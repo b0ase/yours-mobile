@@ -207,5 +207,5 @@ pnpm ios | pnpm android                       # native projects (Xcode / Android
 
 Builds you can install without compiling: the Android APK from
 [release v0.1.0](https://github.com/b0ase/yours-mobile/releases/tag/v0.1.0),
-and iPhone TestFlight (link on https://yours-wallet-mobile.vercel.app once
+and iPhone TestFlight: https://testflight.apple.com/join/WDkxeqaZ (opens once
 Apple approves the beta).
