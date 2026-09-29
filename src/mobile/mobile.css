@@ -1,0 +1,74 @@
+/*
+ * Mobile layout. Upstream sizes the wallet as a fixed 24.5rem x 33.75rem
+ * extension popup via inline styles; stretch that box to the device screen
+ * without touching the upstream components.
+ */
+
+html,
+body,
+#root {
+  max-width: none !important;
+  width: 100%;
+  min-height: 100dvh;
+  background-color: #010101;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+#root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+}
+
+[style*='24.5rem'] {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+[style*='33.75rem'] {
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+}
+
+/* Keep inputs at 16px so iOS doesn't zoom on focus. */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
+/* Overlay "windows" (permission prompts, sweep, USB). */
+.yours-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  background: #010101;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.yours-overlay-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+
+.yours-overlay-close {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 22px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 20px;
+}
+
+.yours-overlay iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #010101;
+}

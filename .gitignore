@@ -42,3 +42,7 @@ scripts/.build-meta.json
 
 # release zips live on GitHub Releases, never in git
 /public/builds
+
+# mobile
+/build-mobile
+smoke-screens/

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Yours Wallet</string>
+    <string name="title_activity_main">Yours Wallet</string>
+    <string name="package_name">org.yours.wallet</string>
+    <string name="custom_url_scheme">org.yours.wallet</string>
+</resources>
