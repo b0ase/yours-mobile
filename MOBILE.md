@@ -112,6 +112,23 @@ and `#pk` buttons that call `CWI.getVersion`, `CWI.isAuthenticated` and
 
 Android needs JDK 21 (`JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`).
 
+## Branding
+
+The app ID is always `com.bitcoincorp.bwallet`. The visible brand is a build switch:
+
+```bash
+bash scripts/set-brand.sh yours && pnpm cap:sync                            # "Yours Wallet Mobile" (default)
+bash scripts/set-brand.sh bwallet && MOBILE_BRAND=bwallet pnpm cap:sync     # "bWallet"
+```
+
+- **yours:** "Yours Wallet Mobile" (home screen: "Yours Mobile") with upstream's logos. Use it for your own devices,
+  sideloading and internal TestFlight. A public store listing under the Yours
+  name needs the Yours team's approval.
+- **bwallet:** bWallet name, logo and default avatar (`src/mobile/brand/`,
+  `assets/bwallet/`). Use it for public listings without that approval.
+- Both show an "unofficial, not endorsed by the Yours Wallet team" notice on
+  the welcome screen and the Browser tab (`src/mobile/brandText.ts`).
+
 ## Staying in sync
 
 ```bash

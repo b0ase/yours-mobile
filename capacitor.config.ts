@@ -1,9 +1,9 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  // Must match the App ID registered in yours.org's Apple / Google developer accounts.
-  appId: 'org.yours.wallet',
-  appName: 'Yours Wallet',
+  // bWallet: an unofficial fork of Yours Wallet, published by The Bitcoin Corporation.
+  appId: 'com.bitcoincorp.bwallet',
+  appName: 'Yours Wallet Mobile',
   webDir: 'build-mobile',
   backgroundColor: '#010101',
   // Never log bridge calls: their arguments include keystore values and the passKey.

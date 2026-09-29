@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
-import { useContext, useEffect } from 'react';
+import { lazy, Suspense, useContext, useEffect } from 'react';
 import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';
 import { Show } from './components/Show';
 import { UnlockWallet } from './components/UnlockWallet';
@@ -26,6 +26,9 @@ import { SyncProvider } from './contexts/providers/SyncProvider';
 import { BottomMenuProvider } from './contexts/providers/BottomMenuProvider';
 import { SnackbarProvider } from './contexts/providers/SnackbarProvider';
 import { SweepMigration } from './pages/SweepMigration';
+
+// Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
+const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
 
 /** Mounted inside the USB gate so the backup loop only runs while a key reads. */
 const UsbBackupRunner = () => {
@@ -116,6 +119,14 @@ export const App = () => {
                           <Route path="/ord-wallet" element={<OrdWallet />} />
                           <Route path="/tools" element={<AppsAndTools />} />
                           <Route path="/settings" element={<Settings />} />
+                          <Route
+                            path="/browser"
+                            element={
+                              <Suspense fallback={null}>
+                                <BrowserPage />
+                              </Suspense>
+                            }
+                          />
                         </Routes>
                       </Router>
                     </Show>

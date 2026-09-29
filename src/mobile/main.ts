@@ -5,6 +5,7 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub } from './hub';
 import { initBiometricUnlock, watchFrameForBiometrics } from './biometricUnlock';
+import { initDisclaimer } from './disclaimer';
 import { initDappBrowser, onOverlayCountChanged, routeWindowOpen } from './dappBrowser';
 import {
   closeOverlayForFrame,
@@ -112,3 +113,4 @@ if (Capacitor.isNativePlatform()) {
 }
 
 await import('../index');
+initDisclaimer();

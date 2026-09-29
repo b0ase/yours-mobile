@@ -37,9 +37,9 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise)
     ]
 
-    private let storageService = "org.yours.wallet.storage"
-    private let biometricService = "org.yours.wallet.biometric"
-    private let installMarker = "org.yours.wallet.installed"
+    private let storageService = "com.bitcoincorp.bwallet.storage"
+    private let biometricService = "com.bitcoincorp.bwallet.biometric"
+    private let installMarker = "com.bitcoincorp.bwallet.installed"
 
     override public func load() {
         // Keychain items outlive an uninstall; UserDefaults do not. A fresh install
@@ -152,7 +152,7 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func biometricGet(_ call: CAPPluginCall) {
         guard let key = call.getString("key") else { return call.reject("Must provide key") }
         let context = LAContext()
-        context.localizedReason = call.getString("reason") ?? "Unlock Yours Wallet"
+        context.localizedReason = call.getString("reason") ?? "Unlock your wallet"
         context.localizedCancelTitle = "Use password"
         var q = query(biometricService, key)
         q[kSecReturnData as String] = true

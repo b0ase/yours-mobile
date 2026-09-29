@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Generate iOS/Android app icons and splash screens from assets/ masters.
-# Requires ImageMagick 7 (`magick`). Replace assets/*.png with yours.org's
-# final 1024px artwork, then re-run:  bash scripts/gen-native-assets.sh
+# Generate iOS/Android app icons and splash screens from assets/<brand>/ masters.
+# Requires ImageMagick 7 (`magick`). Usually run via scripts/set-brand.sh.
+#   bash scripts/gen-native-assets.sh yours|bwallet
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ICON=assets/icon-only.png            # 1024x1024, opaque (iOS + legacy Android)
-FG=assets/icon-foreground.png        # 1024x1024, transparent, mark inside centre 66%
-SPLASH=assets/splash.png             # 2732x2732, logo centred on #010101
-BG_COLOR='#FFFFFF'                   # adaptive icon background
+BRAND=${1:-yours}
+ICON=assets/$BRAND/icon-only.png            # 1024x1024, opaque (iOS + legacy Android)
+FG=assets/$BRAND/icon-foreground.png        # 1024x1024, transparent, mark inside centre 66%
+SPLASH=assets/$BRAND/splash.png             # 2732x2732, logo centred on #010101
+BG_COLOR=$([ "$BRAND" = bwallet ] && echo '#62E596' || echo '#FFFFFF')   # adaptive icon background
 RES=android/app/src/main/res
 
 # iOS

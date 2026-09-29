@@ -159,7 +159,7 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
 
   const getRestoreTitle = () => {
     return importWallet === 'yours'
-      ? `Restore ${theme.settings.walletName} wallet`
+      ? `Restore ${theme.settings.displayName ?? `${theme.settings.walletName} wallet`}`
       : importWallet === 'panda'
         ? 'Restore Panda wallet'
         : importWallet === 'relayx'

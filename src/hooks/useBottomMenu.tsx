@@ -25,6 +25,9 @@ export const useBottomMenu = () => {
       case 'tools':
         navigate('/tools');
         break;
+      case 'browser':
+        navigate('/browser');
+        break;
       default:
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

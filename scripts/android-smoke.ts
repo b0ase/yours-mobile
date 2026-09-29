@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const APP = 'org.yours.wallet';
+const APP = 'com.bitcoincorp.bwallet';
 const ADB = process.env.ADB ?? join(homedir(), 'Library/Android/sdk/platform-tools/adb');
 const OUT = process.argv[2] ?? 'smoke-screens/android';
 const PORT = 9333;
@@ -31,7 +31,7 @@ const adb = (...args: string[]) => execFileSync(ADB, args, { encoding: 'buffer' 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const launch = async (): Promise<{ browser: Browser; page: Page }> => {
-  adb('shell', 'am', 'start', '-n', `${APP}/.MainActivity`);
+  adb('shell', 'am', 'start', '-n', `${APP}/org.yours.wallet.MainActivity`);
   let pid = '';
   for (let i = 0; i < 40 && !pid; i++) {
     await sleep(500);

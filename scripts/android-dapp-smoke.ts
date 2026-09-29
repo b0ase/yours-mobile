@@ -12,7 +12,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const APP = 'org.yours.wallet';
+const APP = 'com.bitcoincorp.bwallet';
 const ADB = process.env.ADB ?? join(homedir(), 'Library/Android/sdk/platform-tools/adb');
 const DAPP = process.argv[2] ?? 'http://10.0.2.2:4790/';
 const OUT = process.argv[3] ?? 'smoke-screens/android-dapp';

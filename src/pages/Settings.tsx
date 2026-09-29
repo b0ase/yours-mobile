@@ -996,7 +996,7 @@ export const Settings = () => {
         <SettingRow
           icon={<LogOut size={16} />}
           label="Sign Out"
-          description={`Sign out of ${theme.settings.walletName} Wallet completely`}
+          description={`Sign out of ${theme.settings.displayName ?? `${theme.settings.walletName} Wallet`} completely`}
           onClick={handleSignOutIntent}
           isFirst
           isLast

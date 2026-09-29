@@ -431,7 +431,7 @@ export const AppsAndTools = () => {
               <MenuRow
                 icon={<Compass size={18} />}
                 title="Discover Apps"
-                description={`Meet the apps using ${theme.settings.walletName} Wallet`}
+                description={`Meet the apps using ${theme.settings.displayName ?? `${theme.settings.walletName} Wallet`}`}
                 onClick={() => setPage('discover-apps')}
               />
             </RowGroup>
@@ -587,7 +587,7 @@ export const AppsAndTools = () => {
       >
         <>
           <p className="mb-3 text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
-            If your app has integrated {theme.settings.walletName} Wallet but is not listed,{' '}
+            If your app has integrated {theme.settings.displayName ?? `${theme.settings.walletName} Wallet`} but is not listed,{' '}
             <a
               href={theme.settings.repo}
               rel="noreferrer"

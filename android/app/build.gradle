@@ -7,7 +7,7 @@ android {
     namespace = "org.yours.wallet"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "org.yours.wallet"
+        applicationId "com.bitcoincorp.bwallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

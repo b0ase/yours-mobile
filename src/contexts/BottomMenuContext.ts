@@ -1,6 +1,6 @@
 import { createContext } from 'react';
 
-export type MenuItems = 'bsv' | 'ords' | 'tools' | 'settings';
+export type MenuItems = 'bsv' | 'ords' | 'tools' | 'settings' | 'browser';
 
 type BottomMenuContextType = {
   selected: MenuItems | null;

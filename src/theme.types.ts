@@ -4,10 +4,16 @@ export type ThemeServices = {
   bsv21: boolean;
   apps: boolean;
   mnee: boolean;
+  /** In-app dApp browser tab (mobile builds only). */
+  browser?: boolean;
 };
 
 export type ThemeSettings = {
   walletName: string;
+  /** Full product name if it isn't "{walletName} Wallet" (white-label builds). */
+  displayName?: string;
+  /** Short status tag shown with the logo, e.g. "Experimental" (white-label builds). */
+  badge?: string;
   repo: string;
   services: ThemeServices;
 };

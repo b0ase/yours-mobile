@@ -48,6 +48,9 @@ try {
   };
   page.on('console', watch('page'));
   page.on('pageerror', (err) => problems.push(`[page] uncaught: ${err instanceof Error ? err.message : err}`));
+  page.on('requestfailed', (req) => {
+    if (process.env.SMOKE_DEBUG) console.log('  [requestfailed]', req.failure()?.errorText, req.url().slice(0, 140));
+  });
   page.on('workercreated', (worker) => worker.on('console', watch('worker')));
 
   console.log('create wallet');
@@ -85,6 +88,11 @@ try {
   await clickText(page, 'Receive');
   await new Promise((r) => setTimeout(r, 1500));
   await shot(page, '06-receive');
+
+  console.log('browser tab');
+  await page.locator('::-p-text(Browser)').setTimeout(30_000).click();
+  await waitText(page, 'Browse BSV apps', 30_000);
+  await shot(page, '06b-browser-tab');
 
   console.log('overlay window (chrome.tabs.create → sweep tool)');
   await page.evaluate(() => chrome.tabs.create({ url: chrome.runtime.getURL('sweep-tab.html') }));

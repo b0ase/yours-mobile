@@ -7,6 +7,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { YoursIcon } from '../../components/YoursIcon';
+import { ThemeBadge } from '../../components/ThemeBadge';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -69,8 +70,9 @@ export const Start = () => {
             className="text-3xl font-bold tracking-tight text-center"
             style={{ color: contrast }}
           >
-            {theme.settings.walletName} Wallet
+            {theme.settings.displayName ?? `${theme.settings.walletName} Wallet`}
           </motion.h1>
+          <ThemeBadge theme={theme} />
 
           <motion.p
             variants={fadeUp}

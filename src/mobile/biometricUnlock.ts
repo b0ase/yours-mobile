@@ -97,7 +97,7 @@ const offerEnrolment = async () => {
   if ((await flag.get(ENROLLED(id))) || (await flag.get(DECLINED))) return;
   const yes = await sheet(
     `Unlock with ${label()}?`,
-    `Use ${label()} instead of your password to unlock Yours Wallet on this device. Your password still works and is still needed for backups and sensitive settings.`,
+    `Use ${label()} instead of your password to unlock your wallet on this device. Your password still works and is still needed for backups and sensitive settings.`,
     `Use ${label()}`,
     'Not now',
   );
@@ -125,7 +125,7 @@ const unlock = async (target: Window) => {
   if (!id || !encryptedKeys) return;
   let passKey: string | null;
   try {
-    passKey = (await YoursNative.biometricGet({ key: SEALED(id), reason: 'Unlock Yours Wallet' })).value;
+    passKey = (await YoursNative.biometricGet({ key: SEALED(id), reason: 'Unlock your wallet' })).value;
   } catch (error: any) {
     if (error?.code !== 'cancelled') toast(`${label()} didn't work. Use your password.`);
     return;

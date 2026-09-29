@@ -188,3 +188,18 @@ select {
     sans-serif;
   text-align: center;
 }
+
+.yours-disclaimer {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  top: calc(env(safe-area-inset-top) + 10px);
+  z-index: 50;
+  color: #667085;
+  font:
+    10px/1.5 Inter,
+    system-ui,
+    sans-serif;
+  text-align: center;
+  pointer-events: none;
+}

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Copy, Github, Check, Loader2 } from 'lucide-react';
 import logo from '../assets/logos/horizontal-logo.png';
+import { ThemeBadge } from './ThemeBadge';
 import { useTheme } from '../hooks/useTheme';
 import activeCircle from '../assets/active-circle.png';
 import { truncate } from '../utils/format';
@@ -86,6 +87,7 @@ export const TopNav = () => {
       {/* Left: Logo + account switcher */}
       <div className="flex items-center gap-2 relative">
         <img src={logo} className="w-24 object-contain" alt="Yours Wallet" />
+        <ThemeBadge theme={theme} />
 
         <span style={{ color: theme.color.global.gray }} className="text-sm select-none">
           /

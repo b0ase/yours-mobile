@@ -1,7 +1,7 @@
 import { Theme } from '../theme.types';
 import { MenuItems } from '../contexts/BottomMenuContext';
 import { Show } from './Show';
-import { Wallet, Layers, Wrench, Settings, LucideIcon } from 'lucide-react';
+import { Wallet, Layers, Globe, Wrench, Settings, LucideIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export type BottomMenuProps = {
@@ -101,6 +101,15 @@ export const BottomMenu = (props: BottomMenuProps) => {
           icon={Layers}
           onClick={() => handleSelect('ords')}
           isSelected={active === 'ords'}
+        />
+      </Show>
+      <Show when={!!theme.settings.services.browser}>
+        <Menu
+          label="Browser"
+          theme={theme}
+          icon={Globe}
+          onClick={() => handleSelect('browser')}
+          isSelected={active === 'browser'}
         />
       </Show>
       <Menu

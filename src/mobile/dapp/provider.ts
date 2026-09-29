@@ -30,7 +30,7 @@ const send = (payload: string): Promise<string> => {
   const ios = w.webkit?.messageHandlers?.yours;
   if (ios) return ios.postMessage(payload);
   const android = w.yoursNative;
-  if (!android) return Promise.reject(new Error('Yours Wallet bridge unavailable'));
+  if (!android) return Promise.reject(new Error('Wallet bridge unavailable'));
   return new Promise((resolve) => {
     const id = String(++seq);
     pending.set(id, resolve);

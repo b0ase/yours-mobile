@@ -21,6 +21,44 @@ const polyfills = () =>
 // Overlay pages get their chrome shim from the top window before any module runs.
 const FRAME_SHIM = `<script>(function(){var m=window.parent!==window&&window.parent.__yoursMobile;if(m){Object.defineProperty(window,'chrome',{value:m.attachFrame(window),writable:true,configurable:true});}})();</script>`;
 
+// Brand: MOBILE_BRAND=yours (default) keeps upstream's name and logos;
+// MOBILE_BRAND=bwallet swaps in bWallet's. Both get the mobile theme settings
+// (Browser tab, fork repo link) via src/mobile/brand/theme.ts.
+const MOBILE_BRAND = process.env.MOBILE_BRAND === 'bwallet' ? 'bwallet' : 'yours';
+const BRAND: Record<string, string> = {
+  [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/mobile/brand/theme.ts'),
+};
+const BWALLET_ASSETS: Record<string, string> = {
+  [resolve(__dirname, 'src/utils/constants.ts')]: resolve(__dirname, 'src/mobile/brand/constants.ts'),
+  [resolve(__dirname, 'src/assets/logos/icon.png')]: resolve(__dirname, 'src/mobile/brand/icon.png'),
+  [resolve(__dirname, 'src/assets/logos/horizontal-logo.png')]: resolve(
+    __dirname,
+    'src/mobile/brand/horizontal-logo.png',
+  ),
+  [resolve(__dirname, 'src/assets/logos/white-logo.png')]: resolve(__dirname, 'src/mobile/brand/white-logo.png'),
+};
+if (MOBILE_BRAND === 'bwallet') Object.assign(BRAND, BWALLET_ASSETS);
+
+const brand = (): Plugin => ({
+  name: 'bwallet-brand',
+  enforce: 'pre',
+  // Default account avatar at a stable path (it is stored in account records).
+  generateBundle() {
+    if (MOBILE_BRAND !== 'bwallet') return;
+    this.emitFile({
+      type: 'asset',
+      fileName: 'bwallet-avatar.png',
+      source: readFileSync(resolve(__dirname, 'src/mobile/brand/icon.png')),
+    });
+  },
+  async resolveId(source, importer, options) {
+    if (!importer || Object.values(BRAND).includes(importer)) return null;
+    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+    const swap = resolved && BRAND[resolved.id.split('?')[0]];
+    return swap ? swap + (resolved!.id.includes('?') ? resolved!.id.slice(resolved!.id.indexOf('?')) : '') : null;
+  },
+});
+
 const mobilePages = (): Plugin => ({
   name: 'yours-mobile-pages',
   transformIndexHtml: {
@@ -50,7 +88,7 @@ const mobilePages = (): Plugin => ({
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [mobilePages()],
+    plugins: [brand(), mobilePages()],
     build: {
       outDir: 'build-mobile',
       target: 'es2022',
@@ -65,10 +103,11 @@ export default mergeConfig(
     },
     worker: {
       format: 'es',
-      plugins: () => [polyfills()],
+      plugins: () => [brand(), polyfills()],
     },
     define: {
       __MOBILE_VERSION__: JSON.stringify(version),
+      __MOBILE_BRAND__: JSON.stringify(MOBILE_BRAND),
     },
   }),
 );

@@ -104,7 +104,7 @@ export const handleHostOp = async (op: HostOp, args: any[]): Promise<unknown> =>
       const [idOrOptions, maybeOptions] = args;
       const options = typeof idOrOptions === 'string' ? maybeOptions : idOrOptions;
       const id = typeof idOrOptions === 'string' ? idOrOptions : `n-${Date.now()}`;
-      await notify(options?.title ?? 'Yours Wallet', options?.message ?? '');
+      await notify(options?.title ?? 'Wallet', options?.message ?? '');
       return id;
     }
   }

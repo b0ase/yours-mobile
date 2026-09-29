@@ -46,3 +46,4 @@ scripts/.build-meta.json
 # mobile
 /build-mobile
 smoke-screens/
+/dist

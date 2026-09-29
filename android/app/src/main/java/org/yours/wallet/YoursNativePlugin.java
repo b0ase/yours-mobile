@@ -285,7 +285,7 @@ public class YoursNativePlugin extends Plugin {
             deleteBiometricKey();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, biometricKey(true));
-            promptWithCipher(call, cipher, "Turn on fingerprint unlock", "Confirm to unlock Yours Wallet with your fingerprint", (c) -> {
+            promptWithCipher(call, cipher, "Turn on fingerprint unlock", "Confirm to unlock your wallet with your fingerprint", (c) -> {
                 prefs(BIOMETRIC_PREFS).edit().putString(key, seal(c, value)).commit();
                 call.resolve();
             });
@@ -297,7 +297,7 @@ public class YoursNativePlugin extends Plugin {
     @PluginMethod
     public void biometricGet(PluginCall call) {
         String key = call.getString("key");
-        String reason = call.getString("reason", "Unlock Yours Wallet");
+        String reason = call.getString("reason", "Unlock your wallet");
         String sealed = key == null ? null : prefs(BIOMETRIC_PREFS).getString(key, null);
         if (sealed == null) {
             JSObject ret = new JSObject();
@@ -310,7 +310,7 @@ public class YoursNativePlugin extends Plugin {
             if (secret == null) throw new KeyPermanentlyInvalidatedException();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, secret, new GCMParameterSpec(GCM_TAG_BITS, ivOf(sealed)));
-            promptWithCipher(call, cipher, "Unlock Yours Wallet", reason, (c) -> {
+            promptWithCipher(call, cipher, "Unlock your wallet", reason, (c) -> {
                 JSObject ret = new JSObject();
                 ret.put("value", open(c, sealed));
                 call.resolve(ret);
