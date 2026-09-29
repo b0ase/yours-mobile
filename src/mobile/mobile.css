@@ -72,3 +72,114 @@ select {
   border: 0;
   background: #010101;
 }
+
+/* Biometric unlock (src/mobile/biometricUnlock.ts). Above overlays. */
+.yours-bio-unlock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom) + 72px);
+  z-index: 2147483200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.yours-bio-primary {
+  width: 87%;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #9eff8a, #34d399);
+  color: #010101;
+  font:
+    600 15px Inter,
+    system-ui,
+    sans-serif;
+}
+
+.yours-bio-off {
+  border: 0;
+  background: none;
+  color: #98a2b3;
+  font:
+    12px Inter,
+    system-ui,
+    sans-serif;
+  padding: 8px;
+}
+
+.yours-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483300;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.yours-sheet {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 24px 20px calc(env(safe-area-inset-bottom) + 20px);
+  border-radius: 20px 20px 0 0;
+  background: #17191e;
+  color: #fff;
+  font-family: Inter, system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.yours-sheet h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.yours-sheet p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #98a2b3;
+}
+
+.yours-sheet-primary,
+.yours-sheet-secondary {
+  height: 46px;
+  border-radius: 12px;
+  font:
+    600 15px Inter,
+    system-ui,
+    sans-serif;
+}
+
+.yours-sheet-primary {
+  border: 0;
+  background: linear-gradient(135deg, #9eff8a, #34d399);
+  color: #010101;
+}
+
+.yours-sheet-secondary {
+  border: 1px solid #344054;
+  background: none;
+  color: #fff;
+}
+
+.yours-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 24px);
+  transform: translateX(-50%);
+  z-index: 2147483400;
+  max-width: 85%;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: #2b2f36;
+  color: #fff;
+  font:
+    13px Inter,
+    system-ui,
+    sans-serif;
+  text-align: center;
+}

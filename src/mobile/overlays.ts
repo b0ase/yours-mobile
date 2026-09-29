@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import type { HostOp } from './protocol';
 
 /**
@@ -13,8 +15,14 @@ const overlays = new Map<number, Overlay>();
 let nextId = 1;
 let onRemoved: (windowId: number) => void = () => {};
 
+let onCountChanged: (count: number) => void = () => {};
+
 export const setOverlayRemovedHandler = (fn: (windowId: number) => void) => {
   onRemoved = fn;
+};
+
+export const setOverlayCountHandler = (fn: (count: number) => void) => {
+  onCountChanged = fn;
 };
 
 const describe = (o: Overlay) => ({
@@ -44,6 +52,7 @@ const open = (url: string, type: string) => {
   document.body.appendChild(el);
   const overlay: Overlay = { id, tabId: id, type, el, iframe };
   overlays.set(id, overlay);
+  onCountChanged(overlays.size);
   return overlay;
 };
 
@@ -53,6 +62,7 @@ export const removeOverlay = (id: number) => {
   overlays.delete(id);
   overlay.el.remove();
   onRemoved(id);
+  onCountChanged(overlays.size);
   return true;
 };
 
@@ -91,12 +101,27 @@ export const handleHostOp = async (op: HostOp, args: any[]): Promise<unknown> =>
       return describe(overlay).tabs[0];
     }
     case 'notifications.create': {
-      // Background tx alerts. Native local notifications are a follow-up; the
-      // in-app balance refresh already covers the foreground case.
       const [idOrOptions, maybeOptions] = args;
       const options = typeof idOrOptions === 'string' ? maybeOptions : idOrOptions;
-      console.log('[notification]', options?.title, options?.message);
-      return typeof idOrOptions === 'string' ? idOrOptions : `n-${Date.now()}`;
+      const id = typeof idOrOptions === 'string' ? idOrOptions : `n-${Date.now()}`;
+      await notify(options?.title ?? 'Yours Wallet', options?.message ?? '');
+      return id;
     }
+  }
+};
+
+/** chrome.notifications → local notifications (upstream: incoming transactions). */
+let notificationId = 1;
+const notify = async (title: string, body: string) => {
+  if (!Capacitor.isNativePlatform()) return console.log('[notification]', title, body);
+  try {
+    let { display } = await LocalNotifications.checkPermissions();
+    if (display === 'prompt' || display === 'prompt-with-rationale') {
+      ({ display } = await LocalNotifications.requestPermissions());
+    }
+    if (display !== 'granted') return;
+    await LocalNotifications.schedule({ notifications: [{ id: notificationId++, title, body }] });
+  } catch (error) {
+    console.warn('[notification] failed', error);
   }
 };

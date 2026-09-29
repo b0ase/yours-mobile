@@ -5,6 +5,9 @@ Android apps with [Capacitor 8](https://capacitorjs.com). The wallet UI,
 background logic and key handling are **upstream's code, unmodified**; the
 mobile layer lives in `src/mobile/` and runs it inside one WebView.
 
+> Community fork of [yours-org/yours-wallet](https://github.com/yours-org/yours-wallet) (MIT).
+> Not an official Yours release; store publishing under the Yours name needs yours.org's approval.
+
 `main` tracks `yours-org/yours-wallet`; merge it into `mobile` to pick up
 upstream releases (see [Staying in sync](#staying-in-sync)).
 
@@ -14,25 +17,69 @@ The extension is several Chrome contexts talking over `chrome.*` APIs. On
 mobile each context gets a drop-in `chrome` shim, and a hub in the top window
 plays the part of the browser.
 
-| Extension context                 | On mobile                                                                      | Where                                      |
-| --------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| Popup (`index.html`)              | The app's main screen                                                          | `src/mobile/main.ts` loads `src/index.tsx` |
-| Service worker (`background.ts`)  | Dedicated Web Worker, no DOM, so `isInServiceWorker` holds                     | `src/mobile/background.worker.ts`          |
-| Prompt / sweep / USB windows      | Full-screen iframe overlays with a close button                                | `src/mobile/overlays.ts`                   |
-| `chrome.runtime` messages & ports | Routed by the hub between contexts, JSON-serialised like Chrome                | `src/mobile/hub.ts`, `chromeShim.ts`       |
-| `chrome.storage.local`            | Native storage (UserDefaults / SharedPreferences) via `@capacitor/preferences` | `hub.ts`                                   |
-| `chrome.storage.session`          | WebView `sessionStorage`: survives reloads, cleared when the app is killed     | `hub.ts`                                   |
-| `chrome.alarms`                   | Timers inside the worker (the inactivity lock catches up on resume)            | `chromeShim.ts`                            |
+| Extension context                 | On mobile                                                                                                 | Where                                      |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Popup (`index.html`)              | The app's main screen                                                                                     | `src/mobile/main.ts` loads `src/index.tsx` |
+| Service worker (`background.ts`)  | Dedicated Web Worker, no DOM, so `isInServiceWorker` holds                                                | `src/mobile/background.worker.ts`          |
+| Prompt / sweep / USB windows      | Full-screen iframe overlays with a close button                                                           | `src/mobile/overlays.ts`                   |
+| `chrome.runtime` messages & ports | Routed by the hub between contexts, JSON-serialised like Chrome                                           | `src/mobile/hub.ts`, `chromeShim.ts`       |
+| `chrome.storage.local`            | Native secure storage: iOS Keychain (this device only, never backed up); Android Keystore-encrypted prefs | `hub.ts`, `YoursNative` plugin             |
+| `chrome.storage.session`          | WebView `sessionStorage`: survives reloads, cleared when the app is killed                                | `hub.ts`                                   |
+| `chrome.alarms`                   | Timers inside the worker (the inactivity lock catches up on resume)                                       | `chromeShim.ts`                            |
+| `chrome.notifications`            | Local notifications (permission asked on first use)                                                       | `overlays.ts`                              |
+| Content script + `inject.js`      | In-app dApp browser (native WebView) with upstream's `window.CWI` injected                                | `src/mobile/dapp/`, `dappBrowser.ts`       |
 
 Internal pages identify as `chrome-extension://yours-mobile`, so upstream's
 `isFromExtension` checks treat them as the wallet's own UI. Nothing else gets
 that origin.
+
+### Native plugin (`YoursNative`)
+
+The app's own plugin, kept in-repo rather than pulled from third parties
+because it holds the keystore and the biometric-sealed passKey:
+`src/mobile/native.ts` (JS, with a web fallback for the browser preview),
+`ios/App/App/YoursNativePlugin.swift`,
+`android/app/src/main/java/org/yours/wallet/YoursNativePlugin.java`.
+
+### Biometric unlock (`src/mobile/biometricUnlock.ts`)
+
+- After a password unlock (or wallet creation), the home screen offers
+  "Unlock with Face ID / Touch ID / fingerprint" once. Accepting seals that
+  account's session passKey behind biometrics (iOS `.biometryCurrentSet`;
+  Android strong-biometric Keystore key, invalidated on re-enrolment).
+- The lock screen then shows an unlock button and prompts automatically.
+  The unsealed passKey must decrypt the account keystore before it is used.
+  If it doesn't (password changed, biometrics re-enrolled), it is deleted and
+  the password is required. "Stop using …" on the lock screen turns it off.
+- Unlocking follows upstream's own path: passKey into `storage.session`,
+  fresh `lastActiveTime`, `WALLET_UNLOCKED`.
+
+### dApp browser (`src/mobile/dappBrowser.ts`, `src/mobile/dapp/provider.ts`)
+
+- Links the wallet opens with `window.open(http[s])`, such as Tools → Apps or
+  explorer links, open in an in-app browser. Tap the address to go elsewhere.
+- Pages get upstream's `window.CWI` (from `inject.ts` / `cwi.ts`), injected at
+  document start. Requests go to the native bridge instead of `chrome.runtime`.
+- The origin of each request comes from the native WebView (Android
+  `WebMessageListener` source origin, iOS `WKFrameInfo.securityOrigin`), never
+  from page script. Only the main frame may talk to the wallet. Each site is a
+  hub endpoint whose sender origin is that real origin, so `background.ts`
+  applies its external-caller rules unchanged: originator must match, and
+  permissions go through upstream's prompts.
+- When a prompt opens, the browser steps aside and returns once it closes.
+- Only http(s) navigations are allowed. Release builds are HTTPS-only (Android
+  default, iOS ATS). Debug Android builds also allow `http://10.0.2.2` for
+  emulator testing.
 
 Mobile-specific hardening:
 
 - Android: `allowBackup="false"` (keystore never goes to Google cloud backup);
   `FLAG_SECURE` in release builds (no screenshots, recordings or recents thumbnail).
 - iOS: the app-switcher snapshot is covered while the app is inactive (`SceneDelegate.swift`).
+- Keychain items survive an iOS uninstall, so a first-launch marker wipes them
+  and a reinstall never inherits an old keystore.
+- Capacitor bridge logging is off (`loggingBehavior: 'none'`); otherwise debug
+  builds write plugin arguments, including keystore values, to the device log.
 - USB security keys need desktop File System Access; upstream feature-detects
   it, so the option is hidden on mobile.
 
@@ -53,8 +100,15 @@ On-device check (Android emulator or USB device, debug build):
 ```bash
 pnpm cap:sync && (cd android && ./gradlew assembleDebug)
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-pnpm exec tsx scripts/android-smoke.ts     # includes a real force-stop / relaunch
+pnpm exec tsx scripts/android-smoke.ts     # create, force-stop, unlock (+ fingerprint if enrolled)
+pnpm exec tsx scripts/android-dapp-smoke.ts http://10.0.2.2:4790/   # dApp browser + permission prompt
 ```
+
+To exercise fingerprint unlock on an emulator: `adb shell locksettings set-pin 1111`,
+enrol a fingerprint in Settings → Security (tap the sensor with `adb emu finger touch 1`),
+then run `android-smoke.ts`. The dApp test expects a page serving `#ver`, `#auth`
+and `#pk` buttons that call `CWI.getVersion`, `CWI.isAuthenticated` and
+`CWI.getPublicKey`, plus a `#log` element.
 
 Android needs JDK 21 (`JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`).
 
@@ -105,20 +159,24 @@ the current set with `rg -o "chrome\.[a-z]+\.[a-zA-Z.]+" src | sort -u`.
 **Verify on real devices before submitting**
 
 - [ ] iOS: background worker starts (Safari Web Inspector → "Yours Wallet Background Script Running!"), then create, force-quit, unlock.
+- [ ] iOS: Face ID enrol / unlock / cancel → password, and after re-enrolling Face ID the password is required again.
+- [ ] iOS: dApp browser, a real dApp (e.g. from Tools → Apps), a permission prompt, Allow and Deny.
+- [ ] iOS: keystore survives app updates; a delete-and-reinstall starts empty.
 - [ ] Restore from seed, send a small amount of BSV, receive, ordinals list, MNEE.
 - [ ] Inactivity lock fires after returning from background.
 
 ## Known gaps / next phases
 
-- **dApp connections.** The extension's content-script injection has no mobile
-  equivalent, so websites can't reach the wallet yet. Options: an in-app
-  browser that injects the provider, or deep-link / QR pairing with `@1sat/connect`.
-- **Biometric unlock.** Face ID / fingerprint unlock with the passKey held in
-  the Keychain / Keystore.
-- **Keychain storage.** The encrypted keystore is in UserDefaults /
-  SharedPreferences. It is password-encrypted as in the extension, but iOS
-  device backups include UserDefaults. Moving it to the Keychain
-  (`WhenUnlockedThisDeviceOnly`) is the recommended hardening.
-- **Transaction notifications.** Upstream's `chrome.notifications` calls are
-  logged, not shown; wire them to `@capacitor/local-notifications`.
+- **iOS native code hasn't run yet.** `YoursNativePlugin.swift` type-checks
+  against the iOS SDK, but it hasn't been built or run on a device or
+  simulator. Android has been verified on an emulator for all of it: secure
+  storage, fingerprint, dApp browser with a permission prompt, notifications.
+- **Background transaction alerts.** Notifications fire when the wallet's sync
+  sees new transactions, which only happens while the app is running (the OS
+  suspends the WebView in the background). Alerts while the app is closed need
+  a push service watching addresses.
+- **Deep-link / QR pairing** (e.g. `@1sat/connect`) for dApps opened in the
+  phone's own browser rather than the in-app one.
+- **Provider events.** `browserEmit` exists natively, but nothing forwards
+  wallet events (account switch) to open pages yet.
 - **Tablet layout.** The UI stretches to full width; iPad may want a centred column.

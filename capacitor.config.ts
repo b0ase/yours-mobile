@@ -6,6 +6,8 @@ const config: CapacitorConfig = {
   appName: 'Yours Wallet',
   webDir: 'build-mobile',
   backgroundColor: '#010101',
+  // Never log bridge calls: their arguments include keystore values and the passKey.
+  loggingBehavior: 'none',
   ios: {
     contentInset: 'never',
     limitsNavigationsToAppBoundDomains: false,

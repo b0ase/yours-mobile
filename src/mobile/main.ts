@@ -4,7 +4,16 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub } from './hub';
-import { closeOverlayForFrame, handleHostOp, removeOverlay, setOverlayRemovedHandler, topOverlayId } from './overlays';
+import { initBiometricUnlock, watchFrameForBiometrics } from './biometricUnlock';
+import { initDappBrowser, onOverlayCountChanged, routeWindowOpen } from './dappBrowser';
+import {
+  closeOverlayForFrame,
+  handleHostOp,
+  removeOverlay,
+  setOverlayCountHandler,
+  setOverlayRemovedHandler,
+  topOverlayId,
+} from './overlays';
 import { INTERNAL_ORIGIN, MOBILE_EXTENSION_ID, type Sender } from './protocol';
 import './mobile.css';
 
@@ -35,7 +44,7 @@ setOverlayRemovedHandler((windowId) => {
   hub.broadcast({ t: 'windowRemoved', windowId });
 });
 
-const attachContext = (id: string, win: Window) => {
+const attachContext = (id: string, win: Window, sender: Sender = senderFor(win.location.href)) => {
   const { chrome, receive } = createChromeShim({
     post: (json) => queueMicrotask(() => void hub.handle(id, JSON.parse(json))),
     parse: (json) => (win as Window & typeof globalThis).JSON.parse(json),
@@ -47,7 +56,7 @@ const attachContext = (id: string, win: Window) => {
       clearInterval: win.clearInterval.bind(win),
     },
   });
-  hub.register(id, { post: (json) => win.setTimeout(() => receive(json), 0), sender: senderFor(win.location.href) });
+  hub.register(id, { post: (json) => win.setTimeout(() => receive(json), 0), sender });
   return chrome;
 };
 
@@ -63,7 +72,10 @@ let frameSeq = 0;
     });
     // The prompt and USB pages close themselves when done.
     (win as any).close = () => closeOverlayForFrame(win);
-    return attachContext(id, win);
+    routeWindowOpen(win);
+    const chrome = attachContext(id, win);
+    watchFrameForBiometrics(win);
+    return chrome;
   },
 };
 
@@ -79,7 +91,15 @@ worker.addEventListener('error', (e) => console.error('[background worker]', e.m
 worker.postMessage({ rootUrl, version: __MOBILE_VERSION__ });
 
 // This window's own chrome (the "popup").
-defineChrome(window, attachContext('main', window));
+const mainChrome = attachContext('main', window);
+defineChrome(window, mainChrome);
+routeWindowOpen(window);
+void initBiometricUnlock(mainChrome);
+
+// dApp browser: each site gets an endpoint carrying its real origin, not the
+// internal one, so the background applies its external-caller rules.
+setOverlayCountHandler(onOverlayCountChanged);
+initDappBrowser((id, origin, url) => attachContext(id, window, { id: MOBILE_EXTENSION_ID, url, origin }));
 
 if (Capacitor.isNativePlatform()) {
   StatusBar.setStyle({ style: Style.Dark }).catch(() => {});

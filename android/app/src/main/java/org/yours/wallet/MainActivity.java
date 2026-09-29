@@ -7,6 +7,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(YoursNativePlugin.class);
         super.onCreate(savedInstanceState);
         // Keep seed phrases and balances out of screenshots, screen recordings
         // and the recent-apps thumbnail. Debug builds skip it so QA can capture.

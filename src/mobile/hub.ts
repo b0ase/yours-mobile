@@ -1,12 +1,14 @@
 import { Preferences } from '@capacitor/preferences';
+import { YoursNative } from './native';
 import type { HostOp, Sender, StorageArea, StorageChanges, ToEndpoint, ToHub } from './protocol';
 
 /**
  * The hub plays the part of the browser: it routes runtime messages and ports
  * between extension pages and owns chrome.storage.
  *
- * - storage.local is persisted natively (UserDefaults / SharedPreferences) so
- *   the encrypted keystore survives WebView storage eviction.
+ * - storage.local is persisted in native secure storage (iOS Keychain,
+ *   this-device-only and excluded from backups; Android Keystore-wrapped
+ *   prefs) so the encrypted keystore survives WebView storage eviction.
  * - storage.session lives in the WebView's sessionStorage: it survives a
  *   location.reload() (as chrome.storage.session survives a popup reload) but
  *   is gone when the app process dies, matching "cleared on browser close".
@@ -156,11 +158,23 @@ export class Hub {
   // STORAGE ****************************************************************
 
   private async loadLocal() {
+    await this.migrateFromPreferences();
+    const { keys } = await YoursNative.secureKeys();
+    for (const key of keys) {
+      if (!key.startsWith(LOCAL_PREFIX)) continue;
+      const { value } = await YoursNative.secureGet({ key });
+      if (value !== null) this.local.set(key.slice(LOCAL_PREFIX.length), JSON.parse(value));
+    }
+  }
+
+  /** Builds before 5.1.0-mobile.2 kept storage.local in Preferences; move it. */
+  private async migrateFromPreferences() {
     const { keys } = await Preferences.keys();
     for (const key of keys) {
       if (!key.startsWith(LOCAL_PREFIX)) continue;
       const { value } = await Preferences.get({ key });
-      if (value !== null) this.local.set(key.slice(LOCAL_PREFIX.length), JSON.parse(value));
+      if (value !== null) await YoursNative.secureSet({ key, value });
+      await Preferences.remove({ key });
     }
   }
 
@@ -169,8 +183,8 @@ export class Hub {
       Promise.all(
         ops.map(([key, value]) =>
           value === undefined
-            ? Preferences.remove({ key: LOCAL_PREFIX + key })
-            : Preferences.set({ key: LOCAL_PREFIX + key, value: JSON.stringify(value) }),
+            ? YoursNative.secureRemove({ key: LOCAL_PREFIX + key })
+            : YoursNative.secureSet({ key: LOCAL_PREFIX + key, value: JSON.stringify(value) }),
         ),
       ),
     );

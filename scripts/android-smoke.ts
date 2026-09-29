@@ -3,6 +3,10 @@
  * over DevTools through create → force-stop (real process death) → relaunch →
  * unlock → receive. Proves the keystore persists natively across restarts.
  *
+ * If the device has a fingerprint enrolled (emulator: Settings, then
+ * `adb emu finger touch 1`), it also enables fingerprint unlock, unlocks with
+ * it after a restart, and checks the password still works after cancelling.
+ *
  *   pnpm cap:sync && (cd android && ./gradlew assembleDebug)
  *   adb install -r android/app/build/outputs/apk/debug/app-debug.apk
  *   pnpm exec tsx scripts/android-smoke.ts [outDir]
@@ -55,6 +59,18 @@ const shot = async (name: string) => {
 const waitText = (page: Page, text: string, timeout = 120_000) =>
   page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text);
 const clickText = (page: Page, text: string) => page.locator(`::-p-text(${text})`).setTimeout(60_000).click();
+const finger = async () => {
+  await sleep(1500); // let the system prompt come up
+  adb('emu', 'finger', 'touch', '1');
+  await sleep(400);
+  adb('emu', 'finger', 'remove', '1');
+};
+const restart = async () => {
+  session.browser.disconnect();
+  adb('shell', 'am', 'force-stop', APP);
+  session = await launch();
+  return session.page;
+};
 
 adb('shell', 'pm', 'clear', APP);
 let session = await launch();
@@ -74,12 +90,35 @@ try {
   await waitText(page, 'Receive');
   await shot('02-wallet');
 
+  const offered = await waitText(page, 'Use fingerprint', 8_000).then(
+    () => true,
+    () => false,
+  );
+  if (offered) {
+    console.log('enable fingerprint unlock');
+    await shot('02b-offer');
+    await page.locator('.yours-sheet-primary').click();
+    await finger();
+    await waitText(page, 'unlock is on', 20_000);
+
+    console.log('restart → unlock with fingerprint');
+    page = await restart();
+    await page.locator('input[type="password"]').setTimeout(60_000).wait();
+    await finger(); // the prompt opens by itself on the lock screen
+    await waitText(page, 'Receive');
+    await shot('02c-fingerprint-unlocked');
+  } else {
+    console.log('(no enrolled fingerprint: skipping biometric checks)');
+  }
+
   console.log('force-stop and relaunch (process death)');
-  session.browser.disconnect();
-  adb('shell', 'am', 'force-stop', APP);
-  session = await launch();
-  page = session.page;
+  page = await restart();
   await page.locator('input[type="password"]').setTimeout(60_000).wait();
+  if (offered) {
+    await sleep(1500);
+    adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); // dismiss the fingerprint prompt: password path
+    await sleep(800);
+  }
   await shot('03-locked');
   await page.locator('input[type="password"]').fill(password);
   await page.keyboard.press('Enter');
