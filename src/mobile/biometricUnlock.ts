@@ -1,12 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { decrypt } from '../utils/crypto';
+import type { PlatformHooks } from '../platform';
 import { YoursNative, isNative, type BiometryType } from './native';
 
 /**
  * Face ID / Touch ID / fingerprint unlock, layered on upstream's own unlock
  * semantics (unlocked = session passKey + fresh lastActiveTime, then
- * WALLET_UNLOCKED). Upstream UI is untouched: the button is a fixed element
- * shown while a lock screen is on screen.
+ * WALLET_UNLOCKED). Plugs into upstream's platform hooks (src/platform.ts):
+ * `quickUnlock` for the lock-screen button, `onWalletReady` for enrolment.
  *
  * - Enrol: once the wallet home screen shows with a passKey in storage.session
  *   (i.e. after a password unlock or wallet creation), offer once to seal it
@@ -78,17 +79,8 @@ const toast = (text: string) => {
 
 // Enrolment -----------------------------------------------------------------
 
-const isHomeScreen = () => {
-  const text = document.body?.innerText ?? '';
-  return (
-    !document.querySelector('.yours-overlay, .yours-sheet-backdrop') &&
-    text.includes('Receive') &&
-    text.includes('Send')
-  );
-};
-
 const offerEnrolment = async () => {
-  if (offeredThisSession || !isHomeScreen()) return;
+  if (offeredThisSession || document.querySelector('.yours-overlay, .yours-sheet-backdrop')) return;
   offeredThisSession = true;
   const { passKey } = await chromeApi.storage.session.get('passKey');
   if (typeof passKey !== 'string') return;
@@ -120,15 +112,15 @@ const disable = async () => {
 
 // Unlock --------------------------------------------------------------------
 
-const unlock = async (target: Window) => {
+const unlock = async (): Promise<boolean> => {
   const { id, encryptedKeys } = await selectedAccount();
-  if (!id || !encryptedKeys) return;
+  if (!id || !encryptedKeys) return false;
   let passKey: string | null;
   try {
     passKey = (await YoursNative.biometricGet({ key: SEALED(id), reason: 'Unlock your wallet' })).value;
   } catch (error: any) {
     if (error?.code !== 'cancelled') toast(`${label()} didn't work. Use your password.`);
-    return;
+    return false;
   }
   const valid =
     !!passKey &&
@@ -140,75 +132,31 @@ const unlock = async (target: Window) => {
     await YoursNative.biometricRemove({ key: SEALED(id) });
     await flag.clear(ENROLLED(id));
     toast(`Enter your password to turn ${label()} back on`);
-    return;
+    return false;
   }
   offeredThisSession = true;
   await chromeApi.storage.session.set({ passKey });
   await chromeApi.storage.local.set({ lastActiveTime: Date.now() });
   await chromeApi.runtime.sendMessage({ action: 'WALLET_UNLOCKED' }).catch(() => undefined);
-  target.location.reload();
+  return true;
 };
 
-// Lock-screen watcher -------------------------------------------------------
+// Platform hooks -------------------------------------------------------------
 
-const isLockScreen = (win: Window) =>
-  !!win.document.querySelector('input[type="password"]') &&
-  (win.document.body?.innerText ?? '').includes('Welcome back') &&
-  // The main screen's button stands down while an overlay (with its own) is up.
-  (win !== window || !document.querySelector('.yours-overlay'));
-
-const watch = (win: Window) => {
-  let button: HTMLDivElement | undefined;
-  let autoPrompted = false;
-  const update = async () => {
-    const onLock = isLockScreen(win);
-    if (win === window && !onLock) void offerEnrolment();
-    const { id } = onLock ? await selectedAccount() : { id: undefined };
-    const enrolled = !!id && (await flag.get(ENROLLED(id)));
-    if (onLock && enrolled) {
-      if (!button) {
-        button = document.createElement('div');
-        button.className = 'yours-bio-unlock';
-        button.innerHTML =
-          '<button type="button" class="yours-bio-primary"></button><button type="button" class="yours-bio-off"></button>';
-        const [go, off] = button.querySelectorAll('button');
-        go.textContent = `Unlock with ${label()}`;
-        off.textContent = `Stop using ${label()}`;
-        go.addEventListener('click', () => void unlock(win));
-        off.addEventListener('click', async () => {
-          await disable();
-          void update();
-        });
-        document.body.appendChild(button);
-      }
-      if (!autoPrompted) {
-        autoPrompted = true;
-        void unlock(win);
-      }
-    } else {
-      button?.remove();
-      button = undefined;
-      if (!onLock) autoPrompted = false;
-    }
-  };
-  const observer = new MutationObserver(() => void update());
-  const start = () => {
-    observer.observe(win.document.body, { childList: true, subtree: true });
-    void update();
-  };
-  if (win.document.body) start();
-  else win.addEventListener('DOMContentLoaded', start, { once: true });
-  win.addEventListener('pagehide', () => {
-    observer.disconnect();
-    button?.remove();
-  });
+const isEnrolled = async () => {
+  const { id } = await selectedAccount();
+  return !!id && (await flag.get(ENROLLED(id)));
 };
 
-export const initBiometricUnlock = async (chrome: any) => {
-  if (!isNative) return;
+/**
+ * Returns the hooks for src/platform.ts, or {} when biometrics aren't
+ * available on this device.
+ */
+export const initBiometricUnlock = async (chrome: any): Promise<PlatformHooks> => {
+  if (!isNative) return {};
   chromeApi = chrome;
   const status = await YoursNative.biometricStatus().catch(() => ({ available: false, biometryType: 'none' as const }));
-  if (!status.available) return;
+  if (!status.available) return {};
   biometry = status.biometryType;
 
   chrome.storage.onChanged.addListener((changes: any, area: string) => {
@@ -217,10 +165,16 @@ export const initBiometricUnlock = async (chrome: any) => {
       void YoursNative.biometricRemove({ key: '' });
     }
   });
-  watch(window);
-};
 
-/** Overlay pages (the dApp-request unlock prompt) get the same lock-screen button. */
-export const watchFrameForBiometrics = (win: Window) => {
-  if (isNative && chromeApi && biometry !== 'none') watch(win);
+  return {
+    quickUnlock: {
+      label: `Unlock with ${label()}`,
+      disableLabel: `Stop using ${label()}`,
+      isAvailable: isEnrolled,
+      unlock,
+      disable,
+      autoPrompt: true,
+    },
+    onWalletReady: () => void offerEnrolment(),
+  };
 };

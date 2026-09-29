@@ -72,6 +72,7 @@ import { getLegacyMneeBalance, sweepLegacyMnee } from '../utils/sweepLegacyMnee'
 import { cancelOwnedOrdLockListings } from '../utils/cancelOrdLockListings';
 import { decrypt } from '../utils/crypto';
 import type { Keys } from '../utils/keys';
+import { getPlatform } from '../platform';
 
 // CopyAddressed feedback state hook — used in receive view
 
@@ -107,6 +108,11 @@ export const BsvWallet = () => {
     return resolveImageUrl(identityProfile.image, apiContext);
   }, [identityProfile.image, apiContext]);
   const [avatarReady, setAvatarReady] = useState(false);
+
+  // Embedder hook (platform.ts): the wallet home is showing.
+  useEffect(() => {
+    getPlatform().onWalletReady?.();
+  }, []);
 
   // Pre-load the avatar image so it's decoded before we render it.
   useEffect(() => {

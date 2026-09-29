@@ -1,13 +1,11 @@
 /*
- * Mobile layout. Upstream sizes the wallet as a fixed 24.5rem x 33.75rem
- * extension popup via inline styles; stretch that box to the device screen
- * without touching the upstream components.
+ * Mobile layout: fill the device screen and respect the safe areas.
  */
 
 html,
 body,
 #root {
-  max-width: none !important;
+  max-width: none;
   width: 100%;
   min-height: 100dvh;
   background-color: #010101;
@@ -22,18 +20,13 @@ body,
   box-sizing: border-box;
 }
 
-/* Upstream's TopNav is fixed at top: 0; keep it below the status bar / notch. */
-.fixed.top-0 {
-  top: env(safe-area-inset-top) !important;
-}
-
-[style*='24.5rem'] {
-  width: 100% !important;
-  max-width: 100% !important;
-}
-
-[style*='33.75rem'] {
-  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+/* Fill the screen: upstream sizes the wallet from these variables (index.css).
+   html:root outranks index.css's :root defaults whatever the load order. */
+html:root {
+  --wallet-width: 100%;
+  --wallet-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  --wallet-unlock-width: 100%;
+  --wallet-inset-top: env(safe-area-inset-top);
 }
 
 /* Keep inputs at 16px so iOS doesn't zoom on focus. */
@@ -76,43 +69,6 @@ select {
   width: 100%;
   border: 0;
   background: #010101;
-}
-
-/* Biometric unlock (src/mobile/biometricUnlock.ts). Above overlays. */
-.yours-bio-unlock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 72px);
-  z-index: 2147483200;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-
-.yours-bio-primary {
-  width: 87%;
-  height: 44px;
-  border: 0;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #9eff8a, #34d399);
-  color: #010101;
-  font:
-    600 15px Inter,
-    system-ui,
-    sans-serif;
-}
-
-.yours-bio-off {
-  border: 0;
-  background: none;
-  color: #98a2b3;
-  font:
-    12px Inter,
-    system-ui,
-    sans-serif;
-  padding: 8px;
 }
 
 .yours-sheet-backdrop {
@@ -187,19 +143,4 @@ select {
     system-ui,
     sans-serif;
   text-align: center;
-}
-
-.yours-disclaimer {
-  position: fixed;
-  left: 16px;
-  right: 16px;
-  top: calc(env(safe-area-inset-top) + 10px);
-  z-index: 50;
-  color: #667085;
-  font:
-    10px/1.5 Inter,
-    system-ui,
-    sans-serif;
-  text-align: center;
-  pointer-events: none;
 }

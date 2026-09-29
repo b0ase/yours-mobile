@@ -8,6 +8,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { YoursIcon } from '../../components/YoursIcon';
 import { ThemeBadge } from '../../components/ThemeBadge';
+import { getPlatform } from '../../platform';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -53,7 +54,7 @@ export const Start = () => {
   return (
     <Show when={showStart}>
       <div
-        className="flex flex-col items-center justify-between w-full h-full min-h-[33.75rem] px-6 py-8"
+        className="flex flex-col items-center justify-between w-full h-full min-h-[var(--wallet-height)] px-6 py-8"
         style={{ backgroundColor: bg }}
       >
         {/* Top section — logo + branding */}
@@ -73,6 +74,11 @@ export const Start = () => {
             {theme.settings.displayName ?? `${theme.settings.walletName} Wallet`}
           </motion.h1>
           <ThemeBadge theme={theme} />
+          {getPlatform().welcomeNotice && (
+            <p className="text-[10px] leading-relaxed text-center max-w-[18rem]" style={{ color: gray }}>
+              {getPlatform().welcomeNotice}
+            </p>
+          )}
 
           <motion.p
             variants={fadeUp}

@@ -33,6 +33,21 @@ Internal pages identify as `chrome-extension://yours-mobile`, so upstream's
 `isFromExtension` checks treat them as the wallet's own UI. Nothing else gets
 that origin.
 
+### Extension points in upstream code
+
+The mobile layer plugs into two small, inert-by-default hooks added to upstream,
+with no DOM scraping or style overrides:
+
+- **`src/platform.ts`:** optional `globalThis.__yoursPlatform` with
+  `quickUnlock` (lock-screen button, rendered by `components/QuickUnlock.tsx`
+  inside `UnlockWallet`), `welcomeNotice` (under the title on `Start`) and
+  `onWalletReady` (called by `BsvWallet`). Only data and callbacks, so overlay
+  frames share the parent's object. The extension sets none.
+- **Wallet frame size:** `index.css` defines `--wallet-width`,
+  `--wallet-height`, `--wallet-unlock-width` and `--wallet-inset-top`, set to
+  the extension popup's values. The components read them, and
+  `src/mobile/mobile.css` sets them to fill the screen inside the safe areas.
+
 ### Native plugin (`YoursNative`)
 
 The app's own plugin, kept in-repo rather than pulled from third parties

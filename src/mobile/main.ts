@@ -4,8 +4,9 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub } from './hub';
-import { initBiometricUnlock, watchFrameForBiometrics } from './biometricUnlock';
-import { initDisclaimer } from './disclaimer';
+import type { PlatformHooks } from '../platform';
+import { initBiometricUnlock } from './biometricUnlock';
+import { UNOFFICIAL_NOTICE } from './brandText';
 import { initDappBrowser, onOverlayCountChanged, routeWindowOpen } from './dappBrowser';
 import {
   closeOverlayForFrame,
@@ -74,9 +75,7 @@ let frameSeq = 0;
     // The prompt and USB pages close themselves when done.
     (win as any).close = () => closeOverlayForFrame(win);
     routeWindowOpen(win);
-    const chrome = attachContext(id, win);
-    watchFrameForBiometrics(win);
-    return chrome;
+    return attachContext(id, win);
   },
 };
 
@@ -96,7 +95,9 @@ worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
 const mainChrome = attachContext('main', window);
 defineChrome(window, mainChrome);
 routeWindowOpen(window);
-void initBiometricUnlock(mainChrome);
+// Upstream's embedder hooks (src/platform.ts); overlay frames share this object.
+const platform: PlatformHooks = { welcomeNotice: UNOFFICIAL_NOTICE, ...(await initBiometricUnlock(mainChrome)) };
+(window as any).__yoursPlatform = platform;
 
 // dApp browser: each site gets an endpoint carrying its real origin, not the
 // internal one, so the background applies its external-caller rules.
@@ -113,4 +114,3 @@ if (Capacitor.isNativePlatform()) {
 }
 
 await import('../index');
-initDisclaimer();

@@ -176,7 +176,7 @@ const PromptApp = () => {
     <MemoryRouter>
       <div
         className="flex items-center justify-center relative p-0"
-        style={{ width: '24.5rem', height: '33.75rem', backgroundColor: walletBg }}
+        style={{ width: 'var(--wallet-width)', height: 'var(--wallet-height)', backgroundColor: walletBg }}
       >
         {(!isReady || screen.kind === 'loading') && <PageLoader message="Loading..." theme={theme} />}
         {screen.kind === 'waiting' && <PageLoader message="Waiting for request..." theme={theme} />}

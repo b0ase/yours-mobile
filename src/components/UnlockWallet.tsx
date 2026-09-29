@@ -6,6 +6,7 @@ import { sleep } from '../utils/sleep';
 import { Input } from './Input';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { YoursIcon } from './YoursIcon';
+import { QuickUnlock } from './QuickUnlock';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import {
   type StickProbe,
@@ -320,8 +321,8 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
     <div
       className="flex flex-col items-center justify-center text-center"
       style={{
-        width: '22.5rem',
-        height: '33.75rem',
+        width: 'var(--wallet-unlock-width)',
+        height: 'var(--wallet-height)',
         backgroundColor: bg,
         color: contrast,
         zIndex: 100,
@@ -560,6 +561,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
           </div>
         </motion.form>
       )}
+      {!usbEnabled && <QuickUnlock theme={theme} onUnlock={onUnlock} />}
     </div>
   );
 };

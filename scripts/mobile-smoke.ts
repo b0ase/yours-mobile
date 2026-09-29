@@ -48,9 +48,10 @@ try {
   };
   page.on('console', watch('page'));
   page.on('pageerror', (err) => problems.push(`[page] uncaught: ${err instanceof Error ? err.message : err}`));
-  page.on('requestfailed', (req) => {
-    if (process.env.SMOKE_DEBUG) console.log('  [requestfailed]', req.failure()?.errorText, req.url().slice(0, 140));
-  });
+  // Keep the URL and reason for failed requests: the console error alone doesn't say which.
+  const failedRequests: string[] = [];
+  page.on('requestfailed', (req) => failedRequests.push(`${req.failure()?.errorText} ${req.url().slice(0, 160)}`));
+  (globalThis as { __failedRequests?: string[] }).__failedRequests = failedRequests;
   page.on('workercreated', (worker) => worker.on('console', watch('worker')));
 
   console.log('create wallet');
@@ -120,6 +121,8 @@ try {
   await browser.close();
 }
 
+const failed = (globalThis as { __failedRequests?: string[] }).__failedRequests ?? [];
+if (problems.length && failed.length) problems.push(...failed.map((f) => `[request] ${f}`));
 if (problems.length) {
   console.log(`\n${problems.length} problem(s):`);
   for (const p of problems) console.log('  ' + p.replaceAll(password, '<password>').slice(0, 400));

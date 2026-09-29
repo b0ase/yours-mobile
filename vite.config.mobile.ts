@@ -19,7 +19,7 @@ const polyfills = () =>
   });
 
 // Overlay pages get their chrome shim from the top window before any module runs.
-const FRAME_SHIM = `<script>(function(){var m=window.parent!==window&&window.parent.__yoursMobile;if(m){Object.defineProperty(window,'chrome',{value:m.attachFrame(window),writable:true,configurable:true});}})();</script>`;
+const FRAME_SHIM = `<script>(function(){var m=window.parent!==window&&window.parent.__yoursMobile;if(m){Object.defineProperty(window,'chrome',{value:m.attachFrame(window),writable:true,configurable:true});window.__yoursPlatform=window.parent.__yoursPlatform;}})();</script>`;
 
 // Brand: MOBILE_BRAND=yours (default) keeps upstream's name and logos;
 // MOBILE_BRAND=bwallet swaps in bWallet's. Both get the mobile theme settings

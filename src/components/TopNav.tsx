@@ -82,7 +82,7 @@ export const TopNav = () => {
   return (
     <div
       className="flex items-center justify-between fixed top-0 w-full z-10 px-4 h-14"
-      style={{ backgroundColor: theme.color.global.walletBackground }}
+      style={{ backgroundColor: theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
     >
       {/* Left: Logo + account switcher */}
       <div className="flex items-center gap-2 relative">

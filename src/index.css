@@ -1,9 +1,18 @@
 @import 'tailwindcss';
 
+/* Wallet frame size. The extension popup is fixed; embedders (e.g. a mobile
+   shell) can override these to fill the screen and clear system bars. */
+:root {
+  --wallet-width: 24.5rem;
+  --wallet-height: 33.75rem;
+  --wallet-unlock-width: 22.5rem;
+  --wallet-inset-top: 0px;
+}
+
 html,
 body,
 #root {
-  max-width: 24.5rem;
+  max-width: var(--wallet-width);
   overflow-x: hidden;
 }
 
