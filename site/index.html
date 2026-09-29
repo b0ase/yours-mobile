@@ -93,7 +93,7 @@
         border: 1px solid #fdb02259;
       }
       .notice {
-        margin: 20px 0 0;
+        margin: 0 0 20px;
         padding: 12px 14px;
         border: 1px solid #fdb02240;
         background: #fdb0220d;
@@ -237,18 +237,24 @@
   </head>
   <body>
     <div class="wrap">
+      <p class="notice">
+        <strong
+          >Yours Wallet Mobile is an unofficial fork of
+          <a href="https://github.com/yours-org/yours-wallet">yours-org/yours-wallet</a> (MIT), published by The
+          Bitcoin Corporation Ltd. It is not affiliated with or endorsed by the Yours Wallet team. "Yours" and the Yours
+          logo belong to their owners.<br />Source:
+          <a href="https://github.com/b0ase/yours-mobile">github.com/b0ase/yours-mobile</a> · Discussion with the Yours
+          team: <a href="https://github.com/yours-org/yours-wallet/issues/353">issue #353</a></strong
+        ><br /><br />
+        It's in early testing: use a new wallet with small amounts only, and keep your recovery phrase safe.
+      </p>
+
       <header>
         <img src="/logo.png" alt="" />
         <strong>Yours Wallet Mobile</strong>
         <span class="tag">Experimental</span>
       </header>
 
-      <p class="notice">
-        <strong>Unofficial.</strong> This is an experimental mobile build of the open-source
-        <a href="https://github.com/yours-org/yours-wallet">Yours Wallet</a>, made by an independent developer. It is not
-        made, reviewed or endorsed by the Yours Wallet team. It's in early testing: use a new wallet with small amounts
-        only, and keep your recovery phrase safe.
-      </p>
 
       <div class="hero">
         <div>
@@ -286,8 +292,8 @@
           <div class="card">
             <h3>Keys stay on the device</h3>
             <p>
-              Stored in the iPhone Keychain or Android Keystore, encrypted with your password, and never included in
-              cloud backups.
+              Private keys are stored in the iPhone Keychain or Android Keystore, encrypted with your password, and never
+              included in cloud backups. As in the extension, transaction records sync to 1Sat wallet storage by default.
             </p>
           </div>
           <div class="card">
@@ -317,7 +323,8 @@
         Corporation Ltd. It is not affiliated with or endorsed by the Yours Wallet team. "Yours" and the Yours logo
         belong to their owners.<br />
         Source: <a href="https://github.com/b0ase/yours-mobile">github.com/b0ase/yours-mobile</a> · Discussion with the
-        Yours team: <a href="https://github.com/yours-org/yours-wallet/issues/353">issue #353</a>
+        Yours team: <a href="https://github.com/yours-org/yours-wallet/issues/353">issue #353</a> ·
+        <a href="/privacy.html">Privacy policy</a>
       </footer>
     </div>
 

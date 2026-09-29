@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Privacy Policy · Yours Wallet Mobile (Experimental)</title>
+    <meta name="theme-color" content="#010101" />
+    <link rel="icon" href="/favicon.png" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+    <style>
+      body {
+        margin: 0;
+        background: #010101;
+        color: #e4e7ec;
+        font: 15px/1.7 Inter, system-ui, sans-serif;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: max(24px, env(safe-area-inset-top)) 16px 48px;
+      }
+      h1 {
+        font-size: 28px;
+        line-height: 1.2;
+        margin: 8px 0 4px;
+        color: #fff;
+      }
+      h2 {
+        font-size: 17px;
+        margin: 32px 0 8px;
+        color: #fff;
+      }
+      p,
+      li {
+        color: #c0c6d0;
+      }
+      a {
+        color: #a1ff8b;
+      }
+      .meta {
+        color: #667085;
+        font-size: 13px;
+      }
+      .notice {
+        padding: 12px 14px;
+        border: 1px solid #fdb02240;
+        background: #fdb0220d;
+        border-radius: 12px;
+        color: #fcd9a0;
+        font-size: 13px;
+      }
+      code {
+        background: #17191e;
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/">← Yours Wallet Mobile</a></p>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Yours Wallet Mobile (Experimental) · Effective 29 September 2026</p>
+
+      <p class="notice">
+        Yours Wallet Mobile is an experimental, unofficial mobile build of the open-source Yours Wallet, published by
+        The Bitcoin Corporation Ltd. It is not made, reviewed or endorsed by the Yours Wallet team, and this policy
+        covers only this mobile app.
+      </p>
+
+      <h2>Summary</h2>
+      <p>
+        Yours Wallet Mobile is non-custodial. We run no servers for the app and don't operate accounts. We don't collect
+        your name, email, contacts, location, advertising identifiers, analytics or crash reports. Your private keys and
+        recovery phrase never leave your device.
+      </p>
+
+      <h2>What stays on your device</h2>
+      <ul>
+        <li>
+          Your private keys and recovery phrase, encrypted with a key derived from your password and stored in the iOS
+          Keychain (this device only, excluded from iCloud and device backups) or in Android storage encrypted with an
+          Android Keystore key (excluded from Google backups).
+        </li>
+        <li>
+          If you turn on Face ID, Touch ID or fingerprint unlock, a key to unlock your wallet is sealed behind your
+          device's biometrics. Your biometric data itself is handled by the operating system and is never available to
+          the app.
+        </li>
+        <li>Settings, recent sites in the Browser tab, and local caches.</li>
+      </ul>
+
+      <h2>What the app sends over the network</h2>
+      <p>To work as a wallet, the app connects to these third-party services, all over HTTPS:</p>
+      <ul>
+        <li>
+          <b>Wallet storage:</b> by default, your wallet's transaction records (outputs, transactions and related
+          metadata, not your private keys) are synced to a remote wallet storage service operated by 1Sat
+          (<code>wallet.1sat.app</code>), as in the Yours Wallet extension. You can change the storage provider in
+          Settings → Wallet Backup.
+        </li>
+        <li>
+          <b>Blockchain services:</b> address, balance, transaction and token lookups, and transaction broadcasts, go
+          to BSV indexing services (1Sat APIs). Transaction links open on WhatsOnChain.
+        </li>
+        <li><b>Wallet messaging:</b> wallet-to-wallet messages use <code>messagebox.1sat.app</code>.</li>
+        <li>
+          <b>Websites you open</b> in the in-app browser receive the requests you make and the responses you approve.
+          They're governed by their own privacy policies.
+        </li>
+      </ul>
+      <p>
+        These services see your IP address and the public blockchain data needed to answer each request. Blockchain
+        transactions are public by nature.
+      </p>
+
+      <h2>Notifications</h2>
+      <p>
+        If you allow notifications, the app shows local alerts about incoming transactions. They're generated on your
+        device; no push notification service is used.
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>You can delete all app data by signing out in Settings, or by uninstalling the app.</li>
+        <li>You can turn biometric unlock off from the lock screen at any time.</li>
+        <li>You can change the remote wallet storage provider in Settings → Wallet Backup.</li>
+      </ul>
+
+      <h2>Children</h2>
+      <p>The app is not directed at children under 13.</p>
+
+      <h2>Changes</h2>
+      <p>
+        We'll post changes to this policy on this page, and in the source repository at
+        <a href="https://github.com/b0ase/yours-mobile">github.com/b0ase/yours-mobile</a>.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Questions about this mobile app: open an issue at
+        <a href="https://github.com/b0ase/yours-mobile/issues">github.com/b0ase/yours-mobile/issues</a>.
+      </p>
+    </main>
+  </body>
+</html>
