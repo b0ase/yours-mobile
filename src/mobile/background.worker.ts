@@ -63,6 +63,7 @@ const init = async (rootUrl: string, version: string) => {
   early.splice(0).forEach(receive);
 
   try {
+    await import('./syncStateRaceFix');
     await import('../background');
     self.postMessage({ t: 'ready' });
   } catch (error) {
