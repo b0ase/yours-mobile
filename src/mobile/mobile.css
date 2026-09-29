@@ -22,6 +22,11 @@ body,
   box-sizing: border-box;
 }
 
+/* Upstream's TopNav is fixed at top: 0; keep it below the status bar / notch. */
+.fixed.top-0 {
+  top: env(safe-area-inset-top) !important;
+}
+
 [style*='24.5rem'] {
   width: 100% !important;
   max-width: 100% !important;

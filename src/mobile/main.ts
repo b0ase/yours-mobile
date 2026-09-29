@@ -86,9 +86,10 @@ worker.addEventListener('message', (e) => {
   if (typeof e.data === 'string') void hub.handle('background', JSON.parse(e.data));
   else if (e.data?.t === 'ready') hub.markBackgroundReady();
   else if (e.data?.t === 'error') console.error('[background worker] failed to start:', e.data.message);
+  else if (e.data?.t === 'console') console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
-worker.postMessage({ rootUrl, version: __MOBILE_VERSION__ });
+worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
 
 // This window's own chrome (the "popup").
 const mainChrome = attachContext('main', window);

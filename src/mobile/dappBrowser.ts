@@ -82,7 +82,8 @@ export const routeWindowOpen = (win: Window) => {
   if (!isNative) return;
   const original = win.open.bind(win);
   win.open = ((url?: string | URL, target?: string, features?: string) => {
-    const href = url === undefined ? '' : new URL(String(url), win.location.href).href;
+    const raw = url === undefined ? '' : String(url);
+    const href = raw === '' ? '' : new URL(raw, win.location.href).href;
     if (/^https?:/i.test(href)) {
       openDappBrowser(href).catch((error) => console.error('[dapp browser]', error));
       return null;

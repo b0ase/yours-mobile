@@ -49,7 +49,9 @@ export const createChromeShim = (opts: ShimOptions) => {
     onMessage: makeEvent(),
     onConnect: makeEvent(),
     onInstalled: makeEvent(),
-    getURL: (path: string) => new URL(path.replace(/^\//, ''), opts.rootUrl).href,
+    // String join, not new URL(path, root): WebKit rejects new URL('', 'capacitor://localhost/')
+    // (custom scheme + empty input), and upstream calls getURL('').
+    getURL: (path: string) => opts.rootUrl.replace(/\/?$/, '/') + path.replace(/^\//, ''),
     getManifest: () => ({ version: opts.version, name: 'Yours Wallet', manifest_version: 3 }),
   };
 
