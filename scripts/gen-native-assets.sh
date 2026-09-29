@@ -9,7 +9,7 @@ BRAND=${1:-yours}
 ICON=assets/$BRAND/icon-only.png            # 1024x1024, opaque (iOS + legacy Android)
 FG=assets/$BRAND/icon-foreground.png        # 1024x1024, transparent, mark inside centre 66%
 SPLASH=assets/$BRAND/splash.png             # 2732x2732, logo centred on #010101
-BG_COLOR=$([ "$BRAND" = bwallet ] && echo '#62E596' || echo '#FFFFFF')   # adaptive icon background
+BG_COLOR=$([ "$BRAND" = bwallet ] && echo '#62E596' || echo '#010101')   # adaptive icon background
 RES=android/app/src/main/res
 
 # iOS
