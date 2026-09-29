@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Yours Mobile</string>
     <string name="title_activity_main">Yours Mobile</string>
-    <string name="package_name">com.bitcoincorp.bwallet</string>
-    <string name="custom_url_scheme">com.bitcoincorp.bwallet</string>
+    <string name="package_name">com.bitcoincorp.yourswalletmobile</string>
+    <string name="custom_url_scheme">com.bitcoincorp.yourswalletmobile</string>
 </resources>

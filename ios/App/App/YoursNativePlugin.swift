@@ -37,9 +37,9 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise)
     ]
 
-    private let storageService = "com.bitcoincorp.bwallet.storage"
-    private let biometricService = "com.bitcoincorp.bwallet.biometric"
-    private let installMarker = "com.bitcoincorp.bwallet.installed"
+    private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
+    private let biometricService = "com.bitcoincorp.yourswalletmobile.biometric"
+    private let installMarker = "com.bitcoincorp.yourswalletmobile.installed"
 
     override public func load() {
         // Keychain items outlive an uninstall; UserDefaults do not. A fresh install

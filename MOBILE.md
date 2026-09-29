@@ -114,7 +114,7 @@ Android needs JDK 21 (`JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jd
 
 ## Branding
 
-The app ID is always `com.bitcoincorp.bwallet`. The visible brand is a build switch:
+The app ID is always `com.bitcoincorp.yourswalletmobile`. The visible brand is a build switch:
 
 ```bash
 bash scripts/set-brand.sh yours && pnpm cap:sync                            # "Yours Wallet Mobile" (default)

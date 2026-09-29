@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const APP = 'com.bitcoincorp.bwallet';
+const APP = 'com.bitcoincorp.yourswalletmobile';
 const ADB = process.env.ADB ?? join(homedir(), 'Library/Android/sdk/platform-tools/adb');
 const OUT = process.argv[2] ?? 'smoke-screens/android';
 const PORT = 9333;

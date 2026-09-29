@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Switch the app's visible brand on both platforms: display name, Face ID
-# text, icons and splash. The app ID (com.bitcoincorp.bwallet) never changes.
+# text, icons and splash. The app ID (com.bitcoincorp.yourswalletmobile) never changes.
 # Build the web layer with the same brand: MOBILE_BRAND=<brand> pnpm cap:sync
 #
 #   bash scripts/set-brand.sh yours     # "Yours Wallet Mobile" (default; personal / internal testing)
