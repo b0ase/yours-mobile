@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Yours Mobile</string>
-    <string name="title_activity_main">Yours Mobile</string>
-    <string name="package_name">com.bitcoincorp.yourswalletmobile</string>
-    <string name="custom_url_scheme">com.bitcoincorp.yourswalletmobile</string>
+    <string name="app_name">bCorp Wallet</string>
+    <string name="title_activity_main">bCorp Wallet</string>
+    <string name="package_name">com.bitcoincorp.bcorpwallet</string>
+    <string name="custom_url_scheme">com.bitcoincorp.bcorpwallet</string>
 </resources>

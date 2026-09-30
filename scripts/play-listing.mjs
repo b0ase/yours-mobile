@@ -12,25 +12,26 @@ import { createSign } from 'crypto';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const PACKAGE = 'com.bitcoincorp.yourswalletmobile';
+const PACKAGE = 'com.bitcoincorp.bcorpwallet';
 const LANG = process.env.PLAY_LANG ?? 'en-GB';
 const ASSETS = join(process.cwd(), 'dist/play-assets');
 const KEY_FILE = process.env.PLAY_SERVICE_ACCOUNT ?? join(homedir(), '.yours-mobile/play-service-account.json');
 
-const TITLE = 'Yours Wallet Mobile (Beta)';
-const SHORT = 'Experimental, unofficial mobile build of the open-source Yours Wallet for BSV.';
-const FULL = `Yours Wallet Mobile is an experimental, unofficial Android build of the open-source Yours Wallet for BSV, 1Sat Ordinals and MNEE.
+const TITLE = 'bCorp Wallet (Beta)';
+const SHORT = 'The BSV wallet for tokens: 1Sat Ordinals, BSV-21 and BRC-100 apps.';
+const FULL = `bCorp Wallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd.
 
-It is not made, reviewed or endorsed by the Yours Wallet team. "Yours" and the Yours logo belong to their owners.
-
+• Hold and send BSV, 1Sat Ordinals and BSV-21 tokens
+• Use BRC-100 apps in the built-in browser, where you approve every request
 • Non-custodial: private keys stay on your device, encrypted with your password in the Android Keystore
-• In-app browser for BSV apps, where you approve every request
 • Optional fingerprint unlock
 • Open source: https://github.com/b0ase/yours-mobile
 
-As in the Yours Wallet extension, transaction records sync to 1Sat wallet storage by default.
+Transaction records sync to 1Sat wallet storage by default; you can change the storage provider in settings.
 
-This is early test software. Use a new wallet with small amounts only, and keep your recovery phrase safe.`;
+Based on the open-source Yours Wallet (MIT licence). Not affiliated with or endorsed by its authors.
+
+This is beta software. Use a new wallet with small amounts only, and keep your recovery phrase safe.`;
 
 const key = JSON.parse(readFileSync(KEY_FILE, 'utf8'));
 const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');

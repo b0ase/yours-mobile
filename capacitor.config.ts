@@ -1,10 +1,10 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  // Unofficial, experimental fork of Yours Wallet, published by The Bitcoin Corporation.
+  // bCorp Wallet by The Bitcoin Corporation Ltd, based on the open-source Yours Wallet (MIT).
   // The ID never changes; the visible brand is set by scripts/set-brand.sh.
-  appId: 'com.bitcoincorp.yourswalletmobile',
-  appName: 'Yours Wallet Mobile',
+  appId: 'com.bitcoincorp.bcorpwallet',
+  appName: 'bCorp Wallet',
   webDir: 'build-mobile',
   backgroundColor: '#010101',
   // Never log bridge calls: their arguments include keystore values and the passKey.
