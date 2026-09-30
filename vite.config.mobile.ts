@@ -62,6 +62,10 @@ const brand = (): Plugin => ({
 // time, so upstream's files stay unchanged (and mergeable). Each entry must still match:
 // the build fails if upstream rewords one, so the list can't silently go stale.
 const BCORP_TEXT: Record<string, [string, string][]> = {
+  // Accounts created before the rebrand stored upstream's hosted avatar; show ours instead.
+  'src/hooks/useIdentity.ts': [
+    ["if (!uri) return '';", "if (!uri) return '';\n  if (uri.includes('i.ibb.co/zGcthBv/yours-org-light.png')) return 'bwallet-avatar.png';"],
+  ],
   'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
   'src/components/UpgradeNotification.tsx': [['Welcome to Yours Wallet 5.0', 'Welcome to bWallet']],
   'src/components/BackupPromo.tsx': [['Yours Wallet now uses', 'bWallet uses']],
