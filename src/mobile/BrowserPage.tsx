@@ -53,6 +53,7 @@ const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
   { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
   { name: 'bChat', link: 'https://www.bitcoinchat.online', icon: 'https://www.bitcoinchat.online/bchat-apple-touch-icon.png' },
+  { name: 'bMovies', link: 'https://www.bmovies.app', icon: 'https://www.bmovies.app/icons/icon-192.png' },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
     .map((a) => ({ name: a.name, link: a.link, icon: a.icon })),
