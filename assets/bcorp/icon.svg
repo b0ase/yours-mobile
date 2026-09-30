@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Placeholder bCorp Wallet mark: geometric "b" monogram. Replace with final artwork. -->
+  <rect width="1024" height="1024" fill="#EAB300"/>
+  <g fill="none" stroke="#111111" stroke-width="110" stroke-linecap="round">
+    <line x1="360" y1="250" x2="360" y2="620"/>
+    <circle cx="530" cy="620" r="170"/>
+  </g>
+</svg>

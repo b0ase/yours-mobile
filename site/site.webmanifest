@@ -1,7 +1,7 @@
 {
-  "name": "Yours Wallet Mobile (Experimental)",
-  "short_name": "Yours Mobile",
-  "description": "Experimental, unofficial mobile build of the open-source Yours Wallet. Not endorsed by the Yours Wallet team.",
+  "name": "bCorp Wallet (Beta)",
+  "short_name": "bCorp Wallet",
+  "description": "The BSV wallet for tokens, by The Bitcoin Corporation Ltd.",
   "start_url": "/",
   "display": "browser",
   "background_color": "#010101",

@@ -6,3 +6,7 @@
 // unhashed path. Relative, so it resolves against whichever page shows it.
 export * from '../../utils/constants';
 export const HOSTED_YOURS_IMAGE = 'bwallet-avatar.png';
+
+// Rebranded builds don't feature upstream's own site (name + logo) in the app list.
+import { featuredApps as upstreamFeaturedApps } from '../../utils/constants';
+export const featuredApps = upstreamFeaturedApps.filter((app) => app.link !== 'https://yours.org');

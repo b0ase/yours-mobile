@@ -1,17 +1,28 @@
-# Yours Wallet Mobile: store and beta text
+# bCorp Wallet: store and beta text
 
-Copy for App Store Connect (TestFlight) and Google Play Console. Keep the
-"unofficial / not endorsed" wording in every public field.
+Copy for App Store Connect (TestFlight) and Google Play Console. The app is
+"bCorp Wallet" by The Bitcoin Corporation Ltd, app ID `com.bitcoincorp.bcorpwallet`.
+The name "Yours" must not appear in the app name, subtitle, icon or screenshots
+(Apple rejected the earlier build under guideline 4.1(a)). Credit the upstream
+project only as "Based on the open-source Yours Wallet" in descriptions.
+
+## App Store Connect
+
+**App name (30 max):** `bCorp Wallet`
+
+**Subtitle (30 max):** `The BSV wallet for tokens`
 
 ## TestFlight: Test Information (App Store Connect → TestFlight → Test Information)
 
 **Beta App Description**
 
-> Yours Wallet Mobile is an experimental, unofficial iPhone build of the open-source Yours Wallet for BSV, 1Sat Ordinals and MNEE. It is not made, reviewed or endorsed by the Yours Wallet team.
+> bCorp Wallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd. Hold and send BSV, 1Sat Ordinals and BSV-21 tokens, and use BRC-100 apps in the built-in browser, with optional Face ID unlock.
 >
-> The wallet logic comes from the Yours Wallet extension, packaged for mobile, with an in-app browser for BSV apps and optional Face ID unlock. Private keys stay on the device, encrypted in the iOS Keychain. As in the extension, transaction records are stored with a remote wallet storage service (1Sat, wallet.1sat.app) by default.
+> Non-custodial: private keys stay on the device, encrypted in the iOS Keychain. Transaction records are stored with a remote wallet storage service (1Sat, wallet.1sat.app) by default.
 >
-> This is early test software: use a new wallet with small amounts only, and keep your recovery phrase safe.
+> Based on the open-source Yours Wallet (MIT licence). Not affiliated with or endorsed by its authors.
+>
+> This is beta software: use a new wallet with small amounts only, and keep your recovery phrase safe.
 
 **What to Test**
 
@@ -33,30 +44,19 @@ Copy for App Store Connect (TestFlight) and Google Play Console. Keep the
 
 > Non-custodial BSV wallet. The user creates or restores a wallet on the device, and keys never leave it. No account or sign-in is needed: tap "Create New Wallet" and choose a password to reach every feature. The app does not buy, sell or exchange cryptocurrency, and holds no user funds.
 >
-> This is an unofficial, experimental build of the open-source Yours Wallet (MIT licence, https://github.com/yours-org/yours-wallet), published by The Bitcoin Corporation Ltd. It is labelled "Experimental" in the app, with a notice that it is not endorsed by the Yours Wallet team. We have contacted the Yours team: https://github.com/yours-org/yours-wallet/issues/353
+> bCorp Wallet is published by The Bitcoin Corporation Ltd under its own name and artwork. It is built on open-source code from Yours Wallet (MIT licence, https://github.com/yours-org/yours-wallet); the licence and copyright notice are kept, and the app is not presented as, or affiliated with, Yours Wallet.
 
 **Sign-in required:** No.
 
 ## Google Play: store listing (Grow → Store presence → Main store listing)
 
-**App name (30 max):** `Yours Wallet Mobile (Beta)`
+**App name (30 max):** `bCorp Wallet (Beta)`
 
 **Short description (80 max):**
 
-> Experimental, unofficial mobile build of the open-source Yours Wallet for BSV.
+> The BSV wallet for tokens: 1Sat Ordinals, BSV-21 and BRC-100 apps.
 
-**Full description:**
-
-> Yours Wallet Mobile is an experimental, unofficial Android build of the open-source Yours Wallet for BSV, 1Sat Ordinals and MNEE.
->
-> It is not made, reviewed or endorsed by the Yours Wallet team.
->
-> • Non-custodial: private keys stay on your device, encrypted with your password in the Android Keystore
-> • In-app browser for BSV apps, where you approve every request
-> • Optional fingerprint unlock
-> • Open source: https://github.com/b0ase/yours-mobile
->
-> This is early test software. Use a new wallet with small amounts only, and keep your recovery phrase safe.
+**Full description:** the `FULL` text in `scripts/play-listing.mjs` (pushed by that script).
 
 **App category:** Finance.
 
@@ -77,5 +77,5 @@ Copy for App Store Connect (TestFlight) and Google Play Console. Keep the
 
 ## Google Play: testing tracks
 
-1. **Internal testing** (Test and release → Testing → Internal testing): create a release, upload `dist/yours-wallet-mobile-<version>.aab`, add testers by email list, and share the opt-in link.
+1. **Internal testing** (Test and release → Testing → Internal testing): create a release, upload ``dist/bcorp-wallet-<version>.aab` (from `scripts/android-release.sh`)`, add testers by email list, and share the opt-in link.
 2. **Closed testing** before production: new personal developer accounts need 12+ testers opted in for 14 days before production access.

@@ -1,12 +1,14 @@
-# Yours Wallet — iOS & Android
+# bCorp Wallet — iOS & Android
 
-This branch (`mobile`) packages the Yours Wallet extension as native iOS and
+**bCorp Wallet** is published by The Bitcoin Corporation Ltd. It is based on the
+open-source Yours Wallet (MIT). This branch (`mobile`) packages the Yours Wallet extension as native iOS and
 Android apps with [Capacitor 8](https://capacitorjs.com). The wallet UI,
 background logic and key handling are **upstream's code, unmodified**; the
 mobile layer lives in `src/mobile/` and runs it inside one WebView.
 
 > Community fork of [yours-org/yours-wallet](https://github.com/yours-org/yours-wallet) (MIT).
-> Not an official Yours release; store publishing under the Yours name needs yours.org's approval.
+> Not an official Yours release. Store builds ship as "bCorp Wallet" with its own name and artwork;
+> the name "Yours" must not appear in the app name, icon, splash, UI chrome or store title (App Store 4.1(a)).
 
 `main` tracks `yours-org/yours-wallet`; merge it into `mobile` to pick up
 upstream releases (see [Staying in sync](#staying-in-sync)).
@@ -101,12 +103,17 @@ Mobile-specific hardening:
 ## For dApp developers
 
 Pages opened in the wallet's Browser tab get `window.CWI` (BRC-100) injected at
-document start, and the user agent ends in `YoursWalletMobile/1`. A site can use
-that to skip its wallet chooser and connect straight away:
+document start, and the user agent ends in `bCorpWallet/1 YoursWalletMobile/1`.
+
+- `bCorpWallet/1` is the current marker; match it in new code.
+- `YoursWalletMobile/1` is kept for existing integrations (bChat, bMovies) and
+  will be dropped in a later release, so check for either for now.
+
+A site can use that to skip its wallet chooser and connect straight away:
 
 ```js
-const inYoursMobile = /YoursWalletMobile\//.test(navigator.userAgent) && 'CWI' in window;
-if (inYoursMobile) connectWith(window.CWI); // the wallet still asks the user to approve
+const inWalletBrowser = /(bCorpWallet|YoursWalletMobile)\//.test(navigator.userAgent) && 'CWI' in window;
+if (inWalletBrowser) connectWith(window.CWI); // the wallet still asks the user to approve
 ```
 
 ## Develop
@@ -140,20 +147,28 @@ Android needs JDK 21 (`JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jd
 
 ## Branding
 
-The app ID is always `com.bitcoincorp.yourswalletmobile`. The visible brand is a build switch:
+The app ID is always `com.bitcoincorp.bcorpwallet` (iOS bundle ID and Android
+applicationId). It replaced `com.bitcoincorp.yourswalletmobile`, so it needs its own
+App Store Connect and Play Console app records. Internal code identifiers
+(`org.yours.wallet` Java package, `YoursNative` plugin, Keychain service names)
+stay as upstream/fork named them to keep merges simple.
+
+The visible brand is a build switch:
 
 ```bash
-bash scripts/set-brand.sh yours && pnpm cap:sync                            # "Yours Wallet Mobile" (default)
+bash scripts/set-brand.sh bcorp && pnpm cap:sync                            # "bCorp Wallet" (default)
 bash scripts/set-brand.sh bwallet && MOBILE_BRAND=bwallet pnpm cap:sync     # "bWallet"
+bash scripts/set-brand.sh yours && MOBILE_BRAND=yours pnpm cap:sync         # "Yours Wallet Mobile"
 ```
 
-- **yours:** "Yours Wallet Mobile" (home screen: "Yours Mobile") with upstream's logos. Use it for your own devices,
-  sideloading and internal TestFlight. A public store listing under the Yours
-  name needs the Yours team's approval.
-- **bwallet:** bWallet name, logo and default avatar (`src/mobile/brand/`,
-  `assets/bwallet/`). Use it for public listings without that approval.
-- Both show an "unofficial, not endorsed by the Yours Wallet team" notice on
-  the welcome screen and the Browser tab (`src/mobile/brandText.ts`).
+- **bcorp:** "bCorp Wallet" name, logo and default avatar (`src/mobile/brand/bcorp/`,
+  `assets/bcorp/`). The store brand. The current artwork is a **placeholder**
+  (`assets/bcorp/icon.svg`); replace the PNGs in those folders with final artwork
+  and rerun `bash scripts/set-brand.sh bcorp`.
+- **bwallet:** bWallet name, logo and default avatar (`src/mobile/brand/`, `assets/bwallet/`).
+- **yours:** upstream's name and logos. Own devices and sideloading only; never a store build.
+- The welcome screen and Browser tab show a short notice from `src/mobile/brandText.ts`
+  (for bcorp: publisher plus "Based on the open-source Yours Wallet").
 
 ## Staying in sync
 
@@ -177,10 +192,10 @@ the current set with `rg -o "chrome\.[a-z]+\.[a-zA-Z.]+" src | sort -u`.
 
 **Accounts & rights**
 
-- [ ] Written permission from yours.org to publish under the "Yours Wallet" name and marks, or publish from their accounts.
+- [ ] Store builds use the bcorp brand (no "Yours" in name, icon, subtitle or screenshots).
 - [ ] Apple Developer Program enrolled **as an organization**: App Store Review Guideline 3.1.5(b) requires this for crypto wallets.
 - [ ] Google Play developer account (organization) and the Play Console _Financial features_ declaration (crypto wallet, non-custodial).
-- [ ] Confirm the App ID `org.yours.wallet` (in `capacitor.config.ts`, Xcode, `android/app/build.gradle`) matches what's registered.
+- [ ] Confirm the App ID `com.bitcoincorp.bcorpwallet` (in `capacitor.config.ts`, Xcode, `android/app/build.gradle`) matches what's registered.
 
 **Assets**
 

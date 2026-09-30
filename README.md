@@ -1,3 +1,8 @@
+> **bCorp Wallet (iOS & Android)** — this repository's `mobile` branch is bCorp Wallet, the BSV wallet for
+> tokens, published by The Bitcoin Corporation Ltd. Based on the open-source Yours Wallet (MIT, © 2024 Daniel
+> Wagner, David Case); not affiliated with or endorsed by its authors. See [MOBILE.md](MOBILE.md). The rest of
+> this README is upstream's, describing the Yours Wallet Chrome extension.
+
 ![Example Image](/public/banner.png)
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
