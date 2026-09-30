@@ -92,6 +92,28 @@ const bcorpText = (): Plugin => ({
     MOBILE_BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', '<title>bCorp Wallet</title>') : html,
 });
 
+/**
+ * bCorp palette: upstream's greens become BSV gold in the bcorp build only, so
+ * upstream files stay untouched and mergeable.
+ */
+const BCORP_COLOURS: [RegExp, string][] = [
+  [/#A1FF8B/gi, '#FFD24D'],
+  [/#9EFF8A/gi, '#FFD24D'],
+  [/#34D399/gi, '#EAB300'],
+  [/rgba\(52,\s*211,\s*153/g, 'rgba(234, 179, 0'],
+  [/\btext-green-400\b/g, 'text-yellow-400'],
+];
+const bcorpColours = (): Plugin => ({
+  name: 'bcorp-colours',
+  enforce: 'pre',
+  transform(code, id) {
+    if (MOBILE_BRAND !== 'bcorp' || !/\/src\/.*\.(tsx?|css)$/.test(id.split('?')[0])) return null;
+    let out = code;
+    for (const [re, to] of BCORP_COLOURS) out = out.replace(re, to);
+    return out === code ? null : { code: out, map: null };
+  },
+});
+
 const mobilePages = (): Plugin => ({
   name: 'yours-mobile-pages',
   transformIndexHtml: {
@@ -121,7 +143,7 @@ const mobilePages = (): Plugin => ({
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [brand(), bcorpText(), mobilePages()],
+    plugins: [brand(), bcorpText(), bcorpColours(), mobilePages()],
     build: {
       outDir: 'build-mobile',
       target: 'es2022',
@@ -136,7 +158,7 @@ export default mergeConfig(
     },
     worker: {
       format: 'es',
-      plugins: () => [brand(), bcorpText(), polyfills()],
+      plugins: () => [brand(), bcorpText(), bcorpColours(), polyfills()],
     },
     define: {
       __MOBILE_VERSION__: JSON.stringify(version),
