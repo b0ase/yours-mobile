@@ -37,6 +37,16 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
     (permissions.certificateAccess ?? []).map(() => true),
   );
   const [spendingChecked, setSpendingChecked] = useState(false);
+  /**
+   * The monthly allowance the user will grant, in BSV as typed. Pre-filled with what the app
+   * asked for; the user may raise or lower it before approving. The manager stores whatever
+   * amount is granted (`authorizedAmount`) — toolbox only checks that a spending grant was
+   * requested at all, not that the amount matches.
+   */
+  const requestedSats = permissions.spendingAuthorization?.amount ?? 0;
+  const [allowanceBsv, setAllowanceBsv] = useState(() => (requestedSats / 1e8).toString());
+  const allowanceSats = Math.round(Number(allowanceBsv) * 1e8);
+  const allowanceValid = allowanceBsv.trim() !== '' && Number.isFinite(allowanceSats) && allowanceSats >= 0;
 
   useEffect(() => {
     handleSelect('bsv');
@@ -51,8 +61,8 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
     if (checkedBaskets.length > 0) granted.basketAccess = checkedBaskets;
     const checkedCerts = (permissions.certificateAccess ?? []).filter((_, i) => certChecked[i]);
     if (checkedCerts.length > 0) granted.certificateAccess = checkedCerts;
-    if (spendingChecked && permissions.spendingAuthorization) {
-      granted.spendingAuthorization = permissions.spendingAuthorization;
+    if (spendingChecked && permissions.spendingAuthorization && allowanceValid) {
+      granted.spendingAuthorization = { ...permissions.spendingAuthorization, amount: allowanceSats };
     }
     return granted;
   };
@@ -153,9 +163,28 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
             />
             <div className="flex flex-col min-w-0">
               <span className="text-xs font-semibold" style={{ color: '#F79009' }}>
-                This app wants to spend up to {((permissions.spendingAuthorization?.amount ?? 0) / 1e8).toFixed(8)} BSV{' '}
-                ({(permissions.spendingAuthorization?.amount ?? 0).toLocaleString()} satoshis)
+                This app wants to spend up to {(requestedSats / 1e8).toFixed(8)} BSV{' '}
+                ({requestedSats.toLocaleString()} satoshis) a month
               </span>
+              <span className="text-xs mt-1 flex items-center gap-1.5" style={{ color: theme.color.global.contrast }}>
+                Allow up to
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={allowanceBsv}
+                  onChange={(e) => setAllowanceBsv(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Monthly allowance in BSV"
+                  className="w-24 rounded-md px-1.5 py-0.5 text-xs bg-transparent"
+                  style={{ border: '1px solid rgba(247,144,9,0.4)', color: theme.color.global.contrast }}
+                />
+                BSV a month
+              </span>
+              {!allowanceValid && (
+                <span className="text-xs mt-1" style={{ color: '#ef4444' }}>
+                  Enter an amount in BSV (0 or more).
+                </span>
+              )}
               {permissions.spendingAuthorization?.description && (
                 <span className="text-xs mt-1 opacity-70" style={{ color: theme.color.global.contrast }}>
                   App says: &ldquo;{permissions.spendingAuthorization.description}&rdquo;
@@ -295,7 +324,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
             color: '#010101',
             opacity: isProcessing ? 0.6 : 1,
           }}
-          disabled={isProcessing}
+          disabled={isProcessing || (spendingChecked && !allowanceValid)}
           onClick={handleGrant}
           whileHover={{ scale: isProcessing ? 1 : 1.02 }}
           whileTap={{ scale: isProcessing ? 1 : 0.97 }}

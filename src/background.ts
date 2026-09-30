@@ -34,7 +34,7 @@ import type {
   CounterpartyPermissionRequest,
   CounterpartyPermissions,
 } from '@bsv/wallet-toolbox-client';
-import type { LocalWalletPermissionsManager } from '@1sat/wallet-browser';
+import { normalizeOriginator, type LocalWalletPermissionsManager } from '@1sat/wallet-browser';
 import { deriveDepositAddresses } from '@1sat/actions';
 import { removeWindow } from './utils/chromeHelpers';
 import { Account, ChromeStorageObject, StorageConfig } from './services/types/chromeStorage.types';
@@ -880,6 +880,7 @@ if (isInServiceWorker) {
       'PERMISSIONS_QUERY_SPENT',
       'PERMISSIONS_REVOKE_ONE',
       'PERMISSIONS_REVOKE_ALL',
+      'PERMISSIONS_SET_SPENDING_AMOUNT',
       // Settings (popup internal)
       'UPDATE_FEE_RATE',
       // Address management (popup internal)
@@ -1155,6 +1156,9 @@ if (isInServiceWorker) {
           return true;
         case 'PERMISSIONS_REVOKE_ALL':
           processPermissionsRevokeAll(message, sendResponse);
+          return true;
+        case 'PERMISSIONS_SET_SPENDING_AMOUNT':
+          processPermissionsSetSpendingAmount(message, sendResponse);
           return true;
         case 'GET_DEPOSIT_ADDRESSES': {
           startupInitPromise.then(() => {
@@ -1760,6 +1764,46 @@ if (isInServiceWorker) {
       console.error('[PERMISSIONS_REVOKE_ALL] Error:', error);
       sendResponse({
         type: 'PERMISSIONS_REVOKE_ALL',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /**
+   * Change an app's monthly spending allowance in place.
+   *
+   * The allowance is the `authorizedAmount` on the app's stored spending grant — the same
+   * field `LocalWalletPermissionsManager.ensureSpendingAuthorization` compares month-to-date
+   * spend against — so rewriting it IS changing the allowance, with no revoke/re-grant and
+   * no new prompt for the app. Popup-internal only (listed with the other PERMISSIONS_*
+   * actions), so no dApp can raise its own allowance.
+   */
+  const processPermissionsSetSpendingAmount = async (
+    message: { originator: string; amount: number },
+    sendResponse: CallbackResponse,
+  ) => {
+    try {
+      const amount = Math.floor(Number(message.amount));
+      if (!Number.isFinite(amount) || amount < 0) throw new Error('Amount must be 0 or more satoshis');
+      if (!message.originator) throw new Error('No app given');
+      await ensureWallet(true);
+      const store = accountContext?.permissionStore;
+      if (!store) throw new Error('Wallet is locked');
+      const key = { type: 'spending' as const, originator: normalizeOriginator(message.originator) };
+      const existing = await store.findGrant(key);
+      await store.putGrant({
+        key,
+        expiry: existing?.expiry ?? 0,
+        grantedAt: existing?.grantedAt ?? Date.now(),
+        reason: existing?.reason,
+        authorizedAmount: amount,
+      });
+      sendResponse({ type: 'PERMISSIONS_SET_SPENDING_AMOUNT', success: true, data: { authorizedAmount: amount } });
+    } catch (error) {
+      console.error('[PERMISSIONS_SET_SPENDING_AMOUNT] Error:', error);
+      sendResponse({
+        type: 'PERMISSIONS_SET_SPENDING_AMOUNT',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });

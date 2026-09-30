@@ -83,6 +83,11 @@ export interface AccountContext {
   addRemote: (url: string) => Promise<void>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
+  /**
+   * The grant store the permissions manager reads. Exposed so the Permissions page can
+   * change an app's monthly spending allowance in place (the manager keeps it private).
+   */
+  permissionStore: IndexedDbPermissionStore;
 }
 
 /**
@@ -372,6 +377,7 @@ export const initWallet = async (
 
   return {
     wallet,
+    permissionStore,
     baseWallet,
     syncContext,
     storage,

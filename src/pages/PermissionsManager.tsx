@@ -223,6 +223,41 @@ export const PermissionsManager = ({ onBack: _onBack }: PermissionsManagerProps)
     }
   };
 
+  const [editingAllowance, setEditingAllowance] = useState<string | null>(null);
+  const [allowanceDraft, setAllowanceDraft] = useState('');
+
+  /** Change an app's monthly spending allowance in place (no revoke, no new prompt). */
+  const handleSaveAllowance = async (token: PermissionToken) => {
+    const sats = Math.round(Number(allowanceDraft) * 1e8);
+    if (allowanceDraft.trim() === '' || !Number.isFinite(sats) || sats < 0) {
+      addSnackbar('Enter an amount in BSV (0 or more)', 'error');
+      return;
+    }
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'PERMISSIONS_SET_SPENDING_AMOUNT',
+        originator: token.originator,
+        amount: sats,
+      });
+      if (response.success) {
+        const key = tokenKey(token);
+        setGroups((prev) =>
+          prev.map((g) =>
+            g.originator === token.originator
+              ? { ...g, permissions: g.permissions.map((p) => (tokenKey(p) === key ? { ...p, authorizedAmount: sats } : p)) }
+              : g,
+          ),
+        );
+        setEditingAllowance(null);
+        addSnackbar('Allowance updated', 'success');
+      } else {
+        addSnackbar(response.error || 'Update failed', 'error');
+      }
+    } catch (error) {
+      addSnackbar('Update failed: ' + (error instanceof Error ? error.message : String(error)), 'error');
+    }
+  };
+
   const handleRevokeOne = async (token: PermissionToken) => {
     const key = tokenKey(token);
     setRevoking((prev) => new Set(prev).add(key));
@@ -404,6 +439,47 @@ export const PermissionsManager = ({ onBack: _onBack }: PermissionsManagerProps)
                             style={{ color: contrast, minWidth: 0 }}
                           >
                             {formatPermissionDetail(perm, spentAmounts.get(key))}
+                            {perm.type === 'spending' && (
+                              editingAllowance === key ? (
+                                <span className="flex items-center gap-1.5 mt-1">
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={allowanceDraft}
+                                    onChange={(e) => setAllowanceDraft(e.target.value)}
+                                    aria-label="Monthly allowance in BSV"
+                                    className="w-24 rounded-md px-1.5 py-0.5 text-xs bg-transparent"
+                                    style={{ border: `1px solid ${gray}55`, color: contrast }}
+                                  />
+                                  <span style={{ color: gray }}>BSV/month</span>
+                                  <button
+                                    onClick={() => handleSaveAllowance(perm)}
+                                    className="text-xs underline cursor-pointer border-0 bg-transparent"
+                                    style={{ color: '#A1FF8B' }}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingAllowance(null)}
+                                    className="text-xs underline cursor-pointer border-0 bg-transparent"
+                                    style={{ color: gray }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setAllowanceDraft(((perm.authorizedAmount ?? 0) / 1e8).toString());
+                                    setEditingAllowance(key);
+                                  }}
+                                  className="block mt-1 text-xs underline cursor-pointer border-0 bg-transparent p-0"
+                                  style={{ color: '#A1FF8B' }}
+                                >
+                                  Change allowance
+                                </button>
+                              )
+                            )}
                           </span>
                           <button
                             onClick={() => handleRevokeOne(perm)}
