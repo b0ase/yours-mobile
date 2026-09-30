@@ -98,6 +98,17 @@ Mobile-specific hardening:
 - USB security keys need desktop File System Access; upstream feature-detects
   it, so the option is hidden on mobile.
 
+## For dApp developers
+
+Pages opened in the wallet's Browser tab get `window.CWI` (BRC-100) injected at
+document start, and the user agent ends in `YoursWalletMobile/1`. A site can use
+that to skip its wallet chooser and connect straight away:
+
+```js
+const inYoursMobile = /YoursWalletMobile\//.test(navigator.userAgent) && 'CWI' in window;
+if (inYoursMobile) connectWith(window.CWI); // the wallet still asks the user to approve
+```
+
 ## Develop
 
 ```bash

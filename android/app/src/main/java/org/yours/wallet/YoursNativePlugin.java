@@ -423,6 +423,8 @@ public class YoursNativePlugin extends Plugin {
             s.setAllowContentAccess(false);
             s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
             s.setSupportMultipleWindows(false);
+            // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
+            s.setUserAgentString(s.getUserAgentString() + " YoursWalletMobile/1");
             browser.setWebViewClient(
                 new WebViewClient() {
                     @Override

@@ -306,6 +306,8 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         content.addScriptMessageHandler(WeakReplyHandler(self), contentWorld: .page, name: "yours")
         config.userContentController = content
         config.websiteDataStore = .default()
+        // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
+        config.applicationNameForUserAgent = "Mobile/15E148 YoursWalletMobile/1"
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
