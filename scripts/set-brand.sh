@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Switch the app's visible brand on both platforms: display name, Face ID
-# text, icons and splash. The app ID (com.bitcoincorp.bcorpwallet) never changes.
+# text, icons and splash. The app ID (com.bitcoincorp.bwallet) never changes.
 # Build the web layer with the same brand: MOBILE_BRAND=<brand> pnpm cap:sync
 #
-#   bash scripts/set-brand.sh bcorp     # "bCorp Wallet" (default; public store listings)
+#   bash scripts/set-brand.sh bcorp     # "bWallet" (default; public store listings)
 #   bash scripts/set-brand.sh bwallet   # "bWallet"
 #   bash scripts/set-brand.sh yours     # "Yours Wallet Mobile" (personal / internal testing only)
 set -euo pipefail
@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 BRAND=${1:?usage: set-brand.sh bcorp|bwallet|yours}
 case "$BRAND" in
   # SHORT is the home-screen label; longer names get cut off under the icon.
-  bcorp) NAME="bCorp Wallet"; SHORT="bCorp Wallet" ;;
+  bcorp) NAME="bWallet"; SHORT="bWallet" ;;
   yours) NAME="Yours Wallet Mobile"; SHORT="Yours Mobile" ;;
   bwallet) NAME="bWallet"; SHORT="bWallet" ;;
   *) echo "unknown brand: $BRAND" >&2; exit 1 ;;

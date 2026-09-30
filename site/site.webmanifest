@@ -1,6 +1,6 @@
 {
-  "name": "bCorp Wallet (Beta)",
-  "short_name": "bCorp Wallet",
+  "name": "bWallet (Beta)",
+  "short_name": "bWallet",
   "description": "The BSV wallet for tokens, by The Bitcoin Corporation Ltd.",
   "start_url": "/",
   "display": "browser",

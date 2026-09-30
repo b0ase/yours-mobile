@@ -1,4 +1,4 @@
-# bCorp Wallet (mobile fork of Yours Wallet): review guide
+# bWallet (mobile fork of Yours Wallet): review guide
 
 For the Yours Wallet team (Dan, David and anyone else reviewing). It's meant to
 take you straight to the security-relevant code, say what each part assumes,
@@ -192,7 +192,7 @@ These could go upstream as one PR if you want them.
    right default on mobile.
 5. **Upstream branches in flight** (usb-rekey fix, actions 0.0.209, lifecycle
    snapshot): I'd merge them once they reach `main`.
-6. **Naming:** store builds now ship as "bCorp Wallet" (`com.bitcoincorp.bcorpwallet`,
+6. **Naming:** store builds now ship as "bWallet" (`com.bitcoincorp.bwallet`,
    `scripts/set-brand.sh bcorp`) after Apple's 4.1(a) rejection; "Yours" appears only
    in the "Based on the open-source Yours Wallet" credit and the MIT licence notice.
 

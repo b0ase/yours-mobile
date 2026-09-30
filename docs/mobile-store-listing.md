@@ -1,14 +1,14 @@
-# bCorp Wallet: store and beta text
+# bWallet: store and beta text
 
 Copy for App Store Connect (TestFlight) and Google Play Console. The app is
-"bCorp Wallet" by The Bitcoin Corporation Ltd, app ID `com.bitcoincorp.bcorpwallet`.
+"bWallet" by The Bitcoin Corporation Ltd, app ID `com.bitcoincorp.bwallet`.
 The name "Yours" must not appear in the app name, subtitle, icon or screenshots
 (Apple rejected the earlier build under guideline 4.1(a)). Credit the upstream
 project only as "Based on the open-source Yours Wallet" in descriptions.
 
 ## App Store Connect
 
-**App name (30 max):** `bCorp Wallet`
+**App name (30 max):** `bWallet`
 
 **Subtitle (30 max):** `The BSV wallet for tokens`
 
@@ -16,7 +16,7 @@ project only as "Based on the open-source Yours Wallet" in descriptions.
 
 **Beta App Description**
 
-> bCorp Wallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd. Hold and send BSV, 1Sat Ordinals and BSV-21 tokens, and use BRC-100 apps in the built-in browser, with optional Face ID unlock.
+> bWallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd. Hold and send BSV, 1Sat Ordinals and BSV-21 tokens, and use BRC-100 apps in the built-in browser, with optional Face ID unlock.
 >
 > Non-custodial: private keys stay on the device, encrypted in the iOS Keychain. Transaction records are stored with a remote wallet storage service (1Sat, wallet.1sat.app) by default.
 >
@@ -44,13 +44,13 @@ project only as "Based on the open-source Yours Wallet" in descriptions.
 
 > Non-custodial BSV wallet. The user creates or restores a wallet on the device, and keys never leave it. No account or sign-in is needed: tap "Create New Wallet" and choose a password to reach every feature. The app does not buy, sell or exchange cryptocurrency, and holds no user funds.
 >
-> bCorp Wallet is published by The Bitcoin Corporation Ltd under its own name and artwork. It is built on open-source code from Yours Wallet (MIT licence, https://github.com/yours-org/yours-wallet); the licence and copyright notice are kept, and the app is not presented as, or affiliated with, Yours Wallet.
+> bWallet is published by The Bitcoin Corporation Ltd under its own name and artwork. It is built on open-source code from Yours Wallet (MIT licence, https://github.com/yours-org/yours-wallet); the licence and copyright notice are kept, and the app is not presented as, or affiliated with, Yours Wallet.
 
 **Sign-in required:** No.
 
 ## Google Play: store listing (Grow → Store presence → Main store listing)
 
-**App name (30 max):** `bCorp Wallet (Beta)`
+**App name (30 max):** `bWallet (Beta)`
 
 **Short description (80 max):**
 

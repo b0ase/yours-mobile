@@ -12,14 +12,14 @@ import { createSign } from 'crypto';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const PACKAGE = 'com.bitcoincorp.bcorpwallet';
+const PACKAGE = 'com.bitcoincorp.bwallet';
 const LANG = process.env.PLAY_LANG ?? 'en-GB';
 const ASSETS = join(process.cwd(), 'dist/play-assets');
 const KEY_FILE = process.env.PLAY_SERVICE_ACCOUNT ?? join(homedir(), '.yours-mobile/play-service-account.json');
 
-const TITLE = 'bCorp Wallet (Beta)';
+const TITLE = 'bWallet (Beta)';
 const SHORT = 'The BSV wallet for tokens: 1Sat Ordinals, BSV-21 and BRC-100 apps.';
-const FULL = `bCorp Wallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd.
+const FULL = `bWallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd.
 
 • Hold and send BSV, 1Sat Ordinals and BSV-21 tokens
 • Use BRC-100 apps in the built-in browser, where you approve every request

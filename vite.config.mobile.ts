@@ -21,7 +21,7 @@ const polyfills = () =>
 // Overlay pages get their chrome shim from the top window before any module runs.
 const FRAME_SHIM = `<script>(function(){var m=window.parent!==window&&window.parent.__yoursMobile;if(m){Object.defineProperty(window,'chrome',{value:m.attachFrame(window),writable:true,configurable:true});window.__yoursPlatform=window.parent.__yoursPlatform;}})();</script>`;
 
-// Brand: MOBILE_BRAND=bcorp (default) is "bCorp Wallet", the store brand;
+// Brand: MOBILE_BRAND=bcorp (default) is "bWallet", the store brand;
 // MOBILE_BRAND=bwallet swaps in bWallet's; MOBILE_BRAND=yours keeps upstream's
 // name and logos (internal testing only). All get the mobile theme settings
 // (Browser tab, fork repo link) via src/mobile/brand/theme.ts.
@@ -62,15 +62,15 @@ const brand = (): Plugin => ({
 // time, so upstream's files stay unchanged (and mergeable). Each entry must still match:
 // the build fails if upstream rewords one, so the list can't silently go stale.
 const BCORP_TEXT: Record<string, [string, string][]> = {
-  'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bCorp Wallet will be ready']],
-  'src/components/UpgradeNotification.tsx': [['Welcome to Yours Wallet 5.0', 'Welcome to bCorp Wallet']],
-  'src/components/BackupPromo.tsx': [['Yours Wallet now uses', 'bCorp Wallet uses']],
+  'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
+  'src/components/UpgradeNotification.tsx': [['Welcome to Yours Wallet 5.0', 'Welcome to bWallet']],
+  'src/components/BackupPromo.tsx': [['Yours Wallet now uses', 'bWallet uses']],
   'src/components/ProviderPicker.tsx': [['Official storage partner of Yours Wallet.', 'Default wallet storage provider.']],
-  'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bCorp Wallet"']],
-  'src/components/YoursIcon.tsx': [['alt="Yours Head"', 'alt="bCorp Wallet"']],
-  'src/pages/requests/UsbCheckRequest.tsx': [['is asking Yours to', 'is asking bCorp Wallet to']],
+  'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bWallet"']],
+  'src/components/YoursIcon.tsx': [['alt="Yours Head"', 'alt="bWallet"']],
+  'src/pages/requests/UsbCheckRequest.tsx': [['is asking Yours to', 'is asking bWallet to']],
   'src/pages/onboarding/RestoreAccount.tsx': [
-    ['alt="Yours"', 'alt="bCorp Wallet"'],
+    ['alt="Yours"', 'alt="bWallet"'],
     ['Upload Yours JSON', 'Upload wallet backup JSON'],
   ],
 };
@@ -89,7 +89,7 @@ const bcorpText = (): Plugin => ({
     return { code, map: null };
   },
   transformIndexHtml: (html) =>
-    MOBILE_BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', '<title>bCorp Wallet</title>') : html,
+    MOBILE_BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', '<title>bWallet</title>') : html,
 });
 
 /**

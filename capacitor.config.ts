@@ -1,10 +1,10 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  // bCorp Wallet by The Bitcoin Corporation Ltd, based on the open-source Yours Wallet (MIT).
+  // bWallet by The Bitcoin Corporation Ltd, based on the open-source Yours Wallet (MIT).
   // The ID never changes; the visible brand is set by scripts/set-brand.sh.
-  appId: 'com.bitcoincorp.bcorpwallet',
-  appName: 'bCorp Wallet',
+  appId: 'com.bitcoincorp.bwallet',
+  appName: 'bWallet',
   webDir: 'build-mobile',
   backgroundColor: '#010101',
   // Never log bridge calls: their arguments include keystore values and the passKey.
