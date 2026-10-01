@@ -224,3 +224,9 @@ body,
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 0 0 1px #23252b;
 }
+
+/* Identity row (TopNav, main tabs): the Wallet home and its sub-views sit in a flex ROW beside
+   TopNav, so the in-flow spacer can't push them down; offset their own pt-14 scrollers instead. */
+html.bw-idrow .pt-14.overflow-y-auto {
+  padding-top: calc(3.5rem + 32px);
+}

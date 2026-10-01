@@ -8,6 +8,7 @@ import { getPersonalLink, onPersonalChange } from './personalToken';
 import { recoverPersonalLink } from './claimPersonal';
 import { FinishIndexing } from '../tokens/FinishIndexing';
 import { getFundRecord } from '../tokens/indexFund';
+import { SectionBoundary } from '../wallet/SectionBoundary';
 import {
   clearPendingPrompt,
   dismissCard,
@@ -92,7 +93,9 @@ export const HandleOnboarding = () => {
   if (link && !getFundRecord(link.tokenId))
     return (
       <div className="w-[92%] mt-4">
-        <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} />
+        <SectionBoundary name="Finish setting up">
+          <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} />
+        </SectionBoundary>
       </div>
     );
   if (!id || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;

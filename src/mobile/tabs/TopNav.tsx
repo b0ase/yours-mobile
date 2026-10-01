@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
@@ -54,6 +54,11 @@ export const TopNav = () => {
   const payable = names.payable;
   const avatar = useAvatar(current);
   const identityRow = showsIdentityRow(pathname);
+  useEffect(() => {
+    const el = document.documentElement;
+    el.classList.toggle('bw-idrow', identityRow);
+    return () => el.classList.remove('bw-idrow');
+  }, [identityRow]);
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
 
@@ -157,8 +162,11 @@ export const TopNav = () => {
             verified={verified}
             onGetName={() => setHandleOpen(true)}
           />
-          {/* In-flow spacer: pages lay out under the fixed TopNav with their own spacer; this adds the row. */}
-          <div aria-hidden className="w-full shrink-0" style={{ height: IDENTITY_ROW_H }} />
+          {/* In-flow spacer for column pages (Market, Chat, Feed, NFTs). Zero width on purpose: the Wallet
+              home renders TopNav inside a flex ROW (App's centred container), where a full-width spacer
+              squeezed the page to 0 px and blanked the Wallet tab. Row pages get the offset from the
+              html.bw-idrow rule in mobile.css instead. */}
+          <div aria-hidden className="shrink-0" style={{ height: IDENTITY_ROW_H, width: 0 }} />
         </>
       )}
       <AnimatePresence>

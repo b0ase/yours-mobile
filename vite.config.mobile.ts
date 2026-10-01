@@ -69,11 +69,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx': [
     [
       "import { getPlatform } from '../platform';",
-      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';",
+      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';\nimport { SectionBoundary } from '../mobile/wallet/SectionBoundary';",
     ],
     [
       '            Send\n          </motion.button>\n        </motion.div>',
-      '            Send\n          </motion.button>\n<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
+      '            Send\n          </motion.button>\n<SectionBoundary name="Mint"><MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>',
     ],
     // Button order: Send · Receive · Mint (flex order; upstream renders Receive first).
     [
@@ -88,10 +88,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     [
       "import { MintButton } from '../mobile/mint/MintButton';",
       "import { MintButton } from '../mobile/mint/MintButton';\nimport { CreditsRow } from '../mobile/credits/CreditsRow';",
-    ],
-    [
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
     ],
     // Send to a name: $handle / paymail / OpNS recipient box with resolve + confirm (src/mobile/names).
     [
@@ -125,8 +121,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
     [
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>\n<HandleOnboarding />',
+      '</SectionBoundary>\n        </motion.div>',
+      '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>',
     ],
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
@@ -206,11 +202,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* ── Assets section ── */}',
-      '        <WalletKindSwitch />\n        <WalletKindGate kind="tokens">\n        {/* ── Assets section ── */}',
+      '        <SectionBoundary name="Kind switch"><WalletKindSwitch /></SectionBoundary>\n        <WalletKindGate kind="tokens">\n<SectionBoundary name="Tokens">\n        {/* ── Assets section ── */}',
     ],
     [
       '        {/* Bottom breathing room */}',
-      '        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <MediaSection />\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <TicketsSection />\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <CreditsRow />\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [
