@@ -52,6 +52,7 @@ import {
   buildPostScript,
   quoteText,
   estimatePostFee,
+  avatarSeed,
   feedTimeLabel,
   filterFeed,
   MAX_INLINE_IMAGE_BYTES,
@@ -273,9 +274,19 @@ const useOnline = () => {
 
 const hue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
-const Avatar = ({ author, size = 40 }: { author: Pick<Author, 'name' | 'avatar' | 'address'>; size?: number }) => {
+const Avatar = ({
+  author,
+  size = 40,
+  source,
+}: {
+  author: Pick<Author, 'name' | 'avatar' | 'address'> & { bapId?: string | null };
+  size?: number;
+  source?: Source;
+}) => {
   const [broken, setBroken] = useState(false);
-  const h = hue(author.address || author.name);
+  const h = hue(avatarSeed({ bapId: null, ...author }, source));
+  // Treechat exposes no public avatar API, so its authors get a per-username initial with a Treechat-green ring.
+  const ring = source === 'treechat' ? '2px solid #3fb950' : undefined;
   if (author.avatar && !broken)
     return (
       <img
@@ -295,6 +306,7 @@ const Avatar = ({ author, size = 40 }: { author: Pick<Author, 'name' | 'avatar' 
         fontSize: size * 0.42,
         color: `hsl(${h} 70% 82%)`,
         background: `linear-gradient(145deg, hsl(${h} 35% 26%), hsl(${h} 30% 14%))`,
+        border: ring,
       }}
     >
       {(author.name || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
@@ -376,7 +388,7 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
     <article
       className="flex gap-3 px-4 py-3"
       // Off-screen cards skip layout / paint, which keeps long scrolls light.
-      style={{ borderBottom: `1px solid ${LINE}`, contentVisibility: 'auto', containIntrinsicSize: 'auto 320px' }}
+      style={{ borderBottom: `1px solid ${LINE}` }}
       onClick={() => a.onOpen(post)}
     >
       <button
@@ -387,7 +399,7 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
         }}
         aria-label={`${post.author.name} profile`}
       >
-        <Avatar author={post.author} />
+        <Avatar author={post.author} source={post.source} />
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-1 min-w-0">

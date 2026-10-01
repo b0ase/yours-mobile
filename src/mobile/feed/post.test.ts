@@ -3,6 +3,7 @@ import { Script, Utils } from '@bsv/sdk';
 import { SafetyFilter, normalizeBlocklist } from '../market/safety';
 import {
   AIP_PREFIX,
+  avatarSeed,
   B_PREFIX,
   MAP_PREFIX,
   MAX_INLINE_IMAGE_BYTES,
@@ -208,5 +209,17 @@ describe('branch and quote', () => {
     expect(parsed).not.toBeNull();
     expect(parsed!.replyTo).toBeNull();
     expect(() => buildQuoteScript('x', 'bad', null)).toThrow();
+  });
+});
+
+describe('avatarSeed', () => {
+  const relay = '14aqJ2hMtENYJVCJaekcrqi12fiZJzoWGK';
+  test('gives Treechat authors sharing the relay address distinct seeds by username', () => {
+    const a = avatarSeed({ address: relay, name: 'RosaAmargada', bapId: null }, 'treechat');
+    const b = avatarSeed({ address: relay, name: 'MissBigPig', bapId: null }, 'treechat');
+    expect(a).not.toBe(b);
+  });
+  test('keeps address seeding elsewhere', () => {
+    expect(avatarSeed({ address: relay, name: 'x', bapId: null }, 'bwallet')).toBe(relay);
   });
 });

@@ -428,6 +428,13 @@ export function parseBmapFeed(body: unknown): FeedPost[] {
   return out.sort((a, b) => b.at - a.at);
 }
 
+/**
+ * Seed for an author's fallback (initial) avatar colour. Treechat relays every user's post through one shared
+ * signing address, so seeding by address painted every Treechat author the same colour; use the username there.
+ */
+export const avatarSeed = (a: Pick<Author, 'address' | 'name' | 'bapId'>, source?: Source): string =>
+  source === 'treechat' && !a.bapId ? `tc:${a.name.toLowerCase()}` : a.address || a.name;
+
 /** Merge lists, newest first, dropping repeats. */
 export function mergePosts(...lists: FeedPost[][]): FeedPost[] {
   const seen = new Set<string>();
