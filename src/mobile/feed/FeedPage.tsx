@@ -135,26 +135,27 @@ const saveSource = (v: Source | 'all') => {
 
 /**
  * Source badge: the app's bundled logo (sources.ts registry) on the author row. Tappable to open
- * the original post where the source has a URL pattern. Unknown apps also keep a "via X" label.
+ * the original post where the source has a URL pattern. Shown as a pill: logo + app name (TWETCH, TREECHAT).
  */
 const Via = ({ post }: { post: FeedPost }) => {
   const info = SOURCE_REGISTRY[post.source] ?? SOURCE_REGISTRY.other;
   const label = sourceLabel(post.app) || info.label;
   const url = sourceUrl(post);
   const badge = (
-    <img src={info.icon} alt="" width={16} height={16} className="h-4 w-4 shrink-0 rounded-[4px] object-cover" />
-  );
-  const text =
-    post.source === 'other' && post.app.trim() ? (
-      <span className="text-[11px] truncate" style={{ color: MUTED }}>
-        via {label}
+    <span
+      className="flex min-w-0 shrink items-center gap-1 rounded-full border py-0.5 pl-0.5 pr-2"
+      style={{ borderColor: 'rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)' }}
+    >
+      <img src={info.icon} alt="" width={16} height={16} className="h-4 w-4 shrink-0 rounded-full object-cover" />
+      <span className="truncate text-[10px] font-semibold uppercase tracking-wide" style={{ color: MUTED }}>
+        {label}
       </span>
-    ) : null;
+    </span>
+  );
   if (!url)
     return (
-      <span className="flex min-w-0 shrink items-center gap-1" title={label} aria-label={`From ${label}`}>
+      <span className="flex min-w-0 shrink" title={label} aria-label={`From ${label}`}>
         {badge}
-        {text}
       </span>
     );
   return (
@@ -167,7 +168,6 @@ const Via = ({ post }: { post: FeedPost }) => {
       }}
     >
       {badge}
-      {text}
     </button>
   );
 };
