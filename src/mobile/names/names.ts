@@ -9,7 +9,8 @@ import { BWALLET_PAYMAIL_DOMAIN } from './config';
  *   1ABC…            → address (passed straight through)
  *   $boase           → HandCash handle → boase@handcash.io paymail
  *   name@domain.tld  → paymail (bsvalias capability discovery)
- *   satchmo          → OpNS name (1Sat on-chain name) → current owner address
+ *   satchmo          → our paymail satchmo@<BWALLET_PAYMAIL_DOMAIN> first, else the
+ *                      OpNS name (1Sat on-chain name) → current owner address
  *
  * Every network call goes through an injectable fetch so tests can mock it.
  * Nothing here signs or broadcasts.
@@ -214,7 +215,30 @@ export const resolveOpns = async (f: Fetch, name: string): Promise<Resolved> => 
   };
 };
 
-export const resolveRecipient = async (f: Fetch, p: Parsed): Promise<Resolved> => {
+/**
+ * A bare name: our own paymail (name@<domain>) first, then OpNS. Inside bWallet people see each
+ * other's paymail without the domain, so typing what you see must reach the same person.
+ */
+export const resolveBareName = async (
+  f: Fetch,
+  name: string,
+  domain: string = BWALLET_PAYMAIL_DOMAIN,
+): Promise<Resolved> => {
+  if (domain && PAYMAIL_RE.test(`${name}@${domain}`)) {
+    try {
+      return await resolvePaymail(f, `${name}@${domain}`, name);
+    } catch {
+      /* not one of ours → OpNS */
+    }
+  }
+  return resolveOpns(f, name);
+};
+
+export const resolveRecipient = async (
+  f: Fetch,
+  p: Parsed,
+  domain: string = BWALLET_PAYMAIL_DOMAIN,
+): Promise<Resolved> => {
   switch (p.kind) {
     case 'address':
       return { input: p.address, target: p.address, targetKind: 'address', via: 'address', ordAddress: p.address };
@@ -223,7 +247,7 @@ export const resolveRecipient = async (f: Fetch, p: Parsed): Promise<Resolved> =
     case 'paymail':
       return resolvePaymail(f, p.paymail);
     case 'opns':
-      return resolveOpns(f, p.name);
+      return resolveBareName(f, p.name, domain);
     default:
       throw new ResolveError(p.kind === 'invalid' ? p.reason : 'Enter a recipient');
   }
@@ -274,6 +298,16 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
   return { status: 'available', name, mineFrom: str(mine?.outpoint) };
 };
 
-/** bWallet-hosted paymail (name@BWALLET_PAYMAIL_DOMAIN) — disabled until the server exists (docs/NAMES.md). */
+/**
+ * How a name is shown inside bWallet: our own paymail without "@<domain>" (alice@b0ase.com → alice).
+ * Other domains, $handles and OpNS names are unchanged. The Receive screen shows the full address.
+ */
+export const bareName = (name: string, domain: string = BWALLET_PAYMAIL_DOMAIN) => {
+  if (!name || !domain) return name;
+  const suffix = `@${domain}`;
+  return name.toLowerCase().endsWith(suffix) && name.length > suffix.length ? name.slice(0, -suffix.length) : name;
+};
+
+/** bWallet-hosted paymail (name@BWALLET_PAYMAIL_DOMAIN), or undefined when paymail is off (docs/NAMES.md). */
 export const bwalletPaymail = (name: string) =>
   BWALLET_PAYMAIL_DOMAIN ? `${name}@${BWALLET_PAYMAIL_DOMAIN}` : undefined;

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Ban, BadgeCheck, Mic, MicOff, Phone, PhoneOff, UserPlus, Volume2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useMyName } from '../names/MyNameBadge';
+import { useAccountNames } from '../names/MyNameBadge';
+import { bareName } from '../names/names';
 import {
   accept,
   blockCaller,
@@ -86,7 +87,9 @@ const status = (s: CallState) => {
 export const CallScreen = () => {
   const { apiContext, isLocked, chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService?.getCurrentAccountObject?.()?.account?.addresses.identityAddress;
-  const myName = useMyName(identityAddress);
+  // The label callees verify: our full paymail (unambiguous), else the OpNS name. Shown bare.
+  const { paymail, handle } = useAccountNames(identityAddress, '', '', false);
+  const myName = paymail || handle;
   const { call } = useCalls();
   const [note, setNote] = useState('');
 
@@ -119,10 +122,10 @@ export const CallScreen = () => {
           className="w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold"
           style={{ background: '#2a2208', border: `2px solid ${GOLD}`, color: GOLD }}
         >
-          {peer.label.replace(/^\$/, '').slice(0, 1).toUpperCase()}
+          {bareName(peer.label).replace(/^\$/, '').slice(0, 1).toUpperCase()}
         </div>
         <div className="flex items-center gap-1.5 max-w-[300px]">
-          <span className="text-2xl font-semibold truncate">{peer.label}</span>
+          <span className="text-2xl font-semibold truncate">{bareName(peer.label)}</span>
           {peer.verified && <BadgeCheck size={18} color="#2ecc71" aria-label="Name verified" />}
         </div>
         <div className="text-sm text-[#98A2B3]">{status(call)}</div>

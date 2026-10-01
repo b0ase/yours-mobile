@@ -1,8 +1,8 @@
 /**
- * bWallet-hosted paymail (name@<domain>). Set at build time:
- *   BWALLET_PAYMAIL_DOMAIN=bwallet-nine.vercel.app pnpm build:mobile
- * Empty (the default) = the feature is off everywhere (no claim flow, no paymail on Receive).
- * BWALLET_PAYMAIL_API overrides the server base URL (default https://<domain>). See docs/NAMES.md.
+ * bWallet-hosted paymail (name@<domain>). Build defaults (vite.config.mobile.ts):
+ *   BWALLET_PAYMAIL_DOMAIN=b0ase.com, BWALLET_PAYMAIL_API=https://pay.b0ase.com
+ * Empty domain = the feature is off everywhere (no claim flow, no paymail on Receive).
+ * Outside a build (unit tests) the constants are undefined, so paymail is off. See docs/NAMES.md.
  */
 declare const __PAYMAIL_DOMAIN__: string;
 declare const __PAYMAIL_API__: string;

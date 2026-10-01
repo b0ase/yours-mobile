@@ -38,7 +38,7 @@ export const TopNav = () => {
     accountObj.account?.name ?? '',
     accountObj.account?.settings?.socialProfile?.displayName ?? '',
   );
-  const payable = names.paymail || names.handle;
+  const payable = names.payable;
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
 

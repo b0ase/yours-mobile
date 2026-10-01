@@ -5,7 +5,7 @@ import { Input } from '../../components/Input';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
-import { checkOpnsAvailability, type Availability } from './names';
+import { bareName, checkOpnsAvailability, type Availability } from './names';
 import { getMyName, onMyNameChange, setMyName } from './myName';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
 import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } from './claimPersonal';
@@ -308,7 +308,7 @@ export const GetYourName = ({ profileName = '' }: { profileName?: string }) => {
         </span>
         {(paymail || myName) && (
           <span className="text-xs font-semibold" style={{ color: gold }}>
-            {paymail || myName}
+            {bareName(paymail) || myName}
           </span>
         )}
       </div>

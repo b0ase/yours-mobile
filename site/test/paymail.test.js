@@ -165,3 +165,65 @@ describe('P2P receive → inbox → wallet can spend', () => {
     expect((await h.receive({ handle: 'nobody@pay.test' }, { hex: '00', reference: 'x' }))[0]).toBe(404);
   });
 });
+
+describe('multiple domains', () => {
+  const MULTI = {
+    PAYMAIL_DOMAIN: 'b0ase.com',
+    PAYMAIL_DOMAINS: ' bwallet-nine.vercel.app, B0ASE.com ,,old.test',
+    PAYMAIL_BASE_URL: 'https://pay.b0ase.com/',
+  };
+
+  test('primary first, de-duplicated, lower-cased', () => {
+    expect(pm.domains(MULTI)).toEqual(['b0ase.com', 'bwallet-nine.vercel.app', 'old.test']);
+    expect(pm.domain(MULTI)).toBe('b0ase.com');
+    expect(pm.domain({ PAYMAIL_DOMAINS: 'a.test,b.test' })).toBe('a.test');
+  });
+
+  test('capabilities use PAYMAIL_BASE_URL, not the paymail domain', () => {
+    const c = pm.capabilities(MULTI).capabilities;
+    for (const v of Object.values(c)) expect(v.startsWith('https://pay.b0ase.com/api/paymail/')).toBe(true);
+    expect(pm.baseUrl({ PAYMAIL_DOMAIN: 'b0ase.com' })).toBe('https://b0ase.com');
+  });
+
+  test('parseHandle accepts every listed domain only', () => {
+    expect(pm.parseHandle('alice@b0ase.com', MULTI)).toBe('alice');
+    expect(pm.parseHandle('alice@bwallet-nine.vercel.app', MULTI)).toBe('alice');
+    expect(pm.parseHandle('alice@old.test', MULTI)).toBe('alice');
+    expect(pm.parseHandle('alice@pay.b0ase.com', MULTI)).toBeNull();
+  });
+
+  test('one alias resolves to the same record on every domain; register uses the primary', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: MULTI });
+    const u = user();
+    const [, r] = await h.register({}, await u.sign('register', { alias: 'alice' }));
+    expect(r.paymail).toBe('alice@b0ase.com');
+    for (const d of ['b0ase.com', 'bwallet-nine.vercel.app', 'old.test']) {
+      const [s, pki] = await h.pki({ handle: `alice@${d}` });
+      expect(s).toBe(200);
+      expect(pki.pubkey).toBe(u.identityKey);
+      expect(pki.handle).toBe(`alice@${d}`);
+      expect((await h.verify({ handle: `alice@${d}`, pubkey: u.identityKey }))[1].match).toBe(true);
+    }
+    expect((await h.pki({ handle: 'alice@elsewhere.test' }))[0]).toBe(404);
+    expect((await h.lookup({ key: u.identityKey }))[1].paymail).toBe('alice@b0ase.com');
+  });
+
+  test('aliases are unique across domains', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: MULTI });
+    expect((await h.register({}, await user().sign('register', { alias: 'bob' })))[0]).toBe(200);
+    // Same alias under an old domain's env is still the same record → taken.
+    const old = pm.makeHandlers({ store, env: { PAYMAIL_DOMAIN: 'old.test', PAYMAIL_DOMAINS: 'b0ase.com' } });
+    expect((await old.register({}, await user().sign('register', { alias: 'bob' })))[0]).toBe(409);
+  });
+
+  test('P2P destination works through an old domain', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: MULTI });
+    await h.register({}, await user().sign('register', { alias: 'carol' }));
+    const [s, out] = await h.p2pDestination({ handle: 'carol@bwallet-nine.vercel.app' }, { satoshis: 1000 });
+    expect(s).toBe(200);
+    expect(store.pays.get(out.reference).alias).toBe('carol');
+  });
+});

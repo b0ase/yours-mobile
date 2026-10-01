@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Ban, Loader2, Phone, PhoneIncoming, PhoneMissed, PhoneOutgoing, UserPlus, X } from 'lucide-react';
+import { bareName } from '../names/names';
 import { resolveCallee } from './peer';
 import { blockCaller, dial, listBlocked, unblockCaller } from './store';
 import { useCalls } from './useCalls';
@@ -103,7 +104,7 @@ export const CallsList = () => {
   };
 
   const nameOf = (c: ServerCall) =>
-    friends.find((f) => f.key === c.peer_key)?.name ?? c.peer_label ?? shortKey(c.peer_key);
+    bareName(friends.find((f) => f.key === c.peer_key)?.name ?? c.peer_label ?? shortKey(c.peer_key));
 
   const callBack = (c: ServerCall) => {
     if (inCall) return;
@@ -180,23 +181,28 @@ export const CallsList = () => {
                 <img src={f.avatar} alt="" className="w-9 h-9 rounded-full object-cover" />
               ) : (
                 <div className="w-9 h-9 rounded-full bg-[#2b2f36] flex items-center justify-center text-sm font-bold text-white">
-                  {f.name.replace(/^\$/, '').slice(0, 1).toUpperCase()}
+                  {bareName(f.name).replace(/^\$/, '').slice(0, 1).toUpperCase()}
                 </div>
               )}
               <button className="flex-1 min-w-0 text-left" onClick={() => callFriend(f)} disabled={inCall || editing}>
-                <div className="text-sm font-semibold text-white truncate">{f.name}</div>
+                <div className="text-sm font-semibold text-white truncate">{bareName(f.name)}</div>
                 <div className="text-[11px] font-mono text-[#98A2B3]">{shortKey(f.key)}</div>
               </button>
               {editing ? (
                 <button
-                  aria-label={`Remove ${f.name}`}
+                  aria-label={`Remove ${bareName(f.name)}`}
                   className="p-2"
                   onClick={() => void removeFriend(f.key).catch(() => undefined)}
                 >
                   <X size={16} color="#ff6b6b" />
                 </button>
               ) : (
-                <button aria-label={`Call ${f.name}`} className="p-2" onClick={() => callFriend(f)} disabled={inCall}>
+                <button
+                  aria-label={`Call ${bareName(f.name)}`}
+                  className="p-2"
+                  onClick={() => callFriend(f)}
+                  disabled={inCall}
+                >
                   <Phone size={16} color={GOLD} />
                 </button>
               )}
@@ -221,7 +227,7 @@ export const CallsList = () => {
           ) : (
             blocks.map((b) => (
               <div key={b.key} className="flex items-center justify-between px-1 py-2">
-                <span className="text-sm text-white truncate">{b.label ?? shortKey(b.key)}</span>
+                <span className="text-sm text-white truncate">{b.label ? bareName(b.label) : shortKey(b.key)}</span>
                 <button
                   className="text-xs text-[#F5B800]"
                   onClick={async () => {

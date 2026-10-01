@@ -120,20 +120,47 @@ and one that was already internalized is acked. Ordinals and tokens sent to the 
 `ordAddress` (no inbox). The unit test in `site/test/paymail.test.js` proves end to end that the derived key matches
 the destination script.
 
-**Wallet config.** `BWALLET_PAYMAIL_DOMAIN` (build env → `__PAYMAIL_DOMAIN__`, read in `src/mobile/names/config.ts`).
-It is empty by default, which turns the feature off: no claim card, no paymail on Receive or the top bar, and no inbox
-polling. `BWALLET_PAYMAIL_API` overrides the server base URL (default `https://<domain>`).
+**Domains.** Addresses are `name@b0ase.com`; the server is the Vercel project `bwallet` (`site/`) at
+`https://pay.b0ase.com`. `PAYMAIL_DOMAIN` is the primary domain (what `register` and `lookup` return).
+`PAYMAIL_DOMAINS` is an optional comma-separated list of extra domains served with the same aliases: an alias is
+one record whatever the domain (aliases are unique across all of them), so moving the primary later keeps old
+addresses working. `pki` / `verify` echo the domain that was asked for. The capability document and every
+endpoint URL use `PAYMAIL_BASE_URL` (default `https://<PAYMAIL_DOMAIN>`).
+
+**Wallet config.** `BWALLET_PAYMAIL_DOMAIN` / `BWALLET_PAYMAIL_API` (build env → `__PAYMAIL_DOMAIN__` /
+`__PAYMAIL_API__` in `vite.config.mobile.ts`, read in `src/mobile/names/config.ts`). Builds default to `b0ase.com`
+and `https://pay.b0ase.com`, so paymail is on. Build with `BWALLET_PAYMAIL_DOMAIN=''` to turn it off (no claim card,
+no paymail on Receive or the top bar, no inbox polling). In unit tests the constants are undefined, so it is off.
+
+**Bare names in bWallet.** Inside the app our own paymail is shown without the domain (`alice`, not
+`alice@b0ase.com`): top bar, account drawer, Calls, Friends and Feed (`bareName()` in `names.ts`). The Receive
+screen is the exception: it shows the full `alice@b0ase.com` with a copy button and "Use the full address in other
+wallets". In Send / `NameInput` / Call a name, a bare name (no `@`, no `$`, not an address) resolves first as
+`name@b0ase.com`, then as an OpNS name (`resolveBareName()`). The label a caller asserts is the full paymail, so
+callee verification is unambiguous.
 
 ### Owner steps before launch
 
-1. **Pick one paymail domain** (e.g. `bwallet.app`). The choice is permanent once paymails are handed out. Until
-   then, the default `bwallet-nine.vercel.app` is for testing only.
-2. DNS: point the domain at the Vercel project. Then either serve `/.well-known/bsvalias` on it directly
-   (the rewrite handles this) or add SRV `_bsvalias._tcp.<domain> 0 10 443 <host>.` (DNSSEC recommended).
-3. Vercel env (project `bwallet`): set `PAYMAIL_DOMAIN`, and optionally `PAYMAIL_BASE_URL`, `ARC_URL` and `ARC_API_KEY`.
-   `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` already exist for Production; add them for Preview to test there.
-4. Run the migration (the agent did not run it):
-   `ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1" < migrations/20261001_bwallet_paymail.sql`
-5. Build the wallet with `BWALLET_PAYMAIL_DOMAIN=<domain>`.
-6. Ops: the endpoint has a per-instance rate limit and a cap of 200 destinations per alias per hour. Add a cron to
-   expire `pending` references older than 24 h, and monitor `paymail broadcast failed` logs.
+1. **DNS at Cloudflare** (zone `b0ase.com`), both records **DNS only** (grey cloud, not proxied):
+   - `A pay.b0ase.com 76.76.21.21`
+   - `SRV _bsvalias._tcp.b0ase.com 0 10 443 pay.b0ase.com`
+     (Cloudflare form: service `_bsvalias`, protocol `TCP`, name `b0ase.com`, priority 0, weight 10, port 443,
+     target `pay.b0ase.com`.)
+2. **Enable DNSSEC** in Cloudflare (DNS → Settings → DNSSEC → Enable), then add the DS record it shows at the
+   registrar if `b0ase.com` isn't registered with Cloudflare. Paymail clients trust the SRV record more when it's signed.
+3. Vercel env (project `bwallet`, Production) is already set: `PAYMAIL_DOMAIN=b0ase.com`,
+   `PAYMAIL_BASE_URL=https://pay.b0ase.com`, and `pay.b0ase.com` is added to the project. Optional: `PAYMAIL_DOMAINS`,
+   `ARC_URL`, `ARC_API_KEY`. `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` exist for Production; add them for Preview
+   to test there.
+4. **Run the migration** (not run by the agent):
+   `ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1" < /Volumes/2026/Projects/yours-mobile-bcorp/migrations/20261001_bwallet_paymail.sql`
+5. Deploy production (after 1-4), then check `https://pay.b0ase.com/.well-known/bsvalias` and a paymail tester
+   (e.g. `alice@b0ase.com` once claimed).
+6. **Expiry cron.** Unpaid `pending` references should expire after 24 h. On the Hetzner host, `crontab -e` and add:
+
+   ```
+   17 * * * * docker exec supabase-db psql -U postgres -d postgres -c "update bwallet_paymail_payments set status='expired' where status='pending' and created_at < now() - interval '24 hours';" >/dev/null
+   ```
+
+   (Or the same `update` via `pg_cron` if that extension is enabled.) Also monitor `paymail broadcast failed` logs.
+   The endpoint has a per-instance rate limit and a cap of 200 destinations per alias per hour.

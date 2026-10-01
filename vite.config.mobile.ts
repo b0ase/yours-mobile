@@ -289,9 +289,10 @@ export default mergeConfig(
       // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
       __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
       __MARKET_REPORT_URL__: JSON.stringify(process.env.BWALLET_MARKET_REPORT_URL ?? ''),
-      // bWallet paymail (src/mobile/names/config.ts). Empty = paymail off.
-      __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? ''),
-      __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? ''),
+      // bWallet paymail (src/mobile/names/config.ts): name@b0ase.com, served by pay.b0ase.com.
+      // Set BWALLET_PAYMAIL_DOMAIN='' to build with paymail off.
+      __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'b0ase.com'),
+      __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.b0ase.com'),
     },
   }),
 );

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  bareName,
   checkOpnsAvailability,
   destinationFor,
   parseRecipient,
@@ -163,4 +164,51 @@ describe('availability', () => {
 test('scriptToAddress', () => {
   expect(scriptToAddress('76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac')).toBe(ADDR);
   expect(scriptToAddress('00')).toBeUndefined();
+});
+
+describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
+  const OURS = {
+    'https://dns.google.com/': { Answer: [{ type: 33, data: '0 10 443 pay.b0ase.com.' }] },
+    'https://pay.b0ase.com/.well-known/bsvalias': {
+      capabilities: {
+        pki: 'https://pay.b0ase.com/api/paymail/id/{alias}@{domain.tld}',
+        '2a40af698840': 'https://pay.b0ase.com/api/paymail/p2p-destination/{alias}@{domain.tld}',
+        '5c55a7fdb7bb': 'https://pay.b0ase.com/api/paymail/receive-beef/{alias}@{domain.tld}',
+      },
+    },
+  };
+
+  test('a bare name resolves as name@b0ase.com when that paymail exists', async () => {
+    const { f, calls } = mock({
+      ...OURS,
+      'https://pay.b0ase.com/api/paymail/id/alice@b0ase.com': { pubkey: '02aa' },
+    });
+    const r = await resolveRecipient(f, parseRecipient('Alice'), 'b0ase.com');
+    expect(r).toMatchObject({ input: 'alice', target: 'alice@b0ase.com', via: 'p2p-paymail', pubkey: '02aa' });
+    expect(calls.some((u) => u.includes('opns'))).toBe(false);
+  });
+
+  test('falls back to OpNS when b0ase.com has no such paymail', async () => {
+    const { f } = mock({
+      'https://dns.google.com/': {},
+      'https://ordinals.gorillapool.io/api/opns/satchmo': { owner: ADDR },
+    });
+    const r = await resolveRecipient(f, parseRecipient('satchmo'), 'b0ase.com');
+    expect(r).toMatchObject({ target: ADDR, via: 'opns-owner' });
+  });
+
+  test('$handles, full paymails and addresses are not rewritten', () => {
+    expect(parseRecipient('$alice').kind).toBe('handle');
+    expect(parseRecipient('alice@other.com').kind).toBe('paymail');
+    expect(parseRecipient(ADDR).kind).toBe('address');
+  });
+
+  test('bareName strips only our domain', () => {
+    expect(bareName('alice@b0ase.com', 'b0ase.com')).toBe('alice');
+    expect(bareName('Alice@B0ASE.com', 'b0ase.com')).toBe('Alice');
+    expect(bareName('alice@handcash.io', 'b0ase.com')).toBe('alice@handcash.io');
+    expect(bareName('$alice', 'b0ase.com')).toBe('$alice');
+    expect(bareName('@b0ase.com', 'b0ase.com')).toBe('@b0ase.com');
+    expect(bareName('alice@b0ase.com', '')).toBe('alice@b0ase.com');
+  });
 });

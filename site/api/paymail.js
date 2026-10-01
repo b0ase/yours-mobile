@@ -2,7 +2,8 @@
 //   /.well-known/bsvalias                     → ?op=caps
 //   /api/paymail/<op>/<handle>[/<pubkey>]     → ?op=<op>&handle=…&pubkey=…
 //   /api/paymail/<op>                         → ?op=<op>   (register, lookup, inbox, ack)
-// Env: PAYMAIL_DOMAIN (default bwallet-nine.vercel.app), PAYMAIL_BASE_URL (optional),
+// Env: PAYMAIL_DOMAIN (primary, default bwallet-nine.vercel.app), PAYMAIL_DOMAINS (optional,
+//      comma-separated extra domains served with the same aliases), PAYMAIL_BASE_URL (optional),
 //      SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ARC_URL / ARC_API_KEY (optional).
 'use strict';
 const { makeHandlers } = require('../lib/paymail');

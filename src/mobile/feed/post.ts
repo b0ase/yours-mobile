@@ -1,4 +1,5 @@
 import { OP, Script, Utils } from '@bsv/sdk';
+import { bareName } from '../names/names';
 
 /**
  * Feed: Bitcoin Schema (bitcoinschema.org) social actions, the protocol 1satsocial,
@@ -261,7 +262,7 @@ export function parseBmapPost(
   const address = asStr(aip.address) || asStr(asRec(asRec(asRec(asArr(d.in)[0]).xput).e).a);
   const signer = address ? signers.get(address) : undefined;
   const bapId = signer?.bapId || asStr(map.bapID) || null;
-  const name = signer?.name || asStr(map.username) || asStr(map.paymail) || shortAddress(address || txid);
+  const name = signer?.name || asStr(map.username) || bareName(asStr(map.paymail)) || shortAddress(address || txid);
   const ts = Number(d.timestamp) || Number(asRec(d.blk).t) * 1000 || 0;
   const m = asRec(meta);
   return {

@@ -35,11 +35,23 @@ const RESERVED = new Set([
   'security',
 ]);
 
-const domain = (env = process.env) =>
-  String(env.PAYMAIL_DOMAIN || 'bwallet-nine.vercel.app')
+const cleanDomain = (d) =>
+  String(d || '')
     .trim()
-    .toLowerCase();
-/** Public base URL for capability endpoints (defaults to https://<PAYMAIL_DOMAIN>). */
+    .toLowerCase()
+    .replace(/\.$/, '');
+/** Primary paymail domain: PAYMAIL_DOMAIN, else the first of PAYMAIL_DOMAINS. */
+const domain = (env = process.env) => domains(env)[0];
+/**
+ * Every domain we answer for: PAYMAIL_DOMAIN (primary) + the comma-separated PAYMAIL_DOMAINS.
+ * An alias is one record whatever the domain, so switching the primary keeps old addresses working.
+ */
+function domains(env = process.env) {
+  const list = [env.PAYMAIL_DOMAIN, ...String(env.PAYMAIL_DOMAINS || '').split(',')].map(cleanDomain).filter(Boolean);
+  const out = [...new Set(list)];
+  return out.length ? out : ['bwallet-nine.vercel.app'];
+}
+/** Public base URL for capability endpoints (defaults to https://<primary domain>). */
 const baseUrl = (env = process.env) => String(env.PAYMAIL_BASE_URL || `https://${domain(env)}`).replace(/\/$/, '');
 
 function capabilities(env = process.env) {
@@ -58,16 +70,23 @@ function capabilities(env = process.env) {
   };
 }
 
-/** "alice@domain" → "alice" when the domain is ours and the alias is well-formed. */
-function parseHandle(handle, env = process.env) {
+/** "alice@domain" → { alias, domain } when the domain is one of ours and the alias is well-formed. */
+function parseHandleParts(handle, env = process.env) {
   const s = decodeURIComponent(String(handle || ''))
     .trim()
     .toLowerCase();
   const at = s.lastIndexOf('@');
   if (at < 1) return null;
   const alias = s.slice(0, at);
-  if (s.slice(at + 1) !== domain(env) || !ALIAS_RE.test(alias)) return null;
-  return alias;
+  const d = s.slice(at + 1);
+  if (!domains(env).includes(d) || !ALIAS_RE.test(alias)) return null;
+  return { alias, domain: d };
+}
+
+/** "alice@domain" → "alice" when the domain is one of ours and the alias is well-formed. */
+function parseHandle(handle, env = process.env) {
+  const p = parseHandleParts(handle, env);
+  return p ? p.alias : null;
 }
 
 function validAlias(alias) {
@@ -154,13 +173,14 @@ function matchOutputs(tx, expected) {
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
 function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now() }) {
-  const handleOf = (alias) => `${alias}@${domain(env)}`;
+  // Aliases are unique across all our domains (the store is keyed by alias alone).
+  const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   const publicAlias = async (handle) => {
-    const alias = parseHandle(handle, env);
-    if (!alias) return [404, { error: 'not-found' }];
-    const row = await store.getAlias(alias);
+    const p = parseHandleParts(handle, env);
+    if (!p) return [404, { error: 'not-found' }];
+    const row = await store.getAlias(p.alias);
     if (!row) return [404, { error: 'not-found' }];
-    return [200, row];
+    return [200, { ...row, _domain: p.domain }];
   };
 
   return {
@@ -169,7 +189,7 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
     pki: async ({ handle }) => {
       const [s, row] = await publicAlias(handle);
       if (s !== 200) return [s, row];
-      return [200, { bsvalias: '1.0', handle: handleOf(row.alias), pubkey: row.identity_key }];
+      return [200, { bsvalias: '1.0', handle: handleOf(row.alias, row._domain), pubkey: row.identity_key }];
     },
 
     profile: async ({ handle }) => {
@@ -182,7 +202,10 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       const [s, row] = await publicAlias(handle);
       if (s !== 200) return [s, row];
       const pk = String(pubkey || '').toLowerCase();
-      return [200, { bsvalias: '1.0', handle: handleOf(row.alias), pubkey: pk, match: pk === row.identity_key }];
+      return [
+        200,
+        { bsvalias: '1.0', handle: handleOf(row.alias, row._domain), pubkey: pk, match: pk === row.identity_key },
+      ];
     },
 
     ord: async ({ handle }) => {
@@ -251,7 +274,7 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
         note: String((body.metadata && body.metadata.note) || '').slice(0, 256) || null,
         received_at: new Date(now()).toISOString(),
       });
-      return [200, { txid, note: `Received by ${handleOf(row.alias)}` }];
+      return [200, { txid, note: `Received by ${handleOf(row.alias, row._domain)}` }];
     },
 
     // ---- wallet-authenticated ------------------------------------------------
@@ -341,6 +364,7 @@ module.exports = {
   SIGN_KEY_ID,
   capabilities,
   parseHandle,
+  parseHandleParts,
   validAlias,
   signedMessage,
   verifySigned,
@@ -349,5 +373,7 @@ module.exports = {
   matchOutputs,
   makeHandlers,
   domain,
+  domains,
+  baseUrl,
   PublicKey,
 };
