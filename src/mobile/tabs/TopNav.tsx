@@ -4,7 +4,8 @@ import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Download, Loader2, Phone, Play, Plus, Settings, X } from 'lucide-react';
+import { Check, Download, Loader2, Menu, Phone, Play, Plus, Settings, X } from 'lucide-react';
+import bGlyph from '../brand/bwallet-glyph.svg';
 import activeCircle from '../../assets/active-circle.png';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -17,8 +18,9 @@ import { useNavigate } from 'react-router-dom';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
- * Phantom-style: the current account (avatar + name) at top-left opens a
- * left drawer with every account, Add / Import account and Settings.
+ * A hamburger at top-left opens a left drawer with the current account (name, handle,
+ * verified), every account, Add / Import account and Settings. The centred b opens the
+ * b agent (/m/agent).
  * Switching reuses upstream TopNav's sequence verbatim.
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
@@ -91,42 +93,22 @@ export const TopNav = () => {
         style={{ backgroundColor: theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
       >
         <button
+          type="button"
           onClick={() => setDrawer(true)}
-          className="flex items-center gap-2 min-w-0 max-w-[calc(50%-48px)]"
-          aria-label="Accounts"
+          className="w-9 h-9 -ml-1 flex items-center justify-center bg-transparent"
+          aria-label="Accounts menu"
         >
-          <img
-            src={accountObj.account?.icon ?? activeCircle}
-            className="w-9 h-9 rounded-full object-cover box-border"
-            // The default avatar is the gold-b tile, which needs no ring; only photos get one.
-            style={isDefaultAvatar(accountObj.account?.icon) ? undefined : { border: '2px solid #F5B800' }}
-            alt=""
-          />
-          <span
-            className={`text-[15px] font-semibold max-w-[140px] ${ELLIPSIS}`}
-            style={{ color: theme.color.global.contrast }}
-          >
-            {names.displayName || short(current ?? '')}
-          </span>
-          {verified && (
-            <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
-              <Check size={14} strokeWidth={3} />
-            </span>
-          )}
-          {payable && payable.toLowerCase() !== names.displayName.toLowerCase() && (
-            <span className={`text-xs font-semibold max-w-[130px] ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
-              · {payable}
-            </span>
-          )}
-          <ChevronDown size={14} strokeWidth={2} color="#8E8E89" className="shrink-0" />
+          <Menu size={22} color="#F2F2F0" />
         </button>
-        {/* Wordmark fixed in the centre of the bar; the account button is capped so it never runs under it. */}
-        <span
-          className="absolute left-1/2 -translate-x-1/2 pointer-events-none font-bold text-[17px]"
-          style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}
+        {/* The b, fixed in the centre of the bar: opens the b agent. */}
+        <button
+          type="button"
+          aria-label="b agent"
+          onClick={() => navigate('/m/agent')}
+          className="absolute left-1/2 -translate-x-1/2 w-10 h-10 flex items-center justify-center bg-transparent"
         >
-          bWallet
-        </span>
+          <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
+        </button>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
@@ -181,6 +163,32 @@ export const TopNav = () => {
                 <button aria-label="Close" onClick={() => setDrawer(false)} className="p-2">
                   <X size={18} color="#98A2B3" />
                 </button>
+              </div>
+              <div className="flex items-center gap-3 px-4 pb-3">
+                <img
+                  src={accountObj.account?.icon ?? activeCircle}
+                  className="w-10 h-10 rounded-full object-cover box-border shrink-0"
+                  // The default avatar is the gold-b tile, which needs no ring; only photos get one.
+                  style={isDefaultAvatar(accountObj.account?.icon) ? undefined : { border: '2px solid #F5B800' }}
+                  alt=""
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                      {names.displayName || short(current ?? '')}
+                    </span>
+                    {verified && (
+                      <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
+                        <Check size={14} strokeWidth={3} />
+                      </span>
+                    )}
+                  </div>
+                  {payable && payable.toLowerCase() !== names.displayName.toLowerCase() && (
+                    <div className={`text-xs font-semibold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
+                      {payable}
+                    </div>
+                  )}
+                </div>
               </div>
               <DrawerHandle
                 identityAddress={current}
