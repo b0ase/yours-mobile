@@ -7,13 +7,16 @@ describe('mobile tabs', () => {
     expect(routeFor('feed')).toBe('/m/feed');
   });
 
-  test('retired Media tab and upstream ords open Wallet (NFTs view)', () => {
-    for (const id of ['media', 'ords']) {
-      expect(tabFor(id)).toBe('bsv');
-      expect(routeFor(id)).toBe('/bsv-wallet');
-      expect(opensWalletNfts(id)).toBe(true);
-    }
+  test('upstream ords opens Wallet (NFTs view)', () => {
+    expect(tabFor('ords')).toBe('bsv');
+    expect(routeFor('ords')).toBe('/bsv-wallet');
+    expect(opensWalletNfts('ords')).toBe(true);
     expect(opensWalletNfts('bsv')).toBe(false);
+  });
+
+  test('media opens the dedicated Media page', () => {
+    expect(routeFor('media')).toBe('/m/media');
+    expect(opensWalletNfts('media')).toBe(false);
   });
 
   test('other tabs unchanged', () => {

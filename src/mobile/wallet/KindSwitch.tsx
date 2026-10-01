@@ -1,9 +1,7 @@
-import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
-import { getMediaView, getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
+import { useSyncExternalStore, type ReactNode } from 'react';
+import { getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
 
 export const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
-export const useMediaView = () => useSyncExternalStore(subscribeWalletKind, getMediaView, getMediaView);
 
 const KINDS: [WalletKind, string][] = [
   ['tokens', 'Tokens'],
@@ -39,9 +37,3 @@ export const WalletKindSwitch = () => {
 /** Renders its children only while the Wallet shows `kind`. */
 export const WalletKindGate = ({ kind, children }: { kind: WalletKind; children: ReactNode }) =>
   useWalletKind() === kind ? <>{children}</> : null;
-
-/** /m/media (the retired Media tab): Wallet on its NFTs view. */
-export const WalletNftsRedirect = () => {
-  useEffect(() => setWalletKind('nfts'), []);
-  return <Navigate to="/bsv-wallet" replace />;
-};

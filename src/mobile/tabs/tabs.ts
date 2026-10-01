@@ -3,7 +3,7 @@ import type { MenuItems } from '../../contexts/BottomMenuContext';
 /**
  * Mobile tab ids. Upstream's MenuItems plus the mobile-only Market, Feed and Chat tabs; the
  * swapped useBottomMenu/BottomMenu understand all of them.
- * Upstream ids keep working: 'ords' (and the retired 'media' tab) open Wallet on its NFTs view,
+ * Upstream ids keep working: 'ords' opens Wallet on its NFTs view, 'media' the Media page,
  * 'tools' opens Settings › Tools.
  * Settings is not on the bar; it opens from the account drawer (TopNav).
  */
@@ -12,7 +12,7 @@ export type MobileTab = MenuItems | 'market' | 'feed' | 'chat';
 export const asMenuItem = (tab: MobileTab) => tab as MenuItems;
 
 /** Ids that open Wallet on its NFTs (media) view instead of Tokens. */
-export const opensWalletNfts = (selected: string | null) => selected === 'ords' || selected === 'media';
+export const opensWalletNfts = (selected: string | null) => selected === 'ords';
 
 /** Which bottom-bar tab is lit for a selected id. */
 export const tabFor = (selected: string | null): MobileTab => {
@@ -35,8 +35,9 @@ export const routeFor = (selected: string | null): string | null => {
   switch (selected) {
     case 'bsv':
     case 'ords':
-    case 'media':
       return '/bsv-wallet';
+    case 'media':
+      return '/m/media';
     case 'market':
       return '/m/market';
     case 'browser':

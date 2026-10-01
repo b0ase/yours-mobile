@@ -4,17 +4,16 @@ import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Clapperboard, Download, Loader2, Phone, Plus, Settings, X } from 'lucide-react';
-import { openMediaView } from '../wallet/walletKind';
+import { Check, ChevronDown, Download, Loader2, Phone, Play, Plus, Settings, X } from 'lucide-react';
 import activeCircle from '../../assets/active-circle.png';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
-import type { MenuItems } from '../../contexts/BottomMenuContext';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -32,6 +31,7 @@ export const TopNav = () => {
   const { theme } = useTheme();
   const { chromeStorageService, wallet, setIsSwitchingAccount } = useServiceContext();
   const { handleSelect } = useBottomMenu();
+  const navigate = useNavigate();
   const { addSnackbar } = useSnackbar();
   const [drawer, setDrawer] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
@@ -131,14 +131,11 @@ export const TopNav = () => {
           <button
             type="button"
             aria-label="Media"
-            onClick={() => {
-              handleSelect('media' as MenuItems); // retired tab id: opens Wallet › NFTs
-              openMediaView();
-            }}
+            onClick={() => navigate('/m/media')}
             className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
             style={{ border: '1px solid #2A2A2C' }}
           >
-            <Clapperboard size={16} color="#F5B800" />
+            <Play size={16} color="#F5B800" fill="#F5B800" />
           </button>
           <button
             type="button"
