@@ -109,6 +109,31 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '          Receive Assets\n        </h2>\n      </div>',
       '          Receive Assets\n        </h2>\n      </div>\n<ReceiveName identityAddress={identityAddress} />',
     ],
+    // "Choose your handle" after create / restore, else a dismissible "Get your $name" card (src/mobile/names).
+    [
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';",
+    ],
+    ['\n<CreditsRow />', '\n<CreditsRow />\n<HandleOnboarding />'],
+  ],
+  // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
+  'src/pages/onboarding/CreateAccount.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
+    ],
+    [
+      '      setStep(2);\n    } catch',
+      "      markHandlePrompt(keys.identityAddress, 'create');\n      setStep(2);\n    } catch",
+    ],
+  ],
+  // Restore: same step, shown only if the restored account has no name after the name sync.
+  'src/pages/onboarding/RestoreAccount.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
+    ],
+    ['      setStep(4);\n', "      markHandlePrompt(keys.identityAddress, 'restore');\n      setStep(4);\n"],
   ],
   // Obsidian UI (Direction A): Wallet home restyle. Classes styled in src/mobile/mobile.css.
   'src/pages/BsvWallet.tsx#obsidian': [
