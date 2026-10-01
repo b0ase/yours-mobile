@@ -6,7 +6,7 @@ import { setWalletKind } from '../wallet/walletKind';
 
 /**
  * Mobile swap for src/hooks/useBottomMenu.tsx (vite.config.mobile.ts): same
- * contract, but routes the five mobile tabs (Wallet · Market · Apps · Feed · Chat) and Settings.
+ * contract, but routes the five mobile tabs (Apps · Market · Wallet · Feed · Chat) and Settings.
  */
 /**
  * The selection last routed. Many components call this hook (TopNav is mounted inside Media and the

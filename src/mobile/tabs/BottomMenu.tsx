@@ -2,19 +2,20 @@ import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-reac
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
-import { asMenuItem, TAB_TAP, tabFor, type MobileTab } from './tabs';
+import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:
- * Wallet · Market · Apps · Feed · Chat (Settings lives in the account drawer). Reuses upstream's Menu item.
+ * Apps · Market · Wallet · Feed · Chat (Settings lives in the account drawer). Reuses upstream's Menu item.
  */
-const TABS: { id: MobileTab; label: string; icon: typeof Wallet }[] = [
-  { id: 'bsv', label: 'Wallet', icon: Wallet },
-  { id: 'market', label: 'Market', icon: Store },
-  { id: 'browser', label: 'Apps', icon: LayoutGrid },
-  { id: 'feed', label: 'Feed', icon: Newspaper },
-  { id: 'chat', label: 'Chat', icon: MessageCircle },
-];
+const TAB_INFO: Record<string, { label: string; icon: typeof Wallet }> = {
+  bsv: { label: 'Wallet', icon: Wallet },
+  market: { label: 'Market', icon: Store },
+  browser: { label: 'Apps', icon: LayoutGrid },
+  feed: { label: 'Feed', icon: Newspaper },
+  chat: { label: 'Chat', icon: MessageCircle },
+};
+const TABS = TAB_ORDER.map((id) => ({ id, ...TAB_INFO[id] }));
 
 export type { BottomMenuProps };
 export default Menu;

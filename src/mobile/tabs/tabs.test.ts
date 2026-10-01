@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { opensWalletNfts, routeFor, tabFor } from './tabs';
+import { opensWalletNfts, routeFor, TAB_ORDER, tabFor } from './tabs';
 
 describe('mobile tabs', () => {
+  test('bottom bar order: Apps · Market · Wallet · Feed · Chat, Wallet in the centre', () => {
+    expect(TAB_ORDER).toEqual(['browser', 'market', 'bsv', 'feed', 'chat']);
+    expect(TAB_ORDER[2]).toBe('bsv');
+  });
+
   test('Feed is a top-level tab with its own route', () => {
     expect(tabFor('feed')).toBe('feed');
     expect(routeFor('feed')).toBe('/m/feed');
