@@ -55,6 +55,7 @@ const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
   { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
   { name: 'Treechat', link: 'https://treechat.com', icon: 'https://treechat.com/assets/favicon.svg' },
+  { name: 'Twetch', link: 'https://twetch.com', icon: 'https://twetch.com/app-icon-512.png' },
   { name: 'Tempo', link: 'https://tempomusic.net', icon: 'https://tempomusic.net/favicon.ico' },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
