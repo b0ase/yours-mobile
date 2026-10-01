@@ -70,6 +70,8 @@
     "release": "tsx scripts/release.ts",
     "debug:ext": "tsx scripts/debug-extension.ts",
     "build:mobile": "vite build -c vite.config.mobile.ts && vite build -c vite.config.dapp.ts",
+    "build:web": "vite build -c vite.config.web.ts",
+    "preview:web": "vite preview -c vite.config.web.ts --port 4781 --strictPort",
     "preview:mobile": "vite preview -c vite.config.mobile.ts --port 4780 --strictPort",
     "test:mobile-smoke": "tsx scripts/mobile-smoke.ts",
     "cap:sync": "pnpm build:mobile && cap sync",

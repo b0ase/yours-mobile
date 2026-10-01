@@ -1,7 +1,7 @@
 import { build } from 'vite';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import chalk from 'chalk';
 
 // ─── Paths ───────────────────────────────────────────────────
@@ -9,6 +9,58 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const root = resolve(__dirname, '..');
 const dist = resolve(root, 'build');
 const META = resolve(__dirname, '.build-meta.json');
+
+// Same rule as vite.brand.ts: BRAND=bcorp (default) is bWallet; yours keeps upstream's manifest.
+const BRAND = ['yours', 'bwallet'].find((b) => b === (process.env.BRAND ?? process.env.MOBILE_BRAND)) ?? 'bcorp';
+const BRAND_ICONS = resolve(root, 'assets/bwallet-ext');
+
+/**
+ * bWallet builds: rewrite build/manifest.json and the PWA manifest, and replace the
+ * Yours sprout icons with the ring-b mark. The name differs from Yours Wallet and no
+ * `key` is set, so Chrome gives it its own extension ID and it installs alongside
+ * Yours Wallet (the Web Store assigns the published ID).
+ */
+function brandManifest() {
+  if (BRAND === 'yours') return;
+  const icons = resolve(dist, 'icons');
+  rmSync(icons, { recursive: true, force: true });
+  mkdirSync(icons);
+  for (const s of [16, 32, 48, 128, 192, 512])
+    copyFileSync(resolve(BRAND_ICONS, `icon${s}.png`), resolve(icons, `icon${s}.png`));
+  copyFileSync(resolve(BRAND_ICONS, 'icon192.png'), resolve(dist, 'logo192.png'));
+  copyFileSync(resolve(BRAND_ICONS, 'icon512.png'), resolve(dist, 'logo512.png'));
+  copyFileSync(resolve(BRAND_ICONS, 'favicon.ico'), resolve(dist, 'favicon.ico'));
+  rmSync(resolve(dist, 'banner.png'), { force: true }); // Yours artwork, unreferenced
+
+  const manifestPath = resolve(dist, 'manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  const iconSet = {
+    '16': 'icons/icon16.png',
+    '32': 'icons/icon32.png',
+    '48': 'icons/icon48.png',
+    '128': 'icons/icon128.png',
+  };
+  manifest.name = 'bWallet';
+  manifest.short_name = 'bWallet';
+  manifest.description = 'The BSV wallet for tokens, media and apps.';
+  manifest.action = { ...manifest.action, default_title: 'bWallet', default_icon: iconSet };
+  manifest.icons = iconSet;
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+
+  const pwaPath = resolve(dist, 'pwa-manifest.json');
+  if (existsSync(pwaPath)) {
+    const pwa = JSON.parse(readFileSync(pwaPath, 'utf-8'));
+    pwa.short_name = 'bWallet';
+    pwa.name = 'bWallet';
+    pwa.description = manifest.description;
+    pwa.icons = [16, 48, 128, 192, 512].map((s) => ({
+      src: `icons/icon${s}.png`,
+      sizes: `${s}x${s}`,
+      type: 'image/png',
+    }));
+    writeFileSync(pwaPath, JSON.stringify(pwa, null, 2) + '\n');
+  }
+}
 
 // ─── Build pipeline ──────────────────────────────────────────
 const STEPS = [
@@ -151,7 +203,7 @@ async function main() {
 
   // Header
   console.log();
-  console.log(accent.bold('  🌱 YOURS WALLET'));
+  console.log(accent.bold(BRAND === 'yours' ? '  🌱 YOURS WALLET' : '  bWALLET'));
   console.log(dim(`  v${version}  ·  Chrome Extension  ·  ${new Date().toLocaleTimeString()}`));
   console.log(dim('  ' + '━'.repeat(40)));
   console.log();
@@ -183,6 +235,8 @@ async function main() {
     done(`${ok('✓')} ${idx} ${step.name}  ${time}  ${size}  ${diff}`);
     results.push({ tag: step.tag, bytes, ms });
   }
+
+  brandManifest();
 
   const elapsed = Date.now() - t0;
   const totalBytes = results.reduce((sum, r) => sum + r.bytes, 0);

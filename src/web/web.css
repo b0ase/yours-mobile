@@ -1,0 +1,87 @@
+/*
+ * Web wallet (vite.config.web.ts): the mobile UI hosted as a static site.
+ * Phones get the mobile layout under a beta banner; wider screens get a
+ * centred phone-width wallet on the black and gold background.
+ */
+
+html:root {
+  --web-banner-height: 34px;
+  --wallet-height: calc(100dvh - var(--web-banner-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+.bwallet-web-banner {
+  position: relative;
+  z-index: 2147483500;
+  box-sizing: border-box;
+  height: var(--web-banner-height);
+  margin-top: env(safe-area-inset-top);
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #f5b800;
+  color: #010101;
+  font:
+    600 11px/1.2 Inter,
+    system-ui,
+    sans-serif;
+  text-align: center;
+}
+
+html body #root {
+  padding-top: 0;
+  height: calc(100dvh - var(--web-banner-height) - env(safe-area-inset-top));
+  min-height: 0;
+  overflow-y: auto;
+  /* Fixed-position UI (tab bar, toasts) stays inside the wallet column. */
+  transform: translateZ(0);
+}
+
+@media (min-width: 640px) {
+  html:root,
+  html:root body {
+    width: 100%;
+    max-width: none;
+  }
+
+  html body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(245, 184, 0, 0.18), transparent 60%),
+      radial-gradient(ellipse at 50% 100%, rgba(245, 184, 0, 0.08), transparent 55%), #000;
+  }
+
+  html:root {
+    --wallet-width: 420px;
+    --wallet-unlock-width: 420px;
+    --wallet-height: calc(100dvh - var(--web-banner-height) - 48px);
+  }
+
+  .bwallet-web-banner {
+    width: 420px;
+    margin: 24px auto 0;
+    border-radius: 16px 16px 0 0;
+  }
+
+  html body #root {
+    width: 420px;
+    max-width: 420px;
+    height: calc(100dvh - var(--web-banner-height) - 48px);
+    margin: 0 auto;
+    border-radius: 0 0 16px 16px;
+    border: 1px solid rgba(245, 184, 0, 0.25);
+    border-top: 0;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  }
+
+  .yours-overlay,
+  .yours-sheet-backdrop {
+    left: 50%;
+    right: auto;
+    width: 420px;
+    transform: translateX(-50%);
+  }
+}

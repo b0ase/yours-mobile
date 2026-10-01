@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
+import { brandDefines, extensionBrandPlugins } from './vite.brand';
 
 // Inject script config - IIFE format (runs in page context)
 export default defineConfig({
   base: './',
   plugins: [
+    ...extensionBrandPlugins(),
     nodePolyfills({
       include: ['buffer', 'process', 'util', 'stream', 'crypto', 'assert', 'url', 'path'],
       globals: {
@@ -44,5 +46,6 @@ export default defineConfig({
   },
   define: {
     'process.env': {},
+    ...brandDefines(),
   },
 });

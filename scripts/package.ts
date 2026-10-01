@@ -10,6 +10,10 @@
  * metadata is excluded. Two builds of the same commit produce the same hash.
  *
  * <tag> is RELEASE_TAG if set, otherwise v<package.json version>.
+ *
+ * bWallet builds (build/manifest.json name "bWallet") also write
+ * dist/bwallet-extension-<version>.zip with the same files at the zip root,
+ * which is the layout the Chrome Web Store upload expects.
  */
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -108,11 +112,40 @@ async function main() {
   writeFileSync(resolve(out, `${zipName}.sha256`), `${zipHash}  ${zipName}\n`);
   writeFileSync(resolve(out, 'SHA256SUMS'), sums.join('\n') + '\n');
 
+  const manifest = JSON.parse(readFileSync(resolve(build, 'manifest.json'), 'utf-8'));
+  let storeZip = '';
+  if (manifest.name === 'bWallet') {
+    const store = new JSZip();
+    for (const rel of files) {
+      store.file(rel, readFileSync(resolve(build, rel)), {
+        date,
+        unixPermissions: 0o644,
+        createFolders: false,
+        compression: 'DEFLATE',
+        compressionOptions: { level: 9 },
+      });
+    }
+    const storeBuffer = await store.generateAsync({
+      type: 'nodebuffer',
+      platform: 'UNIX',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 },
+      streamFiles: false,
+    });
+    const distDir = resolve(root, 'dist');
+    mkdirSync(distDir, { recursive: true });
+    storeZip = `bwallet-extension-${manifest.version}.zip`;
+    writeFileSync(resolve(distDir, storeZip), storeBuffer);
+    writeFileSync(resolve(distDir, `${storeZip}.sha256`), `${sha256(storeBuffer)}  ${storeZip}\n`);
+  }
+
   const mb = (n: number) => (n / 1048576).toFixed(1);
   console.log(`\n  ${zipName}`);
   console.log(`  sha256  ${zipHash}`);
   console.log(`  ${files.length} files · ${mb(totalBytes)} MB unpacked · ${mb(buffer.length)} MB zipped`);
-  console.log('  written to release/\n');
+  console.log('  written to release/');
+  if (storeZip) console.log(`  dist/${storeZip} (Chrome Web Store upload)`);
+  console.log();
 
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(
