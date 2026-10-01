@@ -105,12 +105,14 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/App.tsx': [
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',
       '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={null}><MobileRoutes /></Suspense>} />',
     ],
+    // Media tab's now-playing bar, app-wide so audio controls follow every tab.
+    ['<UsbBackupPill />', '<UsbBackupPill />\n<Suspense fallback={null}><MiniPlayer /></Suspense>'],
   ],
 };
 const mobileText = (): Plugin => ({

@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,7 +8,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Media tab: inscription audio keeps playing with the screen locked and
+        // shows Now Playing controls (UIBackgroundModes: audio in Info.plist).
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         return true
     }
 
