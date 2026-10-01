@@ -3,7 +3,9 @@ import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
+  Ban,
   Bookmark,
+  BookmarkCheck,
   Coins,
   ExternalLink,
   Flag,
@@ -90,10 +92,20 @@ import {
   type LockSummary,
   type PostLock,
 } from './locks';
+import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
+import { oneClick } from '../settings/oneClick';
 import {
+  addBlock,
   addLiked,
   addMyLock,
   addMute,
+  blockKeys,
+  isBookmarked,
+  loadBlocks,
+  loadBookmarks,
+  rememberMuteName,
+  toggleBookmark,
+  type HiddenAccount,
   isFollowing,
   loadFollows,
   loadLiked,
@@ -827,6 +839,12 @@ const Composer = ({
   );
 };
 
+type ApiCtx = ReturnType<typeof useServiceContext>['apiContext'];
+const sendTip = async (apiContext: ApiCtx, post: FeedPost, sats: number) => {
+  const res = await sendBsv.execute(apiContext, { requests: [{ address: post.author.address, satoshis: sats }] });
+  if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+};
+
 const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
@@ -837,8 +855,9 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
     setBusy(true);
     setError('');
     try {
-      const res = await sendBsv.execute(apiContext, { requests: [{ address: post.author.address, satoshis: sats }] });
-      if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+      await sendTip(apiContext, post, sats);
+      // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
+      savePrefs({ quickTip: sats });
       addSnackbar(`Tipped ${post.author.name} ${sats.toLocaleString()} sats`, 'success');
       onClose();
     } catch (e) {
@@ -1022,7 +1041,8 @@ const LockSheet = ({
         </p>
       )}
       <button
-        onClick={() => setConfirming(true)}
+        // One-click pay (Settings → Payments) skips the confirm for amounts within the limit.
+        onClick={() => (oneClick.take(sats).ok ? void lock() : setConfirming(true))}
         disabled={busy || !valid}
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
@@ -1058,7 +1078,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const { addSnackbar } = useSnackbar();
   const identity = useIdentity(apiContext, chromeStorageService);
   const online = useOnline();
-  const [tab, setTab] = useState<Tab>(() => (loadFollows().length ? 'following' : 'foryou'));
+  const [start] = useState(() => initialFeed(loadPrefs().defaultFeed, loadFollows().length > 0));
+  const [tab, setTab] = useState<Tab>(start.tab);
   const [follows, setFollows] = useState<Follow[]>(loadFollows);
   const [mutes, setMutes] = useState<string[]>(loadMutes);
   const [liked, setLiked] = useState<string[]>(loadLiked);
@@ -1069,7 +1090,13 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [composing, setComposing] = useState<{ replyTo: FeedPost | null; quote?: FeedPost } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
   const [locking, setLocking] = useState<FeedPost | null>(null);
-  const [sort, setSort] = useState<FeedSort>('latest');
+  const [sort, setSort] = useState<FeedSort>(start.sort);
+  const [blocks, setBlocks] = useState<HiddenAccount[]>(loadBlocks);
+  const [bookmarks, setBookmarks] = useState<FeedPost[]>(loadBookmarks);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  // Mutes + blocks: hidden in the feed and threads. Blocks alone: hidden on profiles too.
+  const blocked = useMemo(() => blockKeys(blocks), [blocks]);
+  const hidden = useMemo(() => [...mutes, ...blocked], [mutes, blocked]);
   const [height, setHeight] = useState<number | null>(null);
   const [fetchedLocks, setFetchedLocks] = useState<Record<string, PostLock[]>>({});
   const [myLocks, setMyLocks] = useState<PostLock[]>(loadMyLocks);
@@ -1103,10 +1130,10 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const shown = useMemo(
     () =>
       raw[tab]
-        ? filterFeed(visiblePosts(raw[tab]!, mutes), source, (a) => tab === 'foryou' && isFollowing(follows, a))
+        ? filterFeed(visiblePosts(raw[tab]!, hidden), source, (a) => tab === 'foryou' && isFollowing(follows, a))
         : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [raw, tab, mutes, safetyTick, source, follows],
+    [raw, tab, hidden, safetyTick, source, follows],
   );
   const likedSet = useMemo(() => new Set(liked), [liked]);
 
@@ -1188,9 +1215,32 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   };
 
   const mute = (p: FeedPost) => {
+    rememberMuteName(p.author.name, p.author.address, p.author.bapId);
     setMutes((m) => addMute(m, p.author.address, p.author.bapId));
     setMore(null);
     addSnackbar(`Muted ${p.author.name}`, 'info');
+  };
+  const block = (p: FeedPost) => {
+    setBlocks((b) => addBlock(b, { address: p.author.address, bapId: p.author.bapId, name: p.author.name }));
+    setMore(null);
+    addSnackbar(`Blocked ${p.author.name}. Unblock in Settings → Privacy.`, 'info');
+  };
+  const bookmark = (p: FeedPost) => {
+    const on = isBookmarked(bookmarks, p.txid);
+    setBookmarks((b) => toggleBookmark(b, p));
+    setMore(null);
+    addSnackbar(on ? 'Removed from bookmarks' : 'Saved to bookmarks', 'success');
+  };
+  const tip = async (p: FeedPost) => {
+    const sats = loadPrefs().quickTip;
+    // One-click pay: send the last tip amount without the sheet, if within the limit and the rate guard.
+    if (!p.author.address || !oneClick.take(sats).ok) return setTipping(p);
+    try {
+      await sendTip(apiContext, p, sats);
+      addSnackbar(`Tipped ${p.author.name} ${sats.toLocaleString()} sats (one-click)`, 'success');
+    } catch (e) {
+      addSnackbar(e instanceof Error ? e.message : String(e), 'error');
+    }
   };
   const report = (p: FeedPost) => {
     void reportItem({ outpoint: p.txid, name: p.author.name, reason: 'feed-post' });
@@ -1235,7 +1285,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     liked: likedSet,
     onLike: (p) => void like(p),
     onReply: (p) => setComposing({ replyTo: p }),
-    onTip: setTipping,
+    onTip: (p) => void tip(p),
     locks: lockSummaries,
     onLock: setLocking,
     onOpen: setThread,
@@ -1260,6 +1310,9 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}
         <SegmentTitle title="Feed">
+          <button onClick={() => setShowBookmarks(true)} aria-label="Bookmarks" className="p-2 active:opacity-60">
+            <Bookmark size={18} color={MUTED} />
+          </button>
           <button onClick={() => setProfile('me')} aria-label="My profile" className="p-1">
             <Avatar author={me} size={28} />
           </button>
@@ -1387,7 +1440,41 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
               </button>
             );
           })}
+          <button onClick={() => bookmark(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
+            {isBookmarked(bookmarks, more.txid) ? (
+              <BookmarkCheck size={18} color={GOLD} />
+            ) : (
+              <Bookmark size={18} color={MUTED} />
+            )}
+            {isBookmarked(bookmarks, more.txid) ? 'Remove bookmark' : 'Save to bookmarks'}
+          </button>
+          {more.author.address && (
+            <button
+              onClick={() => block(more)}
+              className="w-full flex items-center gap-3 py-3 text-sm"
+              style={{ color: RED }}
+            >
+              <Ban size={18} color={RED} />
+              Block {more.author.name}
+            </button>
+          )}
         </Sheet>
+      )}
+      {showBookmarks && (
+        <Layer title="Bookmarks" onBack={() => setShowBookmarks(false)}>
+          <PostList
+            posts={visiblePosts(bookmarks, blocked)}
+            a={actions}
+            empty={
+              <div className="px-8 pt-14 text-center">
+                <p className="text-sm text-white font-semibold">No bookmarks yet</p>
+                <p className="text-xs mt-1" style={{ color: MUTED }}>
+                  Tap ··· on a post, then Save to bookmarks.
+                </p>
+              </div>
+            }
+          />
+        </Layer>
       )}
       {profile && (
         <ProfileView
@@ -1397,7 +1484,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           onFollow={() => profile !== 'me' && void follow(profile)}
           onBack={() => setProfile(null)}
           actions={actions}
-          mutes={mutes}
+          mutes={blocked}
           safetyTick={safetyTick}
         />
       )}
@@ -1406,7 +1493,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           post={thread}
           onBack={() => setThread(null)}
           actions={actions}
-          mutes={mutes}
+          mutes={hidden}
           safetyTick={safetyTick}
         />
       )}

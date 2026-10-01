@@ -12,6 +12,8 @@ const LS = {
   mutes: 'bwallet.feed.mutes',
   liked: 'bwallet.feed.liked',
   locks: 'bwallet.feed.locks',
+  blocks: 'bwallet.feed.blocks',
+  bookmarks: 'bwallet.feed.bookmarks',
 };
 
 export type Follow = { bapId: string | null; address: string; name: string };
@@ -48,6 +50,71 @@ export const loadMutes = (): string[] => read<string[]>(LS.mutes, []).filter((x)
 export const addMute = (mutes: string[], ...keys: (string | null)[]): string[] => {
   const next = [...new Set([...mutes, ...keys.filter((k): k is string => !!k)])];
   write(LS.mutes, next);
+  return next;
+};
+
+export const removeMute = (mutes: string[], ...keys: (string | null)[]): string[] => {
+  const drop = new Set(keys.filter((k): k is string => !!k));
+  const next = mutes.filter((k) => !drop.has(k));
+  write(LS.mutes, next);
+  return next;
+};
+
+/** Muted / blocked accounts, kept with a display name so Settings can list them. */
+export type HiddenAccount = { address: string; bapId: string | null; name: string };
+const validAccount = (a: HiddenAccount) => !!a && typeof a.address === 'string';
+
+/**
+ * Blocked accounts: hidden everywhere (feed, threads, their profile). Mutes (above) are plain keys and only
+ * quiet the feed and threads; a muted author's profile still shows their posts.
+ */
+export const loadBlocks = (): HiddenAccount[] => read<HiddenAccount[]>(LS.blocks, []).filter(validAccount);
+const sameAccount = (a: HiddenAccount, b: { address: string; bapId: string | null }) =>
+  a.address === b.address || (!!b.bapId && a.bapId === b.bapId);
+export const isBlocked = (blocks: HiddenAccount[], a: { address: string; bapId: string | null }) =>
+  blocks.some((b) => sameAccount(b, a));
+export const addBlock = (blocks: HiddenAccount[], a: HiddenAccount): HiddenAccount[] => {
+  const next = isBlocked(blocks, a) ? blocks : [...blocks, { address: a.address, bapId: a.bapId, name: a.name }];
+  write(LS.blocks, next);
+  return next;
+};
+export const removeBlock = (blocks: HiddenAccount[], a: { address: string; bapId: string | null }) => {
+  const next = blocks.filter((b) => !sameAccount(b, a));
+  write(LS.blocks, next);
+  return next;
+};
+/** Keys for visiblePosts(): every address / BAP id that is blocked. */
+export const blockKeys = (blocks: HiddenAccount[]): string[] =>
+  blocks.flatMap((b) => (b.bapId ? [b.address, b.bapId] : [b.address]));
+
+/** Mute names (mutes are stored as bare keys; names are kept separately for the Settings list). */
+const MUTE_NAMES = 'bwallet.feed.muteNames';
+export const loadMuteNames = (): Record<string, string> => read<Record<string, string>>(MUTE_NAMES, {});
+export const rememberMuteName = (name: string, ...keys: (string | null)[]) => {
+  const names = loadMuteNames();
+  for (const k of keys) if (k) names[k] = name;
+  write(MUTE_NAMES, names);
+};
+/** Groups mute keys into accounts for display: a key whose name matches another key's is folded into it. */
+export const mutedAccounts = (mutes: string[], names: Record<string, string>): { name: string; keys: string[] }[] => {
+  const byName = new Map<string, string[]>();
+  for (const k of mutes) {
+    const n = names[k] ?? k;
+    byName.set(n, [...(byName.get(n) ?? []), k]);
+  }
+  return [...byName].map(([name, keys]) => ({ name, keys }));
+};
+
+/** Saved posts (snapshots, newest first) so they show offline and after the indexer drops them. */
+export const MAX_BOOKMARKS = 500;
+export const loadBookmarks = (): FeedPost[] =>
+  read<FeedPost[]>(LS.bookmarks, []).filter((p) => p && typeof p.txid === 'string' && !!p.author);
+export const isBookmarked = (bookmarks: FeedPost[], txid: string) => bookmarks.some((p) => p.txid === txid);
+export const toggleBookmark = (bookmarks: FeedPost[], p: FeedPost): FeedPost[] => {
+  const next = isBookmarked(bookmarks, p.txid)
+    ? bookmarks.filter((x) => x.txid !== p.txid)
+    : [p, ...bookmarks].slice(0, MAX_BOOKMARKS);
+  write(LS.bookmarks, next);
   return next;
 };
 
