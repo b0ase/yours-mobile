@@ -186,6 +186,15 @@ API (bit-sign):
 
 - **Mint at first listing:** the account NFT is minted only when an account is first listed for sale (seller pays).
 - **Ordinal NFT:** a 1Sat ordinal 1-of-1 signed by the bit-sign issuer key (not BSV-21 supply 1).
-- **No royalty:** bCorp takes no resale royalty on account sales (resale fee 0).
-- Still open: reserved/vanity numbers, DMs on transfer, $NAME room follows account, theft freeze/disputes,
-  numbering HandCash-only accounts.
+- **Reserved + vanity numbers:** reserve #1–#100 for bCorp/team, and hold back vanity numbers (e.g. #1000, #7777,
+  #1234, repeating digits) for bCorp to sell.
+- **Resale royalty: yes** (the owner reversed an earlier "no"): a configurable bCorp royalty on account resales in
+  the bWallet Market, rate to be set (proposed default 5%); unenforceable outside our Market, like tickets.
+- **Private messages:** deleted on transfer, with an option for the seller to export them first. Note: bWallet has no
+  DMs (token rooms only); bChat's personal $NAME room is a room, not DMs. This applies to any bChat DMs/E2E threads
+  that exist, plus the account's E2E key envelopes.
+- **Personal $NAME room follows the account** (recommendation accepted).
+- **HandCash-only accounts are numbered too** (recommendation accepted).
+- **Theft reports and disputes** (owner has no view; recommendations accepted): a 48-hour freeze on transfers when the
+  previous holder reports theft with a signature from their old key; disputes reviewed manually by bCorp, defaulting
+  to the on-chain holder when there's no clear evidence.
