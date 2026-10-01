@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { ExternalLink, Music, Play } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import type { FeedMedia, LinkEmbed } from './media';
+import { usePrefs } from '../settings/usePrefs';
 
 /**
  * Feed media views: swipeable image gallery, tap-to-play video, audio row, link / YouTube /
@@ -27,6 +28,19 @@ function useNearView<T extends Element>(): [React.RefObject<T>, boolean] {
     return () => io.disconnect();
   }, []);
   return [ref, near];
+}
+
+/** True while at least `threshold` of the element is on screen (for autoplay). */
+function useInView<T extends Element>(ref: React.RefObject<T>, enabled: boolean, threshold = 0.6): boolean {
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!enabled || !el || typeof IntersectionObserver === 'undefined') return setInView(false);
+    const io = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ref, enabled, threshold]);
+  return inView;
 }
 
 const Veil = ({ label }: { label: string }) => (
@@ -117,15 +131,31 @@ export const Gallery = ({
   );
 };
 
-/** Tap-to-play video. No src (so no download) until Play; paused and unloaded far off-screen. */
+/**
+ * Video. No src (so no download) until it plays; unloaded far off-screen. Tap to play, or, with
+ * Settings → Feed → Video autoplay on, it starts muted once mostly on screen and pauses when scrolled
+ * away. Blurred (unreviewed) videos never autoplay.
+ */
 export const VideoView = ({ m, blur }: { m: FeedMedia; blur: boolean }) => {
+  const [{ autoplay }] = usePrefs();
   const [shown, setShown] = useState(!blur);
   const [playing, setPlaying] = useState(false);
+  const [auto, setAuto] = useState(false);
   const [ref, near] = useNearView<HTMLDivElement>();
+  const inView = useInView(ref, autoplay && shown);
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (!near && playing) setPlaying(false); // unmounts the <video>, releasing its buffer
   }, [near, playing]);
+  useEffect(() => {
+    if (!autoplay || !shown) return;
+    if (inView && !playing) {
+      setAuto(true);
+      setPlaying(true);
+    } else if (inView) void video.current?.play().catch(() => undefined);
+    else if (playing) video.current?.pause();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inView, autoplay, shown]);
   return (
     <div
       ref={ref}
@@ -140,6 +170,7 @@ export const VideoView = ({ m, blur }: { m: FeedMedia; blur: boolean }) => {
           poster={m.poster ?? undefined}
           controls
           autoPlay
+          muted={auto}
           playsInline
           preload="none"
           className="w-full h-full"
@@ -149,7 +180,11 @@ export const VideoView = ({ m, blur }: { m: FeedMedia; blur: boolean }) => {
         <button
           className="absolute inset-0 w-full h-full"
           aria-label={shown ? 'Play video' : 'Show video'}
-          onClick={() => (shown ? setPlaying(true) : setShown(true))}
+          onClick={() => {
+            if (!shown) return setShown(true);
+            setAuto(false);
+            setPlaying(true);
+          }}
         >
           {m.poster && (
             <img
