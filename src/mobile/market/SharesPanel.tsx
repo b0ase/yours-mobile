@@ -192,6 +192,31 @@ export const SharesPanel = () => {
         >
           {step1 ? 'Get verified' : 'Qualify as an investor'}
         </button>
+        {/* Preview: everyone sees WHICH share classes exist (name + icon only). Offer details,
+            class sizes and Register interest stay behind KYC + investor self-certification. */}
+        <div className="flex flex-col gap-1.5 pt-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[#98A2B3]">Share classes</span>
+          {ALL_OFFERS.filter((o) => o.section !== 'other').map((o) => (
+            <div key={o.id} className="flex items-center gap-2 rounded-lg bg-[#0f1013] px-2.5 py-2">
+              {o.icon ? (
+                <img src={o.icon} alt="" className="h-7 w-7 rounded-md object-cover shrink-0" />
+              ) : (
+                <div
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-bold"
+                  style={{ background: GOLD, color: '#010101' }}
+                >
+                  {o.name.replace(/^b/, '').slice(0, 1).toUpperCase() || 'b'}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-white truncate">{o.name}</div>
+                <div className="text-[10px] text-[#98A2B3] truncate">{o.className}</div>
+              </div>
+              <Lock size={12} color="#667085" />
+            </div>
+          ))}
+          <p className="text-[10px] text-[#667085]">Verify and qualify to see each offer.</p>
+        </div>
       </div>
     );
   }
