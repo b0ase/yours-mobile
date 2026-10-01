@@ -88,7 +88,11 @@ export const TopNav = () => {
         className="flex items-center justify-between fixed top-0 w-full z-10 px-4 h-14"
         style={{ backgroundColor: theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
       >
-        <button onClick={() => setDrawer(true)} className="flex items-center gap-2 min-w-0" aria-label="Accounts">
+        <button
+          onClick={() => setDrawer(true)}
+          className="flex items-center gap-2 min-w-0 max-w-[calc(50%-48px)]"
+          aria-label="Accounts"
+        >
           <img
             src={accountObj.account?.icon ?? activeCircle}
             className="w-9 h-9 rounded-full object-cover box-border"
@@ -113,14 +117,14 @@ export const TopNav = () => {
           )}
           <ChevronDown size={14} strokeWidth={2} color="#8E8E89" className="shrink-0" />
         </button>
+        {/* Wordmark fixed in the centre of the bar; the account button is capped so it never runs under it. */}
+        <span
+          className="absolute left-1/2 -translate-x-1/2 pointer-events-none font-bold text-[17px]"
+          style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}
+        >
+          bWallet
+        </span>
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Wordmark hides under 380px so three buttons + the account name fit at 360px. */}
-          <span
-            className="hidden min-[380px]:inline font-bold text-[17px] mr-1"
-            style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}
-          >
-            bWallet
-          </span>
           <button
             type="button"
             aria-label="Feed"

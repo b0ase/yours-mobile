@@ -146,7 +146,16 @@ export class BchatClient {
       const v = await this.call<{ token?: string; handle?: string; needs_handle?: boolean; error?: string }>(
         'POST',
         '/api/bitsign/auth/wallet/verify',
-        { address, kind: 'yours', nonce: ch.nonce, pubkey_hex: signed.pubKey, signature: signed.sig },
+        // intent=sign-in: sign in as this wallet's owner, ignoring any stale cookie session in the
+        // native cookie jar (bit-sign PR #41). Older servers ignore the field.
+        {
+          address,
+          kind: 'yours',
+          nonce: ch.nonce,
+          pubkey_hex: signed.pubKey,
+          signature: signed.sig,
+          intent: 'sign-in',
+        },
         false,
       );
       if (!v.token || !v.handle) {

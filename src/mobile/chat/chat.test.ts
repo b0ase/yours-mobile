@@ -32,8 +32,18 @@ describe('mergeMessages', () => {
   });
 
   test('server row replaces the optimistic copy once', () => {
-    const pending = msg('tmp', '2026-10-01T10:05:00Z', { pending: true, localId: 'l1', body: 'hi', author_handle: 'me' });
-    const pending2 = msg('tmp2', '2026-10-01T10:05:01Z', { pending: true, localId: 'l2', body: 'hi', author_handle: 'me' });
+    const pending = msg('tmp', '2026-10-01T10:05:00Z', {
+      pending: true,
+      localId: 'l1',
+      body: 'hi',
+      author_handle: 'me',
+    });
+    const pending2 = msg('tmp2', '2026-10-01T10:05:01Z', {
+      pending: true,
+      localId: 'l2',
+      body: 'hi',
+      author_handle: 'me',
+    });
     const server = msg('s1', '2026-10-01T10:05:00Z', { body: 'hi', author_handle: 'me' });
     let out = mergeMessages([pending, pending2], [server]);
     expect(out.map((m) => m.id)).toEqual(['s1', 'tmp2']);
@@ -90,7 +100,18 @@ describe('threadItems', () => {
 
 describe('rooms', () => {
   const rooms: ChatRoom[] = [
-    { id: '1', ticker: 'DM1', name: '$me ↔ $bob', last_message: { author_handle: 'me', kind: 'text', body: 'yo', event_type: null, created_at: '2026-10-01T09:00:00Z' } },
+    {
+      id: '1',
+      ticker: 'DM1',
+      name: '$me ↔ $bob',
+      last_message: {
+        author_handle: 'me',
+        kind: 'text',
+        body: 'yo',
+        event_type: null,
+        created_at: '2026-10-01T09:00:00Z',
+      },
+    },
     { id: '2', ticker: 'NPG', name: 'Ninja Punk Girls', updated_at: '2026-10-01T11:00:00Z' },
   ];
   test('DM title is the other party', () => {
@@ -122,7 +143,10 @@ const fakeHttp = (routes: Record<string, (c: Call) => { status: number; data: un
 describe('BchatClient', () => {
   test('signIn: challenge → sign → verify, then bearer on calls', async () => {
     const { http, calls } = fakeHttp({
-      'POST /api/bitsign/auth/wallet/challenge': () => ({ status: 200, data: { nonce: 'n1', message: 'bitcoinchat.online wallet login: n1' } }),
+      'POST /api/bitsign/auth/wallet/challenge': () => ({
+        status: 200,
+        data: { nonce: 'n1', message: 'bitcoinchat.online wallet login: n1' },
+      }),
       'POST /api/bitsign/auth/wallet/verify': () => ({ status: 200, data: { token: 'T', handle: 'me' } }),
       'GET /api/bitsign/rooms': () => ({ status: 200, data: { rooms: [{ id: '1', ticker: 'A', name: 'A' }] } }),
     });
@@ -138,7 +162,14 @@ describe('BchatClient', () => {
     expect(s).toEqual({ token: 'T', handle: 'me', address: '1Addr' });
     expect(signed).toEqual(['bitcoinchat.online wallet login: n1']);
     expect(calls[0].body).toEqual({ address: '1Addr', kind: 'yours' });
-    expect(calls[1].body).toEqual({ address: '1Addr', kind: 'yours', nonce: 'n1', pubkey_hex: '02ab', signature: 'SIG' });
+    expect(calls[1].body).toEqual({
+      address: '1Addr',
+      kind: 'yours',
+      nonce: 'n1',
+      pubkey_hex: '02ab',
+      signature: 'SIG',
+      intent: 'sign-in',
+    });
     expect(calls[0].headers.Authorization).toBeUndefined();
     const rooms = await client.rooms();
     expect(rooms).toHaveLength(1);
@@ -152,7 +183,10 @@ describe('BchatClient', () => {
       'POST /api/bitsign/auth/wallet/verify': () => ({ status: 200, data: { token: 'T', handle: 'me' } }),
     });
     const client = new BchatClient(http, null, 'https://x.test');
-    await client.signIn({ address: async () => '1Old', sign: async () => ({ address: '1New', pubKey: '02', sig: 'S' }) });
+    await client.signIn({
+      address: async () => '1Old',
+      sign: async () => ({ address: '1New', pubKey: '02', sig: 'S' }),
+    });
     expect((calls[1].body as { address: string }).address).toBe('1New');
     expect(client.current?.address).toBe('1New');
   });
@@ -194,7 +228,10 @@ describe('BchatClient', () => {
 
   test('send and openDirect', async () => {
     const { http, calls } = fakeHttp({
-      'POST /api/bitsign/rooms/ABC/messages': () => ({ status: 200, data: { message: msg('m', '2026-10-01T00:00:00Z') } }),
+      'POST /api/bitsign/rooms/ABC/messages': () => ({
+        status: 200,
+        data: { message: msg('m', '2026-10-01T00:00:00Z') },
+      }),
       'POST /api/bitsign/rooms/direct': () => ({ status: 200, data: { ticker: 'DMX', created: true } }),
     });
     const client = new BchatClient(http, { token: 'T', handle: 'me', address: 'a' }, 'https://x.test');
