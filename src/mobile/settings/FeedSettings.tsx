@@ -2,7 +2,7 @@ import { useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Ban, Bookmark, Newspaper, PlayCircle, Sparkles, Zap } from 'lucide-react';
 import { useBackClose } from '../backStack';
-import { ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
+import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import {
@@ -301,6 +301,27 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
             />
           </>
         )}
+      </Section>
+      <Section title="Token indexing">
+        <Row
+          icon={<Zap size={16} />}
+          label="One-tap indexing fee"
+          description={
+            prefs.indexAutoPayUsd
+              ? `Your own tokens' indexing fee pays on one tap when under $${prefs.indexAutoPayUsd.toFixed(2)}`
+              : "Always confirm your tokens' indexing fee"
+          }
+          right={
+            <Pills
+              label="One-tap indexing limit"
+              options={INDEX_AUTOPAY_USD.map((v) => ({ id: v, label: v ? `$${v.toFixed(2)}` : 'Off' }))}
+              value={prefs.indexAutoPayUsd}
+              onChange={(v) => setPrefs({ indexAutoPayUsd: v })}
+            />
+          }
+          isFirst
+          isLast
+        />
       </Section>
       <Section title="Privacy">
         <Row

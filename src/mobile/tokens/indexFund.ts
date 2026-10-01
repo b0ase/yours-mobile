@@ -181,6 +181,38 @@ export function pickSentIndexFund(
   return null;
 }
 
+// ── tokens this device minted (own tokens: personal $NAME, tickets, any mint) ──
+
+const OWN_KEY = 'bwallet.ownTokens';
+export type OwnToken = { tokenId: string; ticker: string };
+export const OWN_TOKENS_EVENT = 'bwallet-own-tokens';
+
+/** Merge `t` into `list` (by normalised id, newest first). */
+export const withOwnToken = (list: OwnToken[], t: OwnToken): OwnToken[] => [
+  t,
+  ...list.filter((x) => normId(x.tokenId) !== normId(t.tokenId)),
+];
+
+export const listOwnTokens = (): OwnToken[] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(OWN_KEY) ?? '[]') as unknown;
+    return Array.isArray(v)
+      ? v.filter((x): x is OwnToken => !!x && typeof x.tokenId === 'string' && typeof x.ticker === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+export const rememberOwnToken = (t: OwnToken) => {
+  try {
+    localStorage.setItem(OWN_KEY, JSON.stringify(withOwnToken(listOwnTokens(), t)));
+    window.dispatchEvent(new Event(OWN_TOKENS_EVENT));
+  } catch {
+    /* storage unavailable / no window in tests */
+  }
+};
+
 /**
  * After a deploy: fund indexing, but never fail the mint because of it (the token exists and is
  * in the wallet either way); the error is returned so the UI can offer "Finish setting up".
@@ -190,6 +222,7 @@ export async function fundAfterDeploy(
   tokenId: string,
   ticker: string,
 ): Promise<{ ok: true; txid: string } | { ok: false; error: string }> {
+  rememberOwnToken({ tokenId, ticker });
   try {
     const r = await fundIndexing(ctx, tokenId, ticker);
     return { ok: true, txid: r.txid };

@@ -3,6 +3,9 @@ import { Sparkles } from 'lucide-react';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
+import { useSnackbar } from '../../hooks/useSnackbar';
+import { formatSmallUsd, indexAutoPay, satsToUsd } from './indexAutoPay';
+import { markIndexingPaid } from './pendingIndexing';
 import {
   INDEX_FUND_NETWORK_SATS,
   fundAmount,
@@ -16,20 +19,26 @@ import {
 /**
  * "Finish setting up $X": for a token this wallet minted whose 1sat-stack indexing was never
  * funded (minted before bWallet paid indexing at mint, or the funding step failed). Checks the
- * overlay status (read-only); only when it needs funding does it show a button, and the payment
- * goes through the standard confirmation sheet. Nothing is sent without that confirmation.
+ * overlay status (read-only); only when it needs funding does it show a button. The payment goes
+ * through the standard confirmation sheet, except one-tap: a fee under Settings → Payments →
+ * "Index own tokens" (default $0.10, at a known BSV/USD rate, rate-limited: indexAutoPay.ts) pays
+ * on the tap itself. Nothing is sent without a tap.
  */
 export const FinishIndexing = ({
   tokenId,
   ticker,
   onFunded,
   compact = false,
+  exchangeRate = 0,
 }: {
   tokenId: string;
   ticker: string;
   onFunded?: () => void;
   compact?: boolean;
+  /** USD per BSV; 0 / unknown = always confirm. */
+  exchangeRate?: number;
 }) => {
+  const { addSnackbar } = useSnackbar();
   const { apiContext } = useServiceContext();
   const { theme } = useTheme();
   const [status, setStatus] = useState<OverlayStatus | null | undefined>(undefined);
@@ -52,12 +61,18 @@ export const FinishIndexing = ({
   if (status === undefined || (status && !needsIndexFunding(status)) || (paid && !msg)) return null;
   const sats = status ? fundAmount(status) : null;
 
-  const fund = async () => {
+  const fund = async (oneTap = false) => {
     setBusy(true);
     setMsg('');
     try {
       const r = await fundIndexing(apiContext, tokenId, ticker, { status, timeoutMs: 8000 });
       setMsg(`Done. $${ticker} will show in wallets and its room within a minute (tx ${r.txid.slice(0, 8)}…).`);
+      if (oneTap)
+        addSnackbar(
+          `Paid ${r.sats.toLocaleString()} sats (~${formatSmallUsd(satsToUsd(r.sats, exchangeRate))}) to index $${ticker}`,
+          'success',
+        );
+      markIndexingPaid(tokenId);
       onFunded?.();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Could not send the indexing payment');
@@ -86,7 +101,11 @@ export const FinishIndexing = ({
         <button
           type="button"
           disabled={busy || !status}
-          onClick={() => setConfirming(true)}
+          onClick={() => {
+            // One tap under the threshold (total incl. network fee); otherwise the confirm sheet.
+            if (sats && indexAutoPay.take(sats + INDEX_FUND_NETWORK_SATS, exchangeRate).ok) void fund(true);
+            else setConfirming(true);
+          }}
           className="h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
           style={{ background: '#FFD24D', color: '#000' }}
         >

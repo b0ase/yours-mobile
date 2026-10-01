@@ -10,6 +10,8 @@
 export type DefaultFeed = 'foryou' | 'latest' | 'following';
 export const ONE_CLICK_LIMITS = [100, 1_000, 10_000] as const;
 export type OneClickLimit = (typeof ONE_CLICK_LIMITS)[number];
+export const INDEX_AUTOPAY_USD = [0, 0.05, 0.1, 0.25] as const;
+export type IndexAutoPayUsd = (typeof INDEX_AUTOPAY_USD)[number];
 
 export type Prefs = {
   defaultFeed: DefaultFeed;
@@ -20,6 +22,11 @@ export type Prefs = {
   oneClickLimit: OneClickLimit;
   /** Amount a one-click tip sends (the last amount you tipped from the tip sheet). */
   quickTip: number;
+  /**
+   * Indexing fees for your own tokens under this many USD pay on one tap (no confirm sheet).
+   * 0 = always confirm. Guarded like one-click pay (src/mobile/tokens/indexAutoPay.ts).
+   */
+  indexAutoPayUsd: IndexAutoPayUsd;
   /** Looping video behind Apps, Wallet and Feed. Off: still image only. */
   animatedBackgrounds: boolean;
 };
@@ -31,6 +38,7 @@ export const DEFAULT_PREFS: Prefs = {
   oneClickLimit: 1_000,
   quickTip: 1_000,
   animatedBackgrounds: true,
+  indexAutoPayUsd: 0.1,
 };
 
 const KEY = 'bwallet.prefs';
@@ -50,6 +58,9 @@ export const parsePrefs = (raw: unknown): Prefs => {
       ? (limit as OneClickLimit)
       : DEFAULT_PREFS.oneClickLimit,
     quickTip: typeof tip === 'number' && Number.isFinite(tip) && tip >= 1 ? Math.floor(tip) : DEFAULT_PREFS.quickTip,
+    indexAutoPayUsd: (INDEX_AUTOPAY_USD as readonly unknown[]).includes(r.indexAutoPayUsd)
+      ? (r.indexAutoPayUsd as IndexAutoPayUsd)
+      : DEFAULT_PREFS.indexAutoPayUsd,
     animatedBackgrounds:
       typeof r.animatedBackgrounds === 'boolean' ? r.animatedBackgrounds : DEFAULT_PREFS.animatedBackgrounds,
   };

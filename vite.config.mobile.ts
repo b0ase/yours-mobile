@@ -213,6 +213,17 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '            {false && !isSyncing && !balanceLoading && (\n              <motion.button',
     ],
   ],
+  // Own tokens with an unpaid indexing fee: cards under the action buttons (src/mobile/tokens/WalletIndexing).
+  'src/pages/BsvWallet.tsx#indexing': [
+    [
+      "import { getPlatform } from '../platform';",
+      "import { getPlatform } from '../platform';\nimport { WalletIndexing } from '../mobile/tokens/WalletIndexing';",
+    ],
+    [
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>\n<WalletIndexing exchangeRate={exchangeRate} />',
+    ],
+  ],
   // UnlockWallet: bigger b mark above "Welcome back".
   'src/components/UnlockWallet.tsx#logo': [['<YoursIcon width="4rem" />', '<YoursIcon width="7rem" />']],
   // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).

@@ -1,5 +1,7 @@
 import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-react';
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { asMenuItem, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
@@ -19,6 +21,12 @@ export default Menu;
 
 export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) => {
   const active = tabFor(selected);
+  // Own tokens with an unpaid indexing fee: count on the Wallet tab.
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const pending = usePendingIndexing(
+    apiContext,
+    chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
+  ).length;
   return (
     <div
       className="flex items-center w-full absolute bottom-0 z-[100]"
@@ -40,6 +48,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
             window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
           }}
           isSelected={active === t.id}
+          badge={t.id === 'bsv' && pending ? String(pending) : undefined}
         />
       ))}
     </div>
