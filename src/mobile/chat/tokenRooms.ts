@@ -39,6 +39,8 @@ export interface TokenRoomLookup {
   gate?: TokenGate;
   heldRaw?: string | null;
   member?: boolean;
+  /** Present when the room is someone's personal-token room. */
+  personal?: { name: string; by: string; tokenId: string | null } | null;
 }
 
 export type EntryStatus =
@@ -165,7 +167,7 @@ export const parseGateRefusal = (data: unknown): GateRefusal | null => {
 
 export const parseLookup = (data: unknown): TokenRoomLookup | null => {
   if (!data || typeof data !== 'object') return null;
-  const d = data as { key?: unknown; room?: unknown; gate?: RawGate; held_raw?: unknown; member?: unknown };
+  const d = data as { key?: unknown; room?: unknown; gate?: RawGate; held_raw?: unknown; member?: unknown; personal?: unknown };
   if (typeof d.key !== 'string') return null;
   const r = d.room as { ticker?: unknown; name?: unknown; members?: unknown } | null | undefined;
   return {
@@ -177,8 +179,21 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
     gate: asGate(d.gate) ?? undefined,
     heldRaw: typeof d.held_raw === 'string' ? d.held_raw : null,
     member: d.member === true,
+    personal: asPersonal(d.personal),
   };
 };
+
+type RawPersonal = { name?: unknown; by?: unknown; tokenId?: unknown; token_id?: unknown };
+const asPersonal = (p: unknown): TokenRoomLookup['personal'] => {
+  const r = p as RawPersonal | null | undefined;
+  if (!r || typeof r.name !== 'string' || !r.name) return null;
+  const id = typeof r.tokenId === 'string' ? r.tokenId : typeof r.token_id === 'string' ? r.token_id : null;
+  return { name: r.name, by: typeof r.by === 'string' ? r.by : r.name, tokenId: id ? normOutpoint(id) : null };
+};
+
+/** A member room's personal-token binding (metadata.personal), if any. */
+export const personalOfRoom = (room: ChatRoom): TokenRoomLookup['personal'] =>
+  asPersonal((room.metadata as { personal?: unknown } | null | undefined)?.personal);
 
 /**
  * The Chat list: one entry per held token, joined with bit-sign's token rooms.

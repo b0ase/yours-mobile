@@ -39,6 +39,8 @@ export interface ChatRoom {
   created_at?: string | null;
   access_note?: string | null;
   list_kind?: string | null;
+  /** Handle that opened the room (its admin, with owner-role members). */
+  created_by_handle?: string | null;
   /** Token rooms carry metadata.tokenGate ({key, symbol, dec, minAmountRaw}). */
   metadata?: Record<string, unknown> | null;
   last_message?: {

@@ -18,7 +18,7 @@ export const BCHAT_ORIGIN = 'https://www.bitcoinchat.online';
 
 export type HttpResponse = { status: number; data: unknown };
 export type Http = (req: {
-  method: 'GET' | 'POST' | 'PATCH';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   url: string;
   headers: Record<string, string>;
   body?: unknown;
@@ -103,7 +103,7 @@ export class BchatClient {
     return this.session;
   }
 
-  private async call<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown, auth = true): Promise<T> {
+  private async call<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown, auth = true): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) {
       if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
@@ -228,9 +228,39 @@ export class BchatClient {
   }
 
   /** Create (or open) the token's room. The server re-checks the holding. Returns its ticker. */
-  async startTokenRoom(key: string, opts: { name?: string; min?: string } = {}): Promise<string> {
+  async startTokenRoom(
+    key: string,
+    opts: { name?: string; min?: string; purpose?: string; personal_name?: string } = {},
+  ): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/token-gated', { key, ...opts });
     return r.ticker;
+  }
+
+  /** The token id bound to a personal name ("boase"), or null. For the "$BOASE ✓" check. */
+  async personalToken(name: string): Promise<{ tokenId: string | null; ticker: string | null }> {
+    const r = await this.call<{ token_id?: string | null; ticker?: string | null }>(
+      'GET',
+      `/api/bitsign/rooms/token-gated?name=${encodeURIComponent(name)}`,
+    );
+    return { tokenId: r.token_id ?? null, ticker: r.ticker ?? null };
+  }
+
+  /** Room admin: the ban list. */
+  async bans(ticker: string): Promise<{ handle: string | null; address: string | null; reason: string | null }[]> {
+    const r = await this.call<{ bans?: { handle: string | null; address: string | null; reason: string | null }[] }>(
+      'GET',
+      `${BchatClient.path(ticker)}/bans`,
+    );
+    return r.bans ?? [];
+  }
+
+  /** Room admin: ban a $handle or an address (membership = holds the token AND not banned). */
+  async ban(ticker: string, target: string, reason?: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/bans`, { target, reason });
+  }
+
+  async unban(ticker: string, target: string): Promise<void> {
+    await this.call('DELETE', `${BchatClient.path(ticker)}/bans`, { target });
   }
 
   /** Room admin: change the membership minimum (whole tokens). */

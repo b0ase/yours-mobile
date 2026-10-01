@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personalToken';
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
@@ -458,6 +459,29 @@ const MarketPage = () => {
     [rooms, directory, safetyRev],
   );
   const visibleTokens = tokenRows.slice(0, shown);
+  const personalLinks = knownPersonal();
+  const personalRow = (r: Pick<HotRoom, 'ref' | 'title' | 'icon'>, i: number) => (
+    <button
+      key={r.ref.key}
+      onClick={() => void openRoom(r as HotRoom)}
+      className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+    >
+      <span className="w-6 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
+      <Art outpoint={r.icon} kind="bsv21" collectionId={r.ref.id} />
+      <div className="min-w-0 flex-1">
+        <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>
+          {tickerLabel(r.title.replace(/^\$/, ''), r.ref.id, personalLinks)}
+        </div>
+        <div className="text-[11px] text-[#98A2B3]">Access to a holders' room</div>
+      </div>
+      <span
+        className="shrink-0 rounded-full px-2 py-[1px] text-[10px] font-bold"
+        style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+      >
+        Personal token
+      </span>
+    </button>
+  );
   const floorsAsked = useRef(new Set<string>());
   useEffect(() => {
     if (kind !== 'tokens') return;
@@ -496,6 +520,8 @@ const MarketPage = () => {
         <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
       )}
       {visibleTokens.map((r, i) => {
+        // Personal tokens ($BOASE): social / access only. Badge, no floor, no price talk.
+        if (isPersonalTokenId(r.ref.id, personalLinks)) return personalRow(r, i);
         const f = floors[r.ref.key];
         const listings = r.heat > 0 ? r.newListings : f?.listings;
         const floor = r.floorLabel ?? f?.floor ?? null;
@@ -543,7 +569,7 @@ const MarketPage = () => {
       {rooms
         ?.filter(roomSafe)
         .filter((r) => (kind === 'tokens' ? r.ref.kind === 'bsv21' : r.ref.kind === 'coll'))
-        .map((r, i) => (
+        .map((r, i) => r.ref.kind === 'bsv21' && isPersonalTokenId(r.ref.id, personalLinks) ? personalRow(r, i) : (
           <button
             key={r.ref.key}
             onClick={() => void openRoom(r)}
@@ -587,7 +613,9 @@ const MarketPage = () => {
         />
       </div>
       <div className="text-[11px] text-[#98A2B3]">
-        Floor {market?.floorLabel ?? '—'} · {market?.live ?? 0} live · {market?.buyableCount ?? 0} buyable in-app
+        {room.ref.kind === 'bsv21' && isPersonalTokenId(room.ref.id, personalLinks)
+          ? "Personal token · holding one opens its holders' room. Not an investment, no dividends."
+          : `Floor ${market?.floorLabel ?? '—'} · ${market?.live ?? 0} live · ${market?.buyableCount ?? 0} buyable in-app`}
       </div>
       {market === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading listings…</p>}
       {market?.listings.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-6">No live listings.</p>}

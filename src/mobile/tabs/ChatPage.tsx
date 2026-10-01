@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowUp, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, UserPlus, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Ban, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, UserPlus, WifiOff, X } from 'lucide-react';
 import { sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -17,12 +17,16 @@ import {
   parseInvitee,
   parseLookup,
   parseTokenKey,
+  personalOfRoom,
   type GateRefusal,
   type Holding,
   type TokenGate,
   type TokenRoomEntry,
   type TokenRoomLookup,
 } from '../chat/tokenRooms';
+import { addToInviteList, inviteLine, inviteState, loadInviteList } from '../chat/invites';
+import { knownPersonal, rememberPersonal, tickerLabel } from '../names/personalToken';
+import { retryPersonalRoom } from '../names/claimPersonal';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
@@ -124,6 +128,7 @@ const Conversation = ({
   entry,
   onLocked,
   onInvite,
+  onBans,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -135,8 +140,10 @@ const Conversation = ({
   /** The server refused: you no longer hold enough (or never did). */
   onLocked: (refusal: GateRefusal) => void;
   onInvite: (() => void) | null;
+  /** Room admin: the ban list. */
+  onBans: (() => void) | null;
 }) => {
-  const title = room.name || (entry ? `$${entry.gate.symbol}` : roomTitle(room, me));
+  const title = entryTitle(entry, room) ?? roomTitle(room, me);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -280,6 +287,11 @@ const Conversation = ({
                 : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
           </div>
         </div>
+        {onBans && (
+          <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Bans">
+            <Ban size={18} color={MUTED} />
+          </button>
+        )}
         {onInvite && (
           <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
             <UserPlus size={20} color={GOLD} />
@@ -605,9 +617,95 @@ const InviteSheet = ({
   );
 };
 
+/**
+ * Room admin: ban a $handle or an address. Membership = holds the token AND not banned; the
+ * server enforces it on every read/post, so a banned holder is out on their next request.
+ */
+const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: string; onClose: () => void }) => {
+  const [bans, setBans] = useState<{ handle: string | null; address: string | null }[] | null>(null);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const load = useCallback(() => {
+    client
+      .bans(ticker)
+      .then(setBans)
+      .catch((e) => setError(errText(e)));
+  }, [client, ticker]);
+  useEffect(load, [load]);
+  const act = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      setInput('');
+      load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const who = parseInvitee(input);
+  return (
+    <Sheet title="Banned from this room" onClose={onClose}>
+      <p className="text-xs mb-3" style={{ color: MUTED }}>
+        A banned handle or address can't read or post here, even holding the token.
+      </p>
+      <div className="flex items-center gap-2 rounded-2xl px-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="$handle or address"
+          autoCapitalize="none"
+          autoCorrect="off"
+          className="flex-1 bg-transparent py-3 text-white outline-none"
+        />
+      </div>
+      <button
+        onClick={() => who && act(() => client.ban(ticker, 'address' in who ? who.address : `$${who.handle}`))}
+        disabled={busy || !who}
+        className="w-full mt-3 rounded-2xl py-3 font-bold disabled:opacity-50"
+        style={{ background: GOLD, color: '#1a1300' }}
+      >
+        Ban
+      </button>
+      <ul className="mt-3 flex flex-col gap-2">
+        {bans?.length === 0 && <li className="text-xs" style={{ color: MUTED }}>Nobody is banned.</li>}
+        {bans?.map((b) => {
+          const target = b.handle ? `$${b.handle}` : (b.address ?? '');
+          return (
+            <li key={target} className="flex items-center justify-between text-sm text-white">
+              <span className={ELLIPSIS}>{target}</span>
+              <button onClick={() => act(() => client.unban(ticker, target))} disabled={busy} className="text-xs underline" style={{ color: GOLD }}>
+                Unban
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+    </Sheet>
+  );
+};
+
+/** "$BOASE ✓" for a verified personal token, else the room name / "$SYM". */
+const entryTitle = (entry: TokenRoomEntry | null, room: ChatRoom | null): string | null => {
+  if (!entry) return room?.name || null;
+  if (entry.key.startsWith('coll:')) return room?.name || entry.gate.symbol;
+  const label = tickerLabel(entry.gate.symbol, entry.holding.id, knownPersonal());
+  return label.endsWith('✓') ? label : room?.name || label;
+};
+
 // ───────────────────────────── Token rooms list ─────────────────────────────
 
 const LOOKUP_TTL_MS = 5 * 60_000;
+
+const isAdmin = (room: ChatRoom, me: string) => {
+  const n = (h: string | null | undefined) => (h || '').replace(/^\$/, '').toLowerCase();
+  const by = room.created_by_handle ?? personalOfRoom(room)?.by;
+  return !!by && n(by) === n(me);
+};
 
 const ChatPage = () => {
   const { apiContext } = useServiceContext();
@@ -625,7 +723,12 @@ const ChatPage = () => {
   const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null } | null>(null);
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [banning, setBanning] = useState(false);
   const [opening, setOpening] = useState('');
+  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+  const [accepted, setAccepted] = useState<Set<string>>(new Set());
+  const { chromeStorageService } = useServiceContext();
+  const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
@@ -683,6 +786,15 @@ const ChatPage = () => {
     if (handle) void prove();
   }, [handle, prove]);
 
+  // Invite lists (local, per handle) and a personal room still waiting for the indexer.
+  useEffect(() => {
+    if (!handle) return;
+    setIgnored(loadInviteList(handle, 'ignored'));
+    setAccepted(loadInviteList(handle, 'accepted'));
+    if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle, identityAddress]);
+
   const refresh = useCallback(() => {
     if (!handle || !online) return;
     void walletHoldings(apiContext)
@@ -721,7 +833,9 @@ const ChatPage = () => {
           .catch(() => null),
       ),
     ).then((found) => {
-      const add = Object.fromEntries(found.filter((l): l is TokenRoomLookup => !!l).map((l) => [l.key, l]));
+      const ok = found.filter((l): l is TokenRoomLookup => !!l);
+      ok.forEach((l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }));
+      const add = Object.fromEntries(ok.map((l) => [l.key, l]));
       if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
     });
   }, [client, handle, holdings, rooms]);
@@ -730,12 +844,23 @@ const ChatPage = () => {
     () => (holdings && rooms ? buildTokenRoomList(holdings, rooms, lookups) : null),
     [holdings, rooms, lookups],
   );
+  const personalOf = useCallback(
+    (e: TokenRoomEntry) => (e.room ? personalOfRoom(e.room) : null) ?? lookups[e.key]?.personal ?? null,
+    [lookups],
+  );
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase().replace(/^\$/, '');
-    return (entries ?? []).filter(
-      (e) => !q || e.gate.symbol.toLowerCase().includes(q) || (e.room?.name ?? '').toLowerCase().includes(q),
-    );
-  }, [entries, query]);
+    return (entries ?? [])
+      .map((e) => ({ e, invite: inviteState(e, personalOf(e), handle || '', { ignored, accepted }) }))
+      .filter(({ invite }) => invite !== 'hidden')
+      .filter(({ e }) => !q || e.gate.symbol.toLowerCase().includes(q) || (e.room?.name ?? '').toLowerCase().includes(q));
+  }, [entries, query, personalOf, handle, ignored, accepted]);
+
+  const ignoreInvite = (key: string) => handle && setIgnored(addToInviteList(handle, 'ignored', key));
+  const acceptInvite = (e: TokenRoomEntry) => {
+    if (handle) setAccepted(addToInviteList(handle, 'accepted', e.key));
+    void openEntry(e);
+  };
 
   const buy = (key: string) => {
     const ref = parseTokenKey(key);
@@ -901,8 +1026,37 @@ const ChatPage = () => {
         )}
 
         <ul className="w-full">
-          {shown.map((e) => {
-            const title = e.room?.name || (e.key.startsWith('coll:') ? e.gate.symbol : `$${e.gate.symbol}`);
+          {shown.map(({ e, invite }) => {
+            const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
+            const personal = personalOf(e);
+            if (invite === 'invite' && personal) {
+              return (
+                <li key={e.key} className="flex items-center gap-3 px-4 py-[10px]">
+                  <Avatar title={e.gate.symbol} />
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{inviteLine(personal)}</div>
+                    <div className={`text-[12px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                      {title} · {e.members ?? 0} holder{e.members === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => acceptInvite(e)}
+                    disabled={!!opening}
+                    className="rounded-xl px-3 py-1 text-xs font-bold"
+                    style={{ background: GOLD, color: '#1a1300' }}
+                  >
+                    Join
+                  </button>
+                  <button
+                    onClick={() => ignoreInvite(e.key)}
+                    className="rounded-xl px-3 py-1 text-xs font-bold text-white"
+                    style={{ background: PANEL }}
+                  >
+                    Ignore
+                  </button>
+                </li>
+              );
+            }
             const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
             const sub =
               e.status === 'start'
@@ -972,6 +1126,7 @@ const ChatPage = () => {
           online={online}
           onAuthLost={authLost}
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
+          onBans={isAdmin(open.room, handle) ? () => setBanning(true) : null}
           onLocked={(r) => {
             setOpen(null);
             setLocked({ gate: r.gate, heldRaw: r.heldRaw, members: r.room?.members ?? null });
@@ -983,6 +1138,7 @@ const ChatPage = () => {
           }}
         />
       )}
+      {banning && open && <BansSheet client={client} ticker={open.room.ticker} onClose={() => setBanning(false)} />}
       {inviting && open?.entry && (
         <InviteSheet client={client} ticker={open.room.ticker} entry={open.entry} onClose={() => setInviting(false)} />
       )}

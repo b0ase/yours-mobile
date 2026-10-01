@@ -167,3 +167,23 @@ All endpoints need `Authorization: Bearer <bChat session>`.
 - The v1 hooks for this: `ChatMessage.encrypted`, `TokenGate` in `tokenRooms.ts`, and the server's
   `member_joined` / `member_left` events with `via: 'token-gate'`. These events are the triggers
   for key distribution and rotation.
+
+## Personal token + room (claim a name)
+
+Settings → Identity → Get your name: "Use this name" (with "Also mint my personal token" on) runs,
+behind one SendConfirmation, the OpNS bind and a BSV-21 `deployBsv21Mint` with ticker = the name
+(e.g. `BOASE`), supply 1,000,000 by default (editable), decimals 0, icon = ring-b, all to the
+wallet. The deploy tx carries an extra 0-sat MAP output (`app bWallet type personal-token name
+boase ticker BOASE`). The wallet then opens the personal room in bit-sign
+(`POST /rooms/token-gated` with `min 1, purpose community, personal_name`), signatures only; if the
+token is not indexed yet the Chat tab retries. bit-sign binds `personal_name` only when it equals
+the caller's bChat handle.
+
+- **Invite** = send 1 token (existing Invite sheet).
+- **Unsolicited invite**: a personal room you hold the token for but have not joined shows as
+  "$alice invited you — Join / Ignore". Ignore is local (src/mobile/chat/invites.ts); nothing spent.
+- **✓**: `$BOASE ✓` only when the token id equals the one linked to that name (local link, bit-sign
+  `GET /rooms/token-gated?name=`); copycat tickers show without ✓.
+- **Bans**: room admin → ban icon in the room. Membership = holds ≥ min AND not banned
+  (bit-sign `ticker_room_bans`, `/rooms/[ticker]/bans`).
+- Personal tokens are access tokens: Market shows a "Personal token" badge and no floor/price.

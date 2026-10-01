@@ -8,6 +8,8 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { checkOpnsAvailability, bwalletPaymail, type Availability } from './names';
 import { getMyName, onMyNameChange, setMyName } from './myName';
+import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
+import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } from './claimPersonal';
 
 /**
  * Settings → Identity → "Get your name". Read-only OpNS search plus the names this wallet
@@ -31,10 +33,15 @@ export const GetYourName = () => {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Availability | null>(null);
   const [owned, setOwned] = useState<{ name: string; id: string }[]>([]);
-  const [pending, setPending] = useState<{ name: string; id: string } | null>(null);
+  const [pending, setPending] = useState<{ name: string; id: string; tokenOnly?: boolean } | null>(null);
   const [msg, setMsg] = useState('');
+  // Personal token: minted with the name (same confirmation) unless already linked.
+  const [link, setLink] = useState(getPersonalLink(identityAddress));
+  const [withToken, setWithToken] = useState(true);
+  const [supply, setSupply] = useState(DEFAULT_SUPPLY);
 
   useEffect(() => onMyNameChange(() => setMine(getMyName(identityAddress))), [identityAddress]);
+  useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
 
   useEffect(() => {
     if (!apiContext) return;
@@ -64,19 +71,84 @@ export const GetYourName = () => {
     }
   };
 
-  const register = async (n: { name: string; id: string }) => {
+  const mintsToken = (name: string) => withToken && !link && !!personalTicker(name);
+  const supplyError = validateSupply(supply);
+
+  const mintPersonal = async (name: string) => {
+    const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
+    setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet. Opening your room…`);
+    // Signatures only; a fresh token may not be indexed yet — Chat retries until it is.
+    openPersonalRoom(apiContext, identityAddress, l)
+      .then((t) => setMsg(`$${l.ticker} minted and your room ${t ? `$${t} ` : ''}is open. Invite = send 1 $${l.ticker}.`))
+      .catch(() => setMsg(`$${l.ticker} minted. Your room opens in Chat once the token is indexed.`));
+  };
+
+  const register = async (n: { name: string; id: string; tokenOnly?: boolean }) => {
     setPending(null);
     setBusy(true);
     try {
-      const res = await registerOpns.execute(apiContext, { id: n.id });
-      if (res.error) throw new Error(res.error);
-      setMyName(identityAddress, n.name);
-      setMsg(`${n.name} is now your name`);
+      if (!n.tokenOnly) {
+        const res = await registerOpns.execute(apiContext, { id: n.id });
+        if (res.error) throw new Error(res.error);
+        setMyName(identityAddress, n.name);
+        setMsg(`${n.name} is now your name`);
+      }
+      if (n.tokenOnly || mintsToken(n.name)) await mintPersonal(n.name);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Registration failed');
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmLines = (p: { name: string; tokenOnly?: boolean }) => {
+    const lines = p.tokenOnly ? [] : [{ address: `OpNS: ${p.name} → your identity key`, amount: '1 sat (kept)' }];
+    const t = personalTicker(p.name);
+    if (t && (p.tokenOnly || mintsToken(p.name))) {
+      lines.push({ address: `New token $${t} (${Number(supply).toLocaleString()}, to you) + your $${t} room`, amount: '1 sat (kept)' });
+    }
+    return lines;
+  };
+  const fee = (p: { name: string; tokenOnly?: boolean }) =>
+    (p.tokenOnly ? 0 : REGISTER_FEE_ESTIMATE_SATS) + (p.tokenOnly || mintsToken(p.name) ? PERSONAL_FEE_ESTIMATE_SATS : 0);
+
+  // A render helper, not a component: a nested component would remount and drop input focus.
+  const tokenOptions = () => {
+    const t = personalTicker(myName || query) ?? 'NAME';
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-[11px]" style={{ color: gray }}>
+          A personal token, ticker <b style={{ color: fg }}>${t}</b>, all to your wallet, plus a room only holders can
+          enter. Invite = send 1 ${t}. It's for access, not trading.
+        </p>
+        <label className="text-[11px] flex items-center gap-2" style={{ color: gray }}>
+          Supply
+          <input
+            value={supply}
+            inputMode="numeric"
+            onChange={(e) => setSupply(e.target.value)}
+            className="flex-1 rounded-lg px-2 py-1 text-xs bg-transparent outline-none"
+            style={{ color: fg, border: `1px solid ${supplyError ? '#ff4444' : '#3a2f0c'}` }}
+          />
+        </label>
+        {supplyError && (
+          <span className="text-[11px]" style={{ color: '#ff4444' }}>
+            {supplyError}
+          </span>
+        )}
+        {myName ? (
+          <button
+            type="button"
+            disabled={busy || !!supplyError}
+            onClick={() => setPending({ name: myName, id: '', tokenOnly: true })}
+            className="self-start px-3 py-1 rounded-lg text-xs font-semibold border-0 cursor-pointer disabled:opacity-50"
+            style={{ background: '#FFD24D', color: '#000' }}
+          >
+            Create ${t} token + room
+          </button>
+        ) : null}
+      </div>
+    );
   };
 
   const gray = theme.color.global.gray;
@@ -147,6 +219,14 @@ export const GetYourName = () => {
           <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
             Names you own
           </span>
+          {!link && (
+            <label className="text-[11px] flex items-center gap-2" style={{ color: gray }}>
+              <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
+              Also mint my personal token ({supplyError ? 'fix supply below' : `${Number(supply).toLocaleString()}`}) and
+              open my room
+            </label>
+          )}
+          {!link && withToken && !myName && tokenOptions()}
           {owned.map((n) => (
             <div key={n.id} className="flex items-center justify-between">
               <span className="text-sm" style={{ color: fg }}>
@@ -171,6 +251,23 @@ export const GetYourName = () => {
           ))}
         </div>
       )}
+      {myName && personalTicker(myName) && (
+        <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: '1px solid #3a2f0c' }}>
+          <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
+            Your token
+          </span>
+          {link ? (
+            <p className="text-xs" style={{ color: fg }}>
+              <b style={{ color: '#FFD24D' }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
+              {link.roomTicker ? 'room open' : 'room opens once indexed'}. Invite someone by sending them 1 ${link.ticker}{' '}
+              from the room.
+            </p>
+          ) : (
+            tokenOptions()
+          )}
+        </div>
+      )}
+
       {msg && (
         <p className="text-xs" style={{ color: gray }}>
           {msg}
@@ -180,8 +277,8 @@ export const GetYourName = () => {
       <SendConfirmation
         show={!!pending}
         theme={theme}
-        lineItems={pending ? [{ address: `OpNS: ${pending.name} → your identity key`, amount: '1 sat (kept)' }] : []}
-        total={`~${REGISTER_FEE_ESTIMATE_SATS} sats network fee`}
+        lineItems={pending ? confirmLines(pending) : []}
+        total={`~${pending ? fee(pending) : REGISTER_FEE_ESTIMATE_SATS} sats network fee`}
         isProcessing={busy}
         onConfirm={() => pending && register(pending)}
         onCancel={() => setPending(null)}
