@@ -24,6 +24,7 @@ import {
   VolumeX,
   WifiOff,
   X,
+  ChevronDown,
 } from 'lucide-react';
 import { inscribe, sendBsv } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -1183,49 +1184,47 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           ))}
         </div>
 
-        <div className="flex gap-2 px-4 py-2 overflow-x-auto" role="tablist" aria-label="Source">
-          {SOURCES.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => {
-                setSource(s.id);
-                saveSource(s.id);
-              }}
-              className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
-              style={
-                source === s.id
-                  ? { background: GOLD, color: '#1a1300' }
-                  : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
-              }
+        <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
+          {tab === 'foryou' && (
+            // Sort as a compact native dropdown left of the source chips (native picker on phones).
+            <label
+              className="relative shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
+              style={{ background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }}
             >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'foryou' && (
-          <div className="flex gap-2 px-4 pb-2" role="tablist" aria-label="Sort">
-            {(
-              [
-                ['latest', 'Latest'],
-                ['locked', 'Most locked'],
-              ] as const
-            ).map(([id, label]) => (
+              {sort === 'locked' && <Lock size={12} />}
+              {sort === 'locked' ? 'Most locked' : 'Latest'}
+              <ChevronDown size={12} />
+              <select
+                aria-label="Sort"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as 'latest' | 'locked')}
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              >
+                <option value="latest">Latest</option>
+                <option value="locked">Most locked</option>
+              </select>
+            </label>
+          )}
+          <div className="flex gap-2" role="tablist" aria-label="Source">
+            {SOURCES.map((s) => (
               <button
-                key={id}
-                onClick={() => setSort(id)}
-                className="shrink-0 flex items-center gap-1 rounded-full px-3 py-1 text-[12px] font-semibold"
+                key={s.id}
+                onClick={() => {
+                  setSource(s.id);
+                  saveSource(s.id);
+                }}
+                className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
                 style={
-                  sort === id
-                    ? { background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }
+                  source === s.id
+                    ? { background: GOLD, color: '#1a1300' }
                     : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
                 }
               >
-                {id === 'locked' && <Lock size={12} />} {label}
+                {s.label}
               </button>
             ))}
           </div>
-        )}
+        </div>
 
         {!online && (
           <div
