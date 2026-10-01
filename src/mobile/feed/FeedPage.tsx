@@ -2,17 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
+  Bookmark,
   Coins,
+  ExternalLink,
   Flag,
   Heart,
+  Link,
   Lock,
+  LockOpen,
   Film,
   ImagePlus,
   Music,
   MessageCircle,
   MoreHorizontal,
   PenLine,
+  Quote,
   RefreshCw,
+  Repeat2,
   UserCheck,
   UserPlus,
   VolumeX,
@@ -29,6 +35,7 @@ import { resolveImageUrl, useIdentity } from '../../hooks/useIdentity';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { openDappBrowser } from '../dappBrowser';
+import { REMOTE_ACTIONS, actionLabel, postActions, type PostAction } from './sources';
 import { fileToBase64, formatBytes, txFeeSats } from '../mint/mint';
 import { PostMedia } from './FeedMedia';
 import { SOURCE_REGISTRY } from './sources';
@@ -36,8 +43,10 @@ import { kindOf, MAX_POST_IMAGES, planAv } from './media';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
 import {
   buildFollowScript,
+  buildBranchScript,
   buildLikeScript,
   buildPostScript,
+  quoteText,
   estimatePostFee,
   feedTimeLabel,
   filterFeed,
@@ -257,6 +266,19 @@ type PostActions = {
   onOpen: (p: FeedPost) => void;
   onAuthor: (a: Author) => void;
   onMore: (p: FeedPost) => void;
+  /** Branch, quote, copy link, open / bookmark / unlock in the source app. */
+  onAction: (p: FeedPost, action: PostAction) => void;
+};
+
+const ACTION_ICONS: Partial<Record<PostAction, typeof Heart>> = {
+  branch: Repeat2,
+  quote: Quote,
+  copyLink: Link,
+  open: ExternalLink,
+  bookmark: Bookmark,
+  unlock: LockOpen,
+  report: Flag,
+  mute: VolumeX,
 };
 
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
@@ -303,39 +325,70 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
         )}
         {post.text && <p className="text-[14px] text-white whitespace-pre-wrap break-words mt-[2px]">{post.text}</p>}
         <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bwallet'} />
-        <div className="flex items-center gap-6 mt-2" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => a.onReply(post)}
-            className="flex items-center gap-1 text-[12px]"
-            style={{ color: MUTED }}
-            aria-label="Reply"
-          >
-            <MessageCircle size={16} /> {post.replies || ''}
-          </button>
-          <button
-            onClick={() => !liked && a.onLike(post)}
-            className="flex items-center gap-1 text-[12px]"
-            style={{ color: liked ? GOLD : MUTED }}
-            aria-label="Like"
-          >
-            <Heart size={16} fill={liked ? GOLD : 'none'} /> {post.likes + (liked ? 1 : 0) || ''}
-          </button>
-          <button
-            onClick={() => a.onTip(post)}
-            className="flex items-center gap-1 text-[12px]"
-            style={{ color: MUTED }}
-            aria-label="Tip"
-          >
-            <Coins size={16} /> Tip
-          </button>
-          <button
-            onClick={() => a.onLock(post)}
-            className="flex items-center gap-1 text-[12px]"
-            style={{ color: locked?.total ? GOLD : MUTED }}
-            aria-label="Lock BSV to back this post"
-          >
-            <Lock size={16} /> {locked?.total ? '' : 'Lock'}
-          </button>
+        <div className="flex items-center gap-5 mt-2" onClick={(e) => e.stopPropagation()}>
+          {postActions(post).row.map((act) => {
+            const cls = 'flex items-center gap-1 text-[12px]';
+            if (act === 'reply')
+              return (
+                <button
+                  key={act}
+                  onClick={() => a.onReply(post)}
+                  className={cls}
+                  style={{ color: MUTED }}
+                  aria-label="Reply"
+                >
+                  <MessageCircle size={16} /> {post.replies || ''}
+                </button>
+              );
+            if (act === 'like')
+              return (
+                <button
+                  key={act}
+                  onClick={() => !liked && a.onLike(post)}
+                  className={cls}
+                  style={{ color: liked ? GOLD : MUTED }}
+                  aria-label="Like"
+                >
+                  <Heart size={16} fill={liked ? GOLD : 'none'} /> {post.likes + (liked ? 1 : 0) || ''}
+                </button>
+              );
+            if (act === 'tip')
+              return (
+                <button
+                  key={act}
+                  onClick={() => a.onTip(post)}
+                  className={cls}
+                  style={{ color: MUTED }}
+                  aria-label="Tip"
+                >
+                  <Coins size={16} /> Tip
+                </button>
+              );
+            if (act === 'lock')
+              return (
+                <button
+                  key={act}
+                  onClick={() => a.onLock(post)}
+                  className={cls}
+                  style={{ color: locked?.total ? GOLD : MUTED }}
+                  aria-label="Lock BSV to back this post"
+                >
+                  <Lock size={16} /> {locked?.total ? '' : 'Lock'}
+                </button>
+              );
+            const Icon = ACTION_ICONS[act] ?? MoreHorizontal;
+            return (
+              <button
+                key={act}
+                onClick={() => a.onAction(post, act)}
+                className={cls}
+                style={{ color: MUTED }}
+                aria-label={actionLabel(act, post.source)}
+              >
+                <Icon size={16} />
+              </button>
+            );
+          })}
         </div>
         {!!locked?.total && (
           <div className="mt-1 flex items-center gap-1 text-[11px]" style={{ color: GOLD }}>
@@ -452,10 +505,13 @@ let attachSeq = 0;
 
 const Composer = ({
   replyTo,
+  quote = null,
   onClose,
   onPosted,
 }: {
   replyTo: FeedPost | null;
+  /** Post being quoted: the new post names it (MAP quote) and links it. */
+  quote?: FeedPost | null;
   onClose: () => void;
   onPosted: (txid: string) => void;
 }) => {
@@ -472,7 +528,8 @@ const Composer = ({
   const inscribed = items.filter((i) => i.file);
   // Fee preview: the post itself, with placeholder outpoints for media still to be inscribed.
   const input = {
-    text,
+    text: quote ? quoteText(text, sourceUrl(quote) ?? `https://whatsonchain.com/tx/${quote.txid}`) : text,
+    quote: quote?.txid ?? null,
     media: items.flatMap((i) => [...(i.part ? [i.part] : []), ...(i.poster ? [i.poster] : [])]),
     refs: inscribed.map((i) => ({ outpoint: `${'0'.repeat(64)}_0`, mime: i.mime })),
     replyTo: replyTo ? threadRoot(replyTo) : null,
@@ -559,12 +616,13 @@ const Composer = ({
       const tags = [
         'app:bWallet',
         'type:post',
+        ...(input.quote ? [`quote:${input.quote}`] : []),
         ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
       ];
       const txid = await publish(
         apiContext,
         buildPostScript({ ...input, refs }),
-        replyTo ? 'Feed reply' : 'Feed post',
+        replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
         tags,
       );
       onPosted(txid);
@@ -576,17 +634,20 @@ const Composer = ({
   };
 
   return (
-    <Sheet title={replyTo ? `Reply to ${replyTo.author.name}` : 'New post'} onClose={onClose}>
-      {replyTo && (
+    <Sheet
+      title={replyTo ? `Reply to ${replyTo.author.name}` : quote ? `Quote ${quote.author.name}` : 'New post'}
+      onClose={onClose}
+    >
+      {(replyTo ?? quote) && (
         <p className="text-xs mb-2 line-clamp-2" style={{ color: MUTED }}>
-          {replyTo.text}
+          {(replyTo ?? quote)!.text}
         </p>
       )}
       <textarea
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={replyTo ? 'Post your reply' : "What's happening on-chain?"}
+        placeholder={replyTo ? 'Post your reply' : quote ? 'Add a comment' : "What's happening on-chain?"}
         rows={5}
         className="w-full rounded-2xl p-3 text-[15px] text-white outline-none resize-none"
         style={{ background: PANEL, border: `1px solid ${LINE}` }}
@@ -659,7 +720,7 @@ const Composer = ({
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy || (replyTo ? 'Reply' : 'Post')}
+        {busy || (replyTo ? 'Reply' : quote ? 'Quote' : 'Post')}
       </button>
     </Sheet>
   );
@@ -903,7 +964,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
   const [error, setError] = useState('');
   const [source, setSource] = useState<Source | 'all'>(loadSource);
   const [safetyTick, setSafetyTick] = useState(0);
-  const [composing, setComposing] = useState<{ replyTo: FeedPost | null } | null>(null);
+  const [composing, setComposing] = useState<{ replyTo: FeedPost | null; quote?: FeedPost } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
   const [locking, setLocking] = useState<FeedPost | null>(null);
   const [sort, setSort] = useState<'latest' | 'locked'>('latest');
@@ -1038,6 +1099,36 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     addSnackbar('Reported. It is hidden on this device.', 'info');
   };
 
+  const branch = async (p: FeedPost) => {
+    try {
+      await publish(apiContext, buildBranchScript(p.txid), 'Feed branch', [
+        'app:bWallet',
+        'type:repost',
+        'context:tx',
+        `contextValue:${p.txid}`,
+      ]);
+      addSnackbar(`Branched ${p.author.name}'s post`, 'success');
+    } catch (e) {
+      addSnackbar(e instanceof Error ? e.message : String(e), 'error');
+    }
+  };
+
+  const onAction = (p: FeedPost, act: PostAction) => {
+    setMore(null);
+    const url = sourceUrl(p);
+    if (act === 'branch') return void branch(p);
+    if (act === 'quote') return setComposing({ replyTo: null, quote: p });
+    if (act === 'mute') return mute(p);
+    if (act === 'report') return report(p);
+    if (act === 'copyLink' && url)
+      return void navigator.clipboard
+        ?.writeText(url)
+        .then(() => addSnackbar('Link copied', 'success'))
+        .catch(() => addSnackbar('Could not copy the link', 'error'));
+    // Open, and actions that live on the source's servers (Twetch bookmarks, paid unlocks).
+    if ((act === 'open' || REMOTE_ACTIONS.has(act)) && url) return void openDappBrowser(url);
+  };
+
   const actions: PostActions = {
     liked: likedSet,
     onLike: (p) => void like(p),
@@ -1048,6 +1139,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     onOpen: setThread,
     onAuthor: setProfile,
     onMore: setMore,
+    onAction,
   };
 
   const me: Author = {
@@ -1176,6 +1268,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
       {composing && (
         <Composer
           replyTo={composing.replyTo}
+          quote={composing.quote ?? null}
           onClose={() => setComposing(null)}
           onPosted={(txid) => {
             setComposing(null);
@@ -1198,16 +1291,21 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
       )}
       {more && (
         <Sheet title={more.author.name} onClose={() => setMore(null)}>
-          <button onClick={() => mute(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
-            <VolumeX size={18} color={MUTED} /> Mute {more.author.name}
-          </button>
-          <button
-            onClick={() => report(more)}
-            className="w-full flex items-center gap-3 py-3 text-sm"
-            style={{ color: RED }}
-          >
-            <Flag size={18} /> Report post
-          </button>
+          {postActions(more).more.map((act) => {
+            const Icon = ACTION_ICONS[act] ?? MoreHorizontal;
+            const danger = act === 'report';
+            return (
+              <button
+                key={act}
+                onClick={() => onAction(more, act)}
+                className="w-full flex items-center gap-3 py-3 text-sm"
+                style={{ color: danger ? RED : '#fff' }}
+              >
+                <Icon size={18} color={danger ? RED : MUTED} />
+                {act === 'mute' ? `Mute ${more.author.name}` : actionLabel(act, more.source)}
+              </button>
+            );
+          })}
         </Sheet>
       )}
       {profile && (

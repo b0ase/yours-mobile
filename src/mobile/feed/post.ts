@@ -50,6 +50,8 @@ export type PostInput = {
   /** Media inscribed as 1Sat ordinals first, referenced by outpoint (MAP media_<n> + an ordfs link). */
   refs?: { outpoint: string; mime: string }[];
   replyTo?: string | null;
+  /** Quoted post (MAP `quote <txid>`); the composer also appends the original's link to the text. */
+  quote?: string | null;
   app?: string;
   /** Treechat thread a reply belongs to; written as MAP treechat_thread_id so Treechat can place it. */
   threadId?: string | null;
@@ -101,6 +103,7 @@ export function validatePost(p: PostInput): string | null {
   if (refs.length > 4) return 'Up to 4 videos or audio files per post.';
   for (const r of refs) if (!refToOutpoint(r.outpoint) || !kindOf(r.mime)) return 'That media reference is not valid.';
   if (p.replyTo != null && !isTxid(p.replyTo)) return 'That post id is not valid.';
+  if (p.quote != null && !isTxid(p.quote)) return 'That post id is not valid.';
   if (p.threadId != null && !isThreadId(p.threadId)) return 'That thread id is not valid.';
   return null;
 }
@@ -133,6 +136,7 @@ export function buildPostScript(p: PostInput): Script {
   const kv: [string, string][] = [['type', 'post']];
   refs.forEach((r, i) => kv.push([`media_${i}`, `${r.outpoint}|${r.mime}`]));
   if (p.replyTo) kv.push(['context', 'tx'], ['tx', p.replyTo.toLowerCase()]);
+  if (p.quote) kv.push(['quote', p.quote.toLowerCase()]);
   if (p.replyTo && p.threadId) kv.push(['treechat_thread_id', p.threadId.toLowerCase()]);
   writeMap(s, kv, p.app ?? FEED_APP);
   return s;
@@ -153,6 +157,39 @@ export function buildLikeScript(txid: string, app = FEED_APP, unlike = false): S
   }
   return s;
 }
+
+/**
+ * Branch (repost): the Bitcoin Schema repost, `MAP SET app bWallet type repost context tx tx <txid>`.
+ * Twetch's own branch is `type branch tx <txid> action twetch/branch-and-like@0.0.1`, signed by
+ * Twetch's server; we share its `tx` key but always write our own app and the schema type.
+ */
+export function buildBranchScript(txid: string, app = FEED_APP): Script {
+  if (!isTxid(txid)) throw new Error('That post id is not valid.');
+  const s = opReturn();
+  s.writeBin(toArray(MAP_PREFIX, 'utf8'));
+  pushStr(s, 'SET');
+  for (const [k, v] of [
+    ['app', app],
+    ['type', 'repost'],
+    ['context', 'tx'],
+    ['tx', txid.toLowerCase()],
+  ]) {
+    pushStr(s, k);
+    pushStr(s, v);
+  }
+  return s;
+}
+
+/**
+ * Quote: a normal post (B text + MAP `type post`) that names the original with `quote <txid>`
+ * (Twetch's quote is a branch with content, `quotedPostId`). The original's link is appended to
+ * the text so every client can follow it. No `tx` / `context` key, so it is not read as a reply.
+ */
+export const buildQuoteScript = (text: string, txid: string, link: string | null, app = FEED_APP): Script =>
+  buildPostScript({ text: quoteText(text, link), quote: txid, app });
+
+/** The quote's text: the user's words, then the original's link. */
+export const quoteText = (text: string, link: string | null): string => [text.trim(), link].filter(Boolean).join('\n');
 
 export function buildFollowScript(bapId: string, app = FEED_APP, unfollow = false): Script {
   if (!bapId || !/^[1-9A-HJ-NP-Za-km-z]{20,40}$/.test(bapId)) throw new Error('That identity id is not valid.');

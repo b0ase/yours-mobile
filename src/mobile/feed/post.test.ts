@@ -6,7 +6,9 @@ import {
   B_PREFIX,
   MAP_PREFIX,
   MAX_INLINE_IMAGE_BYTES,
+  buildBranchScript,
   buildFollowScript,
+  buildQuoteScript,
   buildLikeScript,
   buildPostScript,
   decodeScript,
@@ -183,3 +185,28 @@ test('visiblePosts applies the safety filter and mutes', () => {
 });
 
 test('B prefix constant is the bitcom B address', () => expect(B_PREFIX).toBe('19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut'));
+
+describe('branch and quote', () => {
+  const TXID = 'cd'.repeat(32);
+  test("branch is a Bitcoin Schema repost, app bWallet, sharing Twetch's tx key", () => {
+    const d = decodeScript(buildBranchScript(TXID.toUpperCase()))!;
+    expect(d.B).toEqual([]);
+    expect(d.MAP).toEqual({ app: 'bWallet', type: 'repost', context: 'tx', tx: TXID });
+    expect(() => buildBranchScript('nope')).toThrow();
+  });
+  test('quote is a post naming the original, with its link, never a reply', () => {
+    const link = `https://twetch.com/t/${TXID}`;
+    const d = decodeScript(buildQuoteScript('  so true ', TXID, link))!;
+    expect(Utils.toUTF8(d.B[0].content)).toBe(`so true\n${link}`);
+    expect(d.MAP).toEqual({ app: 'bWallet', type: 'post', quote: TXID });
+    expect(d.MAP.app).not.toBe('twetch');
+    const parsed = parseBmapPost({
+      tx: { h: 'ef'.repeat(32) },
+      MAP: [d.MAP],
+      B: [{ content: 'so true', 'content-type': 'text/markdown' }],
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.replyTo).toBeNull();
+    expect(() => buildQuoteScript('x', 'bad', null)).toThrow();
+  });
+});
