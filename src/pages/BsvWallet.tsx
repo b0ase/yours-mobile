@@ -74,6 +74,7 @@ import { decrypt } from '../utils/crypto';
 import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
+import { onPay, takePay } from '../mobile/wallet/payNav';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -213,6 +214,20 @@ export const BsvWallet = () => {
   const [recipients, setRecipients] = useState<Recipient[]>([
     { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'bsv' },
   ]);
+
+  // Chat › Contacts › Pay: open Send with that recipient filled in (amount + confirm stay manual).
+  useEffect(() => {
+    const take = () => {
+      const to = takePay();
+      if (!to) return;
+      setRecipients([
+        { id: crypto.randomUUID(), address: to, satSendAmount: null, usdSendAmount: null, amountType: 'bsv' },
+      ]);
+      setPageState('send');
+    };
+    take();
+    return onPay(take);
+  }, []);
 
   const addRecipient = () => {
     setRecipients((prev) => [

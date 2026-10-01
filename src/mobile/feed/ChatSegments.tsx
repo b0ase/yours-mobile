@@ -7,13 +7,15 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useAccountNames } from '../names/MyNameBadge';
 
 /**
- * Chat tab top switch: Rooms | Calls (Feed is its own bottom-bar tab). Generic: add a segment by adding one entry to
- * SEGMENTS and one case in ChatTabs. Rooms is the existing token-rooms page (it renders the
- * header we pass it in place of its old "Rooms" title).
+ * Chat tab top switch: Chatrooms | DMs | Calls (Feed is its own bottom-bar tab). Generic: add a
+ * segment by adding one entry to SEGMENTS and one case in ChatTabs. Chatrooms (id 'rooms') is the
+ * token-rooms page; DMs is the 1:1 list + contacts (chat/DmsPage.tsx). Each renders the header
+ * we pass it.
  */
-export type ChatSegment = 'rooms' | 'calls';
+export type ChatSegment = 'rooms' | 'dms' | 'calls';
 export const SEGMENTS: { id: ChatSegment; label: string }[] = [
-  { id: 'rooms', label: 'Rooms' },
+  { id: 'rooms', label: 'Chatrooms' },
+  { id: 'dms', label: 'DMs' },
   { id: 'calls', label: 'Calls' },
 ];
 const GOLD = '#FFD24D';
@@ -92,7 +94,7 @@ export const useChatDisplayName = () => {
   ).displayName;
 };
 
-/** A non-Rooms segment: same top bar + switch, then its body. */
+/** The Calls segment: same top bar + switch, then its body. */
 const SegmentShell = ({ header, children }: { header: ReactNode; children: ReactNode }) => (
   <div
     className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
@@ -107,12 +109,18 @@ const SegmentShell = ({ header, children }: { header: ReactNode; children: React
   </div>
 );
 
-export const ChatTabs = ({ rooms }: { rooms: (header: ReactNode) => ReactNode }) => {
-  // Opens on Rooms (so a pending "Open room" hand-off is never missed) unless a
+export const ChatTabs = ({
+  rooms,
+  dms,
+}: {
+  rooms: (header: ReactNode) => ReactNode;
+  dms: (header: ReactNode) => ReactNode;
+}) => {
+  // Opens on Chatrooms (so a pending "Open room" hand-off is never missed) unless a
   // segment was requested before this mounted (chat/segmentNav.ts).
   const [seg, setSeg] = useState<ChatSegment>(() => takeChatSegment() ?? 'rooms');
   const change = setSeg;
-  // "Open room" from Wallet / Market must land in Rooms even if Calls was showing.
+  // "Open room" from Wallet / Market must land in Chatrooms even if Calls was showing.
   useEffect(() => onTokenNav(() => setSeg('rooms')), []);
   useEffect(
     () =>
@@ -124,6 +132,7 @@ export const ChatTabs = ({ rooms }: { rooms: (header: ReactNode) => ReactNode })
   );
   const header = <SegmentSwitch value={seg} onChange={change} />;
   if (seg === 'rooms') return <>{rooms(header)}</>;
+  if (seg === 'dms') return <>{dms(header)}</>;
   return (
     <SegmentShell header={header}>
       {CallsList ? (

@@ -76,11 +76,13 @@ import {
   type PayoutSpec,
 } from '../chat/bounties';
 import { PullToRefresh } from '../ui/PullToRefresh';
+import { DmsPage, type DmConversationProps } from '../chat/DmsPage';
 
 /**
- * Chat tab: TOKEN ROOMS ONLY (owner decision; docs/TOKEN-ROOMS.md). The list is one room per
+ * Chat › Chatrooms: TOKEN ROOMS ONLY (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
+ * segment (chat/DmsPage.tsx, owner reversal of the earlier no-DMs rule). The list is one room per
  * BSV-21 token / 1Sat collection this wallet holds at or above the room minimum — buy a token
- * and its room appears; sell it and the room goes. No DMs, no contacts, no new-chat-by-handle.
+ * and its room appears; sell it and the room goes.
  * Rooms list → conversation → back, all inside this tab; the conversation covers the bottom bar.
  * Talks to bitcoinchat.online's API with a session the wallet gets by signing
  * bChat's wallet-login challenge (../chat/api.ts). Live updates by polling
@@ -174,7 +176,8 @@ const Conversation = ({
   onInvite: (() => void) | null;
   /** Room admin: the ban list. */
   onBans: (() => void) | null;
-  onBounties: () => void;
+  /** Null hides the Bounties button (1:1 DMs). */
+  onBounties: (() => void) | null;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
@@ -327,17 +330,19 @@ const Conversation = ({
             <Ban size={18} color={MUTED} />
           </button>
         )}
-        <button onClick={onBounties} className="relative p-2 rounded-full active:opacity-60" aria-label="Bounties">
-          <Trophy size={20} color={GOLD} />
-          {bountyBadge > 0 && (
-            <span
-              className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
-              style={{ background: '#F97066', color: '#fff' }}
-            >
-              {bountyBadge}
-            </span>
-          )}
-        </button>
+        {onBounties && (
+          <button onClick={onBounties} className="relative p-2 rounded-full active:opacity-60" aria-label="Bounties">
+            <Trophy size={20} color={GOLD} />
+            {bountyBadge > 0 && (
+              <span
+                className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                style={{ background: '#F97066', color: '#fff' }}
+              >
+                {bountyBadge}
+              </span>
+            )}
+          </button>
+        )}
         {onInvite && (
           <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
             <UserPlus size={20} color={GOLD} />
@@ -1076,7 +1081,7 @@ const isAdmin = (room: ChatRoom, me: string) => {
   return !!by && n(by) === n(me);
 };
 
-/** Token rooms (the Rooms segment); `header` is the Chat tab's Rooms | Calls switch. */
+/** Token rooms (the Chatrooms segment); `header` is the Chat tab's Chatrooms | DMs | Calls switch. */
 const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const myName = useChatDisplayName();
   const { apiContext } = useServiceContext();
@@ -1308,7 +1313,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         <SegmentRow>{header}</SegmentRow>
-        <SegmentTitle title="Rooms">
+        <SegmentTitle title="Chatrooms">
           {handle && (
             <span className="mr-1 flex flex-col items-end leading-tight">
               <span className="text-[12px] font-semibold text-white">{myName || `$${handle}`}</span>
@@ -1326,7 +1331,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
             style={{ background: '#1a1408', color: '#e6c76a' }}
           >
-            <WifiOff size={14} /> You're offline. Rooms will refresh when you reconnect.
+            <WifiOff size={14} /> You're offline. Chatrooms will refresh when you reconnect.
           </div>
         )}
 
@@ -1339,7 +1344,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search rooms"
+              placeholder="Search chatrooms"
               className="flex-1 bg-transparent py-2 text-sm text-white outline-none"
             />
             {query && (
@@ -1358,10 +1363,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             >
               <MessageCircle size={28} color={GOLD} />
             </div>
-            <h2 className="text-lg font-bold text-white">Token rooms</h2>
+            <h2 className="text-lg font-bold text-white">Token chatrooms</h2>
             <p className="text-xs" style={{ color: MUTED }}>
-              Every token you hold has a room for its holders. Signs in to bChat with this wallet's identity key — no
-              password.
+              Every token you hold has a chatroom for its holders. Signs in to bChat with this wallet's identity key —
+              no password.
             </p>
             <button
               onClick={signIn}
@@ -1377,7 +1382,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
         {handle && entries === null && !listError && (
           <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            Loading rooms…
+            Loading chatrooms…
           </div>
         )}
         {handle && listError && entries === null && (
@@ -1392,9 +1397,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
         {handle && entries && entries.length === 0 && (
           <div className="px-8 pt-14 text-center">
-            <p className="text-sm text-white font-semibold">No rooms yet</p>
+            <p className="text-sm text-white font-semibold">No chatrooms yet</p>
             <p className="text-xs mt-1" style={{ color: MUTED }}>
-              Buy a token in Market to join its room.
+              Buy a token in Market to join its chatroom.
             </p>
             <button
               onClick={() => handleSelect(asMenuItem('market'))}
@@ -1541,6 +1546,16 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   );
 };
 
-const ChatPage = () => <ChatTabs rooms={(header) => <RoomsPage header={header} />} />;
+/** A 1:1 conversation for the DMs segment: the same view, without token-room extras. */
+const DmConversation = (p: DmConversationProps) => (
+  <Conversation {...p} entry={null} onLocked={() => p.onBack()} onInvite={null} onBans={null} onBounties={null} />
+);
+
+const ChatPage = () => (
+  <ChatTabs
+    rooms={(header) => <RoomsPage header={header} />}
+    dms={(header) => <DmsPage header={header} Conversation={DmConversation} />}
+  />
+);
 
 export default ChatPage;

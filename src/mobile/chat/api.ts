@@ -14,6 +14,8 @@
 import { CapacitorHttp } from '@capacitor/core';
 import type { ChatMessage, ChatRoom } from './messages';
 
+import type { BchatContact } from './contacts';
+
 export const BCHAT_ORIGIN = 'https://www.bitcoinchat.online';
 
 export type HttpResponse = { status: number; data: unknown };
@@ -424,7 +426,21 @@ export class BchatClient {
     return this.call('POST', '/api/bitsign/compose', body);
   }
 
-  /** Open (or find) the 1:1 room with $handle. Returns its ticker. (Not shown in the UI: token rooms only.) */
+  /** bChat address book (bit-sign /api/bitsign/me/contacts), synced across devices. */
+  async contacts(): Promise<BchatContact[]> {
+    const r = await this.call<{ contacts?: BchatContact[] }>('GET', '/api/bitsign/me/contacts');
+    return r.contacts ?? [];
+  }
+
+  async addContact(identifier: string, name?: string): Promise<void> {
+    await this.call('POST', '/api/bitsign/me/contacts', { identifier: identifier.trim().replace(/^\$/, ''), name });
+  }
+
+  async removeContact(id: string): Promise<void> {
+    await this.call('DELETE', `/api/bitsign/me/contacts?id=${encodeURIComponent(id)}`);
+  }
+
+  /** Open (or find) the 1:1 room with $handle (Chat › DMs). Returns its ticker. */
   async openDirect(handle: string): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/direct', {
       handle: handle.trim().replace(/^\$/, ''),
