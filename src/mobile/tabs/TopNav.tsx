@@ -14,7 +14,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -34,6 +34,7 @@ export const TopNav = () => {
   const { chromeStorageService, wallet, setIsSwitchingAccount } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
+  const onAgent = useLocation().pathname.startsWith('/m/agent');
   const { addSnackbar } = useSnackbar();
   const [drawer, setDrawer] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
@@ -114,7 +115,9 @@ export const TopNav = () => {
         <button
           type="button"
           aria-label="b agent"
-          onClick={() => navigate('/m/agent')}
+          // Toggle: the b opens the b agent, and closes it again when it's already open.
+          onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
+          aria-pressed={onAgent}
           className="w-10 h-10 flex items-center justify-center bg-transparent"
         >
           <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
