@@ -101,7 +101,9 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
     listOrdinals
       .execute(apiContext, { tags: ['subType:collection'], limit: 100, offset: 0 })
       .then(({ outputs }) =>
-        setCollections(outputs.map((o) => ({ id: o.outpoint.replace('.', '_'), name: getOutputName(o, 'Collection') }))),
+        setCollections(
+          outputs.map((o) => ({ id: o.outpoint.replace('.', '_'), name: getOutputName(o, 'Collection') })),
+        ),
       )
       .catch(() => setCollections([]));
   }, [step, apiContext]);
@@ -217,7 +219,12 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
     <div className="fixed inset-0 z-[150] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div
         className="w-full max-w-md rounded-t-2xl p-4 overflow-y-auto"
-        style={{ background: PANEL, color: '#fff', maxHeight: 'calc(100dvh - env(safe-area-inset-top) - 24px)', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+        style={{
+          background: PANEL,
+          color: '#fff',
+          maxHeight: 'calc(100dvh - env(safe-area-inset-top) - 24px)',
+          paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
+        }}
       >
         <div className="flex items-center justify-between mb-3">
           <span className="font-bold text-lg" style={{ color: GOLD }}>
@@ -230,15 +237,30 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
         {step === 'choose' && (
           <div className="flex flex-col gap-3">
-            <Choice icon={<ImageIcon size={18} />} title="Mint media (NFT)" sub="Photo, image, drawing, video or audio" onClick={() => setStep('media')} />
-            <Choice icon={<Coins size={18} />} title="Mint a token" sub="Create a room with a new token" onClick={() => setStep('token')} />
+            <Choice
+              icon={<ImageIcon size={18} />}
+              title="Mint media (NFT)"
+              sub="Photo, image, drawing, video or audio"
+              onClick={() => setStep('media')}
+            />
+            <Choice
+              icon={<Coins size={18} />}
+              title="Mint a token"
+              sub="Create a room with a new token"
+              onClick={() => setStep('token')}
+            />
           </div>
         )}
 
         {step === 'token' && (
           <div className="text-sm" style={{ color: '#ccc' }}>
             <p>Create a room with a new token — coming next.</p>
-            <button type="button" onClick={() => setStep('choose')} className="mt-4 text-sm bg-transparent border-0 cursor-pointer" style={{ color: GOLD }}>
+            <button
+              type="button"
+              onClick={() => setStep('choose')}
+              className="mt-4 text-sm bg-transparent border-0 cursor-pointer"
+              style={{ color: GOLD }}
+            >
               Back
             </button>
           </div>
@@ -246,7 +268,13 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
         {step === 'media' && (
           <div className="flex flex-col gap-3 text-sm">
-            <input ref={inputRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ACCEPT}
+              className="hidden"
+              onChange={(e) => pick(e.target.files?.[0])}
+            />
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
@@ -260,13 +288,22 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             </p>
             {picked && (
               <div className="rounded-xl overflow-hidden border" style={{ borderColor: BORDER }}>
-                {kind === 'image' && <img src={picked.url} alt="" className="w-full max-h-64 object-contain bg-black" />}
-                {kind === 'video' && <video src={picked.url} controls playsInline className="w-full max-h-64 bg-black" />}
+                {kind === 'image' && (
+                  <img src={picked.url} alt="" className="w-full max-h-64 object-contain bg-black" />
+                )}
+                {kind === 'video' && (
+                  <video src={picked.url} controls playsInline className="w-full max-h-64 bg-black" />
+                )}
                 {kind === 'audio' && <audio src={picked.url} controls className="w-full" />}
                 <div className="px-3 py-2 text-xs" style={{ color: '#bbb' }}>
                   {picked.file.type} · {formatBytes(picked.file.size)}
                   {kind === 'image' && picked.file.size > DOWNSCALE_SUGGEST_BYTES && (
-                    <button type="button" onClick={shrink} className="ml-2 bg-transparent border-0 cursor-pointer underline" style={{ color: GOLD }}>
+                    <button
+                      type="button"
+                      onClick={shrink}
+                      className="ml-2 bg-transparent border-0 cursor-pointer underline"
+                      style={{ color: GOLD }}
+                    >
                       Shrink photo (cheaper)
                     </button>
                   )}
@@ -275,18 +312,50 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             )}
             {fileError && <p style={{ color: '#ff6b6b' }}>{fileError}</p>}
 
-            <input className={input} style={inputStyle} placeholder="Title (required)" value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
-            <textarea className={input} style={inputStyle} placeholder="Description" rows={3} value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} />
-            <select className={input} style={{ ...inputStyle, background: PANEL }} value={collKind} onChange={(e) => setCollKind(e.target.value as Collection['kind'])}>
+            <input
+              className={input}
+              style={inputStyle}
+              placeholder="Title (required)"
+              value={title}
+              maxLength={100}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <textarea
+              className={input}
+              style={inputStyle}
+              placeholder="Description"
+              rows={3}
+              value={description}
+              maxLength={1000}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <select
+              className={input}
+              style={{ ...inputStyle, background: PANEL }}
+              value={collKind}
+              onChange={(e) => setCollKind(e.target.value as Collection['kind'])}
+            >
               <option value="none">No collection</option>
               <option value="new">New collection…</option>
               {collections.length > 0 && <option value="existing">Add to my collection…</option>}
             </select>
             {collKind === 'new' && (
-              <input className={input} style={inputStyle} placeholder="Collection name" value={newColl} maxLength={100} onChange={(e) => setNewColl(e.target.value)} />
+              <input
+                className={input}
+                style={inputStyle}
+                placeholder="Collection name"
+                value={newColl}
+                maxLength={100}
+                onChange={(e) => setNewColl(e.target.value)}
+              />
             )}
             {collKind === 'existing' && (
-              <select className={input} style={{ ...inputStyle, background: PANEL }} value={existingId} onChange={(e) => setExistingId(e.target.value)}>
+              <select
+                className={input}
+                style={{ ...inputStyle, background: PANEL }}
+                value={existingId}
+                onChange={(e) => setExistingId(e.target.value)}
+              >
                 <option value="">Choose a collection</option>
                 {collections.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -297,9 +366,10 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             )}
             {cost && (
               <p className="text-xs" style={{ color: '#bbb' }}>
-                Estimated network fee: {cost.networkSats.toLocaleString()} sats{cost.txCount > 1 ? ' (2 transactions: collection + item)' : ''}
-                {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>}
-                {' '}· Total ≈ {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
+                Estimated network fee: {cost.networkSats.toLocaleString()} sats
+                {cost.txCount > 1 ? ' (2 transactions: collection + item)' : ''}
+                {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Total ≈{' '}
+                {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
               </p>
             )}
             {formError && <p style={{ color: '#ff6b6b' }}>{formError}</p>}
@@ -317,10 +387,21 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         {step === 'done' && (
           <div className="flex flex-col gap-3 text-sm">
             <p>"{title.trim()}" was inscribed. It will appear in Media shortly.</p>
-            <a href={wocTxUrl(txid)} target="_blank" rel="noreferrer" className="flex items-center gap-1 break-all" style={{ color: GOLD }}>
+            <a
+              href={wocTxUrl(txid)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 break-all"
+              style={{ color: GOLD }}
+            >
               {txid} <ExternalLink size={12} />
             </a>
-            <button type="button" onClick={onClose} className="h-11 rounded-xl font-bold border cursor-pointer bg-transparent" style={{ borderColor: BORDER, color: GOLD }}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-11 rounded-xl font-bold border cursor-pointer bg-transparent"
+              style={{ borderColor: BORDER, color: GOLD }}
+            >
               Done
             </button>
           </div>
@@ -333,7 +414,9 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         lineItems={[
           { address: `Inscribe "${title.trim()}"`, amount: picked ? formatBytes(picked.file.size) : '' },
           ...(cost ? [{ address: 'Network fee (est.)', amount: `${cost.networkSats.toLocaleString()} sats` }] : []),
-          ...(cost && cost.feeSats > 0 ? [{ address: 'bWallet mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }] : []),
+          ...(cost && cost.feeSats > 0
+            ? [{ address: 'bWallet mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }]
+            : []),
         ]}
         total={cost ? `${cost.totalSats.toLocaleString()} sats${usd(cost.usd)}` : undefined}
         isProcessing={busy}
@@ -344,7 +427,17 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   );
 };
 
-const Choice = ({ icon, title, sub, onClick }: { icon: React.ReactNode; title: string; sub: string; onClick: () => void }) => (
+const Choice = ({
+  icon,
+  title,
+  sub,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  sub: string;
+  onClick: () => void;
+}) => (
   <button
     type="button"
     onClick={onClick}
