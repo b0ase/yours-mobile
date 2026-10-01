@@ -3,6 +3,7 @@ import { Github } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { UNOFFICIAL_NOTICE } from '../brandText';
 import { openDappBrowser } from '../dappBrowser';
+import { CREDITS_TERMS } from '../credits/credits';
 
 declare const __MOBILE_VERSION__: string;
 import { AppsAndTools } from '../../pages/AppsAndTools';
@@ -70,6 +71,10 @@ const SettingsHub = () => {
                 <div className="text-[11px] text-[#98A2B3]">{theme.settings.repo.replace('https://', '')}</div>
               </div>
             </button>
+            <div className="rounded-xl bg-[#17191E] px-4 py-3">
+              <div className="text-sm font-semibold text-white">Credits</div>
+              <div className="text-[11px] text-[#98A2B3]">{CREDITS_TERMS}</div>
+            </div>
             <p className="text-[10px] leading-relaxed text-[#667085] text-center px-2">{UNOFFICIAL_NOTICE}</p>
           </div>
         )}

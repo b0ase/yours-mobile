@@ -286,6 +286,22 @@ export class BchatClient {
     await this.call('POST', `${BchatClient.path(ticker)}/bounty/${no}/payout`, { txid });
   }
 
+  // ── bCredits (bit-sign feat/credits; src/mobile/credits) ──
+
+  /** Balance + public $BCREDIT config (token id, treasury, price). */
+  async credits(): Promise<unknown> {
+    return this.call('GET', '/api/bitsign/credits');
+  }
+
+  async creditLedger(limit = 50): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/credits/ledger?limit=${limit}`);
+  }
+
+  /** After the wallet sent $BCREDIT to the treasury: bit-sign verifies the tx and credits once. */
+  async depositCredits(txid: string): Promise<unknown> {
+    return this.call('POST', '/api/bitsign/credits/deposit', { txid });
+  }
+
   // ── Verified identity (src/mobile/kyc) ──
 
   /** Ask bit-sign for a BRC-52 KYC certificate for this identity key (needs approved Veriff). */
