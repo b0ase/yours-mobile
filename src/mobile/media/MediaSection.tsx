@@ -24,7 +24,7 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 export const MediaSection = () => {
   const navigate = useNavigate();
-  const { items, hasMore, loading, error, loadMore } = useWalletMedia();
+  const { items, hasMore, loading, error, loadMore, reload } = useWalletMedia();
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<MediaItem | null>(null);
 
@@ -109,7 +109,14 @@ export const MediaSection = () => {
             </button>
           ))}
         </div>
-        {error && <p className="text-xs text-[#F97066]">{error}</p>}
+        {error && (
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-[#17191E] px-3 py-2">
+            <p className="text-xs text-[#98A2B3]">{error}</p>
+            <button onClick={reload} className="shrink-0 text-xs font-semibold text-[#FFD24D]">
+              Try again
+            </button>
+          </div>
+        )}
         {!loading && shown.length === 0 && (
           <p className="text-sm text-[#98A2B3] text-center py-10">
             {items.length === 0 ? 'No inscriptions in this wallet yet.' : 'Nothing in this filter.'}

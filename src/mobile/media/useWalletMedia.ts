@@ -20,6 +20,24 @@ export type MediaItem = {
 
 const PAGE = 50;
 
+/** listOrdinals with two quick retries: a phone waking or switching networks often fails once. */
+const listWithRetry = async (ctx: Parameters<typeof listOrdinals.execute>[0], limit: number, offset: number) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await listOrdinals.execute(ctx, { limit, offset });
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+    }
+  }
+};
+
+/** What the user sees when loading fails (the raw error goes to the console). */
+export const mediaErrorText = (e: unknown) => {
+  console.warn('[media] listOrdinals failed:', e);
+  return "Couldn't load your NFTs. Check your connection and pull down to try again.";
+};
+
 /**
  * The wallet's media inscriptions, paged from listOrdinals. Shared by Wallet › NFTs (MediaSection)
  * and the Media page (MediaPage). A new mint restarts the list from the top.
@@ -53,13 +71,13 @@ export const useWalletMedia = () => {
     if (loading || !hasMore) return;
     setLoading(true);
     try {
-      const { outputs } = await listOrdinals.execute(apiContext, { limit: PAGE, offset });
+      const { outputs } = await listWithRetry(apiContext, PAGE, offset);
+      setError('');
       setItems((prev) => [...prev, ...outputs.filter(isMediaOutput).map(toItem)]);
       setOffset((n) => n + outputs.length);
       setHasMore(outputs.length === PAGE);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setHasMore(false);
+      setError(mediaErrorText(e));
     } finally {
       setLoading(false);
     }
@@ -75,14 +93,14 @@ export const useWalletMedia = () => {
   useEffect(() => {
     if (!reloadKey) return;
     setLoading(true);
-    listOrdinals
-      .execute(apiContext, { limit: PAGE, offset: 0 })
+    listWithRetry(apiContext, PAGE, 0)
       .then(({ outputs }) => {
+        setError('');
         setItems(outputs.filter(isMediaOutput).map(toItem));
         setOffset(outputs.length);
         setHasMore(outputs.length === PAGE);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(mediaErrorText(e)))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
