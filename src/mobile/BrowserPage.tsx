@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
+import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { useBackClose } from './backStack';
 import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
@@ -79,6 +80,8 @@ type Tile = {
   icon?: string;
   demo?: boolean;
   bapp?: BApp;
+  /** One-line tagline for third-party apps (from BSVRadar). */
+  desc?: string;
 };
 
 const ICON = 'h-[60px] w-[60px] rounded-[16px]';
@@ -135,6 +138,16 @@ const bappTile = (a: BApp): Tile => ({
 // Featured first (bChat, bMovies, bMusic, bMint, bWriter), then the rest by group.
 const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id)).map(bappTile);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
+
+// BSVRadar apps, grouped, minus any host already in OTHER_TILES.
+const bareHost = (url: string) => hostOf(url).replace(/^www\./, '');
+const OTHER_HOSTS = new Set(OTHER_TILES.map((t) => bareHost(t.url)));
+const RADAR_SECTIONS = RADAR_GROUPS.map((g) => ({
+  label: g.label,
+  tiles: RADAR_APPS.filter((a) => a.group === g.id && !OTHER_HOSTS.has(bareHost(a.url))).map(
+    (a): Tile => ({ key: `r:${a.url}`, name: a.name, url: a.url, icon: a.icon, desc: a.desc }),
+  ),
+})).filter((g) => g.tiles.length > 0);
 
 const LONG_PRESS_MS = 450;
 
@@ -199,7 +212,7 @@ const AppTile = ({
   );
 };
 
-const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES];
+const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) => g.tiles)];
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
 const FAV_KEY = 'bwallet:favourite-apps';
@@ -422,7 +435,13 @@ const BrowserPage = () => {
     return (
       <>
         {grid(2, OTHER_TILES)}
-        {note('Not made by The Bitcoin Corporation.')}
+        {RADAR_SECTIONS.map((g) => (
+          <div key={g.label} className="flex flex-col gap-3">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+            {grid(2, g.tiles)}
+          </div>
+        ))}
+        {note('Not made by The Bitcoin Corporation. Source: BSVRadar (bsvradar.com).')}
       </>
     );
   };
@@ -543,7 +562,10 @@ const BrowserPage = () => {
                 {info.bapp ? (
                   <p className="text-sm text-[#D0D5DD] leading-relaxed">{info.bapp.verb}</p>
                 ) : (
-                  <p className="text-xs text-[#98A2B3]">Not made by The Bitcoin Corporation.</p>
+                  <>
+                    {info.desc && <p className="text-sm text-[#D0D5DD] leading-relaxed">{info.desc}</p>}
+                    <p className="text-xs text-[#98A2B3]">Not made by The Bitcoin Corporation.</p>
+                  </>
                 )}
                 <button
                   onClick={() => {
