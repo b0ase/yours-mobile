@@ -203,6 +203,7 @@ describe('share offers', () => {
     expect(o.map((x) => x.className)).toEqual(['Class W — bWallet', 'Class M — bMovies', 'Class M2 — bMusic']);
     expect(o.every((x) => x.status === 'pre-launch' && x.issuerName === 'The Bitcoin Corporation Ltd')).toBe(true);
     expect(o[0].id).toBe('bapp-bwallet');
+    expect(o.every((x) => x.nominee && x.transferLocked && x.lockedUntil === '')).toBe(true);
   });
   test('unverified third-party issuers and bad rows are dropped; offer urls must be https', () => {
     const l = parseShareOffers({
@@ -215,6 +216,7 @@ describe('share offers', () => {
     });
     expect(l.map((x) => x.name)).toEqual(['Kyb Co']);
     expect(l[0].offerUrl).toBeUndefined();
+    expect(l[0].transferLocked).toBe(true); // locked unless config says otherwise
   });
   test('share event message is in lockstep with bit-sign', () => {
     expect(shareEventMessage({ handle: 'a', identityKey: 'k', kind: 'interest', offerIds: ['x', 'y'], timestamp: 't' })).toBe(

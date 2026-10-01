@@ -87,6 +87,14 @@ const OfferCard = ({
         </span>
       </div>
       <p className="text-[11px] text-[#D0D5DD]">{o.tracks}</p>
+      <div className="flex flex-wrap gap-1.5 text-[10px]">
+        {o.nominee && <span className="rounded-full bg-[#2b2f36] px-2 py-0.5 text-[#D0D5DD]">Held via nominee</span>}
+        <span className="rounded-full bg-[#2b2f36] px-2 py-0.5 text-[#D0D5DD]">
+          {o.transferLocked
+            ? `Locked until ${o.lockedUntil ? new Date(o.lockedUntil).toLocaleDateString() : 'a date to be confirmed'}`
+            : 'Free to transfer'}
+        </span>
+      </div>
       <div className="text-[10px] text-[#98A2B3]">
         Class size: {o.classSize || 'to be confirmed'} · Issuer: {o.issuerName}
         {o.issuerCompanyNumber ? `, company no. ${o.issuerCompanyNumber}` : ', company no. to be confirmed'}

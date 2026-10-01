@@ -37,3 +37,9 @@ Before a third-party offer can set `issuerVerified: true`, the issuer needs:
 3. Upload of the issuer's own offer document, linked as `offerUrl`.
 4. Acceptance of the listing terms [LEGAL REVIEW]: who is responsible for the offer, and the
    financial-promotion position for showing it to self-certified investors.
+
+## Nominee and transfer lock
+
+The offers follow the nominee model in `docs/TOKENS-AND-SHARES-HANDOFF.md` §5. Each offer has
+`nominee` ("Held via nominee"), `transferLocked` and `lockedUntil` ("Locked until <date>").
+A missing `transferLocked` reads as locked.

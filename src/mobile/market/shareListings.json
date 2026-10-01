@@ -11,7 +11,10 @@
       "issuerName": "The Bitcoin Corporation Ltd",
       "issuerCompanyNumber": "",
       "issuerVerified": true,
-      "status": "pre-launch"
+      "status": "pre-launch",
+      "nominee": true,
+      "transferLocked": true,
+      "lockedUntil": ""
     }
   ]
 }

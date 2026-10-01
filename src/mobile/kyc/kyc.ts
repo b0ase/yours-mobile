@@ -236,6 +236,12 @@ export interface ShareOffer {
   /** Issuer's offer document; absent = placeholder. */
   offerUrl?: string;
   status: 'pre-launch' | 'open' | 'closed';
+  /** Held via a nominee: the nominee is on the register, the token is the beneficial claim. */
+  nominee: boolean;
+  /** Transfers locked (e.g. transfer restrictions) until `lockedUntil`. */
+  transferLocked: boolean;
+  /** ISO date; '' = to be confirmed. */
+  lockedUntil: string;
 }
 
 const SECTIONS: ShareSection[] = ['bcorp', 'bapps', 'other'];
@@ -264,6 +270,10 @@ export const parseShareOffers = (raw: unknown): ShareOffer[] => {
       issuerVerified: o.issuerVerified === true,
       offerUrl: typeof o.offerUrl === 'string' && /^https:\/\//.test(o.offerUrl) ? o.offerUrl : undefined,
       status: STATUSES.includes(o.status as string) ? (o.status as ShareOffer['status']) : 'pre-launch',
+      nominee: o.nominee === true,
+      // Fail closed: locked unless the config says otherwise.
+      transferLocked: o.transferLocked !== false,
+      lockedUntil: Number.isFinite(Date.parse(str(o.lockedUntil))) ? str(o.lockedUntil) : '',
     };
     if (offer.section === 'other' && !offer.issuerVerified) return [];
     return [offer];
@@ -297,6 +307,10 @@ export const bappOffers = (apps: { name: string; verb: string; icon?: string }[]
       issuerCompanyNumber: '',
       issuerVerified: true,
       status: 'pre-launch',
+      // Nominee model (docs/TOKENS-AND-SHARES-HANDOFF.md §5); lock date to be confirmed.
+      nominee: true,
+      transferLocked: true,
+      lockedUntil: '',
     };
   });
 };
