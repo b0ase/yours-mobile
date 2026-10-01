@@ -13,7 +13,7 @@ import {
   MAX_INLINE_AV_BYTES,
   MAX_INSCRIBED_AV_BYTES,
 } from './media';
-import { buildPostScript, decodeScript, parseBmapPost, validatePost } from './post';
+import { buildPostScript, decodeScript, parseBmapPost, parseTwetchFeed, validatePost } from './post';
 import { visiblePosts } from './store';
 
 const T = 'ffff74b706aec8f2f1dbe1257cf3b1920a246339adbfd928ce5e7fdf6a7130af';
@@ -243,4 +243,23 @@ describe('safety over media', () => {
     expect(r.ids).toEqual([OP, OP.split('_')[0]]);
     expect(r.texts).toEqual([`https://ordfs.network/${OP}`]);
   });
+});
+
+test('Twetch API posts carry file media refs and text links', () => {
+  const [p] = parseTwetchFeed({
+    data: [
+      {
+        type: 'post',
+        txid: T,
+        content: 'watch https://youtu.be/m8dMy5_Lox4',
+        files: JSON.stringify([`b://${OP.split('_')[0]}`]),
+        userId: '7',
+        postedAtMs: 5,
+      },
+    ],
+    users: { '7': { name: 'x' } },
+  });
+  expect(p.media).toHaveLength(1);
+  expect(p.media[0].ref).toBe(OP);
+  expect(p.links[0]).toMatchObject({ kind: 'youtube' });
 });

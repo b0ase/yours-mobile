@@ -474,7 +474,8 @@ export function parseTwetchFeed(body: unknown, addressOf: (pubKey: string) => st
     const p = asRec(item);
     const txid = asStr(p.txid).toLowerCase();
     if (asStr(p.type) !== 'post' || !isTxid(txid) || seen.has(txid)) continue;
-    const text = asStr(p.content).trim();
+    const fromText = mediaFromText(asStr(p.content).trim());
+    const text = fromText.text;
     let files: unknown[] = [];
     try {
       files = asArr(typeof p.files === 'string' ? JSON.parse(p.files) : p.files);
@@ -486,7 +487,14 @@ export function parseTwetchFeed(body: unknown, addressOf: (pubKey: string) => st
       .filter((u): u is string => !!u)
       .slice(0, 4)
       .map((src) => ({ src, mime: 'image/jpeg' }));
-    if (!text && !images.length) continue;
+    // Twetch's proxy serves b:// files as images; keep the on-chain ref for the safety filter.
+    const fileMedia: FeedMedia[] = files
+      .map((f) => ({ url: twetchMediaUrl(asStr(f)), ref: refToOutpoint(asStr(f).replace(/@\d+$/, '')) }))
+      .filter((f): f is { url: string; ref: string | null } => !!f.url)
+      .slice(0, 4)
+      .map((f) => ({ kind: 'image', src: f.url, mime: 'image/jpeg', thumb: null, ref: f.ref }));
+    const media = dedupeMedia([...fileMedia, ...fromText.media]);
+    if (!text && !media.length) continue;
     const uid = asStr(p.userId);
     const u = asRec(users[uid]);
     let address = '';
@@ -501,6 +509,8 @@ export function parseTwetchFeed(body: unknown, addressOf: (pubKey: string) => st
       txid,
       text: text.slice(0, MAX_POST_CHARS * 2),
       images,
+      media,
+      links: fromText.links,
       app: 'twetch',
       source: 'twetch',
       threadId: null,
