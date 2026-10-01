@@ -21,12 +21,13 @@
     <meta property="og:image" content="https://bwallet-nine.vercel.app/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="bWallet logo: a gold ring around a rounded b" />
+    <meta property="og:image:alt" content="bWallet logo: a metallic gold b on black, with the motto Just b." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="bWallet: the BSV wallet for tokens, media and apps" />
     <meta name="twitter:description" content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd." />
     <meta name="twitter:image" content="https://bwallet-nine.vercel.app/og.png" />
-    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
     <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
@@ -45,7 +46,7 @@
       <div class="wrap topbar-in">
         <a class="brand" href="/"><img src="/logo.svg" alt="" width="30" height="30" /><span>bWallet</span></a>
         <nav aria-label="Sections">
-          <a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Media</a
+          <a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Feed</a
           ><a href="#chat">Chat</a><a href="#identity">Identity</a><a href="#security">Security</a>
         </nav>
       </div>
@@ -117,8 +118,8 @@
             <p class="eyebrow">One app</p>
             <h2>Meet bWallet. Five tabs, everything on-chain.</h2>
             <p class="lede">
-              Wallet, Market, Apps, Media and Chat, with Settings tucked into the account drawer. A wallet that does
-              more than hold a balance.
+              Wallet, Market, Apps, Feed and Chat, with Settings tucked into the account drawer. A wallet that does more
+              than hold a balance.
             </p>
             <div class="film">
               <video
@@ -168,7 +169,7 @@
                   </div>
                 </div>
                 <nav class="ph-tabs" aria-hidden="true">
-                  <span class="on">Wallet</span><span>Market</span><span>Apps</span><span>Media</span><span>Chat</span>
+                  <span class="on">Wallet</span><span>Market</span><span>Apps</span><span>Feed</span><span>Chat</span>
                 </nav>
               </div>
             </div>
@@ -196,8 +197,9 @@
             <p class="eyebrow">Wallet</p>
             <h2>Hold, mint and send to names.</h2>
             <p class="lede">
-              Hold BSV, MNEE and BSV-21 tokens side by side. Mint your photos, art, video and music as NFTs. Send to a
-              $handle, a paymail or an OpNS name instead of a long address, and get a name of your own.
+              Tokens, NFTs, Tickets and Credits, side by side: BSV, MNEE and BSV-21 tokens, plus your photos, art, video
+              and music minted as NFTs. Send to a $handle, a paymail or an OpNS name instead of a long address, and get
+              a name of your own at name@bwallet.space.
             </p>
           </div>
           <div class="feature-visual reveal">
@@ -240,7 +242,7 @@
               </div>
               <div class="row">
                 <span class="coin" style="--c: #f5b800">$</span
-                ><span class="row-main"><b>Send to $handle</b><small>Paymail and OpNS names too</small></span
+                ><span class="row-main"><b>Send to $handle</b><small>name@bwallet.space and OpNS names too</small></span
                 ><span class="row-amt">Get your name</span>
               </div>
             </div>
@@ -388,9 +390,12 @@
                 <circle cx="12" cy="12" r="9" />
                 <path d="M10 8.5v7l6-3.5z" /></svg
             ></span>
-            <p class="eyebrow">Media</p>
+            <p class="eyebrow">Feed</p>
             <h2>A player for music and video ordinals.</h2>
-            <p class="lede">Your on-chain music and video live in a proper player, not a list of transaction IDs.</p>
+            <p class="lede">
+              Your on-chain music and video live in a proper player, not a list of transaction IDs, alongside bChat
+              posts in the Feed tab.
+            </p>
           </div>
           <div class="feature-visual reveal">
             <!-- SECTION LOOP VIDEO SLOT (media): drop site/media/media.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
