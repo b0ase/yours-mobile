@@ -167,6 +167,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Obsidian UI (Direction A): Wallet home restyle. Classes styled in src/mobile/mobile.css.
   'src/pages/BsvWallet.tsx#obsidian': [
+    [
+      "import { getPlatform } from '../platform';",
+      "import { getPlatform } from '../platform';\nimport { WalletHandle } from '../mobile/wallet/WalletHandle';",
+    ],
     // Account avatar lives in the top bar (gold ring); the home starts with the balance label.
     [
       `        {/* ── Profile avatar ── */}
@@ -176,7 +180,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '          className="flex flex-col items-center mt-1"\n        >\n          <div className="flex items-center gap-2">',
-      '          className="flex flex-col items-center mt-1 bw-balance"\n        >\n<span className="bw-label">Total balance</span>\n          <div className="flex items-center gap-2">',
+      '          className="flex flex-col items-center mt-1 bw-balance"\n        >\n<SectionBoundary name="Handle"><WalletHandle /></SectionBoundary>\n<span className="bw-label">Total balance</span>\n          <div className="flex items-center gap-2">',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',
@@ -220,8 +224,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { getPlatform } from '../platform';\nimport { WalletIndexing } from '../mobile/tokens/WalletIndexing';",
     ],
     [
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>\n<WalletIndexing exchangeRate={exchangeRate} />',
+      '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>',
+      '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
     ],
   ],
   // UnlockWallet: bigger b mark above "Welcome back".
