@@ -170,6 +170,27 @@ export class BchatClient {
     throw new ChatApiError('The wallet signed with an unexpected key', 401);
   }
 
+  /**
+   * Take the wallet's verified paymail name as the bChat handle (bit-sign
+   * POST /api/bitsign/auth/wallet/paymail-handle). Only a provisional `yours-*`
+   * handle is replaced server-side. Keeps the fresh session the server returns.
+   */
+  async claimPaymailHandle(proof: {
+    paymail: string;
+    identity_key: string;
+    timestamp: number;
+    signature: string;
+  }): Promise<ChatSession> {
+    const r = await this.call<{ token?: string; handle?: string; renamed?: boolean }>(
+      'POST',
+      '/api/bitsign/auth/wallet/paymail-handle',
+      proof,
+    );
+    if (!this.session || !r.handle) throw new ChatApiError('bChat handle update failed', 500);
+    this.session = { ...this.session, handle: r.handle, token: r.token || this.session.token };
+    return this.session;
+  }
+
   signOut() {
     this.session = null;
   }

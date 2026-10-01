@@ -16,6 +16,7 @@ import {
 } from './claimPersonal';
 import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
+import { syncBchatHandle } from './bchatHandle';
 import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAlias } from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import { estimateMintFee, fetchMineNode } from './opnsMint';
@@ -233,6 +234,7 @@ export const GetYourName = ({
       const pm = await claimPaymail(f, apiContext.wallet, alias, { ordAddress, name: profileName });
       setPaymail(identityAddress, pm);
       setPm(pm);
+      await syncBchatHandle(apiContext, pm, { signIn: true });
       setMsg(`${pm} is yours. People can pay it from any paymail wallet.`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
