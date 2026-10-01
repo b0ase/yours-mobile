@@ -152,16 +152,13 @@ const BrowserPage = () => {
         </div>
         <ExternalLink size={14} className="shrink-0" style={{ color: '#98A2B3' }} />
       </button>
-      <div className="flex items-center gap-2 text-[10px] pl-[3.25rem]">
-        <span className="rounded-full px-2 py-0.5 font-semibold bg-[#2b2f36] text-[#98A2B3]">
-          {app.source ? 'Open source' : 'Closed source'}
-        </span>
-        {app.source && (
+      {app.source && (
+        <div className="flex items-center gap-2 text-[10px] pl-[3.25rem]">
           <button onClick={() => go(app.source!)} className="flex items-center gap-1 text-[#98A2B3]">
             <Github size={11} /> {new URL(app.source).pathname.slice(1)}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 
