@@ -9,6 +9,7 @@ import { bappOffers, parseShareOffers, shareGate, type ShareOffer, type ShareSec
 import { loadAudit, recordShareEvent } from '../kyc/kycWallet';
 import { useKyc } from '../kyc/useKyc';
 import offersConfig from './shareListings.json';
+import bwalletIcon from '../brand/bcorp/icon.png';
 
 /**
  * Market → Tokens → Shares 🔒.
@@ -19,7 +20,7 @@ import offersConfig from './shareListings.json';
  * only disables that button. See SHARE-LISTINGS.md.
  */
 const CONFIG_OFFERS = parseShareOffers(offersConfig);
-const BWALLET = { name: 'bWallet', verb: 'Hold, send and trade on Bitcoin', icon: undefined };
+const BWALLET = { name: 'bWallet', verb: 'Hold, send and trade on Bitcoin', icon: bwalletIcon };
 const ALL_OFFERS: ShareOffer[] = [
   ...CONFIG_OFFERS.filter((o) => o.section === 'bcorp'),
   ...bappOffers([BWALLET, ...BAPPS.filter((a) => a.name !== 'bWallet')]),
