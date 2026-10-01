@@ -28,9 +28,9 @@ import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, ty
 // registerOpns = self-transfer of the 1-sat name ordinal + MAP; ~300-400 bytes at 100 sat/kB.
 export const REGISTER_FEE_ESTIMATE_SATS = 50;
 // Node locking script size used for the fee estimate before the node is loaded (covenant ≈ 6 kB).
-const NODE_SCRIPT_ESTIMATE = 6200;
+export const NODE_SCRIPT_ESTIMATE = 6200;
 // Rough phone hash rate for the pre-mining estimate; the live estimate uses the measured rate.
-const PHONE_HASHRATE = 400_000;
+export const PHONE_HASHRATE = 400_000;
 
 type Pending =
   | { kind: 'bind'; name: string; id: string; tokenOnly?: boolean }
