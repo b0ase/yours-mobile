@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -177,6 +178,7 @@ const Conversation = ({
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
+  useBackClose(true, onBack);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -486,9 +488,10 @@ const Conversation = ({
 
 // ───────────────────────────── Sheets ─────────────────────────────
 
-const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) =>
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => {
+  useBackClose(true, onClose);
   // Portal to body + z above BottomMenu (z-[100]): the room view's z-[60] layer would trap it under the tab bar.
-  createPortal(
+  return createPortal(
     <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div
         className="w-full rounded-t-3xl px-5 pt-4"
@@ -510,6 +513,7 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
     </div>,
     document.body,
   );
+};
 
 /** A room you can't enter: "Hold 1 $FILM to join" + Buy in Market. */
 const LockedRoom = ({

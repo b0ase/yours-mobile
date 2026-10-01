@@ -14,6 +14,7 @@ import { estimateMintFee } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta } from './opnsRegister';
 import { handleTitle, suggestHandle } from './handlePrompt';
+import { useBackClose } from '../backStack';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
@@ -32,6 +33,7 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
 type AliasState = 'idle' | 'checking' | 'free' | 'taken' | 'invalid' | 'error';
 
 export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose: () => void; title?: string }) => {
+  useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const identityAddress = account?.addresses?.identityAddress ?? '';

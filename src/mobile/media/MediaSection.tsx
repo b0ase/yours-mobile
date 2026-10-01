@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { WalletOutput } from '@bsv/sdk';
@@ -43,6 +44,7 @@ export const MediaSection = () => {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<Item | null>(null);
+  useBackClose(!!open, () => setOpen(null));
 
   const toItem = useCallback(
     (o: WalletOutput): Item => {

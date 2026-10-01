@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useBackClose } from '../backStack';
 import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -33,9 +34,10 @@ export const TopNav = () => {
   const { handleSelect } = useBottomMenu();
   const { addSnackbar } = useSnackbar();
   const [drawer, setDrawer] = useState(false);
-  const [callsOpen, setCallsOpen] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [callsOpen, setCallsOpen] = useState(false);
+  useBackClose(drawer && !switchingTo, () => setDrawer(false));
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.

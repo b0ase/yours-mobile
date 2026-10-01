@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { inscribe, listOrdinals, mintCollection, mintCollectionItem } from '@1sat/actions';
 import { Coins, ExternalLink, Image as ImageIcon, Sparkles, Ticket, X } from 'lucide-react';
@@ -81,6 +82,7 @@ export const MintButton = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
 };
 
 const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: () => void }) => {
+  useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const [step, setStep] = useState<Step>('choose');

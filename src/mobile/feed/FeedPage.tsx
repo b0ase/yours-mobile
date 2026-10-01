@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -25,6 +26,8 @@ import {
   WifiOff,
   X,
   ChevronDown,
+  Check,
+  Clock,
 } from 'lucide-react';
 import { inscribe, sendBsv } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -173,6 +176,86 @@ const Via = ({ post }: { post: FeedPost }) => {
   );
 };
 
+type FeedSort = 'latest' | 'locked';
+const SORT_OPTIONS: { id: FeedSort; label: string; hint: string; icon: ReactNode }[] = [
+  { id: 'latest', label: 'Latest', hint: 'Newest posts first', icon: <Clock size={16} /> },
+  { id: 'locked', label: 'Most locked', hint: 'Ranked by BSV locked behind them', icon: <Lock size={16} /> },
+];
+
+/** Feed sort: a gold pill left of the source chips that opens a small styled popover. */
+const SortMenu = ({ sort, onChange }: { sort: FeedSort; onChange: (s: FeedSort) => void }) => {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  useBackClose(!!at, () => setAt(null));
+  const current = SORT_OPTIONS.find((o) => o.id === sort) ?? SORT_OPTIONS[0];
+  const open = () => {
+    const r = btn.current?.getBoundingClientRect();
+    if (r) setAt({ left: Math.max(12, r.left), top: r.bottom + 8 });
+  };
+  return (
+    <>
+      <button
+        ref={btn}
+        onClick={open}
+        aria-haspopup="menu"
+        aria-expanded={!!at}
+        aria-label={`Sort: ${current.label}`}
+        className="shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
+        style={{ background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }}
+      >
+        {sort === 'locked' && <Lock size={12} />}
+        {current.label}
+        <ChevronDown size={12} style={{ transform: at ? 'rotate(180deg)' : undefined, transition: 'transform .15s' }} />
+      </button>
+      {at &&
+        createPortal(
+          <div className="fixed inset-0 z-[200]" onClick={() => setAt(null)}>
+            <div
+              role="menu"
+              className="absolute w-64 overflow-hidden rounded-2xl p-1.5 shadow-2xl"
+              style={{ left: at.left, top: at.top, background: '#121317', border: `1px solid ${LINE}` }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {SORT_OPTIONS.map((o) => {
+                const on = o.id === sort;
+                return (
+                  <button
+                    key={o.id}
+                    role="menuitemradio"
+                    aria-checked={on}
+                    onClick={() => {
+                      onChange(o.id);
+                      setAt(null);
+                    }}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left"
+                    style={{ background: on ? '#1a1408' : 'transparent' }}
+                  >
+                    <span
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                      style={{ background: on ? GOLD : PANEL, color: on ? '#1a1300' : MUTED }}
+                    >
+                      {o.icon}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold" style={{ color: on ? GOLD : '#F2F2F0' }}>
+                        {o.label}
+                      </span>
+                      <span className="block text-[11px]" style={{ color: MUTED }}>
+                        {o.hint}
+                      </span>
+                    </span>
+                    {on && <Check size={16} color={GOLD} />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+};
+
 const useOnline = () => {
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
   useEffect(() => {
@@ -219,8 +302,9 @@ const Avatar = ({ author, size = 40 }: { author: Pick<Author, 'name' | 'avatar' 
   );
 };
 
-const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) =>
-  createPortal(
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) => {
+  useBackClose(true, onClose);
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div
         className="w-full rounded-t-3xl p-4 pb-10 max-h-[85vh] overflow-y-auto"
@@ -238,10 +322,12 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
     </div>,
     document.body,
   );
+};
 
 /** Full-screen layer inside the tab (profile, thread). */
-const Layer = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) =>
-  createPortal(
+const Layer = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) => {
+  useBackClose(true, onBack);
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
@@ -256,6 +342,7 @@ const Layer = ({ title, onBack, children }: { title: string; onBack: () => void;
     </div>,
     document.body,
   );
+};
 
 type PostActions = {
   liked: Set<string>;
@@ -814,6 +901,7 @@ const LockSheet = ({
   const [blocks, setBlocks] = useState<number>(LOCK_DURATIONS[1].blocks);
   const [custom, setCustom] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  useBackClose(confirming, () => setConfirming(false));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const date = unlockDate(blocks).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -969,7 +1057,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [composing, setComposing] = useState<{ replyTo: FeedPost | null; quote?: FeedPost } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
   const [locking, setLocking] = useState<FeedPost | null>(null);
-  const [sort, setSort] = useState<'latest' | 'locked'>('latest');
+  const [sort, setSort] = useState<FeedSort>('latest');
   const [height, setHeight] = useState<number | null>(null);
   const [fetchedLocks, setFetchedLocks] = useState<Record<string, PostLock[]>>({});
   const [myLocks, setMyLocks] = useState<PostLock[]>(loadMyLocks);
@@ -1185,26 +1273,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         </div>
 
         <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
-          {tab === 'foryou' && (
-            // Sort as a compact native dropdown left of the source chips (native picker on phones).
-            <label
-              className="relative shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
-              style={{ background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }}
-            >
-              {sort === 'locked' && <Lock size={12} />}
-              {sort === 'locked' ? 'Most locked' : 'Latest'}
-              <ChevronDown size={12} />
-              <select
-                aria-label="Sort"
-                value={sort}
-                onChange={(e) => setSort(e.target.value as 'latest' | 'locked')}
-                className="absolute inset-0 opacity-0 cursor-pointer"
-              >
-                <option value="latest">Latest</option>
-                <option value="locked">Most locked</option>
-              </select>
-            </label>
-          )}
+          {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
           <div className="flex gap-2" role="tablist" aria-label="Source">
             {SOURCES.map((s) => (
               <button

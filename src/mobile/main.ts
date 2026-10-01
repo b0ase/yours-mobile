@@ -6,6 +6,7 @@ import { createChromeShim } from './chromeShim';
 import { Hub } from './hub';
 import type { PlatformHooks } from '../platform';
 import { initBiometricUnlock } from './biometricUnlock';
+import { handleBack } from './backStack';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { initDappBrowser, onOverlayCountChanged, routeWindowOpen } from './dappBrowser';
 import {
@@ -113,7 +114,7 @@ if (Capacitor.isNativePlatform()) {
   CapApp.addListener('backButton', () => {
     const top = topOverlayId();
     if (top !== undefined) removeOverlay(top);
-    else void CapApp.minimizeApp();
+    else if (!handleBack()) void CapApp.minimizeApp(); // in-app sheets (useBackClose) first
   });
 }
 
