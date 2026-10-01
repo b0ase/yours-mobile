@@ -1,3 +1,10 @@
+import bphotosIcon from './brand/bphotos-icon.png';
+import bradioIcon from './brand/bradio-icon.png';
+import bdnsIcon from './brand/bdns-icon.png';
+import bsearchIcon from './brand/bsearch-icon.png';
+import bjobsIcon from './brand/bjobs-icon.png';
+import bcodeIcon from './brand/bcode-icon.png';
+import bdriveIcon from './brand/bdrive-icon.png';
 import bvideoIcon from './brand/bvideo-icon.png';
 import bcalIcon from './brand/bcal-icon.png';
 import bsheetsIcon from './brand/bsheets-icon.png';
@@ -77,17 +84,17 @@ export const BAPPS: BApp[] = [
   // Work
   { name: 'bSheets', url: 'https://bitcoin-spreadsheet.vercel.app', verb: 'Spreadsheets saved on-chain', group: 'work', status: 'live', icon: bsheetsIcon, source: suite('bitcoin-spreadsheet') },
   { name: 'bMail', url: 'https://bitcoin-email.vercel.app', verb: 'Send email that pays and gets paid', group: 'work', status: 'live', icon: 'https://bitcoin-email.vercel.app/favicon.ico', source: suite('bitcoin-email') },
-  { name: 'bDrive', url: 'https://bitcoin-drive.vercel.app', verb: 'Store and share files on-chain', group: 'work', status: 'live', icon: 'https://bitcoin-drive.vercel.app/favicon.ico', source: suite('bitcoin-drive') },
+  { name: 'bDrive', url: 'https://bitcoin-drive.vercel.app', verb: 'Store and share files on-chain', group: 'work', status: 'live', icon: bdriveIcon, source: suite('bitcoin-drive') },
   { name: 'bCal', url: 'https://bitcoin-calendar.vercel.app', verb: 'Keep a calendar on Bitcoin', group: 'work', status: 'live', icon: bcalIcon, source: suite('bitcoin-calendar') },
-  { name: 'bCode', url: 'https://bitcoin-code.vercel.app', verb: 'Build apps on Bitcoin', group: 'work', status: 'live', icon: 'https://bitcoin-code.vercel.app/favicon.svg?v=2', source: suite('bitcoin-code') },
-  { name: 'bJobs', url: 'https://bitcoin-jobs.vercel.app', verb: 'Find work and hire, paid in BSV', group: 'work', status: 'live', source: suite('bitcoin-jobs') },
+  { name: 'bCode', url: 'https://bitcoin-code.vercel.app', verb: 'Build apps on Bitcoin', group: 'work', status: 'live', icon: bcodeIcon, source: suite('bitcoin-code') },
+  { name: 'bJobs', url: 'https://bitcoin-jobs.vercel.app', verb: 'Find work and hire, paid in BSV', group: 'work', status: 'live', icon: bjobsIcon, source: suite('bitcoin-jobs') },
   { name: 'bID', url: 'https://bitcoin-identity.vercel.app', verb: 'Manage your on-chain identity', group: 'work', status: 'live', icon: 'https://bitcoin-identity.vercel.app/favicon.ico', source: suite('bitcoin-identity') },
-  { name: 'bSearch', url: 'https://bitcoin-search.vercel.app', verb: 'Search what lives on-chain', group: 'work', status: 'live', icon: 'https://bitcoin-search.vercel.app/favicon.ico', source: suite('bitcoin-search') },
-  { name: 'bDNS', url: 'https://bitcoin-dns.vercel.app', verb: 'Register and trade names on Bitcoin', group: 'work', status: 'live', icon: 'https://bitcoin-dns.vercel.app/favicon.ico', source: suite('bitcoin_dns') },
+  { name: 'bSearch', url: 'https://bitcoin-search.vercel.app', verb: 'Search what lives on-chain', group: 'work', status: 'live', icon: bsearchIcon, source: suite('bitcoin-search') },
+  { name: 'bDNS', url: 'https://bitcoin-dns.vercel.app', verb: 'Register and trade names on Bitcoin', group: 'work', status: 'live', icon: bdnsIcon, source: suite('bitcoin_dns') },
   // Media
   { name: 'bVideo', url: 'https://bitcoin-video-nine.vercel.app', verb: 'Watch and publish video', group: 'media', status: 'live', icon: bvideoIcon, source: suite('bitcoin-video') },
-  { name: 'bRadio', url: 'https://bitcoin-radio.vercel.app', verb: 'Listen to and run Bitcoin radio', group: 'media', status: 'live', source: suite('bitcoin-radio') },
-  { name: 'bPhotos', url: 'https://bitcoin-photos.vercel.app', verb: 'Turn photos into tradable NFTs', group: 'media', status: 'live', source: suite('bitcoin-photos') },
+  { name: 'bRadio', url: 'https://bitcoin-radio.vercel.app', verb: 'Listen to and run Bitcoin radio', group: 'media', status: 'live', icon: bradioIcon, source: suite('bitcoin-radio') },
+  { name: 'bPhotos', url: 'https://bitcoin-photos.vercel.app', verb: 'Turn photos into tradable NFTs', group: 'media', status: 'live', icon: bphotosIcon, source: suite('bitcoin-photos') },
   { name: 'bArt', url: 'https://bitcoin-art.vercel.app', verb: 'Collect and show on-chain art', group: 'media', status: 'live', icon: 'https://bitcoin-art.vercel.app/favicon.ico', source: suite('bitcoin-art') },
   { name: 'bPaint', url: 'https://bitcoin-paint.vercel.app', verb: 'Paint and inscribe your work', group: 'media', status: 'live', icon: 'https://bitcoin-paint.vercel.app/favicon.ico', source: suite('bitcoin-paint') },
   { name: 'b3D', url: 'https://bitcoin-3d.vercel.app', verb: 'Model and own 3D designs', group: 'media', status: 'live', icon: 'https://bitcoin-3d.vercel.app/bitcoin-3d-logo.svg', source: suite('bitcoin-3d') },
