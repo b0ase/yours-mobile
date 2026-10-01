@@ -12,6 +12,8 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
 import type { MenuItems } from '../../contexts/BottomMenuContext';
+import { DrawerHandle } from '../names/DrawerHandle';
+import { HandleFlow } from '../names/HandleFlow';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -32,6 +34,7 @@ export const TopNav = () => {
   const { addSnackbar } = useSnackbar();
   const [drawer, setDrawer] = useState(false);
   const [callsOpen, setCallsOpen] = useState(false);
+  const [handleOpen, setHandleOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
@@ -180,6 +183,16 @@ export const TopNav = () => {
                   <X size={18} color="#98A2B3" />
                 </button>
               </div>
+              <DrawerHandle
+                identityAddress={current}
+                paymail={names.paymail}
+                handle={names.handle}
+                onNavigate={() => setDrawer(false)}
+                onGetName={() => {
+                  setDrawer(false);
+                  setHandleOpen(true);
+                }}
+              />
               <div className="flex-1 overflow-y-auto px-2">
                 {chromeStorageService.getAllAccounts().map((account) => {
                   const id = account.addresses.identityAddress;
@@ -225,6 +238,7 @@ export const TopNav = () => {
         )}
       </AnimatePresence>
       <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} />
+      {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
     </>
   );
 };
