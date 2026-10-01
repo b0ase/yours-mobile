@@ -1,7 +1,7 @@
 import { bareName } from './names';
 
 /**
- * Text for the identity row under the TopNav. Pure.
+ * Text for the account identity beside the Wallet balance (WalletIdentity). Pure.
  *  name — the account / profile name ('' when it just repeats the handle);
  *  tag  — "$testy" (paymail alias, else the OpNS name), '' when the account has no handle;
  *  full — "testy@bwallet.space" (the paymail in full; '' without one);
@@ -21,7 +21,3 @@ export function identityRowText(displayName: string, paymail: string, handle: st
     copy: paymail || handle || '',
   };
 }
-
-/** Routes whose TopNav shows the identity row (main tabs only; not the agent, media or flows). */
-export const showsIdentityRow = (pathname: string) =>
-  /^\/(bsv-wallet|ord-wallet|tools)(\/|$)/.test(pathname) || /^\/m\/(chat|market|feed)(\/|$)/.test(pathname);

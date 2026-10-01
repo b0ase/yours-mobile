@@ -169,7 +169,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx#obsidian': [
     [
       "import { getPlatform } from '../platform';",
-      "import { getPlatform } from '../platform';\nimport { WalletHandle } from '../mobile/wallet/WalletHandle';",
+      "import { getPlatform } from '../platform';\nimport { WalletIdentity } from '../mobile/wallet/WalletIdentity';",
     ],
     // Account avatar lives in the top bar (gold ring); the home starts with the balance label.
     [
@@ -180,7 +180,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '          className="flex flex-col items-center mt-1"\n        >\n          <div className="flex items-center gap-2">',
-      '          className="flex flex-col items-center mt-1 bw-balance"\n        >\n<SectionBoundary name="Handle"><WalletHandle /></SectionBoundary>\n<span className="bw-label">Total balance</span>\n          <div className="flex items-center gap-2">',
+      '          className="flex flex-col items-center mt-1 bw-balance"\n        >\n<SectionBoundary name="Identity"><WalletIdentity /></SectionBoundary>\n<span className="bw-label">Total balance</span>\n          <div className="flex items-center gap-2">',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',

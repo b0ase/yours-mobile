@@ -10,12 +10,14 @@ const root = join(import.meta.dir, '..', '..', '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 describe('wallet layout', () => {
-  test('TopNav renders no full-width in-flow element (it sits in flex rows too)', () => {
+  test('TopNav renders no in-flow full-width element and no identity row (it sits in flex rows too)', () => {
     const src = read('src/mobile/tabs/TopNav.tsx');
-    const spacer = src.split('\n').find((l) => l.includes('aria-hidden') && l.includes('IDENTITY_ROW_H'));
-    expect(spacer).toBeDefined();
-    expect(spacer).not.toContain('w-full');
-    expect(spacer).toContain('width: 0');
+    expect(src).not.toContain('IdentityRow');
+    expect(src).not.toContain('bw-idrow');
+    expect(read('src/mobile/mobile.css')).not.toContain('bw-idrow');
+    // The only full-width thing TopNav renders in place is the fixed tool bar; no in-flow spacers.
+    expect(src).not.toMatch(/aria-hidden[^\n]*(height|h-\d)/);
+    expect(src).toMatch(/grid grid-cols-5 items-center fixed top-0 w-full/);
   });
 
   test('every Wallet-page mobile insert is behind an error boundary', () => {
@@ -27,6 +29,7 @@ describe('wallet layout', () => {
       '<MediaSection />',
       '<TicketsSection />',
       '<CreditsRow />',
+      '<WalletIdentity />',
     ]) {
       const inserts = cfg.split(tag).slice(1);
       expect(inserts.length).toBeGreaterThan(0);

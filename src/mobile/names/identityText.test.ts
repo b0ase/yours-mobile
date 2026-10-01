@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { identityRowText, showsIdentityRow } from './identityText';
+import { identityRowText } from './identityText';
 
 describe('identity row', () => {
   test('paymail handle: $alias, full paymail, tap copies the paymail', () => {
@@ -14,11 +14,5 @@ describe('identity row', () => {
   });
   test('no handle: name only, nothing to copy', () => {
     expect(identityRowText('Account 1', '', '')).toEqual({ name: 'Account 1', tag: '', full: '', copy: '' });
-  });
-  test('shown on main tabs only', () => {
-    for (const p of ['/bsv-wallet', '/ord-wallet', '/tools', '/m/chat', '/m/market', '/m/feed'])
-      expect(showsIdentityRow(p)).toBe(true);
-    for (const p of ['/m/agent', '/m/media', '/settings', '/sweep', '/browser', '/'])
-      expect(showsIdentityRow(p)).toBe(false);
   });
 });

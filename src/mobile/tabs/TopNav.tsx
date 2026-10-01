@@ -1,5 +1,5 @@
 import { routeFor } from './tabs';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useBackClose } from '../backStack';
 import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
@@ -14,8 +14,6 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
-import { IdentityRow, IDENTITY_ROW_H } from '../names/IdentityRow';
-import { showsIdentityRow } from '../names/identityText';
 import { AccountAvatar, useAvatar } from '../names/AccountAvatar';
 import { getLocalAvatar, isDefaultAvatar, pickAvatar, resolveAvatarUrl } from '../names/avatar';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -54,12 +52,6 @@ export const TopNav = () => {
   );
   const payable = names.payable;
   const avatar = useAvatar(current);
-  const identityRow = showsIdentityRow(pathname);
-  useEffect(() => {
-    const el = document.documentElement;
-    el.classList.toggle('bw-idrow', identityRow);
-    return () => el.classList.remove('bw-idrow');
-  }, [identityRow]);
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
 
@@ -156,23 +148,6 @@ export const TopNav = () => {
         </button>
       </div>
 
-      {identityRow && (
-        <>
-          <IdentityRow
-            avatar={avatar}
-            displayName={names.displayName}
-            paymail={names.paymail}
-            handle={names.handle}
-            verified={verified}
-            onGetName={() => setHandleOpen(true)}
-          />
-          {/* In-flow spacer for column pages (Market, Chat, Feed, NFTs). Zero width on purpose: the Wallet
-              home renders TopNav inside a flex ROW (App's centred container), where a full-width spacer
-              squeezed the page to 0 px and blanked the Wallet tab. Row pages get the offset from the
-              html.bw-idrow rule in mobile.css instead. */}
-          <div aria-hidden className="shrink-0" style={{ height: IDENTITY_ROW_H, width: 0 }} />
-        </>
-      )}
       <AnimatePresence>
         {drawer && (
           <motion.div
