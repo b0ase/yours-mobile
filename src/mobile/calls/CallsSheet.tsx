@@ -37,7 +37,7 @@ export const CallsSheet = ({ open, onClose }: { open: boolean; onClose: () => vo
                 <X size={18} color="#98A2B3" />
               </button>
             </div>
-            <CallsList />
+            <CallsList onLeave={onClose} />
           </motion.div>
         </>
       )}
