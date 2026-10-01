@@ -124,9 +124,18 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/Settings.tsx': [
     [
       "import { ToggleSwitch } from '../components/ToggleSwitch';",
-      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';",
+      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';\nimport { IdentityVerification } from '../mobile/kyc/IdentityVerification';",
     ],
-    ['          {identityPubKey && (', '          <GetYourName />\n          {identityPubKey && ('],
+    ['          {identityPubKey && (', '          <IdentityVerification />\n          <GetYourName />\n          {identityPubKey && ('],
+    // Deep links to Settings → Identity ("Get verified" / "Qualify as an investor" from Market → Shares).
+    [
+      "    if (query === 'storage') return 'storage';",
+      "    if (query === 'storage') return 'storage';\n    if (query === 'identity' || query === 'investor') return 'identity';",
+    ],
+    [
+      "    else if (query === 'storage') setPage('storage');",
+      "    else if (query === 'storage') setPage('storage');\n    else if (query === 'identity' || query === 'investor') setPage('identity');",
+    ],
   ],
   'src/App.tsx': [
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.

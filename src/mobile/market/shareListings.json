@@ -1,0 +1,17 @@
+{
+  "_note": "Share offers shown in Market > Tokens > Shares (KYC + investor self-cert to view). bApps alphabet-share offers are generated from src/mobile/bapps.ts, not listed here. No prices anywhere: pre-launch offers take 'Register interest' only. section: 'bcorp' | 'other'. 'other' (third-party issuers) is behind SHOW_OTHER_COMPANIES (default off) and needs issuerVerified (KYB). See SHARE-LISTINGS.md.",
+  "offers": [
+    {
+      "id": "bcorp-ordinary",
+      "section": "bcorp",
+      "name": "The Bitcoin Corporation Ltd",
+      "className": "Ordinary shares",
+      "tracks": "The Bitcoin Corporation Ltd itself, the company behind the bApps.",
+      "classSize": "To be confirmed from the Register of Members",
+      "issuerName": "The Bitcoin Corporation Ltd",
+      "issuerCompanyNumber": "",
+      "issuerVerified": true,
+      "status": "pre-launch"
+    }
+  ]
+}

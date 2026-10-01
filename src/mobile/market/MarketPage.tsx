@@ -34,6 +34,7 @@ import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
+import { SharesPanel } from './SharesPanel';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -93,10 +94,11 @@ const VIEWS: [View, string][] = [
   ['video', 'Video'],
   ['images', 'Images'],
 ];
-/** Tokens side sub-filters; Shares and Tickets are placeholders until their model is specced. */
-const TOKEN_FILTERS: [string, string, boolean][] = [
+/** Tokens side sub-filters. Shares is KYC-gated (SharesPanel); Tickets is a placeholder. */
+type TokenFilter = 'all' | 'shares' | 'tickets';
+const TOKEN_FILTERS: [TokenFilter, string, boolean][] = [
   ['all', 'All tokens', true],
-  ['shares', 'Shares', false],
+  ['shares', 'Shares 🔒', true],
   ['tickets', 'Tickets', false],
 ];
 const KIND_KEY = 'bwallet.market.kind';
@@ -125,6 +127,7 @@ const MarketPage = () => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [section, setSection] = useState<'trending' | 'mine'>('trending');
+  const [tokenFilter, setTokenFilter] = useState<TokenFilter>('all');
   const [rooms, setRooms] = useState<HotRoom[] | null>(null);
   const [error, setError] = useState('');
   const [room, setRoom] = useState<HotRoom | null>(null);
@@ -347,10 +350,11 @@ const MarketPage = () => {
           key={id}
           disabled={!enabled}
           aria-disabled={!enabled}
+          onClick={() => setTokenFilter(id)}
           className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
           style={{
-            background: enabled ? '#A1FF8B' : '#17191E',
-            color: enabled ? '#010101' : '#667085',
+            background: enabled && tokenFilter === id ? '#A1FF8B' : '#17191E',
+            color: enabled ? (tokenFilter === id ? '#010101' : '#98A2B3') : '#667085',
             opacity: enabled ? 1 : 0.7,
           }}
         >
@@ -742,7 +746,9 @@ const MarketPage = () => {
           : room
             ? roomView
             : kind === 'tokens'
-              ? tokenList
+              ? tokenFilter === 'shares'
+                ? <SharesPanel />
+                : tokenList
               : view === 'collections'
                 ? trending
                 : nftGrid}

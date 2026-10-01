@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useMyName } from '../names/MyNameBadge';
+import { useKyc } from '../kyc/useKyc';
+import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Download, Loader2, Plus, Settings, X } from 'lucide-react';
 import logo from '../../assets/logos/horizontal-logo.png';
@@ -29,6 +31,8 @@ export const TopNav = () => {
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
   const myName = useMyName(current);
+  const { kyc } = useKyc();
+  const verified = kycValid(kyc, Date.now());
 
   // Same as upstream TopNav.handleSwitchAccount.
   const handleSwitchAccount = async (identityAddress: string) => {
@@ -78,6 +82,11 @@ export const TopNav = () => {
           >
             {accountObj.account?.name ?? short(current ?? '')}
           </span>
+          {verified && (
+            <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
+              <Check size={14} strokeWidth={3} />
+            </span>
+          )}
           {myName && (
             <span className={`text-xs font-semibold max-w-[110px] ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
               {myName}

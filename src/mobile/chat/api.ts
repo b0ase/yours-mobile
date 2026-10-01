@@ -262,6 +262,45 @@ export class BchatClient {
     return r.address;
   }
 
+  // ── Verified identity (src/mobile/kyc) ──
+
+  /** Ask bit-sign for a BRC-52 KYC certificate for this identity key (needs approved Veriff). */
+  async kycWalletCert(body: { identity_key: string; timestamp: string; signature: string }): Promise<unknown> {
+    const r = await this.call<{ certificate?: unknown }>('POST', '/api/bitsign/kyc/wallet-cert', body);
+    return r.certificate ?? null;
+  }
+
+  /** bit-sign's current investor statements (server-supplied text). */
+  async investorSelfCertOptions(): Promise<{ value?: unknown; label?: unknown; statement?: unknown }[]> {
+    const r = await this.call<{ options?: { value?: unknown; label?: unknown; statement?: unknown }[] }>(
+      'GET',
+      '/api/bitsign/investor-self-cert',
+    );
+    return r.options ?? [];
+  }
+
+  /** Record an identity-key-signed self-certification. */
+  async investorSelfCertWallet(body: {
+    cert_type: string;
+    statement_sha256: string;
+    identity_key: string;
+    timestamp: string;
+    signature: string;
+  }): Promise<void> {
+    await this.call('POST', '/api/bitsign/investor-self-cert/wallet', body);
+  }
+
+  /** Share-offer audit event / register interest (identity-key signed). */
+  async shareOfferEvent(body: {
+    kind: 'view' | 'interest' | 'qualification';
+    offer_ids: string[];
+    identity_key: string;
+    timestamp: string;
+    signature: string;
+  }): Promise<void> {
+    await this.call('POST', '/api/bitsign/share-offers/events', body);
+  }
+
   /** Open (or find) the 1:1 room with $handle. Returns its ticker. (Not shown in the UI: token rooms only.) */
   async openDirect(handle: string): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/direct', {
