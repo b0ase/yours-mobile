@@ -201,6 +201,8 @@ export default mergeConfig(
     define: {
       __MOBILE_VERSION__: JSON.stringify(version),
       __MOBILE_BRAND__: JSON.stringify(MOBILE_BRAND),
+      // Market tab fee address (src/mobile/market/fee.ts). Empty = no fee.
+      __MARKET_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MARKET_FEE_ADDRESS ?? ''),
     },
   }),
 );
