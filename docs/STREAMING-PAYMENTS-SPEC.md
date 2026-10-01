@@ -74,12 +74,12 @@ scripts, wallet support and dispute handling. Park until A or B is live and used
 
 ### Fee math (ARC ~100 sat/kB, ~25 sats per minimal tx, at 100 sats/s)
 
-| Pay every | Payment | Fee | Fee as % | Txs/hour | Fees/hour |
-|---|---|---|---|---|---|
-| 1 s | 100 | 25 | 25% | 3,600 | 90,000 sats |
-| 10 s | 1,000 | 25 | 2.5% | 360 | 9,000 |
-| 30 s | 3,000 | 25 | 0.8% | 120 | 3,000 |
-| 60 s | 6,000 | 25 | 0.4% | 60 | 1,500 |
+| Pay every | Payment | Fee | Fee as % | Txs/hour | Fees/hour   |
+| --------- | ------- | --- | -------- | -------- | ----------- |
+| 1 s       | 100     | 25  | 25%      | 3,600    | 90,000 sats |
+| 10 s      | 1,000   | 25  | 2.5%     | 360      | 9,000       |
+| 30 s      | 3,000   | 25  | 0.8%     | 120      | 3,000       |
+| 60 s      | 6,000   | 25  | 0.4%     | 60       | 1,500       |
 
 Every second on-chain would add 25% and 3,600 txs/hour per listener. At 1 sat/s even a 60 s interval
 is 60 sats paid for 25 sats of fee (42%), so low rates belong on credits.
@@ -105,6 +105,7 @@ A small set of routes in **bit-sign** (no new service, no new hosting cost):
 
 **Gating.** The access token is a short-lived signed token (HMAC/JWT, lifetime = N + grace), bound to
 `sessionId`, user and stream. Options, cheapest first:
+
 1. **Signed URLs** for HLS segments / the audio stream: the creator's origin (or a tiny edge function)
    checks the token signature only, no DB call. Works for radio with Icecast-style `?token=`.
 2. **HLS key rotation**: segments are AES-encrypted; the key URL requires a valid token. Works with any
@@ -161,15 +162,15 @@ updates the counter; stopping playback stops the loop.
 
 ## 7. Build plan
 
-| Phase | What | Effort |
-|---|---|---|
-| 1 | Wallet allowance module + tests; allowance sheet; live counter in MiniPlayer | 2–3 days |
-| 2 | bit-sign stream routes, mode A (reuse BEEF parse/broadcast from burn verify), signed tokens, migrations | 3–4 days |
-| 3 | One real integration: a radio stream with signed-URL gating; mainnet test at 100 sats/s, N = 30 | 2 days |
-| 4 | Timed bChat rooms on `seconds` allowance paid in sats; calls gate | 2–3 days |
-| 5 | Mode B (credits ticks + settlement job + reconciler) | 3–4 days |
-| 6 | HLS key rotation for video; creator self-serve registration | 3 days |
-| Later | Payment channels (C) | — |
+| Phase | What                                                                                                    | Effort   |
+| ----- | ------------------------------------------------------------------------------------------------------- | -------- |
+| 1     | Wallet allowance module + tests; allowance sheet; live counter in MiniPlayer                            | 2–3 days |
+| 2     | bit-sign stream routes, mode A (reuse BEEF parse/broadcast from burn verify), signed tokens, migrations | 3–4 days |
+| 3     | One real integration: a radio stream with signed-URL gating; mainnet test at 100 sats/s, N = 30         | 2 days   |
+| 4     | Timed bChat rooms on `seconds` allowance paid in sats; calls gate                                       | 2–3 days |
+| 5     | Mode B (credits ticks + settlement job + reconciler)                                                    | 3–4 days |
+| 6     | HLS key rotation for video; creator self-serve registration                                             | 3 days   |
+| Later | Payment channels (C)                                                                                    | —        |
 
 ## Open decisions (owner)
 
