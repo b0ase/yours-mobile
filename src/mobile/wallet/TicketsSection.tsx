@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
-import { MessageCircle, RefreshCw, Ticket as TicketIcon } from 'lucide-react';
+import { MessageCircle, RefreshCw, Tag, Ticket as TicketIcon } from 'lucide-react';
+import { SellSheet, type SellTarget } from '../sell/SellSheet';
+import { MyTokenListings } from '../sell/MyTokenListings';
+import { SELL_ENABLED, onListingsChanged } from '../sell/sell';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { isUri } from '../../utils/uri';
@@ -36,6 +39,7 @@ export const TicketsSection = () => {
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const [state, setState] = useState<State>({ status: 'loading' });
   const [tick, setTick] = useState(0);
+  const [selling, setSelling] = useState<SellTarget | null>(null);
 
   const load = useCallback(async () => {
     const holdings = await walletHoldings(apiContext);
@@ -83,9 +87,11 @@ export const TicketsSection = () => {
     const again = () => setTick((n) => n + 1);
     const a = onTicketsChanged(again);
     const b = onPersonalChange(again);
+    const c = onListingsChanged(again);
     return () => {
       a();
       b();
+      c();
     };
   }, []);
 
@@ -163,6 +169,26 @@ export const TicketsSection = () => {
                 {entryLine(t)}
               </div>
             </div>
+            {SELL_ENABLED && BigInt(t.heldRaw || '0') > 0n && (
+              <button
+                type="button"
+                aria-label={`Sell ${t.symbol}`}
+                onClick={() =>
+                  setSelling({
+                    tokenId: t.tokenId,
+                    symbol: t.symbol,
+                    dec: t.dec,
+                    heldRaw: BigInt(t.heldRaw),
+                    isTicket: t.source !== 'personal',
+                  })
+                }
+                className="flex items-center gap-1 h-9 px-2.5 rounded-lg text-xs font-bold border outline-none cursor-pointer flex-shrink-0"
+                style={{ background: '#17191E', borderColor: '#3a2f0c', color: GOLD }}
+              >
+                <Tag size={13} />
+                Sell
+              </button>
+            )}
             <button
               type="button"
               onClick={() => open(t)}
@@ -176,6 +202,13 @@ export const TicketsSection = () => {
           </div>
         );
       })}
+      {SELL_ENABLED && (
+        <>
+          <div className="text-xs font-bold text-[#98A2B3] mt-2 px-1">My listings</div>
+          <MyTokenListings emptyText="Nothing listed. Tap Sell on a ticket to list it." />
+        </>
+      )}
+      {selling && <SellSheet target={selling} onClose={() => setSelling(null)} />}
     </div>
   );
 };

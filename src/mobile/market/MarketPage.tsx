@@ -37,6 +37,8 @@ import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { SharesPanel } from './SharesPanel';
+import { MyTokenListings } from '../sell/MyTokenListings';
+import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel, openTicketRoomInChat } from '../tickets/TicketsPanel';
 import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -276,7 +278,8 @@ const MarketPage = () => {
   const buy = async ({ room: r, listing }: Pending) => {
     setBusy('Buying…');
     try {
-      const fee = marketFeeOptions();
+      // Ticket resales use the ticket resale fee (default 0), not the general Market fee.
+      const fee = ticketPage ? ticketResaleFeeOptions() : marketFeeOptions();
       const res =
         r.ref.kind === 'bsv21'
           ? await buyBsv21.execute(apiContext, {
@@ -723,16 +726,21 @@ const MarketPage = () => {
 
   const mineView = (
     <section className="flex flex-col gap-2">
-      <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
-        <Tag size={11} className="inline mr-1" />
-        {ORDLOCK_LISTING_DISABLED_MESSAGE}
-      </p>
-      {mine === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading…</p>}
-      {mine?.filter((o) => isTokenOutput(o) === (kind === 'tokens')).length === 0 && (
-        <p className="text-xs text-[#98A2B3] text-center py-6">
-          You have no open {kind === 'tokens' ? 'token' : 'NFT'} listings.
+      {SELL_ENABLED && kind === 'tokens' ? (
+        <MyTokenListings emptyText="No token listings. Sell from a token's page or Wallet › Tickets." />
+      ) : (
+        <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
+          <Tag size={11} className="inline mr-1" />
+          {ORDLOCK_LISTING_DISABLED_MESSAGE}
         </p>
       )}
+      {mine === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading…</p>}
+      {!(SELL_ENABLED && kind === 'tokens') &&
+        mine?.filter((o) => isTokenOutput(o) === (kind === 'tokens')).length === 0 && (
+          <p className="text-xs text-[#98A2B3] text-center py-6">
+            You have no open {kind === 'tokens' ? 'token' : 'NFT'} listings.
+          </p>
+        )}
       {mine
         ?.filter((o) => isTokenOutput(o) === (kind === 'tokens'))
         .map((o) => (
@@ -749,7 +757,11 @@ const MarketPage = () => {
     </section>
   );
 
-  const fee = pending ? marketFeeSats(pending.listing.priceSats) : 0;
+  const fee = pending
+    ? ticketPage
+      ? ticketResaleFeeSats(pending.listing.priceSats)
+      : marketFeeSats(pending.listing.priceSats)
+    : 0;
   const confirm = pending && (
     <div className="fixed inset-0 z-[200] flex items-end bg-black/60" onClick={() => !busy && setPending(null)}>
       <div
@@ -768,8 +780,8 @@ const MarketPage = () => {
             <span className="text-white">{formatSats(pending.listing.priceSats)}</span>
           </div>
           <div className="flex justify-between text-[#98A2B3]">
-            <span>Marketplace fee ({MARKET_FEE_RATE * 100}%)</span>
-            <span className="text-white">{fee ? formatSats(fee) : 'None (not configured)'}</span>
+            <span>{ticketPage ? 'Resale fee' : `Marketplace fee (${MARKET_FEE_RATE * 100}%)`}</span>
+            <span className="text-white">{fee ? formatSats(fee) : ticketPage ? 'None' : 'None (not configured)'}</span>
           </div>
           <div className="flex justify-between text-[#98A2B3]">
             <span>Network fee</span>
