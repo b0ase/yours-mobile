@@ -128,6 +128,17 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '{!usbEnabled && <QuickUnlock theme={theme} onUnlock={onUnlock} />}\n<ForgotPassword theme={theme} />',
     ],
   ],
+  // Token page: "Room" opens that token's chatroom in the Chat tab (src/mobile/chat, docs/TOKEN-ROOMS.md).
+  'src/components/SendBsv21View.tsx': [
+    [
+      "import { CoinHistory } from './CoinHistory';",
+      "import { CoinHistory } from './CoinHistory';\nimport { OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';",
+    ],
+    [
+      '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">',
+      '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">\n<OpenTokenRoomButton id={token.info.id} />',
+    ],
+  ],
   'src/App.tsx': [
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [

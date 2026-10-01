@@ -18,7 +18,7 @@ export const BCHAT_ORIGIN = 'https://www.bitcoinchat.online';
 
 export type HttpResponse = { status: number; data: unknown };
 export type Http = (req: {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PATCH';
   url: string;
   headers: Record<string, string>;
   body?: unknown;
@@ -58,6 +58,8 @@ export class ChatApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** The response body, for structured refusals (a token room's `token_gated` 403). */
+    readonly data: unknown = null,
   ) {
     super(message);
   }
@@ -101,7 +103,7 @@ export class BchatClient {
     return this.session;
   }
 
-  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown, auth = true): Promise<T> {
+  private async call<T>(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown, auth = true): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) {
       if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
@@ -114,7 +116,7 @@ export class BchatClient {
       throw new ChatApiError(e instanceof Error ? e.message : 'Network error', 0);
     }
     if (res.status < 200 || res.status >= 300) {
-      throw new ChatApiError(errorOf(res.data, `bChat error ${res.status}`), res.status);
+      throw new ChatApiError(errorOf(res.data, `bChat error ${res.status}`), res.status, res.data);
     }
     return res.data as T;
   }
@@ -218,7 +220,49 @@ export class BchatClient {
     await this.call('POST', `${BchatClient.path(ticker)}/read`, {});
   }
 
-  /** Open (or find) the 1:1 room with $handle. Returns its ticker. */
+  // ── Token rooms (docs/TOKEN-ROOMS.md) ──
+
+  /** Is there a room for this token key, and am I in it? (GET never joins.) */
+  async tokenRoom(key: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/rooms/token-gated?key=${encodeURIComponent(key)}`);
+  }
+
+  /** Create (or open) the token's room. The server re-checks the holding. Returns its ticker. */
+  async startTokenRoom(key: string, opts: { name?: string; min?: string } = {}): Promise<string> {
+    const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/token-gated', { key, ...opts });
+    return r.ticker;
+  }
+
+  /** Room admin: change the membership minimum (whole tokens). */
+  async setTokenRoomMinimum(ticker: string, min: string): Promise<void> {
+    await this.call('PATCH', '/api/bitsign/rooms/token-gated', { ticker, min });
+  }
+
+  /** Link wallet keys to the account: each proof is a DER signature over `message` by that key. */
+  async proveAddresses(
+    message: string,
+    proofs: { pubkey_hex: string; signature: string; role: 'receive' | 'token' }[],
+  ): Promise<{ accepted: string[] }> {
+    const r = await this.call<{ accepted?: string[] }>('POST', '/api/bitsign/wallet/addresses', { message, proofs });
+    return { accepted: r.accepted ?? [] };
+  }
+
+  /** Collection rooms: name the items held so the server can verify them. */
+  async proveItems(key: string, outpoints: string[]): Promise<number> {
+    const r = await this.call<{ accepted?: number }>('POST', '/api/bitsign/wallet/holdings', { key, outpoints });
+    return r.accepted ?? 0;
+  }
+
+  /** Where to send this room's token to invite $handle (members only). */
+  async inviteAddress(ticker: string, handle: string): Promise<string> {
+    const r = await this.call<{ address: string }>(
+      'GET',
+      `${BchatClient.path(ticker)}/invite-address?handle=${encodeURIComponent(handle)}`,
+    );
+    return r.address;
+  }
+
+  /** Open (or find) the 1:1 room with $handle. Returns its ticker. (Not shown in the UI: token rooms only.) */
   async openDirect(handle: string): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/direct', {
       handle: handle.trim().replace(/^\$/, ''),

@@ -1,14 +1,33 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, MessageCirclePlus, RefreshCw, Search, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, UserPlus, WifiOff, X } from 'lucide-react';
+import { sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
+import { proveHoldings, walletHoldings } from '../chat/holdings';
+import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
+import {
+  amountLabel,
+  buildTokenRoomList,
+  holdLine,
+  parseGateRefusal,
+  parseInvitee,
+  parseLookup,
+  parseTokenKey,
+  type GateRefusal,
+  type Holding,
+  type TokenGate,
+  type TokenRoomEntry,
+  type TokenRoomLookup,
+} from '../chat/tokenRooms';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { useSnackbar } from '../../hooks/useSnackbar';
+import { getErrorMessage } from '../../utils/tools';
+import { asMenuItem } from './tabs';
 import {
   avatarHue,
-  filterRooms,
-  isDirectRoom,
   latestCursor,
   listTimeLabel,
   mergeMessages,
@@ -16,7 +35,6 @@ import {
   previewText,
   roomInitial,
   roomTitle,
-  sortRooms,
   threadItems,
   timeLabel,
   type ChatMessage,
@@ -24,8 +42,10 @@ import {
 } from '../chat/messages';
 
 /**
- * Chat tab: native bChat client. Chats list → conversation → back, all inside
- * this tab; the bottom bar stays on the list, the conversation covers it.
+ * Chat tab: TOKEN ROOMS ONLY (owner decision; docs/TOKEN-ROOMS.md). The list is one room per
+ * BSV-21 token / 1Sat collection this wallet holds at or above the room minimum — buy a token
+ * and its room appears; sell it and the room goes. No DMs, no contacts, no new-chat-by-handle.
+ * Rooms list → conversation → back, all inside this tab; the conversation covers the bottom bar.
  * Talks to bitcoinchat.online's API with a session the wallet gets by signing
  * bChat's wallet-login challenge (../chat/api.ts). Live updates by polling
  * (4s in an open conversation, 30s on the list) until realtime lands in v2.
@@ -100,6 +120,9 @@ const Conversation = ({
   online,
   onBack,
   onAuthLost,
+  entry,
+  onLocked,
+  onInvite,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -107,8 +130,12 @@ const Conversation = ({
   online: boolean;
   onBack: () => void;
   onAuthLost: () => void;
+  entry: TokenRoomEntry | null;
+  /** The server refused: you no longer hold enough (or never did). */
+  onLocked: (refusal: GateRefusal) => void;
+  onInvite: (() => void) | null;
 }) => {
-  const title = roomTitle(room, me);
+  const title = room.name || (entry ? `$${entry.gate.symbol}` : roomTitle(room, me));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -123,9 +150,11 @@ const Conversation = ({
   const fail = useCallback(
     (e: unknown) => {
       if (e instanceof ChatApiError && e.status === 401) return onAuthLost();
+      const refusal = e instanceof ChatApiError && e.status === 403 ? parseGateRefusal(e.data) : null;
+      if (refusal) return onLocked(refusal);
       setError(errText(e));
     },
-    [onAuthLost],
+    [onAuthLost, onLocked],
   );
 
   useEffect(() => {
@@ -217,11 +246,14 @@ const Conversation = ({
       .catch((e) => {
         setMessages((cur) => cur.map((m) => (m.localId === localId ? { ...m, failed: true } : m)));
         if (e instanceof ChatApiError && e.status === 401) onAuthLost();
+        const refusal = e instanceof ChatApiError && e.status === 403 ? parseGateRefusal(e.data) : null;
+        if (refusal) onLocked(refusal);
       });
   };
 
   const items = useMemo(() => threadItems(messages, me), [messages, me]);
-  const direct = isDirectRoom(room);
+  const direct = false;
+  const members = room.party_count ?? entry?.members ?? 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: BG }}>
@@ -242,11 +274,16 @@ const Conversation = ({
           <div className="text-[11px]" style={{ color: MUTED }}>
             {!online
               ? 'waiting for network…'
-              : direct
-                ? 'direct message'
-                : `${room.party_count ?? 0} member${room.party_count === 1 ? '' : 's'} · $${room.ticker}`}
+              : entry
+                ? `${entry.gate.key.startsWith('coll:') ? entry.gate.symbol : `$${entry.gate.symbol}`} · ${members} holder${members === 1 ? '' : 's'} · you hold ${amountLabel(entry.holding.amountRaw, entry.gate)}`
+                : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
           </div>
         </div>
+        {onInvite && (
+          <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
+            <UserPlus size={20} color={GOLD} />
+          </button>
+        )}
       </div>
 
       <div
@@ -282,7 +319,7 @@ const Conversation = ({
         )}
         {!loading && !error && messages.length === 0 && (
           <div className="text-center text-xs pt-16" style={{ color: MUTED }}>
-            No messages yet. Say hello.
+            No messages yet. Start the first scene.
           </div>
         )}
         {items.map((it) =>
@@ -387,86 +424,207 @@ const Conversation = ({
   );
 };
 
-// ───────────────────────────── New DM sheet ─────────────────────────────
+// ───────────────────────────── Sheets ─────────────────────────────
 
-const NewChat = ({ onOpen, onClose }: { onOpen: (handle: string) => Promise<void>; onClose: () => void }) => {
-  const [handle, setHandle] = useState('');
-  const [busy, setBusy] = useState(false);
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => (
+  <div className="fixed inset-0 z-[70] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+    <div
+      className="w-full rounded-t-3xl px-5 pt-4"
+      style={{ background: '#0e0e0e', borderTop: `1px solid ${LINE}`, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-white font-semibold">{title}</span>
+        <button onClick={onClose} aria-label="Close" className="p-1">
+          <X size={20} color={MUTED} />
+        </button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+/** A room you can't enter: "Hold 1 $FILM to join" + Buy in Market. */
+const LockedRoom = ({
+  gate,
+  heldRaw,
+  members,
+  onBuy,
+  onClose,
+}: {
+  gate: TokenGate;
+  heldRaw: string | null;
+  members: number | null;
+  onBuy: () => void;
+  onClose: () => void;
+}) => (
+  <Sheet title={gate.key.startsWith('coll:') ? gate.symbol : `$${gate.symbol} room`} onClose={onClose}>
+    <div className="flex flex-col items-center text-center gap-2 pb-2">
+      <div className="h-14 w-14 rounded-2xl flex items-center justify-center" style={{ background: '#1a1408', border: '1px solid #3a2f0c' }}>
+        <Lock size={24} color={GOLD} />
+      </div>
+      <p className="text-base font-bold text-white">{holdLine(gate)}</p>
+      <p className="text-xs" style={{ color: MUTED }}>
+        {members !== null ? `${members} holder${members === 1 ? '' : 's'} in this room. ` : ''}
+        {heldRaw && heldRaw !== '0' ? `You hold ${amountLabel(heldRaw, gate)}.` : 'Holding the token is your membership.'}
+      </p>
+      <button
+        onClick={onBuy}
+        className="mt-2 w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2"
+        style={{ background: GOLD, color: '#1a1300' }}
+      >
+        <ShoppingCart size={16} /> Buy in Market
+      </button>
+    </div>
+  </Sheet>
+);
+
+/**
+ * Invite = send the room token. Resolves $handle → their proven receive address (bit-sign), then
+ * asks the wallet to send exactly the room minimum. Nothing is sent until the user confirms here,
+ * and the wallet's own approval for the transaction still applies.
+ */
+const InviteSheet = ({
+  client,
+  ticker,
+  entry,
+  onClose,
+}: {
+  client: BchatClient;
+  ticker: string;
+  entry: TokenRoomEntry;
+  onClose: () => void;
+}) => {
+  const { apiContext } = useServiceContext();
+  const { addSnackbar } = useSnackbar();
+  const [input, setInput] = useState('');
+  const [target, setTarget] = useState<{ label: string; address: string } | null>(null);
+  const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const go = async () => {
-    const h = handle.trim().replace(/^\$/, '');
-    if (!/^[\w.-]{1,64}$/.test(h)) return setError('Enter a $handle');
-    setBusy(true);
+  const amount = amountLabel(entry.gate.minRaw, entry.gate);
+
+  const resolve = async () => {
+    const who = parseInvitee(input);
+    if (!who) return setError('Enter a $handle or a BSV address');
     setError('');
+    if ('address' in who) return setTarget({ label: `${who.address.slice(0, 8)}…`, address: who.address });
+    setBusy('Looking up…');
     try {
-      await onOpen(h);
+      const address = await client.inviteAddress(ticker, who.handle);
+      setTarget({ label: `$${who.handle}`, address });
     } catch (e) {
       setError(errText(e));
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   };
+
+  const send = async () => {
+    if (!target) return;
+    setBusy('Sending…');
+    setError('');
+    try {
+      const res = await sendBsv21.execute(apiContext, {
+        tokenId: entry.holding.id,
+        recipients: [{ amount: BigInt(entry.gate.minRaw), destination: { address: target.address } }],
+      });
+      if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+      addSnackbar(`Invited ${target.label} — sent ${amount}`, 'success');
+      onClose();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy('');
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[70] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
-      <div
-        className="w-full rounded-t-3xl px-5 pt-4"
-        style={{
-          background: '#0e0e0e',
-          borderTop: `1px solid ${LINE}`,
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-white font-semibold">New message</span>
-          <button onClick={onClose} aria-label="Close" className="p-1">
-            <X size={20} color={MUTED} />
+    <Sheet title="Invite to this room" onClose={onClose}>
+      {!target ? (
+        <>
+          <p className="text-xs mb-3" style={{ color: MUTED }}>
+            An invite is the room token: you send {amount} and they're in.
+          </p>
+          <div className="flex items-center gap-2 rounded-2xl px-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+            <input
+              autoFocus
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && resolve()}
+              placeholder="$handle or address"
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="flex-1 bg-transparent py-3 text-white outline-none"
+            />
+          </div>
+          <button
+            onClick={resolve}
+            disabled={!!busy || !input.trim()}
+            className="w-full mt-4 rounded-2xl py-3 font-bold disabled:opacity-50"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
+            {busy || 'Next'}
           </button>
-        </div>
-        <div className="flex items-center gap-2 rounded-2xl px-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
-          <span style={{ color: GOLD }} className="font-bold">
-            $
-          </span>
-          <input
-            autoFocus
-            value={handle.replace(/^\$/, '')}
-            onChange={(e) => setHandle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && go()}
-            placeholder="handle"
-            autoCapitalize="none"
-            autoCorrect="off"
-            className="flex-1 bg-transparent py-3 text-white outline-none"
-          />
-        </div>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
-        <button
-          onClick={go}
-          disabled={busy}
-          className="w-full mt-4 rounded-2xl py-3 font-bold disabled:opacity-50"
-          style={{ background: GOLD, color: '#1a1300' }}
-        >
-          {busy ? 'Opening…' : 'Start chat'}
-        </button>
-      </div>
-    </div>
+        </>
+      ) : (
+        <>
+          <div className="rounded-2xl p-4 text-sm" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+            <div className="flex justify-between">
+              <span style={{ color: MUTED }}>Send</span>
+              <span className="text-white font-semibold">{amount}</span>
+            </div>
+            <div className="flex justify-between mt-2">
+              <span style={{ color: MUTED }}>To</span>
+              <span className="text-white font-semibold">{target.label}</span>
+            </div>
+            <div className="text-[11px] mt-2 break-all" style={{ color: MUTED }}>
+              {target.address}
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={() => setTarget(null)} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold text-white" style={{ background: PANEL }}>
+              Back
+            </button>
+            <button
+              onClick={send}
+              disabled={!!busy}
+              className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50"
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              {busy || `Send ${amount}`}
+            </button>
+          </div>
+        </>
+      )}
+      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+    </Sheet>
   );
 };
 
-// ───────────────────────────── Chats list ─────────────────────────────
+// ───────────────────────────── Token rooms list ─────────────────────────────
+
+const LOOKUP_TTL_MS = 5 * 60_000;
 
 const ChatPage = () => {
   const { apiContext } = useServiceContext();
+  const { handleSelect } = useBottomMenu();
   const online = useOnline();
   const client = useMemo(() => new BchatClient(defaultHttp(isNative), loadSession()), []);
   const [handle, setHandle] = useState<string | null>(client.handle);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState('');
   const [rooms, setRooms] = useState<ChatRoom[] | null>(null);
+  const [holdings, setHoldings] = useState<Holding[] | null>(null);
+  const [lookups, setLookups] = useState<Record<string, TokenRoomLookup>>({});
   const [listError, setListError] = useState('');
   const [query, setQuery] = useState('');
-  const [open, setOpen] = useState<ChatRoom | null>(null);
-  const [composing, setComposing] = useState(false);
+  const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null } | null>(null);
+  const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [opening, setOpening] = useState('');
   const autoTried = useRef(false);
+  const proved = useRef<Set<string>>(new Set());
+  const lookedAt = useRef<Map<string, number>>(new Map());
 
   const signIn = useCallback(async () => {
     setSigningIn(true);
@@ -490,7 +648,6 @@ const ChatPage = () => {
     setRooms(null);
   }, [client]);
 
-  // A stored session belongs to one wallet identity; drop it after an account switch.
   useEffect(() => {
     const saved = client.current;
     if (!saved) return;
@@ -500,15 +657,33 @@ const ChatPage = () => {
       .catch(() => {});
   }, [client, apiContext, authLost]);
 
-  // Sign in automatically once per visit (the wallet's normal approval applies).
   useEffect(() => {
     if (handle || autoTried.current || !online) return;
     autoTried.current = true;
     void signIn();
   }, [handle, online, signIn]);
 
+  /** Prove this wallet's token keys to bChat (once per key per visit; signatures only). */
+  const prove = useCallback(
+    async (key?: string) => {
+      const tag = key ?? '*';
+      if (proved.current.has(tag)) return;
+      proved.current.add(tag);
+      await proveHoldings(apiContext, client, key).catch(() => proved.current.delete(tag));
+    },
+    [apiContext, client],
+  );
+
+  // Once signed in: link the wallet's keys so bChat can see what it holds.
+  useEffect(() => {
+    if (handle) void prove();
+  }, [handle, prove]);
+
   const refresh = useCallback(() => {
     if (!handle || !online) return;
+    void walletHoldings(apiContext)
+      .then(setHoldings)
+      .catch(() => setHoldings([]));
     client
       .rooms()
       .then((r) => {
@@ -519,28 +694,96 @@ const ChatPage = () => {
         if (e instanceof ChatApiError && e.status === 401) return authLost();
         setListError(errText(e));
       });
-  }, [client, handle, online, authLost]);
+  }, [client, apiContext, handle, online, authLost]);
 
   useEffect(refresh, [refresh]);
   usePoll(refresh, LIST_POLL_MS, !!handle && !open);
 
-  const openRoom = (room: ChatRoom) => {
-    setRooms((cur) => cur?.map((r) => (r.id === room.id ? { ...r, unread: 0 } : r)) ?? cur);
-    setOpen(room);
-  };
+  // Rooms you hold the token for but are not in yet: ask bChat whether they exist.
+  useEffect(() => {
+    if (!handle || !holdings || !rooms) return;
+    const mine = new Set(buildTokenRoomList(holdings, rooms).filter((e) => e.status === 'member').map((e) => e.key));
+    const now = Date.now();
+    const todo = holdings
+      .map((h) => `${h.kind}:${h.id}`)
+      .filter((k) => !mine.has(k) && now - (lookedAt.current.get(k) ?? 0) > LOOKUP_TTL_MS)
+      .slice(0, 20);
+    todo.forEach((k) => lookedAt.current.set(k, now));
+    void Promise.all(
+      todo.map((k) =>
+        client
+          .tokenRoom(k)
+          .then((d) => parseLookup(d))
+          .catch(() => null),
+      ),
+    ).then((found) => {
+      const add = Object.fromEntries(found.filter((l): l is TokenRoomLookup => !!l).map((l) => [l.key, l]));
+      if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
+    });
+  }, [client, handle, holdings, rooms]);
 
-  const openDirect = async (h: string) => {
-    const ticker = await client.openDirect(h);
-    const fresh = await client.rooms().catch(() => rooms ?? []);
-    setRooms(fresh);
-    setComposing(false);
-    openRoom(fresh.find((r) => r.ticker === ticker) ?? { id: ticker, ticker, name: `$${handle} ↔ $${h}` });
-  };
-
-  const shown = useMemo(
-    () => (rooms && handle ? filterRooms(sortRooms(rooms), query, handle) : []),
-    [rooms, query, handle],
+  const entries = useMemo(
+    () => (holdings && rooms ? buildTokenRoomList(holdings, rooms, lookups) : null),
+    [holdings, rooms, lookups],
   );
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase().replace(/^\$/, '');
+    return (entries ?? []).filter(
+      (e) => !q || e.gate.symbol.toLowerCase().includes(q) || (e.room?.name ?? '').toLowerCase().includes(q),
+    );
+  }, [entries, query]);
+
+  const buy = (key: string) => {
+    const ref = parseTokenKey(key);
+    setLocked(null);
+    if (!ref) return;
+    requestMarketToken(ref);
+    handleSelect(asMenuItem('market'));
+  };
+
+  const openEntry = useCallback(
+    async (entry: TokenRoomEntry) => {
+      setOpening(entry.key);
+      try {
+        await prove(entry.key);
+        let room = entry.room;
+        if (!room) {
+          const ticker = await client.startTokenRoom(entry.key);
+          room = { id: ticker, ticker, name: null, party_count: 1 };
+        }
+        setRooms((cur) => cur?.map((r) => (r.ticker === room!.ticker ? { ...r, unread: 0 } : r)) ?? cur);
+        setOpen({ room, entry });
+      } catch (e) {
+        if (e instanceof ChatApiError && e.status === 401) return authLost();
+        const refusal = e instanceof ChatApiError ? parseGateRefusal(e.data) : null;
+        if (refusal) setLocked({ gate: refusal.gate, heldRaw: refusal.heldRaw, members: refusal.room?.members ?? null });
+        else setListError(errText(e));
+      } finally {
+        setOpening('');
+      }
+    },
+    [client, prove, authLost],
+  );
+
+  // "Open room" from a Wallet / Market token page.
+  useEffect(() => {
+    if (!handle) return;
+    const take = async () => {
+      const key = takeChatRoom();
+      if (!key) return;
+      const held = (holdings ?? (await walletHoldings(apiContext).catch(() => []))).filter((h) => `${h.kind}:${h.id}` === key);
+      await prove(key);
+      const look = parseLookup(await client.tokenRoom(key).catch(() => null));
+      const list = buildTokenRoomList(held, rooms ?? [], look ? { [key]: look } : {});
+      if (list[0]) return void openEntry(list[0]);
+      // Not held (or below the minimum): show the lock with the room's real terms.
+      const gate = look?.gate ?? { key, symbol: held[0]?.symbol ?? 'TOKEN', dec: held[0]?.dec ?? 0, minRaw: '1' };
+      setLocked({ gate, heldRaw: look?.heldRaw ?? held[0]?.amountRaw ?? null, members: look?.room?.members ?? null });
+    };
+    void take();
+    return onTokenNav(() => void take());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle]);
 
   return (
     <div
@@ -550,7 +793,7 @@ const ChatPage = () => {
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         <div className="flex items-center justify-between px-4 pb-2">
-          <h1 className="text-[22px] font-bold text-white">Chats</h1>
+          <h1 className="text-[22px] font-bold text-white">Rooms</h1>
           <div className="flex items-center gap-1">
             {handle && (
               <span className="text-[11px] mr-1" style={{ color: MUTED }}>
@@ -565,14 +808,6 @@ const ChatPage = () => {
             >
               <RefreshCw size={18} color={MUTED} />
             </button>
-            <button
-              onClick={() => setComposing(true)}
-              disabled={!handle}
-              aria-label="New message"
-              className="p-2 rounded-full active:opacity-60 disabled:opacity-30"
-            >
-              <MessageCirclePlus size={22} color={GOLD} />
-            </button>
           </div>
         </div>
 
@@ -581,11 +816,11 @@ const ChatPage = () => {
             className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
             style={{ background: '#1a1408', color: '#e6c76a' }}
           >
-            <WifiOff size={14} /> You're offline. Chats will refresh when you reconnect.
+            <WifiOff size={14} /> You're offline. Rooms will refresh when you reconnect.
           </div>
         )}
 
-        {handle && (
+        {handle && entries && entries.length > 4 && (
           <div
             className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3"
             style={{ background: PANEL, border: `1px solid ${LINE}` }}
@@ -594,7 +829,7 @@ const ChatPage = () => {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search"
+              placeholder="Search rooms"
               className="flex-1 bg-transparent py-2 text-sm text-white outline-none"
             />
             {query && (
@@ -611,11 +846,12 @@ const ChatPage = () => {
               className="h-16 w-16 rounded-2xl flex items-center justify-center"
               style={{ background: 'linear-gradient(145deg,#2a2208,#0d0b04)', border: '1px solid #3a2f0c' }}
             >
-              <MessageCirclePlus size={28} color={GOLD} />
+              <MessageCircle size={28} color={GOLD} />
             </div>
-            <h2 className="text-lg font-bold text-white">bChat</h2>
+            <h2 className="text-lg font-bold text-white">Token rooms</h2>
             <p className="text-xs" style={{ color: MUTED }}>
-              Messages with anyone on bitcoinchat.online. Signs in with this wallet's identity key — no password.
+              Every token you hold has a room for its holders. Signs in to bChat with this wallet's identity key — no
+              password.
             </p>
             <button
               onClick={signIn}
@@ -629,12 +865,12 @@ const ChatPage = () => {
           </div>
         )}
 
-        {handle && rooms === null && !listError && (
+        {handle && entries === null && !listError && (
           <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            Loading chats…
+            Loading rooms…
           </div>
         )}
-        {handle && listError && rooms === null && (
+        {handle && listError && entries === null && (
           <div className="text-center text-xs pt-10 text-[#F97066]">
             {listError}
             <div>
@@ -644,48 +880,58 @@ const ChatPage = () => {
             </div>
           </div>
         )}
-        {handle && rooms && rooms.length === 0 && (
+        {handle && entries && entries.length === 0 && (
           <div className="px-8 pt-14 text-center">
-            <p className="text-sm text-white font-semibold">No chats yet</p>
+            <p className="text-sm text-white font-semibold">No rooms yet</p>
             <p className="text-xs mt-1" style={{ color: MUTED }}>
-              Start one with someone's $handle.
+              Buy a token in Market to join its room.
             </p>
             <button
-              onClick={() => setComposing(true)}
-              className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold"
+              onClick={() => handleSelect(asMenuItem('market'))}
+              className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
               style={{ background: GOLD, color: '#1a1300' }}
             >
-              New message
+              <ShoppingCart size={15} /> Market
             </button>
-          </div>
-        )}
-        {handle && rooms && rooms.length > 0 && shown.length === 0 && (
-          <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            No chats match "{query}"
           </div>
         )}
 
         <ul className="w-full">
-          {shown.map((room) => {
-            const title = roomTitle(room, handle || '');
-            const unread = room.unread ?? 0;
+          {shown.map((e) => {
+            const title = e.room?.name || (e.key.startsWith('coll:') ? e.gate.symbol : `$${e.gate.symbol}`);
+            const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
+            const sub =
+              e.status === 'start'
+                ? 'No room yet — tap to start it'
+                : e.status === 'join'
+                  ? `${e.members ?? 0} holder${e.members === 1 ? '' : 's'} · tap to join`
+                  : e.room
+                    ? previewText(e.room, handle || '')
+                    : '';
             return (
-              <li key={room.id}>
+              <li key={e.key}>
                 <button
-                  onClick={() => openRoom(room)}
+                  onClick={() => void openEntry(e)}
+                  disabled={!!opening}
                   className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
                 >
-                  <Avatar title={title} />
+                  <Avatar title={e.gate.symbol} />
                   <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
                     <div className="flex items-baseline gap-2">
                       <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
                       <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-                        {listTimeLabel(room.last_message?.created_at ?? room.updated_at)}
+                        {opening === e.key ? 'opening…' : e.room ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at) : ''}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 mt-[2px]">
+                      <span
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
+                        style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
+                      >
+                        <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
+                      </span>
                       <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-                        {previewText(room, handle || '')}
+                        {sub}
                       </span>
                       {unread > 0 && (
                         <span
@@ -704,19 +950,37 @@ const ChatPage = () => {
         </ul>
       </div>
 
-      {composing && <NewChat onOpen={openDirect} onClose={() => setComposing(false)} />}
+      {locked && (
+        <LockedRoom
+          gate={locked.gate}
+          heldRaw={locked.heldRaw}
+          members={locked.members}
+          onBuy={() => buy(locked.gate.key)}
+          onClose={() => setLocked(null)}
+        />
+      )}
       {open && handle && (
         <Conversation
           client={client}
-          room={open}
+          room={open.room}
+          entry={open.entry}
           me={handle}
           online={online}
           onAuthLost={authLost}
+          onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
+          onLocked={(r) => {
+            setOpen(null);
+            setLocked({ gate: r.gate, heldRaw: r.heldRaw, members: r.room?.members ?? null });
+            refresh();
+          }}
           onBack={() => {
             setOpen(null);
             refresh();
           }}
         />
+      )}
+      {inviting && open?.entry && (
+        <InviteSheet client={client} ticker={open.room.ticker} entry={open.entry} onClose={() => setInviting(false)} />
       )}
     </div>
   );

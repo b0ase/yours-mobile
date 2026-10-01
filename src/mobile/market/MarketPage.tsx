@@ -17,7 +17,9 @@ import {
   contentUrls,
   formatSats,
   hotBoard,
+  parseRoom,
   roomMarket,
+  roomMeta,
   type HotRoom,
   type Listing,
   type RoomMarket,
@@ -26,6 +28,8 @@ import { categoryOf, nftFeed, type Feed as BaseFeed, type NftCategory, type NftL
 import { onSafetyChange, refreshSafety, reportItem, safety } from './safety';
 import { Blurred, ContentImg, NftCard } from './NftCard';
 import { pauseAudio, playQueue } from '../media/player';
+import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
+import { onTokenNav, takeMarketToken } from '../chat/nav';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -175,6 +179,30 @@ const MarketPage = () => {
     setMarket(null);
     setMarket(await roomMarket(r.ref));
   };
+
+  // "Buy in Market" from a locked token room in Chat: open that token's page.
+  useEffect(() => {
+    const take = () => {
+      const want = takeMarketToken();
+      const ref = want && parseRoom(want.kind, want.id);
+      if (!ref) return;
+      void roomMeta(ref.kind, ref.id).then((m) =>
+        openRoom({
+          ref,
+          title: m?.title ?? (ref.kind === 'bsv21' ? 'Token' : 'Collection'),
+          subtitle: m?.subtitle ?? '',
+          icon: m?.icon ?? null,
+          trades: 0,
+          newListings: 0,
+          floorLabel: null,
+          heat: 0,
+        }),
+      );
+    };
+    take();
+    return onTokenNav(take);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const buy = async ({ room: r, listing }: Pending) => {
     setBusy('Buying…');
@@ -371,6 +399,12 @@ const MarketPage = () => {
           <div className="text-base font-bold text-white">{room.title}</div>
           <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{room.subtitle}</div>
         </div>
+        <OpenTokenRoomButton
+          kind={room.ref.kind}
+          id={room.ref.id}
+          className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
+          style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+        />
       </div>
       <div className="text-[11px] text-[#98A2B3]">
         Floor {market?.floorLabel ?? '—'} · {market?.live ?? 0} live · {market?.buyableCount ?? 0} buyable in-app
