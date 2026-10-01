@@ -31,7 +31,10 @@ const AgentPage = () => {
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, busy]);
+  // Braces matter: newer WebViews return a Promise from scrollIntoView, which React would call as the cleanup.
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, busy]);
 
   const ask = async (transcript: AgentMessage[]) => {
     if (!apiContext) throw new Error('Wallet is locked.');
@@ -73,8 +76,11 @@ const AgentPage = () => {
   };
 
   return (
-    // Bottom padding = the tab bar's height (tabs/BottomMenu.tsx, 3.75rem) so the composer sits above it.
-    <div className="w-full h-full flex flex-col" style={{ background: '#010101', paddingBottom: '3.75rem' }}>
+    // Top padding = the fixed TopNav (h-14); bottom = the tab bar (tabs/BottomMenu.tsx, 3.75rem) so the composer sits above it.
+    <div
+      className="w-full h-full flex flex-col"
+      style={{ background: '#010101', paddingTop: '3.5rem', paddingBottom: '3.75rem' }}
+    >
       <TopNav />
       <div className="flex items-center gap-2 px-2 py-1 shrink-0" style={{ borderBottom: `1px solid ${LINE}` }}>
         <button aria-label="Back" onClick={close} className="p-2">
