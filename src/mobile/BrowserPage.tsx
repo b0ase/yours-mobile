@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowRight, Clock, Github, Globe, Search, X } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { useBackClose } from './backStack';
 import { TopNav } from '../components/TopNav';
@@ -11,6 +11,8 @@ import app_onesatsocialIcon from './brand/apps/1satsocial.png';
 import app_treechatIcon from './brand/apps/treechat.png';
 import app_twetchIcon from './brand/apps/twetch.png';
 import app_tempoIcon from './brand/apps/tempo.png';
+import bgVideo from './brand/bg/liquid-gold.mp4';
+import bgPoster from './brand/bg/liquid-gold.jpg';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -196,12 +198,150 @@ const AppTile = ({
   );
 };
 
+const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES];
+
+// Favourites: tile URLs, persisted once the user changes them; until then the default set.
+const FAV_KEY = 'bwallet:favourite-apps';
+const DEFAULT_FAVOURITES = ['bChat', 'bMovies', 'bMusic', 'bMint', 'bWriter', 'Treechat', 'Twetch']
+  .map((name) => ALL_TILES.find((t) => t.name === name)?.url)
+  .filter((u): u is string => !!u);
+
+const readFavourites = (): string[] => {
+  try {
+    const raw = localStorage.getItem(FAV_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : DEFAULT_FAVOURITES;
+  } catch {
+    return DEFAULT_FAVOURITES;
+  }
+};
+
+const writeFavourites = (urls: string[]) => {
+  try {
+    localStorage.setItem(FAV_KEY, JSON.stringify(urls));
+  } catch {
+    // storage unavailable: favourites last for this session only
+  }
+};
+
+// Home-screen pages, swiped left/right (CSS scroll-snap); the switch tracks the page.
+const PAGES = ['Favourites', 'bApps', 'Other apps'] as const;
+const PAGE_KEY = 'bwallet:apps-page';
+
+const readPage = () => {
+  try {
+    const n = Number(sessionStorage.getItem(PAGE_KEY) ?? 0);
+    return Number.isInteger(n) && n >= 0 && n < PAGES.length ? n : 0;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * Liquid-gold loop (site/media/liquid-gold, cropped to portrait, 360x640, ~0.6MB) under a dark
+ * scrim. A still with prefers-reduced-motion; paused while the app is in the background. It sits
+ * in its own non-scrolling layer, so scrolling never repaints it.
+ */
+const HomeBackground = () => {
+  const reduce = useReducedMotion();
+  const video = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    v.muted = true;
+    const sync = () => {
+      if (document.hidden) v.pause();
+      else v.play().catch(() => undefined);
+    };
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, [reduce]);
+  return (
+    <motion.div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+      initial={{ opacity: 0, scale: reduce ? 1 : 1.08 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.6, ease: 'easeOut' }}
+    >
+      {reduce ? (
+        <img src={bgPoster} alt="" className="h-full w-full object-cover" style={{ opacity: 0.5 }} />
+      ) : (
+        <video
+          ref={video}
+          src={bgVideo}
+          poster={bgPoster}
+          muted
+          loop
+          autoPlay
+          playsInline
+          disablePictureInPicture
+          preload="auto"
+          className="h-full w-full object-cover"
+          style={{ opacity: 0.5 }}
+        />
+      )}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: 'linear-gradient(180deg, rgba(1,1,1,0.55) 0%, rgba(1,1,1,0.68) 45%, rgba(1,1,1,0.85) 100%)',
+        }}
+      />
+    </motion.div>
+  );
+};
+
 const BrowserPage = () => {
+  const reduce = useReducedMotion();
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
   const [recent, setRecent] = useState(readRecent);
+  const [favourites, setFavourites] = useState(readFavourites);
   const [info, setInfo] = useState<Tile | null>(null);
+  const [page, setPage] = useState(readPage);
+  // Bumped when the switch moves to a page, so that page's grid replays a gentle zoom.
+  const [replay, setReplay] = useState<{ page: number; n: number }>({ page: -1, n: 0 });
+  const pager = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(page);
   useBackClose(!!info, () => setInfo(null));
+
+  useLayoutEffect(() => {
+    const el = pager.current;
+    if (el) el.scrollLeft = pageRef.current * el.clientWidth;
+  }, []);
+
+  const showPage = (i: number) => {
+    pageRef.current = i;
+    setPage(i);
+    try {
+      sessionStorage.setItem(PAGE_KEY, String(i));
+    } catch {
+      // storage unavailable: the page just isn't remembered
+    }
+  };
+
+  const onPagerScroll = () => {
+    const el = pager.current;
+    if (!el || !el.clientWidth) return;
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    if (i !== pageRef.current && i >= 0 && i < PAGES.length) showPage(i);
+  };
+
+  const goPage = (i: number) => {
+    const el = pager.current;
+    if (!el || i === pageRef.current) return;
+    showPage(i);
+    setReplay((r) => ({ page: i, n: r.n + 1 }));
+    el.scrollTo({ left: i * el.clientWidth, behavior: reduce ? 'auto' : 'smooth' });
+  };
+
+  const isFavourite = (t: Tile) => favourites.includes(t.url);
+  const toggleFavourite = (t: Tile) => {
+    const next = isFavourite(t) ? favourites.filter((u) => u !== t.url) : [...favourites, t.url];
+    setFavourites(next);
+    writeFavourites(next);
+  };
+  const favouriteTiles = favourites.map((u) => ALL_TILES.find((t) => t.url === u)).filter((t): t is Tile => !!t);
 
   const go = (url: string) => {
     setError('');
@@ -217,26 +357,84 @@ const BrowserPage = () => {
     go(url);
   };
 
-  const grid = (tiles: Tile[]) => (
-    <div className="grid grid-cols-4 gap-x-3 gap-y-5">
-      {tiles.map((t) => (
-        <AppTile key={t.key} tile={t} onOpen={() => go(t.url)} onInfo={() => setInfo(t)} />
-      ))}
-    </div>
-  );
+  // Entrance: the grid settles from slightly zoomed-in, like an iOS home screen after unlock
+  // (transform/opacity only). A gentler version replays when the switch picks a page.
+  const grid = (i: number, tiles: Tile[]) => {
+    const replayed = replay.page === i;
+    return (
+      <motion.div
+        key={replayed ? `r${replay.n}` : 'enter'}
+        className="grid grid-cols-4 gap-x-3 gap-y-5"
+        style={{ transformOrigin: '50% 30%' }}
+        initial={reduce ? { opacity: 0 } : { opacity: replayed ? 0.6 : 0, scale: replayed ? 1.06 : 1.2 }}
+        animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+        transition={reduce ? { duration: 0.2 } : { type: 'spring', stiffness: 260, damping: 28, mass: 0.9 }}
+      >
+        {tiles.map((t) => (
+          <AppTile key={t.key} tile={t} onOpen={() => go(t.url)} onInfo={() => setInfo(t)} />
+        ))}
+      </motion.div>
+    );
+  };
 
-  const heading = (text: string) => (
-    <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{text}</h2>
-  );
+  const note = (text: string) => <p className="text-[10px] leading-relaxed text-[#98A2B3] text-center px-2">{text}</p>;
+
+  const pageBody = (i: number) => {
+    if (i === 0) {
+      return (
+        <>
+          {favouriteTiles.length > 0 ? (
+            grid(0, favouriteTiles)
+          ) : (
+            <p className="text-sm text-[#98A2B3] text-center py-10">
+              No favourites yet. Touch and hold any app, then Add to favourites.
+            </p>
+          )}
+          {recent.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recent</h2>
+              <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                {recent.map((url) => (
+                  <button
+                    key={url}
+                    onClick={() => go(url)}
+                    className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+                  >
+                    <Clock size={11} /> {hostOf(url)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {note('Touch and hold an app to add or remove it here.')}
+        </>
+      );
+    }
+    if (i === 1) {
+      return (
+        <>
+          {grid(1, BAPP_TILES)}
+          {note(`Touch and hold an app for details. Grey dot = demo. ${UNOFFICIAL_NOTICE}`)}
+        </>
+      );
+    }
+    return (
+      <>
+        {grid(2, OTHER_TILES)}
+        {note('Not made by The Bitcoin Corporation.')}
+      </>
+    );
+  };
 
   return (
-    <div className="relative w-full" style={{ height: '100%', background: '#010101' }}>
-      <div
-        className="flex w-full h-full flex-col items-center overflow-x-hidden overflow-y-auto"
-        style={{ paddingBottom: 'calc(3.75rem + 1.5rem)' }}
-      >
-        <TopNav />
-        <div className="w-full px-4 pb-6 pt-16 flex flex-col gap-5">
+    <div className="relative w-full overflow-hidden" style={{ height: '100%', background: '#010101' }}>
+      <HomeBackground />
+      <TopNav />
+      <div className="relative flex h-full w-full flex-col pt-14">
+        <div
+          className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
+          style={{ background: 'rgba(1,1,1,0.75)' }}
+        >
           <form onSubmit={submit} className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 rounded-full bg-[#17191E] pl-4 pr-1">
               <Search size={15} style={{ color: '#98A2B3' }} />
@@ -257,37 +455,43 @@ const BrowserPage = () => {
             </div>
             {error && <p className="text-xs text-[#F97066] px-2">{error}</p>}
           </form>
+          <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+            {PAGES.map((label, i) => (
+              <button
+                key={label}
+                role="tab"
+                aria-selected={page === i}
+                onClick={() => goPage(i)}
+                className="flex-1 min-w-0 rounded-lg py-2 px-0.5 text-[13px] font-bold border-0 outline-none cursor-pointer transition-colors"
+                style={{
+                  background: page === i ? '#A1FF8B' : 'transparent',
+                  color: page === i ? '#010101' : '#98A2B3',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          {recent.length > 0 && (
-            <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-              {recent.map((url) => (
-                <button
-                  key={url}
-                  onClick={() => go(url)}
-                  className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E] px-3 py-1.5 text-[11px] text-[#98A2B3]"
-                >
-                  <Clock size={11} /> {hostOf(url)}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <section className="flex flex-col gap-3">
-            {heading('bApps')}
-            {grid(BAPP_TILES)}
-          </section>
-
-          <section className="flex flex-col gap-3 pt-2">
-            {heading('Other apps')}
-            {grid(OTHER_TILES)}
-            <p className="text-[10px] text-[#667085] text-center">Not made by The Bitcoin Corporation.</p>
-          </section>
-
-          <p className="text-[10px] leading-relaxed text-[#667085] text-center px-2">
-            Touch and hold an app for details. Grey dot = demo.
-            <br />
-            {UNOFFICIAL_NOTICE}
-          </p>
+        <div
+          ref={pager}
+          onScroll={onPagerScroll}
+          className="flex min-h-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+          style={{ scrollbarWidth: 'none', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch' }}
+        >
+          {PAGES.map((label, i) => (
+            <section
+              key={label}
+              aria-label={label}
+              className="h-full w-full shrink-0 snap-start snap-always overflow-y-auto overflow-x-hidden"
+              style={{ overscrollBehaviorY: 'contain' }}
+            >
+              <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: 'calc(3.75rem + 1.5rem)' }}>
+                {pageBody(i)}
+              </div>
+            </section>
+          ))}
         </div>
       </div>
 
@@ -348,6 +552,13 @@ const BrowserPage = () => {
                 style={{ background: '#FFD24D', color: '#010101' }}
               >
                 Open
+              </button>
+              <button
+                onClick={() => toggleFavourite(info)}
+                className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+              >
+                <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
+                {isFavourite(info) ? 'Remove from favourites' : 'Add to favourites'}
               </button>
               {info.bapp?.source && (
                 <button

@@ -3,12 +3,12 @@ import bradioIcon from './brand/bradio-icon.png';
 import bdnsIcon from './brand/bdns-icon.png';
 import bsearchIcon from './brand/bsearch-icon.png';
 import bidIcon from './brand/bid-icon.png';
-import bjobsIcon from './brand/bjobs-icon.png';
-import bcodeIcon from './brand/bcode-icon.png';
-import bdriveIcon from './brand/bdrive-icon.png';
+import bjobsIcon from './brand/apps/bjobs.png';
+import bcodeIcon from './brand/apps/bcode.png';
+import bdriveIcon from './brand/apps/bdrive.png';
 import bvideoIcon from './brand/bvideo-icon.png';
-import bcalIcon from './brand/bcal-icon.png';
-import bsheetsIcon from './brand/bsheets-icon.png';
+import bcalIcon from './brand/apps/bcal.png';
+import bsheetsIcon from './brand/apps/bsheets.png';
 import bmintIcon from './brand/bmint-icon.png';
 import bmusicIcon from './brand/bmusic-icon.png';
 import app_bchatIcon from './brand/apps/bchat.png';
@@ -21,11 +21,16 @@ import app_b3dIcon from './brand/apps/b3d.png';
 import app_bbooksIcon from './brand/apps/bbooks.png';
 import app_bgamesIcon from './brand/apps/bgames.png';
 import app_bexchangeIcon from './brand/apps/bexchange.png';
+import app_beduIcon from './brand/apps/bedu.png';
+import app_bsocialIcon from './brand/apps/bsocial.png';
+import app_bmapsIcon from './brand/apps/bmaps.png';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
  * (2026-10-01); 'demo' = not yet live. Demo apps are shown, labelled Demo.
- * icon: the site's favicon/apple-touch icon; omit for the gold "b" monogram.
+ * icon: the app's original icon where it has a distinctive one, else a bCorp flag-cut b
+ * (src/mobile/brand: 1st app of a colour = coloured b on black, 2nd = black b on the
+ * colour, 3rd = white b on the colour, 4th = coloured b on white).
  */
 export type BAppGroup = 'featured' | 'work' | 'media' | 'social';
 
@@ -244,6 +249,7 @@ export const BAPPS: BApp[] = [
     verb: 'Learn and teach courses',
     group: 'media',
     status: 'demo',
+    icon: app_beduIcon,
     source: suite('bitcoin-education'),
   },
   // Social & money
@@ -253,6 +259,7 @@ export const BAPPS: BApp[] = [
     verb: 'Post and follow on Bitcoin',
     group: 'social',
     status: 'live',
+    icon: app_bsocialIcon,
     source: suite('bitcoin-social'),
   },
   {
@@ -279,6 +286,7 @@ export const BAPPS: BApp[] = [
     verb: 'Find places that take Bitcoin',
     group: 'social',
     status: 'live',
+    icon: app_bmapsIcon,
     source: suite('bitcoin-maps'),
   },
 ];
