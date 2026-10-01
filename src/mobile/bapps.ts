@@ -1,3 +1,4 @@
+import bmusicIcon from './brand/bmusic-icon.png';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
@@ -50,7 +51,7 @@ export const BAPPS: BApp[] = [
     verb: 'Tokenise your music; fans who hold it make the video with you',
     group: 'featured',
     status: 'live',
-    icon: 'https://www.bmovies.app/icons/icon-192.png',
+    icon: bmusicIcon,
   },
   {
     name: 'bMint',
