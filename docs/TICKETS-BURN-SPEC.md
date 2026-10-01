@@ -188,4 +188,15 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
 3. **No resale tax by default:** no creator royalty and no bCorp cut on ticket resales. Both are **configurable**, defaulting to 0: a per-room creator royalty set at mint, and a platform ticket-resale fee in build config. Ticket resales do not use the general Market fee (`BWALLET_MARKET_FEE_ADDRESS`).
 4. **Resale:** add a bWallet-only switch to enable ticket listings if upstream still has OrdLock listing creation disabled.
 
-Still open: 2 (default pass length), 6 (early-close refunds), 7 (expired tickets), 8 (legal opinion).
+5. **What a ticket buys is set per room** by the creator at mint, one of:
+   - **time**: each burned ticket buys a duration (e.g. 1 ticket = 1 hour, or = the room's lifetime);
+   - **messages**: each ticket buys N messages;
+   - **words** or **characters**: each ticket buys N words / N characters of posting.
+     Reading may stay free or also be metered (creator's choice). bit-sign keeps the per-member allowance as a ledger
+     (deposit on burn, debit per message/word/char, never below 0, idempotent per message), like the credits ledger;
+     when it runs out the composer asks to burn another ticket.
+6. **No refunds.** Burns are final; there is no refund or creator-bond mechanism.
+7. **Rooms expire, tickets don't.** A ticket for an expired (or closed) room stays a normal token in the wallet but
+   opens nothing; entry to an expired room is refused. The Tickets view shows the room as ended.
+8. **No legal opinion.** Not budgeted. Keep the product framed as access to rooms (no talk of returns or investment)
+   and keep resale fees at 0 by default.
