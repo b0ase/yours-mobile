@@ -39,6 +39,9 @@ export interface YoursNativePlugin {
   /** Dispatch a provider event (account/network change) into the page. */
   browserEmit(opts: { event: string; detail: string }): Promise<void>;
 
+  /** bWallet calls: route call audio to the loudspeaker (true) or the earpiece (false). */
+  audioSetSpeaker(opts: { on: boolean }): Promise<void>;
+
   addListener(event: 'browserRequest', fn: (req: BrowserRequest) => void): Promise<PluginListenerHandle>;
   addListener(event: 'browserClosed', fn: () => void): Promise<PluginListenerHandle>;
 }
@@ -72,6 +75,7 @@ const web: Partial<YoursNativePlugin> = {
   async browserSetHidden() {},
   async browserRespond() {},
   async browserEmit() {},
+  async audioSetSpeaker() {},
 };
 
 export const YoursNative = registerPlugin<YoursNativePlugin>('YoursNative', {

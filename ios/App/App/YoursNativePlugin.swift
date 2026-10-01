@@ -1,3 +1,4 @@
+import AVFoundation
 import Capacitor
 import LocalAuthentication
 import Security
@@ -34,7 +35,8 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "browserClose", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserSetHidden", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserRespond", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "audioSetSpeaker", returnType: CAPPluginReturnPromise)
     ]
 
     private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
@@ -259,6 +261,26 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             self.browser?.emit(event: event, detail: detail)
             call.resolve()
+        }
+    }
+
+    // MARK: - Call audio (bWallet calls, src/mobile/calls/media.ts)
+
+    /// Route call audio to the loudspeaker (on) or back to the receiver (off). WebRTC in
+    /// WKWebView uses the shared AVAudioSession, so overriding its output port is enough.
+    @objc func audioSetSpeaker(_ call: CAPPluginCall) {
+        let on = call.getBool("on") ?? false
+        DispatchQueue.main.async {
+            do {
+                let session = AVAudioSession.sharedInstance()
+                if on {
+                    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
+                }
+                try session.overrideOutputAudioPort(on ? .speaker : .none)
+                call.resolve()
+            } catch {
+                call.reject("Could not change the audio route: \(error.localizedDescription)")
+            }
         }
     }
 }

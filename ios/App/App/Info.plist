@@ -24,6 +24,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>bWallet uses the microphone for voice calls with other bWallet users.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Unlock bWallet with Face ID instead of typing your password.</string>
 	<key>UIApplicationSceneManifest</key>

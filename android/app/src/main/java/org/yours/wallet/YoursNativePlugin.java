@@ -2,6 +2,7 @@ package org.yours.wallet;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.media.AudioManager;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
@@ -580,5 +581,19 @@ public class YoursNativePlugin extends Plugin {
             }
             call.resolve();
         });
+    }
+
+    /** bWallet calls: loudspeaker on/off for WebRTC audio (src/mobile/calls/media.ts). */
+    @PluginMethod
+    public void audioSetSpeaker(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) {
+            call.reject("Audio unavailable");
+            return;
+        }
+        am.setMode(on ? AudioManager.MODE_IN_COMMUNICATION : AudioManager.MODE_NORMAL);
+        am.setSpeakerphoneOn(on);
+        call.resolve();
     }
 }
