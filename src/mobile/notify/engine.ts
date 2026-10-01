@@ -1,0 +1,548 @@
+/**
+ * Notification poller. Runs while the app is open (foreground) and once more on every resume;
+ * each source is optional and fails on its own. The first run of a source only records a baseline
+ * (no history flood). New events go to the in-app list (bell) and, when the category is on and
+ * the OS permission was granted, to a local notification.
+ *
+ * Sources: bmap (replies / quotes / likes / locks on your on-chain posts, mentions), Twetch
+ * (replies + likes on your Twetch posts when your Twetch user id is known, @mentions in the
+ * latest feed), bChat (room unread counts, @handle mentions, missed calls via the calls store),
+ * 1Sat indexer (new outputs at your addresses = payments / tokens; your listings spent by
+ * someone else = sales).
+ *
+ * iOS / Android suspend the WebView in the background, so this cannot fire while the app is
+ * closed: that needs server push (see docs/NOTIFICATIONS.md).
+ */
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import type { OneSatContext } from '@1sat/actions';
+import {
+  FEED_API,
+  fetchByAddress,
+  fetchByBap,
+  fetchReplies,
+  fetchTwetchReplies,
+  fetchTwetchUserPosts,
+} from '../feed/feedApi';
+import { lockCandidates } from '../feed/locks';
+import { parseBmapFeed, parseTwetchFeed, TWETCH_API, type FeedPost } from '../feed/post';
+import { BchatClient, defaultHttp, loadSession } from '../chat/api';
+import { subscribe as subscribeCalls } from '../calls/store';
+import { App } from '@capacitor/app';
+import { ONESAT, search, type SearchRow } from '../market/indexer';
+import { rememberedTicketIds } from '../wallet/walletTickets';
+import { loadPrefs } from '../settings/prefs';
+import {
+  allowed,
+  countIncreases,
+  describeIncoming,
+  diffSeen,
+  excerpt,
+  formatSatsShort,
+  isMe,
+  mentionsMe,
+  nativeId,
+  type IncomingRow,
+  type MeKeys,
+  type NotifyItem,
+} from './notify';
+import { loadPollState, pushItems, savePollState, setAsked, wasAsked, type PollState } from './store';
+
+export type Me = MeKeys & {
+  /** Names to match mentions on (paymail, $handle, OpNS name, profile name). */
+  names: string[];
+  ctx: OneSatContext | null;
+};
+
+export const POLL_MS = 90_000;
+const MY_POSTS = 8;
+
+let me: Me | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
+let running = false;
+let unsubCalls: (() => void) | null = null;
+let resumeSub: { remove: () => Promise<void> } | null = null;
+
+const now = () => Date.now();
+const item = (p: Omit<NotifyItem, 'read' | 'at'> & { at?: number }): NotifyItem => ({ read: false, at: now(), ...p });
+const postTarget = (p: FeedPost) => ({ type: 'post' as const, txid: p.txid, twetchId: p.twetchId });
+
+const getJson = async (url: string): Promise<unknown> => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+};
+
+/** Runs `fn` for a named source with its slice of the poll state; seeds silently on the first run. */
+async function source(
+  st: PollState,
+  key: string,
+  fn: (seen: (ids: string[]) => string[], counts: Record<string, number>) => Promise<Record<string, number> | void>,
+) {
+  const seeded = !!st.seeded[key];
+  const seen = (ids: string[]) => {
+    const d = diffSeen(st.seen[key] ?? [], ids, seeded);
+    st.seen[key] = d.seen;
+    return d.fresh;
+  };
+  const prev = st.counts[key] ?? {};
+  const next = await fn(seen, seeded ? prev : {});
+  if (next) st.counts[key] = { ...prev, ...next };
+  st.seeded[key] = true;
+}
+
+// ── sources ──────────────────────────────────────────────────────────────────
+
+async function myBmapPosts(m: Me): Promise<FeedPost[]> {
+  const lists = await Promise.allSettled([
+    m.bapId ? fetchByBap(m.bapId, 1, MY_POSTS) : Promise.resolve([]),
+    ...m.addresses.slice(0, 1).map((a) => fetchByAddress(a, 1, MY_POSTS)),
+  ]);
+  const seen = new Set<string>();
+  return lists
+    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+    .filter((p) => !seen.has(p.txid) && !!seen.add(p.txid))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, MY_POSTS);
+}
+
+async function bmapSocial(m: Me, st: PollState, out: NotifyItem[]) {
+  const posts = await myBmapPosts(m);
+  await source(st, 'bmap.replies', async (seen) => {
+    const got = await Promise.allSettled(posts.map((p) => fetchReplies(p.txid).then((r) => ({ p, r }))));
+    const replies = got.flatMap((g) =>
+      g.status === 'fulfilled' ? g.value.r.map((r) => ({ post: g.value.p, r })) : [],
+    );
+    const others = replies.filter(({ r }) => !isMe(r.author, m));
+    const fresh = new Set(seen(others.map(({ r }) => r.txid)));
+    for (const { post, r } of others)
+      if (fresh.has(r.txid))
+        out.push(
+          item({
+            id: `reply:${r.txid}`,
+            kind: 'reply',
+            title: `${r.author.name} replied`,
+            body: excerpt(r.text || 'to your post') + (post.text ? ` — on “${excerpt(post.text, 40)}”` : ''),
+            at: r.at || now(),
+            target: postTarget(r),
+          }),
+        );
+  });
+  // Likes + locks: bmap's like index per post (a lock-like is a MAP like next to a lock output).
+  await source(st, 'bmap.likes', async (seen) => {
+    const got = await Promise.allSettled(
+      posts.slice(0, 5).map((p) => getJson(`${FEED_API}/social/post/${p.txid}/like?limit=100`).then((b) => ({ p, b }))),
+    );
+    for (const g of got) {
+      if (g.status !== 'fulfilled') continue;
+      const { p, b } = g.value;
+      const docs = ((b as { results?: unknown[] })?.results ?? []) as Record<string, unknown>[];
+      const locks = new Set(lockCandidates(b));
+      const ids = docs
+        .map((d) => {
+          const tx = (d.tx as { h?: string } | undefined)?.h ?? (d._id as string | undefined) ?? '';
+          const addr = ((d.AIP as { address?: string }[] | undefined)?.[0]?.address as string | undefined) ?? '';
+          return { tx, addr };
+        })
+        .filter((x) => x.tx && !m.addresses.includes(x.addr));
+      const fresh = seen(ids.map((x) => `${p.txid}:${x.tx}`));
+      const nLocks = fresh.filter((f) => locks.has(f.split(':')[1])).length;
+      const nLikes = fresh.length - nLocks;
+      if (nLikes)
+        out.push(
+          item({
+            id: `like:${p.txid}:${fresh.join(',').slice(-24)}`,
+            kind: 'like',
+            title: nLikes === 1 ? 'New like' : `${nLikes} new likes`,
+            body: `On “${excerpt(p.text || 'your post', 60)}”`,
+            target: postTarget(p),
+          }),
+        );
+      if (nLocks)
+        out.push(
+          item({
+            id: `lock:${p.txid}:${fresh.join(',').slice(-24)}`,
+            kind: 'lock',
+            title: nLocks === 1 ? 'Someone locked BSV to your post' : `${nLocks} new locks on your post`,
+            body: `“${excerpt(p.text || 'your post', 60)}”`,
+            target: postTarget(p),
+          }),
+        );
+    }
+  });
+  // Quotes: bChat quotes name the original (MAP quote) and carry its link, so a text search finds them.
+  await source(st, 'bmap.quotes', async (seen) => {
+    const got = await Promise.allSettled(
+      posts
+        .slice(0, 3)
+        .map((p) =>
+          getJson(`${FEED_API}/social/post/search?q=${p.txid}&limit=20`).then((b) => ({ p, q: parseBmapFeed(b) })),
+        ),
+    );
+    for (const g of got) {
+      if (g.status !== 'fulfilled') continue;
+      const qs = g.value.q.filter((q) => q.quoteTxid === g.value.p.txid && !isMe(q.author, m));
+      const fresh = new Set(seen(qs.map((q) => q.txid)));
+      for (const q of qs)
+        if (fresh.has(q.txid))
+          out.push(
+            item({
+              id: `quote:${q.txid}`,
+              kind: 'quote',
+              title: `${q.author.name} quoted you`,
+              body: excerpt(q.text),
+              at: q.at || now(),
+              target: postTarget(q),
+            }),
+          );
+    }
+  });
+}
+
+async function bmapMentions(m: Me, st: PollState, out: NotifyItem[]) {
+  const names = m.names.slice(0, 2);
+  if (!names.length) return;
+  await source(st, 'bmap.mentions', async (seen) => {
+    const got = await Promise.allSettled(
+      names.map((n) => getJson(`${FEED_API}/social/post/search?q=${encodeURIComponent(n)}&limit=30`)),
+    );
+    const posts = got
+      .flatMap((g) => (g.status === 'fulfilled' ? parseBmapFeed(g.value) : []))
+      .filter((p) => !isMe(p.author, m) && mentionsMe(p.text, m.names));
+    const fresh = new Set(seen(posts.map((p) => p.txid)));
+    for (const p of posts)
+      if (fresh.has(p.txid))
+        out.push(
+          item({
+            id: `mention:${p.txid}`,
+            kind: 'mention',
+            title: `${p.author.name} mentioned you`,
+            body: excerpt(p.text),
+            at: p.at || now(),
+            target: postTarget(p),
+          }),
+        );
+  });
+}
+
+async function twetch(m: Me, st: PollState, out: NotifyItem[]) {
+  const uid = m.twetchUserId;
+  if (!uid) return;
+  const posts = await fetchTwetchUserPosts(uid, MY_POSTS);
+  // Replies: only re-read the posts whose reply count went up (Twetch has no notifications API).
+  await source(st, 'twetch.posts', async (seen, prev) => {
+    const counts: Record<string, number> = {};
+    for (const p of posts) counts[`r:${p.twetchId}`] = p.replies;
+    for (const p of posts) counts[`l:${p.twetchId}`] = p.likes;
+    const up = countIncreases(prev, counts);
+    const withReplies = posts.filter((p) => p.twetchId && up[`r:${p.twetchId}`]);
+    const got = await Promise.allSettled(
+      withReplies.map((p) => fetchTwetchReplies(p.twetchId!).then((r) => ({ p, r }))),
+    );
+    for (const g of got) {
+      if (g.status !== 'fulfilled') continue;
+      const rs = g.value.r.filter((r) => r.twetchUserId !== uid);
+      const fresh = new Set(seen(rs.map((r) => r.txid)));
+      for (const r of rs)
+        if (fresh.has(r.txid))
+          out.push(
+            item({
+              id: `reply:${r.txid}`,
+              kind: 'reply',
+              title: `${r.author.name} replied on Twetch`,
+              body: excerpt(r.text || 'to your post'),
+              at: r.at || now(),
+              target: postTarget(r),
+            }),
+          );
+    }
+    for (const p of posts) {
+      const n = up[`l:${p.twetchId}`];
+      if (n)
+        out.push(
+          item({
+            id: `like:${p.txid}:${counts[`l:${p.twetchId}`]}`,
+            kind: 'like',
+            title: n === 1 ? 'New like on Twetch' : `${n} new likes on Twetch`,
+            body: `On “${excerpt(p.text || 'your post', 60)}”`,
+            target: postTarget(p),
+          }),
+        );
+    }
+    return counts;
+  });
+  // Mentions + quotes of you in Twetch's latest feed (@<user id> is Twetch's mention form).
+  await source(st, 'twetch.latest', async (seen) => {
+    const latest = parseTwetchFeed(await getJson(`${TWETCH_API}/v1/feed/latest?limit=60`));
+    const mine = new Set(posts.map((p) => p.twetchId));
+    const hits = latest.filter(
+      (p) =>
+        p.twetchUserId !== uid &&
+        (new RegExp(`(^|[^\\w])@${uid}(?!\\d)`).test(p.text) ||
+          mentionsMe(p.text, m.names) ||
+          (p.quoteId && mine.has(p.quoteId)) ||
+          (p.parentId && mine.has(p.parentId))),
+    );
+    const fresh = new Set(seen(hits.map((p) => p.txid)));
+    for (const p of hits) {
+      if (!fresh.has(p.txid)) continue;
+      const kind =
+        p.parentId && mine.has(p.parentId) ? 'reply' : p.quoteId && mine.has(p.quoteId) ? 'quote' : 'mention';
+      out.push(
+        item({
+          id: `${kind}:${p.txid}`,
+          kind,
+          title: `${p.author.name} ${kind === 'reply' ? 'replied' : kind === 'quote' ? 'quoted you' : 'mentioned you'} on Twetch`,
+          body: excerpt(p.text),
+          at: p.at || now(),
+          target: postTarget(p),
+        }),
+      );
+    }
+  });
+}
+
+async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
+  const session = loadSession();
+  if (!session) return;
+  const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()), session);
+  const rooms = await client.rooms();
+  const names = [...m.names, session.handle].filter(Boolean);
+  await source(st, 'bchat.rooms', async (_seen, prev) => {
+    const counts: Record<string, number> = {};
+    for (const r of rooms) counts[r.ticker] = r.unread ?? 0;
+    // Unread went up (or a read room got a new message: unread from 0) → news in that room.
+    const up = countIncreases(prev, counts);
+    for (const r of rooms) {
+      const n = up[r.ticker];
+      if (!n) continue;
+      const last = r.last_message;
+      const mention = !!last?.body && mentionsMe(last.body, names);
+      out.push(
+        item({
+          id: `${mention ? 'mention' : 'chat'}:${r.ticker}:${last?.created_at ?? counts[r.ticker]}`,
+          kind: mention ? 'mention' : 'chat',
+          title: mention
+            ? `${last?.author_handle ? `$${last.author_handle}` : 'Someone'} mentioned you in ${r.name || r.ticker}`
+            : `${n} new message${n === 1 ? '' : 's'} in ${r.name || r.ticker}`,
+          body: excerpt(last?.body ?? ''),
+          at: Date.parse(last?.created_at ?? '') || now(),
+          target: { type: 'room', ticker: r.ticker },
+        }),
+      );
+    }
+    return counts;
+  });
+}
+
+const outpointKey = (o: string) => o.replace('.', '_');
+
+async function incoming(m: Me, st: PollState, out: NotifyItem[]) {
+  const addrs = m.addresses.slice(0, 3);
+  if (!addrs.length) return;
+  const rows: SearchRow[] = (
+    await Promise.allSettled(
+      addrs.map((a) => search({ key: `own:${a}`, rev: 'true', unspent: 'true', sats: 'true', tags: '*', limit: '60' })),
+    )
+  ).flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+  const tickets = new Set(rememberedTicketIds());
+  const mine = await myTxids(m);
+  await source(st, 'utxo.incoming', async (seen) => {
+    const ext = rows.filter((r) => !mine.has(r.outpoint.split(/[._]/)[0]));
+    const fresh = new Set(seen(ext.map((r) => outpointKey(r.outpoint))));
+    for (const r of ext) {
+      if (!fresh.has(outpointKey(r.outpoint))) continue;
+      const d = describeIncoming(r as IncomingRow, tickets);
+      if (d) out.push(item({ id: `in:${outpointKey(r.outpoint)}`, ...d, target: { type: 'wallet' } }));
+    }
+  });
+  // Sales: a listing of ours that is no longer unspent, spent by a tx this wallet did not make.
+  const listings: Record<string, number> = {};
+  for (const r of rows) if (r.data?.ordlock) listings[outpointKey(r.outpoint)] = Number(r.data.ordlock.price) || 0;
+  const gone = Object.keys(st.listings).filter((o) => !(o in listings));
+  if (st.seeded['utxo.sales']) {
+    const spends = await Promise.allSettled(
+      gone.slice(0, 10).map((o) =>
+        getJson(`${ONESAT}/txo/${o.replace('_', '.')}/spend`).then((b) => ({
+          o,
+          spend: String((b as { spendTxid?: string })?.spendTxid ?? ''),
+        })),
+      ),
+    );
+    for (const s of spends) {
+      if (s.status !== 'fulfilled' || !s.value.spend || mine.has(s.value.spend)) continue;
+      const price = st.listings[s.value.o];
+      out.push(
+        item({
+          id: `sale:${s.value.o}`,
+          kind: 'sale',
+          title: 'Your listing sold',
+          body: price ? `Sold for ${formatSatsShort(price)}` : 'A buyer took your listing',
+          target: { type: 'wallet' },
+        }),
+      );
+    }
+  }
+  st.listings = listings;
+  st.seeded['utxo.sales'] = true;
+}
+
+/** Txids this wallet created recently (its own change / listings / cancels are not news). */
+async function myTxids(m: Me): Promise<Set<string>> {
+  const out = new Set<string>();
+  try {
+    const w = m.ctx?.wallet as unknown as {
+      listActions?: (a: Record<string, unknown>) => Promise<{ actions?: { txid?: string; isOutgoing?: boolean }[] }>;
+    };
+    const res = await w?.listActions?.({ labels: [], labelQueryMode: 'any', limit: 100 });
+    for (const a of res?.actions ?? []) if (a.txid && a.isOutgoing !== false) out.add(a.txid);
+  } catch {
+    // unknown: everything external counts
+  }
+  return out;
+}
+
+// ── calls (pushed by the calls store, not polled here) ──────────────────────
+
+function watchCalls() {
+  unsubCalls?.();
+  let ringing: string | null = null;
+  unsubCalls = subscribeCalls((s) => {
+    const c = s.call as { phase: string; callId?: string; peer?: { label?: string } };
+    if (c.phase === 'incoming' && c.callId && c.callId !== ringing) {
+      ringing = c.callId;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+        void deliver([
+          item({
+            id: `call:${c.callId}`,
+            kind: 'call',
+            title: 'Incoming call',
+            body: c.peer?.label ?? 'Someone is calling',
+            target: { type: 'calls' },
+          }),
+        ]);
+    }
+    const st = loadPollState();
+    const missed = s.recent.filter((r) => r.direction === 'incoming' && !r.answered_at && r.status !== 'ringing');
+    const d = diffSeen(
+      st.seen['calls.missed'] ?? [],
+      missed.map((r) => r.id),
+      !!st.seeded['calls.missed'],
+    );
+    st.seen['calls.missed'] = d.seen;
+    if (s.ready) st.seeded['calls.missed'] = true;
+    savePollState(st);
+    const fresh = missed.filter((r) => d.fresh.includes(r.id));
+    if (fresh.length)
+      void deliver(
+        fresh.map((r) =>
+          item({
+            id: `missed:${r.id}`,
+            kind: 'call',
+            title: 'Missed call',
+            body: r.peer_label ?? 'Someone called you',
+            at: Date.parse(r.created_at) || now(),
+            target: { type: 'calls' },
+          }),
+        ),
+      );
+  });
+}
+
+// ── delivery ─────────────────────────────────────────────────────────────────
+
+async function deliver(found: NotifyItem[]) {
+  const on = allowed(found, loadPrefs().notify);
+  const added = pushItems(on);
+  if (!added.length || !Capacitor.isNativePlatform()) return;
+  try {
+    const { display } = await LocalNotifications.checkPermissions();
+    if (display !== 'granted') return;
+    await LocalNotifications.schedule({
+      notifications: added.slice(0, 5).map((i) => ({
+        id: nativeId(i.id),
+        title: i.title,
+        body: i.body,
+        extra: { notifyId: i.id, target: i.target ?? null },
+        group: 'bwallet',
+      })),
+    });
+  } catch (e) {
+    console.warn('[notify] local notification failed', e);
+  }
+}
+
+export async function pollNow(): Promise<void> {
+  const m = me;
+  if (!m || running) return;
+  running = true;
+  try {
+    const st = loadPollState();
+    const out: NotifyItem[] = [];
+    await Promise.allSettled([
+      bmapSocial(m, st, out),
+      bmapMentions(m, st, out),
+      twetch(m, st, out),
+      bchat(m, st, out),
+      incoming(m, st, out),
+    ]);
+    savePollState(st);
+    await deliver(out);
+  } finally {
+    running = false;
+  }
+}
+
+const schedule = (ms: number) => {
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // resumes on visible
+    void pollNow().finally(() => me && schedule(POLL_MS));
+  }, ms);
+};
+
+const onVisible = () => {
+  if (document.visibilityState === 'visible' && me) schedule(1_500);
+};
+
+/** Start (or reconfigure) polling for the unlocked account. */
+export function startNotify(next: Me) {
+  const first = !me;
+  me = next;
+  if (first) {
+    document.addEventListener('visibilitychange', onVisible);
+    watchCalls();
+    if (Capacitor.isNativePlatform())
+      void App.addListener('resume', () => me && schedule(1_500))
+        .then((h) => (resumeSub = h))
+        .catch(() => undefined);
+    schedule(5_000);
+  }
+}
+
+export function stopNotify() {
+  me = null;
+  if (timer) clearTimeout(timer);
+  timer = null;
+  unsubCalls?.();
+  unsubCalls = null;
+  void resumeSub?.remove();
+  resumeSub = null;
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+}
+
+/**
+ * Ask for the OS notification permission once, at a moment the user has something to be notified
+ * about (after their first post, after claiming a name, or when they open the bell) — never at launch.
+ */
+export async function askNotifyPermissionOnce(): Promise<void> {
+  if (wasAsked() || !Capacitor.isNativePlatform()) return;
+  setAsked();
+  try {
+    const { display } = await LocalNotifications.checkPermissions();
+    if (display === 'prompt' || display === 'prompt-with-rationale') await LocalNotifications.requestPermissions();
+  } catch {
+    // plugin unavailable
+  }
+}

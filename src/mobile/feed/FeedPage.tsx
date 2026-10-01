@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useBackClose } from '../backStack';
+import { NotificationsBell } from '../notify/NotificationsPanel';
+import { askNotifyPermissionOnce } from '../notify/engine';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -77,6 +79,9 @@ import {
   fetchForYou,
   fetchLeaderboard,
   fetchPostLocks,
+  fetchAncestors,
+  fetchBmapPost,
+  fetchTwetchPost,
   fetchThread,
   lockToPost,
   publish,
@@ -1336,6 +1341,18 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     onAction,
   };
 
+  /** A notification's post: from what is loaded, else fetched (Twetch by id, else bmap by txid). */
+  const openTarget = async (t: { txid: string; twetchId?: number }) => {
+    const loaded = [...(raw.foryou ?? []), ...(raw.following ?? [])].find((p) => p.txid === t.txid);
+    try {
+      const p = loaded ?? (t.twetchId ? await fetchTwetchPost(t.twetchId) : await fetchBmapPost(t.txid));
+      if (p) setThread(p);
+      else addSnackbar('That post is not indexed yet', 'info');
+    } catch {
+      addSnackbar('Could not load that post', 'error');
+    }
+  };
+
   const me: Author = {
     address: '',
     bapId: identity.bapId,
@@ -1354,6 +1371,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}
         <SegmentTitle title="Feed">
+          <NotificationsBell onOpenPost={(t) => void openTarget(t)} />
           <button onClick={() => setShowBookmarks(true)} aria-label="Bookmarks" className="p-2 active:opacity-60">
             <Bookmark size={18} color={MUTED} />
           </button>
@@ -1455,6 +1473,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           onPosted={(txid) => {
             setComposing(null);
             addSnackbar(`Posted · ${txid.slice(0, 8)}…`, 'success');
+            // First post: now there is something to be notified about (replies, likes).
+            void askNotifyPermissionOnce();
             setTimeout(() => void load(tab), 2500);
           }}
         />
@@ -1550,7 +1570,16 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           onAuthor={setProfile}
         />
       )}
-      {thread && (
+      {thread && !thread.threadId && (
+        <PostThread
+          post={thread}
+          onBack={() => setThread(null)}
+          actions={actions}
+          mutes={hidden}
+          safetyTick={safetyTick}
+        />
+      )}
+      {thread && thread.threadId && (
         <ThreadView
           post={thread}
           onBack={() => setThread(null)}
@@ -1671,44 +1700,120 @@ const ThreadView = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.txid]);
   // Treechat: the whole thread (every post with this treechat_thread_id), oldest first.
-  // Elsewhere: the post, then its replies.
-  const whole = !!post.threadId;
+  // Tapping a post in it opens that post's own thread view (ancestors + replies).
+  const [focus, setFocus] = useState<FeedPost | null>(null);
   const shown = useMemo(
-    () => (thread ? visiblePosts(whole ? thread : thread.filter((p) => p.txid !== post.txid), mutes) : null),
+    () => (thread ? visiblePosts(thread, mutes) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [thread, mutes, safetyTick, whole, post.txid],
+    [thread, mutes, safetyTick],
   );
   const authorFromThread = (a: Author) => {
     onBack();
     actions.onAuthor(a);
   };
-  if (whole)
-    return (
-      <Layer title={`Thread · via ${sourceLabel(post.app) || 'Treechat'}`} onBack={onBack}>
-        <PostList
-          posts={shown}
-          a={{ ...actions, onOpen: () => undefined, onAuthor: authorFromThread }}
-          empty={
-            <p className="text-center text-xs pt-8" style={{ color: MUTED }}>
-              Nothing to show in this thread.
-            </p>
-          }
-        />
-      </Layer>
-    );
   return (
-    <Layer title="Post" onBack={onBack}>
-      <PostCard
-        post={post}
-        a={{
-          ...actions,
-          onOpen: () => undefined,
-          onAuthor: authorFromThread,
-        }}
-      />
+    <Layer title={`Thread · via ${sourceLabel(post.app) || 'Treechat'}`} onBack={onBack}>
       <PostList
         posts={shown}
-        a={{ ...actions, onOpen: () => undefined }}
+        a={{ ...actions, onOpen: (p) => p.txid !== post.txid && setFocus(p), onAuthor: authorFromThread }}
+        empty={
+          <p className="text-center text-xs pt-8" style={{ color: MUTED }}>
+            Nothing to show in this thread.
+          </p>
+        }
+      />
+      {focus && (
+        <PostThread
+          post={focus}
+          onBack={() => setFocus(null)}
+          actions={actions}
+          mutes={mutes}
+          safetyTick={safetyTick}
+        />
+      )}
+    </Layer>
+  );
+};
+
+/**
+ * Twetch / bChat / other posts: the canonical ancestor chain (what this replies to or quotes, up
+ * to the root) above a thin connector line, then the post, then its replies. Tapping an ancestor
+ * or a reply re-roots the view there; Back walks back through those re-roots before closing.
+ */
+const PostThread = ({
+  post,
+  onBack,
+  actions,
+  mutes,
+  safetyTick,
+}: {
+  post: FeedPost;
+  onBack: () => void;
+  actions: PostActions;
+  mutes: string[];
+  safetyTick: number;
+}) => {
+  const [stack, setStack] = useState<FeedPost[]>([post]);
+  const focus = stack[stack.length - 1];
+  const [ancestors, setAncestors] = useState<FeedPost[] | null>(null);
+  const [replies, setReplies] = useState<FeedPost[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    setAncestors(null);
+    setReplies(null);
+    fetchAncestors(focus)
+      .then((a) => live && setAncestors(a))
+      .catch(() => live && setAncestors([]));
+    fetchThread(focus)
+      .then((t) => live && setReplies(t.filter((p) => p.txid !== focus.txid)))
+      .catch(() => live && setReplies([]));
+    return () => {
+      live = false;
+    };
+  }, [focus]);
+  const reroot = (p: FeedPost) => {
+    if (p.txid !== focus.txid) setStack((s) => [...s, p]);
+  };
+  const back = () => (stack.length > 1 ? setStack((s) => s.slice(0, -1)) : onBack());
+  const shownReplies = useMemo(
+    () => (replies ? visiblePosts(replies, mutes) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [replies, mutes, safetyTick],
+  );
+  const shownAncestors = useMemo(
+    () => visiblePosts(ancestors ?? [], mutes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ancestors, mutes, safetyTick],
+  );
+  const authorFromThread = (a: Author) => {
+    onBack();
+    actions.onAuthor(a);
+  };
+  const a = { ...actions, onOpen: reroot, onAuthor: authorFromThread };
+  return (
+    <Layer title={shownAncestors.length ? 'Thread' : 'Post'} onBack={back}>
+      {ancestors === null && (focus.replyTo || focus.parentId || focus.quoteId || focus.quoteTxid) && (
+        <p className="text-center text-[11px] pt-3" style={{ color: MUTED }}>
+          Loading the thread above…
+        </p>
+      )}
+      {shownAncestors.map((p) => (
+        <div key={p.txid} className="relative" style={{ opacity: 0.92 }}>
+          {/* thin connector from this ancestor's avatar down to the next post */}
+          <div
+            aria-hidden
+            className="absolute pointer-events-none"
+            style={{ left: 35, top: 56, bottom: -12, width: 2, background: LINE, zIndex: 1 }}
+          />
+          <PostCard post={p} a={a} />
+        </div>
+      ))}
+      <div style={{ background: 'rgba(255,210,77,0.04)' }}>
+        <PostCard post={focus} a={{ ...a, onOpen: () => undefined }} />
+      </div>
+      <PostList
+        posts={shownReplies}
+        a={a}
         empty={
           <p className="text-center text-xs pt-8" style={{ color: MUTED }}>
             No replies yet.

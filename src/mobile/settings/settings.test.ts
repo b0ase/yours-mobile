@@ -72,6 +72,13 @@ describe('prefs', () => {
     savePrefs({ oneClickLimit: 999_999 as never });
     expect(loadPrefs().oneClickLimit).toBe(DEFAULT_PREFS.oneClickLimit);
   });
+
+  test('notification toggles and Twetch id validate field by field', () => {
+    const p = parsePrefs({ notify: { social: false, chat: 'no', bogus: false }, twetchUserId: ' 13 ' });
+    expect(p.notify).toEqual({ ...DEFAULT_PREFS.notify, social: false });
+    expect(p.twetchUserId).toBe('13');
+    expect(parsePrefs({ twetchUserId: 'abc' }).twetchUserId).toBe('');
+  });
   test('default feed mapping', () => {
     expect(initialFeed('foryou', true)).toEqual({ tab: 'foryou', sort: 'locked' });
     expect(initialFeed('latest', true)).toEqual({ tab: 'foryou', sort: 'latest' });

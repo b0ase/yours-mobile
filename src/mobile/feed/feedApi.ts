@@ -5,15 +5,18 @@ import { FEED_APP } from './sources';
 import { cutoff, readCache, writeCache, type LeaderboardData, type Timeframe } from './leaderboard';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
 import {
+  ancestorChain,
   groupThread,
   mergePosts,
   parseBmapFeed,
   parseBmapPost,
   parseLikes,
   parseTwetchFeed,
+  parseTwetchPost,
   threadRoot,
   TWETCH_API,
   type FeedPost,
+  type ParentRef,
 } from './post';
 
 /**
@@ -54,8 +57,53 @@ export const fetchLikes = async (txid: string, mine: string[] = []) =>
 export const fetchTwetch = async (limit = 60): Promise<FeedPost[]> => {
   const res = await fetch(`${TWETCH_API}/v1/feed/latest?limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`Twetch error (${res.status})`);
-  return parseTwetchFeed(await res.json(), (pk) => PublicKey.fromString(pk).toAddress());
+  return parseTwetchFeed(await res.json(), twetchAddress);
 };
+
+function twetchAddress(pk: string): string {
+  return PublicKey.fromString(pk).toAddress();
+}
+
+const twetchGet = async (path: string): Promise<unknown> => {
+  const res = await fetch(`${TWETCH_API}${path}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Twetch error (${res.status})`);
+  return res.json();
+};
+
+/** One Twetch post by its numeric id (Twetch's detail API is not keyed by txid). Cached per session. */
+const twetchPostCache = new Map<number, Promise<FeedPost | null>>();
+export const fetchTwetchPost = (id: number): Promise<FeedPost | null> => {
+  let p = twetchPostCache.get(id);
+  if (!p) {
+    p = twetchGet(`/v1/posts/${id}`).then((b) => parseTwetchPost(b, twetchAddress));
+    p.catch(() => twetchPostCache.delete(id));
+    twetchPostCache.set(id, p);
+  }
+  return p;
+};
+
+/** Direct replies to a Twetch post, oldest first. */
+export const fetchTwetchReplies = async (id: number, limit = 50): Promise<FeedPost[]> =>
+  parseTwetchFeed(await twetchGet(`/v1/posts/${id}/replies?limit=${limit}`), twetchAddress).sort((a, b) => a.at - b.at);
+
+/** A Twetch user's own posts, newest first. */
+export const fetchTwetchUserPosts = async (userId: string, limit = 20): Promise<FeedPost[]> =>
+  parseTwetchFeed(await twetchGet(`/v1/users/${encodeURIComponent(userId)}/posts?limit=${limit}`), twetchAddress);
+
+/** One on-chain post by txid from bmap, or null when unindexed. */
+export const fetchBmapPost = async (txid: string): Promise<FeedPost | null> => {
+  const b = await get(`/social/post/${txid}`);
+  return parseBmapPost((b as { post?: unknown })?.post);
+};
+
+const fetchParent = (ref: ParentRef): Promise<FeedPost | null> =>
+  ref.twetchId ? fetchTwetchPost(ref.twetchId) : ref.txid ? fetchBmapPost(ref.txid) : Promise.resolve(null);
+
+/**
+ * The canonical chain above a post: what it replies to (or quotes / branches), up to the root,
+ * root first. Twetch via its post-detail API, everything else via bmap's MAP context tx.
+ */
+export const fetchAncestors = (post: FeedPost): Promise<FeedPost[]> => ancestorChain(post, fetchParent);
 
 /** For you: network-wide recent posts plus a slice of Twetch. Twetch failing never blanks the feed. */
 export async function fetchForYou(): Promise<FeedPost[]> {
@@ -71,6 +119,7 @@ export async function fetchForYou(): Promise<FeedPost[]> {
  * Others: the post's direct replies. Each source is optional; whatever loads is shown.
  */
 export async function fetchThread(post: FeedPost): Promise<FeedPost[]> {
+  if (post.source === 'twetch' && post.twetchId) return [post, ...(await fetchTwetchReplies(post.twetchId))];
   const root = threadRoot(post);
   const jobs: Promise<FeedPost[]>[] = [fetchReplies(root)];
   if (root !== post.txid)

@@ -7,6 +7,8 @@
  *   - 'latest'    → For you tab, sorted by newest
  *   - 'foryou'    → For you tab, ranked by BSV locked behind each post
  */
+import { CATEGORIES, type NotifyCategory } from '../notify/notify';
+
 export type DefaultFeed = 'foryou' | 'latest' | 'following';
 export const ONE_CLICK_LIMITS = [100, 1_000, 10_000] as const;
 export type OneClickLimit = (typeof ONE_CLICK_LIMITS)[number];
@@ -29,7 +31,13 @@ export type Prefs = {
   indexAutoPayUsd: IndexAutoPayUsd;
   /** Looping video behind Apps, Wallet and Feed. Off: still image only. */
   animatedBackgrounds: boolean;
+  /** Notifications per category (Settings → Notifications). */
+  notify: Record<NotifyCategory, boolean>;
+  /** Your Twetch user number (twetch.com/u/<n>), so replies on Twetch reach you. Empty: unknown. */
+  twetchUserId: string;
 };
+
+const ALL_ON = Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<NotifyCategory, boolean>;
 
 export const DEFAULT_PREFS: Prefs = {
   defaultFeed: 'following',
@@ -39,10 +47,20 @@ export const DEFAULT_PREFS: Prefs = {
   quickTip: 1_000,
   animatedBackgrounds: true,
   indexAutoPayUsd: 0.1,
+  notify: ALL_ON,
+  twetchUserId: '',
 };
 
 const KEY = 'bwallet.prefs';
 const EVENT = 'bwallet-prefs';
+
+const parseNotify = (raw: unknown): Record<NotifyCategory, boolean> => {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return Object.fromEntries(CATEGORIES.map((c) => [c, typeof r[c] === 'boolean' ? r[c] : true])) as Record<
+    NotifyCategory,
+    boolean
+  >;
+};
 
 /** Validates stored JSON field by field so a bad / old value falls back to its default, never crashes. */
 export const parsePrefs = (raw: unknown): Prefs => {
@@ -63,6 +81,9 @@ export const parsePrefs = (raw: unknown): Prefs => {
       : DEFAULT_PREFS.indexAutoPayUsd,
     animatedBackgrounds:
       typeof r.animatedBackgrounds === 'boolean' ? r.animatedBackgrounds : DEFAULT_PREFS.animatedBackgrounds,
+    notify: parseNotify(r.notify),
+    twetchUserId:
+      typeof r.twetchUserId === 'string' && /^\d{1,12}$/.test(r.twetchUserId.trim()) ? r.twetchUserId.trim() : '',
   };
 };
 

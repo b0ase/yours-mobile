@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { askNotifyPermissionOnce } from '../notify/engine';
 import { buyOpns, listOpns, registerOpns } from '@1sat/actions';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { Input } from '../../components/Input';
@@ -141,6 +142,7 @@ export const GetYourName = ({
   const mintPersonal = async (name: string) => {
     const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
     void showOnWallet(chromeStorageService, l.tokenId);
+    void askNotifyPermissionOnce();
     setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet. Opening your room…`);
     // Signatures only; a fresh token may not be indexed yet — Chat retries until it is.
     openPersonalRoom(apiContext, identityAddress, l)

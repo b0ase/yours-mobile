@@ -272,6 +272,16 @@ export type FeedPost = {
   at: number;
   likes: number;
   replies: number;
+  /** Twetch only: numeric post id (Twetch's post-detail API is keyed by it, not the txid). */
+  twetchId?: number;
+  /** Twetch only: numeric id of the post this replies to. */
+  parentId?: number;
+  /** Quoted / branched post (Twetch quote-branch; MAP context tx of a quote), when known. */
+  quoteTxid?: string | null;
+  /** Twetch only: numeric id of the quoted / branched post. */
+  quoteId?: number;
+  /** Twetch only: the author's Twetch user id. */
+  twetchUserId?: string;
 };
 
 type Rec = Record<string, unknown>;
@@ -390,6 +400,7 @@ export function parseBmapPost(
   const ts = created || Number(d.timestamp) || Number(asRec(d.blk).t) * 1000 || 0;
   const threadId = asStr(map.treechat_thread_id);
   const m = asRec(meta);
+  const quote = asStr(map.quote);
   return {
     txid: txid.toLowerCase(),
     text: text.slice(0, MAX_POST_CHARS * 2),
@@ -404,6 +415,7 @@ export function parseBmapPost(
     at: ts > 1e12 ? ts : ts * 1000,
     likes: Number(m.likes) || 0,
     replies: Number(m.replies) || 0,
+    ...(isTxid(quote) ? { quoteTxid: quote.toLowerCase() } : {}),
   };
 }
 
@@ -508,68 +520,158 @@ export function twetchMediaUrl(ref: string): string | null {
  * text or an image; marketplace `system` events and bare `branch` reposts are skipped.
  * `addressOf` maps a Twetch public key to an address (for mute / follow keys).
  */
+type TwetchCtx = { users: Rec; replyPosts: Rec; quotedPosts: Rec; addressOf: (pubKey: string) => string };
+
+const posId = (v: unknown): number | undefined => {
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+};
+
+/** One Twetch post object (+ the lookup maps of its response) → a feed post, or null. */
+function parseTwetchItem(item: unknown, c: TwetchCtx): FeedPost | null {
+  const p = asRec(item);
+  const txid = asStr(p.txid).toLowerCase();
+  const type = asStr(p.type);
+  // `branch` with text is a quote; a bare branch (repost) has no text and is dropped below.
+  if ((type !== 'post' && type !== 'branch') || !isTxid(txid)) return null;
+  const fromText = mediaFromText(asStr(p.content).trim());
+  const text = fromText.text;
+  let files: unknown[] = [];
+  try {
+    files = asArr(typeof p.files === 'string' ? JSON.parse(p.files) : p.files);
+  } catch {
+    files = [];
+  }
+  const images: FeedImage[] = files
+    .map((f) => twetchMediaUrl(asStr(f)))
+    .filter((u): u is string => !!u)
+    .slice(0, 4)
+    .map((src) => ({ src, mime: 'image/jpeg' }));
+  // Twetch's proxy serves b:// files as images; keep the on-chain ref for the safety filter.
+  const fileMedia: FeedMedia[] = files
+    .map((f) => ({ url: twetchMediaUrl(asStr(f)), ref: refToOutpoint(asStr(f).replace(/@\d+$/, '')) }))
+    .filter((f): f is { url: string; ref: string | null } => !!f.url)
+    .slice(0, 4)
+    .map((f) => ({ kind: 'image', src: f.url, mime: 'image/jpeg', thumb: null, ref: f.ref }));
+  const media = dedupeMedia([...fileMedia, ...fromText.media]);
+  if (!text && !media.length) return null;
+  const uid = asStr(p.userId);
+  const u = asRec(c.users[uid]);
+  let address = '';
+  try {
+    address = asStr(u.publicKey) ? c.addressOf(asStr(u.publicKey)) : '';
+  } catch {
+    address = '';
+  }
+  const icon = asStr(u.icon);
+  const parentId = posId(p.replyPostId);
+  const quoteId = posId(p.quotedPostId);
+  const parent = asStr(asRec(c.replyPosts[asStr(p.replyPostId)]).txid);
+  const quoted = asStr(asRec(c.quotedPosts[asStr(p.quotedPostId)]).txid);
+  return {
+    txid,
+    text: text.slice(0, MAX_POST_CHARS * 2),
+    images,
+    media,
+    links: fromText.links,
+    app: 'twetch',
+    source: 'twetch',
+    threadId: null,
+    replyTo: isTxid(parent) ? parent.toLowerCase() : null,
+    author: {
+      address: address || `twetch:${uid}`,
+      bapId: null,
+      name: asStr(u.name).trim().slice(0, 60) || `Twetch user ${uid}`,
+      avatar: icon ? twetchMediaUrl(icon) : null,
+    },
+    at: Number(p.postedAtMs) || Number(p.createdAtMs) || 0,
+    likes: Number(p.numLikes) || 0,
+    replies: Number(p.numReplies) || 0,
+    twetchId: posId(p.id),
+    ...(parentId ? { parentId } : {}),
+    ...(quoteId ? { quoteId, quoteTxid: isTxid(quoted) ? quoted.toLowerCase() : null } : {}),
+    twetchUserId: uid || undefined,
+  };
+}
+
+/**
+ * Any Twetch list response (/v1/feed/latest, /v1/posts/{id}/replies, /v1/users/{id}/posts:
+ * {data, users, replyPosts, quotedPosts, …}) → posts, newest first. Only posts and quotes with
+ * text or an image; marketplace `system` events and bare `branch` reposts are skipped.
+ * `addressOf` maps a Twetch public key to an address (for mute / follow keys).
+ */
 export function parseTwetchFeed(body: unknown, addressOf: (pubKey: string) => string = () => ''): FeedPost[] {
   const b = asRec(body);
-  const users = asRec(b.users);
-  const replyPosts = asRec(b.replyPosts);
+  const c: TwetchCtx = {
+    users: asRec(b.users),
+    replyPosts: asRec(b.replyPosts),
+    quotedPosts: asRec(b.quotedPosts),
+    addressOf,
+  };
   const seen = new Set<string>();
   const out: FeedPost[] = [];
   for (const item of asArr(b.data)) {
-    const p = asRec(item);
-    const txid = asStr(p.txid).toLowerCase();
-    if (asStr(p.type) !== 'post' || !isTxid(txid) || seen.has(txid)) continue;
-    const fromText = mediaFromText(asStr(p.content).trim());
-    const text = fromText.text;
-    let files: unknown[] = [];
-    try {
-      files = asArr(typeof p.files === 'string' ? JSON.parse(p.files) : p.files);
-    } catch {
-      files = [];
-    }
-    const images: FeedImage[] = files
-      .map((f) => twetchMediaUrl(asStr(f)))
-      .filter((u): u is string => !!u)
-      .slice(0, 4)
-      .map((src) => ({ src, mime: 'image/jpeg' }));
-    // Twetch's proxy serves b:// files as images; keep the on-chain ref for the safety filter.
-    const fileMedia: FeedMedia[] = files
-      .map((f) => ({ url: twetchMediaUrl(asStr(f)), ref: refToOutpoint(asStr(f).replace(/@\d+$/, '')) }))
-      .filter((f): f is { url: string; ref: string | null } => !!f.url)
-      .slice(0, 4)
-      .map((f) => ({ kind: 'image', src: f.url, mime: 'image/jpeg', thumb: null, ref: f.ref }));
-    const media = dedupeMedia([...fileMedia, ...fromText.media]);
-    if (!text && !media.length) continue;
-    const uid = asStr(p.userId);
-    const u = asRec(users[uid]);
-    let address = '';
-    try {
-      address = asStr(u.publicKey) ? addressOf(asStr(u.publicKey)) : '';
-    } catch {
-      address = '';
-    }
-    const icon = asStr(u.icon);
-    const parent = asStr(asRec(replyPosts[asStr(p.replyPostId)]).txid);
-    out.push({
-      txid,
-      text: text.slice(0, MAX_POST_CHARS * 2),
-      images,
-      media,
-      links: fromText.links,
-      app: 'twetch',
-      source: 'twetch',
-      threadId: null,
-      replyTo: isTxid(parent) ? parent.toLowerCase() : null,
-      author: {
-        address: address || `twetch:${uid}`,
-        bapId: null,
-        name: asStr(u.name).trim().slice(0, 60) || `Twetch user ${uid}`,
-        avatar: icon ? twetchMediaUrl(icon) : null,
-      },
-      at: Number(p.postedAtMs) || Number(p.createdAtMs) || 0,
-      likes: Number(p.numLikes) || 0,
-      replies: Number(p.numReplies) || 0,
-    });
-    seen.add(txid);
+    const p = parseTwetchItem(item, c);
+    if (!p || seen.has(p.txid)) continue;
+    seen.add(p.txid);
+    out.push(p);
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** /v1/posts/{id} ({post, author, quotedPost, …}) → the post, or null. */
+export function parseTwetchPost(body: unknown, addressOf: (pubKey: string) => string = () => ''): FeedPost | null {
+  const b = asRec(body);
+  const post = asRec(b.post);
+  const author = asRec(b.author);
+  const quoted = asRec(b.quotedPost);
+  return parseTwetchItem(post, {
+    users: { [asStr(post.userId) || asStr(author.id)]: author },
+    replyPosts: {},
+    quotedPosts: quoted.id ? { [asStr(quoted.id)]: quoted } : {},
+    addressOf,
+  });
+}
+
+// ── thread ancestry ──────────────────────────────────────────────────────────
+
+/** What a post hangs off: the post it replies to, else the post it quotes / branches. */
+export type ParentRef = { kind: 'reply' | 'quote'; txid: string | null; twetchId?: number };
+
+export function parentRef(p: FeedPost): ParentRef | null {
+  if (p.parentId || p.replyTo) return { kind: 'reply', txid: p.replyTo, twetchId: p.parentId };
+  if (p.quoteId || p.quoteTxid) return { kind: 'quote', txid: p.quoteTxid ?? null, twetchId: p.quoteId };
+  return null;
+}
+
+export const MAX_ANCESTORS = 25;
+
+/**
+ * Walk up from `post` to its root: each step asks `getParent` for the post `parentRef` points at.
+ * Stops at the root, a missing / failed parent, a cycle, or `max` steps. Returns root-first
+ * (oldest ancestor first), excluding `post` itself.
+ */
+export async function ancestorChain(
+  post: FeedPost,
+  getParent: (ref: ParentRef, child: FeedPost) => Promise<FeedPost | null>,
+  max = MAX_ANCESTORS,
+): Promise<FeedPost[]> {
+  const chain: FeedPost[] = [];
+  const seen = new Set([post.txid]);
+  let cur = post;
+  for (let i = 0; i < max; i++) {
+    const ref = parentRef(cur);
+    if (!ref) break;
+    let parent: FeedPost | null = null;
+    try {
+      parent = await getParent(ref, cur);
+    } catch {
+      parent = null;
+    }
+    if (!parent || seen.has(parent.txid)) break;
+    seen.add(parent.txid);
+    chain.push(parent);
+    cur = parent;
+  }
+  return chain.reverse();
 }

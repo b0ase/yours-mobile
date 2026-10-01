@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { askNotifyPermissionOnce } from '../notify/engine';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
@@ -82,6 +83,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
       // Its balance is local: show it on the Wallet tab now, not when an indexer catches up.
       void showOnWallet(chromeStorageService, l.tokenId);
+      void askNotifyPermissionOnce();
       setTokenMsg(`$${l.ticker} minted. Opening your room…`);
       // Signatures only; a fresh token may not be indexed yet. Chat retries until it is.
       openPersonalRoom(apiContext, identityAddress, l)

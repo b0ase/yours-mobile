@@ -1,6 +1,8 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Ban, Bookmark, Newspaper, PlayCircle, Sparkles, Zap } from 'lucide-react';
+import { ArrowLeft, Ban, Bell, Bookmark, Newspaper, PlayCircle, Sparkles, Zap } from 'lucide-react';
+import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
+import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
 import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
@@ -320,6 +322,47 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
             />
           }
           isFirst
+          isLast
+        />
+      </Section>
+      <Section title="Notifications">
+        {CATEGORIES.map((c, i) => (
+          <div key={c}>
+            {i > 0 && <Divider />}
+            <Row
+              icon={<Bell size={16} />}
+              label={CATEGORY_LABELS[c].label}
+              description={CATEGORY_LABELS[c].description}
+              right={
+                <Toggle
+                  label={CATEGORY_LABELS[c].label}
+                  on={prefs.notify[c]}
+                  onChange={(v) => {
+                    setPrefs({ notify: { ...prefs.notify, [c]: v } });
+                    if (v) void askNotifyPermissionOnce();
+                  }}
+                />
+              }
+              isFirst={i === 0}
+            />
+          </div>
+        ))}
+        <Divider />
+        <Row
+          icon={<Bell size={16} />}
+          label="Your Twetch user number"
+          description="From twetch.com/u/<number>: lets replies and likes on your Twetch posts reach you"
+          right={
+            <input
+              inputMode="numeric"
+              aria-label="Twetch user number"
+              placeholder="e.g. 13"
+              defaultValue={prefs.twetchUserId}
+              onBlur={(e) => setPrefs({ twetchUserId: e.target.value.replace(/\D/g, '') })}
+              className="w-20 rounded-lg px-2 py-1 text-sm text-white text-right outline-none"
+              style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            />
+          }
           isLast
         />
       </Section>
