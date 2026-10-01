@@ -50,7 +50,10 @@ const token = async () => {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${sig}` }),
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: `${unsigned}.${sig}`,
+    }),
   }).then((r) => r.json());
   if (!res.access_token) throw new Error(`auth failed: ${res.error_description ?? res.error}`);
   return res.access_token;
@@ -63,7 +66,8 @@ const auth = { authorization: `Bearer ${await token()}` };
 const call = async (method, url, body, headers = {}) => {
   const res = await fetch(url, { method, headers: { ...auth, ...headers }, body });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${method} ${url.replace(API, '').replace(UPLOAD, '')} → ${res.status} ${text.slice(0, 300)}`);
+  if (!res.ok)
+    throw new Error(`${method} ${url.replace(API, '').replace(UPLOAD, '')} → ${res.status} ${text.slice(0, 300)}`);
   return text ? JSON.parse(text) : {};
 };
 

@@ -20,7 +20,13 @@ async function readBody(req) {
   let raw = typeof req.body === 'string' ? req.body : '';
   if (!raw) for await (const c of req) raw += c;
   const type = String(req.headers['content-type'] || '');
-  if (type.includes('application/json')) { try { return JSON.parse(raw || '{}'); } catch { return {}; } }
+  if (type.includes('application/json')) {
+    try {
+      return JSON.parse(raw || '{}');
+    } catch {
+      return {};
+    }
+  }
   return Object.fromEntries(new URLSearchParams(raw));
 }
 
@@ -43,16 +49,24 @@ module.exports = async function handler(req, res) {
     res.setHeader('Allow', 'POST');
     return reply(req, res, 405, false, 'Method not allowed.');
   }
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+  const ip =
+    String(req.headers['x-forwarded-for'] || '')
+      .split(',')[0]
+      .trim() || 'unknown';
   if (limited(ip)) return reply(req, res, 429, false, 'Too many attempts. Please try again later.');
 
   const body = await readBody(req);
   // Honeypot: bots fill it, humans never see it. Pretend success.
   if (body.company) return reply(req, res, 200, true, "You're on the list.");
 
-  const email = String(body.email || '').trim().toLowerCase();
-  const platform = String(body.platform || 'either').trim().toLowerCase();
-  if (!email || email.length > 254 || !EMAIL_RE.test(email)) return reply(req, res, 400, false, 'Please enter a valid email address.');
+  const email = String(body.email || '')
+    .trim()
+    .toLowerCase();
+  const platform = String(body.platform || 'either')
+    .trim()
+    .toLowerCase();
+  if (!email || email.length > 254 || !EMAIL_RE.test(email))
+    return reply(req, res, 400, false, 'Please enter a valid email address.');
   if (!PLATFORMS.has(platform)) return reply(req, res, 400, false, 'Please choose iPhone, Android or Either.');
 
   const url = process.env.SUPABASE_URL;

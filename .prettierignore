@@ -1,0 +1,6 @@
+# Generated or native-platform files: not ours to format.
+android/
+ios/
+dist/
+pnpm-lock.yaml
+site/pnpm-lock.yaml

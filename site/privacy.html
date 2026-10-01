@@ -9,20 +9,29 @@
     <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
       body {
         margin: 0;
         background: #000000;
         color: #e4e7ec;
-        font: 15px/1.7 "IBM Plex Sans", system-ui, sans-serif;
+        font:
+          15px/1.7 'IBM Plex Sans',
+          system-ui,
+          sans-serif;
       }
       main {
         max-width: 720px;
         margin: 0 auto;
         padding: max(24px, env(safe-area-inset-top)) 16px 48px;
       }
-      h1, h2 { font-family: "Space Grotesk", system-ui, sans-serif; }
+      h1,
+      h2 {
+        font-family: 'Space Grotesk', system-ui, sans-serif;
+      }
       h1 {
         font-size: 28px;
         line-height: 1.2;
@@ -39,7 +48,7 @@
         color: #c0c6d0;
       }
       a {
-        color: #F5B800;
+        color: #f5b800;
       }
       .meta {
         color: #667085;
@@ -69,15 +78,15 @@
 
       <p class="notice">
         bWallet is published by The Bitcoin Corporation Ltd and is based on the open-source Yours Wallet (MIT licence).
-        It is not made, reviewed or endorsed by the Yours Wallet authors, and this policy
-        covers only the bWallet mobile app.
+        It is not made, reviewed or endorsed by the Yours Wallet authors, and this policy covers only the bWallet mobile
+        app.
       </p>
 
       <h2>Summary</h2>
       <p>
-        bWallet is non-custodial. We run no servers for the app and don't operate accounts. We don't collect
-        your name, email, contacts, location, advertising identifiers, analytics or crash reports. Your private keys and
-        recovery phrase never leave your device.
+        bWallet is non-custodial. We run no servers for the app and don't operate accounts. We don't collect your name,
+        email, contacts, location, advertising identifiers, analytics or crash reports. Your private keys and recovery
+        phrase never leave your device.
       </p>
 
       <h2>What stays on your device</h2>
@@ -101,18 +110,17 @@
         <li>
           <b>Wallet storage:</b> by default, your wallet's transaction records (outputs, transactions and related
           metadata, not your private keys) are synced to a remote wallet storage service operated by 1Sat
-          (<code>wallet.1sat.app</code>). You can change the storage provider in
-          Settings → Wallet Backup.
+          (<code>wallet.1sat.app</code>). You can change the storage provider in Settings → Wallet Backup.
         </li>
         <li>
-          <b>Blockchain services:</b> address, balance, transaction and token lookups, and transaction broadcasts, go
-          to BSV indexing services (1Sat APIs). Transaction links open on WhatsOnChain.
+          <b>Blockchain services:</b> address, balance, transaction and token lookups, and transaction broadcasts, go to
+          BSV indexing services (1Sat APIs). Transaction links open on WhatsOnChain.
         </li>
         <li><b>Wallet messaging:</b> wallet-to-wallet messages use <code>messagebox.1sat.app</code>.</li>
         <li>
           <b>Market, Media, Apps and Chat:</b> trending tokens, collections, listings and ordinal media are loaded from
-          1Sat indexing and content services (ORDFS). The Apps tab lists bApps such as bChat, bMovies and bWriter;
-          bChat and other bApps you open talk to their own services, which receive what you send them.
+          1Sat indexing and content services (ORDFS). The Apps tab lists bApps such as bChat, bMovies and bWriter; bChat
+          and other bApps you open talk to their own services, which receive what you send them.
         </li>
         <li>
           <b>Names and payments to names:</b> when you send to a $handle, paymail or OpNS name, or look up your own
@@ -136,11 +144,11 @@
 
       <h2 id="kyc">Verified identity (KYC certificates)</h2>
       <p>
-        Identity verification is optional. If you choose to verify, you are sent to bit-sign, which uses Veriff to
-        check your identity document. bit-sign and Veriff keep the verification record under their own privacy
-        policies. bit-sign then issues a private certificate that is stored in your wallet on your device. bWallet
-        does not upload that certificate anywhere by itself: you choose which details, if any, to reveal to an app
-        or service, and only when you approve it.
+        Identity verification is optional. If you choose to verify, you are sent to bit-sign, which uses Veriff to check
+        your identity document. bit-sign and Veriff keep the verification record under their own privacy policies.
+        bit-sign then issues a private certificate that is stored in your wallet on your device. bWallet does not upload
+        that certificate anywhere by itself: you choose which details, if any, to reveal to an app or service, and only
+        when you approve it.
       </p>
 
       <h2>Notifications</h2>
@@ -151,11 +159,11 @@
 
       <h2 id="waitlist">Testing waitlist (this website)</h2>
       <p>
-        If you join the testing waitlist on this website, we collect your email address, the phone platform you
-        chose (iPhone, Android or Either), the time you signed up, and your browser's user-agent string (to help
-        spot abuse). This is stored by The Bitcoin Corporation Ltd in our own database and is used only to invite
-        you to test bWallet and send testing updates. We do not sell it or share it for marketing. You can
-        unsubscribe from any email, or ask us to delete your entry at any time using the contact details below.
+        If you join the testing waitlist on this website, we collect your email address, the phone platform you chose
+        (iPhone, Android or Either), the time you signed up, and your browser's user-agent string (to help spot abuse).
+        This is stored by The Bitcoin Corporation Ltd in our own database and is used only to invite you to test bWallet
+        and send testing updates. We do not sell it or share it for marketing. You can unsubscribe from any email, or
+        ask us to delete your entry at any time using the contact details below.
       </p>
 
       <h2>Your choices</h2>
