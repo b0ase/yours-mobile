@@ -75,6 +75,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '            Send\n          </motion.button>\n        </motion.div>',
       '            Send\n          </motion.button>\n<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
     ],
+    // Button order: Send · Receive · Mint (flex order; upstream renders Receive first).
+    [
+      "onClick={() => setPageState('receive')}\n            className=\"flex flex-1",
+      "onClick={() => setPageState('receive')}\n            className=\"order-2 flex flex-1",
+    ],
+    [
+      "onClick={() => setPageState('asset-picker')}\n            className=\"flex flex-1",
+      "onClick={() => setPageState('asset-picker')}\n            className=\"order-1 flex flex-1",
+    ],
     // Credits row under the action buttons: balance, Top up, history (src/mobile/credits).
     [
       "import { MintButton } from '../mobile/mint/MintButton';",
