@@ -292,6 +292,7 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
       onClick={() => a.onOpen(post)}
     >
       <button
+        className="self-start shrink-0"
         onClick={(e) => {
           e.stopPropagation();
           a.onAuthor(post.author);
