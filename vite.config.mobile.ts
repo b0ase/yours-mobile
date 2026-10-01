@@ -1,9 +1,14 @@
-import { defineConfig, mergeConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, mergeConfig, type Plugin } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
 import { readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
+
+// BWALLET_* build settings (fee addresses etc.) may live in a gitignored .env.local; the shell wins.
+for (const [k, v] of Object.entries(loadEnv(process.env.NODE_ENV ?? 'production', __dirname, 'BWALLET_'))) {
+  process.env[k] ??= v;
+}
 
 /**
  * Mobile (Capacitor) build. One WebView hosts the popup UI (mobile.html →
