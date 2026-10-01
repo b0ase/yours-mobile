@@ -53,6 +53,14 @@ export const BAPPS: BApp[] = [
     icon: 'https://www.bmovies.app/icons/icon-192.png',
   },
   {
+    name: 'bMint',
+    url: 'https://www.bitcoin-mint.com/mint',
+    verb: 'Design, stamp and mint tokens, currency and media on-chain',
+    group: 'featured',
+    status: 'live',
+    icon: 'https://www.bitcoin-mint.com/favicon.ico',
+  },
+  {
     name: 'bWriter',
     url: 'https://bitcoin-writer.com/',
     verb: 'Write and save documents on-chain',
