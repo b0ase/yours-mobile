@@ -417,11 +417,12 @@ export class BchatClient {
   }
 
   /**
-   * One turn with the b agent: bit-sign's composer chat (POST /api/bitsign/compose, action 'chat',
-   * the same back end as bChat's b button). Stateless: the client sends the whole transcript.
+   * The b agent's PAID endpoints (agent/paid.ts): price, quote, and the answer to a paid message.
+   * Limited to /api/bitsign/agent/. The free composer chat (/api/bitsign/compose) is no longer used.
    */
-  async agentTurn(body: Record<string, unknown>): Promise<unknown> {
-    return this.call('POST', '/api/bitsign/compose', body);
+  async agentCall(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+    if (!path.startsWith('/api/bitsign/agent/')) throw new Error('Not a b agent endpoint');
+    return this.call(method, path, body);
   }
 
   /** Open (or find) the 1:1 room with $handle. Returns its ticker. (Not shown in the UI: token rooms only.) */

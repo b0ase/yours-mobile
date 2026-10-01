@@ -7,6 +7,7 @@ import { useBackClose } from '../backStack';
 import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
+import { AgentSettings } from './AgentSettings';
 import {
   loadBlocks,
   loadBookmarks,
@@ -366,6 +367,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           isLast
         />
       </Section>
+      <AgentSettings Section={Section} Row={Row} Divider={Divider} />
       <Section title="Privacy">
         <Row
           icon={<Bookmark size={16} />}

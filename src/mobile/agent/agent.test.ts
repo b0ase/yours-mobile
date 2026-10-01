@@ -1,51 +1,38 @@
 import { describe, expect, test } from 'bun:test';
-import { MAX_TURNS, agentRequest, parseAgentReply, type AgentMessage } from './agent';
+import { MAX_TURNS, looksLikeSecret, transcript, type AgentMessage } from './agent';
+import { BWALLET_GUIDE } from './guide';
 
-describe('agentRequest', () => {
-  test('sends the transcript as a compose chat turn, dropping blanks', () => {
-    const body = agentRequest([
-      { role: 'user', text: 'hi' },
-      { role: 'assistant', text: '  ' },
-      { role: 'assistant', text: 'hello' },
-    ]);
-    expect(body.action).toBe('chat');
-    expect(body.messages).toEqual([
-      { role: 'user', text: 'hi' },
-      { role: 'assistant', text: 'hello' },
-    ]);
-    expect(body.parties).toEqual([]);
-    expect(body.draft).toBeNull();
-  });
-
-  test('keeps only the last MAX_TURNS', () => {
+describe('transcript', () => {
+  test('drops blanks and keeps the last MAX_TURNS', () => {
     const many: AgentMessage[] = Array.from({ length: MAX_TURNS + 5 }, (_, i) => ({ role: 'user', text: `m${i}` }));
-    const body = agentRequest(many);
-    expect(body.messages.length).toBe(MAX_TURNS);
-    expect(body.messages[0].text).toBe('m5');
+    const t = transcript([{ role: 'assistant', text: '  ' }, ...many]);
+    expect(t.length).toBe(MAX_TURNS);
+    expect(t[0].text).toBe('m5');
   });
 });
 
-describe('parseAgentReply', () => {
-  test('plain text', () => {
-    expect(parseAgentReply({ text: ' Hello ' })).toEqual({ text: 'Hello', notes: [] });
+describe('looksLikeSecret', () => {
+  test('recovery phrases and keys are caught', () => {
+    expect(looksLikeSecret('abandon '.repeat(11) + 'about')).toBe(true);
+    expect(looksLikeSecret('KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn')).toBe(true);
+    expect(looksLikeSecret('a'.repeat(64))).toBe(true);
   });
-
-  test('prepared actions become notes for bChat', () => {
-    const r = parseAgentReply({
-      text: 'Done.',
-      created: { documentId: 'd', fileName: 'NDA.pdf' },
-      pendingSignatures: [{}, {}],
-      pendingMints: [{}],
-    });
-    expect(r.notes).toEqual([
-      'Created “NDA.pdf” in bChat.',
-      '2 signature requests ready to review in bChat.',
-      '1 token mint ready to review in bChat.',
-    ]);
+  test('normal questions pass', () => {
+    expect(looksLikeSecret('how do I send bsv to a paymail address')).toBe(false);
+    expect(looksLikeSecret('What is a ticket?')).toBe(false);
   });
+});
 
-  test('garbage is a safe empty reply', () => {
-    expect(parseAgentReply(null)).toEqual({ text: 'No reply.', notes: [] });
-    expect(parseAgentReply({ text: 5 })).toEqual({ text: 'No reply.', notes: [] });
+describe('guide', () => {
+  test('covers the tabs and the safety rules', () => {
+    for (const w of [
+      'Apps · Market · Wallet · Feed · Chat',
+      'Tickets',
+      'Credits',
+      'bwallet.space',
+      'One-click',
+      'seed phrase',
+    ])
+      expect(BWALLET_GUIDE).toContain(w);
   });
 });

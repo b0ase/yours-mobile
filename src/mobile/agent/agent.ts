@@ -1,56 +1,35 @@
 /**
- * The b agent (top bar's centre b → /m/agent): bChat's composer agent, reached through
- * bit-sign's POST /api/bitsign/compose { action: 'chat' } with the wallet's silent bit-sign
- * session. bit-sign answers with the platform's model (or the user's own provider key, set in
- * bChat › Settings); the call is not charged, so no payment is involved. Replies are whole
- * turns (no streaming). Pure helpers here; the page is AgentPage.tsx.
+ * The b agent (top bar's centre b → /m/agent): a help assistant for using bWallet. It is NOT
+ * free; it runs one of two ways, chosen in Settings › b agent (agentPrefs.ts):
+ *   - 'own'  — the user's own provider key; the device calls the provider directly (providers.ts).
+ *   - 'paid' — pay per message in BSV from the wallet, answered by bit-sign (paid.ts).
+ * The system prompt is guide.ts. Replies are whole turns (no streaming). Pure helpers here.
  */
 export type AgentRole = 'user' | 'assistant';
 export type AgentMessage = { role: AgentRole; text: string };
 
-export type AgentReply = {
-  text: string;
-  /** Things the agent prepared that only bChat can finish (documents, signature requests, mints…). */
-  notes: string[];
-};
+/** Most recent turns sent each time (stateless backends; keeps requests and prices bounded). */
+export const MAX_TURNS = 20;
+export const MAX_INPUT = 2000;
 
-/** Most recent turns sent back each time (the server is stateless; keeps requests bounded). */
-export const MAX_TURNS = 40;
-export const MAX_INPUT = 4000;
-
-/** The request body for one turn: the transcript (blank turns dropped, last MAX_TURNS). */
-export const agentRequest = (messages: AgentMessage[]) => ({
-  action: 'chat',
-  messages: messages
+/** The transcript to send: blank turns dropped, last MAX_TURNS kept. */
+export const transcript = (messages: AgentMessage[]): AgentMessage[] =>
+  messages
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text.trim())
     .slice(-MAX_TURNS)
-    .map((m) => ({ role: m.role, text: m.text })),
-  parties: [],
-  draft: null,
-});
+    .map((m) => ({ role: m.role, text: m.text }));
 
-const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
-/** Reads bit-sign's ComposeTurnResult; actions it prepared are surfaced as notes to finish in bChat. */
-export const parseAgentReply = (data: unknown): AgentReply => {
-  const d = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
-  const text = typeof d.text === 'string' ? d.text.trim() : '';
-  const notes: string[] = [];
-  const created = d.created as { fileName?: unknown } | undefined;
-  if (created && typeof created === 'object')
-    notes.push(`Created ${typeof created.fileName === 'string' ? `“${created.fileName}”` : 'a document'} in bChat.`);
-  const pending: [string, string, string][] = [
-    ['pendingSignatures', 'signature request', 'signature requests'],
-    ['pendingMints', 'token mint', 'token mints'],
-    ['pendingAllotments', 'token transfer', 'token transfers'],
-    ['pendingRepoRooms', 'repo room', 'repo rooms'],
-    ['pendingRooms', 'room', 'rooms'],
-    ['pendingInvitations', 'invitation', 'invitations'],
-  ];
-  for (const [key, one, many] of pending) {
-    const n = count(d[key]);
-    if (n) notes.push(`${plural(n, one, many)} ready to review in bChat.`);
-  }
-  return { text: text || (notes.length ? '' : 'No reply.'), notes };
+/** Rough guard: things that look like a seed phrase or a private key must never leave the device. */
+export const looksLikeSecret = (text: string): boolean => {
+  const t = text.trim();
+  // WIF (5/K/L…, base58, 51–52 chars) or 64-hex private key.
+  if (/\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b/.test(t)) return true;
+  if (/\b[0-9a-fA-F]{64}\b/.test(t)) return true;
+  if (/\bxprv[1-9A-HJ-NP-Za-km-z]{100,}/.test(t)) return true;
+  // 12 / 15 / 18 / 21 / 24 lowercase words and nothing else: a recovery phrase.
+  const words = t.split(/\s+/);
+  return [12, 15, 18, 21, 24].includes(words.length) && words.every((w) => /^[a-z]{3,8}$/.test(w));
 };
+
+export const SECRET_WARNING =
+  'That looks like a recovery phrase or a private key, so it was not sent. Never share it with anyone, including b. If you think it was exposed, move your funds to a new wallet.';
