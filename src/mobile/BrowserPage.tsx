@@ -15,6 +15,7 @@ import app_tempoIcon from './brand/apps/tempo.png';
 import bgVideo from './brand/bg/liquid-gold.mp4';
 import bgPoster from './brand/bg/liquid-gold.jpg';
 import { VideoBackground } from './ui/VideoBackground';
+import { useKeyboardInset } from './ui/keyboardInset';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -257,7 +258,13 @@ const readPage = () => {
   }
 };
 
+/** Bottom address bar: 0.5rem above the tab bar (tabs/BottomMenu.tsx, 3.75rem). */
+const SEARCH_BAR_BOTTOM = 'calc(3.75rem + 0.5rem)';
+/** Page grids scroll clear of the tab bar + the address bar (~3.25rem) + gaps. */
+const PAGE_BOTTOM_PAD = 'calc(3.75rem + 5.5rem)';
+
 const BrowserPage = () => {
+  const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
@@ -397,30 +404,11 @@ const BrowserPage = () => {
       <VideoBackground src={bgVideo} poster={bgPoster} />
       <TopNav />
       <div className="relative flex h-full w-full flex-col pt-14">
+        {/* The page switch stays pinned at the top; the address bar lives at the bottom (Safari-style). */}
         <div
           className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
           style={{ background: 'rgba(1,1,1,0.75)' }}
         >
-          <form onSubmit={submit} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 rounded-full bg-[#17191E] pl-4 pr-1">
-              <Search size={15} style={{ color: '#98A2B3' }} />
-              <input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Search or enter address"
-                inputMode="url"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                className="flex-1 min-w-0 bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-[#667085]"
-                aria-label="Web address"
-              />
-              <button type="submit" aria-label="Go" className="p-2">
-                <ArrowRight size={17} style={{ color: '#FFD24D' }} />
-              </button>
-            </div>
-            {error && <p className="text-xs text-[#F97066] px-2">{error}</p>}
-          </form>
           <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
             {PAGES.map((label, i) => (
               <button
@@ -453,11 +441,48 @@ const BrowserPage = () => {
               className="h-full w-full shrink-0 snap-start snap-always overflow-y-auto overflow-x-hidden"
               style={{ overscrollBehaviorY: 'contain' }}
             >
-              <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: 'calc(3.75rem + 1.5rem)' }}>
+              <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: PAGE_BOTTOM_PAD }}>
                 {pageBody(i)}
               </div>
             </section>
           ))}
+        </div>
+      </div>
+
+      {/* Address bar, pinned just above the tab bar (Safari-style). With the keyboard open (iOS doesn't
+          resize the page) it rides on top of the keyboard instead. */}
+      <div
+        className="absolute left-0 right-0 z-[101] px-4"
+        style={{ bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM }}
+      >
+        <div
+          className="rounded-[22px] p-1 backdrop-blur-md"
+          style={{
+            background: 'rgba(16,17,20,0.78)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <form onSubmit={submit} className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2 rounded-full bg-[#17191E] pl-4 pr-1">
+              <Search size={15} style={{ color: '#98A2B3' }} />
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Search or enter address"
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className="flex-1 min-w-0 bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-[#667085]"
+                aria-label="Web address"
+              />
+              <button type="submit" aria-label="Go" className="p-2">
+                <ArrowRight size={17} style={{ color: '#FFD24D' }} />
+              </button>
+            </div>
+            {error && <p className="text-xs text-[#F97066] px-2">{error}</p>}
+          </form>
         </div>
       </div>
 
