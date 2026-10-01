@@ -45,6 +45,14 @@ export const BAPPS: BApp[] = [
     icon: 'https://www.bmovies.app/icons/icon-192.png',
   },
   {
+    name: 'bMusic',
+    url: 'https://www.bmovies.app/bmusic',
+    verb: 'Tokenise your music; fans who hold it make the video with you',
+    group: 'featured',
+    status: 'live',
+    icon: 'https://www.bmovies.app/icons/icon-192.png',
+  },
+  {
     name: 'bWriter',
     url: 'https://bitcoin-writer.com/',
     verb: 'Write and save documents on-chain',
@@ -64,7 +72,6 @@ export const BAPPS: BApp[] = [
   { name: 'bSearch', url: 'https://bitcoin-search.vercel.app', verb: 'Search what lives on-chain', group: 'work', status: 'live', icon: 'https://bitcoin-search.vercel.app/favicon.ico', source: suite('bitcoin-search') },
   { name: 'bDNS', url: 'https://bitcoin-dns.vercel.app', verb: 'Register and trade names on Bitcoin', group: 'work', status: 'live', icon: 'https://bitcoin-dns.vercel.app/favicon.ico', source: suite('bitcoin_dns') },
   // Media
-  { name: 'bMusic', url: 'https://bitcoin-music.vercel.app', verb: 'Make, release and own music', group: 'media', status: 'live', source: suite('bitcoin-music') },
   { name: 'bVideo', url: 'https://bitcoin-video-nine.vercel.app', verb: 'Watch and publish video', group: 'media', status: 'live', icon: 'https://bitcoin-video-nine.vercel.app/favicon.ico', source: suite('bitcoin-video') },
   { name: 'bRadio', url: 'https://bitcoin-radio.vercel.app', verb: 'Listen to and run Bitcoin radio', group: 'media', status: 'live', source: suite('bitcoin-radio') },
   { name: 'bPhotos', url: 'https://bitcoin-photos.vercel.app', verb: 'Turn photos into tradable NFTs', group: 'media', status: 'live', source: suite('bitcoin-photos') },
