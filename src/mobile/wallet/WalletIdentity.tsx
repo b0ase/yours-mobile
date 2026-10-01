@@ -34,7 +34,7 @@ export const WalletIdentity = () => {
       .catch(() => undefined);
 
   return (
-    <div className="flex items-center justify-center gap-1.5 max-w-[92%] mb-1">
+    <div className="flex items-center justify-center gap-1.5 max-w-[90vw] mb-1">
       <AccountAvatar src={avatar} size={22} />
       {t.name && (
         <span className="text-sm font-semibold text-white max-w-[45vw] overflow-hidden text-ellipsis whitespace-nowrap">
