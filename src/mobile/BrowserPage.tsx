@@ -132,9 +132,6 @@ const bappTile = (a: BApp): Tile => ({
 // Featured first (bChat, bMovies, bMusic, bMint, bWriter), then the rest by group.
 const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id)).map(bappTile);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
-const DOCK = ['bChat', 'bMovies', 'bMusic', 'bMint']
-  .map((n) => BAPP_TILES.find((t) => t.name === n))
-  .filter((t): t is Tile => !!t);
 
 const LONG_PRESS_MS = 450;
 
@@ -236,7 +233,7 @@ const BrowserPage = () => {
     <div className="relative w-full" style={{ height: '100%', background: '#010101' }}>
       <div
         className="flex w-full h-full flex-col items-center overflow-x-hidden overflow-y-auto"
-        style={{ paddingBottom: 'calc(3.75rem + 6.5rem)' }}
+        style={{ paddingBottom: 'calc(3.75rem + 1.5rem)' }}
       >
         <TopNav />
         <div className="w-full px-4 pb-6 pt-16 flex flex-col gap-5">
@@ -291,18 +288,6 @@ const BrowserPage = () => {
             <br />
             {UNOFFICIAL_NOTICE}
           </p>
-        </div>
-      </div>
-
-      {/* Dock: four favourites, above the tab bar. */}
-      <div className="absolute inset-x-0 px-4" style={{ bottom: 'calc(3.75rem + 0.5rem)' }}>
-        <div
-          className="grid grid-cols-4 gap-3 rounded-[28px] px-3 py-2.5 backdrop-blur-md"
-          style={{ background: 'rgba(23,25,30,0.88)', border: '1px solid #2b2f36' }}
-        >
-          {DOCK.map((t) => (
-            <AppTile key={t.key} tile={t} label={false} onOpen={() => go(t.url)} onInfo={() => setInfo(t)} />
-          ))}
         </div>
       </div>
 
