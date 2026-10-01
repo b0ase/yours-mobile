@@ -7,6 +7,7 @@ const MarketPage = lazy(() => import('../market/MarketPage'));
 const FeedTab = lazy(() => import('../feed/FeedTab'));
 const ChatPage = lazy(() => import('./ChatPage'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
+const AgentPage = lazy(() => import('../agent/AgentPage'));
 
 const MobileRoutes = () => (
   <Suspense fallback={null}>
@@ -14,6 +15,8 @@ const MobileRoutes = () => (
       <Route path="settings" element={<SettingsHub />} />
       {/* The top bar's Play button: music & video. */}
       <Route path="media" element={<MediaPage />} />
+      {/* The top bar's centre b: the b agent. */}
+      <Route path="agent" element={<AgentPage />} />
       <Route path="market" element={<MarketPage />} />
       <Route path="feed" element={<FeedTab />} />
       <Route path="chat" element={<ChatPage />} />

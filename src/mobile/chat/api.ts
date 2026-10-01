@@ -395,6 +395,14 @@ export class BchatClient {
     await this.call('POST', '/api/bitsign/share-offers/events', body);
   }
 
+  /**
+   * One turn with the b agent: bit-sign's composer chat (POST /api/bitsign/compose, action 'chat',
+   * the same back end as bChat's b button). Stateless: the client sends the whole transcript.
+   */
+  async agentTurn(body: Record<string, unknown>): Promise<unknown> {
+    return this.call('POST', '/api/bitsign/compose', body);
+  }
+
   /** Open (or find) the 1:1 room with $handle. Returns its ticker. (Not shown in the UI: token rooms only.) */
   async openDirect(handle: string): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/direct', {
