@@ -141,7 +141,7 @@ export function withFeeOutput(ctx: OneSatContext, feeSats: number, address = min
   return { ...ctx, wallet } as OneSatContext;
 }
 
-/** Media tab listens so a new mint shows up without a manual refresh. */
+/** Wallet › NFTs (media) listens so a new mint shows up without a manual refresh. */
 const listeners = new Set<() => void>();
 export const onMinted = (fn: () => void) => {
   listeners.add(fn);

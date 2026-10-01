@@ -3,7 +3,7 @@ import bundled from './blocklist.json';
 /**
  * Market safety filter: ALWAYS ON, with no setting to turn it off (Apple App
  * Review 1.1.4 / Google Play sexual-content policy). Anything it matches is
- * removed from the Market; in the Media tab (the user's own items) matches
+ * removed from the Market; in Wallet › NFTs (the user's own items) matches
  * are blurred behind a tap-to-reveal instead of hidden.
  *
  * Sources, merged as a union (a remote list can only ADD blocks):

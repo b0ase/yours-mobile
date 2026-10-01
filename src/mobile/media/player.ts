@@ -1,5 +1,5 @@
 /**
- * Media tab audio player. A single module-level <audio> so playback survives
+ * Wallet › NFTs (media) audio player. A single module-level <audio> so playback survives
  * tab switches and the screen locking (iOS: UIBackgroundModes audio +
  * AVAudioSession .playback in AppDelegate). Lock-screen / Now Playing
  * controls come from the Media Session API, which WKWebView supports.

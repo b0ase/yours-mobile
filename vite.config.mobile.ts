@@ -32,7 +32,7 @@ const FRAME_SHIM = `<script>(function(){var m=window.parent!==window&&window.par
 // top nav swaps on top.
 const MOBILE_SWAPS: Record<string, string> = {
   [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/mobile/brand/theme.ts'),
-  // Mobile tab bar: Wallet · Market · Apps · Media · Chat (src/mobile/tabs).
+  // Mobile tab bar: Wallet · Market · Apps · Feed · Chat (src/mobile/tabs).
   [resolve(__dirname, 'src/components/BottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/BottomMenu.tsx'),
   [resolve(__dirname, 'src/hooks/useBottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/useBottomMenu.tsx'),
   // Account drawer (Phantom-style) in place of the dropdown + GitHub button.
@@ -139,6 +139,26 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '              Tokens\n            </span>',
     ],
   ],
+  // Wallet tab: Tokens | NFTs (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
+  'src/pages/BsvWallet.tsx#kinds': [
+    [
+      "import { ManageTokens } from '../components/ManageTokens';",
+      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';",
+    ],
+    [
+      '        {/* ── Assets section ── */}',
+      '        <WalletKindSwitch />\n        <WalletKindGate kind="tokens">\n        {/* ── Assets section ── */}',
+    ],
+    [
+      '        {/* Bottom breathing room */}',
+      '        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <MediaSection />\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+    ],
+    // The switch replaces the section label and its top margin.
+    [
+      '          className="w-full mt-6"\n        >\n          {/* Section header */}\n          <div className="flex items-center px-4 mb-2">',
+      '          className="w-full"\n        >\n          {/* Section header */}\n          <div className="hidden">',
+    ],
+  ],
   // Obsidian token rows: raised cards (every AssetRow: BSV, MNEE, locks, BSV21).
   'src/components/AssetRow.tsx': [
     [
@@ -215,7 +235,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '<Route path="/settings" element={<Settings />} />',
       '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={null}><MobileRoutes /></Suspense>} />',
     ],
-    // Media tab's now-playing bar, app-wide so audio controls follow every tab.
+    // Media (Wallet › NFTs) now-playing bar, app-wide so audio controls follow every tab.
     // bWallet calls: incoming / in-call screens above every tab (mobile/calls/CallScreen).
     [
       '<UsbBackupPill />',

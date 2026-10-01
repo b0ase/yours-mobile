@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { WalletOutput } from '@bsv/sdk';
 import { listOrdinals } from '@1sat/actions';
 import { onMinted } from '../mint/mint';
 import { FileQuestion, Music, Play, Send, X } from 'lucide-react';
-import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getOutputName, getTagValue } from '../../utils/format';
 import { isMediaOutput, kindOf, type MediaKind } from './media';
@@ -13,8 +13,8 @@ import { safety } from '../market/safety';
 import { Blurred } from '../market/NftCard';
 
 /**
- * Media tab: the wallet's non-fungible inscriptions, filtered by kind, with an
- * audio queue player (MiniPlayer) and a video player, streamed from ORDFS.
+ * Wallet › NFTs: the wallet's non-fungible inscriptions as a media library, filtered by kind,
+ * with an audio queue player (MiniPlayer) and a video player, streamed from ORDFS.
  * Send / list / cancel stay in upstream's Ordinals manager (/ord-wallet).
  */
 type Filter = 'all' | MediaKind;
@@ -30,7 +30,7 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 type Item = { output: WalletOutput; name: string; type?: string; kind: MediaKind; url: string; flagged: boolean };
 
-const MediaPage = () => {
+export const MediaSection = () => {
   const { apiContext } = useServiceContext();
   const navigate = useNavigate();
   const [items, setItems] = useState<Item[]>([]);
@@ -159,14 +159,10 @@ const MediaPage = () => {
   );
 
   return (
-    <div
-      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: '100%', background: '#010101' }}
-    >
-      <TopNav />
-      <div className="w-full px-4 pt-16 flex flex-col gap-3">
+    <div className="w-full flex flex-col">
+      <div className="w-full px-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold text-white">Media</h1>
+          <span className="text-xs font-semibold uppercase tracking-widest text-[#98A2B3]">Media</span>
           <button
             onClick={() => navigate('/ord-wallet')}
             className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
@@ -207,35 +203,36 @@ const MediaPage = () => {
         )}
       </div>
 
-      {open && (
-        <div
-          className="fixed inset-0 z-[200] flex flex-col bg-black"
-          style={{ paddingTop: 'env(safe-area-inset-top)' }}
-        >
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{open.name}</span>
-            <button aria-label="Close" onClick={() => setOpen(null)} className="p-2">
-              <X size={20} color="#fff" />
-            </button>
-          </div>
-          <div className="flex-1 flex items-center justify-center min-h-0">
-            {open.kind === 'video' && (
-              <video src={open.url} controls autoPlay playsInline className="max-w-full max-h-full" />
-            )}
-            {open.kind === 'images' && (
-              <img src={open.url} alt={open.name} className="max-w-full max-h-full object-contain" />
-            )}
-            {open.kind === 'other' && (
-              <iframe src={open.url} title={open.name} sandbox="" className="w-full h-full bg-white" />
-            )}
-          </div>
-          <div className="px-4 py-3 text-[10px] text-[#667085] break-all">
-            {open.type ?? 'unknown type'} · {open.output.outpoint}
-          </div>
-        </div>
-      )}
+      {/* Portalled: the Wallet page animates with transforms, which would trap a fixed overlay. */}
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex flex-col bg-black"
+            style={{ paddingTop: 'env(safe-area-inset-top)' }}
+          >
+            <div className="flex items-center justify-between px-4 py-3">
+              <span className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{open.name}</span>
+              <button aria-label="Close" onClick={() => setOpen(null)} className="p-2">
+                <X size={20} color="#fff" />
+              </button>
+            </div>
+            <div className="flex-1 flex items-center justify-center min-h-0">
+              {open.kind === 'video' && (
+                <video src={open.url} controls autoPlay playsInline className="max-w-full max-h-full" />
+              )}
+              {open.kind === 'images' && (
+                <img src={open.url} alt={open.name} className="max-w-full max-h-full object-contain" />
+              )}
+              {open.kind === 'other' && (
+                <iframe src={open.url} title={open.name} sandbox="" className="w-full h-full bg-white" />
+              )}
+            </div>
+            <div className="px-4 py-3 text-[10px] text-[#667085] break-all">
+              {open.type ?? 'unknown type'} · {open.output.outpoint}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
-
-export default MediaPage;

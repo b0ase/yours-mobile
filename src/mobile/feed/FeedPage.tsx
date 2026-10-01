@@ -951,7 +951,7 @@ const LockSheet = ({
 
 // ── page ────────────────────────────────────────────────────────────────────
 
-export const FeedPage = ({ header }: { header: ReactNode }) => {
+export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const identity = useIdentity(apiContext, chromeStorageService);
@@ -1156,7 +1156,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     >
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
-        <SegmentRow>{header}</SegmentRow>
+        {header && <SegmentRow>{header}</SegmentRow>}
         <SegmentTitle title="Feed">
           <button onClick={() => setProfile('me')} aria-label="My profile" className="p-1">
             <Avatar author={me} size={28} />
