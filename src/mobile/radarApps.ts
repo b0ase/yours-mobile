@@ -122,7 +122,6 @@ import m_tempo from './brand/apps/radar/mna-tempo.png';
 import m_1bitclaw from './brand/apps/radar/mna-1bitclaw.png';
 import m_agid from './brand/apps/radar/mna-agid.png';
 import m_babbage_os from './brand/apps/radar/mna-babbage-os.png';
-import m_teragun from './brand/apps/radar/mna-teragun.png';
 import m_theme_token from './brand/apps/radar/mna-theme-token.png';
 import m_uhrp_storage from './brand/apps/radar/mna-uhrp-storage.png';
 import m_giftchain from './brand/apps/radar/mna-giftchain.png';
@@ -992,14 +991,6 @@ const METANET_APPS: RadarApp[] = [
     desc: 'BRC-100 native desktop and home screen for the web',
     group: 'tools',
     icon: m_babbage_os,
-    source: 'metanet',
-  },
-  {
-    name: 'Teragun',
-    url: 'https://teragun.com',
-    desc: 'Stress-test BSV with live transaction metrics',
-    group: 'tools',
-    icon: m_teragun,
     source: 'metanet',
   },
   {
