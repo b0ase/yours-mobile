@@ -60,6 +60,17 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">\n<OpenTokenRoomButton id={token.info.id} />',
     ],
   ],
+  // Wallet tab: gold "Mint" beside Receive / Send (src/mobile/mint).
+  'src/pages/BsvWallet.tsx': [
+    [
+      "import { getPlatform } from '../platform';",
+      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';",
+    ],
+    [
+      '            Send\n          </motion.button>\n        </motion.div>',
+      '            Send\n          </motion.button>\n<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
+    ],
+  ],
   'src/App.tsx': [
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
@@ -145,6 +156,8 @@ export default mergeConfig(
       ...brandDefines(),
       // Market tab fee address (src/mobile/market/fee.ts). Empty = no fee.
       __MARKET_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MARKET_FEE_ADDRESS ?? ''),
+      // Wallet tab Mint creation fee (src/mobile/mint/mint.ts). Empty = no fee.
+      __MINT_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MINT_FEE_ADDRESS ?? ''),
       // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
       __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
       __MARKET_REPORT_URL__: JSON.stringify(process.env.BWALLET_MARKET_REPORT_URL ?? ''),

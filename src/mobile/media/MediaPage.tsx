@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WalletOutput } from '@bsv/sdk';
 import { listOrdinals } from '@1sat/actions';
+import { onMinted } from '../mint/mint';
 import { FileQuestion, Music, Play, Send, X } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -77,6 +78,24 @@ const MediaPage = () => {
     void loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A new mint (Wallet tab → Mint) restarts the list from the top.
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => onMinted(() => setReloadKey((k) => k + 1)), []);
+  useEffect(() => {
+    if (!reloadKey) return;
+    setLoading(true);
+    listOrdinals
+      .execute(apiContext, { limit: PAGE, offset: 0 })
+      .then(({ outputs }) => {
+        setItems(outputs.filter(isMediaOutput).map(toItem));
+        setOffset(outputs.length);
+        setHasMore(outputs.length === PAGE);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
 
   const shown = useMemo(() => (filter === 'all' ? items : items.filter((i) => i.kind === filter)), [items, filter]);
   const counts = useMemo(() => {
