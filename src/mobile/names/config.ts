@@ -13,9 +13,3 @@ export const BWALLET_PAYMAIL_DOMAIN = clean(typeof __PAYMAIL_DOMAIN__ === 'undef
 export const BWALLET_PAYMAIL_API =
   clean(typeof __PAYMAIL_API__ === 'undefined' ? '' : __PAYMAIL_API__) ||
   (BWALLET_PAYMAIL_DOMAIN ? `https://${BWALLET_PAYMAIL_DOMAIN}` : '');
-
-/**
- * Earlier primary domains of OUR paymail server. Names claimed there stay valid (the server keeps
- * serving them via PAYMAIL_DOMAINS), so they still count as "our own paymail" (e.g. bareName()).
- */
-export const BWALLET_LEGACY_PAYMAIL_DOMAINS: readonly string[] = ['b0ase.com'];

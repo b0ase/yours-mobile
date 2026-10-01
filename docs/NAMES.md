@@ -124,8 +124,8 @@ the destination script.
 `https://pay.bwallet.space`. `PAYMAIL_DOMAIN` is the primary domain (what `register` and `lookup` return).
 `PAYMAIL_DOMAINS` is an optional comma-separated list of extra domains served with the same aliases: an alias is
 one record whatever the domain (aliases are unique across all of them), so moving the primary keeps old
-addresses working. `b0ase.com` was the first primary; it stays in `PAYMAIL_DOMAINS`, so any `name@b0ase.com`
-already claimed still resolves (to the same record as `name@bwallet.space`). `pki` / `verify` echo the domain that
+addresses working. No extra domains are set today (`b0ase.com` was a placeholder that never had DNS and was dropped on
+1 Oct 2026). `pki` / `verify` echo the domain that
 was asked for. The capability document and every endpoint URL use `PAYMAIL_BASE_URL` (default
 `https://<PAYMAIL_DOMAIN>`).
 
@@ -133,30 +133,27 @@ was asked for. The capability document and every endpoint URL use `PAYMAIL_BASE_
 `__PAYMAIL_API__` in `vite.config.mobile.ts`, read in `src/mobile/names/config.ts`). Builds default to
 `bwallet.space` and `https://pay.bwallet.space`, so paymail is on. Build with `BWALLET_PAYMAIL_DOMAIN=''` to turn it
 off (no claim card, no paymail on Receive or the top bar, no inbox polling). In unit tests the constants are
-undefined, so it is off. `BWALLET_LEGACY_PAYMAIL_DOMAINS` (`['b0ase.com']`) lists earlier domains of our server that
-still count as "our own paymail".
+undefined, so it is off.
 
 **Bare names in bWallet.** Inside the app our own paymail is shown without the domain (`alice`, not
-`alice@bwallet.space`; legacy `alice@b0ase.com` is shortened too): top bar, account drawer, Calls, Friends and Feed
+`alice@bwallet.space`): top bar, account drawer, Calls, Friends and Feed
 (`bareName()` in `names.ts`). The Receive screen is the exception: it shows the full `alice@bwallet.space` with a
 copy button and "Use the full address in other wallets". In Send / `NameInput` / Call a name, a bare name (no `@`,
 no `$`, not an address) resolves first as `name@bwallet.space`, then as an OpNS name (`resolveBareName()`). The
 label a caller asserts is the full paymail, so callee verification is unambiguous.
 
-### Owner steps before launch
+### Setup (done 1 Oct 2026; live)
 
-1. **DNS at IONOS** (`bwallet.space`, nameservers `ns1-3.livedns.co.uk`; Domains & SSL → bwallet.space → DNS):
+1. **DNS at Fasthosts** (`bwallet.space`, nameservers `ns1-3.livedns.co.uk`; Advanced DNS):
    - `A pay 76.76.21.21` (i.e. `pay.bwallet.space`), or instead `CNAME pay cname.vercel-dns.com`.
    - `SRV _bsvalias._tcp.bwallet.space`: service `_bsvalias`, protocol `TCP`, host `@`, priority 0, weight 10,
      port 443, target `pay.bwallet.space`. Equivalent zone line:
      `_bsvalias._tcp.bwallet.space. 3600 IN SRV 0 10 443 pay.bwallet.space.`
-   - Remove any IONOS default/parking `A`/`AAAA`/`CNAME` on `pay` that would conflict.
-2. **DNSSEC**: enable it in IONOS (Domains & SSL → bwallet.space → DNSSEC) if offered for this TLD. Paymail clients
+   - Remove any default/parking `A`/`AAAA`/`CNAME` on `pay` that would conflict.
+2. **DNSSEC**: enable it at the DNS host if offered for this TLD. Paymail clients
    trust the SRV record more when it's signed. Optional; paymail works without it.
-3. **Vercel** (project `bwallet`, Production env): `PAYMAIL_DOMAIN=bwallet.space`, `PAYMAIL_DOMAINS=b0ase.com`,
-   `PAYMAIL_BASE_URL=https://pay.bwallet.space`. Add the domain `pay.bwallet.space` to the project (Settings →
-   Domains) and wait for it to verify. Keep `pay.b0ase.com` and the `_bsvalias` SRV on `b0ase.com` in place so legacy
-   `name@b0ase.com` clients keep finding the server. Optional: `ARC_URL`, `ARC_API_KEY`. `SUPABASE_URL` +
+3. **Vercel** (project `bwallet`, Production env): `PAYMAIL_DOMAIN=bwallet.space`,
+   `PAYMAIL_BASE_URL=https://pay.bwallet.space`. The domain `pay.bwallet.space` is on the project. Optional: `ARC_URL`, `ARC_API_KEY`. `SUPABASE_URL` +
    `SUPABASE_SERVICE_ROLE_KEY` exist for Production; add them for Preview to test there.
 4. **Run the migration** (not run by the agent):
    `ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1" < /Volumes/2026/Projects/yours-mobile-bcorp/migrations/20261001_bwallet_paymail.sql`

@@ -203,16 +203,13 @@ describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
     expect(parseRecipient(ADDR).kind).toBe('address');
   });
 
-  test('bareName strips only our domain (and its legacy domains)', () => {
+  test('bareName strips only our domain', () => {
     expect(bareName('alice@bwallet.space', 'bwallet.space')).toBe('alice');
     expect(bareName('Alice@BWALLET.space', 'bwallet.space')).toBe('Alice');
-    expect(bareName('alice@b0ase.com', 'bwallet.space', ['b0ase.com'])).toBe('alice');
-    expect(bareName('alice@b0ase.com', 'bwallet.space', [])).toBe('alice@b0ase.com');
+    expect(bareName('alice@b0ase.com', 'bwallet.space')).toBe('alice@b0ase.com');
     expect(bareName('alice@handcash.io', 'bwallet.space')).toBe('alice@handcash.io');
     expect(bareName('$alice', 'bwallet.space')).toBe('$alice');
     expect(bareName('@bwallet.space', 'bwallet.space')).toBe('@bwallet.space');
-    expect(bareName('@b0ase.com', 'bwallet.space', ['b0ase.com'])).toBe('@b0ase.com');
     expect(bareName('alice@bwallet.space', '')).toBe('alice@bwallet.space');
-    expect(bareName('alice@b0ase.com', '', ['b0ase.com'])).toBe('alice@b0ase.com');
   });
 });

@@ -1,6 +1,6 @@
 import validate from 'bitcoin-address-validation';
 import { Utils } from '@bsv/sdk';
-import { BWALLET_LEGACY_PAYMAIL_DOMAINS, BWALLET_PAYMAIL_DOMAIN } from './config';
+import { BWALLET_PAYMAIL_DOMAIN } from './config';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -300,20 +300,12 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
 
 /**
  * How a name is shown inside bWallet: our own paymail without "@<domain>" (alice@bwallet.space → alice).
- * Legacy domains of our server (alice@b0ase.com) are stripped too while paymail is on. Other domains, $handles and OpNS names are unchanged. The Receive screen shows the full address.
+ * Other domains, $handles and OpNS names are unchanged. The Receive screen shows the full address.
  */
-export const bareName = (
-  name: string,
-  domain: string = BWALLET_PAYMAIL_DOMAIN,
-  legacy: readonly string[] = BWALLET_LEGACY_PAYMAIL_DOMAINS,
-) => {
+export const bareName = (name: string, domain: string = BWALLET_PAYMAIL_DOMAIN) => {
   if (!name || !domain) return name;
-  const lower = name.toLowerCase();
-  for (const d of [domain, ...legacy]) {
-    const suffix = `@${d.toLowerCase()}`;
-    if (lower.endsWith(suffix) && name.length > suffix.length) return name.slice(0, -suffix.length);
-  }
-  return name;
+  const suffix = `@${domain.toLowerCase()}`;
+  return name.toLowerCase().endsWith(suffix) && name.length > suffix.length ? name.slice(0, -suffix.length) : name;
 };
 
 /** bWallet-hosted paymail (name@BWALLET_PAYMAIL_DOMAIN), or undefined when paymail is off (docs/NAMES.md). */
