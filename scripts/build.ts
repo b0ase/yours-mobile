@@ -16,7 +16,7 @@ const BRAND_ICONS = resolve(root, 'assets/bwallet-ext');
 
 /**
  * bWallet builds: rewrite build/manifest.json and the PWA manifest, and replace the
- * Yours sprout icons with the ring-b mark. The name differs from Yours Wallet and no
+ * Yours sprout icons with the bWallet mark. The name differs from Yours Wallet and no
  * `key` is set, so Chrome gives it its own extension ID and it installs alongside
  * Yours Wallet (the Web Store assigns the published ID).
  */

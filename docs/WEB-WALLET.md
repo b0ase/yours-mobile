@@ -14,8 +14,8 @@ tabs) and adds:
   other websites is coming soon."
 - `src/web/web.css`: phones get the mobile layout; screens 640px and wider get
   a centred 420px wallet column on the black and gold background.
-- a PWA manifest (`manifest.webmanifest`), favicon and ring-b icons from
-  `assets/bwallet-ext/` (regenerate with `scripts/gen-extension-icons.sh`).
+- a PWA manifest (`manifest.webmanifest`), favicon and bWallet mark icons from
+  `assets/bwallet-ext/` (regenerate with `scripts/gen-brand-mark.sh`).
 - no `public/` copy (that folder is the extension's Yours manifest and icons),
   no `dapp-provider.js`, no source maps.
 

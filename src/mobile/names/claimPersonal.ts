@@ -7,7 +7,7 @@ import {
   PERSONAL_DECIMALS,
   PERSONAL_MIN,
   PERSONAL_PURPOSE,
-  RING_B_ICON,
+  BWALLET_MARK_ICON,
   cleanSupply,
   getPersonalLink,
   personalKey,
@@ -45,7 +45,7 @@ export async function deployPersonalToken(
     symbol: ticker,
     amount: supply,
     decimals: PERSONAL_DECIMALS,
-    icon: input.icon || RING_B_ICON,
+    icon: input.icon || BWALLET_MARK_ICON,
   });
   if (res.error || !res.tokenId) throw new Error(res.error || 'Token deploy failed');
   const link: PersonalLink = {
