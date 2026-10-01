@@ -65,7 +65,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test src",
+    "test": "bun test src site/test",
     "verify:build": "tsx scripts/verify-build.ts",
     "package": "tsx scripts/package.ts",
     "release": "tsx scripts/release.ts",

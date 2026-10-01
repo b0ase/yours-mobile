@@ -1,0 +1,353 @@
+// bWallet paymail (bsvalias) core. Pure logic + an injectable store, so it's unit-testable.
+//
+// The server holds NO private keys, of users or of its own:
+//   - Users register alias → identity public key (+ ordinal receive address, profile), proving
+//     ownership with a BRC-42/43 signature (protocol [2,'bwallet paymail'], keyID '1',
+//     counterparty 'anyone') over a canonical message with a timestamp.
+//   - P2P destinations use BRC-29 derivation with the "anyone" key (private key 1) as the
+//     sender: child = identityKey.deriveChild(anyone, "2-3241645161d8-<prefix> <suffix>").
+//     Only the identity private key can spend it; the wallet internalizes the output as a
+//     "wallet payment" with senderIdentityKey = anyone's public key.
+//   - Received transactions are verified against the reference's outputs and parked in an
+//     inbox (beef + derivation) that the wallet collects with a signed request.
+'use strict';
+const { Beef, KeyDeriver, P2PKH, PrivateKey, PublicKey, ProtoWallet, Random, Transaction, Utils } = require('@bsv/sdk');
+
+const BRC29 = [2, '3241645161d8'];
+const SIGN_PROTOCOL = [2, 'bwallet paymail'];
+const SIGN_KEY_ID = '1';
+const ANYONE_PUB = new PrivateKey(1).toPublicKey().toString();
+const SIG_WINDOW_MS = 5 * 60 * 1000;
+const MAX_SATS = 21e14;
+const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
+const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
+const RESERVED = new Set([
+  'admin',
+  'root',
+  'support',
+  'help',
+  'bwallet',
+  'bcorp',
+  'paymail',
+  'api',
+  'www',
+  'info',
+  'security',
+]);
+
+const domain = (env = process.env) =>
+  String(env.PAYMAIL_DOMAIN || 'bwallet-nine.vercel.app')
+    .trim()
+    .toLowerCase();
+/** Public base URL for capability endpoints (defaults to https://<PAYMAIL_DOMAIN>). */
+const baseUrl = (env = process.env) => String(env.PAYMAIL_BASE_URL || `https://${domain(env)}`).replace(/\/$/, '');
+
+function capabilities(env = process.env) {
+  const b = `${baseUrl(env)}/api/paymail`;
+  return {
+    bsvalias: '1.0',
+    capabilities: {
+      pki: `${b}/id/{alias}@{domain.tld}`,
+      f12f968c92d6: `${b}/profile/{alias}@{domain.tld}`,
+      a9f510c16bde: `${b}/verify/{alias}@{domain.tld}/{pubkey}`,
+      '2a40af698840': `${b}/p2p-destination/{alias}@{domain.tld}`,
+      '5f1323cddf31': `${b}/receive-tx/{alias}@{domain.tld}`,
+      '5c55a7fdb7bb': `${b}/receive-beef/{alias}@{domain.tld}`,
+      ordAddress: `${b}/ord/{alias}@{domain.tld}`,
+    },
+  };
+}
+
+/** "alice@domain" → "alice" when the domain is ours and the alias is well-formed. */
+function parseHandle(handle, env = process.env) {
+  const s = decodeURIComponent(String(handle || ''))
+    .trim()
+    .toLowerCase();
+  const at = s.lastIndexOf('@');
+  if (at < 1) return null;
+  const alias = s.slice(0, at);
+  if (s.slice(at + 1) !== domain(env) || !ALIAS_RE.test(alias)) return null;
+  return alias;
+}
+
+function validAlias(alias) {
+  if (!ALIAS_RE.test(alias)) return 'Alias must be 1-32 chars: a-z, 0-9, - or _ (not at the ends)';
+  if (RESERVED.has(alias)) return 'That alias is reserved';
+  return null;
+}
+
+/** Canonical message the wallet signs. Field order is fixed; values are stringified. */
+function signedMessage(action, fields) {
+  const keys = Object.keys(fields).sort();
+  return ['bwallet-paymail', 'v1', action, ...keys.map((k) => `${k}=${fields[k] ?? ''}`)].join('|');
+}
+
+/** Verify a BRC-43 signature by `identityKey` (counterparty 'anyone' on the signer side). */
+async function verifySigned(body, action, now = Date.now()) {
+  const identityKey = String(body.identityKey || '').toLowerCase();
+  if (!PUBKEY_RE.test(identityKey)) return 'Invalid identity key';
+  const ts = Number(body.timestamp);
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > SIG_WINDOW_MS) return 'Signature expired; check your clock';
+  if (!/^[0-9a-f]{16,200}$/i.test(String(body.signature || ''))) return 'Missing signature';
+  const fields = { ...(body.fields || {}), identityKey, timestamp: String(ts) };
+  try {
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      data: Utils.toArray(signedMessage(action, fields), 'utf8'),
+      signature: Utils.toArray(body.signature, 'hex'),
+      protocolID: SIGN_PROTOCOL,
+      keyID: SIGN_KEY_ID,
+      counterparty: identityKey,
+    });
+    return valid ? null : 'Bad signature';
+  } catch {
+    return 'Bad signature';
+  }
+}
+
+const deriver = new KeyDeriver(new PrivateKey(1));
+/** BRC-29 P2PKH destination for `identityKey`; returns script + derivation the wallet needs. */
+function deriveDestination(identityKey, satoshis) {
+  const derivationPrefix = Utils.toBase64(Random(16));
+  const derivationSuffix = Utils.toBase64(Random(16));
+  const pub = deriver.derivePublicKey(BRC29, `${derivationPrefix} ${derivationSuffix}`, identityKey, false);
+  const script = new P2PKH().lock(pub.toAddress()).toHex();
+  return { script, satoshis, derivationPrefix, derivationSuffix };
+}
+
+/** Parse a raw tx hex or BEEF hex. Returns { tx, beefHex|null }. */
+function parseIncoming(hexOrBeef) {
+  const hex = String(hexOrBeef || '').trim();
+  if (!/^[0-9a-f]+$/i.test(hex) || hex.length < 20) throw new Error('Not hex');
+  try {
+    const beef = Beef.fromString(hex, 'hex');
+    const last = beef.txs[beef.txs.length - 1];
+    const tx = last && beef.findAtomicTransaction(last.txid);
+    if (tx) return { tx, beefHex: hex };
+  } catch {
+    /* not BEEF */
+  }
+  return { tx: Transaction.fromHex(hex), beefHex: null };
+}
+
+/** Each expected output must appear in the tx with the same script and ≥ satoshis. Returns vouts or null. */
+function matchOutputs(tx, expected) {
+  const used = new Set();
+  const vouts = [];
+  for (const e of expected) {
+    const i = tx.outputs.findIndex(
+      (o, idx) => !used.has(idx) && o.lockingScript.toHex() === e.script && Number(o.satoshis) >= Number(e.satoshis),
+    );
+    if (i < 0) return null;
+    used.add(i);
+    vouts.push(i);
+  }
+  return vouts;
+}
+
+/**
+ * Request handlers. `store` implements:
+ *   getAlias(alias) → row|null            getAliasByKey(identityKey) → row|null
+ *   upsertAlias(row) → row                renameAlias(from, to)
+ *   insertPayment(row)                    getPayment(reference) → row|null
+ *   updatePayment(reference, patch)       listInbox(identityKey) → rows (status 'received')
+ *   countRecentPayments(alias, sinceIso) → number
+ * `broadcast(tx, beefHex)` is optional (best-effort).
+ */
+function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now() }) {
+  const handleOf = (alias) => `${alias}@${domain(env)}`;
+  const publicAlias = async (handle) => {
+    const alias = parseHandle(handle, env);
+    if (!alias) return [404, { error: 'not-found' }];
+    const row = await store.getAlias(alias);
+    if (!row) return [404, { error: 'not-found' }];
+    return [200, row];
+  };
+
+  return {
+    caps: async () => [200, capabilities(env)],
+
+    pki: async ({ handle }) => {
+      const [s, row] = await publicAlias(handle);
+      if (s !== 200) return [s, row];
+      return [200, { bsvalias: '1.0', handle: handleOf(row.alias), pubkey: row.identity_key }];
+    },
+
+    profile: async ({ handle }) => {
+      const [s, row] = await publicAlias(handle);
+      if (s !== 200) return [s, row];
+      return [200, { name: row.display_name || row.alias, avatar: row.avatar || '' }];
+    },
+
+    verify: async ({ handle, pubkey }) => {
+      const [s, row] = await publicAlias(handle);
+      if (s !== 200) return [s, row];
+      const pk = String(pubkey || '').toLowerCase();
+      return [200, { bsvalias: '1.0', handle: handleOf(row.alias), pubkey: pk, match: pk === row.identity_key }];
+    },
+
+    ord: async ({ handle }) => {
+      const [s, row] = await publicAlias(handle);
+      if (s !== 200) return [s, row];
+      if (!row.ord_address) return [404, { error: 'no-ord-address' }];
+      return [200, { address: row.ord_address }];
+    },
+
+    p2pDestination: async ({ handle }, body) => {
+      const [s, row] = await publicAlias(handle);
+      if (s !== 200) return [s, row];
+      const satoshis = Math.floor(Number(body && body.satoshis));
+      if (!Number.isFinite(satoshis) || satoshis < 1 || satoshis > MAX_SATS)
+        return [400, { error: 'invalid-satoshis' }];
+      const since = new Date(now() - 60 * 60 * 1000).toISOString();
+      if ((await store.countRecentPayments(row.alias, since)) > 200) return [429, { error: 'rate-limited' }];
+      const out = deriveDestination(row.identity_key, satoshis);
+      const reference = Utils.toHex(Random(16));
+      await store.insertPayment({
+        reference,
+        alias: row.alias,
+        identity_key: row.identity_key,
+        satoshis,
+        outputs: [out],
+        status: 'pending',
+      });
+      return [200, { outputs: [{ script: out.script, satoshis }], reference }];
+    },
+
+    receive: async ({ handle }, body) => {
+      const [s, row] = await publicAlias(handle);
+      if (s !== 200) return [s, row];
+      const reference = String((body && body.reference) || '');
+      const pay = reference && (await store.getPayment(reference));
+      if (!pay || pay.alias !== row.alias) return [404, { error: 'unknown-reference' }];
+      let parsed;
+      try {
+        parsed = parseIncoming(body.beef || body.hex);
+      } catch {
+        return [400, { error: 'invalid-transaction' }];
+      }
+      const txid = parsed.tx.id('hex');
+      if (pay.status !== 'pending') {
+        if (pay.txid === txid) return [200, { txid, note: 'already received' }];
+        return [409, { error: 'reference-already-used' }];
+      }
+      const vouts = matchOutputs(parsed.tx, pay.outputs);
+      if (!vouts) return [400, { error: 'outputs-do-not-match-reference' }];
+      if (broadcast) {
+        try {
+          await broadcast(parsed.tx, parsed.beefHex);
+        } catch (e) {
+          // The sender normally broadcasts first (1Sat sendBsv does); log and keep going.
+          console.error('paymail broadcast failed', String(e && e.message ? e.message : e).slice(0, 200));
+        }
+      }
+      const outputs = pay.outputs.map((o, i) => ({ ...o, vout: vouts[i] }));
+      await store.updatePayment(reference, {
+        status: 'received',
+        txid,
+        beef: parsed.beefHex,
+        raw_tx: parsed.beefHex ? null : parsed.tx.toHex(),
+        outputs,
+        sender_handle: String((body.metadata && body.metadata.sender) || '').slice(0, 128) || null,
+        note: String((body.metadata && body.metadata.note) || '').slice(0, 256) || null,
+        received_at: new Date(now()).toISOString(),
+      });
+      return [200, { txid, note: `Received by ${handleOf(row.alias)}` }];
+    },
+
+    // ---- wallet-authenticated ------------------------------------------------
+    register: async (_q, body) => {
+      body = body || {};
+      const f = body.fields || {};
+      const alias = String(f.alias || '').toLowerCase();
+      const bad = validAlias(alias);
+      if (bad) return [400, { error: bad }];
+      if (f.ordAddress && !/^1[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(String(f.ordAddress)))
+        return [400, { error: 'Invalid ordAddress' }];
+      const sigErr = await verifySigned(body, 'register', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const identityKey = String(body.identityKey).toLowerCase();
+      const taken = await store.getAlias(alias);
+      if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
+      const mine = await store.getAliasByKey(identityKey);
+      if (mine && mine.alias !== alias) await store.renameAlias(mine.alias, alias); // one paymail per identity: rename keeps the inbox
+      const row = await store.upsertAlias({
+        alias,
+        identity_key: identityKey,
+        ord_address: f.ordAddress || null,
+        display_name: String(f.name || '').slice(0, 64) || null,
+        avatar: String(f.avatar || '').slice(0, 512) || null,
+      });
+      return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
+    },
+
+    lookup: async (q) => {
+      const key = String(q.key || '').toLowerCase();
+      if (!PUBKEY_RE.test(key)) return [400, { error: 'invalid-key' }];
+      const row = await store.getAliasByKey(key);
+      return row ? [200, { paymail: handleOf(row.alias), alias: row.alias }] : [404, { error: 'not-found' }];
+    },
+
+    inbox: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'inbox', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const rows = await store.listInbox(String(body.identityKey).toLowerCase());
+      return [
+        200,
+        {
+          senderIdentityKey: ANYONE_PUB,
+          payments: rows.map((r) => ({
+            reference: r.reference,
+            txid: r.txid,
+            beef: r.beef,
+            rawTx: r.raw_tx,
+            sender: r.sender_handle,
+            note: r.note,
+            outputs: r.outputs.map((o) => ({
+              vout: o.vout,
+              satoshis: o.satoshis,
+              derivationPrefix: o.derivationPrefix,
+              derivationSuffix: o.derivationSuffix,
+            })),
+          })),
+        },
+      ];
+    },
+
+    ack: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'ack', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const refs = String((body.fields && body.fields.references) || '')
+        .split(',')
+        .filter(Boolean)
+        .slice(0, 100);
+      let done = 0;
+      for (const ref of refs) {
+        const p = await store.getPayment(ref);
+        if (p && p.identity_key === key && p.status === 'received') {
+          await store.updatePayment(ref, { status: 'collected', collected_at: new Date(now()).toISOString() });
+          done++;
+        }
+      }
+      return [200, { collected: done }];
+    },
+  };
+}
+
+module.exports = {
+  ANYONE_PUB,
+  BRC29,
+  SIGN_PROTOCOL,
+  SIGN_KEY_ID,
+  capabilities,
+  parseHandle,
+  validAlias,
+  signedMessage,
+  verifySigned,
+  deriveDestination,
+  parseIncoming,
+  matchOutputs,
+  makeHandlers,
+  domain,
+  PublicKey,
+};
