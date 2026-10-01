@@ -114,7 +114,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { CreditsRow } from '../mobile/credits/CreditsRow';",
       "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';",
     ],
-    ['\n<CreditsRow />', '\n<CreditsRow />\n<HandleOnboarding />'],
+    // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
+    [
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>\n<HandleOnboarding />',
+    ],
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
@@ -125,6 +129,27 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     [
       '      setStep(2);\n    } catch',
       "      markHandlePrompt(keys.identityAddress, 'create');\n      setStep(2);\n    } catch",
+    ],
+  ],
+  // WIF / JSON import and master (zip) restore: same step for the imported account, after the name sync.
+  'src/pages/onboarding/ImportAccount.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
+    ],
+    [
+      '      await chromeStorageService.switchAccount(keys.identityAddress || identityPk);\n',
+      "      await chromeStorageService.switchAccount(keys.identityAddress || identityPk);\n      markHandlePrompt(keys.identityAddress, 'restore');\n",
+    ],
+  ],
+  'src/pages/onboarding/MasterRestore.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
+    ],
+    [
+      "      addSnackbar('Wallet restored successfully!', 'success');\n",
+      "      addSnackbar('Wallet restored successfully!', 'success');\n      markHandlePrompt(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress, 'restore');\n",
     ],
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
