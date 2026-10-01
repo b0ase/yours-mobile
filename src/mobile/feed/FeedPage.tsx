@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { sendBsv } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
+import { SegmentRow, SegmentTitle } from './ChatSegments';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { resolveImageUrl, useIdentity } from '../../hooks/useIdentity';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -137,7 +138,10 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
 const Layer = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) =>
   createPortal(
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
-      <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}>
+      <div
+        className="flex items-center gap-2 px-2 pb-2"
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}
+      >
         <button onClick={onBack} aria-label="Back" className="p-2">
           <ArrowLeft size={20} color="white" />
         </button>
@@ -159,9 +163,18 @@ const PostImageView = ({ src }: { src: string }) => {
       className="relative mt-2 block w-full overflow-hidden rounded-2xl"
       style={{ border: `1px solid ${LINE}` }}
     >
-      <img src={src} alt="" loading="lazy" className="w-full max-h-[420px] object-cover" style={shown ? undefined : { filter: 'blur(24px)' }} />
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        className="w-full max-h-[420px] object-cover"
+        style={shown ? undefined : { filter: 'blur(24px)' }}
+      />
       {!shown && (
-        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold" style={{ color: 'white' }}>
+        <span
+          className="absolute inset-0 flex items-center justify-center text-xs font-bold"
+          style={{ color: 'white' }}
+        >
           Tap to show image
         </span>
       )}
@@ -182,7 +195,11 @@ type PostActions = {
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
   const liked = a.liked.has(post.txid);
   return (
-    <article className="flex gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${LINE}` }} onClick={() => a.onOpen(post)}>
+    <article
+      className="flex gap-3 px-4 py-3"
+      style={{ borderBottom: `1px solid ${LINE}` }}
+      onClick={() => a.onOpen(post)}
+    >
       <button
         onClick={(e) => {
           e.stopPropagation();
@@ -219,7 +236,12 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           <PostImageView key={img.src.slice(0, 80)} src={img.src} />
         ))}
         <div className="flex items-center gap-6 mt-2" onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => a.onReply(post)} className="flex items-center gap-1 text-[12px]" style={{ color: MUTED }} aria-label="Reply">
+          <button
+            onClick={() => a.onReply(post)}
+            className="flex items-center gap-1 text-[12px]"
+            style={{ color: MUTED }}
+            aria-label="Reply"
+          >
             <MessageCircle size={16} /> {post.replies || ''}
           </button>
           <button
@@ -230,7 +252,12 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           >
             <Heart size={16} fill={liked ? GOLD : 'none'} /> {post.likes + (liked ? 1 : 0) || ''}
           </button>
-          <button onClick={() => a.onTip(post)} className="flex items-center gap-1 text-[12px]" style={{ color: MUTED }} aria-label="Tip">
+          <button
+            onClick={() => a.onTip(post)}
+            className="flex items-center gap-1 text-[12px]"
+            style={{ color: MUTED }}
+            aria-label="Tip"
+          >
             <Coins size={16} /> Tip
           </button>
         </div>
@@ -302,7 +329,10 @@ const Composer = ({
   const fee = useMemo(() => {
     if (invalid) return null;
     try {
-      return estimatePostFee(buildPostScript(input).toBinary().length + AIP_BYTES, chromeStorageService.getCustomFeeRate());
+      return estimatePostFee(
+        buildPostScript(input).toBinary().length + AIP_BYTES,
+        chromeStorageService.getCustomFeeRate(),
+      );
     } catch {
       return null;
     }
@@ -374,7 +404,13 @@ const Composer = ({
         <button onClick={() => fileRef.current?.click()} className="p-2 rounded-full" aria-label="Add image">
           <ImagePlus size={20} color={GOLD} />
         </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void pick(e.target.files?.[0])} />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => void pick(e.target.files?.[0])}
+        />
         <span className="text-[11px]" style={{ color: text.length > MAX_POST_CHARS ? RED : MUTED }}>
           {text.length}/{MAX_POST_CHARS}
           {fee != null ? ` · fee ≈ ${fee.toLocaleString()} sats` : ''}
@@ -383,7 +419,11 @@ const Composer = ({
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
         Posts are permanent and public on the BSV chain, signed by your identity key.
       </p>
-      {error && <p className="text-xs mt-2" style={{ color: RED }}>{error}</p>}
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
       <button
         onClick={() => void send()}
         disabled={busy || !!invalid}
@@ -427,7 +467,11 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
             key={v}
             onClick={() => setSats(v)}
             className="flex-1 rounded-xl py-2 text-sm font-bold"
-            style={v === sats ? { background: GOLD, color: '#1a1300' } : { background: PANEL, color: 'white', border: `1px solid ${LINE}` }}
+            style={
+              v === sats
+                ? { background: GOLD, color: '#1a1300' }
+                : { background: PANEL, color: 'white', border: `1px solid ${LINE}` }
+            }
           >
             {v.toLocaleString()}
           </button>
@@ -443,7 +487,11 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
         style={{ background: PANEL, border: `1px solid ${LINE}` }}
         aria-label="Satoshis"
       />
-      {error && <p className="text-xs mt-2" style={{ color: RED }}>{error}</p>}
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
       <button
         onClick={() => void tip()}
         disabled={busy || !post.author.address || sats < 1}
@@ -558,20 +606,21 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
   };
 
   return (
-    <div className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36" style={{ height: '100%', background: '#010101' }}>
+    <div
+      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      style={{ height: '100%', background: '#010101' }}
+    >
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
-        <div className="flex items-center justify-between px-4 pb-2">
-          {header}
-          <div className="flex items-center gap-1">
-            <button onClick={() => setProfile('me')} aria-label="My profile" className="p-1">
-              <Avatar author={me} size={28} />
-            </button>
-            <button onClick={() => void load(tab)} aria-label="Refresh" className="p-2 rounded-full active:opacity-60">
-              <RefreshCw size={18} color={MUTED} />
-            </button>
-          </div>
-        </div>
+        <SegmentRow>{header}</SegmentRow>
+        <SegmentTitle title="Feed">
+          <button onClick={() => setProfile('me')} aria-label="My profile" className="p-1">
+            <Avatar author={me} size={28} />
+          </button>
+          <button onClick={() => void load(tab)} aria-label="Refresh" className="p-2 rounded-full active:opacity-60">
+            <RefreshCw size={18} color={MUTED} />
+          </button>
+        </SegmentTitle>
 
         <div className="flex px-4" style={{ borderBottom: `1px solid ${LINE}` }}>
           {(['following', 'foryou'] as Tab[]).map((t) => (
@@ -579,7 +628,10 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
               key={t}
               onClick={() => setTab(t)}
               className="flex-1 py-2 text-[14px] font-bold"
-              style={{ color: tab === t ? 'white' : MUTED, borderBottom: `2px solid ${tab === t ? GOLD : 'transparent'}` }}
+              style={{
+                color: tab === t ? 'white' : MUTED,
+                borderBottom: `2px solid ${tab === t ? GOLD : 'transparent'}`,
+              }}
             >
               {t === 'following' ? 'Following' : 'For you'}
             </button>
@@ -587,7 +639,10 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
         </div>
 
         {!online && (
-          <div className="mx-4 mt-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs" style={{ background: '#1a1408', color: '#e6c76a' }}>
+          <div
+            className="mx-4 mt-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
+            style={{ background: '#1a1408', color: '#e6c76a' }}
+          >
             <WifiOff size={14} /> You're offline.
           </div>
         )}
@@ -602,7 +657,9 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
           a={actions}
           empty={
             <div className="px-8 pt-14 text-center">
-              <p className="text-sm text-white font-semibold">{tab === 'following' ? 'Nobody followed yet' : 'Nothing here yet'}</p>
+              <p className="text-sm text-white font-semibold">
+                {tab === 'following' ? 'Nobody followed yet' : 'Nothing here yet'}
+              </p>
               <p className="text-xs mt-1" style={{ color: MUTED }}>
                 {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
               </p>
@@ -637,7 +694,11 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
           <button onClick={() => mute(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
             <VolumeX size={18} color={MUTED} /> Mute {more.author.name}
           </button>
-          <button onClick={() => report(more)} className="w-full flex items-center gap-3 py-3 text-sm" style={{ color: RED }}>
+          <button
+            onClick={() => report(more)}
+            className="w-full flex items-center gap-3 py-3 text-sm"
+            style={{ color: RED }}
+          >
             <Flag size={18} /> Report post
           </button>
         </Sheet>
@@ -655,7 +716,13 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
         />
       )}
       {thread && (
-        <ThreadView post={thread} onBack={() => setThread(null)} actions={actions} mutes={mutes} safetyTick={safetyTick} />
+        <ThreadView
+          post={thread}
+          onBack={() => setThread(null)}
+          actions={actions}
+          mutes={mutes}
+          safetyTick={safetyTick}
+        />
       )}
     </div>
   );
@@ -684,17 +751,27 @@ const ProfileView = ({
   const [error, setError] = useState('');
   useEffect(() => {
     setPosts(null);
-    const q = author.bapId ? fetchByBap(author.bapId) : author.address ? fetchByAddress(author.address) : Promise.resolve([]);
+    const q = author.bapId
+      ? fetchByBap(author.bapId)
+      : author.address
+        ? fetchByAddress(author.address)
+        : Promise.resolve([]);
     q.then(setPosts).catch((e) => {
       setError(e instanceof Error ? e.message : String(e));
       setPosts([]);
     });
   }, [author.bapId, author.address]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => (posts ? visiblePosts(posts, isMe ? [] : mutes) : null), [posts, mutes, isMe, safetyTick]);
+  const shown = useMemo(
+    () => (posts ? visiblePosts(posts, isMe ? [] : mutes) : null),
+    [posts, mutes, isMe, safetyTick],
+  );
   return (
     <Layer title={author.name} onBack={onBack}>
-      <div className="flex flex-col items-center px-6 pt-6 pb-4 text-center" style={{ borderBottom: `1px solid ${LINE}` }}>
+      <div
+        className="flex flex-col items-center px-6 pt-6 pb-4 text-center"
+        style={{ borderBottom: `1px solid ${LINE}` }}
+      >
         <Avatar author={author} size={80} />
         <h2 className="mt-3 text-lg font-bold text-white">{author.name}</h2>
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
@@ -709,13 +786,21 @@ const ProfileView = ({
           <button
             onClick={onFollow}
             className="mt-3 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
-            style={following ? { background: PANEL, color: 'white', border: `1px solid ${LINE}` } : { background: GOLD, color: '#1a1300' }}
+            style={
+              following
+                ? { background: PANEL, color: 'white', border: `1px solid ${LINE}` }
+                : { background: GOLD, color: '#1a1300' }
+            }
           >
             {following ? <UserCheck size={15} /> : <UserPlus size={15} />} {following ? 'Following' : 'Follow'}
           </button>
         )}
       </div>
-      {error && <p className="text-center text-xs pt-4" style={{ color: RED }}>{error}</p>}
+      {error && (
+        <p className="text-center text-xs pt-4" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
       <PostList
         posts={shown}
         a={{ ...actions, onAuthor: () => undefined }}

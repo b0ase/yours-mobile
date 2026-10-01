@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowUp, Ban, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, Trophy, UserPlus, WifiOff, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowUp,
+  Ban,
+  Coins,
+  Lock,
+  MessageCircle,
+  RefreshCw,
+  Search,
+  ShoppingCart,
+  Trophy,
+  UserPlus,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import { sendBsv, sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -31,7 +45,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem } from './tabs';
-import { ChatTabs } from '../feed/ChatSegments';
+import { ChatTabs, SegmentRow, SegmentTitle, useChatDisplayName } from '../feed/ChatSegments';
 import {
   avatarHue,
   latestCursor,
@@ -410,7 +424,10 @@ const Conversation = ({
                 <span className="text-[10px] ml-2 float-right mt-[6px]" style={{ color: it.mine ? '#5c4800' : MUTED }}>
                   {it.message.edited ? 'edited · ' : ''}
                   {it.message.failed ? (
-                    <button className="underline text-[#b42318]" onClick={() => send(it.message.body || '', it.message)}>
+                    <button
+                      className="underline text-[#b42318]"
+                      onClick={() => send(it.message.body || '', it.message)}
+                    >
                       failed · retry
                     </button>
                   ) : it.message.pending ? (
@@ -469,26 +486,30 @@ const Conversation = ({
 
 // ───────────────────────────── Sheets ─────────────────────────────
 
-const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => 
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) =>
   // Portal to body + z above BottomMenu (z-[100]): the room view's z-[60] layer would trap it under the tab bar.
   createPortal(
-  <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
-    <div
-      className="w-full rounded-t-3xl px-5 pt-4"
-      style={{ background: '#0e0e0e', borderTop: `1px solid ${LINE}`, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-white font-semibold">{title}</span>
-        <button onClick={onClose} aria-label="Close" className="p-1">
-          <X size={20} color={MUTED} />
-        </button>
+    <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+      <div
+        className="w-full rounded-t-3xl px-5 pt-4"
+        style={{
+          background: '#0e0e0e',
+          borderTop: `1px solid ${LINE}`,
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-white font-semibold">{title}</span>
+          <button onClick={onClose} aria-label="Close" className="p-1">
+            <X size={20} color={MUTED} />
+          </button>
+        </div>
+        {children}
       </div>
-      {children}
-    </div>
-  </div>,
+    </div>,
     document.body,
-  )
+  );
 
 /** A room you can't enter: "Hold 1 $FILM to join" + Buy in Market. */
 const LockedRoom = ({
@@ -506,13 +527,18 @@ const LockedRoom = ({
 }) => (
   <Sheet title={gate.key.startsWith('coll:') ? gate.symbol : `$${gate.symbol} room`} onClose={onClose}>
     <div className="flex flex-col items-center text-center gap-2 pb-2">
-      <div className="h-14 w-14 rounded-2xl flex items-center justify-center" style={{ background: '#1a1408', border: '1px solid #3a2f0c' }}>
+      <div
+        className="h-14 w-14 rounded-2xl flex items-center justify-center"
+        style={{ background: '#1a1408', border: '1px solid #3a2f0c' }}
+      >
         <Lock size={24} color={GOLD} />
       </div>
       <p className="text-base font-bold text-white">{holdLine(gate)}</p>
       <p className="text-xs" style={{ color: MUTED }}>
         {members !== null ? `${members} holder${members === 1 ? '' : 's'} in this room. ` : ''}
-        {heldRaw && heldRaw !== '0' ? `You hold ${amountLabel(heldRaw, gate)}.` : 'Holding the token is your membership.'}
+        {heldRaw && heldRaw !== '0'
+          ? `You hold ${amountLabel(heldRaw, gate)}.`
+          : 'Holding the token is your membership.'}
       </p>
       <button
         onClick={onBuy}
@@ -591,7 +617,10 @@ const InviteSheet = ({
           <p className="text-xs mb-3" style={{ color: MUTED }}>
             An invite is the room token: you send {amount} and they're in.
           </p>
-          <div className="flex items-center gap-2 rounded-2xl px-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+          <div
+            className="flex items-center gap-2 rounded-2xl px-3"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          >
             <input
               autoFocus
               value={input}
@@ -628,7 +657,12 @@ const InviteSheet = ({
             </div>
           </div>
           <div className="flex gap-2 mt-4">
-            <button onClick={() => setTarget(null)} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold text-white" style={{ background: PANEL }}>
+            <button
+              onClick={() => setTarget(null)}
+              disabled={!!busy}
+              className="flex-1 rounded-2xl py-3 font-bold text-white"
+              style={{ background: PANEL }}
+            >
               Back
             </button>
             <button
@@ -682,7 +716,10 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
       <p className="text-xs mb-3" style={{ color: MUTED }}>
         A banned handle or address can't read or post here, even holding the token.
       </p>
-      <div className="flex items-center gap-2 rounded-2xl px-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+      <div
+        className="flex items-center gap-2 rounded-2xl px-3"
+        style={{ background: PANEL, border: `1px solid ${LINE}` }}
+      >
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -701,13 +738,22 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
         Ban
       </button>
       <ul className="mt-3 flex flex-col gap-2">
-        {bans?.length === 0 && <li className="text-xs" style={{ color: MUTED }}>Nobody is banned.</li>}
+        {bans?.length === 0 && (
+          <li className="text-xs" style={{ color: MUTED }}>
+            Nobody is banned.
+          </li>
+        )}
         {bans?.map((b) => {
           const target = b.handle ? `$${b.handle}` : (b.address ?? '');
           return (
             <li key={target} className="flex items-center justify-between text-sm text-white">
               <span className={ELLIPSIS}>{target}</span>
-              <button onClick={() => act(() => client.unban(ticker, target))} disabled={busy} className="text-xs underline" style={{ color: GOLD }}>
+              <button
+                onClick={() => act(() => client.unban(ticker, target))}
+                disabled={busy}
+                className="text-xs underline"
+                style={{ color: GOLD }}
+              >
                 Unban
               </button>
             </li>
@@ -739,7 +785,12 @@ const useBountyBadge = (client: BchatClient, ticker: string, me: string) => {
   return count;
 };
 
-const STATUS_COLOR: Record<string, string> = { open: '#32D583', claimed: '#FFD24D', merged: '#53B1FD', paid: '#8a8f98' };
+const STATUS_COLOR: Record<string, string> = {
+  open: '#32D583',
+  claimed: '#FFD24D',
+  merged: '#53B1FD',
+  paid: '#8a8f98',
+};
 
 /**
  * Bounties sheet: open / claimed / merged / paid, with reward. Claim = paste the PR URL. Pay
@@ -871,10 +922,20 @@ const BountiesSheet = ({
           </div>
         </div>
         <div className="flex gap-2 mt-4">
-          <button onClick={() => setPaying(null)} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold text-white" style={{ background: PANEL }}>
+          <button
+            onClick={() => setPaying(null)}
+            disabled={!!busy}
+            className="flex-1 rounded-2xl py-3 font-bold text-white"
+            style={{ background: PANEL }}
+          >
             Back
           </button>
-          <button onClick={pay} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50" style={{ background: GOLD, color: '#1a1300' }}>
+          <button
+            onClick={pay}
+            disabled={!!busy}
+            className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
             {busy || 'Pay'}
           </button>
         </div>
@@ -908,10 +969,20 @@ const BountiesSheet = ({
           style={{ background: PANEL, border: `1px solid ${LINE}` }}
         />
         <div className="flex gap-2 mt-4">
-          <button onClick={() => setClaiming(null)} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold text-white" style={{ background: PANEL }}>
+          <button
+            onClick={() => setClaiming(null)}
+            disabled={!!busy}
+            className="flex-1 rounded-2xl py-3 font-bold text-white"
+            style={{ background: PANEL }}
+          >
             Back
           </button>
-          <button onClick={claim} disabled={!!busy || !prUrl.trim()} className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50" style={{ background: GOLD, color: '#1a1300' }}>
+          <button
+            onClick={claim}
+            disabled={!!busy || !prUrl.trim()}
+            className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
             {busy || 'Claim'}
           </button>
         </div>
@@ -923,8 +994,16 @@ const BountiesSheet = ({
   return (
     <Sheet title="Bounties" onClose={onClose}>
       <div className="max-h-[60vh] overflow-y-auto flex flex-col gap-2">
-        {bounties === null && <p className="text-xs" style={{ color: MUTED }}>Loading…</p>}
-        {bounties?.length === 0 && !error && <p className="text-xs" style={{ color: MUTED }}>No bounties in this room yet.</p>}
+        {bounties === null && (
+          <p className="text-xs" style={{ color: MUTED }}>
+            Loading…
+          </p>
+        )}
+        {bounties?.length === 0 && !error && (
+          <p className="text-xs" style={{ color: MUTED }}>
+            No bounties in this room yet.
+          </p>
+        )}
         {bounties?.map((b) => (
           <div key={b.bounty_no} className="rounded-2xl p-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
             <div className="flex items-center gap-2">
@@ -946,12 +1025,24 @@ const BountiesSheet = ({
               </div>
             )}
             {b.status === 'open' && b.created_by !== me && (
-              <button onClick={() => { setError(''); setClaiming(b); }} className="mt-2 w-full rounded-xl py-2 text-sm font-bold" style={{ background: GOLD, color: '#1a1300' }}>
+              <button
+                onClick={() => {
+                  setError('');
+                  setClaiming(b);
+                }}
+                className="mt-2 w-full rounded-xl py-2 text-sm font-bold"
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
                 Claim with PR
               </button>
             )}
             {showPay(b, me, isAdmin) && (
-              <button onClick={() => startPay(b)} disabled={!!busy} className="mt-2 w-full rounded-xl py-2 text-sm font-bold disabled:opacity-50" style={{ background: GOLD, color: '#1a1300' }}>
+              <button
+                onClick={() => startPay(b)}
+                disabled={!!busy}
+                className="mt-2 w-full rounded-xl py-2 text-sm font-bold disabled:opacity-50"
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
                 {busy || 'Pay'}
               </button>
             )}
@@ -983,6 +1074,7 @@ const isAdmin = (room: ChatRoom, me: string) => {
 
 /** Token rooms (the Rooms segment); `header` is the Chat tab's Rooms | Feed | Calls switch. */
 const RoomsPage = ({ header }: { header: React.ReactNode }) => {
+  const myName = useChatDisplayName();
   const { apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const online = useOnline();
@@ -996,7 +1088,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [listError, setListError] = useState('');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null } | null>(null);
-  const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(null);
+  const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(
+    null,
+  );
   const [inviting, setInviting] = useState(false);
   const [banning, setBanning] = useState(false);
   const [showBounties, setShowBounties] = useState(false);
@@ -1094,7 +1188,11 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   // Rooms you hold the token for but are not in yet: ask bChat whether they exist.
   useEffect(() => {
     if (!handle || !holdings || !rooms) return;
-    const mine = new Set(buildTokenRoomList(holdings, rooms).filter((e) => e.status === 'member').map((e) => e.key));
+    const mine = new Set(
+      buildTokenRoomList(holdings, rooms)
+        .filter((e) => e.status === 'member')
+        .map((e) => e.key),
+    );
     const now = Date.now();
     const todo = holdings
       .map((h) => `${h.kind}:${h.id}`)
@@ -1110,7 +1208,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       ),
     ).then((found) => {
       const ok = found.filter((l): l is TokenRoomLookup => !!l);
-      ok.forEach((l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }));
+      ok.forEach(
+        (l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }),
+      );
       const add = Object.fromEntries(ok.map((l) => [l.key, l]));
       if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
     });
@@ -1129,7 +1229,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     return (entries ?? [])
       .map((e) => ({ e, invite: inviteState(e, personalOf(e), handle || '', { ignored, accepted }) }))
       .filter(({ invite }) => invite !== 'hidden')
-      .filter(({ e }) => !q || e.gate.symbol.toLowerCase().includes(q) || (e.room?.name ?? '').toLowerCase().includes(q));
+      .filter(
+        ({ e }) => !q || e.gate.symbol.toLowerCase().includes(q) || (e.room?.name ?? '').toLowerCase().includes(q),
+      );
   }, [entries, query, personalOf, handle, ignored, accepted]);
 
   const ignoreInvite = (key: string) => handle && setIgnored(addToInviteList(handle, 'ignored', key));
@@ -1161,7 +1263,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       } catch (e) {
         if (e instanceof ChatApiError && e.status === 401) return authLost();
         const refusal = e instanceof ChatApiError ? parseGateRefusal(e.data) : null;
-        if (refusal) setLocked({ gate: refusal.gate, heldRaw: refusal.heldRaw, members: refusal.room?.members ?? null });
+        if (refusal)
+          setLocked({ gate: refusal.gate, heldRaw: refusal.heldRaw, members: refusal.room?.members ?? null });
         else setListError(errText(e));
       } finally {
         setOpening('');
@@ -1176,7 +1279,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     const take = async () => {
       const key = takeChatRoom();
       if (!key) return;
-      const held = (holdings ?? (await walletHoldings(apiContext).catch(() => []))).filter((h) => `${h.kind}:${h.id}` === key);
+      const held = (holdings ?? (await walletHoldings(apiContext).catch(() => []))).filter(
+        (h) => `${h.kind}:${h.id}` === key,
+      );
       await prove(key);
       const look = parseLookup(await client.tokenRoom(key).catch(() => null));
       const list = buildTokenRoomList(held, rooms ?? [], look ? { [key]: look } : {});
@@ -1197,24 +1302,27 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     >
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
-        <div className="flex items-center justify-between px-4 pb-2">
-          {header}
-          <div className="flex items-center gap-1">
-            {handle && (
-              <span className="text-[11px] mr-1" style={{ color: MUTED }}>
-                ${handle}
-              </span>
-            )}
-            <button
-              onClick={refresh}
-              disabled={!handle}
-              aria-label="Refresh"
-              className="p-2 rounded-full active:opacity-60 disabled:opacity-30"
-            >
-              <RefreshCw size={18} color={MUTED} />
-            </button>
-          </div>
-        </div>
+        <SegmentRow>{header}</SegmentRow>
+        <SegmentTitle title="Rooms">
+          {handle && (
+            <span className="mr-1 flex flex-col items-end leading-tight">
+              <span className="text-[12px] font-semibold text-white">{myName || `$${handle}`}</span>
+              {myName && (
+                <span className="text-[10px]" style={{ color: MUTED }}>
+                  ${handle}
+                </span>
+              )}
+            </span>
+          )}
+          <button
+            onClick={refresh}
+            disabled={!handle}
+            aria-label="Refresh"
+            className="p-2 rounded-full active:opacity-60 disabled:opacity-30"
+          >
+            <RefreshCw size={18} color={MUTED} />
+          </button>
+        </SegmentTitle>
 
         {!online && (
           <div
@@ -1354,7 +1462,11 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     <div className="flex items-baseline gap-2">
                       <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
                       <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-                        {opening === e.key ? 'opening…' : e.room ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at) : ''}
+                        {opening === e.key
+                          ? 'opening…'
+                          : e.room
+                            ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
+                            : ''}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 mt-[2px]">
@@ -1417,7 +1529,13 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       )}
       {banning && open && <BansSheet client={client} ticker={open.room.ticker} onClose={() => setBanning(false)} />}
       {showBounties && open && handle && (
-        <BountiesSheet client={client} room={open.room} entry={open.entry} me={handle} onClose={() => setShowBounties(false)} />
+        <BountiesSheet
+          client={client}
+          room={open.room}
+          entry={open.entry}
+          me={handle}
+          onClose={() => setShowBounties(false)}
+        />
       )}
       {inviting && open?.entry && (
         <InviteSheet client={client} ticker={open.room.ticker} entry={open.entry} onClose={() => setInviting(false)} />

@@ -87,7 +87,11 @@ export function buildLikeScript(txid: string, app = FEED_APP, unlike = false): S
   const s = opReturn();
   s.writeBin(toArray(MAP_PREFIX, 'utf8'));
   pushStr(s, 'SET');
-  for (const [k, v] of [['app', app], ['type', unlike ? 'unlike' : 'like'], ['tx', txid.toLowerCase()]]) {
+  for (const [k, v] of [
+    ['app', app],
+    ['type', unlike ? 'unlike' : 'like'],
+    ['tx', txid.toLowerCase()],
+  ]) {
     pushStr(s, k);
     pushStr(s, v);
   }
@@ -99,7 +103,11 @@ export function buildFollowScript(bapId: string, app = FEED_APP, unfollow = fals
   const s = opReturn();
   s.writeBin(toArray(MAP_PREFIX, 'utf8'));
   pushStr(s, 'SET');
-  for (const [k, v] of [['app', app], ['type', unfollow ? 'unfollow' : 'follow'], ['bapID', bapId]]) {
+  for (const [k, v] of [
+    ['app', app],
+    ['type', unfollow ? 'unfollow' : 'follow'],
+    ['bapID', bapId],
+  ]) {
     pushStr(s, k);
     pushStr(s, v);
   }
@@ -112,7 +120,11 @@ export const estimatePostFee = (scriptBytes: number, satsPerKb: number): number 
 
 // ── decoding (our own scripts; used by tests and to show a just-sent post) ──────
 export type DecodedB = { content: number[]; mime: string; encoding: string; filename?: string };
-export type Decoded = { B: DecodedB[]; MAP: Record<string, string>; aip: { address: string; signature: number[] } | null };
+export type Decoded = {
+  B: DecodedB[];
+  MAP: Record<string, string>;
+  aip: { address: string; signature: number[] } | null;
+};
 
 export function decodeScript(script: Script): Decoded | null {
   const chunks = script.chunks;
@@ -186,7 +198,8 @@ export function parseIdentity(raw: unknown): Identity {
       o = {};
     }
   } else o = asRec(raw);
-  const name = asStr(o.alternateName) || asStr(o.name) || [asStr(o.givenName), asStr(o.familyName)].filter(Boolean).join(' ');
+  const name =
+    asStr(o.alternateName) || asStr(o.name) || [asStr(o.givenName), asStr(o.familyName)].filter(Boolean).join(' ');
   const img = asStr(o.image) || asStr(o.logo);
   return { name: name.trim().slice(0, 60), avatar: img ? mediaUrl(img) : null };
 }
@@ -199,7 +212,11 @@ export function signerIndex(signers: unknown): Map<string, Identity & { bapId: s
     const bapId = asStr(r.idKey);
     if (!bapId) continue;
     const id = parseIdentity(r.identity);
-    const addrs = [asStr(r.currentAddress), asStr(r.rootAddress), ...asArr(r.addresses).map((a) => asStr(asRec(a).address))];
+    const addrs = [
+      asStr(r.currentAddress),
+      asStr(r.rootAddress),
+      ...asArr(r.addresses).map((a) => asStr(asRec(a).address)),
+    ];
     for (const a of addrs) if (a) out.set(a, { ...id, bapId });
   }
   return out;
@@ -208,7 +225,11 @@ export function signerIndex(signers: unknown): Map<string, Identity & { bapId: s
 export const shortAddress = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
 /** One bmap transaction document → a post, or null if it is not a readable post. */
-export function parseBmapPost(doc: unknown, signers = new Map<string, Identity & { bapId: string }>(), meta?: Rec): FeedPost | null {
+export function parseBmapPost(
+  doc: unknown,
+  signers = new Map<string, Identity & { bapId: string }>(),
+  meta?: Rec,
+): FeedPost | null {
   const d = asRec(doc);
   const txid = asStr(asRec(d.tx).h) || asStr(d._id);
   if (!isTxid(txid)) return null;
@@ -225,7 +246,8 @@ export function parseBmapPost(doc: unknown, signers = new Map<string, Identity &
     if (mime.startsWith('text/')) {
       if (!text) text = content;
     } else if (/^image\/(jpeg|png|gif|webp)$/.test(mime)) {
-      if (/^[A-Za-z0-9+/=\s]+$/.test(content) && content.length > 16) images.push({ src: `data:${mime};base64,${content.replace(/\s/g, '')}`, mime });
+      if (/^[A-Za-z0-9+/=\s]+$/.test(content) && content.length > 16)
+        images.push({ src: `data:${mime};base64,${content.replace(/\s/g, '')}`, mime });
       else {
         const u = mediaUrl(content);
         if (u) images.push({ src: u, mime });

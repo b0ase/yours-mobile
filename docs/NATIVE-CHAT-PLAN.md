@@ -10,6 +10,7 @@ inside the tab. The bottom bar stays visible on the list; the conversation cover
 Source: `/Volumes/2026/Projects/bit-sign` (Next.js App Router, live at https://www.bitcoinchat.online).
 
 ### Sign-in with a Yours / BRC-100 wallet
+
 - `POST /api/bitsign/auth/wallet/challenge {address, kind}` returns `{nonce, message, expires_at}`.
   The nonce is single-use, lasts two minutes and is bound to the address. The message is
   `bitcoinchat.online wallet login: <nonce>`.
@@ -24,6 +25,7 @@ Source: `/Volumes/2026/Projects/bit-sign` (Next.js App Router, live at https://w
   and signs with `signBsm` from `@1sat/actions` over `window.CWI`.
 
 ### Session
+
 - The token is bit-sign's own HMAC session (`signAccountSession`, valid 30 days). The web
   app keeps it in an httpOnly cookie.
 - **`resolveUserHandle` already accepts it as `Authorization: Bearer <token>`**
@@ -34,6 +36,7 @@ Source: `/Volumes/2026/Projects/bit-sign` (Next.js App Router, live at https://w
   `capacitor://localhost` origin never sends a CORS request, so no CORS change is needed.
 
 ### Rooms, DMs and messages
+
 - Everything is a **room** (`ticker_rooms`, `ticker_room_members`, `ticker_room_messages`).
   A DM is a two-member room named `$a ↔ $b`. `/chat` is the web inbox and `/room/[ticker]`
   is a conversation.
@@ -50,12 +53,14 @@ Source: `/Volumes/2026/Projects/bit-sign` (Next.js App Router, live at https://w
 - `POST /api/bitsign/rooms/[ticker]/read` marks the room read.
 
 ### Realtime
+
 - `GET /api/bitsign/realtime-token` returns a 15-minute Supabase JWT plus the URL and anon key.
   The web room subscribes to `postgres_changes` on `ticker_room_messages` for its `room_id`
   (`src/lib/realtime.ts`). Adding this to the wallet would mean adding `@supabase/supabase-js`,
   so v1 polls instead (see below).
 
 ### Encryption, media, gating
+
 - **No E2E encryption** of chat messages. Bodies are plaintext in the DB. Room policy
   `on_chain_mode` (`off | hash | hash_encrypted`) controls hashing on chain, and stored files
   are encrypted at rest on the server.
@@ -85,6 +90,7 @@ Result: **no bit-sign auth change is needed**. The live server already supports 
 ## 3. bit-sign changes (branch `feat/native-chat-api`, pushed, NOT merged or deployed)
 
 Small and additive. Without the new params, behaviour is identical.
+
 - `GET rooms/[ticker]/messages?latest=1|before=ISO&limit=N` returns the newest page,
   oldest-first, with `has_more`. This lets a conversation open at its end and load older
   messages on scroll-up (`getRoomMessagesPage` in `lib/ticker-rooms.ts`).
@@ -126,3 +132,53 @@ it catches up by paging with `since`, and "load older" turns itself off.
 - Also: replies (`replyTo`), edits (PATCH), member list/avatars, push notifications (bit-sign
   has `/push`), calls (LiveKit), room discovery (`rooms/discover`), and handle choice for
   provisional accounts.
+
+## bit-sign: handle rename for provisional `yours-xxxx` handles (needed)
+
+**Why.** A new Yours/bWallet key signing in to Chat (`POST /api/bitsign/auth/wallet/verify`,
+`kind: "yours"`) gets an account immediately under `yours-<address prefix>`
+(`src/lib/default-handle.ts`), and the response says `provisional_handle: true`. The comment
+there says the UI "can offer a better name later", but no route exists to do it:
+
+- `/auth/wallet/verify` reads only `address, kind, nonce, pubkey_hex, signature`; there is no
+  desired-handle field.
+- `/auth/wallet/handle` (`{ claim_token, handle }`) only serves the claim-token flow for
+  wallets WITHOUT an account. Yours wallets never get a claim token, and it refuses once the
+  credential already has a handle.
+- No `me/handle` or rename route under `src/app/api/bitsign/**`.
+
+So the wallet shows its account name (e.g. `iPhone-test-1`) at the top and `$yours-jor3rmo` in
+Chat. Until bit-sign adds the route below, bWallet shows the account display name in Chat
+first with the `$handle` secondary (Rooms header).
+
+### Route 1: `POST /api/bitsign/me/handle`
+
+- **Auth:** the account session token (`Authorization: Bearer <token from /verify>`) or the
+  login cookie, resolved with `resolveUserHandle`. Nothing in the body identifies the account.
+- **Body:** `{ "handle": "<desired>" }`.
+- **Allowed only while provisional:** the account's current handle was assigned by
+  `createAccountWithDefaultHandle` (store a `handle_provisional boolean` on the account row at
+  creation; a `yours-` prefix alone is not proof, because people can type one). One rename,
+  then the flag clears. A later general rename is a separate decision (old handles are in
+  room memberships, mentions, invites, bans, register entries).
+- **Validation:** exactly `checkHandleAvailable` (lowercase, `HANDLE_PATTERN`
+  `/^[a-z0-9][a-z0-9_-]{2,29}$/`, reserved list, uniqueness, HandCash collision).
+- **Effect:** in one transaction, rewrite the handle on every row keyed by `user_handle` for
+  this account (identities, wallet credentials, room members, messages' author handle or a
+  join, sessions), re-issue the session token and login cookies for the new handle.
+- **Responses:** `200 { token, handle }`; `409 { error, suggestion? }` taken / reserved;
+  `400` invalid format; `403 { error: "not_provisional" }`; `401` no session.
+
+### Route 2 (optional, saves a round trip): desired handle on first sign-in
+
+`POST /api/bitsign/auth/wallet/verify` accepts optional `desired_handle`. For a NEW `yours`
+wallet, try it through `checkHandleAvailable` first and fall back to the derived
+`yours-xxxx` ladder if it fails; return `provisional_handle: true` only when the fallback was
+used. Ignored for existing accounts.
+
+### bWallet side once it exists
+
+- First sign-in: send `desired_handle = slug(displayName)` (lowercase, spaces/dots to `-`,
+  strip anything outside `[a-z0-9_-]`, trim to 30, must start alphanumeric, min 3).
+- Existing provisional handles: banner in Chat "Use <name> as your chat name", one tap calls
+  Route 1; on 409, show the suggestion or ask for a different name.

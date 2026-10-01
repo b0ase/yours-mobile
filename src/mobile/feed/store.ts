@@ -25,7 +25,8 @@ const write = (k: string, v: unknown) => {
   }
 };
 
-export const loadFollows = (): Follow[] => read<Follow[]>(LS.follows, []).filter((f) => f && typeof f.address === 'string');
+export const loadFollows = (): Follow[] =>
+  read<Follow[]>(LS.follows, []).filter((f) => f && typeof f.address === 'string');
 export const isFollowing = (follows: Follow[], a: { address: string; bapId: string | null }) =>
   follows.some((f) => f.address === a.address || (!!a.bapId && f.bapId === a.bapId));
 export const toggleFollow = (follows: Follow[], f: Follow): Follow[] => {

@@ -66,9 +66,9 @@ describe('buildPostScript', () => {
     expect(validatePost({ text: 'a'.repeat(2001) })).toMatch(/under/);
     expect(validatePost({ text: 'a', replyTo: 'nope' })).toMatch(/not valid/);
     expect(validatePost({ text: 'a', image: { bytes: [1], mime: 'image/svg+xml' } })).toMatch(/JPEG/);
-    expect(validatePost({ text: 'a', image: { bytes: new Array(MAX_INLINE_IMAGE_BYTES + 1).fill(0), mime: 'image/jpeg' } })).toMatch(
-      /too large/,
-    );
+    expect(
+      validatePost({ text: 'a', image: { bytes: new Array(MAX_INLINE_IMAGE_BYTES + 1).fill(0), mime: 'image/jpeg' } }),
+    ).toMatch(/too large/);
     expect(() => buildPostScript({ text: '' })).toThrow();
   });
 });

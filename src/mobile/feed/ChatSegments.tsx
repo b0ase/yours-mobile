@@ -4,6 +4,8 @@ import { TopNav } from '../../components/TopNav';
 import { onTokenNav } from '../chat/nav';
 import { onChatSegment, takeChatSegment } from '../chat/segmentNav';
 import { FeedPage } from './FeedPage';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { useAccountNames } from '../names/MyNameBadge';
 
 /**
  * Chat tab top switch: Rooms | Feed | Calls. Generic: add a segment by adding one entry to
@@ -21,7 +23,7 @@ const GOLD = '#FFD24D';
 export const SegmentSwitch = ({ value, onChange }: { value: ChatSegment; onChange: (s: ChatSegment) => void }) => (
   <div
     role="tablist"
-    className="flex rounded-full p-[3px]"
+    className="flex w-full rounded-full p-[3px]"
     style={{ background: '#121316', border: '1px solid #1f2127' }}
   >
     {SEGMENTS.map((s) => {
@@ -32,7 +34,7 @@ export const SegmentSwitch = ({ value, onChange }: { value: ChatSegment; onChang
           role="tab"
           aria-selected={on}
           onClick={() => onChange(s.id)}
-          className="rounded-full px-4 py-[6px] text-[13px] font-bold transition-colors"
+          className="flex-1 rounded-full px-4 py-[7px] text-[13px] font-bold transition-colors"
           style={on ? { background: GOLD, color: '#1a1300' } : { color: '#8a8f98' }}
         >
           {s.label}
@@ -66,6 +68,32 @@ function CallsPlaceholder() {
   );
 }
 
+/** The switch's own full-width row, directly under the top bar; identical on every segment. */
+export const SegmentRow = ({ children }: { children: ReactNode }) => <div className="w-full px-4 pb-3">{children}</div>;
+
+/** Segment title on the left, that segment's actions on the right (sits below SegmentRow). */
+export const SegmentTitle = ({ title, children }: { title: string; children?: ReactNode }) => (
+  <div className="flex items-center justify-between px-4 pb-2">
+    <h1 className="text-[22px] font-bold text-white">{title}</h1>
+    <div className="flex items-center gap-1">{children}</div>
+  </div>
+);
+
+/**
+ * The current account's display name (BAP profile name, else account name), the same name the
+ * top bar shows. Chat shows it first and the bChat $handle second, so one account has one name.
+ */
+export const useChatDisplayName = () => {
+  const { chromeStorageService } = useServiceContext();
+  const acct = chromeStorageService.getCurrentAccountObject().account;
+  return useAccountNames(
+    acct?.addresses.identityAddress,
+    acct?.name ?? '',
+    acct?.settings?.socialProfile?.displayName ?? '',
+    false,
+  ).displayName;
+};
+
 /** A non-Rooms segment: same top bar + switch, then its body. */
 const SegmentShell = ({ header, children }: { header: ReactNode; children: ReactNode }) => (
   <div
@@ -74,7 +102,8 @@ const SegmentShell = ({ header, children }: { header: ReactNode; children: React
   >
     <TopNav />
     <div className="w-full pt-16 flex flex-col">
-      <div className="flex items-center px-4 pb-2">{header}</div>
+      <SegmentRow>{header}</SegmentRow>
+      <SegmentTitle title="Calls" />
       {children}
     </div>
   </div>

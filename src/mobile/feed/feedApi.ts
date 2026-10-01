@@ -29,7 +29,8 @@ export const fetchByAddress = async (address: string, page = 1, limit = 30) =>
 
 export const fetchReplies = async (txid: string) => parseBmapFeed(await get(`/social/post/${txid}/reply?limit=50`));
 
-export const fetchLikes = async (txid: string, mine: string[] = []) => parseLikes(await get(`/social/post/${txid}/like`), mine);
+export const fetchLikes = async (txid: string, mine: string[] = []) =>
+  parseLikes(await get(`/social/post/${txid}/like`), mine);
 
 /** Posts by a set of authors (bapId when known, else address), merged newest-first. */
 export async function fetchFollowing(follows: { bapId: string | null; address: string }[]): Promise<FeedPost[]> {
@@ -50,7 +51,12 @@ export async function fetchFollowing(follows: { bapId: string | null; address: s
  * OP_RETURN output through the wallet (normal approval rules apply). Hands the raw tx to the
  * indexer so the post shows up without waiting for a block.
  */
-export async function publish(ctx: OneSatContext, script: Script, description: string, tags: string[]): Promise<string> {
+export async function publish(
+  ctx: OneSatContext,
+  script: Script,
+  description: string,
+  tags: string[],
+): Promise<string> {
   let signed: Script;
   try {
     signed = await applyBapAip(ctx, script);
@@ -61,7 +67,9 @@ export async function publish(ctx: OneSatContext, script: Script, description: s
   }
   const res = await executeTrackedAction(ctx.wallet, {
     description,
-    outputs: [{ lockingScript: signed.toHex(), satoshis: 0, outputDescription: description, basket: BSOCIAL_BASKET, tags }],
+    outputs: [
+      { lockingScript: signed.toHex(), satoshis: 0, outputDescription: description, basket: BSOCIAL_BASKET, tags },
+    ],
     options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
   });
   if (!res.txid) throw new Error('The wallet did not return a transaction id.');
