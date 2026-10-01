@@ -1,6 +1,70 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { EyeOff, Flag, Music, Play } from 'lucide-react';
 import { contentUrls } from './indexer';
+import { cachedThumb, loadThumb, thumbUrl } from './thumbs';
+
+/** True once the element has come within `margin` of the viewport (sticky). */
+export function useNearViewport<T extends Element>(margin = '400px') {
+  const ref = useRef<T>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    if (typeof IntersectionObserver === 'undefined') return setNear(true);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setNear(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: margin },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near, margin]);
+  return [ref, near] as const;
+}
+
+const Shimmer = () => <div className="absolute inset-0 animate-pulse bg-[#1d2026]" />;
+
+/**
+ * Card thumbnail: shimmer placeholder until near the viewport, then a small
+ * resized WebP from the queue/cache (see thumbs.ts); falls back to the full
+ * inscription hosts if the resize endpoint fails. Fills its (fixed-aspect) parent.
+ */
+export const Thumb = ({ outpoint, alt = '', className = '' }: { outpoint: string; alt?: string; className?: string }) => {
+  const url = thumbUrl(outpoint);
+  const [ref, near] = useNearViewport<HTMLDivElement>();
+  const [src, setSrc] = useState<string | null | undefined>(() => (url ? cachedThumb(url) : null));
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!near || !url || src) return;
+    let live = true;
+    void loadThumb(url).then((s) => live && setSrc(s));
+    return () => {
+      live = false;
+    };
+  }, [near, url, src]);
+  return (
+    <div ref={ref} className="relative w-full h-full">
+      {!loaded && <Shimmer />}
+      {src ? (
+        <img
+          src={src}
+          alt={alt}
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          className={`${className} transition-opacity duration-200`}
+          style={{ opacity: loaded ? 1 : 0 }}
+        />
+      ) : (
+        src === null &&
+        near && <ContentImg outpoint={outpoint} alt={alt} className={className} onLoad={() => setLoaded(true)} />
+      )}
+    </div>
+  );
+};
 
 /**
  * Media thumbnail behind the always-on blur: image and video previews are
@@ -47,15 +111,27 @@ export const ContentImg = ({
   outpoint,
   className,
   alt = '',
+  onLoad,
 }: {
   outpoint: string;
   className?: string;
   alt?: string;
+  onLoad?: () => void;
 }) => {
   const urls = contentUrls(outpoint);
   const [i, setI] = useState(0);
   if (i >= urls.length) return <div className={`${className ?? ''} bg-[#2b2f36]`} />;
-  return <img src={urls[i]} alt={alt} loading="lazy" onError={() => setI(i + 1)} className={className} />;
+  return (
+    <img
+      src={urls[i]}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onLoad={onLoad}
+      onError={() => setI(i + 1)}
+      className={className}
+    />
+  );
 };
 
 export type CardItem = {
@@ -84,6 +160,7 @@ export const NftCard = ({
   onReport: () => void;
 }) => {
   const src = contentUrls(item.origin)[0];
+  const [videoRef, videoNear] = useNearViewport<HTMLDivElement>('200px');
   return (
     <div className="flex flex-col rounded-xl overflow-hidden bg-[#17191E] border border-white/5">
       <div
@@ -93,25 +170,30 @@ export const NftCard = ({
       >
         {item.category === 'images' && (
           <Blurred collectionId={item.collectionId}>
-            <ContentImg outpoint={item.origin} alt={item.name} className="w-full h-full object-cover" />
+            <Thumb outpoint={item.origin} alt={item.name} className="w-full h-full object-cover" />
           </Blurred>
         )}
         {item.category === 'video' && (
           <Blurred collectionId={item.collectionId}>
-            {/* first frame as poster: muted, no autoplay */}
-            <video
-              src={`${src}#t=0.1`}
-              muted
-              playsInline
-              preload="metadata"
-              className="w-full h-full object-cover pointer-events-none"
-            />
+            {/* first frame as poster, only once near the viewport: muted, no autoplay */}
+            <div ref={videoRef} className="relative w-full h-full">
+              <Shimmer />
+              {videoNear && (
+                <video
+                  src={`${src}#t=0.1`}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="relative w-full h-full object-cover pointer-events-none"
+                />
+              )}
+            </div>
           </Blurred>
         )}
         {item.category === 'music' &&
           (item.collectionIcon ? (
             <Blurred collectionId={item.collectionId}>
-              <ContentImg outpoint={item.collectionIcon} className="w-full h-full object-cover" />
+              <Thumb outpoint={item.collectionIcon} className="w-full h-full object-cover" />
             </Blurred>
           ) : (
             <div className="w-full h-full flex items-center justify-center">

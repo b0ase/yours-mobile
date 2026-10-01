@@ -27,6 +27,7 @@ import {
 import { categoryOf, nftFeed, type Feed as BaseFeed, type NftCategory, type NftListing } from './classify';
 import { onSafetyChange, refreshSafety, reportItem, safety } from './safety';
 import { Blurred, ContentImg, NftCard } from './NftCard';
+import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
@@ -49,11 +50,18 @@ const Art = ({
   kind: 'bsv21' | 'coll';
   collectionId?: string;
 }) => {
-  const urls = contentUrls(outpoint);
+  const urls = thumbOrFullUrls(outpoint, 96);
   const [i, setI] = useState(0);
   if (i < urls.length) {
     const img = (
-      <img src={urls[i]} alt="" onError={() => setI(i + 1)} className="h-10 w-10 rounded-lg object-cover shrink-0" />
+      <img
+        src={urls[i]}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onError={() => setI(i + 1)}
+        className="h-10 w-10 rounded-lg object-cover shrink-0 bg-[#2b2f36]"
+      />
     );
     // Collection art shows as-is; blocked collections are already filtered out.
     return kind === 'coll' ? (
@@ -73,15 +81,30 @@ const Art = ({
 
 type Feed = BaseFeed & { partial?: boolean };
 type Pending = { room: Pick<HotRoom, 'ref' | 'title'>; listing: Listing };
-type View = 'trending' | 'all' | 'tokens' | NftCategory;
+type Kind = 'tokens' | 'nfts';
+/** NFTs side: trending collections, or the listing feed by media type. */
+type View = 'collections' | NftCategory;
 const VIEWS: [View, string][] = [
-  ['trending', 'Trending'],
-  ['all', 'All'],
-  ['tokens', 'Tokens'],
+  ['collections', 'Collections'],
   ['music', 'Music'],
   ['video', 'Video'],
   ['images', 'Images'],
 ];
+/** Tokens side sub-filters; Shares and Tickets are placeholders until their model is specced. */
+const TOKEN_FILTERS: [string, string, boolean][] = [
+  ['all', 'All tokens', true],
+  ['shares', 'Shares', false],
+  ['tickets', 'Tickets', false],
+];
+const KIND_KEY = 'bwallet.market.kind';
+const readKind = (): Kind => {
+  try {
+    return localStorage.getItem(KIND_KEY) === 'nfts' ? 'nfts' : 'tokens';
+  } catch {
+    return 'tokens';
+  }
+};
+const isTokenOutput = (o: WalletOutput) => !!o.tags?.some((t) => t === 'bsv21' || t.startsWith('bsv21:'));
 
 /** Market-side safety check for a trending room (token or collection). */
 const roomSafe = (r: HotRoom) =>
@@ -106,7 +129,17 @@ const MarketPage = () => {
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
-  const [view, setView] = useState<View>('trending');
+  const [kind, setKindState] = useState<Kind>(readKind);
+  const setKind = (k: Kind) => {
+    setKindState(k);
+    setRoom(null);
+    try {
+      localStorage.setItem(KIND_KEY, k);
+    } catch {
+      // private mode: just don't remember
+    }
+  };
+  const [view, setView] = useState<View>('collections');
   const [feed, setFeed] = useState<Feed | null>(null);
   const [feedError, setFeedError] = useState('');
   const [preview, setPreview] = useState<NftListing | null>(null);
@@ -138,8 +171,8 @@ const MarketPage = () => {
   }, []);
 
   useEffect(() => {
-    if (view !== 'trending' && view !== 'tokens' && feed === null) void loadFeed();
-  }, [view, feed, loadFeed]);
+    if (kind === 'nfts' && view !== 'collections' && feed === null) void loadFeed();
+  }, [kind, view, feed, loadFeed]);
 
   const [loadingBoard, setLoadingBoard] = useState(false);
   const loadBoard = useCallback(async () => {
@@ -249,6 +282,28 @@ const MarketPage = () => {
     }
   };
 
+  const kindSwitch = (
+    <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="Market type">
+      {(
+        [
+          ['tokens', 'Tokens'],
+          ['nfts', 'NFTs'],
+        ] as const
+      ).map(([id, label]) => (
+        <button
+          key={id}
+          role="tab"
+          aria-selected={kind === id}
+          onClick={() => setKind(id)}
+          className="flex-1 rounded-lg py-2 text-sm font-bold"
+          style={{ background: kind === id ? '#A1FF8B' : 'transparent', color: kind === id ? '#010101' : '#98A2B3' }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
   const segment = (
     <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]">
       {(
@@ -264,6 +319,27 @@ const MarketPage = () => {
           style={{ background: section === id ? '#2b2f36' : 'transparent', color: section === id ? '#fff' : '#98A2B3' }}
         >
           {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const tokenChips = (
+    <div className="flex gap-1.5 overflow-x-auto">
+      {TOKEN_FILTERS.map(([id, label, enabled]) => (
+        <button
+          key={id}
+          disabled={!enabled}
+          aria-disabled={!enabled}
+          className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{
+            background: enabled ? '#A1FF8B' : '#17191E',
+            color: enabled ? '#010101' : '#667085',
+            opacity: enabled ? 1 : 0.7,
+          }}
+        >
+          {label}
+          {!enabled && <span className="ml-1 text-[9px] font-medium uppercase tracking-wide">soon</span>}
         </button>
       ))}
     </div>
@@ -304,7 +380,7 @@ const MarketPage = () => {
     );
   };
 
-  const shownNfts = feed?.items.filter((n) => (view === 'all' || n.category === view) && nftSafe(n)) ?? [];
+  const shownNfts = feed?.items.filter((n) => n.category === view && nftSafe(n)) ?? [];
   const nftGrid = (
     <section className="flex flex-col gap-2">
       {feed === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading NFT listings…</p>}
@@ -362,7 +438,7 @@ const MarketPage = () => {
       )}
       {rooms
         ?.filter(roomSafe)
-        .filter((r) => view !== 'tokens' || r.ref.kind === 'bsv21')
+        .filter((r) => (kind === 'tokens' ? r.ref.kind === 'bsv21' : r.ref.kind === 'coll'))
         .map((r, i) => (
           <button
             key={r.ref.key}
@@ -465,8 +541,12 @@ const MarketPage = () => {
         {ORDLOCK_LISTING_DISABLED_MESSAGE}
       </p>
       {mine === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading…</p>}
-      {mine?.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-6">You have no open listings.</p>}
-      {mine?.map((o) => (
+      {mine?.filter((o) => isTokenOutput(o) === (kind === 'tokens')).length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-6">
+          You have no open {kind === 'tokens' ? 'token' : 'NFT'} listings.
+        </p>
+      )}
+      {mine?.filter((o) => isTokenOutput(o) === (kind === 'tokens')).map((o) => (
         <div key={o.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
           <div className={`min-w-0 flex-1 text-sm text-white ${ELLIPSIS}`}>{getOutputName(o, 'Listing')}</div>
           <button
@@ -529,11 +609,12 @@ const MarketPage = () => {
   return (
     <div
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: 'calc(75%)', background: '#010101' }}
+      style={{ height: '100%', background: '#010101' }}
     >
       <TopNav />
       {busy && <PageLoader theme={theme} message={busy} />}
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
+        {kindSwitch}
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-white flex items-center gap-1.5">
             <Flame size={18} style={{ color: '#A1FF8B' }} /> Market
@@ -544,7 +625,7 @@ const MarketPage = () => {
               clearMarketCache();
               if (section === 'mine') void loadMine();
               else if (room) void openRoom(room);
-              else if (view === 'trending' || view === 'tokens') void loadBoard();
+              else if (kind === 'tokens' || view === 'collections') void loadBoard();
               else void loadFeed();
             }}
             className="p-2"
@@ -553,12 +634,12 @@ const MarketPage = () => {
           </button>
         </div>
         {segment}
-        {section === 'trending' && !room && chips}
+        {section === 'trending' && !room && (kind === 'tokens' ? tokenChips : chips)}
         {section === 'mine'
           ? mineView
           : room
             ? roomView
-            : view === 'trending' || view === 'tokens'
+            : kind === 'tokens' || view === 'collections'
               ? trending
               : nftGrid}
         <p className="text-[10px] text-[#667085] text-center">Listings from the 1Sat order book (api.1sat.app).</p>

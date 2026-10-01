@@ -166,7 +166,7 @@ const BrowserPage = () => {
   return (
     <div
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-20"
-      style={{ height: 'calc(75%)', background: '#010101' }}
+      style={{ height: '100%', background: '#010101' }}
     >
       <TopNav />
       <div className="w-full px-4 pb-6 pt-16 flex flex-col gap-5">

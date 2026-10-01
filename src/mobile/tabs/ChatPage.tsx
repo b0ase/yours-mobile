@@ -788,7 +788,7 @@ const ChatPage = () => {
   return (
     <div
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: 'calc(75%)', background: BG }}
+      style={{ height: '100%', background: BG }}
     >
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
