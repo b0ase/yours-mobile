@@ -4,7 +4,6 @@ import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, Download, Loader2, Plus, Settings, X } from 'lucide-react';
-import logo from '../../assets/logos/horizontal-logo.png';
 import activeCircle from '../../assets/active-circle.png';
 import { ThemeBadge } from '../../components/ThemeBadge';
 import { useTheme } from '../../hooks/useTheme';
@@ -101,7 +100,6 @@ export const TopNav = () => {
         </button>
         <div className="flex items-center gap-2">
           <ThemeBadge theme={theme} />
-          <img src={logo} className="w-20 object-contain" alt="bWallet" />
         </div>
       </div>
 
