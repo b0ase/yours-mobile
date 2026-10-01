@@ -107,7 +107,24 @@ const bcorpText = (): Plugin => ({
 // All mobile builds: mount the mobile-only tab routes (/m/settings, /m/media,
 // /m/market) in upstream's router without editing App.tsx. Same must-match rule.
 const MOBILE_TEXT: Record<string, [string, string][]> = {
+  // "Forgot password? Restore with recovery phrase" under Unlock (src/mobile/forgot).
+  'src/components/UnlockWallet.tsx': [
+    [
+      "import { QuickUnlock } from './QuickUnlock';",
+      "import { QuickUnlock } from './QuickUnlock';\nimport { ForgotPassword } from '../mobile/forgot/ForgotPassword';",
+    ],
+    [
+      '{!usbEnabled && <QuickUnlock theme={theme} onUnlock={onUnlock} />}',
+      '{!usbEnabled && <QuickUnlock theme={theme} onUnlock={onUnlock} />}\n<ForgotPassword theme={theme} />',
+    ],
+  ],
   'src/App.tsx': [
+    // After a forgot-password wipe, open straight on the restore-from-phrase screen.
+    [
+      "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';",
+      "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';\nimport { initialRoute } from './mobile/forgot/wipe';",
+    ],
+    ['<Router>', '<Router initialEntries={[initialRoute()]}>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));",

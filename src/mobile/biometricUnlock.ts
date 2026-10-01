@@ -46,7 +46,7 @@ const selectedAccount = async (): Promise<{ id?: string; encryptedKeys?: string 
 
 // UI ------------------------------------------------------------------------
 
-const sheet = (title: string, body: string, primary: string, secondary: string): Promise<boolean> =>
+export const sheet = (title: string, body: string, primary: string, secondary: string): Promise<boolean> =>
   new Promise((resolve) => {
     const el = document.createElement('div');
     el.className = 'yours-sheet-backdrop';
