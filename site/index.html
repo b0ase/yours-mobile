@@ -50,7 +50,9 @@
 <span class="pill">Beta</span>
 <h1>The BSV wallet for <span class="gold">tokens, media and apps.</span></h1>
 <p class="lede">bWallet puts your coins, a 1Sat market, the bApps store, an ordinals player and bChat in one non-custodial app.</p>
-<div class="cta-row"><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>App Store · iPhone</span><small>Coming soon</small></button><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>Google Play · Android</span><small>Coming soon</small></button></div>
+<div class="cta-row"><a class="btn btn-store" href="https://github.com/b0ase/yours-mobile/releases/download/bwallet-v0.1.0-beta.1/bwallet-0.1.0-beta.1.apk" download><span>Android · Download APK (beta)</span><small>v0.1.0 beta 1 · sideload</small></a><a class="btn btn-store btn-ghost" href="#waitlist"><span>iPhone</span><small>Coming soon — join the waitlist</small></a></div>
+<details class="sideload"><summary>How to sideload on Android</summary><ol><li>Tap <strong>Download APK (beta)</strong>. If Android asks, allow your browser to install unknown apps (Settings &rsaquo; Apps &rsaquo; your browser &rsaquo; Install unknown apps).</li><li>Open the downloaded <code>bwallet-0.1.0-beta.1.apk</code> and tap Install.</li><li>Optional but recommended: check the SHA-256 checksum matches<br /><code class="sha">e57b20ffd2e62edda9b5278499758279e0e6495556ecd91f50ff0b1ab6f2a7e8</code></li></ol><p class="warn">Beta software. Use small amounts and back up your recovery phrase. Only install the APK from this site or the official GitHub release.</p></details>
+<p class="hero-wl"><a href="#waitlist">Join the testing waitlist &rarr;</a></p>
 </div>
 <a class="scroll-cue" href="#showcase" aria-label="Scroll to the app preview"><span></span></a>
 </section>
@@ -114,10 +116,22 @@
 <article class="card sec reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M9 9v1M15 9v1M12 9v4h-1M9 16c2 1.5 4 1.5 6 0"/></svg></span><h3>Face ID</h3><p>Unlock and sign with Face ID or your device passcode. Keys stay encrypted on your phone.</p></article>
 <article class="card sec reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><h3>Approve every request</h3><p>Every app connection, signature and payment shows you what is happening before you say yes.</p></article></div></div></section>
 
+<section class="waitlist" id="waitlist" aria-labelledby="wl-h"><div class="wrap"><div class="section-head reveal"><p class="eyebrow">Testing</p><h2 id="wl-h">Join the testing waitlist</h2><p class="lede">Be first to test bWallet on iPhone, and get new Android builds as they land.</p></div>
+<form class="wl-form card" id="wl-form" action="/api/waitlist" method="post" novalidate>
+<label for="wl-email">Email address</label>
+<input id="wl-email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="you@example.com" />
+<fieldset><legend>Which phone?</legend><div class="wl-opts"><label><input type="radio" name="platform" value="ios" /> iPhone</label><label><input type="radio" name="platform" value="android" /> Android</label><label><input type="radio" name="platform" value="either" checked /> Either</label></div></fieldset>
+<div class="hp" aria-hidden="true"><label for="wl-company">Company</label><input id="wl-company" name="company" type="text" tabindex="-1" autocomplete="off" /></div>
+<input type="hidden" name="source" value="site" />
+<p class="wl-consent">We'll only email you about bWallet testing. Unsubscribe any time. See our <a href="/privacy.html#waitlist">privacy policy</a>.</p>
+<button class="btn btn-gold wl-submit" type="submit">Join the waitlist</button>
+<p class="wl-status" id="wl-status" role="status" aria-live="polite"></p>
+</form></div></section>
+
 <section class="final liquid">
 <video class="lazy-video liquid-video" data-src-webm="/media/liquid-gold.webm" data-src="/media/liquid-gold.mp4" poster="/media/liquid-gold-poster.jpg" muted loop playsinline preload="none" aria-hidden="true"></video>
 <div class="liquid-shade" aria-hidden="true"></div>
-<div class="wrap final-in reveal"><img src="/logo.svg" alt="" width="64" height="64" /><h2>bWallet is coming to iPhone and Android.</h2><p class="lede">Currently in beta.</p><div class="cta-row center"><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>App Store · iPhone</span><small>Coming soon</small></button><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>Google Play · Android</span><small>Coming soon</small></button></div></div></section>
+<div class="wrap final-in reveal"><img src="/logo.svg" alt="" width="64" height="64" /><h2>bWallet is coming to iPhone and Android.</h2><p class="lede">Currently in beta.</p><div class="cta-row center"><a class="btn btn-store" href="https://github.com/b0ase/yours-mobile/releases/download/bwallet-v0.1.0-beta.1/bwallet-0.1.0-beta.1.apk" download><span>Android · Download APK (beta)</span><small>v0.1.0 beta 1 · sideload</small></a><a class="btn btn-store btn-ghost" href="#waitlist"><span>iPhone</span><small>Coming soon — join the waitlist</small></a></div></div></section>
 </main>
 <footer class="foot"><div class="wrap foot-in"><a class="brand" href="/"><img src="/logo.svg" alt="" width="24" height="24" /><span>bWallet</span></a>
 <p>By The Bitcoin Corporation Ltd. Based on the open-source <a href="https://github.com/yours-org/yours-wallet" rel="noopener">Yours Wallet</a> (MIT); not affiliated with or endorsed by its authors.</p>

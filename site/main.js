@@ -24,4 +24,17 @@
     window.addEventListener('scroll',q,{passive:true});
     window.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;px=e.clientX/window.innerWidth-.5;py=e.clientY/window.innerHeight-.5;q()},{passive:true});
     upd();}
+  // waitlist: fetch without reload; no-JS falls back to a normal form post + redirect
+  var wf=d.getElementById('wl-form'),ws=d.getElementById('wl-status');
+  function say(ok,m){if(!ws)return;ws.textContent=m;ws.className='wl-status '+(ok?'ok':'err')}
+  var wq=/[?&]waitlist=(ok|error)/.exec(location.search);
+  if(wq)say(wq[1]==="ok",wq[1]==="ok"?"You're on the list. We'll email you when testing opens.":'Something went wrong. Please try again.');
+  if(wf&&window.fetch&&window.FormData){wf.addEventListener('submit',function(e){e.preventDefault();
+    var em=wf.elements.email.value.trim();if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)||em.length>254){say(false,'Please enter a valid email address.');wf.elements.email.focus();return}
+    var b=wf.querySelector('button[type=submit]');b.disabled=true;say(true,'Joining…');
+    fetch(wf.action,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(wf)).toString()})
+      .then(function(r){return r.json().catch(function(){return {ok:false,message:'Something went wrong. Please try again.'}})})
+      .then(function(j){say(!!j.ok,j.message||(j.ok?"You're on the list.":'Something went wrong.'));if(j.ok)wf.reset()})
+      .catch(function(){say(false,'Network error. Please try again.')})
+      .then(function(){b.disabled=false})})}
 })();
