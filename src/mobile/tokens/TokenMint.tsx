@@ -1,0 +1,283 @@
+import { useEffect, useRef, useState } from 'react';
+import { ExternalLink } from 'lucide-react';
+import { SendConfirmation } from '../../components/SendConfirmation';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { useTheme } from '../../hooks/useTheme';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { asMenuItem } from '../tabs/tabs';
+import { requestChatRoom } from '../chat/nav';
+import { checkSize, formatBytes, iconFile, notifyMinted, wocTxUrl } from '../mint/mint';
+import { inscribeIcon } from '../tickets/mintTicket';
+import { MAX_ICON_BYTES, TICKET_BLOCKED, suggestTicker } from '../tickets/tickets';
+import { deployToken, openTokenRoom, type MintedToken } from './mintToken';
+import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } from './token';
+
+/**
+ * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
+ * description) and its holders' room. No ticket MAP tag. Nothing is broadcast until the user
+ * confirms SendConfirmation.
+ */
+const GOLD = '#FFD24D';
+const PANEL = '#17191E';
+const BORDER = '#3a2f0c';
+
+export const TokenMint = ({
+  exchangeRate,
+  onBack,
+  onClose,
+}: {
+  exchangeRate: number;
+  onBack: () => void;
+  onClose: () => void;
+}) => {
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const { theme } = useTheme();
+  const { handleSelect } = useBottomMenu();
+  const [form, setForm] = useState<TokenForm>(emptyTokenForm);
+  const [tickerTouched, setTickerTouched] = useState(false);
+  const [icon, setIcon] = useState<{ file: File; url: string } | null>(null);
+  const [error, setError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [done, setDone] = useState<{ token: MintedToken; room: string | null } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
+
+  const set = (k: keyof TokenForm) => (v: string) =>
+    setForm((f) => ({
+      ...f,
+      [k]: v,
+      ...(k === 'name' && !tickerTouched ? { ticker: suggestTicker(v) } : {}),
+    }));
+
+  const cost = tokenCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), exchangeRate);
+  const usd = (n: number | null) => (n === null ? '' : ` (~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)})`);
+
+  const pickIcon = async (file: File | undefined) => {
+    setError('');
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setError('Pick an image for the icon.');
+    try {
+      const small = await iconFile(file);
+      const size = checkSize(small.size, MAX_ICON_BYTES);
+      if (!size.ok) return setError(size.message);
+      setIcon({ file: small, url: URL.createObjectURL(small) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read this image');
+    }
+  };
+
+  const review = () => {
+    const err = validateToken(form);
+    setError(err ?? '');
+    if (!err) setConfirming(true);
+  };
+
+  const mint = async () => {
+    if (validateToken(form) === TICKET_BLOCKED) {
+      setConfirming(false);
+      return setError(TICKET_BLOCKED);
+    }
+    setBusy('Minting…');
+    try {
+      const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'token') : null;
+      const token = await deployToken(apiContext, form, { icon: iconOutpoint, feeSats: cost.feeSats });
+      setConfirming(false);
+      notifyMinted();
+      setBusy('Opening the room…');
+      // A just-deployed token may not be indexed yet; opening the room from Chat also creates it.
+      const room = await openTokenRoom(apiContext, token).catch(() => null);
+      setDone({ token, room });
+    } catch (e) {
+      setConfirming(false);
+      setError(e instanceof Error ? e.message : 'Mint failed');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const go = (tab: 'chat' | 'bsv', t?: MintedToken) => {
+    if (t) requestChatRoom(`bsv21:${t.tokenId}`);
+    handleSelect(asMenuItem(tab));
+    onClose();
+  };
+
+  const input = 'w-full rounded-xl px-3 py-2 text-sm outline-none border bg-transparent';
+  const inputStyle = { borderColor: BORDER, color: '#fff' };
+  const primary = { background: `linear-gradient(135deg, #FFE27A, #E0A800)`, color: '#1a1400' };
+
+  if (done) {
+    const { token } = done;
+    return (
+      <div className="flex flex-col gap-3 text-sm">
+        <p>
+          ${token.ticker} is minted: {Number(token.supply).toLocaleString()} in your wallet.{' '}
+          {done.room
+            ? `The room "${token.name}" is open.`
+            : 'The room opens as soon as the network indexes the token (usually a few minutes).'}
+        </p>
+        <p className="text-xs" style={{ color: '#999' }}>
+          Token id
+        </p>
+        <a
+          href={wocTxUrl(token.tokenId.split('_')[0])}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1 break-all text-xs"
+          style={{ color: GOLD }}
+        >
+          {token.tokenId} <ExternalLink size={12} />
+        </a>
+        <button
+          type="button"
+          onClick={() => go('chat', token)}
+          className="h-11 rounded-xl font-bold border-0 cursor-pointer"
+          style={primary}
+        >
+          Open its room
+        </button>
+        <button
+          type="button"
+          onClick={() => go('bsv')}
+          className="h-11 rounded-xl font-bold border cursor-pointer bg-transparent"
+          style={{ borderColor: BORDER, color: GOLD }}
+        >
+          View in wallet
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <p className="text-xs" style={{ color: '#bbb' }}>
+        {TOKEN_COPY}
+      </p>
+      <input
+        className={input}
+        style={inputStyle}
+        placeholder="Token name (required)"
+        value={form.name}
+        maxLength={64}
+        onChange={(e) => set('name')(e.target.value)}
+      />
+      <div className="flex gap-2">
+        <input
+          className={input}
+          style={inputStyle}
+          placeholder="Ticker"
+          aria-label="Ticker"
+          value={form.ticker}
+          maxLength={32}
+          onChange={(e) => {
+            setTickerTouched(true);
+            set('ticker')(e.target.value.toUpperCase().replace(/^\$/, ''));
+          }}
+        />
+        <input
+          className={input}
+          style={inputStyle}
+          placeholder="Supply"
+          aria-label="Supply"
+          inputMode="numeric"
+          value={form.supply}
+          onChange={(e) => set('supply')(e.target.value)}
+        />
+      </div>
+      <label className="text-xs" style={{ color: '#999' }}>
+        Decimals (0 = whole tokens only)
+        <input
+          className={`${input} mt-1`}
+          style={inputStyle}
+          inputMode="numeric"
+          aria-label="Decimals"
+          value={form.decimals}
+          maxLength={2}
+          onChange={(e) => set('decimals')(e.target.value)}
+        />
+      </label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => void pickIcon(e.target.files?.[0])}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="flex items-center gap-3 rounded-xl border border-dashed px-3 py-2 cursor-pointer bg-transparent text-left"
+        style={{ borderColor: GOLD, color: GOLD }}
+      >
+        {icon ? (
+          <img src={icon.url} alt="" className="h-10 w-10 rounded-lg object-cover" />
+        ) : (
+          <span className="h-10 w-10 rounded-lg border" style={{ borderColor: BORDER }} />
+        )}
+        <span>
+          {icon ? 'Change icon' : 'Add an icon (optional)'}
+          {icon && (
+            <span className="block text-[10px]" style={{ color: '#999' }}>
+              {formatBytes(icon.file.size)} · inscribed with the token
+            </span>
+          )}
+        </span>
+      </button>
+      <textarea
+        className={input}
+        style={inputStyle}
+        placeholder="Description (optional, posted as the room's first message)"
+        rows={3}
+        value={form.description}
+        maxLength={1000}
+        onChange={(e) => set('description')(e.target.value)}
+      />
+
+      <p className="text-xs" style={{ color: '#bbb' }}>
+        Estimated network fee: {cost.networkSats.toLocaleString()} sats
+        {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
+        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Total ≈{' '}
+        {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
+      </p>
+      {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
+      <button
+        type="button"
+        onClick={review}
+        className="h-11 rounded-xl font-bold border-0 cursor-pointer"
+        style={primary}
+      >
+        Review token
+      </button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="text-sm bg-transparent border-0 cursor-pointer"
+        style={{ color: GOLD }}
+      >
+        Back
+      </button>
+
+      <SendConfirmation
+        show={confirming}
+        theme={theme}
+        lineItems={[
+          // SendConfirmation truncates labels over 16 characters: keep them short.
+          { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tokens` },
+          ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
+          { address: 'Network fee', amount: `${cost.networkSats.toLocaleString()} sats` },
+          ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }] : []),
+        ]}
+        total={`${cost.totalSats.toLocaleString()} sats${usd(cost.usd)}`}
+        isProcessing={!!busy}
+        onConfirm={() => void mint()}
+        onCancel={() => !busy && setConfirming(false)}
+      />
+      {busy && !confirming && (
+        <p className="text-xs text-center" style={{ color: GOLD, background: PANEL }}>
+          {busy}
+        </p>
+      )}
+    </div>
+  );
+};

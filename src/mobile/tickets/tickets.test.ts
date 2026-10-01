@@ -4,7 +4,10 @@ import { SafetyFilter, type Blocklist } from '../market/safety';
 import { MAP_PREFIX } from '../names/personalToken';
 import { mintFeeFor, txFeeSats } from '../mint/mint';
 import {
+  SPEND_ENTRY_SUPPORTED,
   TICKET_BLOCKED,
+  cleanTicket,
+  toRaw,
   emptyTicketForm,
   eventLabel,
   foundingMessage,
@@ -49,6 +52,7 @@ const ticket = (o: Partial<Ticket> = {}): Ticket => ({
   eventDate: null,
   priceSats: null,
   supply: '100',
+  min: null,
   roomTicker: null,
   createdAt: 1,
   ...o,
@@ -92,6 +96,10 @@ describe('MAP tag', () => {
       '2026-12-01',
       'price',
       '500',
+      'min',
+      '1',
+      'entry',
+      'hold',
     ]);
     expect(ticketMapFields(form())).not.toContain('date');
   });
@@ -103,6 +111,56 @@ describe('MAP tag', () => {
     expect(Utils.toUTF8(chunks[2].data!)).toBe(MAP_PREFIX);
     expect(Utils.toUTF8(chunks[3].data!)).toBe('SET');
     expect(chunks.slice(4).map((c) => Utils.toUTF8(c.data!))).toContain('ticket');
+  });
+});
+
+describe('entry rule (room-policy)', () => {
+  test('defaults: hold, 1 token to enter', () => {
+    const f = emptyTicketForm();
+    expect(f).toMatchObject({ entry: 'hold', minTokens: '1', spendPer: 'entry', spendTo: 'burn' });
+    expect(validateTicket(form(), ok)).toBeNull();
+    expect(cleanTicket(form())).toMatchObject({ min: '1', entry: 'hold', spend: null });
+  });
+
+  test('tokens needed to enter: whole, at least 1, at most the supply', () => {
+    expect(validateTicket(form({ minTokens: '0' }), ok)).toMatch(/at least 1/);
+    expect(validateTicket(form({ minTokens: '1.5' }), ok)).toMatch(/whole number/);
+    expect(validateTicket(form({ minTokens: '101' }), ok)).toMatch(/more than the supply/);
+    expect(validateTicket(form({ minTokens: '10' }), ok)).toBeNull();
+    expect(toRaw('10', 8)).toBe('1000000000');
+  });
+
+  test('spend can be set and recorded, though bit-sign does not enforce it yet', () => {
+    expect(SPEND_ENTRY_SUPPORTED).toBe(false);
+    const f = form({ entry: 'spend', minTokens: '2', spendAmount: '1', spendPer: 'hour', spendTo: 'owner' });
+    expect(validateTicket(f, ok)).toBeNull();
+    expect(ticketMapFields(f).slice(-10)).toEqual([
+      'min',
+      '2',
+      'entry',
+      'spend',
+      'spend',
+      '1',
+      'per',
+      'hour',
+      'to',
+      'owner',
+    ]);
+  });
+
+  test('spend validation', () => {
+    const sp = (o: Partial<TicketForm>) => form({ entry: 'spend', ...o });
+    expect(validateTicket(sp({ spendAmount: '0' }), ok)).toMatch(/^Spend amount/);
+    expect(validateTicket(sp({ spendTo: 'address', spendAddress: 'nope' }), ok)).toBe('Enter a valid BSV address.');
+    const f = sp({ spendTo: 'address', spendAddress: FEE_ADDR });
+    expect(validateTicket(f, ok)).toBeNull();
+    expect(ticketMapFields(f).slice(-2)).toEqual(['to', FEE_ADDR]);
+    expect(ticketMapFields(sp({})).slice(-2)).toEqual(['to', 'burn']);
+  });
+
+  test('the room minimum round-trips through the registry', () => {
+    expect(parseTicket(ticketRegistration(ticket({ min: '5' })))?.min).toBe('5');
+    expect(parseTicket({ token_id: `${ID}_0`, ticker: 'A', min: '0' })?.min).toBeNull();
   });
 });
 

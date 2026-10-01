@@ -6,10 +6,16 @@ import { useTheme } from '../../hooks/useTheme';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom } from '../chat/nav';
-import { checkSize, formatBytes, notifyMinted, wocTxUrl } from '../mint/mint';
+import { checkSize, formatBytes, iconFile, notifyMinted, wocTxUrl } from '../mint/mint';
 import { deployTicket, inscribeIcon, openTicketRoom } from './mintTicket';
 import {
+  ENTRY_LABEL,
+  ENTRY_RULES,
   MAX_ICON_BYTES,
+  SPEND_NOT_ENFORCED,
+  SPEND_PERS,
+  SPEND_TOS,
+  SPEND_TO_LABEL,
   TICKET_BLOCKED,
   TICKET_COPY,
   emptyTicketForm,
@@ -28,20 +34,6 @@ import {
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
-
-/** Square-crop and shrink the icon to keep the inscription small. */
-const iconFile = async (file: File, edge = 256): Promise<File> => {
-  const bmp = await createImageBitmap(file);
-  const side = Math.min(bmp.width, bmp.height);
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = Math.min(edge, side);
-  canvas
-    .getContext('2d')!
-    .drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
-  if (!blob) throw new Error('Could not read this image');
-  return new File([blob], 'icon.png', { type: 'image/png' });
-};
 
 export const TicketMint = ({
   exchangeRate,
@@ -67,7 +59,7 @@ export const TicketMint = ({
 
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
 
-  const set = (k: keyof TicketForm) => (v: string) =>
+  const set = (k: Exclude<keyof TicketForm, 'entry' | 'spendPer' | 'spendTo'>) => (v: string) =>
     setForm((f) => ({
       ...f,
       [k]: v,
@@ -244,6 +236,18 @@ export const TicketMint = ({
         onChange={(e) => set('description')(e.target.value)}
       />
 
+      <label className="text-xs" style={{ color: '#999' }}>
+        Tokens needed to enter
+        <input
+          className={`${input} mt-1`}
+          style={inputStyle}
+          inputMode="numeric"
+          aria-label="Tokens needed to enter"
+          value={form.minTokens}
+          onChange={(e) => set('minTokens')(e.target.value)}
+        />
+      </label>
+
       <button
         type="button"
         onClick={() => setMore((m) => !m)}
@@ -255,6 +259,76 @@ export const TicketMint = ({
       </button>
       {more && (
         <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3 text-xs" style={{ color: '#999' }} role="radiogroup">
+            Entry
+            {ENTRY_RULES.map((rule) => (
+              <label key={rule} className="flex items-center gap-1 text-sm cursor-pointer" style={{ color: '#fff' }}>
+                <input
+                  type="radio"
+                  name="ticket-entry"
+                  value={rule}
+                  checked={form.entry === rule}
+                  onChange={() => setForm((f) => ({ ...f, entry: rule }))}
+                  style={{ accentColor: GOLD }}
+                />
+                {ENTRY_LABEL[rule]}
+              </label>
+            ))}
+          </div>
+          {form.entry === 'spend' && (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  className={input}
+                  style={inputStyle}
+                  inputMode="numeric"
+                  aria-label="Spend amount"
+                  placeholder="Amount"
+                  value={form.spendAmount}
+                  onChange={(e) => set('spendAmount')(e.target.value)}
+                />
+                <select
+                  className={input}
+                  style={{ ...inputStyle, background: PANEL }}
+                  aria-label="Per"
+                  value={form.spendPer}
+                  onChange={(e) => setForm((f) => ({ ...f, spendPer: e.target.value as TicketForm['spendPer'] }))}
+                >
+                  {SPEND_PERS.map((p) => (
+                    <option key={p} value={p}>
+                      per {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <select
+                className={input}
+                style={{ ...inputStyle, background: PANEL }}
+                aria-label="Spent tokens go to"
+                value={form.spendTo}
+                onChange={(e) => setForm((f) => ({ ...f, spendTo: e.target.value as TicketForm['spendTo'] }))}
+              >
+                {SPEND_TOS.map((t) => (
+                  <option key={t} value={t}>
+                    to {SPEND_TO_LABEL[t]}
+                  </option>
+                ))}
+              </select>
+              {form.spendTo === 'address' && (
+                <input
+                  className={input}
+                  style={inputStyle}
+                  aria-label="Spend address"
+                  placeholder="BSV address"
+                  value={form.spendAddress}
+                  onChange={(e) => set('spendAddress')(e.target.value)}
+                />
+              )}
+              <p className="text-[10px]" style={{ color: '#999' }}>
+                {SPEND_NOT_ENFORCED}
+              </p>
+            </div>
+          )}
           <label className="text-xs" style={{ color: '#999' }}>
             Event date (optional, for a ticket that is also for an event)
             <input

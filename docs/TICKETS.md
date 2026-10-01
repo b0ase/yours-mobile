@@ -13,7 +13,7 @@ them in terms of returns.
 1. Optional icon: square-cropped to 256 px and inscribed first (`inscribe`). Its outpoint becomes
    the token `icon`, which the 1Sat overlay and the Market can show.
 2. `deployBsv21Mint` (whole supply to self), behind `SendConfirmation`. The same tx carries:
-   - a 0-sat MAP OP_RETURN: `app=bWallet type=ticket name=<room> ticker=<T> [date=YYYY-MM-DD] [price=<sats>]`
+   - a 0-sat MAP OP_RETURN: `app=bWallet type=ticket name=<room> ticker=<T> [date=YYYY-MM-DD] [price=<sats>] entry=hold|spend`
    - the 1% bWallet mint fee output, using the same rule as Mint media (`mintFeeFor` in
      `src/mobile/mint/mint.ts`, only when built with `BWALLET_MINT_FEE_ADDRESS`).
 3. The room is always opened: `startTokenRoom('bsv21:<id>', { name })`. The description goes in as
@@ -21,6 +21,28 @@ them in terms of returns.
    the ticket is registered (below). The token may not be indexed yet. In that case the ticket is
    kept locally with `roomTicker: null`, and the Market's Tickets panel retries
    (`finishTicketRooms`). Opening the room from Chat also creates it.
+
+Room access rule (bChat protocol SPEC §7.2–7.3, Draft 0.2; the token itself is neutral, the
+room decides how it is used):
+
+- **Tokens needed to enter** (`min`, default 1 whole token; raw units on chain, which equal whole
+  tokens for 0-decimal tickets). Passed to bit-sign as the room's `min` and stored on the ticket.
+- **Entry** (under More options): `hold` (default, holding `min` is membership) or `spend`.
+- **Spend** settings: an amount, **per** `entry|message|minute|hour|day`, **to** `burn` (default),
+  `owner` (Me) or an address.
+
+The deploy MAP tag records these with the spec keys: `min <raw> entry hold|spend` and, for spend
+rooms, `spend <raw> per <unit> to burn|owner|<address>`. bit-sign's token-room gate
+(`src/lib/token-room-gate.ts`) only checks holdings, so spend rules are recorded but not enforced
+yet ("coming soon"; `SPEND_ENTRY_SUPPORTED` in `tickets.ts`), and a spend room works as `hold`.
+
+Next: publish a signed `type room-policy` MAP message for `channel bsv21:<token id>`. It can't
+ride on the deploy tx (the room id is that tx's own txid), so it needs a follow-up owner-signed
+transaction once the deploy is broadcast; not done yet.
+
+Plain tokens (Wallet → Mint → Mint a token, `src/mobile/tokens/`) use the same deploy and
+room-open helpers (`deployBsv21`, `openRoom` in `mintTicket.ts`) without the `type=ticket` MAP tag.
+Every token still gets a holders' room.
 
 Event date and price are under "More options". The price is the creator's asking price and is
 shown in the Market. Selling still uses the 1Sat order book (OrdLock listings). Upstream has

@@ -1,10 +1,10 @@
 # Open Rooms: token-gated chat rooms on BSV
 
-| | |
-|---|---|
-| Status | Draft 0.1 (2026-10-01) |
-| Authors | bWallet / bChat team (The Bitcoin Corporation Ltd) |
-| Builds on | Bitcoin Schema `message` / `like` (B + MAP + AIP), 1Sat Ordinals BSV-21, BAP |
+|                          |                                                                              |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| Status                   | Draft 0.1 (2026-10-01)                                                       |
+| Authors                  | bWallet / bChat team (The Bitcoin Corporation Ltd)                           |
+| Builds on                | Bitcoin Schema `message` / `like` (B + MAP + AIP), 1Sat Ordinals BSV-21, BAP |
 | Reference implementation | bit-sign `feat/token-gated-rooms` (server rooms), bWallet `src/mobile/chat/` |
 
 ## Abstract
@@ -34,18 +34,18 @@ these messages already.
 No public specification of an on-chain, token-gated room on BSV was found. The parts exist
 separately:
 
-| Work | What it gives us | Gap |
-|---|---|---|
-| **Bitcoin Schema messaging** ([bitcoinschema.org/docs/schemas/messaging](https://bitcoinschema.org/docs/schemas/messaging)) | `MAP SET app <app> type message context channel channel <name>`, plus `context bapID` for DMs. Public channels by name | A channel is a free string: no gate, no owner, no moderation, no encryption |
-| **Bitcoin Schema core** ([bitcoinschema.org](https://bitcoinschema.org/)) | `post`, `like`, replies via `context tx tx <txid>`, AIP signing, cross-app indexing | Same |
-| **bSocial overlay / bmap** ([pkg.go.dev bsocial-overlay](https://pkg.go.dev/github.com/b-open-io/bsocial-overlay/bsocial)) | Indexes the output types `friend, like, repost, post, message`. Messages are public unless their content was encrypted first | No membership checks |
-| **BAP** (Bitcoin Attestation Protocol) | Identity key above rotating signing addresses, with address attestations | Not chat-specific. Usable for multi-address proofs (§5.3) |
-| **BRC-33 PeerServ / MessageBox** ([bsv-blockchain/BRCs](https://github.com/bsv-blockchain/BRCs), [message-box-server](https://deepwiki.com/bsv-blockchain/message-box-server)) | Off-chain store and forward addressed to identity keys. BRC-103 auth, BRC-78 encryption | Point to point, not a room. A good transport for phase 2 key envelopes (§9) |
-| **Twetch Chat** (2020, [CoinDesk](https://www.coindesk.com/business/2020/09/09/twetch-launches-encrypted-messaging-in-chat-payments-on-bsv-blockchain)) | Encrypted on-chain chat; the creator derives a shared room key from the members' keys | Proprietary, invite-list based, defunct. [Treechat](https://treechat.com/) re-indexed the Twetch archive via Bitcoin Schema |
-| **Treechat** ([treechat.com](https://treechat.com/)) | Bitcoin Schema social posts and threads, 1Sat apps | No token-gated room spec found |
-| **1satsocial / GorillaPool 1Sat API** | BSV-21 holder balances (`/bsv21/<id>/...`), collection membership, spend checks. bit-sign's gate reuses this logic | No room protocol |
-| **"BitChat"** | The current BitChat is Jack Dorsey's Bluetooth mesh app ([permissionlesstech/bitchat](https://github.com/permissionlesstech/bitchat), [PyPI](https://pypi.org/project/bitchat/)). It has `#channel` names and PBKDF2 passwords but no BSV link. No published spec was found for a MatterCloud-era BSV "bitchat" | n/a |
-| **Metalens** | Historic BSV comments-on-any-URL app. No published room spec found | n/a |
+| Work                                                                                                                                                                           | What it gives us                                                                                                                                                                                                                                                                                                | Gap                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Bitcoin Schema messaging** ([bitcoinschema.org/docs/schemas/messaging](https://bitcoinschema.org/docs/schemas/messaging))                                                    | `MAP SET app <app> type message context channel channel <name>`, plus `context bapID` for DMs. Public channels by name                                                                                                                                                                                          | A channel is a free string: no gate, no owner, no moderation, no encryption                                                 |
+| **Bitcoin Schema core** ([bitcoinschema.org](https://bitcoinschema.org/))                                                                                                      | `post`, `like`, replies via `context tx tx <txid>`, AIP signing, cross-app indexing                                                                                                                                                                                                                             | Same                                                                                                                        |
+| **bSocial overlay / bmap** ([pkg.go.dev bsocial-overlay](https://pkg.go.dev/github.com/b-open-io/bsocial-overlay/bsocial))                                                     | Indexes the output types `friend, like, repost, post, message`. Messages are public unless their content was encrypted first                                                                                                                                                                                    | No membership checks                                                                                                        |
+| **BAP** (Bitcoin Attestation Protocol)                                                                                                                                         | Identity key above rotating signing addresses, with address attestations                                                                                                                                                                                                                                        | Not chat-specific. Usable for multi-address proofs (§5.3)                                                                   |
+| **BRC-33 PeerServ / MessageBox** ([bsv-blockchain/BRCs](https://github.com/bsv-blockchain/BRCs), [message-box-server](https://deepwiki.com/bsv-blockchain/message-box-server)) | Off-chain store and forward addressed to identity keys. BRC-103 auth, BRC-78 encryption                                                                                                                                                                                                                         | Point to point, not a room. A good transport for phase 2 key envelopes (§9)                                                 |
+| **Twetch Chat** (2020, [CoinDesk](https://www.coindesk.com/business/2020/09/09/twetch-launches-encrypted-messaging-in-chat-payments-on-bsv-blockchain))                        | Encrypted on-chain chat; the creator derives a shared room key from the members' keys                                                                                                                                                                                                                           | Proprietary, invite-list based, defunct. [Treechat](https://treechat.com/) re-indexed the Twetch archive via Bitcoin Schema |
+| **Treechat** ([treechat.com](https://treechat.com/))                                                                                                                           | Bitcoin Schema social posts and threads, 1Sat apps                                                                                                                                                                                                                                                              | No token-gated room spec found                                                                                              |
+| **1satsocial / GorillaPool 1Sat API**                                                                                                                                          | BSV-21 holder balances (`/bsv21/<id>/...`), collection membership, spend checks. bit-sign's gate reuses this logic                                                                                                                                                                                              | No room protocol                                                                                                            |
+| **"BitChat"**                                                                                                                                                                  | The current BitChat is Jack Dorsey's Bluetooth mesh app ([permissionlesstech/bitchat](https://github.com/permissionlesstech/bitchat), [PyPI](https://pypi.org/project/bitchat/)). It has `#channel` names and PBKDF2 passwords but no BSV link. No published spec was found for a MatterCloud-era BSV "bitchat" | n/a                                                                                                                         |
+| **Metalens**                                                                                                                                                                   | Historic BSV comments-on-any-URL app. No published room spec found                                                                                                                                                                                                                                              | n/a                                                                                                                         |
 
 **Decision:** extend Bitcoin Schema `message` with `context=channel`. Do not invent a prefix.
 Gating is a validation rule that clients and indexers apply on top. It is not a different
@@ -64,12 +64,12 @@ encoding.
 
 The room id is a string. It is the `channel` value.
 
-| Room token | Room id (`channel`) | Example |
-|---|---|---|
-| BSV-21 | `bsv21:<txid>_<vout>` (deploy outpoint, lowercase hex) | `bsv21:3f9a…c2_0` |
-| BSV-20 tick | `bsv20:<TICK>` (tick upper-cased; BSV-20 ticks are case-insensitive) | `bsv20:ORDI` |
-| 1Sat collection | `coll:<txid>_<vout>` (collection inscription outpoint) | `coll:9b1e…07_0` |
-| Sub-room | `<room id>/<slug>`, slug `[a-z0-9-]{1,32}` | `bsv21:3f9a…c2_0/scene-12` |
+| Room token      | Room id (`channel`)                                                  | Example                    |
+| --------------- | -------------------------------------------------------------------- | -------------------------- |
+| BSV-21          | `bsv21:<txid>_<vout>` (deploy outpoint, lowercase hex)               | `bsv21:3f9a…c2_0`          |
+| BSV-20 tick     | `bsv20:<TICK>` (tick upper-cased; BSV-20 ticks are case-insensitive) | `bsv20:ORDI`               |
+| 1Sat collection | `coll:<txid>_<vout>` (collection inscription outpoint)               | `coll:9b1e…07_0`           |
+| Sub-room        | `<room id>/<slug>`, slug `[a-z0-9-]{1,32}`                           | `bsv21:3f9a…c2_0/scene-12` |
 
 - These match the bit-sign gate keys (`bsv21:`, `coll:`, `bsv20:`) exactly, so a server room maps
   one-to-one to an on-chain room.
@@ -227,12 +227,19 @@ These are signed by the owner or a moderator:
 MAP SET app <app> type room-ban    context channel channel <room id> target <address|bapID> [until <unix>] [reason <text>]
 MAP SET app <app> type room-unban  context channel channel <room id> target <address|bapID>
 MAP SET app <app> type room-policy context channel channel <room id> min <raw units> [title <text>] [history none|from-join|all]
+    [entry hold|spend] [spend <raw units>] [per entry|message|second|minute|hour|day] [to burn|owner|<address>]
 ```
 
 - A ban applies from the block it is mined in. It is not retroactive unless `retro 1` is set,
   which hides the target's earlier messages too. A ban on any linked address bans the identity.
 - `min` defaults to `10^dec` raw units (1 whole token) for BSV-21/BSV-20, or 1 item for a
   collection. This is the same as bit-sign `defaultMinRaw`.
+- **Access rule** (bChat protocol SPEC §7.2–7.3, Draft 0.2). The token is neutral; the room
+  decides how it is used. `min` (set by the creator, any amount) is how many tokens confer entry.
+  `entry hold` (default): holding `min` is membership. `entry spend`: holding `min` lets you in and
+  you pay `spend` raw units `per` entry / message / second / minute / hour / day, `to burn`
+  (default), `to owner` or `to <address>`. A bWallet ticket deploy records the same keys in its MAP
+  tag. bit-sign's gate does not enforce `spend` yet and treats every room as `hold`.
 - Moderation is advisory: every client applies it, and nobody can stop a banned key from writing
   to the chain. Clients MAY offer "show moderated".
 - Clients SHOULD apply the owner's actions over a moderator's, and the latest action at equal
@@ -333,15 +340,15 @@ applies to the historical view.
 These messages need no new indexer. bmap (bmap-api.com, `/q/<collection>/<base64 query>`) and the
 bsocial overlay already index MAP `message` and `like`. Required queries:
 
-| Purpose | Query (bmap, `message` / `like` collections) |
-|---|---|
-| Room timeline | `{"MAP.type":"message","MAP.context":"channel","MAP.channel":"<room id>"}` sorted by `blk.i` desc, `timestamp` for unmined |
-| Room including sub-rooms | `{"MAP.channel":{"$regex":"^<escaped room id>(/|$)"}}` |
-| Thread | `{"MAP.channel":"<room id>","MAP.thread":"<root txid>"}` |
-| Reactions | `like` with `{"MAP.channel":"<room id>","MAP.tx":{"$in":[…]}}` |
-| Moderation | `{"MAP.channel":"<room id>","MAP.type":{"$in":["room-ban","room-unban","room-admin","room-policy"]}}` |
-| Address links | `{"MAP.type":"address-link","MAP.identity":"<addr>"}` and `{"AIP.address":"<addr>","MAP.type":"address-link"}` |
-| Live | bmap SSE / JungleBus subscription filtered on the B + MAP prefixes, then `MAP.channel` |
+| Purpose                  | Query (bmap, `message` / `like` collections)                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Room timeline            | `{"MAP.type":"message","MAP.context":"channel","MAP.channel":"<room id>"}` sorted by `blk.i` desc, `timestamp` for unmined |
+| Room including sub-rooms | `{"MAP.channel":{"$regex":"^<escaped room id>(/                                                                            | $)"}}` |
+| Thread                   | `{"MAP.channel":"<room id>","MAP.thread":"<root txid>"}`                                                                   |
+| Reactions                | `like` with `{"MAP.channel":"<room id>","MAP.tx":{"$in":[…]}}`                                                             |
+| Moderation               | `{"MAP.channel":"<room id>","MAP.type":{"$in":["room-ban","room-unban","room-admin","room-policy"]}}`                      |
+| Address links            | `{"MAP.type":"address-link","MAP.identity":"<addr>"}` and `{"AIP.address":"<addr>","MAP.type":"address-link"}`             |
+| Live                     | bmap SSE / JungleBus subscription filtered on the B + MAP prefixes, then `MAP.channel`                                     |
 
 Balances come from the 1Sat API (`api.1sat.app`): BSV-21/BSV-20 balance by address set,
 `/txo/spends` for spend checks, and collection item lookup. Indexers SHOULD add a compound index on
@@ -389,16 +396,16 @@ Balances come from the 1Sat API (`api.1sat.app`): BSV-21/BSV-20 balance by addre
 
 ## 15. Reference implementation plan (bWallet / bChat)
 
-| Step | Where | Work |
-|---|---|---|
-| 1 | bWallet `src/mobile/chat/onchain/encode.ts` | Build the §6 B+MAP+AIP output with `@bsv/sdk` script templates. Sign with the BRC-100 identity key (`createSignature`) |
-| 2 | bWallet `onchain/read.ts` | bmap queries from §12. Decode, verify AIP, dedupe |
-| 3 | bWallet `onchain/admit.ts` | §5.1 using the existing `tokenRooms.ts` helpers (`tokenKey`, `atLeast`, `defaultMinRaw`) plus the 1Sat balance reader. Moderation fold |
-| 4 | bWallet Chat room view | Toggle "Post on chain". Show an on-chain badge per message. Merge server and chain messages by `ref` / `txid` |
-| 5 | bWallet `holdings.ts` | Optional on-chain `address-link`, batched per session, with a privacy prompt. Keep the server-side proofs as default |
-| 6 | bit-sign | `on_chain_mode = full`, the chain-to-server ingester (§10.2), and the moderation and link ingestion jobs |
-| 7 | Self-tests | Vectors: encode/decode, admission at a height, the earliest-link rule, ban fold, sub-room inheritance (`token-room-gate-selftest.mts` style) |
-| 8 | Phase 2 | Epoch keys, BRC-78 wrapping, MessageBox delivery, rotation driven by `member_left` events. These are the v2 hooks already described in `TOKEN-ROOMS.md` |
+| Step | Where                                       | Work                                                                                                                                                    |
+| ---- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | bWallet `src/mobile/chat/onchain/encode.ts` | Build the §6 B+MAP+AIP output with `@bsv/sdk` script templates. Sign with the BRC-100 identity key (`createSignature`)                                  |
+| 2    | bWallet `onchain/read.ts`                   | bmap queries from §12. Decode, verify AIP, dedupe                                                                                                       |
+| 3    | bWallet `onchain/admit.ts`                  | §5.1 using the existing `tokenRooms.ts` helpers (`tokenKey`, `atLeast`, `defaultMinRaw`) plus the 1Sat balance reader. Moderation fold                  |
+| 4    | bWallet Chat room view                      | Toggle "Post on chain". Show an on-chain badge per message. Merge server and chain messages by `ref` / `txid`                                           |
+| 5    | bWallet `holdings.ts`                       | Optional on-chain `address-link`, batched per session, with a privacy prompt. Keep the server-side proofs as default                                    |
+| 6    | bit-sign                                    | `on_chain_mode = full`, the chain-to-server ingester (§10.2), and the moderation and link ingestion jobs                                                |
+| 7    | Self-tests                                  | Vectors: encode/decode, admission at a height, the earliest-link rule, ban fold, sub-room inheritance (`token-room-gate-selftest.mts` style)            |
+| 8    | Phase 2                                     | Epoch keys, BRC-78 wrapping, MessageBox delivery, rotation driven by `member_left` events. These are the v2 hooks already described in `TOKEN-ROOMS.md` |
 
 Out of scope for v1: holder voting, MLS group keys, collection invites (sending an item).
 

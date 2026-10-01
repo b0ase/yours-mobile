@@ -148,3 +148,17 @@ export const onMinted = (fn: () => void) => {
   return () => void listeners.delete(fn);
 };
 export const notifyMinted = () => listeners.forEach((fn) => fn());
+
+/** Square-crop and shrink the icon to keep the inscription small. */
+export const iconFile = async (file: File, edge = 256): Promise<File> => {
+  const bmp = await createImageBitmap(file);
+  const side = Math.min(bmp.width, bmp.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.min(edge, side);
+  canvas
+    .getContext('2d')!
+    .drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('Could not read this image');
+  return new File([blob], 'icon.png', { type: 'image/png' });
+};

@@ -1,3 +1,4 @@
+import validate from 'bitcoin-address-validation';
 import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { safety, type SafetyFilter } from '../market/safety';
 import { MAP_PREFIX, cleanSupply, validateSupply } from '../names/personalToken';
@@ -13,7 +14,7 @@ import { mintFeeFor, txFeeSats } from '../mint/mint';
  *
  * Tagging + discovery (see docs/TICKETS.md):
  *  - On chain: the deploy tx carries a 0-sat MAP OP_RETURN `app=bWallet type=ticket name= ticker=`
- *    (+ optional date / price). It is a permanent public marker.
+ *    (+ optional date / price) + the room policy `min entry [spend per to]`. It is a permanent public marker.
  *  - The 1Sat indexer cannot filter by MAP (txo/search has no MAP keys, /bsv21/tokens carries only
  *    sym/icon), so the Market finds tickets through a bit-sign registry (GET /api/bitsign/tickets)
  *    plus the tickets this device minted (localStorage), merged.
@@ -30,6 +31,36 @@ export const DEFAULT_TICKET_SUPPLY = '100';
 export const TICKET_DEPLOY_BYTES = 450;
 export const MAX_ICON_BYTES = 512 * 1024;
 
+/**
+ * Room access rule (bChat protocol SPEC §7.2–7.3, room-policy). The token itself is neutral; the
+ * ROOM decides how it is used:
+ *  - `min`: how many tokens confer entry (whole tokens in the form, raw units on chain);
+ *  - `entry hold` (default): holding `min` is membership (bit-sign's token-room gate does this);
+ *  - `entry spend`: holding `min` lets you in, and you pay `spend` raw units `per` entry / message /
+ *    minute / hour / day, `to` burn (default) / owner / an address.
+ * bit-sign's gate has no spend check yet: the creator can set and record a spend rule, but it is
+ * not enforced ("coming soon") and the room works as `hold` until it is.
+ * Recorded in the ticket MAP tag with the spec's keys: `min entry [spend per to]`.
+ */
+export type EntryRule = 'hold' | 'spend';
+export type SpendPer = 'entry' | 'message' | 'minute' | 'hour' | 'day';
+export type SpendTo = 'burn' | 'owner' | 'address';
+export const ENTRY_RULES: EntryRule[] = ['hold', 'spend'];
+export const SPEND_PERS: SpendPer[] = ['entry', 'message', 'minute', 'hour', 'day'];
+export const SPEND_TOS: SpendTo[] = ['burn', 'owner', 'address'];
+export const ENTRY_LABEL: Record<EntryRule, string> = { hold: 'Hold', spend: 'Spend' };
+export const SPEND_TO_LABEL: Record<SpendTo, string> = { burn: 'Burn', owner: 'Me (owner)', address: 'An address' };
+/** Flip when bit-sign's token-room gate enforces spend rooms (SPEC §7.3). */
+export const SPEND_ENTRY_SUPPORTED = false;
+export const SPEND_NOT_ENFORCED =
+  "Spend rules are recorded on chain, but bit-sign doesn't enforce them yet (coming soon): the room works as Hold for now.";
+
+/** Whole tokens → raw units. */
+export const toRaw = (whole: string, decimals: number) =>
+  (BigInt((whole || '').trim().replace(/[,_\s]/g, '') || '0') * 10n ** BigInt(decimals)).toString();
+
+const isWhole = (s: string) => /^\d+$/.test((s || '').trim().replace(/[,_\s]/g, ''));
+
 export interface TicketForm {
   /** Room name, e.g. "Night Owls". */
   name: string;
@@ -41,6 +72,15 @@ export interface TicketForm {
   eventDate: string;
   /** Optional asking price per ticket, in sats (shown; listing itself is a separate step). */
   priceSats: string;
+  /** Tokens needed to enter (whole tokens). */
+  minTokens: string;
+  /** Room access rule. */
+  entry: EntryRule;
+  /** Spend rooms: whole tokens paid per `spendPer`, sent `spendTo`. */
+  spendAmount: string;
+  spendPer: SpendPer;
+  spendTo: SpendTo;
+  spendAddress: string;
 }
 
 export const emptyTicketForm = (): TicketForm => ({
@@ -50,6 +90,12 @@ export const emptyTicketForm = (): TicketForm => ({
   description: '',
   eventDate: '',
   priceSats: '',
+  minTokens: '1',
+  entry: 'hold',
+  spendAmount: '1',
+  spendPer: 'entry',
+  spendTo: 'burn',
+  spendAddress: '',
 });
 
 /** "Night Owls" → "NIGHTOWLS"; also cleans a typed ticker. */
@@ -79,6 +125,18 @@ export function validateTicket(f: TicketForm, s: SafetyFilter = safety()): strin
   const p = f.priceSats.trim().replace(/[,_\s]/g, '');
   if (p && (!/^\d+$/.test(p) || BigInt(p) < 1n || BigInt(p) > 21n * 10n ** 14n))
     return 'Price is a whole number of sats.';
+  if (!isWhole(f.minTokens) || BigInt(f.minTokens.trim().replace(/[,_\s]/g, '')) < 1n)
+    return 'Tokens needed to enter is a whole number, at least 1.';
+  if (BigInt(f.minTokens.trim().replace(/[,_\s]/g, '')) > BigInt(cleanSupply(f.supply)))
+    return 'Tokens needed to enter can’t be more than the supply.';
+  if (!ENTRY_RULES.includes(f.entry)) return 'Pick an entry rule.';
+  if (f.entry === 'spend') {
+    if (!isWhole(f.spendAmount) || BigInt(f.spendAmount.trim().replace(/[,_\s]/g, '')) < 1n)
+      return 'Spend amount is a whole number, at least 1.';
+    if (!SPEND_PERS.includes(f.spendPer)) return 'Pick what the spend is per.';
+    if (!SPEND_TOS.includes(f.spendTo)) return 'Pick where spent tokens go.';
+    if (f.spendTo === 'address' && !validate(f.spendAddress.trim())) return 'Enter a valid BSV address.';
+  }
   if (s.check({ ids: [], texts: [name, t, f.description] }).blocked) return TICKET_BLOCKED;
   return null;
 }
@@ -90,6 +148,16 @@ export const cleanTicket = (f: TicketForm) => ({
   description: f.description.trim(),
   eventDate: f.eventDate.trim() || null,
   priceSats: f.priceSats.trim() ? Number(f.priceSats.replace(/[,_\s]/g, '')) : null,
+  min: toRaw(f.minTokens, TICKET_DECIMALS),
+  entry: f.entry,
+  spend:
+    f.entry === 'spend'
+      ? {
+          amount: toRaw(f.spendAmount, TICKET_DECIMALS),
+          per: f.spendPer,
+          to: f.spendTo === 'address' ? f.spendAddress.trim() : f.spendTo,
+        }
+      : null,
 });
 
 // ── on-chain MAP marker (an extra 0-sat OP_RETURN on the deploy tx) ──
@@ -99,6 +167,8 @@ export function ticketMapFields(f: TicketForm): string[] {
   const out = ['app', 'bWallet', 'type', 'ticket', 'name', c.name.slice(0, 64), 'ticker', c.ticker];
   if (c.eventDate) out.push('date', c.eventDate);
   if (c.priceSats) out.push('price', String(c.priceSats));
+  out.push('min', c.min, 'entry', c.entry);
+  if (c.spend) out.push('spend', c.spend.amount, 'per', c.spend.per, 'to', c.spend.to);
   return out;
 }
 
@@ -120,9 +190,15 @@ export type TicketCost = {
 };
 
 /** Icon inscription (when an image is picked) + the deploy tx. The 1% fee rides on the deploy. */
-export function ticketCost(iconBytes: number, satsPerKb: number, usdPerBsv = 0, feeAddress?: string): TicketCost {
+export function ticketCost(
+  iconBytes: number,
+  satsPerKb: number,
+  usdPerBsv = 0,
+  feeAddress?: string,
+  deployBytes = TICKET_DEPLOY_BYTES,
+): TicketCost {
   const icon = iconBytes > 0 ? txFeeSats(iconBytes, satsPerKb) : 0;
-  const networkSats = icon + txFeeSats(TICKET_DEPLOY_BYTES, satsPerKb);
+  const networkSats = icon + txFeeSats(deployBytes, satsPerKb);
   const feeSats = mintFeeFor(networkSats, feeAddress);
   const totalSats = networkSats + feeSats;
   return {
@@ -146,6 +222,8 @@ export interface Ticket {
   eventDate: string | null;
   priceSats: number | null;
   supply: string | null;
+  /** Tokens needed to enter, raw units (null = 1). */
+  min: string | null;
   roomTicker: string | null;
   createdAt: number;
 }
@@ -168,6 +246,7 @@ export function parseTicket(raw: unknown): Ticket | null {
   const price = Number(r.price_sats ?? r.priceSats);
   const created = r.created_at ?? r.createdAt;
   const supply = str(r.supply, 20);
+  const min = str(r.min, 24);
   return {
     tokenId,
     ticker,
@@ -177,6 +256,7 @@ export function parseTicket(raw: unknown): Ticket | null {
     eventDate: date && isDate(date) ? date : null,
     priceSats: Number.isFinite(price) && price > 0 ? Math.floor(price) : null,
     supply: supply && /^\d+$/.test(supply) ? supply : null,
+    min: min && /^\d+$/.test(min) && min !== '0' ? min : null,
     roomTicker: str(r.room_ticker ?? r.roomTicker, 64),
     createdAt: typeof created === 'number' ? created : Date.parse(String(created ?? '')) || 0,
   };
@@ -197,6 +277,7 @@ export const ticketRegistration = (t: Ticket) => ({
   event_date: t.eventDate,
   price_sats: t.priceSats,
   supply: t.supply,
+  min: t.min,
   room_ticker: t.roomTicker,
 });
 

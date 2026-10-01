@@ -1,5 +1,5 @@
 import { deployBsv21Mint, inscribe, type OneSatContext } from '@1sat/actions';
-import type { CreateActionArgs, WalletInterface } from '@bsv/sdk';
+import type { CreateActionArgs, LockingScript, WalletInterface } from '@bsv/sdk';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
@@ -31,8 +31,8 @@ import {
  * `roomTicker: null` and `finishTicketRooms` retries from the Market.
  */
 
-/** A context whose wallet appends a 0-sat MAP output to the NEXT createAction (the deploy). */
-function withTicketMap(ctx: OneSatContext, form: TicketForm): OneSatContext {
+/** A context whose wallet appends a 0-sat output (a MAP tag) to the NEXT createAction (the deploy). */
+export function withMapOutput(ctx: OneSatContext, script: LockingScript, description: string): OneSatContext {
   let done = false;
   const wallet = new Proxy(ctx.wallet as WalletInterface, {
     get(target, prop, receiver) {
@@ -41,7 +41,7 @@ function withTicketMap(ctx: OneSatContext, form: TicketForm): OneSatContext {
           done = true;
           const outputs = [
             ...(args.outputs ?? []),
-            { lockingScript: ticketMapScript(form).toHex(), satoshis: 0, outputDescription: 'bWallet ticket (MAP)' },
+            { lockingScript: script.toHex(), satoshis: 0, outputDescription: description },
           ];
           return target.createAction({ ...args, outputs }, originator);
         };
@@ -53,14 +53,44 @@ function withTicketMap(ctx: OneSatContext, form: TicketForm): OneSatContext {
   return { ...ctx, wallet } as OneSatContext;
 }
 
-export async function inscribeIcon(ctx: OneSatContext, file: File, ticker: string): Promise<string> {
+export async function inscribeIcon(ctx: OneSatContext, file: File, ticker: string, what = 'ticket'): Promise<string> {
   const res = await inscribe.execute(ctx, {
     base64Content: fileToBase64(await file.arrayBuffer()),
     contentType: file.type,
-    map: { app: MINT_APP, type: 'ord', name: `$${ticker} ticket icon` },
+    map: { app: MINT_APP, type: 'ord', name: `$${ticker} ${what} icon` },
   });
   if (!res.txid || res.error) throw new Error(res.error || 'Icon inscription failed');
   return `${res.txid}_0`;
+}
+
+/**
+ * Shared BSV-21 deploy (tickets and plain tokens): fixed supply to self, the 1% mint fee output,
+ * and an optional MAP tag output on the same tx. `amount` is in raw units. Returns the token id
+ * as `txid_vout`.
+ */
+export async function deployBsv21(
+  ctx: OneSatContext,
+  opts: {
+    symbol: string;
+    amount: string;
+    decimals: number;
+    icon: string | null;
+    feeSats: number;
+    map?: { script: LockingScript; description: string };
+  },
+): Promise<string> {
+  const withFee = withFeeOutput(ctx, opts.feeSats);
+  const res = await deployBsv21Mint.execute(
+    opts.map ? withMapOutput(withFee, opts.map.script, opts.map.description) : withFee,
+    {
+      symbol: opts.symbol,
+      amount: opts.amount,
+      decimals: opts.decimals,
+      ...(opts.icon ? { icon: opts.icon } : {}),
+    },
+  );
+  if (res.error || !res.tokenId) throw new Error(res.error || 'Mint failed');
+  return res.tokenId.replace('.', '_');
 }
 
 export async function deployTicket(
@@ -69,15 +99,16 @@ export async function deployTicket(
   opts: { icon: string | null; feeSats: number },
 ): Promise<Ticket> {
   const c = cleanTicket(form);
-  const res = await deployBsv21Mint.execute(withTicketMap(withFeeOutput(ctx, opts.feeSats), form), {
+  const tokenId = await deployBsv21(ctx, {
     symbol: c.ticker,
     amount: c.supply,
     decimals: TICKET_DECIMALS,
-    ...(opts.icon ? { icon: opts.icon } : {}),
+    icon: opts.icon,
+    feeSats: opts.feeSats,
+    map: { script: ticketMapScript(form), description: 'bWallet ticket (MAP)' },
   });
-  if (res.error || !res.tokenId) throw new Error(res.error || 'Ticket mint failed');
   const ticket: Ticket = {
-    tokenId: res.tokenId.replace('.', '_'),
+    tokenId,
     ticker: c.ticker,
     name: c.name,
     description: c.description || null,
@@ -85,6 +116,7 @@ export async function deployTicket(
     eventDate: c.eventDate,
     priceSats: c.priceSats,
     supply: c.supply,
+    min: c.min,
     roomTicker: null,
     createdAt: Date.now(),
   };
@@ -92,21 +124,45 @@ export async function deployTicket(
   return ticket;
 }
 
-async function chatClient(ctx: OneSatContext): Promise<BchatClient> {
+export async function chatClient(ctx: OneSatContext): Promise<BchatClient> {
   const client = new BchatClient(defaultHttp(isNative), loadSession());
   if (!client.handle) saveSession(await client.signIn(walletSigner(ctx)));
   return client;
 }
 
+/**
+ * Shared room open (tickets and plain tokens): prove holdings, open the token-gated room for
+ * `bsv21:<id>`, post the founding note. Returns the room ticker.
+ */
+export async function openRoom(
+  ctx: OneSatContext,
+  tokenId: string,
+  opts: { name: string; min?: string; purpose?: string; founding: string },
+  client?: BchatClient,
+): Promise<string> {
+  const c = client ?? (await chatClient(ctx));
+  const key = `bsv21:${tokenId}`;
+  await proveHoldings(ctx, c, key).catch(() => 0);
+  const roomTicker = await c.startTokenRoom(key, {
+    name: opts.name,
+    ...(opts.min ? { min: opts.min } : {}),
+    ...(opts.purpose ? { purpose: opts.purpose } : {}),
+  });
+  await c.send(roomTicker, opts.founding).catch(() => null);
+  return roomTicker;
+}
+
 /** Open the ticket's holders' room, post the founding note, register it. Returns the room ticker. */
 export async function openTicketRoom(ctx: OneSatContext, ticket: Ticket, client?: BchatClient): Promise<string> {
   const c = client ?? (await chatClient(ctx));
-  const key = `bsv21:${ticket.tokenId}`;
-  await proveHoldings(ctx, c, key).catch(() => 0);
-  const roomTicker = await c.startTokenRoom(key, { name: ticket.name, min: TICKET_MIN, purpose: TICKET_PURPOSE });
+  const roomTicker = await openRoom(
+    ctx,
+    ticket.tokenId,
+    { name: ticket.name, min: ticket.min ?? TICKET_MIN, purpose: TICKET_PURPOSE, founding: foundingMessage(ticket) },
+    c,
+  );
   const done = { ...ticket, roomTicker };
   saveLocalTicket(done);
-  await c.send(roomTicker, foundingMessage(ticket)).catch(() => null);
   await registerTicket(done, c);
   return roomTicker;
 }

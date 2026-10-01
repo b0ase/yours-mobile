@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { inscribe, listOrdinals, mintCollection, mintCollectionItem } from '@1sat/actions';
-import { ExternalLink, Image as ImageIcon, Sparkles, Ticket, X } from 'lucide-react';
+import { Coins, ExternalLink, Image as ImageIcon, Sparkles, Ticket, X } from 'lucide-react';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { getOutputName } from '../../utils/format';
 import { TicketMint } from '../tickets/TicketMint';
+import { TokenMint } from '../tokens/TokenMint';
+import { TOKEN_COPY } from '../tokens/token';
 import {
   ACCEPT,
   BLOCKED_MESSAGE,
@@ -30,7 +32,8 @@ import {
 /**
  * "Mint" — gold button beside Receive / Send on the Wallet tab (build-time insert into
  * BsvWallet.tsx, vite.config.mobile.ts). Opens a sheet: Mint a chatroom (a ticket:
- * src/mobile/tickets/TicketMint.tsx; every token is a room) or Mint media (NFT).
+ * src/mobile/tickets/TicketMint.tsx), Mint a token (src/mobile/tokens/TokenMint.tsx; every token
+ * has a room) or Mint media (NFT).
  *
  * Inscribes through upstream's @1sat/actions with the wallet's own apiContext:
  *   inscribe (no collection) · mintCollection + mintCollectionItem (new collection) ·
@@ -44,7 +47,7 @@ const GOLD = '#FFD24D';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
-type Step = 'choose' | 'ticket' | 'media' | 'done';
+type Step = 'choose' | 'ticket' | 'token' | 'media' | 'done';
 type Picked = { file: File; url: string };
 
 const downscale = async (file: File, maxEdge = 2048, quality = 0.85): Promise<File> => {
@@ -232,11 +235,13 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
           <span className="font-bold text-lg" style={{ color: GOLD }}>
             {step === 'ticket'
               ? 'Mint a chatroom'
-              : step === 'choose'
-                ? 'Mint'
-                : step === 'done'
-                  ? 'Minted'
-                  : 'Mint media'}
+              : step === 'token'
+                ? 'Mint a token'
+                : step === 'choose'
+                  ? 'Mint'
+                  : step === 'done'
+                    ? 'Minted'
+                    : 'Mint media'}
           </span>
           <button type="button" onClick={onClose} className="bg-transparent border-0 cursor-pointer" aria-label="Close">
             <X size={20} color="#aaa" />
@@ -251,6 +256,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
               sub="Mint tickets that grant entry to your new chatrooms."
               onClick={() => setStep('ticket')}
             />
+            <Choice icon={<Coins size={18} />} title="Mint a token" sub={TOKEN_COPY} onClick={() => setStep('token')} />
             <Choice
               icon={<ImageIcon size={18} />}
               title="Mint media (NFT)"
@@ -262,6 +268,10 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
         {step === 'ticket' && (
           <TicketMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
+        )}
+
+        {step === 'token' && (
+          <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
         )}
 
         {step === 'media' && (
