@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { ArrowLeft, Coins, Flame, Image as ImageIcon, RefreshCw, Tag } from 'lucide-react';
+import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, RefreshCw, ShieldCheck, Tag, X } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { PageLoader } from '../../components/PageLoader';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -22,6 +22,10 @@ import {
   type Listing,
   type RoomMarket,
 } from './indexer';
+import { categoryOf, nftFeed, type Feed as BaseFeed, type NftCategory, type NftListing } from './classify';
+import { onSafetyChange, refreshSafety, reportItem, safety } from './safety';
+import { Blurred, ContentImg, NftCard } from './NftCard';
+import { pauseAudio, playQueue } from '../media/player';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -32,11 +36,29 @@ import {
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
-const Art = ({ outpoint, kind }: { outpoint: string | null; kind: 'bsv21' | 'coll' }) => {
+const Art = ({
+  outpoint,
+  kind,
+  collectionId,
+}: {
+  outpoint: string | null;
+  kind: 'bsv21' | 'coll';
+  collectionId?: string;
+}) => {
   const urls = contentUrls(outpoint);
   const [i, setI] = useState(0);
   if (i < urls.length) {
-    return <img src={urls[i]} alt="" onError={() => setI(i + 1)} className="h-10 w-10 rounded-lg object-cover shrink-0" />;
+    const img = (
+      <img src={urls[i]} alt="" onError={() => setI(i + 1)} className="h-10 w-10 rounded-lg object-cover shrink-0" />
+    );
+    // Collection art is blurred (unless allow-listed) like every NFT thumbnail; token icons are shown.
+    return kind === 'coll' ? (
+      <div className="h-10 w-10 rounded-lg overflow-hidden shrink-0 text-[0px]">
+        <Blurred collectionId={collectionId}>{img}</Blurred>
+      </div>
+    ) : (
+      img
+    );
   }
   return (
     <div className="h-10 w-10 rounded-lg bg-[#2b2f36] flex items-center justify-center shrink-0">
@@ -45,7 +67,28 @@ const Art = ({ outpoint, kind }: { outpoint: string | null; kind: 'bsv21' | 'col
   );
 };
 
-type Pending = { room: HotRoom; listing: Listing };
+type Feed = BaseFeed & { partial?: boolean };
+type Pending = { room: Pick<HotRoom, 'ref' | 'title'>; listing: Listing };
+type View = 'trending' | 'all' | 'tokens' | NftCategory;
+const VIEWS: [View, string][] = [
+  ['trending', 'Trending'],
+  ['all', 'All'],
+  ['tokens', 'Tokens'],
+  ['music', 'Music'],
+  ['video', 'Video'],
+  ['images', 'Images'],
+];
+
+/** Market-side safety check for a trending room (token or collection). */
+const roomSafe = (r: HotRoom) =>
+  !safety().check({
+    ids: [r.ref.id],
+    collectionId: r.ref.kind === 'coll' ? r.ref.id : null,
+    texts: [r.title, r.subtitle],
+  }).blocked;
+const nftSafe = (n: NftListing) =>
+  !safety().check({ ids: [n.outpoint, n.origin], collectionId: n.collectionId, texts: [n.name, n.collectionName] })
+    .blocked;
 
 const MarketPage = () => {
   const { theme } = useTheme();
@@ -59,6 +102,40 @@ const MarketPage = () => {
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
+  const [view, setView] = useState<View>('trending');
+  const [feed, setFeed] = useState<Feed | null>(null);
+  const [feedError, setFeedError] = useState('');
+  const [preview, setPreview] = useState<NftListing | null>(null);
+  const [reporting, setReporting] = useState<{
+    outpoint: string;
+    origin?: string | null;
+    collectionId?: string | null;
+    name: string;
+  } | null>(null);
+  const [, setSafetyRev] = useState(0);
+
+  useEffect(() => {
+    void refreshSafety();
+    return onSafetyChange(() => setSafetyRev((n) => n + 1));
+  }, []);
+
+  const loadFeed = useCallback(async () => {
+    setFeedError('');
+    setFeed(null);
+    try {
+      setFeed(await nftFeed(300, (items) => setFeed({ items, stats: { scanned: 0, nft: 0, unclassified: 0, blocked: 0, counts: { music: 0, video: 0, images: 0 } }, partial: true })));
+    } catch (e) {
+      setFeedError(e instanceof Error ? e.message : String(e));
+      setFeed({
+        items: [],
+        stats: { scanned: 0, nft: 0, unclassified: 0, blocked: 0, counts: { music: 0, video: 0, images: 0 } },
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view !== 'trending' && view !== 'tokens' && feed === null) void loadFeed();
+  }, [view, feed, loadFeed]);
 
   const [loadingBoard, setLoadingBoard] = useState(false);
   const loadBoard = useCallback(async () => {
@@ -105,7 +182,12 @@ const MarketPage = () => {
       const fee = marketFeeOptions();
       const res =
         r.ref.kind === 'bsv21'
-          ? await buyBsv21.execute(apiContext, { tokenId: r.ref.id, outpoint: listing.outpoint, amount: listing.amount ?? '0', ...fee })
+          ? await buyBsv21.execute(apiContext, {
+              tokenId: r.ref.id,
+              outpoint: listing.outpoint,
+              amount: listing.amount ?? '0',
+              ...fee,
+            })
           : await buyOrdinal.execute(apiContext, { outpoint: listing.outpoint, ...fee });
       if (!res.txid || res.error) {
         addSnackbar(getErrorMessage(res.error), 'error');
@@ -114,7 +196,8 @@ const MarketPage = () => {
       addSnackbar('Purchase sent!', 'success');
       setPending(null);
       clearMarketCache();
-      setMarket(await roomMarket(r.ref));
+      if (room) setMarket(await roomMarket(room.ref));
+      else void loadFeed();
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : 'Purchase failed', 'error');
     } finally {
@@ -158,30 +241,122 @@ const MarketPage = () => {
     </div>
   );
 
+  const chips = (
+    <div className="flex gap-1.5 overflow-x-auto">
+      {VIEWS.map(([id, label]) => (
+        <button
+          key={id}
+          onClick={() => {
+            setView(id);
+            setRoom(null);
+          }}
+          className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{ background: view === id ? '#A1FF8B' : '#17191E', color: view === id ? '#010101' : '#98A2B3' }}
+        >
+          {label}
+          {feed && (id === 'music' || id === 'video' || id === 'images')
+            ? ` ${feed.items.filter((n) => n.category === id && nftSafe(n)).length}`
+            : ''}
+        </button>
+      ))}
+    </div>
+  );
+
+  const playPreview = (n: NftListing) => {
+    playQueue(
+      [
+        {
+          id: n.outpoint,
+          title: n.name,
+          url: contentUrls(n.origin)[0],
+          artwork: n.collectionIcon ? contentUrls(n.collectionIcon)[0] : undefined,
+        },
+      ],
+      0,
+    );
+  };
+
+  const shownNfts = feed?.items.filter((n) => (view === 'all' || n.category === view) && nftSafe(n)) ?? [];
+  const nftGrid = (
+    <section className="flex flex-col gap-2">
+      {feed === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading NFT listings…</p>}
+      {feedError && <p className="text-xs text-[#F97066]">{feedError}</p>}
+      {feed && shownNfts.length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">Nothing listed here right now.</p>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        {shownNfts.map((n) => (
+          <NftCard
+            key={n.outpoint}
+            item={n}
+            onPlay={() => playPreview(n)}
+            onOpen={() => {
+              if (n.category === 'video') pauseAudio();
+              setPreview(n);
+            }}
+            onReport={() =>
+              setReporting({ outpoint: n.outpoint, origin: n.origin, collectionId: n.collectionId, name: n.name })
+            }
+            onBuy={() =>
+              setPending({
+                room: { ref: { kind: 'coll', id: n.collectionId ?? '', key: '' }, title: n.collectionName ?? 'NFT' },
+                listing: {
+                  outpoint: n.outpoint,
+                  priceSats: n.priceSats,
+                  amount: null,
+                  label: n.name,
+                  origin: n.origin,
+                  seller: n.seller,
+                  buyable: n.buyable,
+                },
+              })
+            }
+          />
+        ))}
+      </div>
+      {feed?.partial && <p className="text-[10px] text-[#667085] text-center">Still loading…</p>}
+      {feed && !feed.partial && (
+        <p className="text-[10px] text-[#667085] text-center flex items-center justify-center gap-1">
+          <ShieldCheck size={11} /> Safety filter on · {feed.stats.blocked} hidden · {feed.stats.unclassified}{' '}
+          unsupported
+        </p>
+      )}
+    </section>
+  );
+
   const trending = (
     <section className="flex flex-col gap-2">
       {rooms === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading the order book…</p>}
       {loadingBoard && rooms !== null && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && <p className="text-xs text-[#F97066]">{error}</p>}
-      {rooms?.length === 0 && !error && <p className="text-xs text-[#98A2B3] text-center py-8">Nothing trending right now.</p>}
-      {rooms?.map((r, i) => (
-        <button key={r.ref.key} onClick={() => void openRoom(r)} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left">
-          <span className="w-4 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
-          <Art outpoint={r.icon} kind={r.ref.kind} />
-          <div className="min-w-0 flex-1">
-            <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{r.title}</div>
-            <div className="text-[11px] text-[#98A2B3]">
-              {r.ref.kind === 'bsv21' ? 'Token' : 'Collection'} · {r.trades} sales · {r.newListings} new listings
+      {rooms?.length === 0 && !error && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">Nothing trending right now.</p>
+      )}
+      {rooms
+        ?.filter(roomSafe)
+        .filter((r) => view !== 'tokens' || r.ref.kind === 'bsv21')
+        .map((r, i) => (
+          <button
+            key={r.ref.key}
+            onClick={() => void openRoom(r)}
+            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+          >
+            <span className="w-4 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
+            <Art outpoint={r.icon} kind={r.ref.kind} collectionId={r.ref.id} />
+            <div className="min-w-0 flex-1">
+              <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{r.title}</div>
+              <div className="text-[11px] text-[#98A2B3]">
+                {r.ref.kind === 'bsv21' ? 'Token' : 'Collection'} · {r.trades} sales · {r.newListings} new listings
+              </div>
             </div>
-          </div>
-          <div className="text-right shrink-0">
-            <div className="text-[10px] text-[#667085]">Floor</div>
-            <div className="text-xs font-semibold" style={{ color: '#A1FF8B' }}>
-              {r.floorLabel ?? '—'}
+            <div className="text-right shrink-0">
+              <div className="text-[10px] text-[#667085]">Floor</div>
+              <div className="text-xs font-semibold" style={{ color: '#A1FF8B' }}>
+                {r.floorLabel ?? '—'}
+              </div>
             </div>
-          </div>
-        </button>
-      ))}
+          </button>
+        ))}
     </section>
   );
 
@@ -191,7 +366,7 @@ const MarketPage = () => {
         <ArrowLeft size={14} /> Trending
       </button>
       <div className="flex items-center gap-3">
-        <Art outpoint={room.icon} kind={room.ref.kind} />
+        <Art outpoint={room.icon} kind={room.ref.kind} collectionId={room.ref.id} />
         <div className="min-w-0">
           <div className="text-base font-bold text-white">{room.title}</div>
           <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{room.subtitle}</div>
@@ -202,25 +377,50 @@ const MarketPage = () => {
       </div>
       {market === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading listings…</p>}
       {market?.listings.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-6">No live listings.</p>}
-      {market?.listings.map((l) => (
-        <div key={l.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
-          {room.ref.kind === 'coll' && <Art outpoint={l.origin} kind="coll" />}
-          <div className="min-w-0 flex-1">
-            <div className={`text-sm text-white ${ELLIPSIS}`}>{l.label}</div>
-            <div className="text-[11px] font-semibold" style={{ color: '#A1FF8B' }}>
-              {formatSats(l.priceSats)}
+      {market?.listings
+        .filter(
+          (l) =>
+            room.ref.kind === 'bsv21' ||
+            (!!categoryOf(l.contentType) &&
+              !safety().check({ ids: [l.outpoint, l.origin], collectionId: room.ref.id, texts: [l.label, room.title] })
+                .blocked),
+        )
+        .map((l) => (
+          <div key={l.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
+            {room.ref.kind === 'coll' && (
+              <Art
+                outpoint={categoryOf(l.contentType) === 'images' ? l.origin : room.icon}
+                kind="coll"
+                collectionId={room.ref.id}
+              />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className={`text-sm text-white ${ELLIPSIS}`}>{l.label}</div>
+              <div className="text-[11px] font-semibold" style={{ color: '#A1FF8B' }}>
+                {formatSats(l.priceSats)}
+              </div>
             </div>
+            <button
+              disabled={!l.buyable}
+              onClick={() => setPending({ room, listing: l })}
+              className="rounded-lg px-3 py-1.5 text-xs font-bold"
+              style={{ background: l.buyable ? '#A1FF8B' : '#2b2f36', color: l.buyable ? '#010101' : '#667085' }}
+            >
+              {l.buyable ? 'Buy' : 'Unavailable'}
+            </button>
+            {room.ref.kind === 'coll' && (
+              <button
+                aria-label="Report"
+                className="p-1"
+                onClick={() =>
+                  setReporting({ outpoint: l.outpoint, origin: l.origin, collectionId: room.ref.id, name: l.label })
+                }
+              >
+                <Flag size={14} color="#F97066" />
+              </button>
+            )}
           </div>
-          <button
-            disabled={!l.buyable}
-            onClick={() => setPending({ room, listing: l })}
-            className="rounded-lg px-3 py-1.5 text-xs font-bold"
-            style={{ background: l.buyable ? '#A1FF8B' : '#2b2f36', color: l.buyable ? '#010101' : '#667085' }}
-          >
-            {l.buyable ? 'Buy' : 'Unavailable'}
-          </button>
-        </div>
-      ))}
+        ))}
     </section>
   );
 
@@ -235,7 +435,10 @@ const MarketPage = () => {
       {mine?.map((o) => (
         <div key={o.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
           <div className={`min-w-0 flex-1 text-sm text-white ${ELLIPSIS}`}>{getOutputName(o, 'Listing')}</div>
-          <button onClick={() => void cancel(o)} className="rounded-lg px-3 py-1.5 text-xs font-bold bg-[#2b2f36] text-white">
+          <button
+            onClick={() => void cancel(o)}
+            className="rounded-lg px-3 py-1.5 text-xs font-bold bg-[#2b2f36] text-white"
+          >
             Cancel
           </button>
         </div>
@@ -307,7 +510,8 @@ const MarketPage = () => {
               clearMarketCache();
               if (section === 'mine') void loadMine();
               else if (room) void openRoom(room);
-              else void loadBoard();
+              else if (view === 'trending' || view === 'tokens') void loadBoard();
+              else void loadFeed();
             }}
             className="p-2"
           >
@@ -315,10 +519,76 @@ const MarketPage = () => {
           </button>
         </div>
         {segment}
-        {section === 'mine' ? mineView : room ? roomView : trending}
+        {section === 'trending' && !room && chips}
+        {section === 'mine'
+          ? mineView
+          : room
+            ? roomView
+            : view === 'trending' || view === 'tokens'
+              ? trending
+              : nftGrid}
         <p className="text-[10px] text-[#667085] text-center">Listings from the 1Sat order book (api.1sat.app).</p>
       </div>
       {confirm}
+      {preview && (
+        <div
+          className="fixed inset-0 z-[200] flex flex-col bg-black"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        >
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{preview.name}</span>
+            <button aria-label="Close" onClick={() => setPreview(null)} className="p-2">
+              <X size={20} color="#fff" />
+            </button>
+          </div>
+          <div className="flex-1 flex items-center justify-center min-h-0">
+            {preview.category === 'video' && (
+              <video src={contentUrls(preview.origin)[0]} controls playsInline className="max-w-full max-h-full" />
+            )}
+            {preview.category === 'images' && (
+              <ContentImg
+                outpoint={preview.origin}
+                alt={preview.name}
+                className="max-w-full max-h-full object-contain"
+              />
+            )}
+          </div>
+          <div className="px-4 py-3 text-[10px] text-[#667085] break-all">
+            {preview.collectionName ?? 'No collection'} · {preview.priceLabel} · {preview.contentType}
+          </div>
+        </div>
+      )}
+      {reporting && (
+        <div className="fixed inset-0 z-[210] flex items-end bg-black/60" onClick={() => setReporting(null)}>
+          <div
+            className="w-full rounded-t-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-base font-bold text-white">Report this item?</div>
+            <div className="text-xs text-[#98A2B3]">
+              “{reporting.name}” will be hidden on this device right away and flagged for review.
+            </div>
+            {(['Sexual or adult content', 'Violence or abuse', 'Scam or spam', 'Other'] as const).map((reason) => (
+              <button
+                key={reason}
+                onClick={() => {
+                  void reportItem({ ...reporting, reason });
+                  setReporting(null);
+                  setPreview(null);
+                  addSnackbar('Reported and hidden', 'success');
+                }}
+                className="rounded-xl bg-[#2b2f36] py-2.5 text-sm font-semibold text-white"
+              >
+                {reason}
+              </button>
+            ))}
+            <button onClick={() => setReporting(null)} className="py-2 text-xs text-[#98A2B3]">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

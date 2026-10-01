@@ -27,7 +27,9 @@ export const CONTENT_HOSTS = [
   'https://ordinals.gorillapool.io/content',
 ];
 export const contentUrls = (outpoint: string | null | undefined): string[] =>
-  outpoint && isOutpoint(outpoint.replace('.', '_')) ? CONTENT_HOSTS.map((h) => `${h}/${outpoint.replace('.', '_')}`) : [];
+  outpoint && isOutpoint(outpoint.replace('.', '_'))
+    ? CONTENT_HOSTS.map((h) => `${h}/${outpoint.replace('.', '_')}`)
+    : [];
 
 // ── fetch + cache ────────────────────────────────────────────────────────────
 const cache = new Map<string, { value: unknown; expires: number }>();
@@ -90,40 +92,79 @@ export async function search(params: Record<string, string | string[]>): Promise
 type OrdfsMeta = {
   origin?: string;
   contentType?: string;
-  map?: { name?: string; subType?: string; subTypeData?: string | { collectionId?: string; description?: string } };
+  map?: {
+    name?: string;
+    subType?: string;
+    subTypeData?: string | { collectionId?: string; description?: string };
+  } & Record<string, unknown>;
 };
-type ItemInfo = { id: string; name: string | null; origin: string; image: boolean };
-const itemColl = new Map<string, ItemInfo | null>(); // immutable: no expiry
 
-/** Collection (and item name) of the inscription at this outpoint, from its origin. */
-export async function itemCollection(outpoint: string): Promise<ItemInfo | null> {
-  if (itemColl.has(outpoint)) return itemColl.get(outpoint)!;
-  let value: ItemInfo | null = null;
+/** What the indexer knows about an inscription (from ORDFS metadata of its origin). */
+export type ItemMeta = {
+  origin: string;
+  contentType: string | null;
+  name: string | null;
+  collectionId: string | null;
+  /** Raw MAP fields (strings), for the safety filter (nsfw / adult / rating flags, descriptions). */
+  map: Record<string, unknown>;
+};
+const itemMetas = new Map<string, ItemMeta | null>(); // immutable: no expiry
+
+const parseStd = (std: unknown): Record<string, unknown> => {
+  if (std && typeof std === 'object') return std as Record<string, unknown>;
+  try {
+    const v = JSON.parse(typeof std === 'string' ? std : '') as unknown;
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+
+/** Content type and MAP metadata of the inscription at this outpoint. null on a transient error (not cached). */
+export async function itemInfo(outpoint: string): Promise<ItemMeta | null> {
+  if (itemMetas.has(outpoint)) return itemMetas.get(outpoint)!;
+  let value: ItemMeta | null;
   try {
     const res = await fetch(`${ONESAT}/ordfs/metadata/${outpoint.replace('_', '.')}:-2`, {
       signal: AbortSignal.timeout(10_000),
     });
     if (res.ok) {
       const meta = (await res.json()) as OrdfsMeta;
-      const m = meta.map;
-      let std = m?.subTypeData;
-      if (typeof std === 'string') std = JSON.parse(std) as { collectionId?: string };
-      if (m?.subType === 'collectionItem' && std?.collectionId) {
-        value = {
-          id: std.collectionId,
-          name: m.name ?? null,
-          origin: (meta.origin ?? outpoint).replace('.', '_'),
-          image: !!meta.contentType?.startsWith('image/'),
-        };
-      }
-    } else if (res.status !== 404) {
+      const m = meta.map ?? {};
+      const std = parseStd(m.subTypeData);
+      const coll = m.subType === 'collectionItem' && typeof std.collectionId === 'string' ? std.collectionId : null;
+      value = {
+        origin: (meta.origin ?? outpoint).replace('.', '_'),
+        contentType: meta.contentType ?? null,
+        name: typeof m.name === 'string' ? m.name : null,
+        collectionId: coll,
+        map: { ...m, subTypeData: std },
+      };
+    } else if (res.status === 404) {
+      value = { origin: outpoint.replace('.', '_'), contentType: null, name: null, collectionId: null, map: {} };
+    } else {
       return null; // transient: don't cache
     }
   } catch {
     return null;
   }
-  itemColl.set(outpoint, value);
+  itemMetas.set(outpoint, value);
   return value;
+}
+
+type ItemInfo = { id: string; name: string | null; origin: string; image: boolean; contentType: string | null };
+
+/** Collection (and item name) of the inscription at this outpoint, from its origin. */
+export async function itemCollection(outpoint: string): Promise<ItemInfo | null> {
+  const m = await itemInfo(outpoint);
+  if (!m?.collectionId) return null;
+  return {
+    id: m.collectionId,
+    name: m.name,
+    origin: m.origin,
+    image: !!m.contentType?.startsWith('image/'),
+    contentType: m.contentType,
+  };
 }
 
 export type RecentListing = {
@@ -137,6 +178,7 @@ export type RecentListing = {
   origin: string | null;
   seller: string;
   height: number | null;
+  contentType?: string | null;
 };
 
 const heightOf = (score?: number) => (score && score < 1e8 ? Math.floor(score) : null);
@@ -152,13 +194,36 @@ async function liveListings(): Promise<RecentListing[]> {
     if (token?.id && token.amt) {
       const ref = parseRoom('bsv21', token.id);
       return ref
-        ? { event: 'listed', outpoint, kind: 'bsv21', id: ref.id, priceSats, amount: token.amt, name: null, origin: null, seller, height: heightOf(r.score) }
+        ? {
+            event: 'listed',
+            outpoint,
+            kind: 'bsv21',
+            id: ref.id,
+            priceSats,
+            amount: token.amt,
+            name: null,
+            origin: null,
+            seller,
+            height: heightOf(r.score),
+          }
         : null;
     }
     const item = await itemCollection(outpoint);
     const ref = item ? parseRoom('coll', item.id) : null;
     return ref && item
-      ? { event: 'listed', outpoint, kind: 'coll', id: ref.id, priceSats, amount: null, name: item.name, origin: item.image ? item.origin : null, seller, height: heightOf(r.score) }
+      ? {
+          event: 'listed',
+          outpoint,
+          kind: 'coll',
+          id: ref.id,
+          priceSats,
+          amount: null,
+          name: item.name,
+          origin: item.origin,
+          seller,
+          height: heightOf(r.score),
+          contentType: item.contentType,
+        }
       : null;
   });
   return mapped.filter((l): l is RecentListing => !!l);
@@ -178,7 +243,19 @@ async function sales(): Promise<RecentListing[]> {
     const item = await itemCollection(origin);
     const ref = item ? parseRoom('coll', item.id) : null;
     return ref && item
-      ? { event: 'sold', outpoint: r.outpoint.replace('.', '_'), kind: 'coll', id: ref.id, priceSats: lock.price, amount: null, name: lock.name ?? item.name, origin: item.image ? item.origin : null, seller: '', height: heightOf(lock.spend_score) }
+      ? {
+          event: 'sold',
+          outpoint: r.outpoint.replace('.', '_'),
+          kind: 'coll',
+          id: ref.id,
+          priceSats: lock.price,
+          amount: null,
+          name: lock.name ?? item.name,
+          origin: item.origin,
+          seller: '',
+          height: heightOf(lock.spend_score),
+          contentType: item.contentType,
+        }
       : null;
   });
   return mapped.filter((l): l is RecentListing => !!l);
@@ -227,7 +304,13 @@ export const roomMeta = (kind: RoomKind, id: string): Promise<RoomMeta | null> =
         if (kind === 'bsv21') {
           const { token: t } = await getJson<Bsv21Token>(`${ONESAT}/bsv21/${id}`);
           const sym = (t?.sym ?? id.slice(0, 8)).replace(/^\$/, '');
-          return { title: `$${sym}`, subtitle: 'BSV-21 token', icon: t?.icon ?? null, dec: Number(t?.dec ?? 0) || 0, sym };
+          return {
+            title: `$${sym}`,
+            subtitle: 'BSV-21 token',
+            icon: t?.icon ?? null,
+            dec: Number(t?.dec ?? 0) || 0,
+            sym,
+          };
         }
         const m = await getJson<OrdfsMeta>(`${ONESAT}/ordfs/metadata/${id.replace('_', '.')}`);
         return {
@@ -268,11 +351,18 @@ export type Listing = {
   label: string;
   origin: string | null; // art (collections)
   seller: string;
+  contentType?: string | null;
   /** Can be bought in-app (BSV-21: the overlay recognises it; buyBsv21 validates against it). */
   buyable: boolean;
 };
 
-export type RoomMarket = { listings: Listing[]; floorLabel: string | null; floorSats: number | null; live: number; buyableCount: number };
+export type RoomMarket = {
+  listings: Listing[];
+  floorLabel: string | null;
+  floorSats: number | null;
+  live: number;
+  buyableCount: number;
+};
 
 const EMPTY: RoomMarket = { listings: [], floorLabel: null, floorSats: null, live: 0, buyableCount: 0 };
 
@@ -297,15 +387,18 @@ async function loadMarket(room: RoomRef, limit: number): Promise<RoomMarket> {
     const meta = await roomMeta(room.kind, room.id);
     const listings = (await recentListings('active'))
       .filter((l) => l.kind === 'coll' && l.id === room.id)
-      .map((l): Listing => ({
-        outpoint: l.outpoint,
-        priceSats: l.priceSats,
-        amount: null,
-        label: l.name ?? meta?.title ?? 'Item',
-        origin: l.origin,
-        seller: l.seller,
-        buyable: true,
-      }))
+      .map(
+        (l): Listing => ({
+          outpoint: l.outpoint,
+          priceSats: l.priceSats,
+          amount: null,
+          label: l.name ?? meta?.title ?? 'Item',
+          origin: l.origin,
+          seller: l.seller,
+          contentType: l.contentType,
+          buyable: true,
+        }),
+      )
       .sort((a, b) => a.priceSats - b.priceSats);
     return {
       listings: listings.slice(0, limit),
@@ -317,24 +410,41 @@ async function loadMarket(room: RoomRef, limit: number): Promise<RoomMarket> {
   }
   // eslint-disable-next-line prefer-const
   let [rows, meta] = await Promise.all([
-    search({ key: [`bsv21:${room.id}`, 'ordlock'], join: 'intersect', unspent: 'true', rev: 'true', limit: '100', tags: 'bsv21,ordlock' }),
+    search({
+      key: [`bsv21:${room.id}`, 'ordlock'],
+      join: 'intersect',
+      unspent: 'true',
+      rev: 'true',
+      limit: '100',
+      tags: 'bsv21,ordlock',
+    }),
     roomMeta(room.kind, room.id),
   ]);
   const seen = new Set<string>();
   rows = rows.filter((r) => !seen.has(r.outpoint) && !!seen.add(r.outpoint)); // search can repeat rows
-  const valid = await overlayValid(room.id, rows.map((r) => r.outpoint));
+  const valid = await overlayValid(
+    room.id,
+    rows.map((r) => r.outpoint),
+  );
   const dec = meta?.dec ?? 0;
   const listings = rows
-    .filter((r) => r.data?.bsv21?.id === room.id && (r.data.ordlock?.price ?? 0) > 0 && BigInt(r.data.bsv21.amt ?? '0') > BigInt(0))
-    .map((r): Listing => ({
-      outpoint: r.outpoint.replace('.', '_'),
-      priceSats: r.data!.ordlock!.price!,
-      amount: r.data!.bsv21!.amt!,
-      label: `${formatAmount(BigInt(r.data!.bsv21!.amt!), dec)} $${meta?.sym ?? ''}`,
-      origin: null,
-      seller: r.data!.ordlock!.seller?.AddressString ?? '',
-      buyable: valid.has(r.outpoint.replace('.', '_')),
-    }))
+    .filter(
+      (r) =>
+        r.data?.bsv21?.id === room.id &&
+        (r.data.ordlock?.price ?? 0) > 0 &&
+        BigInt(r.data.bsv21.amt ?? '0') > BigInt(0),
+    )
+    .map(
+      (r): Listing => ({
+        outpoint: r.outpoint.replace('.', '_'),
+        priceSats: r.data!.ordlock!.price!,
+        amount: r.data!.bsv21!.amt!,
+        label: `${formatAmount(BigInt(r.data!.bsv21!.amt!), dec)} $${meta?.sym ?? ''}`,
+        origin: null,
+        seller: r.data!.ordlock!.seller?.AddressString ?? '',
+        buyable: valid.has(r.outpoint.replace('.', '_')),
+      }),
+    )
     .sort((a, b) => a.priceSats - b.priceSats);
   const perToken = (l: Listing) => l.priceSats / (Number(l.amount) / 10 ** dec);
   const floor = listings.length ? Math.min(...listings.map(perToken)) : null;

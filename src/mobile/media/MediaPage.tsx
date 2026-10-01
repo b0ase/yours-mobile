@@ -8,6 +8,8 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { getOutputName, getTagValue } from '../../utils/format';
 import { isMediaOutput, kindOf, type MediaKind } from './media';
 import { pauseAudio, playQueue } from './player';
+import { safety } from '../market/safety';
+import { Blurred } from '../market/NftCard';
 
 /**
  * Media tab: the wallet's non-fungible inscriptions, filtered by kind, with an
@@ -25,7 +27,7 @@ const FILTERS: { id: Filter; label: string }[] = [
 const PAGE = 50;
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
-type Item = { output: WalletOutput; name: string; type?: string; kind: MediaKind; url: string };
+type Item = { output: WalletOutput; name: string; type?: string; kind: MediaKind; url: string; flagged: boolean };
 
 const MediaPage = () => {
   const { apiContext } = useServiceContext();
@@ -47,6 +49,8 @@ const MediaPage = () => {
         name: getOutputName(o, 'Inscription'),
         type,
         kind: kindOf(type),
+        // Your own items are never hidden; ones the Market filter would block are blurred (tap to reveal).
+        flagged: safety().check({ ids: [o.outpoint, origin], texts: [getOutputName(o, '')] }).blocked,
         url: `${apiContext.services!.ordfs.getContentUrl(origin)}?outpoint=${o.outpoint}`,
       };
     },
@@ -101,25 +105,35 @@ const MediaPage = () => {
       className="relative rounded-xl overflow-hidden bg-[#17191E] border border-white/5"
       style={{ aspectRatio: '1/1' }}
     >
-      {item.kind === 'images' && (
-        <img src={item.url} alt={item.name} loading="lazy" className="w-full h-full object-cover" />
-      )}
-      {item.kind === 'video' && (
-        <video src={`${item.url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
-      )}
-      {(item.kind === 'music' || item.kind === 'other') && (
-        <div className="w-full h-full flex items-center justify-center">
-          {item.kind === 'music' ? (
-            <Music size={28} style={{ color: '#A1FF8B' }} />
-          ) : (
-            <FileQuestion size={28} style={{ color: '#98A2B3' }} />
-          )}
-        </div>
-      )}
+      <Blurred forceBlur={item.flagged}>
+        {item.kind === 'images' && (
+          <img src={item.url} alt={item.name} loading="lazy" className="w-full h-full object-cover" />
+        )}
+        {item.kind === 'video' && (
+          <video
+            src={`${item.url}#t=0.1`}
+            muted
+            playsInline
+            preload="metadata"
+            className="w-full h-full object-cover"
+          />
+        )}
+        {(item.kind === 'music' || item.kind === 'other') && (
+          <div className="w-full h-full flex items-center justify-center">
+            {item.kind === 'music' ? (
+              <Music size={28} style={{ color: '#A1FF8B' }} />
+            ) : (
+              <FileQuestion size={28} style={{ color: '#98A2B3' }} />
+            )}
+          </div>
+        )}
+      </Blurred>
       {(item.kind === 'music' || item.kind === 'video') && (
         <Play size={14} className="absolute top-1.5 right-1.5" color="#fff" fill="#fff" />
       )}
-      <div className={`absolute bottom-0 inset-x-0 bg-black/60 px-1.5 py-1 text-[10px] text-white text-left ${ELLIPSIS}`}>
+      <div
+        className={`absolute bottom-0 inset-x-0 bg-black/60 px-1.5 py-1 text-[10px] text-white text-left ${ELLIPSIS}`}
+      >
         {item.name}
       </div>
     </button>
@@ -175,7 +189,10 @@ const MediaPage = () => {
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-[200] flex flex-col bg-black" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+        <div
+          className="fixed inset-0 z-[200] flex flex-col bg-black"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        >
           <div className="flex items-center justify-between px-4 py-3">
             <span className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{open.name}</span>
             <button aria-label="Close" onClick={() => setOpen(null)} className="p-2">

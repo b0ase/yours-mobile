@@ -1,0 +1,16 @@
+{
+  "_doc": "Bundled Market safety blocklist (src/mobile/market/safety.ts). ids are outpoints txid_vout (dots are normalised). keywords match whole words, case-insensitive; substrings match anywhere. allowCollections only un-blurs thumbnails of items that already passed every other check.",
+  "collections": [],
+  "origins": [],
+  "outpoints": [],
+  "tokens": [],
+  "keywords": [
+    "nsfw", "xxx", "porn", "porno", "pornographic", "pornography", "nude", "nudes", "nudity", "naked",
+    "onlyfans", "fansly", "hentai", "ecchi", "sex", "sexy", "sexual", "erotic", "erotica", "adult",
+    "18+", "r18", "r-18", "lewd", "fetish", "bdsm", "milf", "boobs", "tits", "titties", "pussy",
+    "cock", "dick", "penis", "vagina", "camgirl", "stripper", "striptease", "topless", "playboy",
+    "cherryx"
+  ],
+  "substrings": ["nsfw", "porn", "hentai", "onlyfans", "xxx"],
+  "allowCollections": []
+}

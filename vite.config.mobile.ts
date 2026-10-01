@@ -235,6 +235,9 @@ export default mergeConfig(
       __MOBILE_BRAND__: JSON.stringify(MOBILE_BRAND),
       // Market tab fee address (src/mobile/market/fee.ts). Empty = no fee.
       __MARKET_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MARKET_FEE_ADDRESS ?? ''),
+      // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
+      __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
+      __MARKET_REPORT_URL__: JSON.stringify(process.env.BWALLET_MARKET_REPORT_URL ?? ''),
     },
   }),
 );

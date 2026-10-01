@@ -1,0 +1,101 @@
+import { describe, expect, test } from 'bun:test';
+import { categoryOf } from './classify';
+import { BUNDLED, compileKeywords, mergeBlocklists, metadataFlagsAdult, normalizeBlocklist, remoteBlocklist, SafetyFilter } from './safety';
+
+const f = new SafetyFilter(BUNDLED);
+const blocked = (text: string) => f.check({ texts: [text] }).blocked;
+
+describe('categoryOf', () => {
+  test('audio/video/image', () => {
+    expect(categoryOf('audio/mpeg')).toBe('music');
+    expect(categoryOf('audio/wav')).toBe('music');
+    expect(categoryOf('video/mp4')).toBe('video');
+    expect(categoryOf('image/png')).toBe('images');
+    expect(categoryOf('image/svg+xml')).toBe('images');
+    expect(categoryOf('image/gif')).toBe('images');
+    expect(categoryOf('IMAGE/WEBP; charset=binary')).toBe('images');
+  });
+  test('everything else is unclassifiable (hidden)', () => {
+    for (const t of ['text/html', 'text/plain', 'application/json', 'application/bsv-20', 'model/gltf-binary', '', null, undefined, 'image/'])
+      expect(categoryOf(t)).toBeNull();
+  });
+});
+
+describe('keyword matching', () => {
+  test('explicit terms are blocked, case-insensitive', () => {
+    for (const t of ['NSFW drop', 'xxx', 'Porn', 'nude art', 'Nudes #3', 'OnlyFans leak', 'hentai girl', 'sex', 'Erotic', 'Adult collection', '18+ only', 'Sexy Punk'])
+      expect(blocked(t)).toBe(true);
+  });
+  test('unambiguous terms match inside words', () => {
+    expect(blocked('myNSFWdrop')).toBe(true);
+    expect(blocked('pornstar')).toBe(true);
+  });
+  // Decisions: whole-word matching avoids place names and ordinary words.
+  test('word-boundary false positives are NOT blocked', () => {
+    for (const t of ['Essex', 'Sussex Punks', 'Middlesex', 'Wessex', 'adultery (a novel)', 'Adulting 101', 'pussycat', 'cockpit', 'Dickens', 'Sextant', 'Analysis'])
+      expect(blocked(t)).toBe(false);
+  });
+  test('18+ needs its own boundary', () => {
+    expect(blocked('Age 18+')).toBe(true);
+    expect(blocked('118+2')).toBe(false);
+  });
+  test('compileKeywords with nothing matches nothing', () => expect(compileKeywords([])).toBeNull());
+});
+
+describe('metadata flags', () => {
+  test('nsfw / adult / rating', () => {
+    expect(metadataFlagsAdult({ nsfw: 'true' })).toBe(true);
+    expect(metadataFlagsAdult({ adult: true })).toBe(true);
+    expect(metadataFlagsAdult({ rating: 'Explicit' })).toBe(true);
+    expect(metadataFlagsAdult({ subTypeData: { contentRating: '18+' } })).toBe(true);
+    expect(metadataFlagsAdult({ nsfw: 'false', rating: 'G' })).toBe(false);
+    expect(metadataFlagsAdult(null)).toBe(false);
+  });
+  test('keywords in metadata descriptions are checked', () => {
+    expect(f.check({ texts: ['Cool Cats'], map: { subTypeData: { description: 'uncensored hentai' } } }).blocked).toBe(true);
+  });
+});
+
+describe('blocklist ids, hidden list, allowlist', () => {
+  const op = 'a'.repeat(64) + '_0';
+  const list = mergeBlocklists(BUNDLED, normalizeBlocklist({ collections: ['B'.repeat(64) + '.1'], outpoints: [op], allowCollections: ['c'.repeat(64) + '_0'] }));
+  const g = new SafetyFilter(list, new Set(['d'.repeat(64) + '_2']));
+  test('collection id (dot form normalised)', () => expect(g.check({ collectionId: 'b'.repeat(64) + '_1' }).reason).toBe('id'));
+  test('outpoint', () => expect(g.check({ ids: [op] }).blocked).toBe(true));
+  test('locally hidden (reported)', () => expect(g.check({ ids: ['d'.repeat(64) + '.2'] }).reason).toBe('hidden'));
+  test('clean item passes', () => expect(g.check({ ids: ['e'.repeat(64) + '_0'], texts: ['Bitcoin Punks'] }).blocked).toBe(false));
+  test('allowlist only affects blur', () => {
+    expect(g.isAllowlisted('c'.repeat(64) + '.0')).toBe(true);
+    expect(g.isAllowlisted(null)).toBe(false);
+  });
+  test('normalize ignores junk', () => {
+    const n = normalizeBlocklist({ keywords: ['X', 3, ''], collections: 'nope' });
+    expect(n.keywords).toEqual(['x']);
+    expect(n.collections).toEqual([]);
+  });
+});
+
+describe('remote blocklist', () => {
+  test('no URL = empty, no fetch', async () => {
+    expect((await remoteBlocklist('')).keywords).toEqual([]);
+  });
+  test('fetched once, cached for an hour', async () => {
+    let calls = 0;
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response(JSON.stringify({ collections: ['f'.repeat(64) + '_0'] }));
+    }) as unknown as typeof fetch;
+    try {
+      const t = 1_000_000;
+      const a = await remoteBlocklist('https://example.test/bl.json', t);
+      await remoteBlocklist('https://example.test/bl.json', t + 30 * 60_000);
+      expect(a.collections).toEqual(['f'.repeat(64) + '_0']);
+      expect(calls).toBe(1);
+      await remoteBlocklist('https://example.test/bl.json', t + 61 * 60_000);
+      expect(calls).toBe(2);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+});
