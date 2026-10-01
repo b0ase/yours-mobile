@@ -11,6 +11,7 @@ import {
   sourceLabel,
   sourceOf,
   sourceUrl,
+  textOn,
   type Source,
 } from './sources';
 
@@ -84,5 +85,21 @@ describe('source registry', () => {
     const tc = postActions({ source: 'treechat', threadId: THREAD, txid: TX });
     expect(tc.more).toContain('open');
     expect(postActions({ source: 'treechat', threadId: null, txid: TX }).more).not.toContain('copyLink');
+  });
+});
+
+describe('source colours', () => {
+  test('Treechat purple, Twetch blue, bChat gold', () => {
+    expect(SOURCE_REGISTRY.treechat.color).toBe('#8C80E4');
+    expect(SOURCE_REGISTRY.twetch.color).toBe('#085AF6');
+    expect(SOURCE_REGISTRY.bchat.color).toBe('#FFD24D');
+  });
+
+  test('textOn picks the readable text colour', () => {
+    expect(textOn('#085AF6')).toBe('#ffffff');
+    expect(textOn('#8C80E4')).toBe('#1a1300');
+    expect(textOn('#FFD24D')).toBe('#1a1300');
+    expect(textOn('#000000')).toBe('#ffffff');
+    expect(textOn('nope')).toBe('#ffffff');
   });
 });

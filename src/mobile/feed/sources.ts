@@ -44,6 +44,7 @@ export type SourceInfo = {
   id: Source;
   label: string;
   icon: string;
+  /** Brand colour: the selected source chip and the source's avatar ring. */
   color?: string;
   /** Does this MAP app value belong to the source? (lower-cased, trimmed) */
   matches: (app: string) => boolean;
@@ -76,7 +77,8 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
     id: 'treechat',
     label: 'Treechat',
     icon: treechatIcon,
-    color: '#8D7FE3',
+    // Sampled from brand/sources/treechat.png (dominant non-black colour).
+    color: '#8C80E4',
     matches: (a) => a === 'treechat' || a.startsWith('treechat_'),
     // Verified: app.treechat.com/p/<thread id> redirects to /quest/<thread id>.
     postUrl: (p) => (p.threadId ? `https://app.treechat.com/p/${p.threadId}` : null),
@@ -86,6 +88,8 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
     id: 'twetch',
     label: 'Twetch',
     icon: twetchIcon,
+    // The bundled logo is monochrome (#23242E on white), so this is Twetch's brand blue.
+    color: '#085AF6',
     matches: (a) => a === 'twetch',
     // The form Twetch users shared on-chain.
     postUrl: (p) => `https://twetch.com/t/${p.txid}`,
@@ -173,3 +177,17 @@ export const actionLabel = (a: PostAction, source: Source): string =>
   a === 'open' || a === 'bookmark' || a === 'unlock'
     ? `${ACTION_LABELS[a]} ${SOURCE_REGISTRY[source].label}`
     : ACTION_LABELS[a];
+
+/** Readable text on a solid background: near-black on light colours, white on dark (WCAG relative luminance). */
+export const textOn = (hex: string): string => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1], 16);
+  const lin = (c: number) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const l = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  // Contrast vs white (1.05/(l+0.05)) against contrast vs black ((l+0.05)/0.05).
+  return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? '#ffffff' : '#1a1300';
+};
