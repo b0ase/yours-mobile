@@ -180,3 +180,19 @@ updates the counter; stopping playback stops the loop.
 5. Payment for a call: caller only, or split between participants?
 6. Mode B settlement cadence and minimum payout.
 7. Does a timed room accept both ticket burns and sats, or one per room?
+
+## Owner decisions (2 Oct 2026)
+
+1. **Price point:** about $0.10 per listener-hour is fine (≈ 140 sats/s at $19.74/BSV). Creators still set their own rate.
+2. **Margin:** at that price there is room for a platform fee of up to ~25%, configurable per stream (default 0 for
+   creators who self-host). It funds hosting the gating proxy for small creators; self-hosting creators pay nothing.
+3. **Direct payouts are the default.** Mode A (on-chain every N seconds, straight to the creator) is the product.
+   Prepaid credits (mode B) stay in the code but are **off by default** and not marketed: holding user funds may be
+   regulated, and the owner prefers direct payment. No credit payout schedule is needed while B is off.
+4. **Session cap and low-balance floor:** configurable by the listener (with sensible defaults) and per stream.
+5. **Hosting:** host the gating proxy for small creators only if the platform fee covers it; otherwise provide the
+   snippet for self-hosting.
+6. **Calls are free by default.** Anyone may set a price to **receive** calls and advertise it (e.g. solicitors,
+   therapists): the caller pays the callee per second; there is no caller-side or split charge otherwise.
+7. **Timed rooms:** the creator configures entry per room — ticket burns, sats, or either.
+8. **Interval:** still open (30 s default proposed).
