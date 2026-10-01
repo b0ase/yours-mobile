@@ -56,9 +56,12 @@ const brand = (): Plugin => ({
     });
   },
   async resolveId(source, importer, options) {
-    if (!importer || Object.values(BRAND).includes(importer)) return null;
+    if (!importer) return null;
     const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
     const swap = resolved && BRAND[resolved.id.split('?')[0]];
+    // A replacement may import the file it replaces (brand/constants re-exports upstream);
+    // every other import from a replacement is still swapped (mobile TopNav's logo).
+    if (swap && swap === importer.split('?')[0]) return null;
     return swap ? swap + (resolved!.id.includes('?') ? resolved!.id.slice(resolved!.id.indexOf('?')) : '') : null;
   },
 });
