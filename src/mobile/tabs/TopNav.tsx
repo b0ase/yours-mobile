@@ -3,13 +3,15 @@ import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Download, Loader2, Phone, Plus, Settings, X } from 'lucide-react';
+import { Check, ChevronDown, Clapperboard, Download, Loader2, Phone, Plus, Settings, X } from 'lucide-react';
+import { openMediaView } from '../wallet/walletKind';
 import activeCircle from '../../assets/active-circle.png';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
+import type { MenuItems } from '../../contexts/BottomMenuContext';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -121,6 +123,18 @@ export const TopNav = () => {
           bWallet
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            aria-label="Media"
+            onClick={() => {
+              handleSelect('media' as MenuItems); // retired tab id: opens Wallet › NFTs
+              openMediaView();
+            }}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: '1px solid #2A2A2C' }}
+          >
+            <Clapperboard size={16} color="#F5B800" />
+          </button>
           <button
             type="button"
             aria-label="Calls"

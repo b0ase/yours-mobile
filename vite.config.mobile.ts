@@ -82,7 +82,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
-      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>\n<CreditsRow />',
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
     ],
     // Send to a name: $handle / paymail / OpNS recipient box with resolve + confirm (src/mobile/names).
     [
@@ -151,7 +151,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* Bottom breathing room */}',
-      '        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <MediaSection />\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <MediaSection />\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <CreditsRow />\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [

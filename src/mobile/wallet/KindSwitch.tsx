@@ -1,15 +1,17 @@
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
-import { getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
+import { getMediaView, getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
 
 export const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
+export const useMediaView = () => useSyncExternalStore(subscribeWalletKind, getMediaView, getMediaView);
 
 const KINDS: [WalletKind, string][] = [
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
+  ['credits', 'Credits'],
 ];
 
-/** Tokens | NFTs, styled like Market's type switch (market/MarketPage.tsx). */
+/** Tokens | NFTs | Credits, styled like Market's type switch (market/MarketPage.tsx). */
 export const WalletKindSwitch = () => {
   const kind = useWalletKind();
   return (

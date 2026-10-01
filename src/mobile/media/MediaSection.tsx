@@ -11,6 +11,7 @@ import { isMediaOutput, kindOf, type MediaKind } from './media';
 import { pauseAudio, playQueue } from './player';
 import { safety } from '../market/safety';
 import { Blurred } from '../market/NftCard';
+import { useMediaView } from '../wallet/KindSwitch';
 
 /**
  * Wallet › NFTs: the wallet's non-fungible inscriptions as a media library, filtered by kind,
@@ -25,6 +26,8 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'images', label: 'Images' },
   { id: 'other', label: 'Other' },
 ];
+/** The Media view's filters. */
+const PLAYABLE: Filter[] = ['all', 'music', 'video'];
 const PAGE = 50;
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
@@ -97,12 +100,22 @@ export const MediaSection = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
 
-  const shown = useMemo(() => (filter === 'all' ? items : items.filter((i) => i.kind === filter)), [items, filter]);
+  // Media view (top bar button): only what you play — music and video.
+  const mediaOnly = useMediaView();
+  const pool = useMemo(
+    () => (mediaOnly ? items.filter((i) => i.kind === 'music' || i.kind === 'video') : items),
+    [items, mediaOnly],
+  );
+  const filters = mediaOnly ? FILTERS.filter((f) => PLAYABLE.includes(f.id)) : FILTERS;
+  useEffect(() => {
+    if (mediaOnly && !PLAYABLE.includes(filter)) setFilter('all');
+  }, [mediaOnly, filter]);
+  const shown = useMemo(() => (filter === 'all' ? pool : pool.filter((i) => i.kind === filter)), [pool, filter]);
   const counts = useMemo(() => {
-    const c: Record<Filter, number> = { all: items.length, music: 0, video: 0, images: 0, other: 0 };
-    items.forEach((i) => c[i.kind]++);
+    const c: Record<Filter, number> = { all: pool.length, music: 0, video: 0, images: 0, other: 0 };
+    pool.forEach((i) => c[i.kind]++);
     return c;
-  }, [items]);
+  }, [pool]);
 
   const tap = (item: Item) => {
     if (item.kind === 'music') {
@@ -162,7 +175,9 @@ export const MediaSection = () => {
     <div className="w-full flex flex-col">
       <div className="w-full px-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-widest text-[#98A2B3]">Media</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-[#98A2B3]">
+            {mediaOnly ? 'Music & video' : 'Media'}
+          </span>
           <button
             onClick={() => navigate('/ord-wallet')}
             className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
@@ -171,7 +186,7 @@ export const MediaSection = () => {
           </button>
         </div>
         <div className="flex gap-1.5 overflow-x-auto">
-          {FILTERS.map((f) => (
+          {filters.map((f) => (
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
