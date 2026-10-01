@@ -80,7 +80,7 @@ type Tile = {
   icon?: string;
   demo?: boolean;
   bapp?: BApp;
-  /** One-line tagline for third-party apps (from BSVRadar). */
+  /** One-line tagline for third-party apps (from BSVRadar or the Metanet app store). */
   desc?: string;
 };
 
@@ -139,7 +139,7 @@ const bappTile = (a: BApp): Tile => ({
 const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id)).map(bappTile);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
-// BSVRadar apps, grouped, minus any host already in OTHER_TILES.
+// BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
 const bareHost = (url: string) => hostOf(url).replace(/^www\./, '');
 const OTHER_HOSTS = new Set(OTHER_TILES.map((t) => bareHost(t.url)));
 const RADAR_SECTIONS = RADAR_GROUPS.map((g) => ({
@@ -441,7 +441,7 @@ const BrowserPage = () => {
             {grid(2, g.tiles)}
           </div>
         ))}
-        {note('Not made by The Bitcoin Corporation. Source: BSVRadar (bsvradar.com).')}
+        {note('Not made by The Bitcoin Corporation. Sources: BSVRadar, Metanet app store.')}
       </>
     );
   };

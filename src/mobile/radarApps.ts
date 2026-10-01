@@ -115,6 +115,18 @@ import r_ageless_republic from './brand/apps/radar/ageless-republic.png';
 import r_hypertypist from './brand/apps/radar/hypertypist.png';
 import r_peerjump from './brand/apps/radar/peerjump.png';
 
+import m_seven_words from './brand/apps/radar/mna-seven-words.png';
+import m_chaintap from './brand/apps/radar/mna-chaintap.png';
+import m_papertrade from './brand/apps/radar/mna-papertrade.png';
+import m_tempo from './brand/apps/radar/mna-tempo.png';
+import m_1bitclaw from './brand/apps/radar/mna-1bitclaw.png';
+import m_agid from './brand/apps/radar/mna-agid.png';
+import m_babbage_os from './brand/apps/radar/mna-babbage-os.png';
+import m_teragun from './brand/apps/radar/mna-teragun.png';
+import m_theme_token from './brand/apps/radar/mna-theme-token.png';
+import m_uhrp_storage from './brand/apps/radar/mna-uhrp-storage.png';
+import m_giftchain from './brand/apps/radar/mna-giftchain.png';
+import m_bitgenius from './brand/apps/radar/mna-bitgenius.png';
 /**
  * Third-party BSV apps for Apps › Other apps, discovered via the BSVRadar
  * directory (bsvradar.com, 2026-10-01). Only the apps' names, URLs and short
@@ -140,9 +152,12 @@ export const RADAR_GROUPS: { id: RadarGroup; label: string }[] = [
   { id: 'games', label: 'Games' },
 ];
 
-export type RadarApp = { name: string; url: string; desc: string; group: RadarGroup; icon: string };
+/** Where an app was discovered: BSVRadar (bsvradar.com) or the Metanet Apps overlay (metanetapps.com). */
+export type AppSource = 'bsvradar' | 'metanet';
 
-export const RADAR_APPS: RadarApp[] = [
+export type RadarApp = { name: string; url: string; desc: string; group: RadarGroup; icon: string; source: AppSource };
+
+const BSVRADAR_APPS: Omit<RadarApp, 'source'>[] = [
   {
     name: '3D Ordi',
     url: 'https://3dordi.io',
@@ -913,4 +928,115 @@ export const RADAR_APPS: RadarApp[] = [
     icon: r_hypertypist,
   },
   { name: 'PeerJump', url: 'https://peerjump.fun/', desc: 'How high can you climb?', group: 'games', icon: r_peerjump },
+];
+
+/**
+ * Apps published to the Metanet Apps catalogue (metanetapps.com), read on 2026-10-02 from its
+ * public overlay lookup service (ls_apps / tm_apps, overlay-us-1.bsvb.tech). Names, URLs and
+ * descriptions come from each publisher's signed metadata; icons are the publisher-declared icon
+ * (or the site's own) rendered to 96px. Only apps not already listed above or in bApps/Other apps,
+ * with the same exclusions as BSVRadar (our own apps, gambling, seed/key tools, dead sites).
+ */
+const METANET_APPS: RadarApp[] = [
+  {
+    name: 'Seven Words',
+    url: 'https://seven.metanet.app',
+    desc: 'Anything can be said in seven words',
+    group: 'social',
+    icon: m_seven_words,
+    source: 'metanet',
+  },
+  {
+    name: 'ChainTap',
+    url: 'https://chaintap.utxoengineer.com',
+    desc: 'Paid BSV intelligence digest distilled from X, every three days',
+    group: 'media',
+    icon: m_chaintap,
+    source: 'metanet',
+  },
+  {
+    name: 'PaperTrade',
+    url: 'https://papertrade.metanet.app',
+    desc: 'Pay-per-page BSV newsstand for independent writing',
+    group: 'media',
+    icon: m_papertrade,
+    source: 'metanet',
+  },
+  {
+    name: 'Tempo',
+    url: 'https://tempomusic.net',
+    desc: 'Stream music directly from independent artists',
+    group: 'media',
+    icon: m_tempo,
+    source: 'metanet',
+  },
+  {
+    name: '1BitClaw',
+    url: 'https://1bitclaw.com',
+    desc: 'On-chain app platform on BSV: design processes with money, roles and signatures…',
+    group: 'tools',
+    icon: m_1bitclaw,
+    source: 'metanet',
+  },
+  {
+    name: 'AGiD',
+    url: 'https://agidentity.org',
+    desc: 'Agentic Identity Framework for OpenClaw style agents',
+    group: 'tools',
+    icon: m_agid,
+    source: 'metanet',
+  },
+  {
+    name: 'Babbage OS',
+    url: 'https://babbageos.com',
+    desc: 'BRC-100 native desktop and home screen for the web',
+    group: 'tools',
+    icon: m_babbage_os,
+    source: 'metanet',
+  },
+  {
+    name: 'Teragun',
+    url: 'https://teragun.com',
+    desc: 'Stress-test BSV with live transaction metrics',
+    group: 'tools',
+    icon: m_teragun,
+    source: 'metanet',
+  },
+  {
+    name: 'Theme Token',
+    url: 'https://themetoken.dev',
+    desc: 'Create, inscribe, discover, remix, and install ShadCN-compatible themes on BSV',
+    group: 'tools',
+    icon: m_theme_token,
+    source: 'metanet',
+  },
+  {
+    name: 'UHRP Storage',
+    url: 'https://uhrp-ui.bapp.dev',
+    desc: 'Upload and download files with UHRP',
+    group: 'tools',
+    icon: m_uhrp_storage,
+    source: 'metanet',
+  },
+  {
+    name: 'Giftchain',
+    url: 'https://entangleit.com',
+    desc: 'Generate gift cards on the blockchain',
+    group: 'money',
+    icon: m_giftchain,
+    source: 'metanet',
+  },
+  {
+    name: 'BitGenius',
+    url: 'https://bitgenius.net',
+    desc: 'Cited research and docs for BSV builders',
+    group: 'learn',
+    icon: m_bitgenius,
+    source: 'metanet',
+  },
+];
+
+export const RADAR_APPS: RadarApp[] = [
+  ...BSVRADAR_APPS.map((a): RadarApp => ({ ...a, source: 'bsvradar' })),
+  ...METANET_APPS,
 ];
