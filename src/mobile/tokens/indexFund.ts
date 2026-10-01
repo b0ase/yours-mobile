@@ -1,5 +1,6 @@
 import { P2PKH } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
+import { withTimeout } from '../withTimeout';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import type { ChromeStorageObject } from '../../services/types/chromeStorage.types';
 
@@ -58,11 +59,16 @@ type Details = { getTokenDetails(id: string): Promise<unknown> };
 const bsv21Client = (ctx: OneSatContext): Details | null =>
   ((ctx.services as unknown as { bsv21?: Details } | undefined)?.bsv21 ?? null) as Details | null;
 
-/** Current overlay status for a token, or null if the indexer doesn't know it (yet). */
+const STATUS_TIMEOUT_MS = 8000;
+
+/** Current overlay status for a token, or null if the indexer doesn't know it (yet) or doesn't answer. */
 export async function overlayStatus(ctx: OneSatContext, tokenId: string): Promise<OverlayStatus | null> {
   const c = bsv21Client(ctx);
   if (!c) return null;
-  return parseOverlayStatus(await c.getTokenDetails(normId(tokenId)).catch(() => null));
+  const details = await withTimeout(c.getTokenDetails(normId(tokenId)), STATUS_TIMEOUT_MS, 'Indexer status').catch(
+    () => null,
+  );
+  return parseOverlayStatus(details);
 }
 
 /** Poll until the indexer exposes the fee address (it learns the token from the deploy BEEF). */
@@ -84,6 +90,8 @@ export async function waitForOverlayStatus(
 
 const KEY = (tokenId: string) => `bwallet.indexFund.${normId(tokenId)}`;
 export type FundRecord = { txid: string; sats: number; at: number };
+/** Label on every indexing payment; the startup self-heal (indexFundHeal.ts) finds ours by it. */
+export const INDEX_FUND_LABEL = 'bsv21-index-fund';
 export const getFundRecord = (tokenId: string): FundRecord | null => {
   try {
     const v = localStorage.getItem(KEY(tokenId));
@@ -103,6 +111,12 @@ const setFundRecord = (tokenId: string, r: FundRecord) => {
 /**
  * Pay the token's overlay fee address from the wallet (a normal createAction: P2PKH output,
  * wallet funds + change). Run only after the user confirmed the cost. Returns the funding txid.
+ *
+ * Broadcast now, not "delayed": with wallet-toolbox's default (acceptDelayedBroadcast: true) the
+ * signed tx is parked as `sending` for the toolbox Monitor, which bWallet only runs once at wallet
+ * start. The payment then sat unbroadcast with its inputs spent locally, and the next launch
+ * broadcast it while holding every storage lock, so GET_BALANCE (and the Wallet balance spinner)
+ * waited on it. Every other bWallet createAction already sends immediately.
  */
 export async function fundIndexing(
   ctx: OneSatContext,
@@ -113,20 +127,58 @@ export async function fundIndexing(
   const status = opts.status ?? (await waitForOverlayStatus(ctx, tokenId, { timeoutMs: opts.timeoutMs }));
   if (!status) throw new Error(`The indexer hasn't seen $${ticker} yet. Try "Finish setting up" again in a minute.`);
   const sats = fundAmount(status, opts.fund);
-  const res = await ctx.wallet.createAction({
-    description: `Index $${ticker} (1sat overlay)`.slice(0, 50),
-    outputs: [
-      {
-        lockingScript: new P2PKH().lock(status.feeAddress).toHex(),
-        satoshis: sats,
-        outputDescription: 'Token indexing fee (1sat overlay)',
-      },
-    ],
-    labels: ['bsv21-index-fund'],
-  });
+  const description = indexFundDescription(ticker);
+  let res: { txid?: string };
+  try {
+    res = await ctx.wallet.createAction({
+      description,
+      outputs: [
+        {
+          lockingScript: new P2PKH().lock(status.feeAddress).toHex(),
+          satoshis: sats,
+          outputDescription: 'Token indexing fee (1sat overlay)',
+        },
+      ],
+      labels: [INDEX_FUND_LABEL],
+      options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+    });
+  } catch (e) {
+    // A broadcast without a final verdict comes back as an error (over the CWI bridge, just a
+    // message), yet the tx may be on the network. If the wallet holds it as sent, record it so
+    // the card never offers to pay twice; otherwise the toolbox already released its inputs.
+    const sent = await withTimeout(
+      ctx.wallet.listActions({ labels: [INDEX_FUND_LABEL], limit: 50 }),
+      STATUS_TIMEOUT_MS,
+      'listActions',
+    )
+      .then((r) => pickSentIndexFund(r.actions, description))
+      .catch(() => null);
+    if (sent) {
+      setFundRecord(tokenId, { txid: sent, sats, at: Date.now() });
+      return { txid: sent, sats, feeAddress: status.feeAddress };
+    }
+    throw e;
+  }
   if (!res.txid) throw new Error('Indexing payment was not sent');
   setFundRecord(tokenId, { txid: res.txid, sats, at: Date.now() });
   return { txid: res.txid, sats, feeAddress: status.feeAddress };
+}
+
+export const indexFundDescription = (ticker: string) => `Index $${ticker} (1sat overlay)`.slice(0, 50);
+
+/** Statuses of a payment that was handed to the network (or may have been): never pay again. */
+const SENT = new Set(['sending', 'unproven', 'completed']);
+
+/** Newest of our indexing payments for this token that is (possibly) on the network, else null. */
+export function pickSentIndexFund(
+  actions: { txid?: string; status?: string; description?: string; labels?: string[] }[],
+  description: string,
+): string | null {
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const a = actions[i];
+    if (a.description === description && a.status && SENT.has(a.status) && a.txid) return a.txid;
+  }
+  return null;
 }
 
 /**

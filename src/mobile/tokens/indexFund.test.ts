@@ -9,7 +9,10 @@ import {
   fundIndexing,
   indexCostSats,
   needsIndexFunding,
+  indexFundDescription,
+  overlayStatus,
   parseOverlayStatus,
+  pickSentIndexFund,
   withFavorite,
 } from './indexFund';
 
@@ -68,6 +71,43 @@ describe('fundIndexing', () => {
     expect(a.outputs[0].lockingScript).toBe(new P2PKH().lock(FEE).toHex());
     expect(a.labels).toContain('bsv21-index-fund');
   });
+  test('broadcasts now: never left for the delayed-broadcast monitor', async () => {
+    let args: { options?: { acceptDelayedBroadcast?: boolean } } = {};
+    const ctx = {
+      wallet: { createAction: async (a: typeof args) => ((args = a), { txid: 'f'.repeat(64) }) },
+      services: { bsv21: { getTokenDetails: async () => details({ fee_address: FEE }) } },
+    } as unknown as OneSatContext;
+    await fundIndexing(ctx, ID, 'TESTY');
+    expect(args.options?.acceptDelayedBroadcast).toBe(false);
+  });
+  test('a failed send that the wallet still holds as sent returns that txid (no double pay)', async () => {
+    const tx = 'c'.repeat(64);
+    const ctx = {
+      wallet: {
+        createAction: async () => {
+          throw new Error('No broadcast verdict');
+        },
+        listActions: async () => ({
+          totalActions: 1,
+          actions: [{ txid: tx, status: 'sending', description: indexFundDescription('TESTY') }],
+        }),
+      },
+      services: { bsv21: { getTokenDetails: async () => details({ fee_address: FEE }) } },
+    } as unknown as OneSatContext;
+    expect((await fundIndexing(ctx, ID, 'TESTY')).txid).toBe(tx);
+  });
+  test('a definite failure rethrows', async () => {
+    const ctx = {
+      wallet: {
+        createAction: async () => {
+          throw new Error('Insufficient funds');
+        },
+        listActions: async () => ({ totalActions: 0, actions: [] }),
+      },
+      services: { bsv21: { getTokenDetails: async () => details({ fee_address: FEE }) } },
+    } as unknown as OneSatContext;
+    await expect(fundIndexing(ctx, ID, 'TESTY')).rejects.toThrow(/Insufficient/);
+  });
   test('refuses (sends nothing) while the indexer has not seen the token', async () => {
     let sent = false;
     const ctx = {
@@ -78,6 +118,32 @@ describe('fundIndexing', () => {
     expect(sent).toBe(false);
   });
 });
+
+test('pickSentIndexFund: newest matching (possibly) sent payment only', () => {
+  const d = indexFundDescription('TESTY');
+  const A = 'a'.repeat(64),
+    B = 'b'.repeat(64);
+  expect(pickSentIndexFund([{ txid: A, status: 'failed', description: d }], d)).toBeNull();
+  expect(pickSentIndexFund([{ txid: A, status: 'sending', description: indexFundDescription('OTHER') }], d)).toBeNull();
+  expect(
+    pickSentIndexFund(
+      [
+        { txid: A, status: 'completed', description: d },
+        { txid: B, status: 'unproven', description: d },
+      ],
+      d,
+    ),
+  ).toBe(B);
+});
+
+test('overlayStatus gives up on a hung indexer instead of waiting forever', async () => {
+  const ctx = {
+    services: { bsv21: { getTokenDetails: () => new Promise(() => {}) } },
+  } as unknown as OneSatContext;
+  const t0 = Date.now();
+  expect(await overlayStatus(ctx, ID)).toBeNull();
+  expect(Date.now() - t0).toBeLessThan(9000);
+}, 12000);
 
 test('withFavorite puts the new token first, deduped', () => {
   expect(withFavorite(undefined, `${'a'.repeat(64)}.0`)).toEqual([ID]);

@@ -47,6 +47,7 @@ import {
 } from './services/oneSatPrompt';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
 import { initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
+import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
 import { WalletBackupService } from './backup/WalletBackupService';
 import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/usbRekeyBackground';
@@ -297,6 +298,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   if (accountContext) {
     bindPermissionCallbacks(accountContext.wallet);
     console.log('[background] initializeWallet: bound permission callbacks');
+    // Abort token-indexing payments that were built but never sent (bounded, never throws).
+    void healIndexFundActions(accountContext.baseWallet).then((r) => {
+      if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
+    });
   }
 
   return accountContext?.wallet ?? null;

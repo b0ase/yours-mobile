@@ -73,6 +73,14 @@ import { cancelOwnedOrdLockListings } from '../utils/cancelOrdLockListings';
 import { decrypt } from '../utils/crypto';
 import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
+import { withTimeout } from '../mobile/withTimeout';
+import {
+  BALANCE_TIMEOUT_MS,
+  RATE_TIMEOUT_MS,
+  balanceView,
+  loadLastBalance,
+  saveLastBalance,
+} from '../mobile/wallet/balanceLoad';
 
 // CopyAddressed feedback state hook — used in receive view
 
@@ -148,6 +156,8 @@ export const BsvWallet = () => {
   const [bsvBalance, setBsvBalance] = useState<number>(0);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
   const [balanceLoading, setBalanceLoading] = useState(true);
+  const [balanceFailed, setBalanceFailed] = useState(false);
+  const [balanceKnown, setBalanceKnown] = useState(false);
   const [lockData, setLockData] = useState<LockData>();
   const [isSendAllBsv, setIsSendAllBsv] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -429,12 +439,44 @@ export const BsvWallet = () => {
     setIsSendAllBsv(satSendAmount === bsvBalanceInSats);
   }, [satSendAmount, bsvBalance]);
 
-  const getAndSetBsvBalance = async (): Promise<number> => {
-    const satoshis = await getWalletBalance();
+  const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
-    const rate = await fetchExchangeRate(apiContext.chain, apiContext.wocApiKey);
-    setExchangeRate(rate);
+    saveLastBalance(identityAddress, satoshis);
+    setBalanceKnown(true);
+    setBalanceFailed(false);
     setBalanceLoading(false);
+  };
+
+  /**
+   * Load the BSV balance, bounded: the background wallet can sit on its storage lock (e.g. while
+   * broadcasting a queued tx at start). On timeout/error show the last known balance with
+   * "Couldn't refresh" instead of spinning forever; a late answer still lands. Returns null when
+   * this attempt did not produce a balance.
+   */
+  const getAndSetBsvBalance = async (): Promise<number | null> => {
+    const pending = getWalletBalance();
+    let satoshis: number;
+    try {
+      satoshis = await withTimeout(pending, BALANCE_TIMEOUT_MS, 'Balance');
+    } catch (err) {
+      console.warn('[BsvWallet] balance not refreshed:', err instanceof Error ? err.message : err);
+      const cached = loadLastBalance(identityAddress);
+      if (cached != null && !balanceKnown) {
+        setBsvBalance(cached / 100_000_000);
+        setBalanceKnown(true);
+      }
+      setBalanceFailed(true);
+      setBalanceLoading(false);
+      pending.then(applyBalance).catch(() => undefined);
+      return null;
+    }
+    applyBalance(satoshis);
+    const rate = await withTimeout(
+      fetchExchangeRate(apiContext.chain, apiContext.wocApiKey),
+      RATE_TIMEOUT_MS,
+      'Exchange rate',
+    ).catch(() => null);
+    if (rate) setExchangeRate(rate);
     return satoshis;
   };
 
@@ -579,7 +621,11 @@ export const BsvWallet = () => {
       ]);
       loadLocks && loadLocks();
       const unchanged =
-        sats === before.sats && mnee !== undefined && mnee === before.mnee && bsv21Signature(tokens) === before.tokens;
+        sats !== null &&
+        sats === before.sats &&
+        mnee !== undefined &&
+        mnee === before.mnee &&
+        bsv21Signature(tokens) === before.tokens;
       if (notifyIfUnchanged && synced && unchanged) {
         addSnackbar('Balances are up to date. Incoming transactions can take one confirmation to appear.', 'info');
       }
@@ -1192,8 +1238,16 @@ export const BsvWallet = () => {
           className="flex flex-col items-center mt-1"
         >
           <div className="flex items-center gap-2">
-            {balanceLoading ? (
+            {balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown }) === 'spinner' ? (
               <Loader2 size={28} className="animate-spin" style={{ color: theme.color.global.gray }} />
+            ) : balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown }) === 'unknown' ? (
+              <h1
+                title="Balance unavailable"
+                className="text-4xl font-bold tracking-tight select-none"
+                style={{ color: theme.color.global.gray, letterSpacing: '-0.02em' }}
+              >
+                —
+              </h1>
             ) : (
               <h1
                 title={isSyncing ? 'Syncing…' : 'Balance'}
@@ -1232,6 +1286,16 @@ export const BsvWallet = () => {
               </motion.button>
             )}
           </div>
+          {balanceFailed && (
+            <button
+              type="button"
+              onClick={() => void getAndSetBsvBalance()}
+              className="mt-1 text-[11px] border-0 bg-transparent cursor-pointer p-0"
+              style={{ color: theme.color.global.gray }}
+            >
+              Couldn't refresh. Tap to retry.
+            </button>
+          )}
         </motion.div>
 
         {/* ── Action buttons ── */}
