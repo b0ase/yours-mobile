@@ -8,6 +8,13 @@ import { setWalletKind } from '../wallet/walletKind';
  * Mobile swap for src/hooks/useBottomMenu.tsx (vite.config.mobile.ts): same
  * contract, but routes the five mobile tabs (Wallet · Market · Apps · Feed · Chat) and Settings.
  */
+/**
+ * The selection last routed. Many components call this hook (TopNav is mounted inside Media and the
+ * b agent too); without this, each new instance's mount effect re-navigated to the current
+ * selection, e.g. opening the b agent bounced straight back to Settings.
+ */
+let routedSelection: string | null | undefined;
+
 export const useBottomMenu = () => {
   const context = useContext(BottomMenuContext);
   const navigate = useNavigate();
@@ -20,6 +27,8 @@ export const useBottomMenu = () => {
 
   useEffect(() => {
     if (!context || !navigate) return;
+    if (context.selected === routedSelection) return;
+    routedSelection = context.selected;
     if (opensWalletNfts(context.selected)) setWalletKind('nfts');
     const route = routeFor(context.selected);
     if (route) navigate(route);

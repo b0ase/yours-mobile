@@ -1,3 +1,4 @@
+import { routeFor } from './tabs';
 import { useEffect, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
@@ -84,6 +85,9 @@ export const TopNav = () => {
   const go = (query?: string) => {
     setDrawer(false);
     handleSelect('settings', query);
+    // Selecting the already-selected Settings changes nothing, so route explicitly (e.g. from Media).
+    const route = routeFor('settings');
+    if (route) navigate(route);
   };
 
   const action = (icon: React.ReactNode, label: string, onClick: () => void) => (
