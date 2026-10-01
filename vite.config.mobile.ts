@@ -70,6 +70,63 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '            Send\n          </motion.button>\n        </motion.div>',
       '            Send\n          </motion.button>\n<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
     ],
+    // Send to a name: $handle / paymail / OpNS recipient box with resolve + confirm (src/mobile/names).
+    [
+      "import { MintButton } from '../mobile/mint/MintButton';",
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { NameInput } from '../mobile/names/NameInput';\nimport { ReceiveName } from '../mobile/names/MyNameBadge';",
+    ],
+    [
+      `<Input
+                theme={theme}
+                placeholder="Enter Address or Paymail"
+                type="text"
+                onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
+                value={recipient.address}
+              />`,
+      `<NameInput
+                theme={theme}
+                asset="bsv"
+                onChange={(v) => updateRecipient(recipient.id, 'address', v)}
+                value={recipient.address}
+              />`,
+    ],
+    // Receive screen shows the account's name.
+    [
+      '          Receive Assets\n        </h2>\n      </div>',
+      '          Receive Assets\n        </h2>\n      </div>\n<ReceiveName identityAddress={identityAddress} />',
+    ],
+  ],
+  // Token send: names only when the destination can receive ordinals (ordAddress), else blocked.
+  'src/components/SendBsv21View.tsx#names': [
+    [
+      "import { Input } from './Input';",
+      "import { Input } from './Input';\nimport { NameInput } from '../mobile/names/NameInput';",
+    ],
+    [
+      `<Input
+                    theme={theme}
+                    placeholder="Enter address..."
+                    type="text"
+                    onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
+                    value={recipient.address}
+                    style={{ width: '100%', margin: 0 }}
+                  />`,
+      `<NameInput
+                    theme={theme}
+                    asset="token"
+                    onChange={(v) => updateRecipient(recipient.id, 'address', v)}
+                    value={recipient.address}
+                    style={{ width: '100%', margin: 0 }}
+                  />`,
+    ],
+  ],
+  // Settings → Identity: "Get your name" (OpNS search + bind an owned name).
+  'src/pages/Settings.tsx': [
+    [
+      "import { ToggleSwitch } from '../components/ToggleSwitch';",
+      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';",
+    ],
+    ['          {identityPubKey && (', '          <GetYourName />\n          {identityPubKey && ('],
   ],
   'src/App.tsx': [
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
@@ -95,8 +152,8 @@ const mobileText = (): Plugin => ({
   enforce: 'pre',
   transform(code, id) {
     const file = id.split('?')[0].slice(__dirname.length + 1);
-    const swaps = MOBILE_TEXT[file];
-    if (!swaps) return null;
+    const swaps = Object.entries(MOBILE_TEXT).flatMap(([k, v]) => (k.split('#')[0] === file ? v : []));
+    if (!swaps.length) return null;
     for (const [from, to] of swaps) {
       if (!code.includes(from)) this.error(`mobile-text: "${from}" not found in ${file}`);
       code = code.split(from).join(to);
