@@ -204,7 +204,26 @@ const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES];
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
 const FAV_KEY = 'bwallet:favourite-apps';
-const DEFAULT_FAVOURITES = ['bChat', 'bMovies', 'bMusic', 'bMint', 'bWriter', 'Treechat', 'Twetch']
+// The featured suite: our own bApps, then the ones with their original icons, then Treechat and Twetch.
+const DEFAULT_FAVOURITES = [
+  'bChat',
+  'bMovies',
+  'bMusic',
+  'bMint',
+  'bWriter',
+  'bSheets',
+  'bMail',
+  'bDrive',
+  'bCal',
+  'bCode',
+  'bJobs',
+  'bArt',
+  'bPaint',
+  'b3D',
+  'bExchange',
+  'Treechat',
+  'Twetch',
+]
   .map((name) => ALL_TILES.find((t) => t.name === name)?.url)
   .filter((u): u is string => !!u);
 
