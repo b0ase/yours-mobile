@@ -76,9 +76,12 @@ export const shouldShowOnboarding = (
   return pending.reason === 'create' || synced;
 };
 
-/** The Wallet card: until the account has a name, unless dismissed or the onboarding sheet is up. */
-export const shouldShowCard = (hasName: boolean, dismissed: boolean, onboardingOpen: boolean) =>
-  !hasName && !dismissed && !onboardingOpen;
+/** Every account gets a handle AND its personal $NAME room; the prompts stay until both exist. */
+export const handleComplete = (hasName: boolean, hasRoom: boolean) => hasName && hasRoom;
+
+/** The Wallet card: until the account has a handle and a room, unless dismissed or the sheet is up. */
+export const shouldShowCard = (complete: boolean, dismissed: boolean, onboardingOpen: boolean) =>
+  !complete && !dismissed && !onboardingOpen;
 
 /** First suggestion for the handle input: the profile name, else the account name ("Account 1" → ''). */
 export const suggestHandle = (profileName = '', accountName = ''): string => {

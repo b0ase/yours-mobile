@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { handleTitle, parsePending, shouldShowCard, shouldShowOnboarding, suggestHandle } from './handlePrompt';
+import {
+  handleComplete,
+  handleTitle,
+  parsePending,
+  shouldShowCard,
+  shouldShowOnboarding,
+  suggestHandle,
+} from './handlePrompt';
 
 describe('handle prompt', () => {
   test('parsePending accepts only well-formed flags', () => {
@@ -23,6 +30,12 @@ describe('handle prompt', () => {
     expect(shouldShowOnboarding(restore, 'a', false, false)).toBe(false);
     expect(shouldShowOnboarding(restore, 'a', false, true)).toBe(true);
     expect(shouldShowOnboarding(restore, 'a', true, true)).toBe(false);
+  });
+
+  test('complete needs both a handle and a room', () => {
+    expect(handleComplete(true, true)).toBe(true);
+    expect(handleComplete(true, false)).toBe(false);
+    expect(handleComplete(false, true)).toBe(false);
   });
 
   test('wallet card until named, unless dismissed or onboarding is open', () => {
