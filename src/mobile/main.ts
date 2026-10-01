@@ -17,6 +17,7 @@ import {
   topOverlayId,
 } from './overlays';
 import { INTERNAL_ORIGIN, MOBILE_EXTENSION_ID, type Sender } from './protocol';
+import '@fontsource/space-grotesk/700.css';
 import './mobile.css';
 
 /**

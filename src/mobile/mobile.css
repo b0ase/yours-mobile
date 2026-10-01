@@ -167,3 +167,60 @@ html.android [class*='overflow-y-auto']:not(:has(.fixed)),
 html.android [class*='overflow-auto']:not(:has(.fixed)) {
   transform: translateZ(0);
 }
+
+/* ── Obsidian UI (Direction A) ─────────────────────────────────────────
+   Pure black canvas, gold pills, raised token cards. Classes are added to
+   upstream markup by vite.config.mobile.ts (MOBILE_TEXT "#obsidian"). */
+html,
+body,
+#root {
+  background-color: #000;
+}
+
+.bw-balance {
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.bw-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #8e8e89;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bw-balance-amount {
+  font-family: 'Space Grotesk', Inter, system-ui, sans-serif;
+  font-size: 44px !important;
+  line-height: 1.05;
+  color: #f2f2f0 !important;
+}
+
+.bw-pill {
+  height: 52px;
+  border-radius: 26px !important;
+  font-size: 15px !important;
+}
+
+.bw-pill-gold {
+  background: linear-gradient(135deg, #ffd24d, #eab300) !important;
+  color: #000 !important;
+  box-shadow:
+    0 6px 18px rgba(234, 179, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.bw-pill-outline {
+  background: transparent !important;
+  border: 1px solid #3a3a3c !important;
+  color: #f2f2f0 !important;
+}
+
+.bw-card {
+  border-radius: 18px;
+  background: linear-gradient(180deg, #1b1d22, #131418);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 0 0 1px #23252b;
+}

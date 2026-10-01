@@ -3,7 +3,7 @@ import { useMyName } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Download, Loader2, Plus, Settings, X } from 'lucide-react';
+import { Check, ChevronDown, Download, Loader2, Plus, Settings, X } from 'lucide-react';
 import logo from '../../assets/logos/horizontal-logo.png';
 import activeCircle from '../../assets/active-circle.png';
 import { ThemeBadge } from '../../components/ThemeBadge';
@@ -75,9 +75,14 @@ export const TopNav = () => {
         style={{ backgroundColor: theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
       >
         <button onClick={() => setDrawer(true)} className="flex items-center gap-2 min-w-0" aria-label="Accounts">
-          <img src={accountObj.account?.icon ?? activeCircle} className="w-8 h-8 rounded-full object-cover" alt="" />
+          <img
+            src={accountObj.account?.icon ?? activeCircle}
+            className="w-9 h-9 rounded-full object-cover box-border"
+            style={{ border: '2px solid #F5B800' }}
+            alt=""
+          />
           <span
-            className={`text-sm font-semibold max-w-[140px] ${ELLIPSIS}`}
+            className={`text-[15px] font-semibold max-w-[140px] ${ELLIPSIS}`}
             style={{ color: theme.color.global.contrast }}
           >
             {accountObj.account?.name ?? short(current ?? '')}
@@ -92,6 +97,7 @@ export const TopNav = () => {
               {myName}
             </span>
           )}
+          <ChevronDown size={14} strokeWidth={2} color="#8E8E89" className="shrink-0" />
         </button>
         <div className="flex items-center gap-2">
           <ThemeBadge theme={theme} />

@@ -105,6 +105,45 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '          Receive Assets\n        </h2>\n      </div>\n<ReceiveName identityAddress={identityAddress} />',
     ],
   ],
+  // Obsidian UI (Direction A): Wallet home restyle. Classes styled in src/mobile/mobile.css.
+  'src/pages/BsvWallet.tsx#obsidian': [
+    // Account avatar lives in the top bar (gold ring); the home starts with the balance label.
+    [
+      `        {/* ── Profile avatar ── */}
+        <Show when={avatarReady}>`,
+      `        {/* ── Profile avatar ── */}
+        <Show when={avatarReady && false}>`,
+    ],
+    [
+      '          className="flex flex-col items-center mt-1"\n        >\n          <div className="flex items-center gap-2">',
+      '          className="flex flex-col items-center mt-1 bw-balance"\n        >\n<span className="bw-label">Total balance</span>\n          <div className="flex items-center gap-2">',
+    ],
+    [
+      'className="text-4xl font-bold tracking-tight select-none"',
+      'className="text-4xl font-bold tracking-tight select-none bw-balance-amount"',
+    ],
+    // Receive / Send: gold gradient pills with glow.
+    [
+      'className="flex flex-1 items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer"',
+      'className="flex flex-1 items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer bw-pill bw-pill-gold"',
+    ],
+    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="flex items-center gap-3 mt-6 w-[90%]"'],
+    // Section label.
+    [
+      '              Assets\n            </span>\n            <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />',
+      '              Tokens\n            </span>',
+    ],
+  ],
+  // Obsidian token rows: raised cards (every AssetRow: BSV, MNEE, locks, BSV21).
+  'src/components/AssetRow.tsx': [
+    ['className="flex items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"', 'className="flex items-center justify-between w-[92%] mx-auto px-0 py-3.5 mb-2.5 bw-card"'],
+    [
+      `        backgroundColor: theme.color.global.row,
+        cursor: showPointer ? 'pointer' : 'default',
+        border: \`1px solid \${theme.color.global.gray}14\`,`,
+      "        cursor: showPointer ? 'pointer' : 'default',",
+    ],
+  ],
   // Token send: names only when the destination can receive ordinals (ordAddress), else blocked.
   'src/components/SendBsv21View.tsx#names': [
     [

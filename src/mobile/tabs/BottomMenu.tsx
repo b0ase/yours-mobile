@@ -25,7 +25,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
       style={{
         height: '3.75rem',
         backgroundColor: theme.color.component.bottomMenuBackground,
-        borderTop: `1px solid ${theme.color.global.gray}18`,
+        borderTop: '1px solid #1C1C1E',
       }}
     >
       {TABS.map((t) => (

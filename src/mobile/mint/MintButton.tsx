@@ -61,11 +61,11 @@ export const MintButton = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
   const [open, setOpen] = useState(false);
   return (
     <>
+      {/* Secondary dark outline pill beside the gold Receive / Send (mobile.css .bw-pill). */}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex flex-1 items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm outline-none cursor-pointer border"
-        style={{ background: `linear-gradient(135deg, #FFE27A, #E0A800)`, borderColor: '#E0A800', color: '#1a1400' }}
+        className="flex flex-1 items-center justify-center gap-2 py-3 font-semibold text-sm outline-none cursor-pointer bw-pill bw-pill-outline"
       >
         <Sparkles size={16} strokeWidth={2.5} />
         Mint
