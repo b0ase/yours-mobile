@@ -6,7 +6,6 @@ import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Download, Loader2, Menu, Phone, Play, Plus, Settings, X } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
-import activeCircle from '../../assets/active-circle.png';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -14,6 +13,10 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
+import { IdentityRow, IDENTITY_ROW_H } from '../names/IdentityRow';
+import { showsIdentityRow } from '../names/identityText';
+import { AccountAvatar, useAvatar } from '../names/AccountAvatar';
+import { getLocalAvatar, isDefaultAvatar, pickAvatar, resolveAvatarUrl } from '../names/avatar';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 /**
@@ -24,9 +27,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
  * Switching reuses upstream TopNav's sequence verbatim.
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
-// Default avatar: the bWallet mark, or the old Yours image older accounts stored (shown as the mark).
-const isDefaultAvatar = (icon?: string) =>
-  !icon || icon.endsWith('bwallet-avatar.png') || icon.includes('i.ibb.co/zGcthBv/yours-org-light.png');
 const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 export const TopNav = () => {
@@ -52,6 +52,8 @@ export const TopNav = () => {
     accountObj.account?.settings?.socialProfile?.displayName ?? '',
   );
   const payable = names.payable;
+  const avatar = useAvatar(current);
+  const identityRow = showsIdentityRow(pathname);
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
 
@@ -145,6 +147,20 @@ export const TopNav = () => {
         </button>
       </div>
 
+      {identityRow && (
+        <>
+          <IdentityRow
+            avatar={avatar}
+            displayName={names.displayName}
+            paymail={names.paymail}
+            handle={names.handle}
+            verified={verified}
+            onGetName={() => setHandleOpen(true)}
+          />
+          {/* In-flow spacer: pages lay out under the fixed TopNav with their own spacer; this adds the row. */}
+          <div aria-hidden className="w-full shrink-0" style={{ height: IDENTITY_ROW_H }} />
+        </>
+      )}
       <AnimatePresence>
         {drawer && (
           <motion.div
@@ -170,13 +186,7 @@ export const TopNav = () => {
                 </button>
               </div>
               <div className="flex items-center gap-3 px-4 pb-3">
-                <img
-                  src={accountObj.account?.icon ?? activeCircle}
-                  className="w-10 h-10 rounded-full object-cover box-border shrink-0"
-                  // The default avatar is the gold-b tile, which needs no ring; only photos get one.
-                  style={isDefaultAvatar(accountObj.account?.icon) ? undefined : { border: '2px solid #F5B800' }}
-                  alt=""
-                />
+                <AccountAvatar src={avatar} size={40} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1 min-w-0">
                     <span className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>
@@ -227,7 +237,17 @@ export const TopNav = () => {
                       {isSwitching ? (
                         <Loader2 size={20} className="animate-spin w-9 h-9 p-2" color="#A1FF8B" />
                       ) : (
-                        <img src={account.icon} className="w-9 h-9 rounded-full object-cover" alt="" />
+                        <AccountAvatar
+                          size={36}
+                          ring={false}
+                          src={resolveAvatarUrl(
+                            pickAvatar({
+                              local: getLocalAvatar(id),
+                              socialAvatar: account.settings?.socialProfile?.avatar,
+                              accountIcon: isDefaultAvatar(account.icon) ? '' : account.icon,
+                            }),
+                          )}
+                        />
                       )}
                       <div className="min-w-0 flex-1">
                         <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{rowNames.label}</div>

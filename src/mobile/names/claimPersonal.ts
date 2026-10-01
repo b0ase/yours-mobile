@@ -1,5 +1,7 @@
-import { deployBsv21Mint, type OneSatContext } from '@1sat/actions';
+import { bsv21FieldsFromOutput, deployBsv21Mint, type OneSatContext } from '@1sat/actions';
+import { BSV21_BASKET } from '@1sat/types';
 import { isNative } from '../native';
+import { fundAfterDeploy, indexCostSats } from '../tokens/indexFund';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings } from '../chat/holdings';
@@ -12,7 +14,9 @@ import {
   getPersonalLink,
   personalKey,
   personalTicker,
+  pickOwnDeploy,
   rememberPersonal,
+  type OwnDeploy,
   setPersonalLink,
   validateSupply,
   withPersonalMap,
@@ -30,7 +34,11 @@ import {
  */
 
 // deploy+mint inscription (~250 B) + MAP (~100 B) + inputs/change at ~100 sat/kB.
-export const PERSONAL_FEE_ESTIMATE_SATS = 80;
+export const PERSONAL_NETWORK_FEE_SATS = 80;
+/** Indexing: the creator pre-funds the token's 1sat-stack fee address at mint (tokens/indexFund.ts). */
+export const PERSONAL_INDEX_SATS = indexCostSats();
+/** Everything the confirm sheet shows for the token + room. */
+export const PERSONAL_FEE_ESTIMATE_SATS = PERSONAL_NETWORK_FEE_SATS + PERSONAL_INDEX_SATS;
 
 export async function deployPersonalToken(
   ctx: OneSatContext,
@@ -57,6 +65,10 @@ export async function deployPersonalToken(
     roomTicker: null,
   };
   setPersonalLink(input.identityAddress, link);
+  // Second tx: fund indexing so other wallets, the Market and bit-sign's room gate can see it.
+  // Never fails the claim (the token is minted and in this wallet); "Finish setting up" retries.
+  const fund = await fundAfterDeploy(ctx, res.tokenId, ticker);
+  if (!fund.ok) console.warn('[personal] indexing not funded yet:', fund.error);
   return link;
 }
 
@@ -100,4 +112,45 @@ export async function lookupPersonal(client: BchatClient, name: string): Promise
   const r = await client.personalToken(personalKey(name)).catch(() => null);
   if (r?.tokenId) rememberPersonal({ name, tokenId: r.tokenId });
   return r?.tokenId ?? null;
+}
+
+/**
+ * Restore a lost local link (e.g. app data cleared, or minted from another screen): look for this
+ * wallet's own deploy of $HANDLE in the BSV-21 basket. Read-only; returns the restored link or null.
+ */
+export async function recoverPersonalLink(
+  ctx: OneSatContext,
+  identityAddress: string,
+  handle: string,
+): Promise<PersonalLink | null> {
+  const existing = getPersonalLink(identityAddress);
+  if (existing) return existing;
+  const ticker = personalTicker(handle);
+  if (!ticker) return null;
+  const res = await ctx.wallet
+    .listOutputs({
+      basket: BSV21_BASKET,
+      tags: ['bsv21:deploy'],
+      includeTags: true,
+      includeCustomInstructions: true,
+      limit: 200,
+    })
+    .catch(() => null);
+  const deploys: OwnDeploy[] = [];
+  for (const o of res?.outputs ?? []) {
+    const f = bsv21FieldsFromOutput({ tags: o.tags, customInstructions: o.customInstructions, outpoint: o.outpoint });
+    if (f.isDeploy && f.tokenId && f.sym && f.amt) deploys.push({ tokenId: f.tokenId, sym: f.sym, amt: f.amt });
+  }
+  const d = pickOwnDeploy(deploys, ticker);
+  if (!d) return null;
+  const link: PersonalLink = {
+    name: personalKey(handle),
+    tokenId: d.tokenId,
+    ticker,
+    supply: d.amt,
+    createdAt: Date.now(),
+    roomTicker: null,
+  };
+  setPersonalLink(identityAddress, link);
+  return link;
 }

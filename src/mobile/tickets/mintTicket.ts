@@ -5,6 +5,7 @@ import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api'
 import { walletSigner } from '../chat/signer';
 import { proveHoldings } from '../chat/holdings';
 import { MINT_APP, fileToBase64, withFeeOutput } from '../mint/mint';
+import { fundAfterDeploy } from '../tokens/indexFund';
 import {
   TICKET_DECIMALS,
   TICKET_MIN,
@@ -65,7 +66,8 @@ export async function inscribeIcon(ctx: OneSatContext, file: File, ticker: strin
 
 /**
  * Shared BSV-21 deploy (tickets and plain tokens): fixed supply to self, the 1% mint fee output,
- * and an optional MAP tag output on the same tx. `amount` is in raw units. Returns the token id
+ * and an optional MAP tag output on the same tx; then a second tx funds the token's 1sat-stack
+ * indexing (indexFund.ts; the cost is on the confirm sheet). `amount` is in raw units. Returns the token id
  * as `txid_vout`.
  */
 export async function deployBsv21(
@@ -90,7 +92,12 @@ export async function deployBsv21(
     },
   );
   if (res.error || !res.tokenId) throw new Error(res.error || 'Mint failed');
-  return res.tokenId.replace('.', '_');
+  const tokenId = res.tokenId.replace('.', '_');
+  // Creator pays indexing at mint (1sat-stack lists a token only once its fee address is funded).
+  // A failure here doesn't undo the mint; the token offers "Finish setting up" (FinishIndexing).
+  const fund = await fundAfterDeploy(ctx, tokenId, opts.symbol);
+  if (!fund.ok) console.warn('[deployBsv21] indexing not funded yet:', fund.error);
+  return tokenId;
 }
 
 export async function deployTicket(

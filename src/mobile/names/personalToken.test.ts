@@ -9,6 +9,7 @@ import {
   personalKey,
   personalMapScript,
   personalTicker,
+  pickOwnDeploy,
   tickerLabel,
   validateSupply,
   withPersonalMap,
@@ -74,5 +75,19 @@ describe('on-chain MAP link', () => {
     expect(calls[0].outputs?.[0]).toEqual(deploy); // deploy stays vout 0 → token id unchanged
     expect(calls[0].outputs?.[1].satoshis).toBe(0);
     expect(calls[1].outputs?.length).toBe(1);
+  });
+});
+
+describe('pickOwnDeploy', () => {
+  test('finds this wallet’s deploy of the ticker (newest), normalising the id', () => {
+    const d = [
+      { tokenId: `${'1'.repeat(64)}_0`, sym: 'OTHER', amt: '5' },
+      { tokenId: `${'2'.repeat(64)}.0`, sym: 'TESTY', amt: '1000000' },
+      { tokenId: `${'3'.repeat(64)}_0`, sym: '$testy', amt: '7' },
+    ];
+    expect(pickOwnDeploy(d, 'TESTY')).toEqual({ tokenId: `${'3'.repeat(64)}_0`, sym: '$testy', amt: '7' });
+    expect(pickOwnDeploy(d.slice(0, 2), '$testy')?.tokenId).toBe(`${'2'.repeat(64)}_0`);
+    expect(pickOwnDeploy(d, 'NOPE')).toBeNull();
+    expect(pickOwnDeploy([{ tokenId: 'junk', sym: 'TESTY', amt: '1' }], 'TESTY')).toBeNull();
   });
 });
