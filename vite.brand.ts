@@ -1,0 +1,191 @@
+import type { Plugin } from 'vite';
+import { resolve } from 'path';
+import { readFileSync } from 'fs';
+
+/**
+ * Build-time brand switch shared by the mobile (vite.config.mobile.ts), web
+ * (vite.config.web.ts) and extension (vite.config*.ts) builds. Upstream's files
+ * stay unchanged (and mergeable); the brand is applied by these plugins.
+ *
+ * BRAND=bcorp (default) is "bWallet", the store brand; BRAND=bwallet is the
+ * older green bWallet; BRAND=yours keeps upstream's name and logos (internal
+ * testing only). MOBILE_BRAND is still read for older scripts.
+ */
+export type Brand = 'bcorp' | 'yours' | 'bwallet';
+export const BRAND: Brand =
+  (['yours', 'bwallet'] as const).find((b) => b === (process.env.BRAND ?? process.env.MOBILE_BRAND)) ?? 'bcorp';
+
+/** `__BRAND__` (and the older `__MOBILE_BRAND__`) for src code. */
+export const brandDefines = () => ({
+  __BRAND__: JSON.stringify(BRAND),
+  __MOBILE_BRAND__: JSON.stringify(BRAND),
+});
+
+const LOGO_DIR = BRAND === 'bcorp' ? 'src/mobile/brand/bcorp' : 'src/mobile/brand';
+const BWALLET_ASSETS: Record<string, string> = {
+  [resolve(__dirname, 'src/utils/constants.ts')]: resolve(__dirname, 'src/mobile/brand/constants.ts'),
+  [resolve(__dirname, 'src/assets/logos/icon.png')]: resolve(__dirname, LOGO_DIR, 'icon.png'),
+  [resolve(__dirname, 'src/assets/logos/horizontal-logo.png')]: resolve(__dirname, LOGO_DIR, 'horizontal-logo.png'),
+  [resolve(__dirname, 'src/assets/logos/white-logo.png')]: resolve(__dirname, LOGO_DIR, 'white-logo.png'),
+};
+
+/**
+ * Swaps upstream modules for brand ones. `extra` swaps (theme, mobile tab bar...)
+ * apply to every brand; logos, constants and the default avatar only to bWallet
+ * brands. Set `emitAvatar: false` for builds that only bundle scripts.
+ */
+export const brand = (extra: Record<string, string> = {}, { emitAvatar = true } = {}): Plugin => {
+  const SWAPS: Record<string, string> = { ...extra };
+  if (BRAND !== 'yours') Object.assign(SWAPS, BWALLET_ASSETS);
+  return {
+    name: 'bwallet-brand',
+    enforce: 'pre',
+    // Default account avatar at a stable path (it is stored in account records).
+    generateBundle() {
+      if (BRAND === 'yours' || !emitAvatar) return;
+      this.emitFile({
+        type: 'asset',
+        fileName: 'bwallet-avatar.png',
+        source: readFileSync(resolve(__dirname, LOGO_DIR, 'icon.png')),
+      });
+    },
+    async resolveId(source, importer, options) {
+      if (!importer) return null;
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      const swap = resolved && SWAPS[resolved.id.split('?')[0]];
+      // A replacement may import the file it replaces (brand/constants re-exports upstream);
+      // every other import from a replacement is still swapped (mobile TopNav's logo).
+      if (swap && swap === importer.split('?')[0]) return null;
+      return swap ? swap + (resolved!.id.includes('?') ? resolved!.id.slice(resolved!.id.indexOf('?')) : '') : null;
+    },
+  };
+};
+
+type Swaps = Record<string, [string, string][]>;
+
+const applySwaps = (name: string, table: Swaps) =>
+  function (this: { error: (m: string) => never }, code: string, id: string) {
+    const file = id.split('?')[0].slice(__dirname.length + 1);
+    const swaps = table[file];
+    if (!swaps) return null;
+    for (const [from, to] of swaps) {
+      if (!code.includes(from)) this.error(`${name}: "${from}" not found in ${file}`);
+      code = code.split(from).join(to);
+    }
+    return { code, map: null };
+  };
+
+// bcorp builds: reword upstream UI strings that name "Yours" as the product, at build
+// time. Each entry must still match: the build fails if upstream rewords one, so the
+// list can't silently go stale.
+const BCORP_TEXT: Swaps = {
+  // Accounts created before the rebrand stored upstream's hosted avatar; show ours instead.
+  'src/hooks/useIdentity.ts': [
+    [
+      "if (!uri) return '';",
+      "if (!uri) return '';\n  if (uri.includes('i.ibb.co/zGcthBv/yours-org-light.png')) return 'bwallet-avatar.png';",
+    ],
+  ],
+  'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
+  'src/components/UpgradeNotification.tsx': [['Welcome to Yours Wallet 5.0', 'Welcome to bWallet']],
+  'src/components/BackupPromo.tsx': [['Yours Wallet now uses', 'bWallet uses']],
+  'src/components/ProviderPicker.tsx': [
+    ['Official storage partner of Yours Wallet.', 'Default wallet storage provider.'],
+  ],
+  'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bWallet"']],
+  'src/components/YoursIcon.tsx': [['alt="Yours Head"', 'alt="bWallet"']],
+  'src/pages/requests/UsbCheckRequest.tsx': [['is asking Yours to', 'is asking bWallet to']],
+  'src/pages/onboarding/RestoreAccount.tsx': [
+    ['alt="Yours"', 'alt="bWallet"'],
+    ['Upload Yours JSON', 'Upload wallet backup JSON'],
+    // Yours users don't know a Yours seed restores as bWallet: list Yours by name too (same import path).
+    [
+      "import masterWallet from '../../assets/master-wallet.svg';",
+      "import masterWallet from '../../assets/master-wallet.svg';\nimport yoursOriginalLogo from '../../mobile/brand/yours-white-logo.png';",
+    ],
+    [
+      "    {\n      id: 'relayx',",
+      "    {\n      id: 'yours',\n      label: 'Yours Wallet',\n      logo: (\n        <div className=\"flex items-center justify-center rounded-lg\" style={{ backgroundColor: '#000', width: '2.25rem', height: '2.25rem', padding: '0.35rem' }}>\n          <img src={yoursOriginalLogo} alt=\"Yours Wallet\" style={{ width: '1rem', height: 'auto' }} />\n        </div>\n      ),\n    },\n    {\n      id: 'relayx',",
+    ],
+    ['key={opt.id}', 'key={opt.label}'],
+  ],
+};
+
+/**
+ * Extension-only bcorp rewording, on top of BCORP_TEXT: pages and logs the mobile
+ * app does not show (USB key flows, Settings footer, content/background logs).
+ */
+export const EXTENSION_TEXT: Swaps = {
+  'src/content.ts': [["console.log('🌱 Yours Wallet Loaded');", ''] as [string, string]],
+  'src/background.ts': [
+    ["console.log('Yours Wallet Background Script Running!');", "console.log('bWallet background running');"],
+  ],
+  'src/pages/Settings.tsx': [
+    [
+      '        {buildInfo}\n      </div>',
+      '        {buildInfo}\n      </div>\n      <div className="text-center text-[10px] pb-4 px-4" style={{ color: \'#667085\' }}>bWallet (beta) by The Bitcoin Corporation Ltd. Based on the open-source Yours Wallet (MIT licence); not affiliated with or endorsed by its authors.</div>',
+    ],
+  ],
+  'src/pages/usb/RepickFlow.tsx': [['The dialog will name Yours Wallet.', 'The dialog will name bWallet.']],
+  'src/pages/usb/EnrollFlow.tsx': [['already has a Yours key file', 'already has a wallet key file']],
+  'src/pages/usb/AddFlow.tsx': [['already has a Yours key file', 'already has a wallet key file']],
+  'src/pages/usb/RestoreFlow.tsx': [
+    ['No Yours backup found on this drive', 'No wallet backup found on this drive'],
+    ['Open the Yours icon;', 'Open the bWallet icon;'],
+  ],
+  'src/pages/usb/UsbFlow.tsx': [
+    ['Click the Yours icon to open your wallet.', 'Click the bWallet icon to open your wallet.'],
+  ],
+  'src/services/usbBackup.ts': [
+    ['written by a different version of Yours.', 'written by a different version of the wallet.'],
+    ["This drive doesn't hold a Yours USB key", "This drive doesn't hold a wallet USB key"],
+  ],
+};
+
+export const bcorpText = (extra: Swaps = {}): Plugin => {
+  const table: Swaps = { ...BCORP_TEXT };
+  for (const [file, swaps] of Object.entries(extra)) table[file] = [...(table[file] ?? []), ...swaps];
+  const transform = applySwaps('bcorp-text', table);
+  return {
+    name: 'bcorp-text',
+    enforce: 'pre',
+    transform(code, id) {
+      if (BRAND !== 'bcorp') return null;
+      return transform.call(this, code, id);
+    },
+    transformIndexHtml: (html) =>
+      BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', '<title>bWallet</title>') : html,
+  };
+};
+
+/**
+ * bCorp palette: upstream's greens become BSV gold in the bcorp build only.
+ */
+const BCORP_COLOURS: [RegExp, string][] = [
+  [/#A1FF8B/gi, '#FFD24D'],
+  [/#9EFF8A/gi, '#FFD24D'],
+  [/#34D399/gi, '#EAB300'],
+  [/rgba\(52,\s*211,\s*153/g, 'rgba(234, 179, 0'],
+  [/\btext-green-400\b/g, 'text-yellow-400'],
+];
+export const bcorpColours = (): Plugin => ({
+  name: 'bcorp-colours',
+  enforce: 'pre',
+  transform(code, id) {
+    if (BRAND !== 'bcorp' || !/\/src\/.*\.(tsx?|css)$/.test(id.split('?')[0])) return null;
+    let out = code;
+    for (const [re, to] of BCORP_COLOURS) out = out.replace(re, to);
+    return out === code ? null : { code: out, map: null };
+  },
+});
+
+/** Extension theme: bWallet name and badge, without the mobile-only Browser tab. */
+export const EXTENSION_SWAPS: Record<string, string> =
+  BRAND === 'yours' ? {} : { [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/brand/extensionTheme.ts') };
+
+/** All brand plugins for one extension bundle. */
+export const extensionBrandPlugins = ({ emitAvatar = false } = {}): Plugin[] => [
+  brand(EXTENSION_SWAPS, { emitAvatar }),
+  bcorpText(EXTENSION_TEXT),
+  bcorpColours(),
+];
