@@ -26,3 +26,28 @@ export const onChatSegment = (fn: () => void) => {
   window.addEventListener(EVENT, fn);
   return () => window.removeEventListener(EVENT, fn);
 };
+
+/** Open the 1:1 with a bChat handle (from Calls): switches Chat to DMs, which takes the request. */
+const DM_EVENT = 'bwallet:chat-dm';
+let pendingDm: string | null = null;
+
+export const requestDm = (handle: string) => {
+  pendingDm = handle;
+  requestChatSegment('dms');
+  try {
+    window.dispatchEvent(new Event(DM_EVENT));
+  } catch {
+    /* no window (tests) */
+  }
+};
+
+export const takeDmRequest = (): string | null => {
+  const h = pendingDm;
+  pendingDm = null;
+  return h;
+};
+
+export const onDmRequest = (fn: () => void) => {
+  window.addEventListener(DM_EVENT, fn);
+  return () => window.removeEventListener(DM_EVENT, fn);
+};
