@@ -39,7 +39,14 @@ type Pending =
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
-export const GetYourName = ({ profileName = '' }: { profileName?: string }) => {
+export const GetYourName = ({
+  profileName = '',
+  hidePaymail = false,
+}: {
+  profileName?: string;
+  /** The handle sheet claims the paymail itself; hide this block there. */
+  hidePaymail?: boolean;
+}) => {
   const { theme } = useTheme();
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
@@ -323,7 +330,7 @@ export const GetYourName = ({ profileName = '' }: { profileName?: string }) => {
         )}
       </p>
 
-      {paymailEnabled() && (
+      {paymailEnabled() && !hidePaymail && (
         <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: '1px solid #3a2f0c' }}>
           <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
             Paymail
