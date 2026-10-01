@@ -54,6 +54,7 @@ const DEAD_HOSTS = new Set(['taleofshua.com']);
 const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
   { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
+  { name: 'Treechat', link: 'https://treechat.com', icon: 'https://treechat.com/assets/favicon.svg' },
   { name: 'Tempo', link: 'https://tempomusic.net', icon: 'https://tempomusic.net/favicon.ico' },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
@@ -77,10 +78,20 @@ const AppIcon = ({ src }: { src?: string }) => {
 const BAppIcon = ({ src }: { src?: string }) => {
   const [failed, setFailed] = useState(false);
   if (src && !failed) {
-    return <img src={src} alt="" onError={() => setFailed(true)} className="h-10 w-10 rounded-xl object-cover bg-[#2b2f36] shrink-0" />;
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="h-10 w-10 rounded-xl object-cover bg-[#2b2f36] shrink-0"
+      />
+    );
   }
   return (
-    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 font-bold text-lg" style={{ background: '#EAB300', color: '#010101' }}>
+    <div
+      className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 font-bold text-lg"
+      style={{ background: '#EAB300', color: '#010101' }}
+    >
       b
     </div>
   );
@@ -123,7 +134,11 @@ const BrowserPage = () => {
             <span className="text-sm font-semibold text-white">{app.name}</span>
             <span
               className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase"
-              style={app.status === 'live' ? { background: '#EAB30022', color: '#FFD24D' } : { background: '#2b2f36', color: '#98A2B3' }}
+              style={
+                app.status === 'live'
+                  ? { background: '#EAB30022', color: '#FFD24D' }
+                  : { background: '#2b2f36', color: '#98A2B3' }
+              }
             >
               {app.status === 'live' ? 'Live' : 'Demo'}
             </span>
@@ -206,7 +221,10 @@ const BrowserPage = () => {
               key={id}
               onClick={() => setSection(id)}
               className="flex-1 rounded-lg py-1.5 text-xs font-semibold"
-              style={{ background: section === id ? '#2b2f36' : 'transparent', color: section === id ? '#fff' : '#98A2B3' }}
+              style={{
+                background: section === id ? '#2b2f36' : 'transparent',
+                color: section === id ? '#fff' : '#98A2B3',
+              }}
             >
               {label}
             </button>

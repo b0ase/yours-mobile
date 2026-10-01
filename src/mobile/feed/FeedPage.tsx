@@ -23,6 +23,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { resolveImageUrl, useIdentity } from '../../hooks/useIdentity';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
+import { openDappBrowser } from '../dappBrowser';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
 import {
   buildFollowScript,
@@ -30,15 +31,21 @@ import {
   buildPostScript,
   estimatePostFee,
   feedTimeLabel,
+  filterFeed,
   MAX_INLINE_IMAGE_BYTES,
   MAX_POST_CHARS,
   shortAddress,
+  sourceLabel,
+  sourceUrl,
+  SOURCES,
+  threadRoot,
   validatePost,
   type Author,
   type FeedPost,
   type PostImage,
+  type Source,
 } from './post';
-import { fetchByAddress, fetchByBap, fetchFollowing, fetchRecent, fetchReplies, publish } from './feedApi';
+import { fetchByAddress, fetchByBap, fetchFollowing, fetchForYou, fetchThread, publish } from './feedApi';
 import {
   addLiked,
   addMute,
@@ -67,6 +74,47 @@ const TIP_PRESETS = [1_000, 10_000, 100_000];
 const AIP_BYTES = 140;
 
 type Tab = 'following' | 'foryou';
+const SOURCE_KEY = 'bwallet.feed.source';
+const loadSource = (): Source | 'all' => {
+  try {
+    const v = localStorage.getItem(SOURCE_KEY);
+    return SOURCES.some((s) => s.id === v) ? (v as Source | 'all') : 'all';
+  } catch {
+    return 'all';
+  }
+};
+const saveSource = (v: Source | 'all') => {
+  try {
+    localStorage.setItem(SOURCE_KEY, v);
+  } catch {
+    // storage unavailable
+  }
+};
+
+/** "via Treechat" credit; a link to the original where the source app has a URL pattern. */
+const Via = ({ post }: { post: FeedPost }) => {
+  const label = sourceLabel(post.app);
+  if (!label) return null;
+  const url = sourceUrl(post);
+  if (!url)
+    return (
+      <span className="text-[11px] shrink-0" style={{ color: MUTED }}>
+        via {label}
+      </span>
+    );
+  return (
+    <button
+      className="text-[11px] shrink-0 underline decoration-dotted"
+      style={{ color: MUTED }}
+      onClick={(e) => {
+        e.stopPropagation();
+        void openDappBrowser(url);
+      }}
+    >
+      via {label}
+    </button>
+  );
+};
 
 const useOnline = () => {
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
@@ -213,8 +261,9 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
         <div className="flex items-baseline gap-1 min-w-0">
           <span className="text-[14px] font-bold text-white truncate">{post.author.name}</span>
           <span className="text-[12px] truncate" style={{ color: MUTED }}>
-            {post.app ? `· ${post.app}` : ''} · {feedTimeLabel(post.at)}
+            · {feedTimeLabel(post.at)}
           </span>
+          <Via post={post} />
           <button
             className="ml-auto p-1 -mr-1"
             aria-label="More"
@@ -324,7 +373,13 @@ const Composer = ({
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview]);
 
-  const input = { text, image, replyTo: replyTo?.txid ?? null };
+  // Treechat replies point MAP tx at the thread's first post and carry its thread id.
+  const input = {
+    text,
+    image,
+    replyTo: replyTo ? threadRoot(replyTo) : null,
+    threadId: replyTo?.source === 'treechat' ? replyTo.threadId : null,
+  };
   const invalid = validatePost(input);
   const fee = useMemo(() => {
     if (invalid) return null;
@@ -358,7 +413,11 @@ const Composer = ({
     if (safety().check({ texts: [text] }).blocked) return setError("This can't be posted from bWallet.");
     setBusy(true);
     try {
-      const tags = ['app:bWallet', 'type:post', ...(replyTo ? [`context:tx`, `contextValue:${replyTo.txid}`] : [])];
+      const tags = [
+        'app:bWallet',
+        'type:post',
+        ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
+      ];
       const txid = await publish(apiContext, buildPostScript(input), replyTo ? 'Feed reply' : 'Feed post', tags);
       onPosted(txid);
     } catch (e) {
@@ -517,6 +576,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
   const [liked, setLiked] = useState<string[]>(loadLiked);
   const [raw, setRaw] = useState<Record<Tab, FeedPost[] | null>>({ following: null, foryou: null });
   const [error, setError] = useState('');
+  const [source, setSource] = useState<Source | 'all'>(loadSource);
   const [safetyTick, setSafetyTick] = useState(0);
   const [composing, setComposing] = useState<{ replyTo: FeedPost | null } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
@@ -533,7 +593,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     async (which: Tab) => {
       setError('');
       try {
-        const posts = which === 'foryou' ? await fetchRecent() : await fetchFollowing(follows);
+        const posts = which === 'foryou' ? await fetchForYou() : await fetchFollowing(follows);
         setRaw((r) => ({ ...r, [which]: posts }));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -546,8 +606,14 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     void load(tab);
   }, [tab, load]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => (raw[tab] ? visiblePosts(raw[tab]!, mutes) : null), [raw, tab, mutes, safetyTick]);
+  const shown = useMemo(
+    () =>
+      raw[tab]
+        ? filterFeed(visiblePosts(raw[tab]!, mutes), source, (a) => tab === 'foryou' && isFollowing(follows, a))
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [raw, tab, mutes, safetyTick, source, follows],
+  );
   const likedSet = useMemo(() => new Set(liked), [liked]);
 
   const like = async (p: FeedPost) => {
@@ -638,6 +704,26 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
           ))}
         </div>
 
+        <div className="flex gap-2 px-4 py-2 overflow-x-auto" role="tablist" aria-label="Source">
+          {SOURCES.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => {
+                setSource(s.id);
+                saveSource(s.id);
+              }}
+              className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+              style={
+                source === s.id
+                  ? { background: GOLD, color: '#1a1300' }
+                  : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
+              }
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
         {!online && (
           <div
             className="mx-4 mt-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
@@ -658,7 +744,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
           empty={
             <div className="px-8 pt-14 text-center">
               <p className="text-sm text-white font-semibold">
-                {tab === 'following' ? 'Nobody followed yet' : 'Nothing here yet'}
+                {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
               </p>
               <p className="text-xs mt-1" style={{ color: MUTED }}>
                 {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
@@ -827,15 +913,40 @@ const ThreadView = ({
   mutes: string[];
   safetyTick: number;
 }) => {
-  const [replies, setReplies] = useState<FeedPost[] | null>(null);
+  const [thread, setThread] = useState<FeedPost[] | null>(null);
   useEffect(() => {
-    setReplies(null);
-    fetchReplies(post.txid)
-      .then((r) => setReplies(r.sort((a, b) => a.at - b.at)))
-      .catch(() => setReplies([]));
+    setThread(null);
+    fetchThread(post)
+      .then(setThread)
+      .catch(() => setThread([post]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.txid]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => (replies ? visiblePosts(replies, mutes) : null), [replies, mutes, safetyTick]);
+  // Treechat: the whole thread (every post with this treechat_thread_id), oldest first.
+  // Elsewhere: the post, then its replies.
+  const whole = !!post.threadId;
+  const shown = useMemo(
+    () => (thread ? visiblePosts(whole ? thread : thread.filter((p) => p.txid !== post.txid), mutes) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [thread, mutes, safetyTick, whole, post.txid],
+  );
+  const authorFromThread = (a: Author) => {
+    onBack();
+    actions.onAuthor(a);
+  };
+  if (whole)
+    return (
+      <Layer title={`Thread · via ${sourceLabel(post.app) || 'Treechat'}`} onBack={onBack}>
+        <PostList
+          posts={shown}
+          a={{ ...actions, onOpen: () => undefined, onAuthor: authorFromThread }}
+          empty={
+            <p className="text-center text-xs pt-8" style={{ color: MUTED }}>
+              Nothing to show in this thread.
+            </p>
+          }
+        />
+      </Layer>
+    );
   return (
     <Layer title="Post" onBack={onBack}>
       <PostCard
@@ -843,10 +954,7 @@ const ThreadView = ({
         a={{
           ...actions,
           onOpen: () => undefined,
-          onAuthor: (a) => {
-            onBack();
-            actions.onAuthor(a);
-          },
+          onAuthor: authorFromThread,
         }}
       />
       <PostList

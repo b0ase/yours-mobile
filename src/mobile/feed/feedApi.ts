@@ -1,6 +1,6 @@
 import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, type OneSatContext } from '@1sat/actions';
 import { Transaction, Utils, type Script } from '@bsv/sdk';
-import { parseBmapFeed, parseLikes, type FeedPost } from './post';
+import { groupThread, mergePosts, parseBmapFeed, parseBmapPost, parseLikes, threadRoot, type FeedPost } from './post';
 
 /**
  * Feed read source: the bmap API (BitcoinSchema/bmap-api, the indexer behind 1satsocial /
@@ -27,10 +27,57 @@ export const fetchByBap = async (bapId: string, page = 1, limit = 30) =>
 export const fetchByAddress = async (address: string, page = 1, limit = 30) =>
   parseBmapFeed(await get(`/social/post/address/${encodeURIComponent(address)}?page=${page}&limit=${limit}`));
 
-export const fetchReplies = async (txid: string) => parseBmapFeed(await get(`/social/post/${txid}/reply?limit=50`));
+export const fetchReplies = async (txid: string) => parseBmapFeed(await get(`/social/post/${txid}/reply?limit=100`));
 
 export const fetchLikes = async (txid: string, mine: string[] = []) =>
   parseLikes(await get(`/social/post/${txid}/like`), mine);
+
+// The query is ASCII JSON, so plain btoa is safe.
+const b64 = (s: string) => btoa(s);
+
+/**
+ * Twetch (MAP app=twetch) through bmap's raw query route. Unsorted on purpose: a sort on this
+ * collection times out server-side. Twetch content is historical (newest indexed ~block 843k, 2024).
+ */
+export const fetchTwetch = async (limit = 20): Promise<FeedPost[]> => {
+  const body = (await get(`/q/post/${b64(JSON.stringify({ v: 3, q: { find: { 'MAP.app': 'twetch' }, limit } }))}`)) as {
+    post?: unknown;
+    signers?: unknown;
+  };
+  return parseBmapFeed({ results: body?.post, signers: body?.signers });
+};
+
+/** For you: network-wide recent posts plus a slice of Twetch. Twetch failing never blanks the feed. */
+export async function fetchForYou(): Promise<FeedPost[]> {
+  const [recent, twetch] = await Promise.allSettled([fetchRecent(), fetchTwetch()]);
+  if (recent.status === 'rejected') throw recent.reason;
+  return mergePosts(recent.value, twetch.status === 'fulfilled' ? twetch.value : []);
+}
+
+/**
+ * A whole thread. Treechat: the root post + its replies (Treechat points every reply's MAP tx
+ * at the root), plus a text search for the thread id (bmap has no index on
+ * MAP.treechat_thread_id, so a direct query times out) filtered to exact matches.
+ * Others: the post's direct replies. Each source is optional; whatever loads is shown.
+ */
+export async function fetchThread(post: FeedPost): Promise<FeedPost[]> {
+  const root = threadRoot(post);
+  const jobs: Promise<FeedPost[]>[] = [fetchReplies(root)];
+  if (root !== post.txid)
+    jobs.push(
+      get(`/social/post/${root}`).then((b) => {
+        const p = parseBmapPost((b as { post?: unknown })?.post);
+        return p ? [p] : [];
+      }),
+    );
+  if (post.threadId)
+    jobs.push(get(`/social/post/search?q=${encodeURIComponent(post.threadId)}&limit=100`).then(parseBmapFeed));
+  const got = await Promise.allSettled(jobs);
+  return groupThread(
+    post,
+    got.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])),
+  );
+}
 
 /** Posts by a set of authors (bapId when known, else address), merged newest-first. */
 export async function fetchFollowing(follows: { bapId: string | null; address: string }[]): Promise<FeedPost[]> {

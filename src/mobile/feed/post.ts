@@ -27,7 +27,14 @@ const { toArray } = Utils;
 const PIPE = 0x7c;
 
 export type PostImage = { bytes: number[]; mime: string; filename?: string };
-export type PostInput = { text: string; image?: PostImage | null; replyTo?: string | null; app?: string };
+export type PostInput = {
+  text: string;
+  image?: PostImage | null;
+  replyTo?: string | null;
+  app?: string;
+  /** Treechat thread a reply belongs to; written as MAP treechat_thread_id so Treechat can place it. */
+  threadId?: string | null;
+};
 
 const pushStr = (s: Script, v: string) => s.writeBin(toArray(v, 'utf8'));
 
@@ -43,6 +50,10 @@ const writeMap = (s: Script, kv: [string, string][], app: string) => {
 
 const opReturn = () => new Script().writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
 
+/** Treechat thread / message ids are UUIDs. */
+export const isThreadId = (t: string | null | undefined): t is string =>
+  !!t && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t);
+
 export const isTxid = (t: string | null | undefined): t is string => !!t && /^[0-9a-f]{64}$/i.test(t);
 
 export function validatePost(p: PostInput): string | null {
@@ -54,6 +65,7 @@ export function validatePost(p: PostInput): string | null {
     if (p.image.bytes.length > MAX_INLINE_IMAGE_BYTES) return 'That image is too large to post, even after shrinking.';
   }
   if (p.replyTo != null && !isTxid(p.replyTo)) return 'That post id is not valid.';
+  if (p.threadId != null && !isThreadId(p.threadId)) return 'That thread id is not valid.';
   return null;
 }
 
@@ -79,6 +91,7 @@ export function buildPostScript(p: PostInput): Script {
   }
   const kv: [string, string][] = [['type', 'post']];
   if (p.replyTo) kv.push(['context', 'tx'], ['tx', p.replyTo.toLowerCase()]);
+  if (p.replyTo && p.threadId) kv.push(['treechat_thread_id', p.threadId.toLowerCase()]);
   writeMap(s, kv, p.app ?? FEED_APP);
   return s;
 }
@@ -158,11 +171,59 @@ export function decodeScript(script: Script): Decoded | null {
 // ── bmap API parsing ─────────────────────────────────────────────────────────
 export type Author = { address: string; bapId: string | null; name: string; avatar: string | null };
 export type FeedImage = { src: string; mime: string };
+/** Where a post was made, from MAP `app`. Everything not ours / Treechat / Twetch is "other". */
+export type Source = 'bwallet' | 'treechat' | 'twetch' | 'other';
+export const SOURCES: { id: Source | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'bwallet', label: 'bWallet' },
+  { id: 'treechat', label: 'Treechat' },
+  { id: 'twetch', label: 'Twetch' },
+  { id: 'other', label: 'Other' },
+];
+
+const APP_LABELS: Record<string, string> = {
+  treechat: 'Treechat',
+  treechat_staging: 'Treechat',
+  twetch: 'Twetch',
+  '1satsocial': '1satsocial',
+  '1sat.social': '1satsocial',
+  bsocial: 'bSocial',
+};
+
+export function sourceOf(app: string): Source {
+  const a = app.trim().toLowerCase();
+  if (a === FEED_APP.toLowerCase()) return 'bwallet';
+  if (a === 'treechat' || a.startsWith('treechat_')) return 'treechat';
+  if (a === 'twetch') return 'twetch';
+  return 'other';
+}
+
+/** "Treechat" for the credit line; unknown apps keep their own (trimmed) name; empty → ''. */
+export const sourceLabel = (app: string): string => {
+  const a = app.trim();
+  if (!a || sourceOf(a) === 'bwallet') return '';
+  return APP_LABELS[a.toLowerCase()] ?? a.slice(0, 24);
+};
+
+/**
+ * Link to the original on the source app, where a URL pattern is known:
+ * Treechat app.treechat.com/p/<thread id> (verified: redirects to /quest/<thread id>);
+ * Twetch twetch.com/t/<txid> (the form Twetch users shared on-chain).
+ */
+export function sourceUrl(p: Pick<FeedPost, 'source' | 'threadId' | 'txid'>): string | null {
+  if (p.source === 'treechat' && p.threadId) return `https://app.treechat.com/p/${p.threadId}`;
+  if (p.source === 'twetch') return `https://twetch.com/t/${p.txid}`;
+  return null;
+}
+
 export type FeedPost = {
   txid: string;
   text: string;
   images: FeedImage[];
   app: string;
+  source: Source;
+  /** Treechat thread id (MAP treechat_thread_id), else null. */
+  threadId: string | null;
   replyTo: string | null;
   author: Author;
   /** ms since epoch */
@@ -257,19 +318,34 @@ export function parseBmapPost(
   }
   if (!text && !images.length) return null;
   const ctx = asStr(map.context);
-  const parent = asStr(map.tx) || (ctx === 'tx' ? asStr(map.contextValue) : '');
+  const app = asStr(map.app);
+  const source = sourceOf(app);
+  // Twetch put the parent in MAP `reply` (literal "null" when none).
+  const parent =
+    asStr(map.tx) || (ctx === 'tx' ? asStr(map.contextValue) : '') || (source === 'twetch' ? asStr(map.reply) : '');
   const aip = asRec(asArr(d.AIP)[0]);
   const address = asStr(aip.address) || asStr(asRec(asRec(asRec(asArr(d.in)[0]).xput).e).a);
   const signer = address ? signers.get(address) : undefined;
   const bapId = signer?.bapId || asStr(map.bapID) || null;
-  const name = signer?.name || asStr(map.username) || bareName(asStr(map.paymail)) || shortAddress(address || txid);
-  const ts = Number(d.timestamp) || Number(asRec(d.blk).t) * 1000 || 0;
+  const twetchUser = source === 'twetch' && /^\d+$/.test(asStr(map.mb_user)) ? `Twetch user ${asStr(map.mb_user)}` : '';
+  const name =
+    signer?.name ||
+    asStr(map.username).slice(0, 60) ||
+    bareName(asStr(map.paymail)) ||
+    twetchUser ||
+    shortAddress(address || txid);
+  // Treechat's own creation time beats bmap's index time (often months later).
+  const created = Date.parse(asStr(map.treechat_created_at));
+  const ts = created || Number(d.timestamp) || Number(asRec(d.blk).t) * 1000 || 0;
+  const threadId = asStr(map.treechat_thread_id);
   const m = asRec(meta);
   return {
     txid: txid.toLowerCase(),
     text: text.slice(0, MAX_POST_CHARS * 2),
     images,
-    app: asStr(map.app),
+    app,
+    source,
+    threadId: isThreadId(threadId) ? threadId.toLowerCase() : null,
     replyTo: isTxid(parent) ? parent.toLowerCase() : null,
     author: { address, bapId, name, avatar: signer?.avatar ?? null },
     at: ts > 1e12 ? ts : ts * 1000,
@@ -297,6 +373,40 @@ export function parseBmapFeed(body: unknown): FeedPost[] {
     out.push(p);
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** Merge lists, newest first, dropping repeats. */
+export function mergePosts(...lists: FeedPost[][]): FeedPost[] {
+  const seen = new Set<string>();
+  return lists
+    .flat()
+    .filter((p) => !seen.has(p.txid) && !!seen.add(p.txid))
+    .sort((a, b) => b.at - a.at);
+}
+
+/** Root txid of a post's thread: Treechat replies all point MAP tx at the thread's first post. */
+export const threadRoot = (p: FeedPost): string => (p.source === 'treechat' && p.replyTo ? p.replyTo : p.txid);
+
+/**
+ * Every post of `post`'s thread from `candidates` (which may include unrelated search hits):
+ * same treechat_thread_id, or the root itself, or replies to the root. Oldest first.
+ */
+export function groupThread(post: FeedPost, candidates: FeedPost[]): FeedPost[] {
+  const root = threadRoot(post);
+  const inThread = (p: FeedPost) =>
+    post.threadId ? p.threadId === post.threadId || p.txid === root : p.txid === root || p.replyTo === root;
+  return mergePosts([post], candidates.filter(inThread)).sort((a, b) => a.at - b.at);
+}
+
+/** Source filter; "following first" ranks posts by followed authors above the rest, each newest first. */
+export function filterFeed(
+  posts: FeedPost[],
+  source: Source | 'all',
+  isFollowed: (a: Author) => boolean = () => false,
+): FeedPost[] {
+  const kept = source === 'all' ? posts : posts.filter((p) => p.source === source);
+  const rank = (p: FeedPost) => (isFollowed(p.author) ? 0 : 1);
+  return [...kept].sort((a, b) => rank(a) - rank(b) || b.at - a.at);
 }
 
 /** Like count + whether `myAddresses` already liked, from /social/post/{txid}/like. */
