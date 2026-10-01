@@ -54,6 +54,7 @@ const DEAD_HOSTS = new Set(['taleofshua.com']);
 const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
   { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
+  { name: 'Tempo', link: 'https://tempomusic.net', icon: 'https://tempomusic.net/favicon.ico' },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
     .filter((a) => new URL(a.link).hostname !== 'yours.org')
