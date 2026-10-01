@@ -53,6 +53,24 @@ export const signHandleClaim = async (
 
 const inflight = new Map<string, Promise<string | null>>();
 
+/** A refusal (name taken / a HandCash handle / reserved) is not retried on every sync. */
+const REFUSED_KEY = (paymail: string) => `bwallet.bchatHandle.refused.${paymail}`;
+const REFUSAL_TTL_MS = 24 * 60 * 60_000;
+const refusedRecently = (paymail: string) => {
+  try {
+    return Date.now() - Number(localStorage.getItem(REFUSED_KEY(paymail)) || 0) < REFUSAL_TTL_MS;
+  } catch {
+    return false;
+  }
+};
+const noteRefusal = (paymail: string) => {
+  try {
+    localStorage.setItem(REFUSED_KEY(paymail), String(Date.now()));
+  } catch {
+    /* storage unavailable */
+  }
+};
+
 /**
  * Make the bChat handle the paymail alias, if it is still a `yours-*` default.
  * `signIn: false` (startup) never signs in just for this — it only fixes an existing session.
@@ -68,6 +86,7 @@ export const syncBchatHandle = (
   if (stored && !needsPaymailHandle(stored.handle, paymail)) return Promise.resolve(null);
   if (!stored && !opts.signIn) return Promise.resolve(null);
   const key = paymail.toLowerCase();
+  if (!opts.signIn && refusedRecently(key)) return Promise.resolve(null);
   const running = inflight.get(key);
   if (running) return running;
   const p = (async () => {
@@ -79,6 +98,8 @@ export const syncBchatHandle = (
       saveSession(s);
       return s.handle;
     } catch (e) {
+      const status = (e as { status?: number } | null)?.status;
+      if (status && status >= 400 && status < 500 && status !== 401) noteRefusal(key);
       console.warn('[bchatHandle] could not update bChat handle:', e instanceof Error ? e.message : e);
       return null;
     } finally {
