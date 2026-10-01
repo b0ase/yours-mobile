@@ -210,3 +210,5 @@ Build once burn-on-entry exists (burns are the data). Same Twetch-style board as
 - **Top creators**: by ticket volume (tickets burned across their rooms; optionally tickets sold).
 
 Totals come from the burn ledger (bit-sign) rather than client-side scans, so every timeframe is exact.
+
+9. **Indexing is paid by the creator at mint.** Minting a ticket token includes the 1sat-stack overlay funding (about 1,000 sats per token output) so its burns are indexed at 0-conf. The mint sheet shows this cost.
