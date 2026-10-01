@@ -33,179 +33,93 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <style>
-      :root {
-        --bg: #000;
-        --card: #0d0d0d;
-        --line: #262626;
-        --text: #fff;
-        --muted: #b3b3b3;
-        --dim: #8a8a8a;
-        --gold: #f5b800;
-      }
-      * { box-sizing: border-box; }
-      html, body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font: 16px/1.6 "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-        -webkit-font-smoothing: antialiased;
-      }
-      a { color: var(--gold); }
-      a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
-      h1, h2, h3, .brand { font-family: "Space Grotesk", system-ui, sans-serif; }
-      .wrap {
-        max-width: 1040px;
-        margin: 0 auto;
-        padding: max(20px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
-      }
-      header { display: flex; align-items: center; gap: 10px; }
-      header img { width: 36px; height: 36px; }
-      .brand { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
-      nav { margin-left: auto; display: none; gap: 18px; font-size: 14px; }
-      nav a { color: var(--muted); text-decoration: none; }
-      nav a:hover { color: var(--gold); }
-      .hero { display: grid; gap: 36px; margin-top: 56px; align-items: center; }
-      .mark { width: min(260px, 60vw); justify-self: center; }
-      h1 {
-        font-size: clamp(38px, 8vw, 64px);
-        line-height: 1.03;
-        letter-spacing: -0.035em;
-        margin: 0;
-      }
-      h1 em { font-style: normal; color: var(--gold); }
-      .lede { color: var(--muted); font-size: 18px; margin: 18px 0 0; max-width: 34em; }
-      .downloads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
-      .dl {
-        display: flex; flex-direction: column; justify-content: center;
-        min-width: 180px; min-height: 58px; padding: 10px 18px;
-        border-radius: 14px; border: 1px solid var(--line); background: var(--card);
-      }
-      .dl b { font-size: 15px; }
-      .dl small { font-size: 12px; color: var(--gold); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-      section { margin-top: 72px; }
-      h2 { font-size: clamp(24px, 4vw, 30px); letter-spacing: -0.02em; margin: 0 0 8px; }
-      .kicker { color: var(--gold); font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 6px; }
-      .intro { color: var(--muted); margin: 0 0 20px; max-width: 40em; }
-      .grid { display: grid; gap: 12px; }
-      .card { padding: 20px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); }
-      .card h3 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; gap: 10px; }
-      .card h3::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); flex: none; }
-      .card p { margin: 0; color: var(--muted); font-size: 15px; }
-      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding: 0; list-style: none; }
-      .chips li { font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid #f5b80059; color: #ffd866; }
-      .security { border-color: #f5b80066; }
-      .security ul { margin: 0; padding-left: 20px; color: var(--muted); }
-      .security li + li { margin-top: 6px; }
-      .pair { display: grid; gap: 0 12px; }
-      footer {
-        margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line);
-        color: var(--dim); font-size: 13px; line-height: 1.7;
-      }
-      footer a { color: var(--muted); }
-      @media (min-width: 760px) {
-        nav { display: flex; }
-        .hero { grid-template-columns: 1.4fr 1fr; }
-        .pair { grid-template-columns: 1fr 1fr; }
-        .grid.three { grid-template-columns: repeat(3, 1fr); }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <header>
-        <img src="/logo.svg" alt="" width="36" height="36" />
-        <span class="brand">bWallet</span>
-        <nav aria-label="Sections">
-          <a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Media</a
-          ><a href="#chat">Chat</a><a href="#security">Security</a>
-        </nav>
-      </header>
+<link rel="stylesheet" href="/styles.css" />
+<link rel="preload" as="image" href="/media/hero-poster.jpg" />
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><div class="wrap topbar-in"><a class="brand" href="/"><img src="/logo.svg" alt="" width="30" height="30" /><span>bWallet</span></a>
+<nav aria-label="Sections"><a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Media</a><a href="#chat">Chat</a><a href="#security">Security</a></nav></div></header>
+<main id="main">
+<section class="hero">
+<video class="hero-video" autoplay muted loop playsinline preload="metadata" poster="/media/hero-poster.jpg" aria-hidden="true">
+<source src="/media/hero.webm" type="video/webm" /><source src="/media/hero.mp4" type="video/mp4" /></video>
+<div class="hero-shade" aria-hidden="true"></div>
+<div class="wrap hero-in">
+<img class="hero-logo" src="/logo.svg" alt="bWallet logo" width="96" height="96" />
+<span class="pill">Beta</span>
+<h1>The BSV wallet for <span class="gold">tokens, media and apps.</span></h1>
+<p class="lede">bWallet puts your coins, a 1Sat market, the bApps store, an ordinals player and bChat in one non-custodial app.</p>
+<div class="cta-row"><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>App Store · iPhone</span><small>Coming soon</small></button><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>Google Play · Android</span><small>Coming soon</small></button></div>
+</div>
+<a class="scroll-cue" href="#showcase" aria-label="Scroll to the app preview"><span></span></a>
+</section>
 
-      <main>
-        <div class="hero">
-          <div>
-            <h1>bWallet: the BSV wallet for <em>tokens, media and apps.</em></h1>
-            <p class="lede">
-              Hold BSV, MNEE and BSV-21 tokens, trade 1Sat tokens and collections, open bApps, play music and video
-              ordinals and chat, all in one non-custodial app for iPhone and Android.
-            </p>
-            <div class="downloads">
-              <div class="dl" aria-label="iPhone app: coming soon"><b>iPhone</b><small>Coming soon</small></div>
-              <div class="dl" aria-label="Android app: coming soon"><b>Android</b><small>Coming soon</small></div>
-            </div>
-          </div>
-          <img class="mark" src="/logo.svg" alt="bWallet logo: a gold ring around a rounded b" width="260" height="260" />
-        </div>
+<section class="showcase" id="showcase">
+<div class="wrap showcase-grid">
+<div class="showcase-copy reveal"><p class="eyebrow">One app</p><h2>Meet bWallet. Five tabs, everything on-chain.</h2><p class="lede">Wallet, Market, Apps, Media and Chat. A wallet that does more than hold a balance.</p><div class="film"><video class="lazy-video" data-src-webm="/media/phone.webm" data-src="/media/phone.mp4" poster="/media/phone-poster.jpg" muted loop playsinline preload="none" aria-hidden="true" width="736" height="400"></video></div></div>
+<div class="phone-stage reveal"><div class="phone" id="phone"><div class="phone-screen">
+<div class="notch" aria-hidden="true"></div>
+<div class="ph-top"><img src="/logo.svg" alt="" width="22" height="22" /><span>bWallet</span><span class="ph-dot" aria-hidden="true"></span></div>
+<p class="ph-label">Total balance</p><p class="ph-bal">0.0000 <span>BSV</span></p><p class="ph-usd">$0.00</p>
+<div class="ph-actions"><span class="btn-gold sm">Receive</span><span class="btn-gold sm">Send</span></div>
+<div class="ph-list"><div class="row"><span class="coin" style="--c:#F5B800">B</span><span class="row-main"><b>BSV</b><small>Bitcoin SV</small></span><span class="row-amt">0.0000</span></div><div class="row"><span class="coin" style="--c:#3ddc97">M</span><span class="row-main"><b>MNEE</b><small>Stablecoin</small></span><span class="row-amt">0.00</span></div><div class="row"><span class="coin" style="--c:#8a7cff">21</span><span class="row-main"><b>BSV-21</b><small>Tokens</small></span><span class="row-amt">—</span></div></div>
+<nav class="ph-tabs" aria-hidden="true"><span class="on">Wallet</span><span>Market</span><span>Apps</span><span>Media</span><span>Chat</span></nav>
+</div></div><p class="phone-cap">Illustration of the home screen. Built in HTML, not a screenshot.</p></div>
+</div></section>
 
-        <section id="wallet">
-          <p class="kicker">Wallet</p>
-          <h2>Your money and tokens</h2>
-          <p class="intro">Send and receive BSV, hold the MNEE stablecoin, and keep every BSV-21 token in one place.</p>
-          <div class="grid three">
-            <div class="card"><h3>BSV</h3><p>Send, receive and see your balance and history.</p></div>
-            <div class="card"><h3>MNEE</h3><p>Hold and send MNEE alongside your BSV.</p></div>
-            <div class="card"><h3>BSV-21 tokens</h3><p>See and transfer the fungible tokens you own.</p></div>
-          </div>
-        </section>
+<section class="feature" id="wallet"><div class="wrap feature-grid"><div class="feature-copy reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h15a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/><path d="M3 7l12-4v4"/><circle cx="16.5" cy="13.5" r="1.4"/></svg></span><p class="eyebrow">Wallet</p><h2>BSV, MNEE and BSV-21 in one place.</h2><p class="lede">Hold Bitcoin SV, the MNEE stablecoin and any BSV-21 token side by side. Receive with a QR, send with a tap.</p></div><div class="feature-visual reveal">
+<!-- SECTION LOOP VIDEO SLOT (wallet): drop site/media/wallet.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
+<div class="card stack"><div class="row"><span class="coin" style="--c:#F5B800">B</span><span class="row-main"><b>BSV</b><small>Bitcoin SV</small></span><span class="row-amt">0.0000</span></div><div class="row"><span class="coin" style="--c:#3ddc97">M</span><span class="row-main"><b>MNEE</b><small>USD stablecoin</small></span><span class="row-amt">0.00</span></div><div class="row"><span class="coin" style="--c:#8a7cff">21</span><span class="row-main"><b>BSV-21</b><small>Your fungible tokens</small></span><span class="row-amt">—</span></div></div></div></div></section>
+<section class="feature rev" id="market"><div class="wrap feature-grid"><div class="feature-copy reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></span><p class="eyebrow">Market</p><h2>Trending 1Sat tokens and collections.</h2><p class="lede">Browse what is moving across 1Sat Ordinals tokens and collections, then buy or list straight from your wallet.</p></div><div class="feature-visual reveal">
+<!-- SECTION LOOP VIDEO SLOT (market): drop site/media/market.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
+<div class="film section-film"><video class="section-loop" data-src-webm="/media/market.webm" data-src="/media/market.mp4" poster="/media/market-poster.jpg" muted loop playsinline preload="none" aria-hidden="true" width="736" height="400"></video></div>
+<div class="card"><div class="card-head"><span>Trending</span><span class="chip">1Sat</span></div><ol class="trend"><li><span class="bar" style="--w:92%"></span><span class="t-name">Tokens</span><span class="t-tag">BSV-21</span></li><li><span class="bar" style="--w:74%"></span><span class="t-name">Collections</span><span class="t-tag">Ordinals</span></li><li><span class="bar" style="--w:58%"></span><span class="t-name">Listings</span><span class="t-tag">Buy</span></li><li><span class="bar" style="--w:40%"></span><span class="t-name">Your items</span><span class="t-tag">Sell</span></li></ol><p class="note">Illustrative layout, not live market data.</p></div></div></div></section>
+<section class="feature" id="apps"><div class="wrap feature-grid"><div class="feature-copy reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></span><p class="eyebrow">Apps</p><h2>The bApps store, built in.</h2><p class="lede">Open Bitcoin apps from inside the wallet and approve what they ask for. No extensions, no copy-pasting keys.</p></div><div class="feature-visual reveal">
+<!-- SECTION LOOP VIDEO SLOT (apps): drop site/media/apps.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
+<div class="card mini-apps"><span class="mini">bChat</span><span class="mini">bMovies</span><span class="mini">bWriter</span><span class="mini">bSheets</span><span class="mini">bMail</span><span class="mini">bDrive</span><span class="mini">bMusic</span><span class="mini">bArt</span><span class="mini">bMaps</span></div></div></div></section>
+<section class="feature rev" id="media"><div class="wrap feature-grid"><div class="feature-copy reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></svg></span><p class="eyebrow">Media</p><h2>A player for music and video ordinals.</h2><p class="lede">Your on-chain music and video live in a proper player, not a list of transaction IDs.</p></div><div class="feature-visual reveal">
+<!-- SECTION LOOP VIDEO SLOT (media): drop site/media/media.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
+<div class="card player"><div class="art" aria-hidden="true"></div><div class="player-meta"><b>Now playing</b><small>Music &amp; video ordinals</small></div><div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="scrub"><span></span></div></div></div></div></section>
+<section class="feature" id="chat"><div class="wrap feature-grid"><div class="feature-copy reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg></span><p class="eyebrow">Chat</p><h2>bChat, right where your money is.</h2><p class="lede">Message people from the same app that holds your coins. Your wallet is your identity.</p></div><div class="feature-visual reveal">
+<!-- SECTION LOOP VIDEO SLOT (chat): drop site/media/chat.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
+<div class="card chat"><p class="bubble in">gm. sent you the ticket</p><p class="bubble out">got it, thanks</p><p class="bubble in">see you there</p><p class="typing" aria-hidden="true"><i></i><i></i><i></i></p></div></div></div></section>
 
-        <section id="market">
-          <p class="kicker">Market</p>
-          <h2>Trending 1Sat tokens and collections</h2>
-          <div class="card">
-            <p>
-              Browse what's trending across 1Sat Ordinals tokens and collections, then buy listings or list your own for
-              sale, straight from the wallet.
-            </p>
-          </div>
-        </section>
+<section class="bapps" aria-labelledby="bapps-h">
+<div class="wrap"><div class="section-head reveal"><p class="eyebrow">bApps</p><h2 id="bapps-h">A whole suite, one tap away.</h2><p class="lede">Bitcoin apps from The Bitcoin Corporation. Open any of them in your browser today.</p></div>
+<div class="tiles"><a class="tile" href="https://www.bitcoinchat.online" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ch</span><span class="tile-name">bChat</span><span class="tile-verb">Chat with keys, not accounts</span></a>
+<a class="tile" href="https://www.bmovies.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Mo</span><span class="tile-name">bMovies</span><span class="tile-verb">Films and series on-chain</span></a>
+<a class="tile" href="https://bitcoin-writer.com/" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Wr</span><span class="tile-name">bWriter</span><span class="tile-verb">Write and publish on Bitcoin</span></a>
+<a class="tile" href="https://bitcoin-spreadsheet.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Sh</span><span class="tile-name">bSheets</span><span class="tile-verb">Spreadsheets saved on-chain</span></a>
+<a class="tile" href="https://bitcoin-email.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ma</span><span class="tile-name">bMail</span><span class="tile-verb">Email that pays and gets paid</span></a>
+<a class="tile" href="https://bitcoin-drive.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Dr</span><span class="tile-name">bDrive</span><span class="tile-verb">Store and share files on-chain</span></a>
+<a class="tile" href="https://bitcoin-calendar.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ca</span><span class="tile-name">bCal</span><span class="tile-verb">A calendar on Bitcoin</span></a>
+<a class="tile" href="https://bitcoin-code.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Co</span><span class="tile-name">bCode</span><span class="tile-verb">Build apps on Bitcoin</span></a>
+<a class="tile" href="https://bitcoin-music.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Mu</span><span class="tile-name">bMusic</span><span class="tile-verb">Make, release and own music</span></a>
+<a class="tile" href="https://bitcoin-video-nine.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Vi</span><span class="tile-name">bVideo</span><span class="tile-verb">Watch and publish video</span></a>
+<a class="tile" href="https://bitcoin-photos.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ph</span><span class="tile-name">bPhotos</span><span class="tile-verb">Photos as tradable NFTs</span></a>
+<a class="tile" href="https://bitcoin-art.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ar</span><span class="tile-name">bArt</span><span class="tile-verb">Collect on-chain art</span></a>
+<a class="tile" href="https://bitcoin-paint.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Pa</span><span class="tile-name">bPaint</span><span class="tile-verb">Paint and inscribe your work</span></a>
+<a class="tile" href="https://bitcoin-3d.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">3D</span><span class="tile-name">b3D</span><span class="tile-verb">Model and own 3D designs</span></a>
+<a class="tile" href="https://bitcoin-books-bay.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Bo</span><span class="tile-name">bBooks</span><span class="tile-verb">Read and publish books</span></a>
+<a class="tile" href="https://bitcoin-social.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">So</span><span class="tile-name">bSocial</span><span class="tile-verb">Post and follow on Bitcoin</span></a>
+<a class="tile" href="https://bitcoin-gaming.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ga</span><span class="tile-name">bGame</span><span class="tile-verb">Games with real stakes</span></a>
+<a class="tile" href="https://bitcoin-exchange-iota.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ex</span><span class="tile-name">bExchange</span><span class="tile-verb">Trade tokens across exchanges</span></a>
+<a class="tile" href="https://bitcoin-maps.vercel.app" target="_blank" rel="noopener"><span class="tile-mark" aria-hidden="true">Ma</span><span class="tile-name">bMaps</span><span class="tile-verb">Places that take Bitcoin</span></a></div></div></section>
 
-        <section id="apps">
-          <p class="kicker">Apps</p>
-          <h2>The bApps store</h2>
-          <p class="intro">Bitcoin apps that open inside the wallet and ask your permission before they do anything.</p>
-          <div class="card">
-            <p>Featured: bChat, bMovies and bWriter, plus the apps from the Bitcoin Apps suite.</p>
-            <ul class="chips" aria-label="Featured bApps">
-              <li>bChat</li><li>bMovies</li><li>bWriter</li><li>Bitcoin Apps suite</li>
-            </ul>
-          </div>
-        </section>
+<section class="security" id="security"><div class="wrap"><div class="section-head reveal"><p class="eyebrow">Security</p><h2>Your keys. Your device. Your call.</h2></div>
+<div class="sec-grid"><article class="card sec reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h3>Non-custodial</h3><p>We never hold your coins. Your recovery phrase is yours alone and nobody can freeze or move your funds.</p></article>
+<article class="card sec reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M9 9v1M15 9v1M12 9v4h-1M9 16c2 1.5 4 1.5 6 0"/></svg></span><h3>Face ID</h3><p>Unlock and sign with Face ID or your device passcode. Keys stay encrypted on your phone.</p></article>
+<article class="card sec reveal"><span class="ring-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><h3>Approve every request</h3><p>Every app connection, signature and payment shows you what is happening before you say yes.</p></article></div></div></section>
 
-        <div class="pair">
-          <section id="media">
-            <p class="kicker">Media</p>
-            <h2>Ordinals player</h2>
-            <div class="card"><p>Play the music and video ordinals you own, right inside the wallet.</p></div>
-          </section>
-          <section id="chat">
-            <p class="kicker">Chat</p>
-            <h2>bChat built in</h2>
-            <div class="card"><p>Message people from the same app that holds your tokens.</p></div>
-          </section>
-        </div>
-
-        <section id="security">
-          <p class="kicker">Security</p>
-          <h2>Non-custodial by design</h2>
-          <div class="card security">
-            <ul>
-              <li>Your keys are created and stored on your device, in the iPhone Keychain or Android Keystore, encrypted with your password.</li>
-              <li>Keys are never included in cloud backups and never sent to The Bitcoin Corporation Ltd.</li>
-              <li>Optional Face ID, Touch ID or fingerprint unlock. Your password is still needed for backups and sensitive settings.</li>
-              <li>Every app connection, payment and signature asks for your approval first.</li>
-              <li>Write down your recovery phrase. Nobody, including us, can recover it for you.</li>
-            </ul>
-          </div>
-        </section>
-      </main>
-
-      <footer>
-        By The Bitcoin Corporation Ltd. Based on the open-source
-        <a href="https://github.com/yours-org/yours-wallet">Yours Wallet</a> (MIT); not affiliated with or endorsed by
-        its authors.<br />
-        <a href="/privacy.html">Privacy policy</a>
-      </footer>
-    </div>
-  </body>
+<section class="final liquid">
+<video class="lazy-video liquid-video" data-src-webm="/media/liquid-gold.webm" data-src="/media/liquid-gold.mp4" poster="/media/liquid-gold-poster.jpg" muted loop playsinline preload="none" aria-hidden="true"></video>
+<div class="liquid-shade" aria-hidden="true"></div>
+<div class="wrap final-in reveal"><img src="/logo.svg" alt="" width="64" height="64" /><h2>bWallet is coming to iPhone and Android.</h2><p class="lede">Currently in beta.</p><div class="cta-row center"><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>App Store · iPhone</span><small>Coming soon</small></button><button class="btn btn-store" type="button" disabled aria-disabled="true"><span>Google Play · Android</span><small>Coming soon</small></button></div></div></section>
+</main>
+<footer class="foot"><div class="wrap foot-in"><a class="brand" href="/"><img src="/logo.svg" alt="" width="24" height="24" /><span>bWallet</span></a>
+<p>By The Bitcoin Corporation Ltd. Based on the open-source <a href="https://github.com/yours-org/yours-wallet" rel="noopener">Yours Wallet</a> (MIT); not affiliated with or endorsed by its authors.</p>
+<p><a href="/privacy.html">Privacy policy</a></p></div></footer>
+<script src="/main.js" defer></script>
+</body>
 </html>
