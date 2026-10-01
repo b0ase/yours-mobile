@@ -31,6 +31,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem } from './tabs';
+import { ChatTabs } from '../feed/ChatSegments';
 import {
   avatarHue,
   latestCursor,
@@ -980,7 +981,8 @@ const isAdmin = (room: ChatRoom, me: string) => {
   return !!by && n(by) === n(me);
 };
 
-const ChatPage = () => {
+/** Token rooms (the Rooms segment); `header` is the Chat tab's Rooms | Feed | Calls switch. */
+const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const online = useOnline();
@@ -1196,7 +1198,7 @@ const ChatPage = () => {
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         <div className="flex items-center justify-between px-4 pb-2">
-          <h1 className="text-[22px] font-bold text-white">Rooms</h1>
+          {header}
           <div className="flex items-center gap-1">
             {handle && (
               <span className="text-[11px] mr-1" style={{ color: MUTED }}>
@@ -1423,5 +1425,7 @@ const ChatPage = () => {
     </div>
   );
 };
+
+const ChatPage = () => <ChatTabs rooms={(header) => <RoomsPage header={header} />} />;
 
 export default ChatPage;
