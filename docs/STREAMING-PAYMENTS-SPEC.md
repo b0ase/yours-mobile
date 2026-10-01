@@ -195,4 +195,4 @@ updates the counter; stopping playback stops the loop.
 6. **Calls are free by default.** Anyone may set a price to **receive** calls and advertise it (e.g. solicitors,
    therapists): the caller pays the callee per second; there is no caller-side or split charge otherwise.
 7. **Timed rooms:** the creator configures entry per room — ticket burns, sats, or either.
-8. **Interval:** still open (30 s default proposed).
+8. **Interval:** pay every **30 s for streams** and rooms, every **10 s for paid calls**.
