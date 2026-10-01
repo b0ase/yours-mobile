@@ -227,3 +227,47 @@ describe('multiple domains', () => {
     expect(store.pays.get(out.reference).alias).toBe('carol');
   });
 });
+
+describe('production config: bwallet.space primary, b0ase.com legacy', () => {
+  const PROD = {
+    PAYMAIL_DOMAIN: 'bwallet.space',
+    PAYMAIL_DOMAINS: 'b0ase.com',
+    PAYMAIL_BASE_URL: 'https://pay.bwallet.space',
+  };
+
+  test('domains, base URL and capabilities', () => {
+    expect(pm.domains(PROD)).toEqual(['bwallet.space', 'b0ase.com']);
+    expect(pm.domain(PROD)).toBe('bwallet.space');
+    expect(pm.baseUrl(PROD)).toBe('https://pay.bwallet.space');
+    for (const v of Object.values(pm.capabilities(PROD).capabilities)) {
+      expect(v.startsWith('https://pay.bwallet.space/api/paymail/')).toBe(true);
+    }
+  });
+
+  test('new names register on bwallet.space; legacy b0ase.com addresses still resolve', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: PROD });
+    const u = user();
+    const [, r] = await h.register({}, await u.sign('register', { alias: 'dave' }));
+    expect(r.paymail).toBe('dave@bwallet.space');
+    for (const d of ['bwallet.space', 'b0ase.com']) {
+      const [s, pki] = await h.pki({ handle: `dave@${d}` });
+      expect(s).toBe(200);
+      expect(pki.handle).toBe(`dave@${d}`);
+    }
+    expect(pm.parseHandle('dave@pay.bwallet.space', PROD)).toBeNull();
+    expect((await h.lookup({ key: u.identityKey }))[1].paymail).toBe('dave@bwallet.space');
+  });
+
+  test('a name claimed under b0ase.com stays the same record on bwallet.space', async () => {
+    const store = memStore();
+    const old = pm.makeHandlers({ store, env: { PAYMAIL_DOMAIN: 'b0ase.com' } });
+    const u = user();
+    await old.register({}, await u.sign('register', { alias: 'erin' }));
+    const h = pm.makeHandlers({ store, env: PROD });
+    expect((await h.pki({ handle: 'erin@bwallet.space' }))[1].pubkey).toBe(u.identityKey);
+    const [s] = await h.p2pDestination({ handle: 'erin@b0ase.com' }, { satoshis: 1000 });
+    expect(s).toBe(200);
+    expect((await h.register({}, await user().sign('register', { alias: 'erin' })))[0]).toBe(409);
+  });
+});

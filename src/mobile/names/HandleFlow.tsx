@@ -18,7 +18,7 @@ import { useBackClose } from '../backStack';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
- * from the Wallet "Get your $name" card. Step 1 claims the free paymail name@b0ase.com (signed by
+ * from the Wallet "Get your $name" card. Step 1 claims the free paymail name@bwallet.space (signed by
  * the identity key, no transaction). Step 2, on by default: the personal $NAME token + its
  * holder-only room (claimPersonal), after the standard confirmation sheet shows the fee.
  * Optional: the on-chain OpNS name via the Settings flow (GetYourName), also fee-confirmed.

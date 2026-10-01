@@ -10,7 +10,7 @@ export type AccountNames = {
   displayName: string;
   /** OpNS name in use (owned / bound), or ''. */
   handle: string;
-  /** bWallet paymail in full (name@b0ase.com), or '' (always '' when paymail is unconfigured). */
+  /** bWallet paymail in full (name@bwallet.space), or '' (always '' when paymail is unconfigured). */
   paymail: string;
   /** How bWallet shows the payable name: the paymail without our domain, else the OpNS handle. */
   payable: string;
@@ -54,7 +54,7 @@ export const useMyName = (identityAddress?: string) => useAccountNames(identityA
 
 /**
  * Receive screen (build-time insert into BsvWallet.tsx). The one place the FULL paymail is shown,
- * because other wallets need the domain: "alice@b0ase.com [copy] · Use the full address in other wallets".
+ * because other wallets need the domain: "alice@bwallet.space [copy] · Use the full address in other wallets".
  */
 export const ReceiveName = ({ identityAddress }: { identityAddress?: string }) => {
   const { displayName, handle, paymail } = useAccountNames(identityAddress, '', '', false);

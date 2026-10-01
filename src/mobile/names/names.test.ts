@@ -168,32 +168,32 @@ test('scriptToAddress', () => {
 
 describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
   const OURS = {
-    'https://dns.google.com/': { Answer: [{ type: 33, data: '0 10 443 pay.b0ase.com.' }] },
-    'https://pay.b0ase.com/.well-known/bsvalias': {
+    'https://dns.google.com/': { Answer: [{ type: 33, data: '0 10 443 pay.bwallet.space.' }] },
+    'https://pay.bwallet.space/.well-known/bsvalias': {
       capabilities: {
-        pki: 'https://pay.b0ase.com/api/paymail/id/{alias}@{domain.tld}',
-        '2a40af698840': 'https://pay.b0ase.com/api/paymail/p2p-destination/{alias}@{domain.tld}',
-        '5c55a7fdb7bb': 'https://pay.b0ase.com/api/paymail/receive-beef/{alias}@{domain.tld}',
+        pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
+        '2a40af698840': 'https://pay.bwallet.space/api/paymail/p2p-destination/{alias}@{domain.tld}',
+        '5c55a7fdb7bb': 'https://pay.bwallet.space/api/paymail/receive-beef/{alias}@{domain.tld}',
       },
     },
   };
 
-  test('a bare name resolves as name@b0ase.com when that paymail exists', async () => {
+  test('a bare name resolves as name@bwallet.space when that paymail exists', async () => {
     const { f, calls } = mock({
       ...OURS,
-      'https://pay.b0ase.com/api/paymail/id/alice@b0ase.com': { pubkey: '02aa' },
+      'https://pay.bwallet.space/api/paymail/id/alice@bwallet.space': { pubkey: '02aa' },
     });
-    const r = await resolveRecipient(f, parseRecipient('Alice'), 'b0ase.com');
-    expect(r).toMatchObject({ input: 'alice', target: 'alice@b0ase.com', via: 'p2p-paymail', pubkey: '02aa' });
+    const r = await resolveRecipient(f, parseRecipient('Alice'), 'bwallet.space');
+    expect(r).toMatchObject({ input: 'alice', target: 'alice@bwallet.space', via: 'p2p-paymail', pubkey: '02aa' });
     expect(calls.some((u) => u.includes('opns'))).toBe(false);
   });
 
-  test('falls back to OpNS when b0ase.com has no such paymail', async () => {
+  test('falls back to OpNS when bwallet.space has no such paymail', async () => {
     const { f } = mock({
       'https://dns.google.com/': {},
       'https://ordinals.gorillapool.io/api/opns/satchmo': { owner: ADDR },
     });
-    const r = await resolveRecipient(f, parseRecipient('satchmo'), 'b0ase.com');
+    const r = await resolveRecipient(f, parseRecipient('satchmo'), 'bwallet.space');
     expect(r).toMatchObject({ target: ADDR, via: 'opns-owner' });
   });
 
@@ -203,12 +203,16 @@ describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
     expect(parseRecipient(ADDR).kind).toBe('address');
   });
 
-  test('bareName strips only our domain', () => {
-    expect(bareName('alice@b0ase.com', 'b0ase.com')).toBe('alice');
-    expect(bareName('Alice@B0ASE.com', 'b0ase.com')).toBe('Alice');
-    expect(bareName('alice@handcash.io', 'b0ase.com')).toBe('alice@handcash.io');
-    expect(bareName('$alice', 'b0ase.com')).toBe('$alice');
-    expect(bareName('@b0ase.com', 'b0ase.com')).toBe('@b0ase.com');
-    expect(bareName('alice@b0ase.com', '')).toBe('alice@b0ase.com');
+  test('bareName strips only our domain (and its legacy domains)', () => {
+    expect(bareName('alice@bwallet.space', 'bwallet.space')).toBe('alice');
+    expect(bareName('Alice@BWALLET.space', 'bwallet.space')).toBe('Alice');
+    expect(bareName('alice@b0ase.com', 'bwallet.space', ['b0ase.com'])).toBe('alice');
+    expect(bareName('alice@b0ase.com', 'bwallet.space', [])).toBe('alice@b0ase.com');
+    expect(bareName('alice@handcash.io', 'bwallet.space')).toBe('alice@handcash.io');
+    expect(bareName('$alice', 'bwallet.space')).toBe('$alice');
+    expect(bareName('@bwallet.space', 'bwallet.space')).toBe('@bwallet.space');
+    expect(bareName('@b0ase.com', 'bwallet.space', ['b0ase.com'])).toBe('@b0ase.com');
+    expect(bareName('alice@bwallet.space', '')).toBe('alice@bwallet.space');
+    expect(bareName('alice@b0ase.com', '', ['b0ase.com'])).toBe('alice@b0ase.com');
   });
 });
