@@ -34,8 +34,8 @@ export const WalletIdentity = () => {
       .catch(() => undefined);
 
   return (
-    <div className="flex items-center justify-center gap-1.5 max-w-[90vw] mb-1">
-      <AccountAvatar src={avatar} size={22} />
+    <div className="flex items-center justify-center gap-2 max-w-[90vw] mb-2">
+      <AccountAvatar src={avatar} size={30} />
       {t.name && (
         <span className="text-sm font-semibold text-white max-w-[45vw] overflow-hidden text-ellipsis whitespace-nowrap">
           {t.name}
@@ -48,7 +48,10 @@ export const WalletIdentity = () => {
       )}
       {t.tag ? (
         <>
-          <span className="text-[15px] font-bold shrink-0" style={{ color: '#FFD24D' }}>
+          <span
+            className="text-[26px] leading-none font-extrabold tracking-tight shrink-0"
+            style={{ color: '#FFD24D' }}
+          >
             {t.tag}
           </span>
           <button
@@ -57,7 +60,7 @@ export const WalletIdentity = () => {
             aria-label={`Copy ${t.copy}`}
             className="p-1 bg-transparent border-0 cursor-pointer shrink-0"
           >
-            <Copy size={13} color="#98A2B3" />
+            <Copy size={17} color="#98A2B3" />
           </button>
         </>
       ) : (
