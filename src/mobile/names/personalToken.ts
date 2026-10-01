@@ -192,3 +192,17 @@ export function rememberPersonal(l: Pick<PersonalLink, 'name' | 'tokenId'>) {
   const rest = knownPersonal().filter((x) => personalKey(x.name) !== name);
   write(KNOWN, [...rest, { name, tokenId: id }].slice(-200));
 }
+
+// ── recovery: the link is local; if it was lost, find this wallet's own deploy of $TICKER ──
+
+export type OwnDeploy = { tokenId: string; sym: string; amt: string };
+
+/**
+ * The deploy+mint output this wallet made for `ticker` (BSV-21 basket, tagged bsv21:deploy).
+ * Several deploys of the same ticker: the last one listed (the newest). null if none.
+ */
+export function pickOwnDeploy(deploys: OwnDeploy[], ticker: string): OwnDeploy | null {
+  const t = (ticker || '').replace(/^\$/, '').toUpperCase();
+  const hits = deploys.filter((d) => normId(d.tokenId) && (d.sym || '').replace(/^\$/, '').toUpperCase() === t);
+  return hits.length ? { ...hits[hits.length - 1], tokenId: normId(hits[hits.length - 1].tokenId)! } : null;
+}

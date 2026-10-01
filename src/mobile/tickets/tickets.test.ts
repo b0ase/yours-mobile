@@ -3,6 +3,7 @@ import { Utils } from '@bsv/sdk';
 import { SafetyFilter, type Blocklist } from '../market/safety';
 import { MAP_PREFIX } from '../names/personalToken';
 import { mintFeeFor, txFeeSats } from '../mint/mint';
+import { indexCostSats } from '../tokens/indexFund';
 import {
   SPEND_ENTRY_SUPPORTED,
   TICKET_BLOCKED,
@@ -167,8 +168,9 @@ describe('entry rule (room-policy)', () => {
 describe('cost', () => {
   test('no fee address: network only, one tx without an icon', () => {
     const c = ticketCost(0, 100, 0, '');
-    expect(c).toMatchObject({ feeSats: 0, txCount: 1, usd: null });
-    expect(c.networkSats).toBe(c.totalSats);
+    expect(c).toMatchObject({ feeSats: 0, txCount: 1, usd: null, indexSats: indexCostSats() });
+    // The creator pays indexing at mint; it is part of the total on the confirm sheet.
+    expect(c.totalSats).toBe(c.networkSats + c.indexSats);
   });
 
   test('icon adds a tx; 1% fee matches Mint media', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { buyOpns, listOpns, registerOpns } from '@1sat/actions';
-import { Search } from 'lucide-react';
+import { ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { Input } from '../../components/Input';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -8,7 +8,13 @@ import { useTheme } from '../../hooks/useTheme';
 import { bareName, checkOpnsAvailability, type Availability } from './names';
 import { getMyName, onMyNameChange, setMyName } from './myName';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
-import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } from './claimPersonal';
+import {
+  PERSONAL_FEE_ESTIMATE_SATS,
+  PERSONAL_INDEX_SATS,
+  deployPersonalToken,
+  openPersonalRoom,
+} from './claimPersonal';
+import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
 import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAlias } from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
@@ -122,11 +128,18 @@ export const GetYourName = ({
     }
   };
 
+  // The token + room follow the handle: the paymail alias, else the OpNS name in use.
+  const handleName = bareName(paymail) || myName;
+  // OpNS stays reachable but closed once there's a paymail handle (and nothing OpNS is in flight).
+  const [opnsOpen, setOpnsOpen] = useState(false);
+  const showOpns = opnsOpen || !paymail || !!progress || !!mining || (owned.length > 0 && !myName);
+
   const mintsToken = (name: string) => withToken && !link && !!personalTicker(name);
   const supplyError = validateSupply(supply);
 
   const mintPersonal = async (name: string) => {
     const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
+    void showOnWallet(chromeStorageService, l.tokenId);
     setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet. Opening your room…`);
     // Signatures only; a fresh token may not be indexed yet — Chat retries until it is.
     openPersonalRoom(apiContext, identityAddress, l)
@@ -246,6 +259,10 @@ export const GetYourName = ({
         address: `New token $${t} (${Number(supply).toLocaleString()}, to you) + your $${t} room`,
         amount: '1 sat (kept)',
       });
+      lines.push({
+        address: 'Indexing',
+        amount: `${PERSONAL_INDEX_SATS.toLocaleString()} sats`,
+      });
     }
     return lines;
   };
@@ -266,7 +283,7 @@ export const GetYourName = ({
 
   // A render helper, not a component: a nested component would remount and drop input focus.
   const tokenOptions = () => {
-    const t = personalTicker(myName || query) ?? 'NAME';
+    const t = personalTicker(handleName || query) ?? 'NAME';
     return (
       <div className="flex flex-col gap-2">
         <p className="text-[11px]" style={{ color: gray }}>
@@ -288,11 +305,11 @@ export const GetYourName = ({
             {supplyError}
           </span>
         )}
-        {myName ? (
+        {handleName ? (
           <button
             type="button"
             disabled={busy || !!supplyError}
-            onClick={() => setPending({ kind: 'bind', name: myName, id: '', tokenOnly: true })}
+            onClick={() => setPending({ kind: 'bind', name: handleName, id: '', tokenOnly: true })}
             className={`self-start ${btn}`}
             style={{ background: gold, color: '#000' }}
           >
@@ -384,186 +401,199 @@ export const GetYourName = ({
         </div>
       )}
 
-      <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
-        OpNS name (on-chain)
-      </span>
-      <div className="flex gap-2 items-center">
-        <Input
-          theme={theme}
-          placeholder="Search a name"
-          value={query}
-          autoCapitalize="none"
-          onChange={(e) => setQuery(e.target.value.toLowerCase())}
-          onKeyDown={(e) => e.key === 'Enter' && search()}
-          style={{ width: '100%', margin: 0 }}
-        />
-        <button
-          type="button"
-          onClick={search}
-          disabled={busy}
-          aria-label="Search"
-          className="h-10 w-10 flex-shrink-0 rounded-lg flex items-center justify-center border-0 cursor-pointer"
-          style={{ background: gold, color: '#000' }}
-        >
-          <Search size={16} />
-        </button>
-      </div>
-
-      {result?.status === 'invalid' && (
-        <p className="text-xs" style={{ color: '#ff4444' }}>
-          {result.reason}
-        </p>
-      )}
-      {result?.status === 'taken' && (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs" style={{ color: gray }}>
-            <b style={{ color: fg }}>{result.name}</b> is taken
-            {result.owner ? ` (owner ${result.owner.slice(0, 8)}…)` : ''}.
-            {owned.some((o) => o.name === result.name) ? ' You own it — use it below.' : ''}
-            {result.listing ? ` For sale: ${result.listing.price.toLocaleString()} sats.` : ''}
-          </p>
-          {result.listing && !owned.some((o) => o.name === result.name) && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                result.listing &&
-                setPending({
-                  kind: 'buy',
-                  name: result.name,
-                  outpoint: result.listing.outpoint,
-                  price: result.listing.price,
-                })
-              }
-              className={btn}
-              style={{ background: gold, color: '#000' }}
-            >
-              Buy
-            </button>
-          )}
-        </div>
-      )}
-      {result?.status === 'available' && !progress && !mining && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs" style={{ color: '#2ecc71' }}>
-            {result.name} is available.
-            {mineFromDomain !== null
-              ? ` It's mined from "${mineFromDomain || '(root)'}": ${charsToMine} character${
-                  charsToMine === 1 ? '' : 's'
-                }, one transaction each, roughly ${formatEta(
-                  (charsToMine * EXPECTED_HASHES) / PHONE_HASHRATE,
-                )} of mining on a phone.`
-              : " Couldn't find where to mine it from; try again shortly."}
-          </p>
-          {mineFromDomain !== null && charsToMine > 0 && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setPending({ kind: 'mint', name: result.name, chars: charsToMine })}
-              className={`self-start ${btn}`}
-              style={{ background: gold, color: '#000' }}
-            >
-              Register this name
-            </button>
-          )}
-        </div>
-      )}
-
-      {progress && progress.phase !== 'done' && (
-        <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: '1px solid #3a2f0c' }}>
-          <span className="text-xs" style={{ color: fg }}>
-            {progress.phase === 'broadcasting'
-              ? `Broadcasting "${progress.domain}${nextChar}"…`
-              : `Mining character ${progress.charIndex + 1} of ${progress.charsTotal}: "${progress.domain}${nextChar}"`}
-          </span>
-          <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: '#2a2410' }}>
-            <div
-              className="h-full"
-              style={{
-                background: gold,
-                width: `${Math.min(
-                  100,
-                  ((progress.charIndex + Math.min(0.95, progress.tried / EXPECTED_HASHES)) /
-                    Math.max(1, progress.charsTotal)) *
-                    100,
-                )}%`,
-              }}
+      {/* OpNS is optional once the account has a paymail handle: a quiet disclosure, closed by default. */}
+      <button
+        type="button"
+        onClick={() => setOpnsOpen((o) => !o)}
+        aria-expanded={showOpns}
+        className="flex items-center justify-between bg-transparent border-0 p-0 cursor-pointer"
+      >
+        <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
+          OpNS name (on-chain{paymail ? ', optional' : ''})
+        </span>
+        {showOpns ? <ChevronUp size={14} color={gray} /> : <ChevronDown size={14} color={gray} />}
+      </button>
+      {showOpns && (
+        <>
+          <div className="flex gap-2 items-center">
+            <Input
+              theme={theme}
+              placeholder="Search a name"
+              value={query}
+              autoCapitalize="none"
+              onChange={(e) => setQuery(e.target.value.toLowerCase())}
+              onKeyDown={(e) => e.key === 'Enter' && search()}
+              style={{ width: '100%', margin: 0 }}
             />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px]" style={{ color: gray }}>
-              {progress.rate > 0
-                ? `${Math.round(progress.rate / 1000)}k hashes/s · ${formatEta(progress.etaSeconds)} left`
-                : 'Starting…'}
-            </span>
             <button
               type="button"
-              onClick={() => abort.current?.abort()}
-              className={btn}
-              style={{ background: 'transparent', color: gray, border: `1px solid ${gray}` }}
+              onClick={search}
+              disabled={busy}
+              aria-label="Search"
+              className="h-10 w-10 flex-shrink-0 rounded-lg flex items-center justify-center border-0 cursor-pointer"
+              style={{ background: gold, color: '#000' }}
             >
-              Cancel
+              <Search size={16} />
             </button>
           </div>
-          <p className="text-[10px]" style={{ color: gray }}>
-            Keep the app open. Time per character varies a lot: it's luck, like Bitcoin mining.
-          </p>
-        </div>
-      )}
 
-      {owned.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
-            Names you own{owned.length > 1 && !myName ? ' — pick one' : ''}
-          </span>
-          {!link && (
-            <label className="text-[11px] flex items-center gap-2" style={{ color: gray }}>
-              <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
-              Also mint my personal token ({supplyError ? 'fix supply below' : `${Number(supply).toLocaleString()}`})
-              and open my room
-            </label>
+          {result?.status === 'invalid' && (
+            <p className="text-xs" style={{ color: '#ff4444' }}>
+              {result.reason}
+            </p>
           )}
-          {!link && withToken && !myName && tokenOptions()}
-          {owned.map((n) => (
-            <div key={n.id} className="flex items-center justify-between">
-              <span className="text-sm" style={{ color: fg }}>
-                {n.name}
-                {n.published && (
-                  <span className="text-[10px] ml-2" style={{ color: gray }}>
-                    bound
-                  </span>
-                )}
-              </span>
-              {myName === n.name ? (
-                <span className="text-xs" style={{ color: '#2ecc71' }}>
-                  In use
-                </span>
-              ) : n.published ? (
+          {result?.status === 'taken' && (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs" style={{ color: gray }}>
+                <b style={{ color: fg }}>{result.name}</b> is taken
+                {result.owner ? ` (owner ${result.owner.slice(0, 8)}…)` : ''}.
+                {owned.some((o) => o.name === result.name) ? ' You own it — use it below.' : ''}
+                {result.listing ? ` For sale: ${result.listing.price.toLocaleString()} sats.` : ''}
+              </p>
+              {result.listing && !owned.some((o) => o.name === result.name) && (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => setMyName(identityAddress, n.name)}
+                  onClick={() =>
+                    result.listing &&
+                    setPending({
+                      kind: 'buy',
+                      name: result.name,
+                      outpoint: result.listing.outpoint,
+                      price: result.listing.price,
+                    })
+                  }
                   className={btn}
                   style={{ background: gold, color: '#000' }}
                 >
-                  Show this name
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setPending({ kind: 'bind', name: n.name, id: n.id })}
-                  className={btn}
-                  style={{ background: gold, color: '#000' }}
-                >
-                  Use this name
+                  Buy
                 </button>
               )}
             </div>
-          ))}
-        </div>
+          )}
+          {result?.status === 'available' && !progress && !mining && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs" style={{ color: '#2ecc71' }}>
+                {result.name} is available.
+                {mineFromDomain !== null
+                  ? ` It's mined from "${mineFromDomain || '(root)'}": ${charsToMine} character${
+                      charsToMine === 1 ? '' : 's'
+                    }, one transaction each, roughly ${formatEta(
+                      (charsToMine * EXPECTED_HASHES) / PHONE_HASHRATE,
+                    )} of mining on a phone.`
+                  : " Couldn't find where to mine it from; try again shortly."}
+              </p>
+              {mineFromDomain !== null && charsToMine > 0 && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setPending({ kind: 'mint', name: result.name, chars: charsToMine })}
+                  className={`self-start ${btn}`}
+                  style={{ background: gold, color: '#000' }}
+                >
+                  Register this name
+                </button>
+              )}
+            </div>
+          )}
+
+          {progress && progress.phase !== 'done' && (
+            <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: '1px solid #3a2f0c' }}>
+              <span className="text-xs" style={{ color: fg }}>
+                {progress.phase === 'broadcasting'
+                  ? `Broadcasting "${progress.domain}${nextChar}"…`
+                  : `Mining character ${progress.charIndex + 1} of ${progress.charsTotal}: "${progress.domain}${nextChar}"`}
+              </span>
+              <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: '#2a2410' }}>
+                <div
+                  className="h-full"
+                  style={{
+                    background: gold,
+                    width: `${Math.min(
+                      100,
+                      ((progress.charIndex + Math.min(0.95, progress.tried / EXPECTED_HASHES)) /
+                        Math.max(1, progress.charsTotal)) *
+                        100,
+                    )}%`,
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px]" style={{ color: gray }}>
+                  {progress.rate > 0
+                    ? `${Math.round(progress.rate / 1000)}k hashes/s · ${formatEta(progress.etaSeconds)} left`
+                    : 'Starting…'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => abort.current?.abort()}
+                  className={btn}
+                  style={{ background: 'transparent', color: gray, border: `1px solid ${gray}` }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <p className="text-[10px]" style={{ color: gray }}>
+                Keep the app open. Time per character varies a lot: it's luck, like Bitcoin mining.
+              </p>
+            </div>
+          )}
+
+          {owned.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
+                Names you own{owned.length > 1 && !myName ? ' — pick one' : ''}
+              </span>
+              {!link && (
+                <label className="text-[11px] flex items-center gap-2" style={{ color: gray }}>
+                  <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
+                  Also mint my personal token ({supplyError ? 'fix supply below' : `${Number(supply).toLocaleString()}`}
+                  ) and open my room
+                </label>
+              )}
+              {!link && withToken && !myName && tokenOptions()}
+              {owned.map((n) => (
+                <div key={n.id} className="flex items-center justify-between">
+                  <span className="text-sm" style={{ color: fg }}>
+                    {n.name}
+                    {n.published && (
+                      <span className="text-[10px] ml-2" style={{ color: gray }}>
+                        bound
+                      </span>
+                    )}
+                  </span>
+                  {myName === n.name ? (
+                    <span className="text-xs" style={{ color: '#2ecc71' }}>
+                      In use
+                    </span>
+                  ) : n.published ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setMyName(identityAddress, n.name)}
+                      className={btn}
+                      style={{ background: gold, color: '#000' }}
+                    >
+                      Show this name
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setPending({ kind: 'bind', name: n.name, id: n.id })}
+                      className={btn}
+                      style={{ background: gold, color: '#000' }}
+                    >
+                      Use this name
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
-      {myName && personalTicker(myName) && (
+      {handleName && personalTicker(handleName) && (
         <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: '1px solid #3a2f0c' }}>
           <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
             Your token

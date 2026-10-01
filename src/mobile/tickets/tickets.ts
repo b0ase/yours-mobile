@@ -3,6 +3,7 @@ import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { safety, type SafetyFilter } from '../market/safety';
 import { MAP_PREFIX, cleanSupply, validateSupply } from '../names/personalToken';
 import { mintFeeFor, txFeeSats } from '../mint/mint';
+import { indexCostSats } from '../tokens/indexFund';
 
 /**
  * Tickets: a ticket gets you into a room. Send one to invite someone.
@@ -184,6 +185,8 @@ export function ticketMapScript(f: TicketForm): LockingScript {
 export type TicketCost = {
   networkSats: number;
   feeSats: number;
+  /** Creator-paid 1sat-stack indexing at mint (fee-address pre-fund + its tx fee). */
+  indexSats: number;
   totalSats: number;
   usd: number | null;
   txCount: number;
@@ -200,10 +203,12 @@ export function ticketCost(
   const icon = iconBytes > 0 ? txFeeSats(iconBytes, satsPerKb) : 0;
   const networkSats = icon + txFeeSats(deployBytes, satsPerKb);
   const feeSats = mintFeeFor(networkSats, feeAddress);
-  const totalSats = networkSats + feeSats;
+  const indexSats = indexCostSats();
+  const totalSats = networkSats + feeSats + indexSats;
   return {
     networkSats,
     feeSats,
+    indexSats,
     totalSats,
     usd: usdPerBsv > 0 ? (totalSats / 1e8) * usdPerBsv : null,
     txCount: iconBytes > 0 ? 2 : 1,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { SendConfirmation } from '../../components/SendConfirmation';
+import { showOnWallet } from './indexFund';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -83,6 +84,7 @@ export const TokenMint = ({
     try {
       const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'token') : null;
       const token = await deployToken(apiContext, form, { icon: iconOutpoint, feeSats: cost.feeSats });
+      void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
       notifyMinted();
       setBusy('Opening the room…');
@@ -237,8 +239,8 @@ export const TokenMint = ({
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {cost.networkSats.toLocaleString()} sats
         {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
-        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Total ≈{' '}
-        {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
+        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Indexing (so wallets
+        list it): {cost.indexSats.toLocaleString()} sats · Total ≈ {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
       </p>
       {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
       <button
@@ -267,6 +269,8 @@ export const TokenMint = ({
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
           { address: 'Network fee', amount: `${cost.networkSats.toLocaleString()} sats` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }] : []),
+          // Creator pays 1sat indexing at mint, so wallets and the room gate can see the token.
+          { address: 'Indexing', amount: `${cost.indexSats.toLocaleString()} sats` },
         ]}
         total={`${cost.totalSats.toLocaleString()} sats${usd(cost.usd)}`}
         isProcessing={!!busy}

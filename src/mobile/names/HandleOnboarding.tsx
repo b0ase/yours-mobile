@@ -5,6 +5,9 @@ import { accountNamesFor } from './MyNameBadge';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
 import { getPersonalLink, onPersonalChange } from './personalToken';
+import { recoverPersonalLink } from './claimPersonal';
+import { FinishIndexing } from '../tokens/FinishIndexing';
+import { getFundRecord } from '../tokens/indexFund';
 import {
   clearPendingPrompt,
   dismissCard,
@@ -48,6 +51,16 @@ export const HandleOnboarding = () => {
     };
   }, [id]);
 
+  // A token minted before its local link was saved (or with app data cleared): restore the link
+  // from this wallet's own deploy, so the card stops asking and "Finish setting up" can show.
+  const payable = accountNamesFor(id).payable;
+  useEffect(() => {
+    if (!apiContext || !id || !payable || hasRoom) return;
+    recoverPersonalLink(apiContext, id, payable)
+      .then((l) => l && setHasRoom(true))
+      .catch(() => undefined);
+  }, [apiContext, id, payable, hasRoom]);
+
   // A restored wallet may already own a paymail / OpNS name: ask the chain first.
   useEffect(() => {
     if (!apiContext || !id) return;
@@ -74,6 +87,14 @@ export const HandleOnboarding = () => {
   };
 
   if (open) return <HandleFlow onClose={close} />;
+  const link = hasRoom ? getPersonalLink(id) : null;
+  // Minted but never indexed (e.g. before bWallet paid indexing at mint): offer to finish it.
+  if (link && !getFundRecord(link.tokenId))
+    return (
+      <div className="w-[92%] mt-4">
+        <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} />
+      </div>
+    );
   if (!id || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;
   return (
     <div
