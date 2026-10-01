@@ -29,6 +29,9 @@ const MOBILE_BRAND = (['yours', 'bwallet'] as const).find((b) => b === process.e
 const LOGO_DIR = MOBILE_BRAND === 'bcorp' ? 'src/mobile/brand/bcorp' : 'src/mobile/brand';
 const BRAND: Record<string, string> = {
   [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/mobile/brand/theme.ts'),
+  // Mobile tab bar: Wallet · Market · Apps · Media · Settings (src/mobile/tabs).
+  [resolve(__dirname, 'src/components/BottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/BottomMenu.tsx'),
+  [resolve(__dirname, 'src/hooks/useBottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/useBottomMenu.tsx'),
 };
 const BWALLET_ASSETS: Record<string, string> = {
   [resolve(__dirname, 'src/utils/constants.ts')]: resolve(__dirname, 'src/mobile/brand/constants.ts'),
@@ -96,6 +99,35 @@ const bcorpText = (): Plugin => ({
     MOBILE_BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', '<title>bWallet</title>') : html,
 });
 
+// All mobile builds: mount the mobile-only tab routes (/m/settings, /m/media,
+// /m/market) in upstream's router without editing App.tsx. Same must-match rule.
+const MOBILE_TEXT: Record<string, [string, string][]> = {
+  'src/App.tsx': [
+    [
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));",
+    ],
+    [
+      '<Route path="/settings" element={<Settings />} />',
+      '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={null}><MobileRoutes /></Suspense>} />',
+    ],
+  ],
+};
+const mobileText = (): Plugin => ({
+  name: 'mobile-text',
+  enforce: 'pre',
+  transform(code, id) {
+    const file = id.split('?')[0].slice(__dirname.length + 1);
+    const swaps = MOBILE_TEXT[file];
+    if (!swaps) return null;
+    for (const [from, to] of swaps) {
+      if (!code.includes(from)) this.error(`mobile-text: "${from}" not found in ${file}`);
+      code = code.split(from).join(to);
+    }
+    return { code, map: null };
+  },
+});
+
 /**
  * bCorp palette: upstream's greens become BSV gold in the bcorp build only, so
  * upstream files stay untouched and mergeable.
@@ -147,7 +179,7 @@ const mobilePages = (): Plugin => ({
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [brand(), bcorpText(), bcorpColours(), mobilePages()],
+    plugins: [brand(), mobileText(), bcorpText(), bcorpColours(), mobilePages()],
     build: {
       outDir: 'build-mobile',
       target: 'es2022',
