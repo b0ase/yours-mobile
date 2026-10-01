@@ -2,6 +2,7 @@ import { getProfile, listOpns, resolveBapId, type OneSatContext } from '@1sat/ac
 import type { WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
 import { collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
+import { syncBchatHandle } from './bchatHandle';
 
 /**
  * Per-account naming. One identity key per account; each account has:
@@ -130,6 +131,8 @@ export const syncAccountNames = async (
       const p = await lookupPaymail(f, publicKey);
       if ((p ?? '') !== read(K.paymail(identityAddress))) setPaymail(identityAddress, p ?? '');
       if (p) {
+        // One identity: a bChat session still on its `yours-*` default takes the paymail name.
+        void syncBchatHandle(ctx, p);
         await collectPaymailInbox(f, ctx.wallet, async (txid) =>
           ctx.services ? (await ctx.services.getBeefForTxid(txid)).toBinary() : undefined,
         );

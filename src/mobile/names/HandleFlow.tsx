@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
+import { syncBchatHandle } from './bchatHandle';
 import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAlias } from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
@@ -123,6 +124,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       });
       setPaymail(identityAddress, pm);
       setPm(pm);
+      // bChat handle = paymail name, before any token room is opened under it.
+      await syncBchatHandle(apiContext, pm, { signIn: true });
       // Token + room is part of the flow: go straight to its fee confirmation.
       if (withToken && !getPersonalLink(identityAddress) && personalTicker(pm.split('@')[0]) && !supplyError)
         setConfirming(true);
