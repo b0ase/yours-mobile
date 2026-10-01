@@ -3,350 +3,209 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>bWallet (Beta)</title>
+    <title>bWallet</title>
     <meta
       name="description"
-      content="bWallet: the BSV wallet for tokens. 1Sat Ordinals, BSV-21 tokens and BRC-100 apps on iPhone and Android. Non-custodial, by The Bitcoin Corporation Ltd."
+      content="bWallet: the BSV wallet for tokens, media and apps. BSV, MNEE and BSV-21 tokens, a 1Sat market, the bApps store, an ordinals media player and bChat. Non-custodial, by The Bitcoin Corporation Ltd."
     />
-    <meta name="theme-color" content="#010101" />
-    <link rel="canonical" href="https://yours-wallet-mobile.vercel.app/" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="canonical" href="https://bwallet-nine.vercel.app/" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://yours-wallet-mobile.vercel.app/" />
-    <meta property="og:site_name" content="bWallet (Beta)" />
-    <meta property="og:title" content="bWallet (Beta)" />
-    <meta
-      property="og:description"
-      content="The BSV wallet for tokens: 1Sat Ordinals, BSV-21 tokens and BRC-100 apps. Non-custodial, by The Bitcoin Corporation Ltd."
-    />
-    <meta property="og:image" content="https://yours-wallet-mobile.vercel.app/og.png" />
+    <meta property="og:url" content="https://bwallet-nine.vercel.app/" />
+    <meta property="og:site_name" content="bWallet" />
+    <meta property="og:title" content="bWallet: the BSV wallet for tokens, media and apps" />
+    <meta property="og:description" content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd. Tokens, market, bApps, media and chat in one app." />
+    <meta property="og:image" content="https://bwallet-nine.vercel.app/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="bWallet: the BSV wallet for tokens" />
+    <meta property="og:image:alt" content="bWallet logo: a gold ring around a rounded b" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="bWallet (Beta)" />
-    <meta
-      name="twitter:description"
-      content="The BSV wallet for tokens: 1Sat Ordinals, BSV-21 tokens and BRC-100 apps. Non-custodial, by The Bitcoin Corporation Ltd."
-    />
-    <meta name="twitter:image" content="https://yours-wallet-mobile.vercel.app/og.png" />
+    <meta name="twitter:title" content="bWallet: the BSV wallet for tokens, media and apps" />
+    <meta name="twitter:description" content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd." />
+    <meta name="twitter:image" content="https://bwallet-nine.vercel.app/og.png" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
-    <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        --bg: #010101;
-        --card: #111317;
-        --line: #23262d;
-        --text: #ffffff;
-        --muted: #98a2b3;
-        --dim: #667085;
-        --green-1: #a1ff8b;
-        --green-2: #34d399;
-        --amber: #fdb022;
+        --bg: #000;
+        --card: #0d0d0d;
+        --line: #262626;
+        --text: #fff;
+        --muted: #b3b3b3;
+        --dim: #8a8a8a;
+        --gold: #f5b800;
       }
-      * {
-        box-sizing: border-box;
-      }
-      html,
-      body {
+      * { box-sizing: border-box; }
+      html, body {
         margin: 0;
         background: var(--bg);
         color: var(--text);
-        font-family: Inter, system-ui, -apple-system, sans-serif;
+        font: 16px/1.6 "IBM Plex Sans", system-ui, -apple-system, sans-serif;
         -webkit-font-smoothing: antialiased;
       }
-      a {
-        color: inherit;
-      }
+      a { color: var(--gold); }
+      a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+      h1, h2, h3, .brand { font-family: "Space Grotesk", system-ui, sans-serif; }
       .wrap {
-        max-width: 960px;
+        max-width: 1040px;
         margin: 0 auto;
         padding: max(20px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
       }
-      header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      header img {
-        width: 32px;
-        height: 32px;
-      }
-      header strong {
-        font-size: 15px;
-      }
-      .tag {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 999px;
-        padding: 3px 9px;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--amber);
-        background: #fdb0221f;
-        border: 1px solid #fdb02259;
-      }
-      .notice {
-        margin: 0 0 20px;
-        padding: 12px 14px;
-        border: 1px solid #fdb02240;
-        background: #fdb0220d;
-        border-radius: 12px;
-        color: #fcd9a0;
-        font-size: 13px;
-        line-height: 1.55;
-      }
-      .hero {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 32px;
-        margin-top: 40px;
-        align-items: center;
-      }
+      header { display: flex; align-items: center; gap: 10px; }
+      header img { width: 36px; height: 36px; }
+      .brand { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+      nav { margin-left: auto; display: none; gap: 18px; font-size: 14px; }
+      nav a { color: var(--muted); text-decoration: none; }
+      nav a:hover { color: var(--gold); }
+      .hero { display: grid; gap: 36px; margin-top: 56px; align-items: center; }
+      .mark { width: min(260px, 60vw); justify-self: center; }
       h1 {
-        font-size: clamp(34px, 7vw, 56px);
-        line-height: 1.05;
-        letter-spacing: -0.03em;
+        font-size: clamp(38px, 8vw, 64px);
+        line-height: 1.03;
+        letter-spacing: -0.035em;
         margin: 0;
       }
-      h1 span {
-        background: linear-gradient(135deg, var(--green-1), var(--green-2));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-      }
-      .lede {
-        color: var(--muted);
-        font-size: 17px;
-        line-height: 1.6;
-        margin: 16px 0 0;
-        max-width: 34em;
-      }
-      .downloads {
-        display: grid;
-        gap: 10px;
-        margin-top: 28px;
-      }
+      h1 em { font-style: normal; color: var(--gold); }
+      .lede { color: var(--muted); font-size: 18px; margin: 18px 0 0; max-width: 34em; }
+      .downloads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
       .dl {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        min-height: 60px;
-        padding: 12px 16px;
-        border-radius: 14px;
-        border: 1px solid var(--line);
-        background: var(--card);
-        text-decoration: none;
+        display: flex; flex-direction: column; justify-content: center;
+        min-width: 180px; min-height: 58px; padding: 10px 18px;
+        border-radius: 14px; border: 1px solid var(--line); background: var(--card);
       }
-      .dl.live {
-        border: 0;
-        background: linear-gradient(135deg, var(--green-1), var(--green-2));
-        color: #010101;
-      }
-      .dl b {
-        display: block;
-        font-size: 15px;
-      }
-      .dl small {
-        display: block;
-        font-size: 12px;
-        margin-top: 2px;
-        opacity: 0.75;
-      }
-      .dl .state {
-        font-size: 12px;
-        font-weight: 600;
-        white-space: nowrap;
-      }
-      .dl:not(.live) .state {
-        color: var(--dim);
-      }
-      .shots {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-      }
-      .shots img {
-        width: 30%;
-        max-width: 200px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-      }
-      section {
-        margin-top: 56px;
-      }
-      h2 {
-        font-size: 20px;
-        margin: 0 0 16px;
-        letter-spacing: -0.01em;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 12px;
-      }
-      .card {
-        padding: 16px;
-        border-radius: 14px;
-        border: 1px solid var(--line);
-        background: var(--card);
-      }
-      .card h3 {
-        margin: 0 0 6px;
-        font-size: 15px;
-      }
-      .card p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 14px;
-        line-height: 1.55;
-      }
-      ol {
-        color: var(--muted);
-        line-height: 1.7;
-        padding-left: 20px;
-        margin: 0;
-      }
+      .dl b { font-size: 15px; }
+      .dl small { font-size: 12px; color: var(--gold); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+      section { margin-top: 72px; }
+      h2 { font-size: clamp(24px, 4vw, 30px); letter-spacing: -0.02em; margin: 0 0 8px; }
+      .kicker { color: var(--gold); font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 6px; }
+      .intro { color: var(--muted); margin: 0 0 20px; max-width: 40em; }
+      .grid { display: grid; gap: 12px; }
+      .card { padding: 20px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); }
+      .card h3 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+      .card h3::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); flex: none; }
+      .card p { margin: 0; color: var(--muted); font-size: 15px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding: 0; list-style: none; }
+      .chips li { font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid #f5b80059; color: #ffd866; }
+      .security { border-color: #f5b80066; }
+      .security ul { margin: 0; padding-left: 20px; color: var(--muted); }
+      .security li + li { margin-top: 6px; }
+      .pair { display: grid; gap: 0 12px; }
       footer {
-        margin-top: 56px;
-        padding-top: 20px;
-        border-top: 1px solid var(--line);
-        color: var(--dim);
-        font-size: 12px;
-        line-height: 1.7;
+        margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line);
+        color: var(--dim); font-size: 13px; line-height: 1.7;
       }
-      footer a {
-        color: var(--muted);
-      }
+      footer a { color: var(--muted); }
       @media (min-width: 760px) {
-        .hero {
-          grid-template-columns: 1.1fr 1fr;
-        }
-        .grid {
-          grid-template-columns: 1fr 1fr;
-        }
+        nav { display: flex; }
+        .hero { grid-template-columns: 1.4fr 1fr; }
+        .pair { grid-template-columns: 1fr 1fr; }
+        .grid.three { grid-template-columns: repeat(3, 1fr); }
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <p class="notice">
-        bWallet is in beta: use a new wallet with small amounts only, and keep your recovery phrase safe.
-      </p>
-
       <header>
-        <img src="/logo.png" alt="" />
-        <strong>bWallet</strong>
-        <span class="tag">Beta</span>
+        <img src="/logo.svg" alt="" width="36" height="36" />
+        <span class="brand">bWallet</span>
+        <nav aria-label="Sections">
+          <a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Media</a
+          ><a href="#chat">Chat</a><a href="#security">Security</a>
+        </nav>
       </header>
 
-      <div class="hero">
-        <div>
-          <h1>The BSV wallet <span>for tokens.</span></h1>
-          <p class="lede">
-            Hold and send BSV, 1Sat Ordinals and BSV-21 tokens on iPhone and Android, and use BRC-100 apps in the
-            built-in browser. Non-custodial: your keys stay on your device, with Face ID or fingerprint unlock.
-          </p>
-          <div class="downloads" id="downloads"></div>
+      <main>
+        <div class="hero">
+          <div>
+            <h1>bWallet: the BSV wallet for <em>tokens, media and apps.</em></h1>
+            <p class="lede">
+              Hold BSV, MNEE and BSV-21 tokens, trade 1Sat tokens and collections, open bApps, play music and video
+              ordinals and chat, all in one non-custodial app for iPhone and Android.
+            </p>
+            <div class="downloads">
+              <div class="dl" aria-label="iPhone app: coming soon"><b>iPhone</b><small>Coming soon</small></div>
+              <div class="dl" aria-label="Android app: coming soon"><b>Android</b><small>Coming soon</small></div>
+            </div>
+          </div>
+          <img class="mark" src="/logo.svg" alt="bWallet logo: a gold ring around a rounded b" width="260" height="260" />
         </div>
-        <div class="shots">
-          <img src="/shot-03-wallet.jpg" alt="Wallet home screen" />
-          <img src="/shot-06b-browser-tab.jpg" alt="In-app browser for BSV apps" />
-          <img src="/shot-04-locked.jpg" alt="Lock screen" />
-        </div>
-      </div>
 
-      <section>
-        <h2>What's inside</h2>
-        <div class="grid">
-          <div class="card">
-            <h3>Proven open-source core</h3>
-            <p>
-              The wallet logic, key handling and permission prompts come from the open-source Yours Wallet browser
-              extension (MIT), packaged for mobile by The Bitcoin Corporation Ltd.
-            </p>
+        <section id="wallet">
+          <p class="kicker">Wallet</p>
+          <h2>Your money and tokens</h2>
+          <p class="intro">Send and receive BSV, hold the MNEE stablecoin, and keep every BSV-21 token in one place.</p>
+          <div class="grid three">
+            <div class="card"><h3>BSV</h3><p>Send, receive and see your balance and history.</p></div>
+            <div class="card"><h3>MNEE</h3><p>Hold and send MNEE alongside your BSV.</p></div>
+            <div class="card"><h3>BSV-21 tokens</h3><p>See and transfer the fungible tokens you own.</p></div>
           </div>
-          <div class="card">
-            <h3>In-app browser</h3>
-            <p>
-              BSV apps open inside the wallet and connect over the standard BRC-100 wallet interface. You approve
-              every request.
-            </p>
-          </div>
-          <div class="card">
-            <h3>Keys stay on the device</h3>
-            <p>
-              Private keys are stored in the iPhone Keychain or Android Keystore, encrypted with your password, and never
-              included in cloud backups. Transaction records sync to 1Sat wallet storage by default.
-            </p>
-          </div>
-          <div class="card">
-            <h3>Face ID and fingerprint</h3>
-            <p>
-              Optional biometric unlock. Your password still works, and is still needed for backups and sensitive
-              settings.
-            </p>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section>
-        <h2>Joining the beta</h2>
-        <ol>
-          <li><b>iPhone:</b> install Apple's TestFlight app, then open the TestFlight link above.</li>
-          <li>
-            <b>Android:</b> download the APK above and open it. Allow "Install unknown apps" for your browser when asked.
-          </li>
-          <li>Create a new wallet for testing, and report problems on GitHub.</li>
-        </ol>
-      </section>
+        <section id="market">
+          <p class="kicker">Market</p>
+          <h2>Trending 1Sat tokens and collections</h2>
+          <div class="card">
+            <p>
+              Browse what's trending across 1Sat Ordinals tokens and collections, then buy listings or list your own for
+              sale, straight from the wallet.
+            </p>
+          </div>
+        </section>
+
+        <section id="apps">
+          <p class="kicker">Apps</p>
+          <h2>The bApps store</h2>
+          <p class="intro">Bitcoin apps that open inside the wallet and ask your permission before they do anything.</p>
+          <div class="card">
+            <p>Featured: bChat, bMovies and bWriter, plus the apps from the Bitcoin Apps suite.</p>
+            <ul class="chips" aria-label="Featured bApps">
+              <li>bChat</li><li>bMovies</li><li>bWriter</li><li>Bitcoin Apps suite</li>
+            </ul>
+          </div>
+        </section>
+
+        <div class="pair">
+          <section id="media">
+            <p class="kicker">Media</p>
+            <h2>Ordinals player</h2>
+            <div class="card"><p>Play the music and video ordinals you own, right inside the wallet.</p></div>
+          </section>
+          <section id="chat">
+            <p class="kicker">Chat</p>
+            <h2>bChat built in</h2>
+            <div class="card"><p>Message people from the same app that holds your tokens.</p></div>
+          </section>
+        </div>
+
+        <section id="security">
+          <p class="kicker">Security</p>
+          <h2>Non-custodial by design</h2>
+          <div class="card security">
+            <ul>
+              <li>Your keys are created and stored on your device, in the iPhone Keychain or Android Keystore, encrypted with your password.</li>
+              <li>Keys are never included in cloud backups and never sent to The Bitcoin Corporation Ltd.</li>
+              <li>Optional Face ID, Touch ID or fingerprint unlock. Your password is still needed for backups and sensitive settings.</li>
+              <li>Every app connection, payment and signature asks for your approval first.</li>
+              <li>Write down your recovery phrase. Nobody, including us, can recover it for you.</li>
+            </ul>
+          </div>
+        </section>
+      </main>
 
       <footer>
-        bWallet is published by The Bitcoin Corporation Ltd. Based on the open-source
-        <a href="https://github.com/yours-org/yours-wallet">Yours Wallet</a> (MIT licence); not affiliated with or
-        endorsed by its authors.<br />
-        Source: <a href="https://github.com/b0ase/yours-mobile">github.com/b0ase/yours-mobile</a> ·
+        By The Bitcoin Corporation Ltd. Based on the open-source
+        <a href="https://github.com/yours-org/yours-wallet">Yours Wallet</a> (MIT); not affiliated with or endorsed by
+        its authors.<br />
         <a href="/privacy.html">Privacy policy</a>
       </footer>
     </div>
-
-    <script>
-      // Download links. Leave a URL empty to show "Coming soon".
-      const LINKS = {
-        // bWallet (com.bitcoincorp.bwallet) is a new app record: add its TestFlight link and
-        // bcorp-wallet-<version>.apk release URL here once they exist.
-        testflight: '',
-        apk: '',
-        play: '',
-      };
-
-      const items = [
-        { key: 'testflight', title: 'iPhone: TestFlight beta', sub: 'Requires the TestFlight app from Apple' },
-        { key: 'apk', title: 'Android: download APK', sub: 'Direct install, Android 7 or later' },
-        { key: 'play', title: 'Android: Google Play', sub: 'Google Play testing track' },
-      ];
-
-      const el = document.getElementById('downloads');
-      for (const item of items) {
-        const url = LINKS[item.key];
-        const node = document.createElement(url ? 'a' : 'div');
-        node.className = 'dl' + (url ? ' live' : '');
-        if (url) {
-          node.href = url;
-          node.rel = 'noopener';
-        }
-        node.innerHTML = '<div><b></b><small></small></div><span class="state"></span>';
-        node.querySelector('b').textContent = item.title;
-        node.querySelector('small').textContent = item.sub;
-        node.querySelector('.state').textContent = url ? 'Get it →' : 'Coming soon';
-        el.appendChild(node);
-      }
-    </script>
   </body>
 </html>

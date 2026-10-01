@@ -4,24 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Privacy Policy · bWallet (Beta)</title>
-    <meta name="theme-color" content="#010101" />
+    <meta name="theme-color" content="#000000" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
     <style>
       body {
         margin: 0;
-        background: #010101;
+        background: #000000;
         color: #e4e7ec;
-        font: 15px/1.7 Inter, system-ui, sans-serif;
+        font: 15px/1.7 "IBM Plex Sans", system-ui, sans-serif;
       }
       main {
         max-width: 720px;
         margin: 0 auto;
         padding: max(24px, env(safe-area-inset-top)) 16px 48px;
       }
+      h1, h2 { font-family: "Space Grotesk", system-ui, sans-serif; }
       h1 {
         font-size: 28px;
         line-height: 1.2;
@@ -38,7 +39,7 @@
         color: #c0c6d0;
       }
       a {
-        color: #a1ff8b;
+        color: #F5B800;
       }
       .meta {
         color: #667085;
@@ -46,8 +47,8 @@
       }
       .notice {
         padding: 12px 14px;
-        border: 1px solid #fdb02240;
-        background: #fdb0220d;
+        border: 1px solid #f5b80040;
+        background: #f5b8000d;
         border-radius: 12px;
         color: #fcd9a0;
         font-size: 13px;
@@ -64,12 +65,12 @@
     <main>
       <p><a href="/">← bWallet</a></p>
       <h1>Privacy Policy</h1>
-      <p class="meta">bWallet (Beta) · Effective 29 September 2026</p>
+      <p class="meta">bWallet (Beta) · Effective 1 October 2026</p>
 
       <p class="notice">
         bWallet is published by The Bitcoin Corporation Ltd and is based on the open-source Yours Wallet (MIT licence).
         It is not made, reviewed or endorsed by the Yours Wallet authors, and this policy
-        covers only this mobile app.
+        covers only the bWallet mobile app.
       </p>
 
       <h2>Summary</h2>
@@ -91,7 +92,7 @@
           device's biometrics. Your biometric data itself is handled by the operating system and is never available to
           the app.
         </li>
-        <li>Settings, recent sites in the Browser tab, and local caches.</li>
+        <li>Settings, recent sites and apps you open, chat history cached for bChat, and local caches.</li>
       </ul>
 
       <h2>What the app sends over the network</h2>
@@ -108,6 +109,11 @@
           to BSV indexing services (1Sat APIs). Transaction links open on WhatsOnChain.
         </li>
         <li><b>Wallet messaging:</b> wallet-to-wallet messages use <code>messagebox.1sat.app</code>.</li>
+        <li>
+          <b>Market, Media, Apps and Chat:</b> trending tokens, collections, listings and ordinal media are loaded from
+          1Sat indexing and content services (ORDFS). The Apps tab lists bApps such as bChat, bMovies and bWriter;
+          bChat and other bApps you open talk to their own services, which receive what you send them.
+        </li>
         <li>
           <b>Websites you open</b> in the in-app browser receive the requests you make and the responses you approve.
           They're governed by their own privacy policies.
