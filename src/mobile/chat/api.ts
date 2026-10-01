@@ -292,6 +292,30 @@ export class BchatClient {
     return r.address;
   }
 
+  // ── Bounties paid on merge (bit-sign feat/bounty-payouts; src/mobile/chat/bounties.ts) ──
+
+  async bounties(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/bounty`);
+  }
+
+  /** Claim by linking the PR. `agentLabel` names an agent acting for this handle. */
+  async claimBounty(ticker: string, no: number, prUrl: string, agentLabel?: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/bounty/${no}/claim-pr`, {
+      pr_url: prUrl.trim(),
+      ...(agentLabel?.trim() ? { agent_label: agentLabel.trim() } : {}),
+    });
+  }
+
+  /** Admin / treasury holder: the transfer spec this wallet performs. */
+  async bountyPayoutSpec(ticker: string, no: number): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/bounty/${no}/payout`);
+  }
+
+  /** After the wallet broadcast: record the txid (server marks the bounty paid, once). */
+  async confirmBountyPayout(ticker: string, no: number, txid: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/bounty/${no}/payout`, { txid });
+  }
+
   // ── Verified identity (src/mobile/kyc) ──
 
   /** Ask bit-sign for a BRC-52 KYC certificate for this identity key (needs approved Veriff). */

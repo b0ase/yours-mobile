@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowUp, Ban, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, UserPlus, WifiOff, X } from 'lucide-react';
-import { sendBsv21 } from '@1sat/actions';
+import { ArrowLeft, ArrowUp, Ban, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, Trophy, UserPlus, WifiOff, X } from 'lucide-react';
+import { sendBsv, sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
@@ -45,6 +45,21 @@ import {
   type ChatMessage,
   type ChatRoom,
 } from '../chat/messages';
+import {
+  claimCheck,
+  loadSeen,
+  markSeen,
+  parseBounties,
+  parseSpec,
+  rewardLabel,
+  saveSeen,
+  showPay,
+  sortBounties,
+  transferLabel,
+  unseenForMe,
+  type Bounty,
+  type PayoutSpec,
+} from '../chat/bounties';
 
 /**
  * Chat tab: TOKEN ROOMS ONLY (owner decision; docs/TOKEN-ROOMS.md). The list is one room per
@@ -129,6 +144,7 @@ const Conversation = ({
   onLocked,
   onInvite,
   onBans,
+  onBounties,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -142,7 +158,9 @@ const Conversation = ({
   onInvite: (() => void) | null;
   /** Room admin: the ban list. */
   onBans: (() => void) | null;
+  onBounties: () => void;
 }) => {
+  const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -292,6 +310,17 @@ const Conversation = ({
             <Ban size={18} color={MUTED} />
           </button>
         )}
+        <button onClick={onBounties} className="relative p-2 rounded-full active:opacity-60" aria-label="Bounties">
+          <Trophy size={20} color={GOLD} />
+          {bountyBadge > 0 && (
+            <span
+              className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+              style={{ background: '#F97066', color: '#fff' }}
+            >
+              {bountyBadge}
+            </span>
+          )}
+        </button>
         {onInvite && (
           <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
             <UserPlus size={20} color={GOLD} />
@@ -689,6 +718,250 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
   );
 };
 
+// ───────────────────────────── Bounties ─────────────────────────────
+
+/** Count of my bounties that turned merged / paid since I last opened the Bounties sheet. */
+const useBountyBadge = (client: BchatClient, ticker: string, me: string) => {
+  const [count, setCount] = useState(0);
+  const check = useCallback(() => {
+    client
+      .bounties(ticker)
+      .then((d) => setCount(unseenForMe(ticker, parseBounties(d), me, loadSeen()).length))
+      .catch(() => undefined);
+  }, [client, ticker, me]);
+  useEffect(() => {
+    check();
+    window.addEventListener('bwallet:bounties-seen', check);
+    return () => window.removeEventListener('bwallet:bounties-seen', check);
+  }, [check]);
+  usePoll(check, LIST_POLL_MS, true);
+  return count;
+};
+
+const STATUS_COLOR: Record<string, string> = { open: '#32D583', claimed: '#FFD24D', merged: '#53B1FD', paid: '#8a8f98' };
+
+/**
+ * Bounties sheet: open / claimed / merged / paid, with reward. Claim = paste the PR URL. Pay
+ * (room admin / treasury holder) = fetch the server's transfer spec, confirm here, and the wallet
+ * sends it with its normal approval; the txid is posted back and the bounty becomes paid.
+ */
+const BountiesSheet = ({
+  client,
+  room,
+  entry,
+  me,
+  onClose,
+}: {
+  client: BchatClient;
+  room: ChatRoom;
+  entry: TokenRoomEntry | null;
+  me: string;
+  onClose: () => void;
+}) => {
+  const { apiContext } = useServiceContext();
+  const { addSnackbar } = useSnackbar();
+  const [bounties, setBounties] = useState<Bounty[] | null>(null);
+  const [error, setError] = useState('');
+  const [claiming, setClaiming] = useState<Bounty | null>(null);
+  const [prUrl, setPrUrl] = useState('');
+  const [agent, setAgent] = useState('');
+  const [paying, setPaying] = useState<PayoutSpec | null>(null);
+  const [busy, setBusy] = useState('');
+  const token = entry && entry.key.startsWith('bsv21:') ? { symbol: entry.gate.symbol, dec: entry.gate.dec } : null;
+  const isAdmin = String((room as { created_by_handle?: unknown }).created_by_handle ?? '') === me;
+
+  const load = useCallback(async () => {
+    try {
+      const list = sortBounties(parseBounties(await client.bounties(room.ticker)));
+      setBounties(list);
+      saveSeen(markSeen(room.ticker, list, loadSeen()));
+      window.dispatchEvent(new Event('bwallet:bounties-seen'));
+    } catch (e) {
+      setError(errText(e));
+      setBounties([]);
+    }
+  }, [client, room.ticker]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const claim = async () => {
+    if (!claiming) return;
+    const why = claimCheck(claiming, me, prUrl);
+    if (why) return setError(why);
+    setBusy('Claiming…');
+    setError('');
+    try {
+      await client.claimBounty(room.ticker, claiming.bounty_no, prUrl, agent);
+      addSnackbar(`Claimed #${claiming.bounty_no}`, 'success');
+      setClaiming(null);
+      setPrUrl('');
+      setAgent('');
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const startPay = async (b: Bounty) => {
+    setBusy('Preparing…');
+    setError('');
+    try {
+      const spec = parseSpec(await client.bountyPayoutSpec(room.ticker, b.bounty_no));
+      if (!spec) throw new Error('The server returned no payable transfer');
+      setPaying(spec);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const pay = async () => {
+    if (!paying) return;
+    setBusy('Sending…');
+    setError('');
+    let confirmed = false;
+    try {
+      for (const t of paying.transfers) {
+        const res =
+          t.type === 'bsv21'
+            ? await sendBsv21.execute(apiContext, {
+                tokenId: t.tokenId,
+                recipients: [{ amount: BigInt(t.amountRaw), destination: { address: t.address } }],
+              })
+            : await sendBsv.execute(apiContext, { requests: [{ address: t.address, satoshis: t.sats }] });
+        if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+        // Record the FIRST broadcast at once, so a failure on a later leg can never lead to paying twice.
+        if (!confirmed) {
+          await client.confirmBountyPayout(room.ticker, paying.bountyNo, res.txid);
+          confirmed = true;
+        }
+      }
+      addSnackbar(`Paid #${paying.bountyNo} to $${paying.claimant}`, 'success');
+      setPaying(null);
+      await load();
+    } catch (e) {
+      setError(confirmed ? `Recorded as paid, but a later transfer failed: ${errText(e)}` : errText(e));
+      if (confirmed) await load();
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (paying) {
+    return (
+      <Sheet title={`Pay bounty #${paying.bountyNo}`} onClose={onClose}>
+        <div className="rounded-2xl p-4 text-sm" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+          {paying.transfers.map((t, i) => (
+            <div key={i} className="flex justify-between mt-1">
+              <span style={{ color: MUTED }}>Send</span>
+              <span className="text-white font-semibold">{transferLabel(t)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between mt-2">
+            <span style={{ color: MUTED }}>To</span>
+            <span className="text-white font-semibold">${paying.claimant}</span>
+          </div>
+          <div className="text-[11px] mt-2 break-all" style={{ color: MUTED }}>
+            {paying.transfers[0].address}
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={() => setPaying(null)} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold text-white" style={{ background: PANEL }}>
+            Back
+          </button>
+          <button onClick={pay} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50" style={{ background: GOLD, color: '#1a1300' }}>
+            {busy || 'Pay'}
+          </button>
+        </div>
+        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      </Sheet>
+    );
+  }
+
+  if (claiming) {
+    return (
+      <Sheet title={`Claim #${claiming.bounty_no}`} onClose={onClose}>
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          {claiming.title} — {rewardLabel(claiming, token)}. Paid to your proven receive address when the PR merges.
+        </p>
+        <input
+          autoFocus
+          value={prUrl}
+          onChange={(e) => setPrUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo/pull/123"
+          autoCapitalize="none"
+          autoCorrect="off"
+          className="w-full rounded-2xl px-3 py-3 bg-transparent text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        />
+        <input
+          value={agent}
+          onChange={(e) => setAgent(e.target.value)}
+          placeholder="Agent (optional, e.g. claude)"
+          autoCapitalize="none"
+          className="w-full mt-2 rounded-2xl px-3 py-3 bg-transparent text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        />
+        <div className="flex gap-2 mt-4">
+          <button onClick={() => setClaiming(null)} disabled={!!busy} className="flex-1 rounded-2xl py-3 font-bold text-white" style={{ background: PANEL }}>
+            Back
+          </button>
+          <button onClick={claim} disabled={!!busy || !prUrl.trim()} className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50" style={{ background: GOLD, color: '#1a1300' }}>
+            {busy || 'Claim'}
+          </button>
+        </div>
+        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet title="Bounties" onClose={onClose}>
+      <div className="max-h-[60vh] overflow-y-auto flex flex-col gap-2">
+        {bounties === null && <p className="text-xs" style={{ color: MUTED }}>Loading…</p>}
+        {bounties?.length === 0 && !error && <p className="text-xs" style={{ color: MUTED }}>No bounties in this room yet.</p>}
+        {bounties?.map((b) => (
+          <div key={b.bounty_no} className="rounded-2xl p-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase" style={{ color: STATUS_COLOR[b.status] ?? MUTED }}>
+                {b.status}
+              </span>
+              <span className={`flex-1 text-sm text-white ${ELLIPSIS}`}>
+                #{b.bounty_no} {b.title}
+              </span>
+            </div>
+            <div className="text-xs mt-1" style={{ color: GOLD }}>
+              {rewardLabel(b, token)}
+            </div>
+            {b.claimed_by && (
+              <div className="text-[11px] mt-1" style={{ color: MUTED }}>
+                ${b.claimed_by}
+                {b.agent_label ? ` via ${b.agent_label}` : ''}
+                {b.github_pr_url ? ` · ${b.github_pr_url.replace('https://github.com/', '')}` : ''}
+              </div>
+            )}
+            {b.status === 'open' && b.created_by !== me && (
+              <button onClick={() => { setError(''); setClaiming(b); }} className="mt-2 w-full rounded-xl py-2 text-sm font-bold" style={{ background: GOLD, color: '#1a1300' }}>
+                Claim with PR
+              </button>
+            )}
+            {showPay(b, me, isAdmin) && (
+              <button onClick={() => startPay(b)} disabled={!!busy} className="mt-2 w-full rounded-xl py-2 text-sm font-bold disabled:opacity-50" style={{ background: GOLD, color: '#1a1300' }}>
+                {busy || 'Pay'}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+    </Sheet>
+  );
+};
+
 /** "$BOASE ✓" for a verified personal token, else the room name / "$SYM". */
 const entryTitle = (entry: TokenRoomEntry | null, room: ChatRoom | null): string | null => {
   if (!entry) return room?.name || null;
@@ -724,6 +997,7 @@ const ChatPage = () => {
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(null);
   const [inviting, setInviting] = useState(false);
   const [banning, setBanning] = useState(false);
+  const [showBounties, setShowBounties] = useState(false);
   const [opening, setOpening] = useState('');
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
   const [accepted, setAccepted] = useState<Set<string>>(new Set());
@@ -1127,6 +1401,7 @@ const ChatPage = () => {
           onAuthLost={authLost}
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
           onBans={isAdmin(open.room, handle) ? () => setBanning(true) : null}
+          onBounties={() => setShowBounties(true)}
           onLocked={(r) => {
             setOpen(null);
             setLocked({ gate: r.gate, heldRaw: r.heldRaw, members: r.room?.members ?? null });
@@ -1139,6 +1414,9 @@ const ChatPage = () => {
         />
       )}
       {banning && open && <BansSheet client={client} ticker={open.room.ticker} onClose={() => setBanning(false)} />}
+      {showBounties && open && handle && (
+        <BountiesSheet client={client} room={open.room} entry={open.entry} me={handle} onClose={() => setShowBounties(false)} />
+      )}
       {inviting && open?.entry && (
         <InviteSheet client={client} ticker={open.room.ticker} entry={open.entry} onClose={() => setInviting(false)} />
       )}

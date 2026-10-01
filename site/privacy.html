@@ -115,6 +115,16 @@
           bChat and other bApps you open talk to their own services, which receive what you send them.
         </li>
         <li>
+          <b>Names and payments to names:</b> when you send to a $handle, paymail or OpNS name, or look up your own
+          name, the app asks 1Sat indexers (including OpNS), bit-sign and HandCash paymail lookup services to resolve
+          that name to a payment destination. Those services see the name being looked up.
+        </li>
+        <li>
+          <b>Market and Chat:</b> token and NFT listings, media and token rooms are loaded from 1Sat indexers. The
+          Market's safety filter runs as part of that loading; if you use Report, the item is hidden on your device and,
+          where a review service is configured, the item reference is sent to us for review.
+        </li>
+        <li>
           <b>Websites you open</b> in the in-app browser receive the requests you make and the responses you approve.
           They're governed by their own privacy policies.
         </li>
@@ -122,6 +132,15 @@
       <p>
         These services see your IP address and the public blockchain data needed to answer each request. Blockchain
         transactions are public by nature.
+      </p>
+
+      <h2 id="kyc">Verified identity (KYC certificates)</h2>
+      <p>
+        Identity verification is optional. If you choose to verify, you are sent to bit-sign, which uses Veriff to
+        check your identity document. bit-sign and Veriff keep the verification record under their own privacy
+        policies. bit-sign then issues a private certificate that is stored in your wallet on your device. bWallet
+        does not upload that certificate anywhere by itself: you choose which details, if any, to reveal to an app
+        or service, and only when you approve it.
       </p>
 
       <h2>Notifications</h2>
