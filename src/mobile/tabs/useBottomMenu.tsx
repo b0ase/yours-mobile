@@ -5,7 +5,7 @@ import { routeFor } from './tabs';
 
 /**
  * Mobile swap for src/hooks/useBottomMenu.tsx (vite.config.mobile.ts): same
- * contract, but routes the five mobile tabs (Wallet · Market · Apps · Media · Settings).
+ * contract, but routes the five mobile tabs (Wallet · Market · Apps · Media · Chat) and Settings.
  */
 export const useBottomMenu = () => {
   const context = useContext(BottomMenuContext);

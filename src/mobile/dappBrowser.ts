@@ -16,6 +16,10 @@ let open = false;
 let hiddenForOverlay = false;
 let overlayCount = 0;
 const contexts = new Map<string, any>();
+const lastUrls = new Map<string, string>();
+
+/** Last page URL a site was on when it called the wallet (this session), e.g. to reopen bChat where it was. */
+export const lastUrlFor = (origin: string) => lastUrls.get(origin);
 
 export const isDappBrowserOpen = () => open;
 
@@ -57,6 +61,7 @@ export const initDappBrowser = (createContext: ContextFactory) => {
     try {
       const origin = new URL(req.origin);
       if (origin.protocol !== 'https:' && origin.protocol !== 'http:') throw new Error('Unsupported origin');
+      if (req.url?.startsWith(origin.origin)) lastUrls.set(origin.origin, req.url);
       const { type, params } = JSON.parse(req.payload) as { type: string; params?: unknown };
       if (!isCWIEventName(type)) throw new Error(`Unsupported request: ${type}`);
       let chrome = contexts.get(origin.origin);

@@ -5,6 +5,7 @@ import { Route, Routes } from 'react-router-dom';
 const SettingsHub = lazy(() => import('./SettingsHub'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
 const MarketPage = lazy(() => import('../market/MarketPage'));
+const ChatPage = lazy(() => import('./ChatPage'));
 
 const MobileRoutes = () => (
   <Suspense fallback={null}>
@@ -12,6 +13,7 @@ const MobileRoutes = () => (
       <Route path="settings" element={<SettingsHub />} />
       <Route path="media" element={<MediaPage />} />
       <Route path="market" element={<MarketPage />} />
+      <Route path="chat" element={<ChatPage />} />
     </Routes>
   </Suspense>
 );

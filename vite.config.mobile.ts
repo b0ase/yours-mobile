@@ -29,9 +29,11 @@ const MOBILE_BRAND = (['yours', 'bwallet'] as const).find((b) => b === process.e
 const LOGO_DIR = MOBILE_BRAND === 'bcorp' ? 'src/mobile/brand/bcorp' : 'src/mobile/brand';
 const BRAND: Record<string, string> = {
   [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/mobile/brand/theme.ts'),
-  // Mobile tab bar: Wallet · Market · Apps · Media · Settings (src/mobile/tabs).
+  // Mobile tab bar: Wallet · Market · Apps · Media · Chat (src/mobile/tabs).
   [resolve(__dirname, 'src/components/BottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/BottomMenu.tsx'),
   [resolve(__dirname, 'src/hooks/useBottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/useBottomMenu.tsx'),
+  // Account drawer (Phantom-style) in place of the dropdown + GitHub button.
+  [resolve(__dirname, 'src/components/TopNav.tsx')]: resolve(__dirname, 'src/mobile/tabs/TopNav.tsx'),
 };
 const BWALLET_ASSETS: Record<string, string> = {
   [resolve(__dirname, 'src/utils/constants.ts')]: resolve(__dirname, 'src/mobile/brand/constants.ts'),

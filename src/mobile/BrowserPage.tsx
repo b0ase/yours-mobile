@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, Clock, ExternalLink, Github, Globe } from 'lucide-react';
-import { liveBApps } from './bapps';
+import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
@@ -53,6 +53,7 @@ const DEAD_HOSTS = new Set(['taleofshua.com']);
 // Third-party apps (Apps › Other apps). Our own live in ./bapps.ts.
 const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
+  { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
     .filter((a) => new URL(a.link).hostname !== 'yours.org')
@@ -67,6 +68,19 @@ const AppIcon = ({ src }: { src?: string }) => {
   return (
     <div className="h-9 w-9 rounded-lg bg-[#2b2f36] flex items-center justify-center">
       <Globe size={16} style={{ color: '#A1FF8B' }} />
+    </div>
+  );
+};
+
+/** bApp icon: the site's icon, else a gold "b" monogram. */
+const BAppIcon = ({ src }: { src?: string }) => {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return <img src={src} alt="" onError={() => setFailed(true)} className="h-10 w-10 rounded-xl object-cover bg-[#2b2f36] shrink-0" />;
+  }
+  return (
+    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 font-bold text-lg" style={{ background: '#EAB300', color: '#010101' }}>
+      b
     </div>
   );
 };
@@ -98,6 +112,37 @@ const BrowserPage = () => {
     if (!url) return setError('Enter a web address, like 1sat.market');
     go(url);
   };
+
+  const bappCard = (app: BApp) => (
+    <div key={app.url} className="rounded-xl bg-[#17191E] px-3 py-3 flex flex-col gap-2">
+      <button onClick={() => go(app.url)} className="flex items-center gap-3 text-left">
+        <BAppIcon src={app.icon} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white">{app.name}</span>
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase"
+              style={app.status === 'live' ? { background: '#EAB30022', color: '#FFD24D' } : { background: '#2b2f36', color: '#98A2B3' }}
+            >
+              {app.status === 'live' ? 'Live' : 'Demo'}
+            </span>
+          </div>
+          <div className="text-[11px] text-[#98A2B3] leading-snug">{app.verb}</div>
+        </div>
+        <ExternalLink size={14} className="shrink-0" style={{ color: '#98A2B3' }} />
+      </button>
+      <div className="flex items-center gap-2 text-[10px] pl-[3.25rem]">
+        <span className="rounded-full px-2 py-0.5 font-semibold bg-[#2b2f36] text-[#98A2B3]">
+          {app.source ? 'Open source' : 'Closed source'}
+        </span>
+        {app.source && (
+          <button onClick={() => go(app.source!)} className="flex items-center gap-1 text-[#98A2B3]">
+            <Github size={11} /> {new URL(app.source).pathname.slice(1)}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   const row = (key: string, title: string, subtitle: string, onClick: () => void, icon: React.ReactNode) => (
     <motion.button
@@ -149,15 +194,6 @@ const BrowserPage = () => {
           {error && <p className="text-xs text-[#F97066]">{error}</p>}
         </form>
 
-        {recent.length > 0 && (
-          <section className="flex flex-col gap-2">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#667085]">Recent</h2>
-            {recent.map((url) =>
-              row(`r:${url}`, hostOf(url), url, () => go(url), <Clock size={18} style={{ color: '#98A2B3' }} />),
-            )}
-          </section>
-        )}
-
         <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]">
           {(
             [
@@ -178,30 +214,11 @@ const BrowserPage = () => {
 
         {section === 'bapps' ? (
           <section className="flex flex-col gap-2">
-            {liveBApps().map((app) => (
-              <div key={app.url} className="rounded-xl bg-[#17191E] px-4 py-3 flex flex-col gap-2">
-                <button onClick={() => go(app.url)} className="flex items-center gap-3 text-left">
-                  <AppIcon src={app.icon} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-white">{app.name}</div>
-                    <div className="text-[11px] text-[#98A2B3] leading-snug">{app.verb}</div>
-                  </div>
-                  <ExternalLink size={14} className="shrink-0" style={{ color: '#98A2B3' }} />
-                </button>
-                <div className="flex items-center gap-2 text-[10px]">
-                  <span
-                    className="rounded-full px-2 py-0.5 font-semibold"
-                    style={{ background: '#2b2f36', color: app.source ? '#A1FF8B' : '#98A2B3' }}
-                  >
-                    {app.source ? 'Open source' : 'Closed source'}
-                  </span>
-                  {app.source && (
-                    <button onClick={() => go(app.source!)} className="flex items-center gap-1 text-[#98A2B3]">
-                      <Github size={11} /> {hostOf(app.source)}
-                      {new URL(app.source).pathname}
-                    </button>
-                  )}
-                </div>
+            {BAPP_GROUPS.map((g) => (
+              <div key={g.id} className="flex flex-col gap-2">
+                {g.id === 'work' && <h2 className="pt-3 text-sm font-bold text-white">All bApps</h2>}
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#667085] pt-1">{g.label}</h2>
+                {bappsIn(g.id).map((app) => bappCard(app))}
               </div>
             ))}
           </section>
@@ -211,6 +228,15 @@ const BrowserPage = () => {
               row(`a:${app.link}`, app.name, hostOf(app.link), () => go(app.link), <AppIcon src={app.icon} />),
             )}
             <p className="text-[10px] text-[#667085] text-center">Not made by The Bitcoin Corporation.</p>
+          </section>
+        )}
+
+        {recent.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#667085]">Recent</h2>
+            {recent.map((url) =>
+              row(`r:${url}`, hostOf(url), url, () => go(url), <Clock size={18} style={{ color: '#98A2B3' }} />),
+            )}
           </section>
         )}
 
