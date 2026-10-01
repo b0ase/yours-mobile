@@ -13,3 +13,9 @@ test('wallet kind store notifies on change only', () => {
   setWalletKind('tokens');
   expect(calls).toBe(1);
 });
+
+test('tickets is a wallet kind', () => {
+  setWalletKind('tickets');
+  expect(getWalletKind()).toBe('tickets');
+  setWalletKind('tokens');
+});
