@@ -1072,7 +1072,7 @@ const isAdmin = (room: ChatRoom, me: string) => {
   return !!by && n(by) === n(me);
 };
 
-/** Token rooms (the Rooms segment); `header` is the Chat tab's Rooms | Feed | Calls switch. */
+/** Token rooms (the Rooms segment); `header` is the Chat tab's Rooms | Calls switch. */
 const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const myName = useChatDisplayName();
   const { apiContext } = useServiceContext();

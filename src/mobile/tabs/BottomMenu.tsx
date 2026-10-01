@@ -1,16 +1,16 @@
-import { Wallet, Store, LayoutGrid, Play, MessageCircle } from 'lucide-react';
+import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-react';
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { asMenuItem, tabFor, type MobileTab } from './tabs';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:
- * Wallet · Market · Apps · Media · Chat (Settings lives in the account drawer). Reuses upstream's Menu item.
+ * Wallet · Market · Apps · Feed · Chat (Settings lives in the account drawer). Reuses upstream's Menu item.
  */
 const TABS: { id: MobileTab; label: string; icon: typeof Wallet }[] = [
   { id: 'bsv', label: 'Wallet', icon: Wallet },
   { id: 'market', label: 'Market', icon: Store },
   { id: 'browser', label: 'Apps', icon: LayoutGrid },
-  { id: 'media', label: 'Media', icon: Play },
+  { id: 'feed', label: 'Feed', icon: Newspaper },
   { id: 'chat', label: 'Chat', icon: MessageCircle },
 ];
 

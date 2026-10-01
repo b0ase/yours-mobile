@@ -1,11 +1,12 @@
 import { useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
-import { routeFor } from './tabs';
+import { opensWalletNfts, routeFor } from './tabs';
+import { setWalletKind } from '../wallet/walletKind';
 
 /**
  * Mobile swap for src/hooks/useBottomMenu.tsx (vite.config.mobile.ts): same
- * contract, but routes the five mobile tabs (Wallet · Market · Apps · Media · Chat) and Settings.
+ * contract, but routes the five mobile tabs (Wallet · Market · Apps · Feed · Chat) and Settings.
  */
 export const useBottomMenu = () => {
   const context = useContext(BottomMenuContext);
@@ -17,6 +18,7 @@ export const useBottomMenu = () => {
 
   useEffect(() => {
     if (!context || !navigate) return;
+    if (opensWalletNfts(context.selected)) setWalletKind('nfts');
     const route = routeFor(context.selected);
     if (route) navigate(route);
     // eslint-disable-next-line react-hooks/exhaustive-deps

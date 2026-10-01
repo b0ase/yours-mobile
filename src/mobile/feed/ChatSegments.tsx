@@ -3,19 +3,17 @@ import { Phone } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { onTokenNav } from '../chat/nav';
 import { onChatSegment, takeChatSegment } from '../chat/segmentNav';
-import { FeedPage } from './FeedPage';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useAccountNames } from '../names/MyNameBadge';
 
 /**
- * Chat tab top switch: Rooms | Feed | Calls. Generic: add a segment by adding one entry to
+ * Chat tab top switch: Rooms | Calls (Feed is its own bottom-bar tab). Generic: add a segment by adding one entry to
  * SEGMENTS and one case in ChatTabs. Rooms is the existing token-rooms page (it renders the
  * header we pass it in place of its old "Rooms" title).
  */
-export type ChatSegment = 'rooms' | 'feed' | 'calls';
+export type ChatSegment = 'rooms' | 'calls';
 export const SEGMENTS: { id: ChatSegment; label: string }[] = [
   { id: 'rooms', label: 'Rooms' },
-  { id: 'feed', label: 'Feed' },
   { id: 'calls', label: 'Calls' },
 ];
 const GOLD = '#FFD24D';
@@ -110,11 +108,11 @@ const SegmentShell = ({ header, children }: { header: ReactNode; children: React
 );
 
 export const ChatTabs = ({ rooms }: { rooms: (header: ReactNode) => ReactNode }) => {
-  // Opens on Rooms (so a pending "Open room" hand-off is never missed) unless a top-bar
-  // Feed / phone tap asked for a segment before this mounted (chat/segmentNav.ts).
+  // Opens on Rooms (so a pending "Open room" hand-off is never missed) unless a
+  // segment was requested before this mounted (chat/segmentNav.ts).
   const [seg, setSeg] = useState<ChatSegment>(() => takeChatSegment() ?? 'rooms');
   const change = setSeg;
-  // "Open room" from Wallet / Market must land in Rooms even if Feed or Calls was showing.
+  // "Open room" from Wallet / Market must land in Rooms even if Calls was showing.
   useEffect(() => onTokenNav(() => setSeg('rooms')), []);
   useEffect(
     () =>
@@ -126,7 +124,6 @@ export const ChatTabs = ({ rooms }: { rooms: (header: ReactNode) => ReactNode })
   );
   const header = <SegmentSwitch value={seg} onChange={change} />;
   if (seg === 'rooms') return <>{rooms(header)}</>;
-  if (seg === 'feed') return <FeedPage header={header} />;
   return (
     <SegmentShell header={header}>
       {CallsList ? (

@@ -1,26 +1,28 @@
 import type { MenuItems } from '../../contexts/BottomMenuContext';
 
 /**
- * Mobile tab ids. Upstream's MenuItems plus the mobile-only Media and Market
- * tabs; the swapped useBottomMenu/BottomMenu understand all of them.
- * Upstream ids keep working: 'ords' opens Media, 'tools' opens Settings › Tools.
+ * Mobile tab ids. Upstream's MenuItems plus the mobile-only Market, Feed and Chat tabs; the
+ * swapped useBottomMenu/BottomMenu understand all of them.
+ * Upstream ids keep working: 'ords' (and the retired 'media' tab) open Wallet on its NFTs view,
+ * 'tools' opens Settings › Tools.
  * Settings is not on the bar; it opens from the account drawer (TopNav).
  */
-export type MobileTab = MenuItems | 'media' | 'market' | 'chat';
+export type MobileTab = MenuItems | 'market' | 'feed' | 'chat';
 
 export const asMenuItem = (tab: MobileTab) => tab as MenuItems;
+
+/** Ids that open Wallet on its NFTs (media) view instead of Tokens. */
+export const opensWalletNfts = (selected: string | null) => selected === 'ords' || selected === 'media';
 
 /** Which bottom-bar tab is lit for a selected id. */
 export const tabFor = (selected: string | null): MobileTab => {
   switch (selected) {
-    case 'ords':
-    case 'media':
-      return 'media';
     case 'tools':
     case 'settings':
       return 'settings';
     case 'market':
     case 'browser':
+    case 'feed':
     case 'chat':
       return selected;
     default:
@@ -32,14 +34,15 @@ export const tabFor = (selected: string | null): MobileTab => {
 export const routeFor = (selected: string | null): string | null => {
   switch (selected) {
     case 'bsv':
-      return '/bsv-wallet';
     case 'ords':
     case 'media':
-      return '/m/media';
+      return '/bsv-wallet';
     case 'market':
       return '/m/market';
     case 'browser':
       return '/browser';
+    case 'feed':
+      return '/m/feed';
     case 'chat':
       return '/m/chat';
     case 'settings':
