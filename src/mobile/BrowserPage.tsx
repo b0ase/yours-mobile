@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
@@ -495,87 +496,91 @@ const BrowserPage = () => {
         </div>
       </div>
 
-      <AnimatePresence>
-        {info && (
-          <motion.div
-            className="fixed inset-0 z-50 flex items-end"
-            style={{ background: 'rgba(0,0,0,0.6)' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setInfo(null)}
-          >
+      {/* Portalled above the tab bar (z-100) so the sheet's buttons are never hidden behind it. */}
+      {createPortal(
+        <AnimatePresence>
+          {info && (
             <motion.div
-              className="w-full rounded-t-3xl bg-[#17191E] px-5 pt-5 flex flex-col gap-4"
-              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
-              initial={{ y: 40 }}
-              animate={{ y: 0 }}
-              exit={{ y: 40 }}
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-[150] flex items-end"
+              style={{ background: 'rgba(0,0,0,0.6)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setInfo(null)}
             >
-              <div className="flex items-center gap-4">
-                <TileIcon tile={info} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-lg font-bold text-white ${ONE_LINE}`}>{info.name}</span>
-                    {info.bapp && (
-                      <span
-                        className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
-                        style={
-                          info.demo
-                            ? { background: '#2b2f36', color: '#98A2B3' }
-                            : { background: '#EAB30022', color: '#FFD24D' }
-                        }
-                      >
-                        {info.demo ? 'Demo' : 'Live'}
-                      </span>
-                    )}
+              <motion.div
+                className="w-full rounded-t-3xl bg-[#17191E] px-5 pt-5 flex flex-col gap-4"
+                style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
+                initial={{ y: 40 }}
+                animate={{ y: 0 }}
+                exit={{ y: 40 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-4">
+                  <TileIcon tile={info} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-lg font-bold text-white ${ONE_LINE}`}>{info.name}</span>
+                      {info.bapp && (
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
+                          style={
+                            info.demo
+                              ? { background: '#2b2f36', color: '#98A2B3' }
+                              : { background: '#EAB30022', color: '#FFD24D' }
+                          }
+                        >
+                          {info.demo ? 'Demo' : 'Live'}
+                        </span>
+                      )}
+                    </div>
+                    <div className={`text-xs text-[#98A2B3] ${ONE_LINE}`}>{hostOf(info.url)}</div>
                   </div>
-                  <div className={`text-xs text-[#98A2B3] ${ONE_LINE}`}>{hostOf(info.url)}</div>
+                  <button onClick={() => setInfo(null)} aria-label="Close" className="p-1">
+                    <X size={20} style={{ color: '#98A2B3' }} />
+                  </button>
                 </div>
-                <button onClick={() => setInfo(null)} aria-label="Close" className="p-1">
-                  <X size={20} style={{ color: '#98A2B3' }} />
-                </button>
-              </div>
-              {info.bapp ? (
-                <p className="text-sm text-[#D0D5DD] leading-relaxed">{info.bapp.verb}</p>
-              ) : (
-                <p className="text-xs text-[#98A2B3]">Not made by The Bitcoin Corporation.</p>
-              )}
-              <button
-                onClick={() => {
-                  const url = info.url;
-                  setInfo(null);
-                  go(url);
-                }}
-                className="rounded-xl py-3 text-sm font-bold"
-                style={{ background: '#FFD24D', color: '#010101' }}
-              >
-                Open
-              </button>
-              <button
-                onClick={() => toggleFavourite(info)}
-                className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
-              >
-                <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
-                {isFavourite(info) ? 'Remove from favourites' : 'Add to favourites'}
-              </button>
-              {info.bapp?.source && (
+                {info.bapp ? (
+                  <p className="text-sm text-[#D0D5DD] leading-relaxed">{info.bapp.verb}</p>
+                ) : (
+                  <p className="text-xs text-[#98A2B3]">Not made by The Bitcoin Corporation.</p>
+                )}
                 <button
                   onClick={() => {
-                    const src = info.bapp?.source ?? '';
+                    const url = info.url;
                     setInfo(null);
-                    go(src);
+                    go(url);
                   }}
-                  className="flex items-center justify-center gap-1.5 text-xs text-[#98A2B3]"
+                  className="rounded-xl py-3 text-sm font-bold"
+                  style={{ background: '#FFD24D', color: '#010101' }}
                 >
-                  <Github size={13} /> {new URL(info.bapp.source).pathname.slice(1)}
+                  Open
                 </button>
-              )}
+                <button
+                  onClick={() => toggleFavourite(info)}
+                  className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                >
+                  <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
+                  {isFavourite(info) ? 'Remove from favourites' : 'Add to favourites'}
+                </button>
+                {info.bapp?.source && (
+                  <button
+                    onClick={() => {
+                      const src = info.bapp?.source ?? '';
+                      setInfo(null);
+                      go(src);
+                    }}
+                    className="flex items-center justify-center gap-1.5 text-xs text-[#98A2B3]"
+                  >
+                    <Github size={13} /> {new URL(info.bapp.source).pathname.slice(1)}
+                  </button>
+                )}
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 };

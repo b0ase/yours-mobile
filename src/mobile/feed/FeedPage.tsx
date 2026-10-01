@@ -354,7 +354,7 @@ const Avatar = ({
 const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) => {
   useBackClose(true, onClose);
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div
         className="w-full rounded-t-3xl p-4 pb-10 max-h-[85vh] overflow-y-auto"
         style={{ background: '#0b0c0e', borderTop: `1px solid ${LINE}` }}
