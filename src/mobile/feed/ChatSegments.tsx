@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode
 import { Phone } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { onTokenNav } from '../chat/nav';
+import { onChatSegment, takeChatSegment } from '../chat/segmentNav';
 import { FeedPage } from './FeedPage';
 
 /**
@@ -18,7 +19,11 @@ export const SEGMENTS: { id: ChatSegment; label: string }[] = [
 const GOLD = '#FFD24D';
 
 export const SegmentSwitch = ({ value, onChange }: { value: ChatSegment; onChange: (s: ChatSegment) => void }) => (
-  <div role="tablist" className="flex rounded-full p-[3px]" style={{ background: '#121316', border: '1px solid #1f2127' }}>
+  <div
+    role="tablist"
+    className="flex rounded-full p-[3px]"
+    style={{ background: '#121316', border: '1px solid #1f2127' }}
+  >
     {SEGMENTS.map((s) => {
       const on = s.id === value;
       return (
@@ -63,7 +68,10 @@ function CallsPlaceholder() {
 
 /** A non-Rooms segment: same top bar + switch, then its body. */
 const SegmentShell = ({ header, children }: { header: ReactNode; children: ReactNode }) => (
-  <div className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36" style={{ height: '100%', background: '#010101' }}>
+  <div
+    className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+    style={{ height: '100%', background: '#010101' }}
+  >
     <TopNav />
     <div className="w-full pt-16 flex flex-col">
       <div className="flex items-center px-4 pb-2">{header}</div>
@@ -73,11 +81,20 @@ const SegmentShell = ({ header, children }: { header: ReactNode; children: React
 );
 
 export const ChatTabs = ({ rooms }: { rooms: (header: ReactNode) => ReactNode }) => {
-  // Always opens on Rooms, so a pending "Open room" hand-off is never missed.
-  const [seg, setSeg] = useState<ChatSegment>('rooms');
+  // Opens on Rooms (so a pending "Open room" hand-off is never missed) unless a top-bar
+  // Feed / phone tap asked for a segment before this mounted (chat/segmentNav.ts).
+  const [seg, setSeg] = useState<ChatSegment>(() => takeChatSegment() ?? 'rooms');
   const change = setSeg;
   // "Open room" from Wallet / Market must land in Rooms even if Feed or Calls was showing.
   useEffect(() => onTokenNav(() => setSeg('rooms')), []);
+  useEffect(
+    () =>
+      onChatSegment(() => {
+        const next = takeChatSegment();
+        if (next) setSeg(next);
+      }),
+    [],
+  );
   const header = <SegmentSwitch value={seg} onChange={change} />;
   if (seg === 'rooms') return <>{rooms(header)}</>;
   if (seg === 'feed') return <FeedPage header={header} />;

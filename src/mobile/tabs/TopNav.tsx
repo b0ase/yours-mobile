@@ -3,12 +3,15 @@ import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Download, Loader2, Phone, Plus, Settings, X } from 'lucide-react';
+import { Check, ChevronDown, Download, Loader2, Newspaper, Phone, Plus, Settings, X } from 'lucide-react';
 import activeCircle from '../../assets/active-circle.png';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { CallsSheet } from '../calls/CallsSheet';
+import { requestChatSegment } from '../chat/segmentNav';
+import { asMenuItem } from './tabs';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -25,6 +28,7 @@ export const TopNav = () => {
   const { handleSelect } = useBottomMenu();
   const { addSnackbar } = useSnackbar();
   const [drawer, setDrawer] = useState(false);
+  const [callsOpen, setCallsOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
@@ -55,6 +59,12 @@ export const TopNav = () => {
       return;
     }
     window.location.reload();
+  };
+
+  // Top-right Feed button: the Chat tab, on its Feed segment (feed/ChatSegments.tsx).
+  const openFeed = () => {
+    requestChatSegment('feed');
+    handleSelect(asMenuItem('chat'));
   };
 
   const go = (query?: string) => {
@@ -104,16 +114,26 @@ export const TopNav = () => {
           <ChevronDown size={14} strokeWidth={2} color="#8E8E89" className="shrink-0" />
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Wordmark hides under 380px so three buttons + the account name fit at 360px. */}
           <span
-            className="font-bold text-[17px] mr-1"
+            className="hidden min-[380px]:inline font-bold text-[17px] mr-1"
             style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}
           >
             bWallet
           </span>
           <button
             type="button"
-            aria-label="Call"
-            onClick={() => addSnackbar('Calling other bWallet users is coming soon', 'info')}
+            aria-label="Feed"
+            onClick={openFeed}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: '1px solid #2A2A2C' }}
+          >
+            <Newspaper size={16} color="#F2F2F0" />
+          </button>
+          <button
+            type="button"
+            aria-label="Calls"
+            onClick={() => setCallsOpen(true)}
             className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
             style={{ border: '1px solid #2A2A2C' }}
           >
@@ -199,6 +219,7 @@ export const TopNav = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} />
     </>
   );
 };
