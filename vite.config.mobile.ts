@@ -416,6 +416,9 @@ export default mergeConfig(
       ...brandDefines(),
       // Market tab fee address (src/mobile/market/fee.ts). Empty = no fee.
       __MARKET_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MARKET_FEE_ADDRESS ?? ''),
+      // bWallet re-enables BSV-21 OrdLock listings (Sell tickets); resale fee on tickets defaults to 0.
+      __BWALLET_SELL__: 'true',
+      __TICKET_RESALE_FEE_RATE__: JSON.stringify(process.env.BWALLET_TICKET_RESALE_FEE_RATE ?? '0'),
       // Wallet tab Mint creation fee (src/mobile/mint/mint.ts). Empty = no fee.
       __MINT_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MINT_FEE_ADDRESS ?? ''),
       // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.

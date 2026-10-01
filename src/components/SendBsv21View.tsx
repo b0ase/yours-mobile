@@ -14,7 +14,9 @@ import { Show } from './Show';
 import { CoinHistory } from './CoinHistory';
 import { ONESAT_MAINNET_CONTENT_URL, sendBsv21, type Bsv21Balance } from '@1sat/actions';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag } from 'lucide-react';
+import { SellSheet } from '../mobile/sell/SellSheet';
+import { SELL_ENABLED } from '../mobile/sell/sell';
 
 export interface Token {
   isConfirmed: boolean;
@@ -60,6 +62,7 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
   const [successTxId, setSuccessTxId] = useState('');
   const sentAtomicRef = useRef<bigint>(0n);
   const [copied, setCopied] = useState(false);
+  const [selling, setSelling] = useState(false);
   const baseUrl = ONESAT_MAINNET_CONTENT_URL;
 
   const maxAmount = token.isConfirmed ? token.info.all.confirmed : token.info.all.pending;
@@ -386,6 +389,19 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
 
             {/* Action buttons */}
             <div className="flex gap-2 mt-1">
+              {SELL_ENABLED && maxAmount > 0n && (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={() => setSelling(true)}
+                  className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
+                  style={{ backgroundColor: '#17191E', borderColor: '#3a2f0c', color: '#FFD24D' }}
+                >
+                  <Tag size={14} />
+                  Sell
+                </motion.button>
+              )}
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -445,6 +461,13 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />
+      {selling && token && (
+        <SellSheet
+          target={{ tokenId: token.info.id, symbol: getTokenName(token.info), dec: token.info.dec, heldRaw: maxAmount }}
+          onClose={() => setSelling(false)}
+          onListed={(amt) => void onBack(amt)}
+        />
+      )}
     </Show>
   );
 };

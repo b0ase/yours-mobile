@@ -1,0 +1,194 @@
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Tag, X } from 'lucide-react';
+import { useBackClose } from '../backStack';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { useSnackbar } from '../../hooks/useSnackbar';
+import { fetchExchangeRate } from '../../utils/wallet';
+import { createListing, overlayFeePerOutput } from './sellActions';
+import {
+  DEFAULT_FEE_PER_OUTPUT,
+  buildListingScript,
+  fromRaw,
+  indexingFeeSats,
+  listingTxBytes,
+  networkFeeSats,
+  toRaw,
+  totalPriceSats,
+  usd,
+  validateSell,
+} from './sell';
+
+const GOLD = '#FFD24D';
+const BG = '#17191E';
+const LINE = '#2b2f36';
+// Any valid addresses: only used to size the listing script for the fee estimate.
+const SIZE_ADDR = '1BitcoinEaterAddressDontSendf59kuE';
+
+export type SellTarget = { tokenId: string; symbol: string; dec: number; heldRaw: bigint; isTicket?: boolean };
+
+const ERR: Record<string, string> = {
+  quantity: 'Enter how many to sell',
+  'over-balance': "That's more than you hold",
+  price: 'Enter a price of at least 1 sat',
+};
+
+/** Bottom sheet: list some of a BSV-21 token (a ticket, a $NAME token, any token) for sale. */
+export const SellSheet = ({
+  target,
+  onClose,
+  onListed,
+}: {
+  target: SellTarget;
+  onClose: () => void;
+  onListed?: (amountRaw: bigint) => void;
+}) => {
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const { addSnackbar } = useSnackbar();
+  const [qty, setQty] = useState(
+    target.heldRaw === 1n * 10n ** BigInt(target.dec) ? fromRaw(target.heldRaw, target.dec) : '',
+  );
+  const [price, setPrice] = useState('');
+  const [rate, setRate] = useState(0);
+  const [fpo, setFpo] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  useBackClose(!busy, onClose);
+
+  useEffect(() => {
+    void fetchExchangeRate(apiContext.chain, apiContext.wocApiKey).then(setRate);
+    void overlayFeePerOutput(apiContext, target.tokenId).then(setFpo);
+  }, [apiContext, target.tokenId]);
+
+  const unit = target.isTicket ? 'ticket' : `$${target.symbol}`;
+  const qtyRaw = toRaw(qty, target.dec);
+  const perToken = Number(price);
+  const total = qtyRaw ? totalPriceSats(qtyRaw, target.dec, perToken) : 0;
+  const error = qty || price ? validateSell(qtyRaw, target.heldRaw, total) : null;
+  const indexing = qtyRaw ? indexingFeeSats(qtyRaw, target.heldRaw, fpo ?? DEFAULT_FEE_PER_OUTPUT) : 0;
+  const network = useMemo(() => {
+    if (!qtyRaw || total < 1) return 0;
+    const len = buildListingScript(target.tokenId, qtyRaw, SIZE_ADDR, SIZE_ADDR, total).toBinary().length;
+    return networkFeeSats(listingTxBytes(2, len, qtyRaw < target.heldRaw), chromeStorageService.getCustomFeeRate());
+  }, [qtyRaw, total, target.tokenId, target.heldRaw, chromeStorageService]);
+  const ready = !!qtyRaw && total >= 1 && !validateSell(qtyRaw, target.heldRaw, total);
+
+  const confirm = async () => {
+    if (!ready || !qtyRaw) return;
+    setBusy(true);
+    try {
+      await createListing(apiContext, {
+        tokenId: target.tokenId,
+        symbol: target.symbol,
+        dec: target.dec,
+        amount: qtyRaw,
+        priceSats: total,
+      });
+      addSnackbar(`Listed ${qty} ${unit} for ${total.toLocaleString()} sats`, 'success');
+      onListed?.(qtyRaw);
+      onClose();
+    } catch (e) {
+      addSnackbar(e instanceof Error ? e.message : 'Listing failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const row = (label: string, value: string, sub = '') => (
+    <div className="flex justify-between text-sm">
+      <span className="text-[#98A2B3]">{label}</span>
+      <span className="text-white text-right">
+        {value}
+        {sub && <span className="block text-[11px] text-[#667085]">{sub}</span>}
+      </span>
+    </div>
+  );
+
+  const input =
+    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[#FFD24D]';
+
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-end bg-black/60" onClick={() => !busy && onClose()}>
+      <div
+        role="dialog"
+        aria-label={`Sell ${unit}`}
+        className="w-full rounded-t-2xl px-5 pt-5 flex flex-col gap-3 border-t"
+        style={{ background: BG, borderColor: LINE, paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-base font-bold text-white">
+            <Tag size={16} color={GOLD} /> Sell {target.isTicket ? 'tickets' : `$${target.symbol}`}
+          </div>
+          <button aria-label="Close" onClick={onClose} disabled={busy} className="p-1">
+            <X size={18} color="#98A2B3" />
+          </button>
+        </div>
+
+        <label className="flex flex-col gap-1">
+          <span className="flex justify-between text-xs text-[#98A2B3]">
+            <span>Quantity</span>
+            <button
+              type="button"
+              className="font-bold"
+              style={{ color: GOLD }}
+              onClick={() => setQty(fromRaw(target.heldRaw, target.dec))}
+            >
+              Max {fromRaw(target.heldRaw, target.dec)}
+            </button>
+          </span>
+          <input
+            inputMode={target.dec > 0 ? 'decimal' : 'numeric'}
+            value={qty}
+            onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setQty(e.target.value)}
+            placeholder="1"
+            className={input}
+            style={{ borderColor: LINE }}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-[#98A2B3]">Price per {target.isTicket ? 'ticket' : 'token'} (sats)</span>
+          <input
+            inputMode="numeric"
+            value={price}
+            onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setPrice(e.target.value)}
+            placeholder="1000"
+            className={input}
+            style={{ borderColor: LINE }}
+          />
+          {perToken > 0 && <span className="text-[11px] text-[#667085]">{usd(perToken, rate)} each</span>}
+        </label>
+
+        <div className="flex flex-col gap-1.5 rounded-xl p-3" style={{ background: '#0F1013' }}>
+          {row('You receive when sold', `${total.toLocaleString()} sats`, usd(total, rate))}
+          {row('Network fee', `~${network.toLocaleString()} sats`)}
+          {row(
+            'Indexing fee',
+            `${indexing.toLocaleString()} sats`,
+            qtyRaw && qtyRaw < target.heldRaw ? 'listing + your change' : 'listing',
+          )}
+          <div className="h-px my-1" style={{ background: LINE }} />
+          {row('You pay now', `~${(network + indexing).toLocaleString()} sats`, usd(network + indexing, rate))}
+        </div>
+
+        <p className="text-[11px] leading-relaxed text-[#667085] m-0">
+          Your {unit} go into an on-chain listing (1Sat OrdLock) visible on the Market and 1sat.market. Cancel any time
+          from My listings to get them back.
+        </p>
+
+        {error && <p className="text-xs text-[#F97066] m-0">{ERR[error]}</p>}
+
+        <button
+          type="button"
+          disabled={!ready || busy}
+          onClick={() => void confirm()}
+          className="h-12 rounded-xl text-sm font-bold disabled:opacity-40"
+          style={{ background: GOLD, color: '#010101' }}
+        >
+          {busy ? 'Listing…' : 'Confirm listing'}
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+};
