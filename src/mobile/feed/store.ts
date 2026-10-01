@@ -1,12 +1,18 @@
 import { safety, type SafetyFilter } from '../market/safety';
 import { mediaSafety } from './media';
+import type { PostLock } from './locks';
 import type { FeedPost } from './post';
 
 /**
  * Feed per-device state: who you follow (mirrored on-chain by follow txs), who you muted,
  * what you liked (so the heart stays lit before the indexer catches up). localStorage only.
  */
-const LS = { follows: 'bwallet.feed.follows', mutes: 'bwallet.feed.mutes', liked: 'bwallet.feed.liked' };
+const LS = {
+  follows: 'bwallet.feed.follows',
+  mutes: 'bwallet.feed.mutes',
+  liked: 'bwallet.feed.liked',
+  locks: 'bwallet.feed.locks',
+};
 
 export type Follow = { bapId: string | null; address: string; name: string };
 
@@ -49,6 +55,15 @@ export const loadLiked = (): string[] => read<string[]>(LS.liked, []).filter((x)
 export const addLiked = (liked: string[], txid: string): string[] => {
   const next = [...new Set([...liked, txid])].slice(-2000);
   write(LS.liked, next);
+  return next;
+};
+
+/** Locks this device made, so a post's total includes them before the indexer catches up. */
+export const loadMyLocks = (): PostLock[] =>
+  read<PostLock[]>(LS.locks, []).filter((l) => l && typeof l.lockTxid === 'string' && typeof l.postTxid === 'string');
+export const addMyLock = (locks: PostLock[], l: PostLock): PostLock[] => {
+  const next = [...locks.filter((x) => x.lockTxid !== l.lockTxid), l].slice(-500);
+  write(LS.locks, next);
   return next;
 };
 

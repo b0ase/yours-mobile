@@ -5,6 +5,7 @@ import {
   Coins,
   Flag,
   Heart,
+  Lock,
   Film,
   ImagePlus,
   Music,
@@ -19,7 +20,9 @@ import {
   X,
 } from 'lucide-react';
 import { inscribe, sendBsv } from '@1sat/actions';
+import { SendConfirmation } from '../../components/SendConfirmation';
 import { TopNav } from '../../components/TopNav';
+import { useTheme } from '../../hooks/useTheme';
 import { SegmentRow, SegmentTitle } from './ChatSegments';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { resolveImageUrl, useIdentity } from '../../hooks/useIdentity';
@@ -51,13 +54,36 @@ import {
   type PostImage,
   type Source,
 } from './post';
-import { fetchByAddress, fetchByBap, fetchFollowing, fetchForYou, fetchThread, publish } from './feedApi';
+import {
+  fetchByAddress,
+  fetchByBap,
+  fetchFollowing,
+  fetchForYou,
+  fetchPostLocks,
+  fetchThread,
+  lockToPost,
+  publish,
+} from './feedApi';
+import {
+  BLOCKS_PER_DAY,
+  formatLocked,
+  LOCK_AMOUNTS,
+  LOCK_DURATIONS,
+  MAX_LOCK_BLOCKS,
+  rankByLocked,
+  summarizeLocks,
+  unlockDate,
+  type LockSummary,
+  type PostLock,
+} from './locks';
 import {
   addLiked,
+  addMyLock,
   addMute,
   isFollowing,
   loadFollows,
   loadLiked,
+  loadMyLocks,
   loadMutes,
   toggleFollow,
   visiblePosts,
@@ -226,6 +252,8 @@ type PostActions = {
   onLike: (p: FeedPost) => void;
   onReply: (p: FeedPost) => void;
   onTip: (p: FeedPost) => void;
+  locks: Record<string, LockSummary | undefined>;
+  onLock: (p: FeedPost) => void;
   onOpen: (p: FeedPost) => void;
   onAuthor: (a: Author) => void;
   onMore: (p: FeedPost) => void;
@@ -233,6 +261,7 @@ type PostActions = {
 
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
   const liked = a.liked.has(post.txid);
+  const locked = a.locks[post.txid];
   return (
     <article
       className="flex gap-3 px-4 py-3"
@@ -299,7 +328,23 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           >
             <Coins size={16} /> Tip
           </button>
+          <button
+            onClick={() => a.onLock(post)}
+            className="flex items-center gap-1 text-[12px]"
+            style={{ color: locked?.total ? GOLD : MUTED }}
+            aria-label="Lock BSV to back this post"
+          >
+            <Lock size={16} /> {locked?.total ? '' : 'Lock'}
+          </button>
         </div>
+        {!!locked?.total && (
+          <div className="mt-1 flex items-center gap-1 text-[11px]" style={{ color: GOLD }}>
+            <Lock size={11} /> {formatLocked(locked.total)} locked
+            <span style={{ color: MUTED }}>
+              · {locked.lockers} {locked.lockers === 1 ? 'locker' : 'lockers'}
+            </span>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -688,6 +733,161 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
   );
 };
 
+const LockSheet = ({
+  post,
+  height,
+  onClose,
+  onLocked,
+}: {
+  post: FeedPost;
+  height: number | null;
+  onClose: () => void;
+  onLocked: (l: PostLock) => void;
+}) => {
+  const { apiContext } = useServiceContext();
+  const { theme } = useTheme();
+  const { addSnackbar } = useSnackbar();
+  const [sats, setSats] = useState<number>(LOCK_AMOUNTS[0]);
+  const [blocks, setBlocks] = useState<number>(LOCK_DURATIONS[1].blocks);
+  const [custom, setCustom] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const date = unlockDate(blocks).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const valid = sats >= 1 && blocks >= 1 && blocks <= MAX_LOCK_BLOCKS && !!height;
+  const lock = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      // Re-read the tip so the lock runs `blocks` from now, not from when the sheet opened.
+      const tip = (await apiContext.services?.chaintracks.currentHeight()) ?? height;
+      if (!tip) throw new Error('Could not read the current block height. Try again.');
+      const l = await lockToPost(apiContext, { postTxid: post.txid, satoshis: sats, until: tip + blocks });
+      addSnackbar(`Locked ${formatLocked(sats)} until ${date}`, 'success');
+      onLocked(l);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pill = (on: boolean) =>
+    on ? { background: GOLD, color: '#1a1300' } : { background: PANEL, color: 'white', border: `1px solid ${LINE}` };
+  return (
+    <Sheet title="Lock BSV to back this post" onClose={onClose}>
+      <p className="text-xs mb-3" style={{ color: MUTED }}>
+        Back {post.author.name}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet,
+        and the post shows how much is locked behind it.
+      </p>
+      <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
+      <div className="flex gap-2">
+        {LOCK_AMOUNTS.map((v) => (
+          <button
+            key={v}
+            onClick={() => setSats(v)}
+            className="flex-1 rounded-xl py-2 text-sm font-bold"
+            style={pill(v === sats)}
+          >
+            {formatLocked(v)}
+          </button>
+        ))}
+      </div>
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        step="0.001"
+        value={sats / 1e8}
+        onChange={(e) => setSats(Math.max(0, Math.round((Number(e.target.value) || 0) * 1e8)))}
+        className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+        style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        aria-label="Amount in BSV"
+      />
+      <p className="text-[12px] font-semibold text-white mt-3 mb-1">Lock for</p>
+      <div className="flex gap-2">
+        {LOCK_DURATIONS.map((d) => (
+          <button
+            key={d.label}
+            onClick={() => {
+              setCustom(false);
+              setBlocks(d.blocks);
+            }}
+            className="flex-1 rounded-xl py-2 text-[13px] font-bold"
+            style={pill(!custom && d.blocks === blocks)}
+          >
+            {d.label}
+          </button>
+        ))}
+        <button
+          onClick={() => setCustom(true)}
+          className="flex-1 rounded-xl py-2 text-[13px] font-bold"
+          style={pill(custom)}
+        >
+          Custom
+        </button>
+      </div>
+      {custom && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={MAX_LOCK_BLOCKS}
+            value={blocks}
+            onChange={(e) => setBlocks(Math.max(1, Math.min(MAX_LOCK_BLOCKS, Math.floor(Number(e.target.value) || 0))))}
+            className="flex-1 rounded-xl px-3 py-2 text-sm text-white outline-none"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            aria-label="Blocks"
+          />
+          <span className="text-xs" style={{ color: MUTED }}>
+            blocks (~{(blocks / BLOCKS_PER_DAY).toFixed(1)} days)
+          </span>
+        </div>
+      )}
+      <div className="mt-3 rounded-xl px-3 py-2 text-xs" style={{ background: '#1a1408', color: '#e6c76a' }}>
+        Your BSV stays yours. It's locked until {date}, then you can unlock it.
+        <span className="block mt-1" style={{ color: MUTED }}>
+          {blocks.toLocaleString()} blocks{height ? `, until block ${(height + blocks).toLocaleString()}` : ''}. The
+          date is an estimate (about 10 minutes a block). Locked coins can't be spent early. Locking backs a post; it
+          earns nothing.
+        </span>
+      </div>
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
+      <button
+        onClick={() => setConfirming(true)}
+        disabled={busy || !valid}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
+        style={{ background: GOLD, color: '#1a1300' }}
+      >
+        {height ? `Lock ${formatLocked(sats)}` : 'Reading block height…'}
+      </button>
+      {confirming &&
+        createPortal(
+          <div className="fixed inset-0 z-[70]">
+            <SendConfirmation
+              show
+              theme={theme}
+              lineItems={[
+                { address: 'Lock (stays yours)', amount: formatLocked(sats) },
+                { address: 'Unlocks', amount: date },
+              ]}
+              total={formatLocked(sats)}
+              isProcessing={busy}
+              onConfirm={() => void lock()}
+              onCancel={() => setConfirming(false)}
+            />
+          </div>,
+          document.body,
+        )}
+    </Sheet>
+  );
+};
+
 // ── page ────────────────────────────────────────────────────────────────────
 
 export const FeedPage = ({ header }: { header: ReactNode }) => {
@@ -705,6 +905,12 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
   const [safetyTick, setSafetyTick] = useState(0);
   const [composing, setComposing] = useState<{ replyTo: FeedPost | null } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
+  const [locking, setLocking] = useState<FeedPost | null>(null);
+  const [sort, setSort] = useState<'latest' | 'locked'>('latest');
+  const [height, setHeight] = useState<number | null>(null);
+  const [fetchedLocks, setFetchedLocks] = useState<Record<string, PostLock[]>>({});
+  const [myLocks, setMyLocks] = useState<PostLock[]>(loadMyLocks);
+  const lockFetches = useRef(new Set<string>());
   const [more, setMore] = useState<FeedPost | null>(null);
   const [profile, setProfile] = useState<Author | 'me' | null>(null);
   const [thread, setThread] = useState<FeedPost | null>(null);
@@ -740,6 +946,56 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     [raw, tab, mutes, safetyTick, source, follows],
   );
   const likedSet = useMemo(() => new Set(liked), [liked]);
+
+  useEffect(() => {
+    let live = true;
+    const read = () =>
+      apiContext.services?.chaintracks
+        .currentHeight()
+        .then((h) => live && setHeight(h))
+        .catch(() => undefined);
+    void read();
+    const t = setInterval(read, 5 * 60_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [apiContext]);
+
+  // Lock totals for what is on screen (first 60), a few posts at a time; each post fetched once.
+  useEffect(() => {
+    const todo = (shown ?? [])
+      .slice(0, 60)
+      .map((p) => p.txid)
+      .filter((t) => !lockFetches.current.has(t));
+    if (!todo.length) return;
+    todo.forEach((t) => lockFetches.current.add(t));
+    let i = 0;
+    const worker = async () => {
+      while (i < todo.length) {
+        const txid = todo[i++];
+        try {
+          const locks = await fetchPostLocks(txid);
+          if (locks.length) setFetchedLocks((m) => ({ ...m, [txid]: locks }));
+        } catch {
+          lockFetches.current.delete(txid);
+        }
+      }
+    };
+    void Promise.all([worker(), worker(), worker()]);
+  }, [shown]);
+
+  const lockSummaries = useMemo(() => {
+    const by: Record<string, PostLock[]> = { ...fetchedLocks };
+    for (const l of myLocks) by[l.postTxid] = [...(by[l.postTxid] ?? []), l];
+    const out: Record<string, LockSummary> = {};
+    if (height) for (const [txid, ls] of Object.entries(by)) out[txid] = summarizeLocks(ls, height);
+    return out;
+  }, [fetchedLocks, myLocks, height]);
+  const sorted = useMemo(
+    () => (shown && tab === 'foryou' && sort === 'locked' ? rankByLocked(shown, lockSummaries) : shown),
+    [shown, tab, sort, lockSummaries],
+  );
 
   const like = async (p: FeedPost) => {
     try {
@@ -787,6 +1043,8 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
     onLike: (p) => void like(p),
     onReply: (p) => setComposing({ replyTo: p }),
     onTip: setTipping,
+    locks: lockSummaries,
+    onLock: setLocking,
     onOpen: setThread,
     onAuthor: setProfile,
     onMore: setMore,
@@ -852,6 +1110,30 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
           ))}
         </div>
 
+        {tab === 'foryou' && (
+          <div className="flex gap-2 px-4 pb-2" role="tablist" aria-label="Sort">
+            {(
+              [
+                ['latest', 'Latest'],
+                ['locked', 'Most locked'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setSort(id)}
+                className="shrink-0 flex items-center gap-1 rounded-full px-3 py-1 text-[12px] font-semibold"
+                style={
+                  sort === id
+                    ? { background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }
+                    : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
+                }
+              >
+                {id === 'locked' && <Lock size={12} />} {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {!online && (
           <div
             className="mx-4 mt-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
@@ -867,7 +1149,7 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
         )}
 
         <PostList
-          posts={shown}
+          posts={sorted}
           a={actions}
           empty={
             <div className="px-8 pt-14 text-center">
@@ -903,6 +1185,17 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
         />
       )}
       {tipping && <TipSheet post={tipping} onClose={() => setTipping(null)} />}
+      {locking && (
+        <LockSheet
+          post={locking}
+          height={height}
+          onClose={() => setLocking(null)}
+          onLocked={(l) => {
+            setMyLocks((m) => addMyLock(m, l));
+            setLocking(null);
+          }}
+        />
+      )}
       {more && (
         <Sheet title={more.author.name} onClose={() => setMore(null)}>
           <button onClick={() => mute(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">

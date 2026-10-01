@@ -1,4 +1,7 @@
-import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, type OneSatContext } from '@1sat/actions';
+import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, LOCK_BASKET, type OneSatContext } from '@1sat/actions';
+import { P1SAT_PROTOCOL } from '@1sat/types';
+import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
+import { FEED_APP } from './sources';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
 import {
   groupThread,
@@ -147,4 +150,89 @@ async function ingest(tx: number[]) {
   } catch {
     // best effort: the indexer also picks it up from the chain
   }
+}
+
+// ── social locks ─────────────────────────────────────────────────────────────
+
+const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
+/** Lock txs are immutable: cache decoded results (null = not a lock) for the session. */
+const lockTxCache = new Map<string, Promise<PostLock | null>>();
+
+const fetchLockTx = (lockTxid: string, postTxid: string) => {
+  let p = lockTxCache.get(lockTxid);
+  if (!p) {
+    p = fetch(`${WOC}/tx/${lockTxid}/hex`, { signal: AbortSignal.timeout(15_000) })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`tx ${r.status}`))))
+      .then((hex) => decodeLockTx(hex.trim(), postTxid));
+    p.catch(() => lockTxCache.delete(lockTxid));
+    lockTxCache.set(lockTxid, p);
+  }
+  return p;
+};
+
+/**
+ * Locks backing a post. No live indexer serves Hodlocker-style lock totals any more (hodlocker.com
+ * and its LooLock API are gone), so: bmap's like index for the post (lock-likes are MAP likes),
+ * keep those with a non-address output, and decode each tx's lock output (WhatsOnChain raw tx).
+ */
+export async function fetchPostLocks(postTxid: string): Promise<PostLock[]> {
+  const ids = lockCandidates(await get(`/social/post/${postTxid}/like?limit=100`));
+  const got = await Promise.allSettled(ids.slice(0, 40).map((id) => fetchLockTx(id, postTxid)));
+  return got.flatMap((r) => (r.status === 'fulfilled' && r.value ? [r.value] : []));
+}
+
+/**
+ * Lock `satoshis` until block `until` against `postTxid`: the same lock output, basket, tags and
+ * key as @1sat/actions lockBsv (so the Wallet's Locks row lists it and unlockBsv spends it), plus a
+ * MAP like for the post, AIP-signed when the account has a BAP identity.
+ */
+export async function lockToPost(
+  ctx: OneSatContext,
+  o: { postTxid: string; satoshis: number; until: number },
+): Promise<PostLock> {
+  const { publicKey } = await ctx.wallet.getPublicKey({
+    protocolID: P1SAT_PROTOCOL,
+    keyID: 'lock',
+    counterparty: 'self',
+    forSelf: true,
+  });
+  const address = PublicKey.fromString(publicKey).toAddress();
+  const { lock, map, until } = lockOutputs({ ...o, address, app: FEED_APP });
+  let mapScript = map;
+  try {
+    mapScript = await applyBapAip(ctx, map);
+  } catch {
+    // no BAP identity: an unsigned MAP like still counts for lock indexers
+  }
+  const res = await executeTrackedAction(
+    ctx.wallet,
+    {
+      description: 'Lock BSV to a post',
+      outputs: [
+        {
+          lockingScript: lock.toHex(),
+          satoshis: o.satoshis,
+          outputDescription: `Lock ${o.satoshis} sats until block ${until}`,
+          basket: LOCK_BASKET,
+          tags: [`until:${until}`],
+          customInstructions: JSON.stringify({ protocolID: P1SAT_PROTOCOL, keyID: 'lock' }),
+        },
+        {
+          lockingScript: mapScript.toHex(),
+          satoshis: 0,
+          outputDescription: 'Feed lock',
+          basket: BSOCIAL_BASKET,
+          tags: ['app:bWallet', 'type:lock', `tx:${o.postTxid}`],
+        },
+      ],
+      options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+    },
+    undefined,
+    undefined,
+    undefined,
+    { spends: [], permissionScheme: 'lock' },
+  );
+  if (!res.txid) throw new Error('The wallet did not return a transaction id.');
+  if (res.tx) void ingest(res.tx);
+  return { lockTxid: res.txid, postTxid: o.postTxid, satoshis: o.satoshis, until, address };
 }
