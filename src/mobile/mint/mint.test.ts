@@ -19,7 +19,9 @@ describe('mint fee estimate', () => {
     expect(c.usd).toBeCloseTo((c.totalSats / 1e8) * 50);
   });
   test('new collection doubles the tx count', () => {
-    expect(m.estimateCost(1000, 100, 0, { newCollection: true }).networkSats).toBe(2 * m.estimateCost(1000, 100).networkSats);
+    expect(m.estimateCost(1000, 100, 0, { newCollection: true }).networkSats).toBe(
+      2 * m.estimateCost(1000, 100).networkSats,
+    );
   });
   test('1% creation fee (min 1 sat) only with a valid fee address', () => {
     const c = m.estimateCost(1_000_000, 100, 0, { feeAddress: ADDR });
@@ -56,25 +58,34 @@ describe('metadata', () => {
     });
   });
   test('description omitted when empty', () => {
-    expect(m.buildMap({ title: 'A', description: '  ', collection: none })).toEqual({ app: 'bWallet', type: 'ord', name: 'A' });
+    expect(m.buildMap({ title: 'A', description: '  ', collection: none })).toEqual({
+      app: 'bWallet',
+      type: 'ord',
+      name: 'A',
+    });
   });
   test('title required; new collection needs a name', () => {
     expect(m.validateForm({ title: ' ', description: '', collection: none }, f)).toBe('Add a title.');
-    expect(m.validateForm({ title: 'x', description: '', collection: { kind: 'new', name: '' } }, f)).toBe('Name the new collection.');
+    expect(m.validateForm({ title: 'x', description: '', collection: { kind: 'new', name: '' } }, f)).toBe(
+      'Name the new collection.',
+    );
     expect(m.validateForm({ title: 'Cat', description: 'my cat', collection: none }, f)).toBeNull();
   });
   test('collection id from mintCollection', () => {
     expect(m.collectionIdFrom('ab', undefined)).toBe('ab_0');
     expect(m.collectionIdFrom('ab', 'ab_0')).toBe('ab_0');
   });
-  test('base64 of bytes', () => expect(m.fileToBase64(new TextEncoder().encode('hi').buffer as ArrayBuffer)).toBe('aGk='));
+  test('base64 of bytes', () =>
+    expect(m.fileToBase64(new TextEncoder().encode('hi').buffer as ArrayBuffer)).toBe('aGk='));
 });
 
 describe('safety block', () => {
   test('blocked keywords in title, description or collection', () => {
     expect(m.validateForm({ title: 'NSFW drop', description: '', collection: none }, f)).toBe(m.BLOCKED_MESSAGE);
     expect(m.blockedText({ title: 'ok', description: 'adult art', collection: none }, f)).toBe(true);
-    expect(m.blockedText({ title: 'ok', description: '', collection: { kind: 'new', name: 'sex pics' } }, f)).toBe(true);
+    expect(m.blockedText({ title: 'ok', description: '', collection: { kind: 'new', name: 'sex pics' } }, f)).toBe(
+      true,
+    );
   });
   test('innocent words pass', () => {
     expect(m.blockedText({ title: 'Essex sunset', description: 'Dickens cockpit', collection: none }, f)).toBe(false);

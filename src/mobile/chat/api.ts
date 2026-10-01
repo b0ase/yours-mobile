@@ -103,7 +103,12 @@ export class BchatClient {
     return this.session;
   }
 
-  private async call<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown, auth = true): Promise<T> {
+  private async call<T>(
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+    auth = true,
+  ): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) {
       if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
@@ -234,6 +239,16 @@ export class BchatClient {
   ): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/token-gated', { key, ...opts });
     return r.ticker;
+  }
+
+  /** Ticket registry (bit-sign, docs/TICKETS.md): public list of tickets minted in bWallet. */
+  async tickets(): Promise<unknown> {
+    return this.call('GET', '/api/bitsign/tickets', undefined, false);
+  }
+
+  /** Ticket registry: announce a ticket you just minted (the server re-checks the deploy). */
+  async registerTicket(body: Record<string, unknown>): Promise<void> {
+    await this.call('POST', '/api/bitsign/tickets', body);
   }
 
   /** The token id bound to a personal name ("boase"), or null. For the "$BOASE ✓" check. */

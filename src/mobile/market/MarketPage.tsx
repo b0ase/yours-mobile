@@ -36,6 +36,9 @@ import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { SharesPanel } from './SharesPanel';
+import { TicketsPanel, openTicketRoomInChat } from '../tickets/TicketsPanel';
+import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -97,14 +100,15 @@ const VIEWS: [View, string][] = [
 ];
 /**
  * Tokens side sub-filters. bApps = bCorp and bApp share classes, investor-restricted (SharesPanel).
- * Shares (other companies listing their own shares) and Tickets are coming-soon placeholders.
+ * Shares (other companies listing their own shares) is a coming-soon placeholder. Tickets = rooms
+ * you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
 type TokenFilter = 'all' | 'bapps' | 'shares' | 'tickets';
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = [
   ['all', 'All tokens', true],
   ['bapps', 'bApps 🔒', true],
   ['shares', 'Shares', false],
-  ['tickets', 'Tickets', false],
+  ['tickets', 'Tickets', true],
 ];
 const KIND_KEY = 'bwallet.market.kind';
 const readKind = (): Kind => {
@@ -161,6 +165,9 @@ const MarketPage = () => {
     name: string;
   } | null>(null);
   const [safetyRev, setSafetyRev] = useState(0);
+  const { handleSelect } = useBottomMenu();
+  /** Set while the open room page is a ticket's (from the Tickets filter). */
+  const [ticketPage, setTicketPage] = useState<{ ticket: Ticket; holder: boolean } | null>(null);
 
   useEffect(() => {
     void refreshSafety();
@@ -231,7 +238,8 @@ const MarketPage = () => {
     if (section === 'mine' && mine === null) void loadMine();
   }, [section, mine, loadMine]);
 
-  const openRoom = async (r: HotRoom) => {
+  const openRoom = async (r: HotRoom, ticket: { ticket: Ticket; holder: boolean } | null = null) => {
+    setTicketPage(ticket);
     setRoom(r);
     setMarket(null);
     setMarket(await roomMarket(r.ref));
@@ -278,7 +286,8 @@ const MarketPage = () => {
         addSnackbar(getErrorMessage(res.error), 'error');
         return;
       }
-      addSnackbar('Purchase sent!', 'success');
+      addSnackbar(ticketPage ? 'Ticket bought: you can open the room now.' : 'Purchase sent!', 'success');
+      if (ticketPage) setTicketPage({ ...ticketPage, holder: true });
       setPending(null);
       clearMarketCache();
       if (room) setMarket(await roomMarket(room.ref));
@@ -604,8 +613,14 @@ const MarketPage = () => {
 
   const roomView = room && (
     <section className="flex flex-col gap-2">
-      <button onClick={() => setRoom(null)} className="flex items-center gap-1 text-xs text-[#98A2B3] self-start">
-        <ArrowLeft size={14} /> Trending
+      <button
+        onClick={() => {
+          setRoom(null);
+          setTicketPage(null);
+        }}
+        className="flex items-center gap-1 text-xs text-[#98A2B3] self-start"
+      >
+        <ArrowLeft size={14} /> {ticketPage ? 'Tickets' : 'Trending'}
       </button>
       <div className="flex items-center gap-3">
         <Art outpoint={room.icon} kind={room.ref.kind} collectionId={room.ref.id} />
@@ -613,20 +628,48 @@ const MarketPage = () => {
           <div className="text-base font-bold text-white">{room.title}</div>
           <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{room.subtitle}</div>
         </div>
-        <OpenTokenRoomButton
-          kind={room.ref.kind}
-          id={room.ref.id}
-          className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
-          style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
-        />
+        {ticketPage ? (
+          ticketPage.holder && (
+            <button
+              onClick={() => openTicketRoomInChat(ticketPage.ticket.tokenId, handleSelect)}
+              className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
+              style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+            >
+              Open room
+            </button>
+          )
+        ) : (
+          <OpenTokenRoomButton
+            kind={room.ref.kind}
+            id={room.ref.id}
+            className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
+            style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+          />
+        )}
       </div>
+      {ticketPage && (
+        <div className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
+          {TICKET_COPY}
+          {ticketPage.ticket.description && <div className="mt-1 text-white">{ticketPage.ticket.description}</div>}
+          {eventLabel(ticketPage.ticket.eventDate) && (
+            <div className="mt-1">Event: {eventLabel(ticketPage.ticket.eventDate)}</div>
+          )}
+          {ticketPage.holder && (
+            <div className="mt-1 text-[#FFD24D]">You hold a ticket: the room is yours to open.</div>
+          )}
+        </div>
+      )}
       <div className="text-[11px] text-[#98A2B3]">
         {room.ref.kind === 'bsv21' && isPersonalTokenId(room.ref.id, personalLinks)
           ? "Personal token · holding one opens its holders' room. Not an investment, no dividends."
           : `Floor ${market?.floorLabel ?? '—'} · ${market?.live ?? 0} live · ${market?.buyableCount ?? 0} buyable in-app`}
       </div>
       {market === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading listings…</p>}
-      {market?.listings.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-6">No live listings.</p>}
+      {market?.listings.length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-6">
+          {ticketPage ? 'No tickets listed for sale right now. Ask a holder to send you one.' : 'No live listings.'}
+        </p>
+      )}
       {market?.listings
         .filter(
           (l) =>
@@ -656,7 +699,7 @@ const MarketPage = () => {
               className="rounded-lg px-3 py-1.5 text-xs font-bold"
               style={{ background: l.buyable ? '#A1FF8B' : '#2b2f36', color: l.buyable ? '#010101' : '#667085' }}
             >
-              {l.buyable ? 'Buy' : 'Unavailable'}
+              {l.buyable ? (ticketPage ? 'Buy ticket' : 'Buy') : 'Unavailable'}
             </button>
             {room.ref.kind === 'coll' && (
               <button
@@ -784,6 +827,25 @@ const MarketPage = () => {
         ) : kind === 'tokens' ? (
           tokenFilter === 'bapps' ? (
             <SharesPanel />
+          ) : tokenFilter === 'tickets' ? (
+            <TicketsPanel
+              art={(icon, id) => <Art outpoint={icon} kind="bsv21" collectionId={id} />}
+              onBuy={(t, holder) =>
+                void openRoom(
+                  {
+                    ref: parseRoom('bsv21', t.tokenId)!,
+                    title: t.name,
+                    subtitle: `$${t.ticker} · ticket`,
+                    icon: t.icon,
+                    trades: 0,
+                    newListings: 0,
+                    floorLabel: null,
+                    heat: 0,
+                  },
+                  { ticket: t, holder },
+                )
+              }
+            />
           ) : (
             tokenList
           )

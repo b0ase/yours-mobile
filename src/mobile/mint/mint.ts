@@ -42,6 +42,14 @@ export const checkSize = (bytes: number, max = MAX_MINT_BYTES): SizeCheck => {
 export const formatBytes = (n: number) =>
   n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
 
+/** The 1% bWallet mint fee on a network fee (min 1 sat); 0 when no fee address is built in. */
+export const mintFeeFor = (networkSats: number, feeAddress = configured): number =>
+  mintFeeAddress(feeAddress) && networkSats > 0 ? Math.max(1, Math.ceil(networkSats * MINT_FEE_RATE)) : 0;
+
+/** Network fee for one tx of about `bytes` (plus overhead) at `satsPerKb`, plus 1 sat per output. */
+export const txFeeSats = (bytes: number, satsPerKb: number) =>
+  Math.ceil(((bytes + TX_OVERHEAD_BYTES) * satsPerKb) / 1000) + 1;
+
 export type Cost = { networkSats: number; feeSats: number; totalSats: number; usd: number | null; txCount: number };
 
 /** Network fee ≈ (body + overhead) × sat/kB, plus 1 sat per output; ×2 txs when a new collection is created. */
@@ -51,15 +59,17 @@ export function estimateCost(
   usdPerBsv = 0,
   opts: { newCollection?: boolean; feeAddress?: string } = {},
 ): Cost {
-  const txFee = (b: number) => Math.ceil(((b + TX_OVERHEAD_BYTES) * satsPerKb) / 1000) + 1;
   const txCount = opts.newCollection ? 2 : 1;
-  const networkSats = txFee(bytes) * txCount;
-  const feeSats = mintFeeAddress(opts.feeAddress ?? configured) ? Math.max(1, Math.ceil(networkSats * MINT_FEE_RATE)) : 0;
+  const networkSats = txFeeSats(bytes, satsPerKb) * txCount;
+  const feeSats = mintFeeFor(networkSats, opts.feeAddress);
   const totalSats = networkSats + feeSats;
   return { networkSats, feeSats, totalSats, usd: usdPerBsv > 0 ? (totalSats / 1e8) * usdPerBsv : null, txCount };
 }
 
-export type Collection = { kind: 'none' } | { kind: 'new'; name: string } | { kind: 'existing'; id: string; name: string };
+export type Collection =
+  | { kind: 'none' }
+  | { kind: 'new'; name: string }
+  | { kind: 'existing'; id: string; name: string };
 export type MintForm = { title: string; description: string; collection: Collection };
 
 /** MAP for a plain inscription (no collection). */
@@ -115,7 +125,11 @@ export function withFeeOutput(ctx: OneSatContext, feeSats: number, address = min
           done = true;
           const outputs = [
             ...(args.outputs ?? []),
-            { lockingScript: new P2PKH().lock(address).toHex(), satoshis: feeSats, outputDescription: 'bWallet mint fee' },
+            {
+              lockingScript: new P2PKH().lock(address).toHex(),
+              satoshis: feeSats,
+              outputDescription: 'bWallet mint fee',
+            },
           ];
           return target.createAction({ ...args, outputs }, originator);
         };
