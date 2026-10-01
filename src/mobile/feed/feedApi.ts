@@ -2,6 +2,7 @@ import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, LOCK_BASKET, type On
 import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
+import { cutoff, readCache, writeCache, type LeaderboardData, type Timeframe } from './leaderboard';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
 import {
   groupThread,
@@ -235,4 +236,52 @@ export async function lockToPost(
   if (!res.txid) throw new Error('The wallet did not return a transaction id.');
   if (res.tx) void ingest(res.tx);
   return { lockTxid: res.txid, postTxid: o.postTxid, satoshis: o.satoshis, until, address };
+}
+
+// ── most-locked leaderboard ──────────────────────────────────────────────────
+
+/** Request caps: at most this many feed pages and this many posts' lock lookups per refresh. */
+export const LEADERBOARD_PAGES = 4;
+export const LEADERBOARD_PAGE_SIZE = 50;
+export const LEADERBOARD_MAX_POSTS = 120;
+
+/**
+ * Posts + their locks for a leaderboard timeframe. bmap's recent feed is paged back until a page
+ * reaches past the timeframe's start (or the page cap), then each in-window post's locks are read
+ * (3 at a time; lock txs are cached). Results cached in memory + localStorage for 10 minutes.
+ */
+export async function fetchLeaderboard(tf: Timeframe, force = false): Promise<LeaderboardData> {
+  if (!force) {
+    const hit = readCache(tf);
+    if (hit) return hit;
+  }
+  const since = cutoff(tf);
+  const posts: FeedPost[] = [];
+  let complete = false;
+  for (let page = 1; page <= LEADERBOARD_PAGES; page++) {
+    const got = await fetchRecent(page, LEADERBOARD_PAGE_SIZE);
+    posts.push(...got);
+    if (got.length < LEADERBOARD_PAGE_SIZE) complete = true;
+    if (since > 0 && got.some((p) => p.at && p.at < since)) complete = true;
+    if (complete) break;
+  }
+  const oldest = posts.reduce((m, p) => (p.at && p.at < m ? p.at : m), Date.now());
+  const todo = [...new Set(posts.filter((p) => p.at >= since).map((p) => p.txid))].slice(0, LEADERBOARD_MAX_POSTS);
+  const locks: Record<string, PostLock[]> = {};
+  let i = 0;
+  const worker = async () => {
+    while (i < todo.length) {
+      const txid = todo[i++];
+      try {
+        const ls = await fetchPostLocks(txid);
+        if (ls.length) locks[txid] = ls;
+      } catch {
+        // one post failing never blanks the board
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  const data: LeaderboardData = { posts, locks, oldest, complete, at: Date.now() };
+  writeCache(tf, data);
+  return data;
 }

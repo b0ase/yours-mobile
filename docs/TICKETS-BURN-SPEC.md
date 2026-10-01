@@ -200,3 +200,13 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
    opens nothing; entry to an expired room is refused. The Tickets view shows the room as ended.
 8. **No legal opinion.** Not budgeted. Keep the product framed as access to rooms (no talk of returns or investment)
    and keep resale fees at 0 by default.
+
+## Leaderboards (later)
+
+Build once burn-on-entry exists (burns are the data). Same Twetch-style board as the Feed's "Most locked"
+(rank, avatar, name, amount; timeframe chips **1D · 7D · 1M · ALL**; own row highlighted):
+
+- **Top rooms**: by tickets burned; most active (messages / members in the period); ending soon (rooms nearest expiry).
+- **Top creators**: by ticket volume (tickets burned across their rooms; optionally tickets sold).
+
+Totals come from the burn ledger (bit-sign) rather than client-side scans, so every timeframe is exact.

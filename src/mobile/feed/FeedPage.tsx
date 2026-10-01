@@ -28,6 +28,7 @@ import {
   ChevronDown,
   Check,
   Clock,
+  Trophy,
 } from 'lucide-react';
 import { inscribe, sendBsv } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -73,6 +74,7 @@ import {
   fetchByBap,
   fetchFollowing,
   fetchForYou,
+  fetchLeaderboard,
   fetchPostLocks,
   fetchThread,
   lockToPost,
@@ -90,6 +92,17 @@ import {
   type LockSummary,
   type PostLock,
 } from './locks';
+import {
+  formatUsd,
+  isMe,
+  rankPeople,
+  rankPosts,
+  TIMEFRAMES,
+  cutoff,
+  type LeaderboardData,
+  type Timeframe,
+} from './leaderboard';
+import { fetchExchangeRate } from '../../utils/wallet';
 import {
   addLiked,
   addMyLock,
@@ -1077,6 +1090,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [more, setMore] = useState<FeedPost | null>(null);
   const [profile, setProfile] = useState<Author | 'me' | null>(null);
   const [thread, setThread] = useState<FeedPost | null>(null);
+  const [board, setBoard] = useState(false);
 
   useEffect(() => {
     void refreshSafety();
@@ -1263,6 +1277,13 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           <button onClick={() => setProfile('me')} aria-label="My profile" className="p-1">
             <Avatar author={me} size={28} />
           </button>
+          <button
+            onClick={() => setBoard(true)}
+            aria-label="Most locked leaderboard"
+            className="p-2 rounded-full active:opacity-60"
+          >
+            <Trophy size={18} color={GOLD} />
+          </button>
           <button onClick={() => void load(tab)} aria-label="Refresh" className="p-2 rounded-full active:opacity-60">
             <RefreshCw size={18} color={MUTED} />
           </button>
@@ -1399,6 +1420,20 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           actions={actions}
           mutes={mutes}
           safetyTick={safetyTick}
+        />
+      )}
+      {board && (
+        <Leaderboard
+          me={{
+            bapId: identity.bapId,
+            addresses: Object.values(chromeStorageService.getCurrentAccountObject().account?.addresses ?? {}).filter(
+              (x): x is string => typeof x === 'string' && !!x,
+            ),
+          }}
+          myLocks={myLocks}
+          onBack={() => setBoard(false)}
+          onOpen={setThread}
+          onAuthor={setProfile}
         />
       )}
       {thread && (
@@ -1569,3 +1604,220 @@ const ThreadView = ({
     </Layer>
   );
 };
+
+type BoardKind = 'people' | 'posts';
+
+/** Twetch-style "Most locked" leaderboard: People / Posts, 1D · 7D · 1M · ALL. */
+const Leaderboard = ({
+  me,
+  myLocks,
+  onBack,
+  onOpen,
+  onAuthor,
+}: {
+  me: { bapId: string | null; addresses: string[] };
+  myLocks: PostLock[];
+  onBack: () => void;
+  onOpen: (p: FeedPost) => void;
+  onAuthor: (a: Author) => void;
+}) => {
+  const [kind, setKind] = useState<BoardKind>('people');
+  const [tf, setTf] = useState<Timeframe>('7d');
+  const [data, setData] = useState<LeaderboardData | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [rate, setRate] = useState(0);
+
+  useEffect(() => {
+    void fetchExchangeRate('main').then(setRate);
+  }, []);
+
+  const load = useCallback(async (which: Timeframe, force = false) => {
+    setLoading(true);
+    setError('');
+    try {
+      setData(await fetchLeaderboard(which, force));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    void load(tf);
+  }, [tf, load]);
+
+  // This device's own locks count before the indexer catches up.
+  const locks = useMemo(() => {
+    const by: Record<string, PostLock[]> = { ...(data?.locks ?? {}) };
+    for (const l of myLocks) by[l.postTxid] = [...(by[l.postTxid] ?? []), l];
+    return by;
+  }, [data, myLocks]);
+  const since = useMemo(() => cutoff(tf, data?.at), [tf, data]);
+  const people = useMemo(() => (data ? rankPeople(data.posts, locks, since) : []), [data, locks, since]);
+  const posts = useMemo(() => (data ? rankPosts(data.posts, locks, since) : []), [data, locks, since]);
+  const rows = kind === 'people' ? people : posts;
+  const tfLabel = TIMEFRAMES.find((t) => t.id === tf)?.label ?? '';
+
+  const scope = data
+    ? data.complete
+      ? `Locks on the ${data.posts.length} most recent bmap posts covering ${tfLabel}. Twetch locks are not indexed.`
+      : `Loaded window only: the ${data.posts.length} most recent bmap posts, back to ${new Date(data.oldest).toLocaleDateString()}. No indexer serves full ${tfLabel} totals.`
+    : '';
+
+  const amount = (sats: number) => (
+    <div className="text-right shrink-0">
+      <div className="text-[14px] font-bold" style={{ color: GOLD }}>
+        {formatLocked(sats)}
+      </div>
+      {rate > 0 && (
+        <div className="text-[11px]" style={{ color: MUTED }}>
+          {formatUsd(sats, rate)}
+        </div>
+      )}
+    </div>
+  );
+  const rowStyle = (mine: boolean) => ({
+    background: mine ? 'rgba(255,210,77,0.08)' : BOARD_PANEL,
+    border: `1px solid ${mine ? GOLD : BOARD_LINE}`,
+  });
+  const rank = (n: number) => (
+    <span className="w-7 shrink-0 text-center text-[15px] font-bold" style={{ color: n <= 3 ? GOLD : MUTED }}>
+      {n}
+    </span>
+  );
+
+  return (
+    <Layer title="Most locked" onBack={onBack}>
+      <div className="flex px-4" style={{ borderBottom: `1px solid ${LINE}` }}>
+        {(['people', 'posts'] as BoardKind[]).map((k) => (
+          <button
+            key={k}
+            onClick={() => setKind(k)}
+            className="flex-1 py-2 text-[14px] font-bold"
+            style={{
+              color: kind === k ? 'white' : MUTED,
+              borderBottom: `2px solid ${kind === k ? GOLD : 'transparent'}`,
+            }}
+          >
+            {k === 'people' ? 'People' : 'Posts'}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 px-4 py-3">
+        {TIMEFRAMES.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTf(t.id)}
+            className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+            style={
+              tf === t.id
+                ? { background: GOLD, color: '#1a1300' }
+                : { background: BOARD_PANEL, color: MUTED, border: `1px solid ${BOARD_LINE}` }
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+        <button
+          onClick={() => void load(tf, true)}
+          aria-label="Refresh leaderboard"
+          className="ml-auto p-2 rounded-full active:opacity-60"
+          disabled={loading}
+        >
+          <RefreshCw size={16} color={MUTED} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      {scope && (
+        <p className="px-4 pb-2 text-[11px]" style={{ color: MUTED }}>
+          {scope}
+        </p>
+      )}
+      {error && (
+        <div className="px-8 pt-10 text-center">
+          <p className="text-sm" style={{ color: RED }}>
+            {error}
+          </p>
+          <button onClick={() => void load(tf, true)} className="mt-3 text-xs font-semibold" style={{ color: GOLD }}>
+            Try again
+          </button>
+        </div>
+      )}
+      {!error && loading && !data && (
+        <p className="px-8 pt-14 text-center text-sm" style={{ color: MUTED }}>
+          Adding up locks…
+        </p>
+      )}
+      {!error && data && !rows.length && (
+        <div className="px-8 pt-14 text-center">
+          <p className="text-sm text-white font-semibold">No locks in this period yet</p>
+          <p className="text-xs mt-1" style={{ color: MUTED }}>
+            Lock BSV behind a post to put it on the board.
+          </p>
+        </div>
+      )}
+      <div className="flex flex-col gap-2 px-4">
+        {kind === 'people'
+          ? people.map((r) => {
+              const mine = isMe(r.author, me);
+              return (
+                <button
+                  key={r.key}
+                  onClick={() => onAuthor(r.author)}
+                  className="flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left"
+                  style={rowStyle(mine)}
+                >
+                  {rank(r.rank)}
+                  <Avatar author={r.author} source={r.source} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-semibold text-white">
+                      {r.author.name}
+                      {mine && <span style={{ color: GOLD }}> · You</span>}
+                    </div>
+                    <div className="truncate text-[11px]" style={{ color: MUTED }}>
+                      {r.author.address ? shortAddress(r.author.address) : r.source} · {r.posts} post
+                      {r.posts === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  {amount(r.sats)}
+                </button>
+              );
+            })
+          : posts.map((r) => {
+              const mine = isMe(r.post.author, me);
+              return (
+                <button
+                  key={r.post.txid}
+                  onClick={() => onOpen(r.post)}
+                  className="flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left"
+                  style={rowStyle(mine)}
+                >
+                  {rank(r.rank)}
+                  <Avatar author={r.post.author} source={r.post.source} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="truncate text-[13px] font-semibold text-white">
+                        {r.post.author.name}
+                        {mine && <span style={{ color: GOLD }}> · You</span>}
+                      </span>
+                      <Via post={r.post} />
+                    </div>
+                    <div className="truncate text-[12px]" style={{ color: '#c9ccd2' }}>
+                      {r.post.text || 'Media post'}
+                    </div>
+                    <div className="text-[11px]" style={{ color: MUTED }}>
+                      {feedTimeLabel(r.post.at)} · {r.lockers} locker{r.lockers === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  {amount(r.sats)}
+                </button>
+              );
+            })}
+      </div>
+    </Layer>
+  );
+};
+
+const BOARD_PANEL = '#17191E';
+const BOARD_LINE = '#2b2f36';
