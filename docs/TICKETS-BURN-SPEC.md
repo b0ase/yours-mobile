@@ -19,11 +19,11 @@ at mint (`deployBsv21Mint`). The deploy MAP tag already carries
 
 **Burn.** Two options on BSV-21:
 
-| Option | How | Verdict |
-|---|---|---|
-| A. `burn` op | Transfer inscription `{"p":"bsv-20","op":"burn","id":<id>,"amt":"N"}` spending the ticket UTXOs; the 1Sat indexer removes `amt` from circulating supply | **Recommended**, if the indexer honours it (must verify on GorillaPool / api.1sat.app before build; check the `burn` handling in the 1sat indexer and `@1sat/actions`) |
-| B. Send to unspendable script | `transfer` of N to an `OP_FALSE OP_RETURN` output (or a provably unspendable P2PKH such as `1BitcoinEaterAddressDontSendf59kuE`) | Fallback. Provably gone, but indexers count it as "held by" that script, so "burned" must be computed by us |
-| C. Send to room treasury | Treasury later burns | Rejected: not a burn until a second tx, needs a custodial key, creator could resell |
+| Option                        | How                                                                                                                                                     | Verdict                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. `burn` op                  | Transfer inscription `{"p":"bsv-20","op":"burn","id":<id>,"amt":"N"}` spending the ticket UTXOs; the 1Sat indexer removes `amt` from circulating supply | **Recommended**, if the indexer honours it (must verify on GorillaPool / api.1sat.app before build; check the `burn` handling in the 1sat indexer and `@1sat/actions`) |
+| B. Send to unspendable script | `transfer` of N to an `OP_FALSE OP_RETURN` output (or a provably unspendable P2PKH such as `1BitcoinEaterAddressDontSendf59kuE`)                        | Fallback. Provably gone, but indexers count it as "held by" that script, so "burned" must be computed by us                                                            |
+| C. Send to room treasury      | Treasury later burns                                                                                                                                    | Rejected: not a burn until a second tx, needs a custodial key, creator could resell                                                                                    |
 
 Either A or B: the entry tx also carries a MAP OP_RETURN
 `app=bWallet type=room-entry channel=bsv21:<id> handle=<bChat handle>` so the burn is linked to
@@ -31,9 +31,9 @@ an identity on chain, and change goes back to the sender. The server never holds
 
 **What entry buys.** Options:
 
-1. *Room lifetime*: one burn = member until the room expires. Simple, scarce, good for events.
-2. *Timed pass*: one burn = 24 h (creator picks). Recurring burn, faster deflation, more friction.
-3. *Per message*: already in the spec grammar; too fiddly for v1.
+1. _Room lifetime_: one burn = member until the room expires. Simple, scarce, good for events.
+2. _Timed pass_: one burn = 24 h (creator picks). Recurring burn, faster deflation, more friction.
+3. _Per message_: already in the spec grammar; too fiddly for v1.
 
 **Recommendation:** creator picks 1 or 2 at mint (`pass room` default, `pass 24h` optional);
 per-message stays "later".
@@ -161,16 +161,16 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
 
 ## 6. Build plan
 
-| Phase | Scope | Effort |
-|---|---|---|
-| 0 | Verify `burn` op support on GorillaPool / api.1sat.app and `@1sat/actions`; pick A or B | 0.5 day |
-| 1 | bit-sign: migration, `bit_sign_room_enter`, verifier (fork of `verifyDeposit`), `/enter` + `/entry`, spend branch in `enforceTokenGate`, selftest like `token-room-gate-selftest.mts` | 3–4 days |
-| 2 | Wallet: burn tx builder, entry sheet, `walletTickets` fields, turn on `SPEND_ENTRY_SUPPORTED` for `per entry to burn`, mint form gets pass/expiry | 3 days |
-| 3 | Tickets/Market: countdown, supply/burned, floor, Expired state | 2 days |
-| 4 | Resale: when listing create is back (or bWallet toggle), creator royalty output in the bWallet buy flow | 2–3 days + legal read |
-| 5 | Signed `room-policy` MAP follow-up tx, expiry re-open, nightly re-check job | 2 days |
+| Phase | Scope                                                                                                                                                                                 | Effort                |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| 0     | Verify `burn` op support on GorillaPool / api.1sat.app and `@1sat/actions`; pick A or B                                                                                               | 0.5 day               |
+| 1     | bit-sign: migration, `bit_sign_room_enter`, verifier (fork of `verifyDeposit`), `/enter` + `/entry`, spend branch in `enforceTokenGate`, selftest like `token-room-gate-selftest.mts` | 3–4 days              |
+| 2     | Wallet: burn tx builder, entry sheet, `walletTickets` fields, turn on `SPEND_ENTRY_SUPPORTED` for `per entry to burn`, mint form gets pass/expiry                                     | 3 days                |
+| 3     | Tickets/Market: countdown, supply/burned, floor, Expired state                                                                                                                        | 2 days                |
+| 4     | Resale: when listing create is back (or bWallet toggle), creator royalty output in the bWallet buy flow                                                                               | 2–3 days + legal read |
+| 5     | Signed `room-policy` MAP follow-up tx, expiry re-open, nightly re-check job                                                                                                           | 2 days                |
 
-## Open decisions (owner)
+## Open decisions (owner) — see the decisions below
 
 1. Burn method: `burn` op (A) vs unspendable output (B), after the phase 0 check.
 2. Default pass: room lifetime or timed (and the default duration).
@@ -180,3 +180,12 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
 6. Early-close policy: creator-funded refunds are voluntary or required (e.g. creator posts a bond)?
 7. Expired tickets: leave tradable as collectibles, or hide everywhere?
 8. Get a UK legal opinion before resale goes live: yes/no, and budget.
+
+## Owner decisions (1 Oct 2026)
+
+1. **Burn method:** whichever works. Pick in phase 0: use the BSV-21 `burn` op if GorillaPool and `@1sat/actions` index it, else the unspendable output.
+2. **Zero-conf first:** accept indexer-valid unconfirmed burns and let the user in straight away. Keep the nightly re-check to catch the rare double-spend.
+3. **No resale tax by default:** no creator royalty and no bCorp cut on ticket resales. Both are **configurable**, defaulting to 0: a per-room creator royalty set at mint, and a platform ticket-resale fee in build config. Ticket resales do not use the general Market fee (`BWALLET_MARKET_FEE_ADDRESS`).
+4. **Resale:** add a bWallet-only switch to enable ticket listings if upstream still has OrdLock listing creation disabled.
+
+Still open: 2 (default pass length), 6 (early-close refunds), 7 (expired tickets), 8 (legal opinion).
