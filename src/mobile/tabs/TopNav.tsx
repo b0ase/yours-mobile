@@ -3,9 +3,8 @@ import { useMyName } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Download, Loader2, Plus, Settings, X } from 'lucide-react';
+import { Check, ChevronDown, Download, Loader2, Phone, Plus, Settings, X } from 'lucide-react';
 import activeCircle from '../../assets/active-circle.png';
-import { ThemeBadge } from '../../components/ThemeBadge';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -98,8 +97,28 @@ export const TopNav = () => {
           )}
           <ChevronDown size={14} strokeWidth={2} color="#8E8E89" className="shrink-0" />
         </button>
-        <div className="flex items-center gap-2">
-          <ThemeBadge theme={theme} />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="font-bold text-[17px] mr-1" style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}>
+            bWallet
+          </span>
+          <button
+            type="button"
+            aria-label="Call"
+            onClick={() => addSnackbar('Calling other bWallet users is coming soon', 'info')}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: '1px solid #2A2A2C' }}
+          >
+            <Phone size={16} color="#F5B800" />
+          </button>
+          <button
+            type="button"
+            aria-label="Settings"
+            onClick={() => go()}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: '1px solid #2A2A2C' }}
+          >
+            <Settings size={16} color="#F2F2F0" />
+          </button>
         </div>
       </div>
 
