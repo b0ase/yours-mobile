@@ -11,6 +11,16 @@ import bcalIcon from './brand/bcal-icon.png';
 import bsheetsIcon from './brand/bsheets-icon.png';
 import bmintIcon from './brand/bmint-icon.png';
 import bmusicIcon from './brand/bmusic-icon.png';
+import app_bchatIcon from './brand/apps/bchat.png';
+import app_bmoviesIcon from './brand/apps/bmovies.png';
+import app_bwriterIcon from './brand/apps/bwriter.png';
+import app_bmailIcon from './brand/apps/bmail.png';
+import app_bartIcon from './brand/apps/bart.png';
+import app_bpaintIcon from './brand/apps/bpaint.png';
+import app_b3dIcon from './brand/apps/b3d.png';
+import app_bbooksIcon from './brand/apps/bbooks.png';
+import app_bgamesIcon from './brand/apps/bgames.png';
+import app_bexchangeIcon from './brand/apps/bexchange.png';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
@@ -47,7 +57,7 @@ export const BAPPS: BApp[] = [
     verb: 'Chat, voice and video messages, tokenised group chats',
     group: 'featured',
     status: 'live',
-    icon: 'https://www.bitcoinchat.online/bchat-apple-touch-icon.png',
+    icon: app_bchatIcon,
   },
   {
     name: 'bMovies',
@@ -55,7 +65,7 @@ export const BAPPS: BApp[] = [
     verb: 'Watch and back tokenised films',
     group: 'featured',
     status: 'live',
-    icon: 'https://www.bmovies.app/icons/icon-192.png',
+    icon: app_bmoviesIcon,
   },
   {
     name: 'bMusic',
@@ -79,7 +89,7 @@ export const BAPPS: BApp[] = [
     verb: 'Write and save documents on-chain',
     group: 'featured',
     status: 'live',
-    icon: 'https://bitcoin-writer.com/favicon.svg',
+    icon: app_bwriterIcon,
     source: 'https://github.com/b0ase/bitcoin-writer',
   },
   // Work
@@ -98,7 +108,7 @@ export const BAPPS: BApp[] = [
     verb: 'Send email that pays and gets paid',
     group: 'work',
     status: 'live',
-    icon: 'https://bitcoin-email.vercel.app/favicon.ico',
+    icon: app_bmailIcon,
     source: suite('bitcoin-email'),
   },
   {
@@ -198,7 +208,7 @@ export const BAPPS: BApp[] = [
     verb: 'Collect and show on-chain art',
     group: 'media',
     status: 'live',
-    icon: 'https://bitcoin-art.vercel.app/favicon.ico',
+    icon: app_bartIcon,
     source: suite('bitcoin-art'),
   },
   {
@@ -207,7 +217,7 @@ export const BAPPS: BApp[] = [
     verb: 'Paint and inscribe your work',
     group: 'media',
     status: 'live',
-    icon: 'https://bitcoin-paint.vercel.app/favicon.ico',
+    icon: app_bpaintIcon,
     source: suite('bitcoin-paint'),
   },
   {
@@ -216,7 +226,7 @@ export const BAPPS: BApp[] = [
     verb: 'Model and own 3D designs',
     group: 'media',
     status: 'live',
-    icon: 'https://bitcoin-3d.vercel.app/bitcoin-3d-logo.svg',
+    icon: app_b3dIcon,
     source: suite('bitcoin-3d'),
   },
   {
@@ -225,7 +235,7 @@ export const BAPPS: BApp[] = [
     verb: 'Read and publish books',
     group: 'media',
     status: 'live',
-    icon: 'https://bitcoin-books-bay.vercel.app/favicon.svg',
+    icon: app_bbooksIcon,
     source: suite('bitcoin-books'),
   },
   {
@@ -251,7 +261,7 @@ export const BAPPS: BApp[] = [
     verb: 'Play games with real stakes',
     group: 'social',
     status: 'live',
-    icon: 'https://bitcoin-gaming.vercel.app/favicon.ico',
+    icon: app_bgamesIcon,
     source: suite('bitcoin-gaming'),
   },
   {
@@ -260,7 +270,7 @@ export const BAPPS: BApp[] = [
     verb: 'Trade tokens across exchanges',
     group: 'social',
     status: 'live',
-    icon: 'https://bitcoin-exchange-iota.vercel.app/favicon.ico',
+    icon: app_bexchangeIcon,
     source: suite('bitcoin-exchange'),
   },
   {

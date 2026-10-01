@@ -6,6 +6,10 @@ import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { openDappBrowser } from './dappBrowser';
+import app_onesatsocialIcon from './brand/apps/1satsocial.png';
+import app_treechatIcon from './brand/apps/treechat.png';
+import app_twetchIcon from './brand/apps/twetch.png';
+import app_tempoIcon from './brand/apps/tempo.png';
 
 /**
  * Browser tab (theme.settings.services.browser). Sites open in the in-app
@@ -53,10 +57,10 @@ const DEAD_HOSTS = new Set(['taleofshua.com']);
 // Third-party apps (Apps › Other apps). Our own live in ./bapps.ts.
 const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
-  { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
-  { name: 'Treechat', link: 'https://treechat.com', icon: 'https://treechat.com/assets/favicon.svg' },
-  { name: 'Twetch', link: 'https://twetch.com', icon: 'https://twetch.com/app-icon-512.png' },
-  { name: 'Tempo', link: 'https://tempomusic.net', icon: 'https://tempomusic.net/favicon.ico' },
+  { name: '1satsocial', link: 'https://1satsocial.online', icon: app_onesatsocialIcon },
+  { name: 'Treechat', link: 'https://treechat.com', icon: app_treechatIcon },
+  { name: 'Twetch', link: 'https://twetch.com', icon: app_twetchIcon },
+  { name: 'Tempo', link: 'https://tempomusic.net', icon: app_tempoIcon },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
     .filter((a) => new URL(a.link).hostname !== 'yours.org')
