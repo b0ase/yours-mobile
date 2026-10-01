@@ -133,7 +133,8 @@ export const RADAR_GROUPS: { id: RadarGroup; label: string }[] = [
   { id: 'media', label: 'Media' },
   { id: 'tools', label: 'Tools' },
   { id: 'money', label: 'Payments & wallets' },
-  { id: 'buy', label: 'Buy BSV' },
+  // TODO(owner, 2 Oct 2026): 'Buy BSV' (third-party KYC onramps) is hidden for now; revisit before showing.
+  // { id: 'buy', label: 'Buy BSV' },
   { id: 'explore', label: 'Explorers' },
   { id: 'learn', label: 'Learn' },
   { id: 'games', label: 'Games' },
