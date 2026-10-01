@@ -70,6 +70,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '            Send\n          </motion.button>\n        </motion.div>',
       '            Send\n          </motion.button>\n<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
     ],
+    // Credits row under the action buttons: balance, Top up, history (src/mobile/credits).
+    [
+      "import { MintButton } from '../mobile/mint/MintButton';",
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { CreditsRow } from '../mobile/credits/CreditsRow';",
+    ],
+    [
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>',
+      '<MintButton exchangeRate={exchangeRate} />\n        </motion.div>\n<CreditsRow />',
+    ],
     // Send to a name: $handle / paymail / OpNS recipient box with resolve + confirm (src/mobile/names).
     [
       "import { MintButton } from '../mobile/mint/MintButton';",
