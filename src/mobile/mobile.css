@@ -156,3 +156,14 @@ select {
   transform: translateZ(0);
   isolation: isolate;
 }
+
+/* Android WebView ghost, app-wide: give every scroller its own compositor
+   layer so it repaints its own contents instead of leaving stale tiles of
+   animated rows (Settings, Market, ...). transform makes the scroller the
+   containing block for position:fixed descendants, so skip any scroller that
+   currently holds a .fixed overlay (sheets/modals rendered inline); the rule
+   drops while the overlay is open and returns when it closes. */
+html.android [class*='overflow-y-auto']:not(:has(.fixed)),
+html.android [class*='overflow-auto']:not(:has(.fixed)) {
+  transform: translateZ(0);
+}

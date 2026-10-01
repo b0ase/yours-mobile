@@ -75,9 +75,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
       "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';",
-      "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';\nimport { initialRoute } from './mobile/forgot/wipe';",
+      "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';\nimport { initialRoute } from './mobile/forgot/wipe';\nimport { AndroidMotion } from './mobile/AndroidMotion';",
     ],
-    ['<Router>', '<Router initialEntries={[initialRoute()]}>'],
+    // Android: no transform animations (WebView ghost tiles); see mobile/AndroidMotion.
+    ['<Router>', '<AndroidMotion><Router initialEntries={[initialRoute()]}>'],
+    ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));",

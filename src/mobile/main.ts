@@ -27,6 +27,9 @@ import './mobile.css';
 
 declare const __MOBILE_VERSION__: string;
 
+// Scopes Android-only WebView paint workarounds in mobile.css.
+if (Capacitor.getPlatform() === 'android') document.documentElement.classList.add('android');
+
 const rootUrl = new URL('./', location.href).href;
 const senderFor = (url: string): Sender => ({ id: MOBILE_EXTENSION_ID, url, origin: INTERNAL_ORIGIN });
 const defineChrome = (target: any, chrome: unknown) =>
