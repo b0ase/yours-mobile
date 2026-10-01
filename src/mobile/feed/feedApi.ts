@@ -1,6 +1,16 @@
 import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, type OneSatContext } from '@1sat/actions';
-import { Transaction, Utils, type Script } from '@bsv/sdk';
-import { groupThread, mergePosts, parseBmapFeed, parseBmapPost, parseLikes, threadRoot, type FeedPost } from './post';
+import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
+import {
+  groupThread,
+  mergePosts,
+  parseBmapFeed,
+  parseBmapPost,
+  parseLikes,
+  parseTwetchFeed,
+  threadRoot,
+  TWETCH_API,
+  type FeedPost,
+} from './post';
 
 /**
  * Feed read source: the bmap API (BitcoinSchema/bmap-api, the indexer behind 1satsocial /
@@ -32,19 +42,15 @@ export const fetchReplies = async (txid: string) => parseBmapFeed(await get(`/so
 export const fetchLikes = async (txid: string, mine: string[] = []) =>
   parseLikes(await get(`/social/post/${txid}/like`), mine);
 
-// The query is ASCII JSON, so plain btoa is safe.
-const b64 = (s: string) => btoa(s);
-
 /**
- * Twetch (MAP app=twetch) through bmap's raw query route. Unsorted on purpose: a sort on this
- * collection times out server-side. Twetch content is historical (newest indexed ~block 843k, 2024).
+ * Recent public Twetch posts from Twetch's own read API (bmap stopped indexing Twetch around
+ * block 843k). One plain GET per refresh, no auth, no spoofed headers: Twetch's terms allow
+ * legitimate automation that does not burden the service.
  */
-export const fetchTwetch = async (limit = 20): Promise<FeedPost[]> => {
-  const body = (await get(`/q/post/${b64(JSON.stringify({ v: 3, q: { find: { 'MAP.app': 'twetch' }, limit } }))}`)) as {
-    post?: unknown;
-    signers?: unknown;
-  };
-  return parseBmapFeed({ results: body?.post, signers: body?.signers });
+export const fetchTwetch = async (limit = 60): Promise<FeedPost[]> => {
+  const res = await fetch(`${TWETCH_API}/v1/feed/latest?limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Twetch error (${res.status})`);
+  return parseTwetchFeed(await res.json(), (pk) => PublicKey.fromString(pk).toAddress());
 };
 
 /** For you: network-wide recent posts plus a slice of Twetch. Twetch failing never blanks the feed. */

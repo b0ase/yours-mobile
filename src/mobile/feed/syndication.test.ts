@@ -5,6 +5,8 @@ import {
   groupThread,
   buildPostScript,
   parseBmapPost,
+  parseTwetchFeed,
+  twetchMediaUrl,
   sourceLabel,
   sourceOf,
   sourceUrl,
@@ -161,5 +163,51 @@ describe('Treechat reply interop', () => {
       type: 'post',
     });
     expect(validatePost({ text: 'x', replyTo: tx(1), threadId: 'nope' })).toMatch(/thread/);
+  });
+});
+
+describe('Twetch API feed', () => {
+  const tx = (n: number) => n.toString(16).padStart(64, '0');
+  const body = {
+    data: [
+      { txid: tx(1), userId: 3, type: 'post', content: 'gm', postedAtMs: 2000, numLikes: 2, numReplies: 1 },
+      {
+        txid: tx(2),
+        userId: 9,
+        type: 'post',
+        content: ' ',
+        files: `["b://${tx(5)}@1"]`,
+        postedAtMs: 3000,
+        replyPostId: 7,
+      },
+      { txid: tx(3), userId: 3, type: 'system', content: 'NOOGIES sold', postedAtMs: 4000 },
+      { txid: tx(4), userId: 3, type: 'branch', postedAtMs: 5000 },
+      { txid: 'nope', userId: 3, type: 'post', content: 'bad', postedAtMs: 1 },
+    ],
+    users: { '3': { name: 'Randy', icon: `b://${tx(6)}`, publicKey: 'pk3' } },
+    replyPosts: { '7': { txid: tx(8) } },
+  };
+  test('keeps posts, skips system/branch/bad txids, maps users and media', () => {
+    const posts = parseTwetchFeed(body, (pk) => `addr-${pk}`);
+    expect(posts.map((p) => p.txid)).toEqual([tx(2), tx(1)]);
+    const [img, gm] = posts;
+    expect(gm.author).toEqual({
+      address: 'addr-pk3',
+      bapId: null,
+      name: 'Randy',
+      avatar: `https://api.twetch.com/v1/media/${tx(6)}.jpg?v=4`,
+    });
+    expect(gm.source).toBe('twetch');
+    expect(gm.likes).toBe(2);
+    expect(sourceUrl(gm)).toBe(`https://twetch.com/t/${tx(1)}`);
+    expect(img.text).toBe('');
+    expect(img.images[0].src).toBe(`https://api.twetch.com/v1/media/${tx(5)}-o1.jpg?v=4`);
+    expect(img.replyTo).toBe(tx(8));
+    expect(img.author.name).toBe('Twetch user 9');
+    expect(img.author.address).toBe('twetch:9');
+  });
+  test('media refs: unsafe schemes dropped', () => {
+    expect(twetchMediaUrl('javascript:alert(1)')).toBeNull();
+    expect(twetchMediaUrl('https://x.test/a.png')).toBe('https://x.test/a.png');
   });
 });

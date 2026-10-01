@@ -425,3 +425,81 @@ export const feedTimeLabel = (ms: number, now = Date.now()): string => {
   if (s < 86400 * 7) return `${Math.floor(s / 86400)}d`;
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
+
+// ── Twetch API parsing ───────────────────────────────────────────────────────
+/**
+ * Twetch's public read API (api.twetch.com, unauthenticated GET, CORS *). Since the 2026
+ * relaunch posts are still B + MAP app=twetch on-chain, but bmap stopped indexing them, so the
+ * API is the practical read path. Its media proxy serves b:// refs and post images.
+ */
+export const TWETCH_API = 'https://api.twetch.com';
+
+/** b://<txid>[@n] or a bare txid → Twetch's media proxy; https stays; anything else null. */
+export function twetchMediaUrl(ref: string): string | null {
+  const r = ref.trim();
+  if (/^https:\/\//i.test(r)) return r;
+  const m = r.match(/^(?:b:\/\/)?([0-9a-f]{64})(?:@(\d+))?$/i);
+  if (!m) return null;
+  return `${TWETCH_API}/v1/media/${m[1].toLowerCase()}${m[2] ? `-o${m[2]}` : ''}.jpg?v=4`;
+}
+
+/**
+ * /v1/feed/latest ({data, users, replyPosts, …}) → posts, newest first. Only `post` items with
+ * text or an image; marketplace `system` events and bare `branch` reposts are skipped.
+ * `addressOf` maps a Twetch public key to an address (for mute / follow keys).
+ */
+export function parseTwetchFeed(body: unknown, addressOf: (pubKey: string) => string = () => ''): FeedPost[] {
+  const b = asRec(body);
+  const users = asRec(b.users);
+  const replyPosts = asRec(b.replyPosts);
+  const seen = new Set<string>();
+  const out: FeedPost[] = [];
+  for (const item of asArr(b.data)) {
+    const p = asRec(item);
+    const txid = asStr(p.txid).toLowerCase();
+    if (asStr(p.type) !== 'post' || !isTxid(txid) || seen.has(txid)) continue;
+    const text = asStr(p.content).trim();
+    let files: unknown[] = [];
+    try {
+      files = asArr(typeof p.files === 'string' ? JSON.parse(p.files) : p.files);
+    } catch {
+      files = [];
+    }
+    const images: FeedImage[] = files
+      .map((f) => twetchMediaUrl(asStr(f)))
+      .filter((u): u is string => !!u)
+      .slice(0, 4)
+      .map((src) => ({ src, mime: 'image/jpeg' }));
+    if (!text && !images.length) continue;
+    const uid = asStr(p.userId);
+    const u = asRec(users[uid]);
+    let address = '';
+    try {
+      address = asStr(u.publicKey) ? addressOf(asStr(u.publicKey)) : '';
+    } catch {
+      address = '';
+    }
+    const icon = asStr(u.icon);
+    const parent = asStr(asRec(replyPosts[asStr(p.replyPostId)]).txid);
+    out.push({
+      txid,
+      text: text.slice(0, MAX_POST_CHARS * 2),
+      images,
+      app: 'twetch',
+      source: 'twetch',
+      threadId: null,
+      replyTo: isTxid(parent) ? parent.toLowerCase() : null,
+      author: {
+        address: address || `twetch:${uid}`,
+        bapId: null,
+        name: asStr(u.name).trim().slice(0, 60) || `Twetch user ${uid}`,
+        avatar: icon ? twetchMediaUrl(icon) : null,
+      },
+      at: Number(p.postedAtMs) || Number(p.createdAtMs) || 0,
+      likes: Number(p.numLikes) || 0,
+      replies: Number(p.numReplies) || 0,
+    });
+    seen.add(txid);
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
