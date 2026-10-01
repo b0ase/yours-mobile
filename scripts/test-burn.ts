@@ -90,6 +90,7 @@ async function wocUtxos(addr: string): Promise<{ tx_hash: string; tx_pos: number
 }
 
 async function balance(addr: string): Promise<number> {
+  await new Promise((r) => setTimeout(r, 1000)); // WoC rate limit
   return (await wocUtxos(addr)).reduce((s, u) => s + u.value, 0);
 }
 

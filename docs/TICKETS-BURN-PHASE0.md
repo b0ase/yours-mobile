@@ -117,3 +117,41 @@ via GorillaPool. Grant entry at 0-conf; keep the nightly re-check.
 - Neither API reports burned supply, so the "312 burned" UI must come from our entries table.
 - Observation: upstream `burnOrdinals` writes `OP_FALSE` + `MAP.set()` (which already begins with
   `OP_RETURN`), so the output is a correct `OP_FALSE OP_RETURN`. No issue there.
+
+## 6. Mainnet test results (2026-10-01, `scripts/test-burn.ts run`)
+
+This was one run of the chained path with no confirmation waits: deploy, then fund the overlay, then transfer to the buyer, then the buyer burns, spending the unconfirmed transfer output. The keys were throwaway keys kept only in the session scratchpad.
+
+| Step | txid | size | broadcast (`api.1sat.app/1sat/tx`) |
+|---|---|---|---|
+| tx1 deploy+mint BURNTEST 100 | `ebb6ef51eee787852f9de893c02ec5905234eb1aca4fcce10cbbecc3831ad4fb` | 317 B | ACCEPTED_BY_NETWORK, 295 ms |
+| tx2 creator funds overlay (3000 → `1HAeteL7Dk8vXQ3ctVyktyRqrAzgk4LwfU`) | `72d91f3aff1a2401663ab0b7bdc612fc23bc7ec257c9f09b88d66597b2edee42` | 226 B | ACCEPTED_BY_NETWORK, 328 ms |
+| tx3 transfer 10 → buyer (+2000 overlay fee) | `ff49e39e9ce1ff7767062e550b1a71cb48c4f61a3b620c745ec70bd723772446` | 766 B | ACCEPTED_BY_NETWORK, 308 ms |
+| tx4 buyer burns 1 (op `burn`, vout 0) + MAP room-entry (+2000 overlay fee) | `7174daa178cda515c7ba4f4dc744a5fb5f3b93c93ea5b0f5777ebbc035bfc5da` | 812 B | ACCEPTED_BY_NETWORK, 289 ms |
+
+- **0-conf broadcasting works end to end.** The whole 4-tx chain went from the start of the deploy to the burn being accepted in about 1.9 s. No mempool chain or ancestor limits were hit, and the broadcaster accepted a burn whose inputs were unconfirmed.
+- **1sat-stack**
+  - The deploy went to `tm_bsv21`, was admitted immediately (`outputsToAdmit:[0]`) and was visible after 132 ms.
+  - `status.fee_address` was available 375 ms after the deploy.
+  - `is_active` became true 752 ms after the funding tx.
+  - **But all three per-token submits (`tm_<id>`) returned HTTP 500** ("internal error"). This happened even for tx3 and tx4, which were sent after the token was already active.
+  - As a result, the transfer and the burn appeared at `/1sat/bsv21/{id}/tx/{txid}` only after **~97 s**. All four txs were mined in block 969229 (header time 21:52:02Z, ~35 s after broadcast), so indexing evidently came from the block or queue sync, not from the 0-conf submit.
+  - The final status was `credits 7000`, `output_count 6`, `debits 6000`, `balance 1000`. The six outputs are the deploy, transfer×2 and burn+change, plus one more counted output. The burn tx response showed `op:"burn", amt:"1"` at vout 0 and `transfer 9` at vout 1, as designed.
+- **GorillaPool**
+  - The token was known 1.15 s after the deploy, with the same `fundAddress` as 1sat-stack, so a single creator payment funds both indexers. Even so, GorillaPool reported `fundTotal 0` and `included false`.
+  - The tx3 and tx4 outpoints were indexed with `op` correct (`burn`, `amt 1`) but stayed at **`status: 0` (pending) for more than 180 s, even after mining**. GorillaPool did not validate them in this window.
+- **Supply:** neither API changed the supply. 1sat-stack still reports `amt "100"` in the token and GorillaPool reports `amt 100`. "Burned" must still be counted by us.
+- **Overlay cost** was 7,000 sats in total: 3,000 at mint, 2,000 per token-moving tx. At the default 1,000 sats per output, a ticket burn costs **2,000 sats** of overlay fee, because its burn output and token change output are both charged. Minimum creator pre-fund is more than 1,000 sats per indexed output.
+- **Spend:** 7,325 sats in total: 7,000 overlay, about 322 miner fees at 150 sat/kB, and three 1-sat token outputs. The remainder stays at the throwaway addresses: creator `12kpCudSbFao6sWVVq93XGeD6PEcLGYgB2` 499,155 sats plus 90 BURNTEST, and buyer `19Qp5vhVzFzcTnqtNUfSfLJvMDUJmNUDPx` 876 sats plus 9 BURNTEST.
+
+**Implications for "enter within seconds":**
+
+1. **Broadcast is fast, but indexer confirmation is not:** about 97 s on 1sat-stack in this run, and still pending on GorillaPool after more than 3 min. Don't gate room entry on indexers.
+2. **bit-sign should verify from the BEEF the wallet submits.** It needs to:
+   - parse the tx and check the burn output (`BSV21.decode`, `op==burn`, `id`, `amt ≥ N`);
+   - check the input signatures against the sender's addresses;
+   - check token validity of the inputs, either with an ancestor walk inside the BEEF back to outpoints the indexer already marks valid, or by trusting the ticket purchase (transfer) outputs that bit-sign itself issued or recorded at sale time;
+   - confirm the tx was accepted by ARC (`/1sat/tx/{txid}` status).
+
+   Grant entry on that, and let the nightly indexer re-check catch fraud.
+3. **Follow-up:** find out why 1sat-stack `/1sat/bsv21/overlay/submit` returns 500 for per-token topics (maybe a fresh token whose topic worker isn't running yet). If it worked, 0-conf overlay admission would be about 1 s.
