@@ -1,79 +1,242 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowUp, Loader2 } from 'lucide-react';
+import { sendBsv } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { ChatApiError, saveSession } from '../chat/api';
+import { getErrorMessage } from '../../utils/tools';
+import { fetchExchangeRate } from '../../utils/wallet';
+import { ChatApiError, saveSession, type BchatClient } from '../chat/api';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
+import { oneClick } from '../settings/oneClick';
 import bGlyph from '../brand/bwallet-glyph.svg';
-import { MAX_INPUT, agentRequest, parseAgentReply, type AgentMessage } from './agent';
+import { MAX_INPUT, SECRET_WARNING, looksLikeSecret, transcript, type AgentMessage } from './agent';
+import { BWALLET_GUIDE } from './guide';
+import { PROVIDERS, callProvider } from './providers';
+import { loadKey } from './keyStore';
+import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
+import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PriceInfo, type Quote } from './paid';
 import { TopNav } from '../../components/TopNav';
 
 /**
- * /m/agent — the b agent, opened by the top bar's centre b. bChat's composer agent (same back
- * end as bChat's b button), signed in silently with the wallet's own key. See agent.ts.
+ * /m/agent — the b agent, opened by the top bar's centre b. Helps people use bWallet (guide.ts).
+ * Not free: either the user's own provider key (direct from the device) or pay per message in
+ * BSV (paid.ts). See agent.ts.
  */
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 
-type Shown = AgentMessage & { notes?: string[] };
+/** A paid message whose payment went out but whose answer did not come back: retried, never re-paid. */
+type Unanswered = { quote: Quote; txid: string; messages: AgentMessage[] };
+
+const ConfirmSheet = ({
+  sats,
+  bsvUsd,
+  onPay,
+  onCancel,
+}: {
+  sats: number;
+  bsvUsd: number;
+  onPay: () => void;
+  onCancel: () => void;
+}) => {
+  useBackClose(true, onCancel);
+  return createPortal(
+    <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full rounded-t-3xl p-5"
+        style={{
+          background: PANEL,
+          borderTop: `1px solid ${LINE}`,
+          paddingBottom: 'max(env(safe-area-inset-bottom), 20px)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-base font-bold text-white">Pay for this message?</p>
+        <p className="mt-1 text-sm" style={{ color: MUTED }}>
+          {formatPrice(sats, bsvUsd)} from this wallet, plus a small network fee.
+        </p>
+        <button
+          onClick={onPay}
+          className="mt-4 w-full rounded-2xl py-3 text-sm font-bold"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          Pay and send
+        </button>
+        <button onClick={onCancel} className="mt-2 w-full py-2 text-sm" style={{ color: MUTED }}>
+          Cancel
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+};
 
 const AgentPage = () => {
   const navigate = useNavigate();
   const close = () => navigate(-1);
   useBackClose(true, close);
   const { apiContext } = useServiceContext();
-  const [messages, setMessages] = useState<Shown[]>([]);
+  const [prefs] = useAgentPrefs();
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [price, setPrice] = useState<PriceInfo | null>(null);
+  const [rate, setRate] = useState(0);
+  const [keyReady, setKeyReady] = useState<boolean | null>(null);
+  const [confirm, setConfirm] = useState<{ sats: number; resolve: (ok: boolean) => void } | null>(null);
+  const [unanswered, setUnanswered] = useState<Unanswered | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const provider = PROVIDERS[prefs.provider];
 
   // Braces matter: newer WebViews return a Promise from scrollIntoView, which React would call as the cleanup.
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
-  const ask = async (transcript: AgentMessage[]) => {
-    if (!apiContext) throw new Error('Wallet is locked.');
-    const body = agentRequest(transcript);
-    try {
-      return await (await signedInClient(apiContext)).agentTurn(body);
-    } catch (e) {
-      // A stale session: sign in again once with the wallet's key.
-      if (!(e instanceof ChatApiError) || e.status !== 401) throw e;
-      saveSession(null);
-      return (await signedInClient(apiContext, kycClient())).agentTurn(body);
+  /** The signed-in bit-sign client, re-signing once with the wallet's key on a stale session. */
+  const withClient = useCallback(
+    async <T,>(fn: (c: BchatClient) => Promise<T>): Promise<T> => {
+      if (!apiContext) throw new Error('Wallet is locked.');
+      try {
+        return await fn(await signedInClient(apiContext));
+      } catch (e) {
+        if (!(e instanceof ChatApiError) || e.status !== 401) throw e;
+        saveSession(null);
+        return fn(await signedInClient(apiContext, kycClient()));
+      }
+    },
+    [apiContext],
+  );
+  const backend = useMemo(
+    () => bitsignPaidBackend((method, path, body) => withClient((c) => c.agentCall(method, path, body))),
+    [withClient],
+  );
+
+  useEffect(() => {
+    let live = true;
+    setError(null);
+    if (prefs.mode === 'own') {
+      setKeyReady(null);
+      void loadKey(prefs.provider).then((k) => live && setKeyReady(!!k));
+    } else {
+      setPrice(null);
+      backend
+        .price()
+        .then((p) => live && setPrice(p))
+        .catch(
+          () =>
+            live &&
+            setPrice({
+              enabled: false,
+              sats: 0,
+              bsvUsd: 0,
+              model: '',
+              reason: 'Paid messages are not available right now.',
+            }),
+        );
+      fetchExchangeRate('main')
+        .then((r) => live && setRate(r))
+        .catch(() => {});
     }
+    return () => {
+      live = false;
+    };
+  }, [prefs.mode, prefs.provider, backend]);
+
+  const bsvUsd = price?.bsvUsd || rate;
+  const askConfirm = (sats: number) => new Promise<boolean>((resolve) => setConfirm({ sats, resolve }));
+
+  const answerPaid = async (u: Unanswered) => {
+    setUnanswered(u);
+    const text = await backend.turn(u.quote, u.txid, u.messages, BWALLET_GUIDE);
+    setUnanswered(null);
+    return text;
+  };
+
+  const runPaid = async (sent: AgentMessage[]): Promise<string | null> => {
+    if (!apiContext) throw new Error('Wallet is locked.');
+    const quote = await backend.quote(sent);
+    const decision = payDecision(
+      quote.sats,
+      prefs.dailyLimitSats,
+      spentToday(loadSpend(), Date.now()),
+      () => oneClick.take(quote.sats).ok,
+    );
+    if (decision.kind === 'refuse') throw new Error(refuseText(decision.reason, prefs.dailyLimitSats));
+    if (decision.kind === 'confirm' && !(await askConfirm(quote.sats))) return null;
+    const res = await sendBsv.execute(apiContext, { requests: [{ address: quote.payTo, satoshis: quote.sats }] });
+    if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+    recordSpend(quote.sats);
+    return answerPaid({ quote, txid: res.txid, messages: sent });
+  };
+
+  const runOwn = async (sent: AgentMessage[]) => {
+    const key = await loadKey(prefs.provider);
+    if (!key) throw new Error(`Add your ${provider.label} API key in Settings › b agent.`);
+    return callProvider(prefs.provider, key, prefs.models[prefs.provider], BWALLET_GUIDE, sent);
   };
 
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
-    const next: Shown[] = [...messages, { role: 'user', text }];
+    if (looksLikeSecret(text)) {
+      setInput('');
+      setError(SECRET_WARNING);
+      return;
+    }
+    const next: AgentMessage[] = [...messages, { role: 'user', text }];
     setMessages(next);
     setInput('');
     setError(null);
     setBusy(true);
     try {
-      const reply = parseAgentReply(await ask(next));
-      setMessages([...next, { role: 'assistant', text: reply.text, notes: reply.notes }]);
+      const sent = transcript(next);
+      const reply = prefs.mode === 'own' ? await runOwn(sent) : await runPaid(sent);
+      if (reply === null) {
+        // Cancelled at the confirm step: nothing paid, put the text back.
+        setMessages(messages);
+        setInput(text);
+      } else setMessages([...next, { role: 'assistant', text: reply }]);
     } catch (e) {
-      const needsKey =
-        e instanceof ChatApiError && e.status === 503 && Array.isArray((e.data as { needs?: unknown })?.needs);
-      setError(
-        needsKey
-          ? 'The b agent has no model available right now. Add your own API key in bChat › Settings.'
-          : e instanceof Error
-            ? e.message
-            : String(e),
-      );
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
+
+  const retry = async () => {
+    if (!unanswered || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const reply = await answerPaid(unanswered);
+      setMessages((m) => [...m, { role: 'assistant', text: reply }]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const today = spentToday(loadSpend(), Date.now());
+  const status =
+    prefs.mode === 'own'
+      ? keyReady === false
+        ? `Add your ${provider.label} API key in Settings › b agent.`
+        : `Your ${provider.label} key · ${prefs.models[prefs.provider]}`
+      : price === null
+        ? 'Checking the price…'
+        : price.enabled
+          ? `${formatPrice(price.sats, bsvUsd)} per message · today ${today.toLocaleString('en-US')} / ${prefs.dailyLimitSats.toLocaleString('en-US')} sats`
+          : (price.reason ?? 'Paid messages are not available yet.');
+  const canSend = prefs.mode === 'own' ? keyReady !== false : !!price?.enabled;
 
   return (
     // Top padding = the fixed TopNav (h-14); bottom = the tab bar (tabs/BottomMenu.tsx, 3.75rem) so the composer sits above it.
@@ -92,12 +255,10 @@ const AgentPage = () => {
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && (
-          <div className="m-auto text-center max-w-[280px]">
+          <div className="m-auto text-center">
             <img src={bGlyph} alt="" width={56} height={56} className="mx-auto mb-3" />
-            <p className="text-white font-semibold">Ask b anything</p>
-            <p className="text-xs mt-1" style={{ color: MUTED }}>
-              bChat's agent: drafts agreements, explains tokens and rooms. Anything it prepares opens in bChat for you
-              to review. Free to use.
+            <p className="text-sm" style={{ color: MUTED }}>
+              Ask about using bWallet
             </p>
           </div>
         )}
@@ -112,11 +273,6 @@ const AgentPage = () => {
               }
             >
               {m.text}
-              {m.notes?.map((n) => (
-                <div key={n} className="mt-1 text-[12px]" style={{ color: GOLD }}>
-                  {n}
-                </div>
-              ))}
             </div>
           </div>
         ))}
@@ -130,42 +286,75 @@ const AgentPage = () => {
             {error}
           </p>
         )}
+        {unanswered && !busy && (
+          <button
+            onClick={() => void retry()}
+            className="self-start rounded-full px-3 py-1 text-xs font-bold"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+          >
+            Paid — get the answer (no new payment)
+          </button>
+        )}
         <div ref={endRef} />
       </div>
 
       <form
-        className="shrink-0 flex items-end gap-2 px-3 pt-2"
+        className="shrink-0 flex flex-col gap-1 px-3 pt-2"
         style={{ paddingBottom: 10, borderTop: `1px solid ${LINE}` }}
         onSubmit={(e) => {
           e.preventDefault();
           void send();
         }}
       >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          rows={1}
-          placeholder="Message b"
-          aria-label="Message b"
-          className="flex-1 resize-none rounded-2xl px-3 py-2 text-[14px] text-white outline-none max-h-32"
-          style={{ background: PANEL, border: `1px solid ${LINE}` }}
-        />
         <button
-          type="submit"
-          aria-label="Send"
-          disabled={busy || !input.trim()}
-          className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-          style={{ background: GOLD }}
+          type="button"
+          onClick={() => navigate('/m/settings')}
+          className="text-left text-[11px]"
+          style={{ color: MUTED }}
         >
-          <ArrowUp size={18} color="#1a1300" />
+          {status}
         </button>
+        <div className="flex items-end gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={1}
+            placeholder="Message b"
+            aria-label="Message b"
+            className="flex-1 resize-none rounded-2xl px-3 py-2 text-[14px] text-white outline-none max-h-32"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          />
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={busy || !input.trim() || !canSend || !!unanswered}
+            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
+            style={{ background: GOLD }}
+          >
+            <ArrowUp size={18} color="#1a1300" />
+          </button>
+        </div>
       </form>
+      {confirm && (
+        <ConfirmSheet
+          sats={confirm.sats}
+          bsvUsd={bsvUsd}
+          onPay={() => {
+            confirm.resolve(true);
+            setConfirm(null);
+          }}
+          onCancel={() => {
+            confirm.resolve(false);
+            setConfirm(null);
+          }}
+        />
+      )}
     </div>
   );
 };
