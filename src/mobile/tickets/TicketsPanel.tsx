@@ -107,7 +107,7 @@ export const TicketsPanel = ({
     <section className="flex flex-col gap-2">
       <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
         <TicketIcon size={11} className="inline mr-1" />
-        {TICKET_COPY} Start your own from Wallet → Mint → Start a room.
+        {TICKET_COPY} Start your own from Wallet → Mint → Mint a chatroom.
       </p>
       {tickets === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading tickets…</p>}
       {tickets?.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-8">No tickets yet.</p>}

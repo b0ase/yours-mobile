@@ -233,7 +233,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             {step === 'token'
               ? 'Mint a token'
               : step === 'ticket'
-                ? 'Start a room'
+                ? 'Mint a chatroom'
                 : step === 'choose'
                   ? 'Mint'
                   : step === 'done'
@@ -248,16 +248,16 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         {step === 'choose' && (
           <div className="flex flex-col gap-3">
             <Choice
+              icon={<Ticket size={18} />}
+              title="Mint a chatroom"
+              sub="Mint tickets that grant entry to your new chatrooms."
+              onClick={() => setStep('ticket')}
+            />
+            <Choice
               icon={<ImageIcon size={18} />}
               title="Mint media (NFT)"
               sub="Photo, image, drawing, video or audio"
               onClick={() => setStep('media')}
-            />
-            <Choice
-              icon={<Ticket size={18} />}
-              title="Start a room (ticket)"
-              sub="A ticket gets you into a room. Send one to invite someone."
-              onClick={() => setStep('ticket')}
             />
             <Choice
               icon={<Coins size={18} />}
