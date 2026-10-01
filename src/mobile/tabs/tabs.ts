@@ -9,6 +9,9 @@ import type { MenuItems } from '../../contexts/BottomMenuContext';
  */
 export type MobileTab = MenuItems | 'market' | 'feed' | 'chat';
 
+/** Window event fired on every bottom-bar tap (useBottomMenu routes it even if the tab is already selected). */
+export const TAB_TAP = 'bwallet:tab-tap';
+
 export const asMenuItem = (tab: MobileTab) => tab as MenuItems;
 
 /** Ids that open Wallet on its NFTs (media) view instead of Tokens. */

@@ -1,6 +1,6 @@
 import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-react';
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
-import { asMenuItem, tabFor, type MobileTab } from './tabs';
+import { asMenuItem, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:
@@ -34,7 +34,11 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
           label={t.label}
           theme={theme}
           icon={t.icon}
-          onClick={() => handleSelect(asMenuItem(t.id))}
+          onClick={() => {
+            handleSelect(asMenuItem(t.id));
+            // Re-tapping the lit tab (e.g. from Media or the b agent) must still navigate back to it.
+            window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
+          }}
           isSelected={active === t.id}
         />
       ))}

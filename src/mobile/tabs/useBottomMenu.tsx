@@ -1,7 +1,7 @@
-import { useContext, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useContext, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
-import { opensWalletNfts, routeFor } from './tabs';
+import { opensWalletNfts, routeFor, TAB_TAP } from './tabs';
 import { setWalletKind } from '../wallet/walletKind';
 
 /**
@@ -11,6 +11,8 @@ import { setWalletKind } from '../wallet/walletKind';
 export const useBottomMenu = () => {
   const context = useContext(BottomMenuContext);
   const navigate = useNavigate();
+  const path = useRef('');
+  path.current = useLocation().pathname;
 
   if (!context) {
     throw new Error('useBottomMenu must be used within a BottomMenuProvier');
@@ -23,6 +25,16 @@ export const useBottomMenu = () => {
     if (route) navigate(route);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context.selected]);
+
+  // A tap on the already-selected tab doesn't change `selected`, so route it here too.
+  useEffect(() => {
+    const onTap = (e: Event) => {
+      const route = routeFor((e as CustomEvent<string>).detail);
+      if (route && path.current !== route) navigate(route);
+    };
+    window.addEventListener(TAB_TAP, onTap);
+    return () => window.removeEventListener(TAB_TAP, onTap);
+  }, [navigate]);
 
   return context;
 };

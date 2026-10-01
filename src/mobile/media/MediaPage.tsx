@@ -6,6 +6,7 @@ import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
 import { getState, pauseAudio, subscribe, toggle } from './player';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
+import { TopNav } from '../../components/TopNav';
 
 /**
  * /m/media — the top bar's Play button. The wallet's music and video inscriptions as a player:
@@ -167,13 +168,10 @@ const MediaPage = () => {
 
   return (
     <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
+      <TopNav />
       <div
-        className="sticky top-0 z-10 flex items-center gap-2 px-2 pb-2"
-        style={{
-          paddingTop: 'max(env(safe-area-inset-top), 12px)',
-          background: '#010101',
-          borderBottom: `1px solid ${LINE}`,
-        }}
+        className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1 mt-14"
+        style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
       >
         <button aria-label="Back" onClick={close} className="p-2">
           <ArrowLeft size={20} color="#fff" />

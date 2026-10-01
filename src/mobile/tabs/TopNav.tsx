@@ -34,7 +34,9 @@ export const TopNav = () => {
   const { chromeStorageService, wallet, setIsSwitchingAccount } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
-  const onAgent = useLocation().pathname.startsWith('/m/agent');
+  const pathname = useLocation().pathname;
+  const onAgent = pathname.startsWith('/m/agent');
+  const onMedia = pathname.startsWith('/m/media');
   const { addSnackbar } = useSnackbar();
   const [drawer, setDrawer] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
@@ -125,7 +127,8 @@ export const TopNav = () => {
         <button
           type="button"
           aria-label="Media"
-          onClick={() => navigate('/m/media')}
+          onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
+          aria-pressed={onMedia}
           className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
           style={{ border: '1px solid #2A2A2C' }}
         >
