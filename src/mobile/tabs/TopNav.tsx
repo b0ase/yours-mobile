@@ -20,6 +20,9 @@ import { asMenuItem } from './tabs';
  * Switching reuses upstream TopNav's sequence verbatim.
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
+// Default avatar: bWallet's ring-b, or the old Yours image older accounts stored (shown as the ring-b).
+const isDefaultAvatar = (icon?: string) =>
+  !icon || icon.endsWith('bwallet-avatar.png') || icon.includes('i.ibb.co/zGcthBv/yours-org-light.png');
 const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 export const TopNav = () => {
@@ -96,7 +99,8 @@ export const TopNav = () => {
           <img
             src={accountObj.account?.icon ?? activeCircle}
             className="w-9 h-9 rounded-full object-cover box-border"
-            style={{ border: '2px solid #F5B800' }}
+            // The default avatar is the ring-b, which already has its own gold ring; only photos get one.
+            style={isDefaultAvatar(accountObj.account?.icon) ? undefined : { border: '2px solid #F5B800' }}
             alt=""
           />
           <span
