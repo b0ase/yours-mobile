@@ -7,7 +7,7 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { walletHoldings } from '../chat/holdings';
 import { ChatApiError } from '../chat/api';
-import { kycClient, signedInClient } from '../kyc/kycWallet';
+import { signedInClient } from '../kyc/kycWallet';
 import {
   CREDITS_TERMS,
   addPending,
@@ -32,7 +32,8 @@ import {
  * Wallet tab "Credits" row (build-time insert into BsvWallet.tsx, vite.config.mobile.ts):
  * in-app $BCREDIT balance, Top up, history. Top up sends $BCREDIT to the bApp treasury with
  * the wallet's normal approval (sendBsv21), then posts the txid to bit-sign. Until bit-sign
- * has a token id + treasury configured, the row says "coming soon".
+ * has a token id + treasury configured, the row says "coming soon". The balance loads on its own:
+ * the wallet signs in to bit-sign silently with its key, so the user never signs in.
  */
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -71,8 +72,6 @@ export const CreditsRow = () => {
   const [info, setInfo] = useState<CreditsInfo | null>(null);
   const [pending, setPending] = useState<Pending>(loadPending);
   const [sheet, setSheet] = useState<'topup' | 'history' | null>(null);
-  /** No bit-sign session yet: don't sign in on page load, wait for a tap. */
-  const [signedOut, setSignedOut] = useState(false);
 
   const updatePending = (fn: (p: Pending) => Pending) =>
     setPending((p) => {
@@ -81,37 +80,30 @@ export const CreditsRow = () => {
       return next;
     });
 
-  const refresh = useCallback(
-    async (signIn = false) => {
-      if (!apiContext) return;
-      try {
-        if (!signIn && !kycClient().current) {
-          setSignedOut(true);
-          return;
-        }
-        setSignedOut(false);
-        const client = await signedInClient(apiContext);
-        setInfo(parseCreditsInfo(await client.credits()));
-        // Retry top-ups the indexer had not validated yet.
-        for (const p of loadPending()) {
-          try {
-            if (depositOutcome(200, await client.depositCredits(p.txid)) !== 'pending') {
-              updatePending((x) => removePending(x, p.txid));
-            }
-          } catch (e) {
-            // A 4xx is the server refusing this txid for good; network / 5xx stays pending.
-            const st = e instanceof ChatApiError ? e.status : 0;
-            if (st >= 400 && st < 500 && st !== 401) updatePending((x) => removePending(x, p.txid));
+  const refresh = useCallback(async () => {
+    if (!apiContext) return;
+    try {
+      // Silent: the wallet signs in with its own key, the user never sees bit-sign.
+      const client = await signedInClient(apiContext);
+      setInfo(parseCreditsInfo(await client.credits()));
+      // Retry top-ups the indexer had not validated yet.
+      for (const p of loadPending()) {
+        try {
+          if (depositOutcome(200, await client.depositCredits(p.txid)) !== 'pending') {
+            updatePending((x) => removePending(x, p.txid));
           }
+        } catch (e) {
+          // A 4xx is the server refusing this txid for good; network / 5xx stays pending.
+          const st = e instanceof ChatApiError ? e.status : 0;
+          if (st >= 400 && st < 500 && st !== 401) updatePending((x) => removePending(x, p.txid));
         }
-        setInfo(parseCreditsInfo(await client.credits()));
-      } catch (e) {
-        console.warn('[credits] read failed:', e);
-        setInfo((i) => i ?? parseCreditsInfo(null));
       }
-    },
-    [apiContext],
-  );
+      setInfo(parseCreditsInfo(await client.credits()));
+    } catch (e) {
+      console.warn('[credits] read failed:', e);
+      setInfo((i) => i ?? parseCreditsInfo(null));
+    }
+  }, [apiContext]);
 
   useEffect(() => {
     void refresh();
@@ -131,25 +123,14 @@ export const CreditsRow = () => {
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-white">Credits</div>
             <div className="text-[11px]" style={{ color: MUTED }}>
-              {signedOut
-                ? 'Sign in to bit-sign to see your balance'
-                : !info
-                  ? 'Loading…'
-                  : enabled
-                    ? `${info.balance.toLocaleString('en-US')} available${pendingCredits ? ` · ${pendingCredits} pending` : ''}`
-                    : 'Coming soon'}
+              {!info
+                ? 'Loading…'
+                : enabled
+                  ? `${info.balance.toLocaleString('en-US')} available${pendingCredits ? ` · ${pendingCredits} pending` : ''}`
+                  : 'Coming soon'}
             </div>
           </div>
-          {signedOut && (
-            <button
-              onClick={() => void refresh(true)}
-              className="rounded-xl px-3 py-1.5 text-xs font-bold"
-              style={{ background: LINE, color: '#FFFFFF' }}
-            >
-              Show
-            </button>
-          )}
-          {enabled && !signedOut && (
+          {enabled && (
             <>
               <button onClick={() => setSheet('history')} aria-label="Credit history" className="p-2">
                 <History size={18} color={MUTED} />
