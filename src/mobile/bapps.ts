@@ -1,3 +1,4 @@
+import bmintIcon from './brand/bmint-icon.png';
 import bmusicIcon from './brand/bmusic-icon.png';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
@@ -59,7 +60,7 @@ export const BAPPS: BApp[] = [
     verb: 'Design, stamp and mint tokens, currency and media on-chain',
     group: 'featured',
     status: 'live',
-    icon: 'https://www.bitcoin-mint.com/favicon.ico',
+    icon: bmintIcon,
   },
   {
     name: 'bWriter',
@@ -91,7 +92,7 @@ export const BAPPS: BApp[] = [
   { name: 'bEdu', url: 'https://bitcoin-education-psi.vercel.app', verb: 'Learn and teach courses', group: 'media', status: 'demo', source: suite('bitcoin-education') },
   // Social & money
   { name: 'bSocial', url: 'https://bitcoin-social.vercel.app', verb: 'Post and follow on Bitcoin', group: 'social', status: 'live', source: suite('bitcoin-social') },
-  { name: 'bGame', url: 'https://bitcoin-gaming.vercel.app', verb: 'Play games with real stakes', group: 'social', status: 'live', icon: 'https://bitcoin-gaming.vercel.app/favicon.ico', source: suite('bitcoin-gaming') },
+  { name: 'bGames', url: 'https://bitcoin-gaming.vercel.app', verb: 'Play games with real stakes', group: 'social', status: 'live', icon: 'https://bitcoin-gaming.vercel.app/favicon.ico', source: suite('bitcoin-gaming') },
   { name: 'bExchange', url: 'https://bitcoin-exchange-iota.vercel.app', verb: 'Trade tokens across exchanges', group: 'social', status: 'live', icon: 'https://bitcoin-exchange-iota.vercel.app/favicon.ico', source: suite('bitcoin-exchange') },
   { name: 'bMaps', url: 'https://bitcoin-maps.vercel.app', verb: 'Find places that take Bitcoin', group: 'social', status: 'live', source: suite('bitcoin-maps') },
 ];
