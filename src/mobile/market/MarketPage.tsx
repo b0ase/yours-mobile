@@ -95,11 +95,15 @@ const VIEWS: [View, string][] = [
   ['video', 'Video'],
   ['images', 'Images'],
 ];
-/** Tokens side sub-filters. Shares is KYC-gated (SharesPanel); Tickets is a placeholder. */
-type TokenFilter = 'all' | 'shares' | 'tickets';
+/**
+ * Tokens side sub-filters. bApps = bCorp and bApp share classes, investor-restricted (SharesPanel).
+ * Shares (other companies listing their own shares) and Tickets are coming-soon placeholders.
+ */
+type TokenFilter = 'all' | 'bapps' | 'shares' | 'tickets';
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = [
   ['all', 'All tokens', true],
-  ['shares', 'Shares 🔒', true],
+  ['bapps', 'bApps 🔒', true],
+  ['shares', 'Shares', false],
   ['tickets', 'Tickets', false],
 ];
 const KIND_KEY = 'bwallet.market.kind';
@@ -354,7 +358,7 @@ const MarketPage = () => {
           onClick={() => setTokenFilter(id)}
           className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
           style={{
-            background: enabled && tokenFilter === id ? '#A1FF8B' : '#17191E',
+            background: enabled && tokenFilter === id ? '#F5B800' : '#17191E',
             color: enabled ? (tokenFilter === id ? '#010101' : '#98A2B3') : '#667085',
             opacity: enabled ? 1 : 0.7,
           }}
@@ -569,28 +573,32 @@ const MarketPage = () => {
       {rooms
         ?.filter(roomSafe)
         .filter((r) => (kind === 'tokens' ? r.ref.kind === 'bsv21' : r.ref.kind === 'coll'))
-        .map((r, i) => r.ref.kind === 'bsv21' && isPersonalTokenId(r.ref.id, personalLinks) ? personalRow(r, i) : (
-          <button
-            key={r.ref.key}
-            onClick={() => void openRoom(r)}
-            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
-          >
-            <span className="w-4 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
-            <Art outpoint={r.icon} kind={r.ref.kind} collectionId={r.ref.id} />
-            <div className="min-w-0 flex-1">
-              <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{r.title}</div>
-              <div className="text-[11px] text-[#98A2B3]">
-                {r.ref.kind === 'bsv21' ? 'Token' : 'Collection'} · {r.trades} sales · {r.newListings} new listings
+        .map((r, i) =>
+          r.ref.kind === 'bsv21' && isPersonalTokenId(r.ref.id, personalLinks) ? (
+            personalRow(r, i)
+          ) : (
+            <button
+              key={r.ref.key}
+              onClick={() => void openRoom(r)}
+              className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+            >
+              <span className="w-4 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
+              <Art outpoint={r.icon} kind={r.ref.kind} collectionId={r.ref.id} />
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{r.title}</div>
+                <div className="text-[11px] text-[#98A2B3]">
+                  {r.ref.kind === 'bsv21' ? 'Token' : 'Collection'} · {r.trades} sales · {r.newListings} new listings
+                </div>
               </div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-[10px] text-[#667085]">Floor</div>
-              <div className="text-xs font-semibold" style={{ color: '#A1FF8B' }}>
-                {r.floorLabel ?? '—'}
+              <div className="text-right shrink-0">
+                <div className="text-[10px] text-[#667085]">Floor</div>
+                <div className="text-xs font-semibold" style={{ color: '#A1FF8B' }}>
+                  {r.floorLabel ?? '—'}
+                </div>
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          ),
+        )}
     </section>
   );
 
@@ -769,17 +777,21 @@ const MarketPage = () => {
         </div>
         {segment}
         {section === 'trending' && !room && (kind === 'tokens' ? tokenChips : chips)}
-        {section === 'mine'
-          ? mineView
-          : room
-            ? roomView
-            : kind === 'tokens'
-              ? tokenFilter === 'shares'
-                ? <SharesPanel />
-                : tokenList
-              : view === 'collections'
-                ? trending
-                : nftGrid}
+        {section === 'mine' ? (
+          mineView
+        ) : room ? (
+          roomView
+        ) : kind === 'tokens' ? (
+          tokenFilter === 'bapps' ? (
+            <SharesPanel />
+          ) : (
+            tokenList
+          )
+        ) : view === 'collections' ? (
+          trending
+        ) : (
+          nftGrid
+        )}
         <p className="text-[10px] text-[#667085] text-center">Listings from the 1Sat order book (api.1sat.app).</p>
       </div>
       {confirm}
