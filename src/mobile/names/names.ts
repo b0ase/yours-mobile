@@ -27,8 +27,8 @@ export type Parsed =
 
 const PAYMAIL_RE = /^([a-z0-9._+-]{1,64})@([a-z0-9-]+(\.[a-z0-9-]+)+)$/i;
 const HANDLE_RE = /^\$([a-z0-9_.-]{1,50})$/i;
-// OpNS names: lowercase letters/digits plus - and _ (dots split into sub-names).
-const OPNS_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+// OpNS names: the covenant only accepts a-z, 0-9 and - (opns.md "Character set").
+const OPNS_RE = /^[a-z0-9-]{1,64}$/i;
 
 export const HANDCASH_DOMAIN = 'handcash.io';
 
@@ -241,18 +241,34 @@ export const destinationFor = (
 };
 
 export type Availability =
-  | { status: 'taken'; name: string; owner?: string; origin: string }
+  | { status: 'taken'; name: string; owner?: string; origin: string; listing?: { outpoint: string; price: number } }
   | { status: 'available'; name: string; mineFrom?: string }
   | { status: 'invalid'; name: string; reason: string };
 
 /** Read-only OpNS availability: origin exists → taken; else the mine tree's nearest parent. */
 export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Availability> => {
   const name = raw.trim().toLowerCase().replace(/^@/, '');
-  if (!OPNS_RE.test(name)) return { status: 'invalid', name, reason: 'Letters, numbers, - and _ only' };
+  if (!OPNS_RE.test(name)) return { status: 'invalid', name, reason: 'Letters, numbers and - only' };
   const o = await tryJson(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
   if (str(o?.outpoint)) {
     const rec = await tryJson(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
-    return { status: 'taken', name, origin: o.outpoint, owner: str(rec?.owner) };
+    // For sale? The latest location carries an OrdLock listing (price in sats) while unspent.
+    const latest = await tryJson(
+      f,
+      `${SERVICES.inscriptionLatest}/${String(o.outpoint).replace('.', '_')}/latest?script=false`,
+    );
+    const price = Number(latest?.data?.list?.price);
+    const listing =
+      price > 0 && !latest?.spend && str(latest?.outpoint)
+        ? { outpoint: String(latest.outpoint).replace('_', '.'), price }
+        : undefined;
+    return {
+      status: 'taken',
+      name,
+      origin: o.outpoint,
+      owner: str(rec?.owner ?? latest?.owner),
+      ...(listing && { listing }),
+    };
   }
   const mine = await tryJson(f, `${SERVICES.opnsMine}/${encodeURIComponent(name)}`);
   return { status: 'available', name, mineFrom: str(mine?.outpoint) };
