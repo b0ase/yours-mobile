@@ -45,7 +45,7 @@ import { openDappBrowser } from '../dappBrowser';
 import { REMOTE_ACTIONS, actionLabel, postActions, type PostAction } from './sources';
 import { fileToBase64, formatBytes, txFeeSats } from '../mint/mint';
 import { PostMedia } from './FeedMedia';
-import { FEED_APP, SOURCE_REGISTRY, migrateSourceId } from './sources';
+import { FEED_APP, SOURCE_REGISTRY, migrateSourceId, textOn } from './sources';
 import { kindOf, MAX_POST_IMAGES, planAv } from './media';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
 import {
@@ -164,33 +164,41 @@ const saveSource = (v: Source | 'all') => {
 };
 
 /**
- * Source badge: the app's bundled logo (sources.ts registry) on the author row. Tappable to open
- * the original post where the source has a URL pattern. Shown as a pill: logo + app name (TWETCH, TREECHAT).
+ * Source badge: the app's bundled logo (sources.ts registry) inline on the author row, between the
+ * name and the time. Compact (14px logo + small-caps label) so it never crowds the post. Tappable
+ * to open the original post where the source has a URL pattern.
  */
 const Via = ({ post }: { post: FeedPost }) => {
   const info = SOURCE_REGISTRY[post.source] ?? SOURCE_REGISTRY.other;
   const label = sourceLabel(post.app) || info.label;
   const url = sourceUrl(post);
   const badge = (
-    <span
-      className="flex min-w-0 shrink items-center gap-1 rounded-full border py-0.5 pl-0.5 pr-2"
-      style={{ borderColor: 'rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)' }}
-    >
-      <img src={info.icon} alt="" width={16} height={16} className="h-4 w-4 shrink-0 rounded-full object-cover" />
-      <span className="truncate text-[10px] font-semibold uppercase tracking-wide" style={{ color: MUTED }}>
+    <>
+      <img
+        src={info.icon}
+        alt=""
+        width={14}
+        height={14}
+        className="h-[14px] w-[14px] shrink-0 rounded-full object-cover"
+      />
+      <span
+        className="truncate max-w-[72px] text-[9px] font-semibold uppercase leading-none tracking-wide"
+        style={{ color: MUTED }}
+      >
         {label}
       </span>
-    </span>
+    </>
   );
+  const cls = 'flex min-w-0 shrink items-center gap-1 self-center';
   if (!url)
     return (
-      <span className="flex min-w-0 shrink" title={label} aria-label={`From ${label}`}>
+      <span className={cls} title={label} aria-label={`From ${label}`}>
         {badge}
       </span>
     );
   return (
     <button
-      className="flex min-w-0 shrink items-center gap-1 p-1 -m-1"
+      className={cls}
       aria-label={`View on ${label}`}
       onClick={(e) => {
         e.stopPropagation();
@@ -202,7 +210,11 @@ const Via = ({ post }: { post: FeedPost }) => {
   );
 };
 
+/** Selected source chip colour: the source's brand colour ("All" is gold). */
+const chipColor = (id: Source | 'all') => (id === 'all' ? GOLD : (SOURCE_REGISTRY[id].color ?? GOLD));
+
 type FeedSort = 'latest' | 'locked';
+
 const SORT_OPTIONS: { id: FeedSort; label: string; hint: string; icon: ReactNode }[] = [
   { id: 'latest', label: 'Latest', hint: 'Newest posts first', icon: <Clock size={16} /> },
   { id: 'locked', label: 'Most locked', hint: 'Ranked by BSV locked behind them', icon: <Lock size={16} /> },
@@ -310,8 +322,8 @@ const Avatar = ({
 }) => {
   const [broken, setBroken] = useState(false);
   const h = hue(avatarSeed({ bapId: null, ...author }, source));
-  // Treechat exposes no public avatar API, so its authors get a per-username initial with a Treechat-green ring.
-  const ring = source === 'treechat' ? '2px solid #3fb950' : undefined;
+  // Treechat exposes no public avatar API, so its authors get a per-username initial with a Treechat-purple ring.
+  const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : undefined;
   if (author.avatar && !broken)
     return (
       <img
@@ -427,12 +439,12 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
         <Avatar author={post.author} source={post.source} />
       </button>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-1 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[14px] font-bold text-white truncate">{post.author.name}</span>
-          <span className="text-[12px] truncate" style={{ color: MUTED }}>
+          <Via post={post} />
+          <span className="text-[12px] shrink-0 whitespace-nowrap" style={{ color: MUTED }}>
             · {feedTimeLabel(post.at)}
           </span>
-          <Via post={post} />
           <button
             className="ml-auto p-1 -mr-1"
             aria-label="More"
@@ -1371,7 +1383,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
                 style={
                   source === s.id
-                    ? { background: GOLD, color: '#1a1300' }
+                    ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
                     : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
                 }
               >
