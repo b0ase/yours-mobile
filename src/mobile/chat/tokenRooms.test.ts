@@ -57,14 +57,22 @@ describe('holding parsing', () => {
     const gate = { key: `bsv21:${FILM}`, symbol: 'FILM', dec: 2, minRaw: '100' };
     expect(amountLabel('250', gate)).toBe('2.5 $FILM');
     expect(holdLine(gate)).toBe('Hold 1 $FILM to join');
-    expect(holdLine({ key: `coll:${COLL}`, symbol: 'Punks', dec: 0, minRaw: '1' })).toBe('Hold 1 item from Punks to join');
+    expect(holdLine({ key: `coll:${COLL}`, symbol: 'Punks', dec: 0, minRaw: '1' })).toBe(
+      'Hold 1 item from Punks to join',
+    );
   });
   test('gate from room metadata', () => {
     expect(gateOfRoom(filmRoom())).toEqual({ key: `bsv21:${FILM}`, symbol: 'FILM', dec: 2, minRaw: '100' });
     expect(gateOfRoom(dm)).toBeNull();
   });
   test('derivations from customInstructions', () => {
-    const ci = JSON.stringify({ id: FILM, amt: '5', protocolID: [0, 'onesat'], keyID: `${FILM}-1`, counterparty: 'self' });
+    const ci = JSON.stringify({
+      id: FILM,
+      amt: '5',
+      protocolID: [0, 'onesat'],
+      keyID: `${FILM}-1`,
+      counterparty: 'self',
+    });
     expect(derivationOf(ci)).toEqual({ protocolID: [0, 'onesat'], keyID: `${FILM}-1`, counterparty: 'self' });
     expect(derivationOf(JSON.stringify({ id: FILM, amt: '5' }))).toBeNull();
     expect(derivationOf('not json')).toBeNull();
@@ -137,7 +145,9 @@ describe('UI state from server refusals', () => {
   });
   test('invitee input', () => {
     expect(parseInvitee('$Alice')).toEqual({ handle: 'alice' });
-    expect(parseInvitee('1BoatSLRHtKNngkdXEeobR76b53LETtpyT')).toEqual({ address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' });
+    expect(parseInvitee('1BoatSLRHtKNngkdXEeobR76b53LETtpyT')).toEqual({
+      address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    });
     expect(parseInvitee('not a handle!')).toBeNull();
   });
 });

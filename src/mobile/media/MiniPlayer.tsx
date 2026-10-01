@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Music, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import { getState, next, previous, seek, stop, subscribe, toggle } from './player';
 
-const fmt = (s: number) => (isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00');
+const fmt = (s: number) =>
+  isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
 
 /** Now-playing bar above the tab bar; mounted app-wide (vite.config.mobile.ts) so it follows every tab. */
 const MiniPlayer = () => {

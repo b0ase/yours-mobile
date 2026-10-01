@@ -167,7 +167,14 @@ export const parseGateRefusal = (data: unknown): GateRefusal | null => {
 
 export const parseLookup = (data: unknown): TokenRoomLookup | null => {
   if (!data || typeof data !== 'object') return null;
-  const d = data as { key?: unknown; room?: unknown; gate?: RawGate; held_raw?: unknown; member?: unknown; personal?: unknown };
+  const d = data as {
+    key?: unknown;
+    room?: unknown;
+    gate?: RawGate;
+    held_raw?: unknown;
+    member?: unknown;
+    personal?: unknown;
+  };
   if (typeof d.key !== 'string') return null;
   const r = d.room as { ticker?: unknown; name?: unknown; members?: unknown } | null | undefined;
   return {
@@ -234,7 +241,12 @@ export function buildTokenRoomList(
     if (mine) {
       out.push({ key, holding: h, status: 'member', room: mine, gate, members: mine.party_count ?? null });
     } else if (look?.room) {
-      const room: ChatRoom = { id: look.room.ticker, ticker: look.room.ticker, name: look.room.name, party_count: look.room.members };
+      const room: ChatRoom = {
+        id: look.room.ticker,
+        ticker: look.room.ticker,
+        name: look.room.name,
+        party_count: look.room.members,
+      };
       out.push({ key, holding: h, status: look.member ? 'member' : 'join', room, gate, members: look.room.members });
     } else {
       out.push({ key, holding: h, status: 'start', room: null, gate, members: null });
@@ -282,7 +294,8 @@ export const uniqueDerivations = (list: (Derivation | null)[], cap = 25): Deriva
 };
 
 /** Must match bit-sign's addressProofMessage. */
-export const addressProofMessage = (handle: string, ts: number) => `bitcoinchat.online address proof: $${handle}: ${ts}`;
+export const addressProofMessage = (handle: string, ts: number) =>
+  `bitcoinchat.online address proof: $${handle}: ${ts}`;
 
 /** Invite input: "$alice" / "alice" → handle; a base58 address → address. */
 export const parseInvitee = (input: string): { handle: string } | { address: string } | null => {

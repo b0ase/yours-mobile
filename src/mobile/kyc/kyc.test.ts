@@ -128,7 +128,9 @@ describe('lockstep messages with bit-sign', () => {
     expect(kycRequestMessage('alice', KEY, 'T')).toBe(
       `bit-sign wallet KYC certificate\nhandle:alice\nidentity_key:${KEY}\ntimestamp:T`,
     );
-    expect(selfCertSignMessage({ handle: 'a', identityKey: 'k', certType: 'hnw', statementHash: 'h', timestamp: 't' })).toBe(
+    expect(
+      selfCertSignMessage({ handle: 'a', identityKey: 'k', certType: 'hnw', statementHash: 'h', timestamp: 't' }),
+    ).toBe(
       'bit-sign investor self-certification\nhandle:a\nidentity_key:k\ncert_type:hnw\nstatement_sha256:h\ntimestamp:t',
     );
   });
@@ -219,8 +221,8 @@ describe('share offers', () => {
     expect(l[0].transferLocked).toBe(true); // locked unless config says otherwise
   });
   test('share event message is in lockstep with bit-sign', () => {
-    expect(shareEventMessage({ handle: 'a', identityKey: 'k', kind: 'interest', offerIds: ['x', 'y'], timestamp: 't' })).toBe(
-      'bit-sign share offer event\nhandle:a\nidentity_key:k\nkind:interest\noffers:x,y\ntimestamp:t',
-    );
+    expect(
+      shareEventMessage({ handle: 'a', identityKey: 'k', kind: 'interest', offerIds: ['x', 'y'], timestamp: 't' }),
+    ).toBe('bit-sign share offer event\nhandle:a\nidentity_key:k\nkind:interest\noffers:x,y\ntimestamp:t');
   });
 });

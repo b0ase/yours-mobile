@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { categoryOf } from './classify';
-import { BUNDLED, compileKeywords, mergeBlocklists, metadataFlagsAdult, normalizeBlocklist, remoteBlocklist, SafetyFilter } from './safety';
+import {
+  BUNDLED,
+  compileKeywords,
+  mergeBlocklists,
+  metadataFlagsAdult,
+  normalizeBlocklist,
+  remoteBlocklist,
+  SafetyFilter,
+} from './safety';
 
 const f = new SafetyFilter(BUNDLED);
 const blocked = (text: string) => f.check({ texts: [text] }).blocked;
@@ -16,14 +24,37 @@ describe('categoryOf', () => {
     expect(categoryOf('IMAGE/WEBP; charset=binary')).toBe('images');
   });
   test('everything else is unclassifiable (hidden)', () => {
-    for (const t of ['text/html', 'text/plain', 'application/json', 'application/bsv-20', 'model/gltf-binary', '', null, undefined, 'image/'])
+    for (const t of [
+      'text/html',
+      'text/plain',
+      'application/json',
+      'application/bsv-20',
+      'model/gltf-binary',
+      '',
+      null,
+      undefined,
+      'image/',
+    ])
       expect(categoryOf(t)).toBeNull();
   });
 });
 
 describe('keyword matching', () => {
   test('explicit terms are blocked, case-insensitive', () => {
-    for (const t of ['NSFW drop', 'xxx', 'Porn', 'nude art', 'Nudes #3', 'OnlyFans leak', 'hentai girl', 'sex', 'Erotic', 'Adult collection', '18+ only', 'Sexy Punk'])
+    for (const t of [
+      'NSFW drop',
+      'xxx',
+      'Porn',
+      'nude art',
+      'Nudes #3',
+      'OnlyFans leak',
+      'hentai girl',
+      'sex',
+      'Erotic',
+      'Adult collection',
+      '18+ only',
+      'Sexy Punk',
+    ])
       expect(blocked(t)).toBe(true);
   });
   test('unambiguous terms match inside words', () => {
@@ -32,7 +63,19 @@ describe('keyword matching', () => {
   });
   // Decisions: whole-word matching avoids place names and ordinary words.
   test('word-boundary false positives are NOT blocked', () => {
-    for (const t of ['Essex', 'Sussex Punks', 'Middlesex', 'Wessex', 'adultery (a novel)', 'Adulting 101', 'pussycat', 'cockpit', 'Dickens', 'Sextant', 'Analysis'])
+    for (const t of [
+      'Essex',
+      'Sussex Punks',
+      'Middlesex',
+      'Wessex',
+      'adultery (a novel)',
+      'Adulting 101',
+      'pussycat',
+      'cockpit',
+      'Dickens',
+      'Sextant',
+      'Analysis',
+    ])
       expect(blocked(t)).toBe(false);
   });
   test('18+ needs its own boundary', () => {
@@ -52,18 +95,29 @@ describe('metadata flags', () => {
     expect(metadataFlagsAdult(null)).toBe(false);
   });
   test('keywords in metadata descriptions are checked', () => {
-    expect(f.check({ texts: ['Cool Cats'], map: { subTypeData: { description: 'uncensored hentai' } } }).blocked).toBe(true);
+    expect(f.check({ texts: ['Cool Cats'], map: { subTypeData: { description: 'uncensored hentai' } } }).blocked).toBe(
+      true,
+    );
   });
 });
 
 describe('blocklist ids, hidden list, allowlist', () => {
   const op = 'a'.repeat(64) + '_0';
-  const list = mergeBlocklists(BUNDLED, normalizeBlocklist({ collections: ['B'.repeat(64) + '.1'], outpoints: [op], allowCollections: ['c'.repeat(64) + '_0'] }));
+  const list = mergeBlocklists(
+    BUNDLED,
+    normalizeBlocklist({
+      collections: ['B'.repeat(64) + '.1'],
+      outpoints: [op],
+      allowCollections: ['c'.repeat(64) + '_0'],
+    }),
+  );
   const g = new SafetyFilter(list, new Set(['d'.repeat(64) + '_2']));
-  test('collection id (dot form normalised)', () => expect(g.check({ collectionId: 'b'.repeat(64) + '_1' }).reason).toBe('id'));
+  test('collection id (dot form normalised)', () =>
+    expect(g.check({ collectionId: 'b'.repeat(64) + '_1' }).reason).toBe('id'));
   test('outpoint', () => expect(g.check({ ids: [op] }).blocked).toBe(true));
   test('locally hidden (reported)', () => expect(g.check({ ids: ['d'.repeat(64) + '.2'] }).reason).toBe('hidden'));
-  test('clean item passes', () => expect(g.check({ ids: ['e'.repeat(64) + '_0'], texts: ['Bitcoin Punks'] }).blocked).toBe(false));
+  test('clean item passes', () =>
+    expect(g.check({ ids: ['e'.repeat(64) + '_0'], texts: ['Bitcoin Punks'] }).blocked).toBe(false));
   test('allowlist only affects blur', () => {
     expect(g.isAllowlisted('c'.repeat(64) + '.0')).toBe(true);
     expect(g.isAllowlisted(null)).toBe(false);

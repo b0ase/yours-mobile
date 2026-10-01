@@ -79,12 +79,13 @@ export const mergeMessages = (current: ChatMessage[], incoming: ChatMessage[]): 
     // Resolve a matching optimistic message (oldest pending first) — only the
     // first time this server row is seen, so a re-polled row can't eat a newer
     // identical pending message.
-    if (!byId.has(m.id)) for (const [key, c] of byId) {
-      if (c.pending && !c.failed && c.author_handle === m.author_handle && c.body === m.body) {
-        byId.delete(key);
-        break;
+    if (!byId.has(m.id))
+      for (const [key, c] of byId) {
+        if (c.pending && !c.failed && c.author_handle === m.author_handle && c.body === m.body) {
+          byId.delete(key);
+          break;
+        }
       }
-    }
     byId.set(m.id, { ...byId.get(m.id), ...m, pending: false, failed: false });
   }
 

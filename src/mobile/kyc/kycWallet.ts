@@ -143,7 +143,12 @@ export const checkIssuedCertificate = async (
   return c as IssuedCertificate;
 };
 
-const decrypt = (wallet: WalletInterface, keyring: Record<string, string>, fields: Record<string, string>, certifier: string) =>
+const decrypt = (
+  wallet: WalletInterface,
+  keyring: Record<string, string>,
+  fields: Record<string, string>,
+  certifier: string,
+) =>
   // MasterCertificate only calls wallet.decrypt, which WalletInterface provides.
   MasterCertificate.decryptFields(wallet as unknown as ProtoWallet, keyring, fields, certifier);
 

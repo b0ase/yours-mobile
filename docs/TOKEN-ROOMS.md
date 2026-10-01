@@ -25,11 +25,11 @@ not build a parallel one. From 1satsocial we reused the holder-check logic:
 
 Gate keys:
 
-| key | holding |
-|---|---|
-| `bsv21:<txid_vout>` | BSV-21 balance (raw units). Default min = 10^dec, i.e. 1 token |
-| `coll:<txid_vout>` | count of verified, unspent items of a 1Sat collection. Default min = 1 |
-| `bsv20:` / `spl:` / `erc20:` | existing bit-sign readers (single address), unchanged |
+| key                          | holding                                                                |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `bsv21:<txid_vout>`          | BSV-21 balance (raw units). Default min = 10^dec, i.e. 1 token         |
+| `coll:<txid_vout>`           | count of verified, unspent items of a 1Sat collection. Default min = 1 |
+| `bsv20:` / `spl:` / `erc20:` | existing bit-sign readers (single address), unchanged                  |
 
 ## Which addresses are checked
 
@@ -69,46 +69,50 @@ keeps the items that are:
 
 ## What is enforced where
 
-| where | what |
-|---|---|
-| bit-sign `lib/token-room-gate.ts` `enforceTokenGate` | the gate itself. Called by the room GET **and** by `readRoomMessages` / `postRoomMessage` (`lib/room-actions.ts`), so every read and every post re-checks the holding |
-| bit-sign `lib/ticker-rooms.ts` `isRoomMember` → `stillHolds` | the ~50 other room routes. Revokes a member who sold; `bsv21:`/`coll:` keys use the same linked-address reader |
-| bit-sign `lib/token-gate.ts` `resolveTokenGate` | creating a room (`POST token-gated`). The creator must hold at least the minimum; the symbol and decimals come from the indexer |
-| wallet `tokenRooms.ts` `buildTokenRoomList` | **display only**: which rooms to list. Never trusted for access |
+| where                                                        | what                                                                                                                                                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| bit-sign `lib/token-room-gate.ts` `enforceTokenGate`         | the gate itself. Called by the room GET **and** by `readRoomMessages` / `postRoomMessage` (`lib/room-actions.ts`), so every read and every post re-checks the holding |
+| bit-sign `lib/ticker-rooms.ts` `isRoomMember` → `stillHolds` | the ~50 other room routes. Revokes a member who sold; `bsv21:`/`coll:` keys use the same linked-address reader                                                        |
+| bit-sign `lib/token-gate.ts` `resolveTokenGate`              | creating a room (`POST token-gated`). The creator must hold at least the minimum; the symbol and decimals come from the indexer                                       |
+| wallet `tokenRooms.ts` `buildTokenRoomList`                  | **display only**: which rooms to list. Never trusted for access                                                                                                       |
 
 Gate decision (`gateDecision`, tested in `token-room-gate-selftest.mts`):
 
-| held ≥ min? | has member row? | result |
-|---|---|---|
-| yes | no | **join** (holder row + `member_joined` event) |
-| yes | yes | allow |
-| no | yes | **revoke** (`left_at` set; the register keeps the history) + 403 |
-| no | no | 403 |
-| indexer did not answer | yes | allow. An outage never evicts anyone |
-| indexer did not answer | no | 403. A newcomer is not admitted |
+| held ≥ min?            | has member row? | result                                                           |
+| ---------------------- | --------------- | ---------------------------------------------------------------- |
+| yes                    | no              | **join** (holder row + `member_joined` event)                    |
+| yes                    | yes             | allow                                                            |
+| no                     | yes             | **revoke** (`left_at` set; the register keeps the history) + 403 |
+| no                     | no              | 403                                                              |
+| indexer did not answer | yes             | allow. An outage never evicts anyone                             |
+| indexer did not answer | no              | 403. A newcomer is not admitted                                  |
 
 Holdings are cached for 60 s. A refusal is a structured 403 that the wallet renders as the locked
 screen:
 
 ```json
-{ "error": "Hold 1 $FILM to join", "token_gated": true,
+{
+  "error": "Hold 1 $FILM to join",
+  "token_gated": true,
   "gate": { "key": "bsv21:…", "symbol": "FILM", "dec": 8, "min_raw": "100000000", "min": "1" },
-  "held_raw": "0", "room": { "ticker": "FILM", "name": "…", "members": 12 } }
+  "held_raw": "0",
+  "room": { "ticker": "FILM", "name": "…", "members": 12 }
+}
 ```
 
 ## Endpoints (bit-sign, branch `feat/token-gated-rooms`)
 
 All endpoints need `Authorization: Bearer <bChat session>`.
 
-| method | path | purpose |
-|---|---|---|
-| GET | `/api/bitsign/rooms/token-gated?key=` | room (ticker, name, members), gate, your `held_raw`, `member`. Never joins anyone |
-| POST | `/api/bitsign/rooms/token-gated` `{key, name?, min?}` | create or open the token's room. `min` is in whole tokens and applies only on create |
-| PATCH | `/api/bitsign/rooms/token-gated` `{ticker, min}` | room admin changes the minimum |
-| GET / POST | `/api/bitsign/wallet/addresses` | list linked addresses, or link proven keys `{message, proofs:[{pubkey_hex, signature, role}]}` |
-| POST | `/api/bitsign/wallet/holdings` `{key:'coll:…', outpoints}` | verify and store collection items |
-| GET | `/api/bitsign/rooms/[ticker]/invite-address?handle=` | the invitee's proven receive address. Members only |
-| GET / POST | `/api/bitsign/rooms/[ticker]/messages` | unchanged shape. The token gate runs first and admits holders |
+| method     | path                                                       | purpose                                                                                        |
+| ---------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| GET        | `/api/bitsign/rooms/token-gated?key=`                      | room (ticker, name, members), gate, your `held_raw`, `member`. Never joins anyone              |
+| POST       | `/api/bitsign/rooms/token-gated` `{key, name?, min?}`      | create or open the token's room. `min` is in whole tokens and applies only on create           |
+| PATCH      | `/api/bitsign/rooms/token-gated` `{ticker, min}`           | room admin changes the minimum                                                                 |
+| GET / POST | `/api/bitsign/wallet/addresses`                            | list linked addresses, or link proven keys `{message, proofs:[{pubkey_hex, signature, role}]}` |
+| POST       | `/api/bitsign/wallet/holdings` `{key:'coll:…', outpoints}` | verify and store collection items                                                              |
+| GET        | `/api/bitsign/rooms/[ticker]/invite-address?handle=`       | the invitee's proven receive address. Members only                                             |
+| GET / POST | `/api/bitsign/rooms/[ticker]/messages`                     | unchanged shape. The token gate runs first and admits holders                                  |
 
 ## Wallet UI (mobile layer only)
 
@@ -122,6 +126,7 @@ All endpoints need `Authorization: Bearer <bChat session>`.
 
   DMs and other bChat rooms are not shown. When the list is empty it says "Buy a token in Market to
   join its room", with a Market button.
+
 - **Locked room** sheet: "Hold 1 $TICKER to join", the number of holders, and a **Buy in Market**
   button that opens that token's Market page (`chat/nav.ts`).
 - **Room header**: "$FILM · N holders · you hold X", plus **Invite**.

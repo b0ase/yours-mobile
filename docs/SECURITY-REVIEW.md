@@ -51,6 +51,7 @@ On mobile:
   `attachContext(id, window, { id, url, origin })` in `main.ts`.
 
 **What to check**
+
 - That nothing else can register a hub endpoint with the internal origin.
   - **Overlay frames:** registration goes through `window.__yoursMobile.attachFrame`,
     which only same-origin frames can reach via `window.parent`. Inline shim:
@@ -66,6 +67,7 @@ On mobile:
 ## 3. Trust boundary 2: the dApp browser
 
 **Files**
+
 - `src/mobile/dapp/provider.ts`: injected at document start. It gives the page
   your `window.CWI` (imports `inject.ts`/`cwi.ts`) and forwards `YoursRequest`
   events, as `content.ts` does.
@@ -78,17 +80,18 @@ On mobile:
 
 **Guarantees and their sources**
 
-| Property | Where |
-|---|---|
-| The origin comes from the WebView, not the page: Android `sourceOrigin`, iOS `message.frameInfo.securityOrigin`. | native `browserRequest` handlers |
-| Only the main frame can call the wallet; subframes (ads, embeds) are rejected. | Android `isMainFrame`, iOS `frameInfo.isMainFrame` + `forMainFrameOnly: true` |
-| `originator` = `new URL(origin).host`, the same derivation as `content.ts` (`location.host`). | `dappBrowser.ts` |
-| Only `isCWIEventName(type)` requests pass. | `dappBrowser.ts` |
-| Background still cross-validates `originator` against `sender.origin`, and every permission goes through your prompts. | your `background.ts` (unchanged) |
-| Replies are bound to the page that asked; after a navigation, pending replies are dropped. | `pageGeneration` (Android), `generation` + `failPending` (iOS) |
-| Only `http(s)` navigations load; `intent:`, `file:`, `javascript:` etc. are dropped. | `shouldOverrideUrlLoading` / `decidePolicyFor` |
+| Property                                                                                                               | Where                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| The origin comes from the WebView, not the page: Android `sourceOrigin`, iOS `message.frameInfo.securityOrigin`.       | native `browserRequest` handlers                                              |
+| Only the main frame can call the wallet; subframes (ads, embeds) are rejected.                                         | Android `isMainFrame`, iOS `frameInfo.isMainFrame` + `forMainFrameOnly: true` |
+| `originator` = `new URL(origin).host`, the same derivation as `content.ts` (`location.host`).                          | `dappBrowser.ts`                                                              |
+| Only `isCWIEventName(type)` requests pass.                                                                             | `dappBrowser.ts`                                                              |
+| Background still cross-validates `originator` against `sender.origin`, and every permission goes through your prompts. | your `background.ts` (unchanged)                                              |
+| Replies are bound to the page that asked; after a navigation, pending replies are dropped.                             | `pageGeneration` (Android), `generation` + `failPending` (iOS)                |
+| Only `http(s)` navigations load; `intent:`, `file:`, `javascript:` etc. are dropped.                                   | `shouldOverrideUrlLoading` / `decidePolicyFor`                                |
 
 **What to check**
+
 - Whether any CWI action is unsafe to expose even behind prompts on mobile.
 - **http origins:** the code accepts `http:`. Release builds block cleartext
   (Android default; iOS ATS with no exceptions in `Info.plist`). Debug Android
@@ -121,8 +124,8 @@ On mobile:
 The lock-screen button comes through your new optional hook,
 `src/platform.ts` → `quickUnlock`, rendered by `components/QuickUnlock.tsx`.
 
-- **Enrolment:** after a password unlock, the user opts in and the *current
-  session passKey* is sealed per account.
+- **Enrolment:** after a password unlock, the user opts in and the _current
+  session passKey_ is sealed per account.
   - iOS: `.biometryCurrentSet`, `WhenPasscodeSetThisDeviceOnly`.
   - Android: strong-biometric Keystore key, `setInvalidatedByBiometricEnrollment(true)`.
 - **Unlock:** unseal the passKey → **check it decrypts `account.encryptedKeys`**

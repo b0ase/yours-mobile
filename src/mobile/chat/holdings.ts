@@ -65,7 +65,14 @@ export async function walletHoldings(ctx: OneSatContext): Promise<Holding[]> {
     const id = normOutpoint(t.id);
     const confirmed = String(t.all?.confirmed ?? 0);
     if (!id || confirmed === '0') continue;
-    out.push({ kind: 'bsv21', id, symbol: (t.sym || id.slice(0, 6)).replace(/^\$/, ''), dec: t.dec || 0, amountRaw: confirmed, icon: t.icon ?? null });
+    out.push({
+      kind: 'bsv21',
+      id,
+      symbol: (t.sym || id.slice(0, 6)).replace(/^\$/, ''),
+      dec: t.dec || 0,
+      amountRaw: confirmed,
+      icon: t.icon ?? null,
+    });
   }
   const counts = new Map<string, number>();
   for (const o of items) {
@@ -75,7 +82,14 @@ export async function walletHoldings(ctx: OneSatContext): Promise<Holding[]> {
   const colls = await Promise.all(
     [...counts].map(async ([id, n]) => {
       const meta = await roomMeta('coll', id).catch(() => null);
-      return { kind: 'coll' as const, id, symbol: meta?.title || `Collection ${id.slice(0, 6)}`, dec: 0, amountRaw: String(n), icon: meta?.icon ?? null };
+      return {
+        kind: 'coll' as const,
+        id,
+        symbol: meta?.title || `Collection ${id.slice(0, 6)}`,
+        dec: 0,
+        amountRaw: String(n),
+        icon: meta?.icon ?? null,
+      };
     }),
   );
   return out.concat(colls);
@@ -92,7 +106,9 @@ export async function proveHoldings(ctx: OneSatContext, client: BchatClient, key
   const want = key ? parseTokenKey(key) : null;
   const [tokenOuts, itemOuts] = await Promise.all([basket(ctx, BSV21_BASKET), basket(ctx, ONESAT_BASKET)]);
   const tokenSel = tokenOuts.filter((o) => !want || (want.kind === 'bsv21' && bsv21IdOf(o) === want.id));
-  const itemSel = itemOuts.filter((o) => (want ? want.kind === 'coll' && collectionOf(o) === want.id : !!collectionOf(o)));
+  const itemSel = itemOuts.filter((o) =>
+    want ? want.kind === 'coll' && collectionOf(o) === want.id : !!collectionOf(o),
+  );
 
   const deposit: Derivation = { protocolID: ONESAT_PROTOCOL, keyID: '1sat 0', counterparty: 'self' };
   const derivations = uniqueDerivations([
@@ -109,14 +125,23 @@ export async function proveHoldings(ctx: OneSatContext, client: BchatClient, key
       const args = { protocolID: d.protocolID, keyID: d.keyID, counterparty: d.counterparty };
       const { publicKey } = await ctx.wallet.getPublicKey({ ...args, forSelf: true });
       const { signature } = await ctx.wallet.createSignature({ ...args, data });
-      proofs.push({ pubkey_hex: publicKey, signature: Utils.toHex(signature), role: d === deposit ? 'receive' : 'token' });
+      proofs.push({
+        pubkey_hex: publicKey,
+        signature: Utils.toHex(signature),
+        role: d === deposit ? 'receive' : 'token',
+      });
     } catch {
       /* a key the wallet will not sign with is skipped, not fatal */
     }
   }
   const { accepted } = proofs.length ? await client.proveAddresses(message, proofs) : { accepted: [] };
   if (want?.kind === 'coll' && itemSel.length) {
-    await client.proveItems(key!, itemSel.map((o) => o.outpoint)).catch(() => 0);
+    await client
+      .proveItems(
+        key!,
+        itemSel.map((o) => o.outpoint),
+      )
+      .catch(() => 0);
   }
   return accepted.length;
 }

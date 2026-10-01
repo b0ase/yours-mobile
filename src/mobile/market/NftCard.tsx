@@ -33,7 +33,15 @@ const Shimmer = () => <div className="absolute inset-0 animate-pulse bg-[#1d2026
  * resized WebP from the queue/cache (see thumbs.ts); falls back to the full
  * inscription hosts if the resize endpoint fails. Fills its (fixed-aspect) parent.
  */
-export const Thumb = ({ outpoint, alt = '', className = '' }: { outpoint: string; alt?: string; className?: string }) => {
+export const Thumb = ({
+  outpoint,
+  alt = '',
+  className = '',
+}: {
+  outpoint: string;
+  alt?: string;
+  className?: string;
+}) => {
   const url = thumbUrl(outpoint);
   const [ref, near] = useNearViewport<HTMLDivElement>();
   const [src, setSrc] = useState<string | null | undefined>(() => (url ? cachedThumb(url) : null));

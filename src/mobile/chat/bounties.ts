@@ -35,7 +35,8 @@ export interface PayoutSpec {
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
-const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
+const num = (v: unknown) =>
+  typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null;
 
 /** Server rows → Bounty. Only paid-on-merge bounties (payout_kind set) are shown. */
 export function parseBounties(data: unknown): Bounty[] {
@@ -81,7 +82,8 @@ export function formatRaw(raw: string, dec: number): string {
 
 export function rewardLabel(b: Bounty, token: { symbol: string; dec: number } | null): string {
   const parts: string[] = [];
-  if (b.reward_token_raw) parts.push(token ? `${formatRaw(b.reward_token_raw, token.dec)} $${token.symbol}` : `${b.reward_token_raw} tokens`);
+  if (b.reward_token_raw)
+    parts.push(token ? `${formatRaw(b.reward_token_raw, token.dec)} $${token.symbol}` : `${b.reward_token_raw} tokens`);
   if (b.reward_sats) parts.push(`${b.reward_sats.toLocaleString('en-US')} sats`);
   return parts.join(' + ') || b.reward || '—';
 }
@@ -109,7 +111,14 @@ export function parseSpec(data: unknown): PayoutSpec | null {
     const address = str(t?.address);
     if (!address) return null;
     if (t.type === 'bsv21' && str(t.tokenId) && /^[1-9]\d*$/.test(String(t.amountRaw))) {
-      transfers.push({ type: 'bsv21', tokenId: String(t.tokenId), symbol: str(t.symbol) ?? '', dec: num(t.dec) ?? 0, amountRaw: String(t.amountRaw), address });
+      transfers.push({
+        type: 'bsv21',
+        tokenId: String(t.tokenId),
+        symbol: str(t.symbol) ?? '',
+        dec: num(t.dec) ?? 0,
+        amountRaw: String(t.amountRaw),
+        address,
+      });
     } else if (t.type === 'bsv' && (num(t.sats) ?? 0) > 0) {
       transfers.push({ type: 'bsv', sats: num(t.sats)!, address });
     } else return null;
@@ -130,7 +139,10 @@ export const seenKey = (ticker: string, no: number) => `${ticker.toUpperCase()}#
 
 export function unseenForMe(ticker: string, bs: Bounty[], me: string, seen: Seen): Bounty[] {
   return bs.filter(
-    (b) => b.claimed_by === me && (b.status === 'merged' || b.status === 'paid') && seen[seenKey(ticker, b.bounty_no)] !== b.status,
+    (b) =>
+      b.claimed_by === me &&
+      (b.status === 'merged' || b.status === 'paid') &&
+      seen[seenKey(ticker, b.bounty_no)] !== b.status,
   );
 }
 

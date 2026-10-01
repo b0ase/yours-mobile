@@ -5,17 +5,12 @@ import { useTheme } from '../../hooks/useTheme';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { openDappBrowser } from '../dappBrowser';
 import { KYC_PAGE_URL } from './config';
-import {
-  investorValid,
-  kycValid,
-  PLACEHOLDER_STATEMENTS,
-  statementsFromServer,
-  type InvestorStatement,
-} from './kyc';
+import { investorValid, kycValid, PLACEHOLDER_STATEMENTS, statementsFromServer, type InvestorStatement } from './kyc';
 import { importKycCertificate, signedInClient, signInvestorStatement } from './kycWallet';
 import { useKyc } from './useKyc';
 
-const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const day = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
 /**
  * Settings → Identity → "Get verified" (KYC via bit-sign's Veriff flow, stored as a BRC-52
@@ -65,7 +60,11 @@ export const IdentityVerification = () => {
       setMsg(`Verified${s.country ? ` · ${s.country}` : ''}. Certificate stored in your wallet.`);
     } catch (e) {
       const m = e instanceof Error ? e.message : 'Import failed';
-      setMsg(/verification first|not_verified/i.test(m) ? 'bit-sign has no approved verification for you yet. Finish Veriff first.' : m);
+      setMsg(
+        /verification first|not_verified/i.test(m)
+          ? 'bit-sign has no approved verification for you yet. Finish Veriff first.'
+          : m,
+      );
     } finally {
       setBusy(false);
     }
@@ -199,8 +198,8 @@ export const IdentityVerification = () => {
                     {choice.statement}
                   </div>
                   <label className="flex items-start gap-2 text-[11px]" style={{ color: fg }}>
-                    <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} />
-                    I have read this statement and it applies to me.
+                    <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} />I have read
+                    this statement and it applies to me.
                   </label>
                   {choice.placeholder && (
                     <p className="text-[11px]" style={{ color: '#F97066' }}>

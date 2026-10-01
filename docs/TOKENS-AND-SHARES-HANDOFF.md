@@ -20,6 +20,7 @@ Base: `bwallet` branch at 689f028. Related docs: `TOKEN-ROOMS.md` (what is built
 Decided model: resellable tokens, consumed by use, room ends when supply burns out.
 
 **One abstraction: membership + meter.**
+
 - Membership: hold >= N to be in the room (built).
 - Meter: `{ unit, price, destination }`. Unit is one of seconds present, messages,
   bytes, media seconds. Message kinds (text, media, patch) carry a multiplier.
@@ -34,6 +35,7 @@ keeps talking for up to the 60 s cache.
 
 **Burn-out behaviour.** Trigger: circulating supply < membership minimum (nobody new
 can ever join). Then a per-room policy, set at creation:
+
 - media retention: `none` | `members` | `public`
 - chat on burn-out: `sealed` | `archive` (read-only) | `open` (free chat, needs a
   sat-fee or rate limit as the spam brake)
@@ -105,6 +107,7 @@ view: history, next date, per-class rows. All pieces exist (balances by address,
 batch sends, derived-key proofs from token rooms).
 
 **Public offer is the hard half, and it is company structure:**
+
 - A UK Ltd cannot offer shares to the public. Either become a plc, or the token is a
   beneficial claim on shares held by a **nominee** (how UK crowdfunding platforms
   work). Nominee stays on the register; chain is the beneficial-ownership ledger.

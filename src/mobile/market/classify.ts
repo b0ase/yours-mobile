@@ -98,7 +98,13 @@ const collectionMeta = (id: string): Promise<CollMeta> =>
 export const nftFeed = (limit = 300, onPartial?: (items: NftListing[]) => void): Promise<Feed> =>
   cached(`nftfeed:${limit}`, async () => {
     const partial: NftListing[] = [];
-    const rows = await search({ key: 'ordlock', rev: 'true', unspent: 'true', limit: String(limit), tags: 'bsv21,ordlock' });
+    const rows = await search({
+      key: 'ordlock',
+      rev: 'true',
+      unspent: 'true',
+      limit: String(limit),
+      tags: 'bsv21,ordlock',
+    });
     const stats: FeedStats = {
       scanned: rows.length,
       nft: 0,
