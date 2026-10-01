@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Ban, Bookmark, Newspaper, PlayCircle, Zap } from 'lucide-react';
+import { ArrowLeft, Ban, Bookmark, Newspaper, PlayCircle, Sparkles, Zap } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
@@ -249,6 +249,23 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           label="Video autoplay"
           description={prefs.autoplay ? 'Videos play muted as you scroll' : 'Videos wait for a tap'}
           right={<Toggle label="Video autoplay" on={prefs.autoplay} onChange={(v) => setPrefs({ autoplay: v })} />}
+        />
+        <Divider />
+        <Row
+          icon={<Sparkles size={16} />}
+          label="Animated backgrounds"
+          description={
+            prefs.animatedBackgrounds
+              ? 'Gold motion behind Wallet, Apps and Feed'
+              : 'Still images behind Wallet, Apps and Feed'
+          }
+          right={
+            <Toggle
+              label="Animated backgrounds"
+              on={prefs.animatedBackgrounds}
+              onChange={(v) => setPrefs({ animatedBackgrounds: v })}
+            />
+          }
           isLast
         />
       </Section>

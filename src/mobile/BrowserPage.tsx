@@ -14,6 +14,7 @@ import app_twetchIcon from './brand/apps/twetch.png';
 import app_tempoIcon from './brand/apps/tempo.png';
 import bgVideo from './brand/bg/liquid-gold.mp4';
 import bgPoster from './brand/bg/liquid-gold.jpg';
+import { VideoBackground } from './ui/VideoBackground';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -237,61 +238,6 @@ const readPage = () => {
   }
 };
 
-/**
- * Liquid-gold loop (site/media/liquid-gold, cropped to portrait, 360x640, ~0.6MB) under a dark
- * scrim. A still with prefers-reduced-motion; paused while the app is in the background. It sits
- * in its own non-scrolling layer, so scrolling never repaints it.
- */
-const HomeBackground = () => {
-  const reduce = useReducedMotion();
-  const video = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const v = video.current;
-    if (!v) return;
-    v.muted = true;
-    const sync = () => {
-      if (document.hidden) v.pause();
-      else v.play().catch(() => undefined);
-    };
-    sync();
-    document.addEventListener('visibilitychange', sync);
-    return () => document.removeEventListener('visibilitychange', sync);
-  }, [reduce]);
-  return (
-    <motion.div
-      aria-hidden
-      className="pointer-events-none absolute inset-0 overflow-hidden"
-      initial={{ opacity: 0, scale: reduce ? 1 : 1.08 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
-    >
-      {reduce ? (
-        <img src={bgPoster} alt="" className="h-full w-full object-cover" style={{ opacity: 0.5 }} />
-      ) : (
-        <video
-          ref={video}
-          src={bgVideo}
-          poster={bgPoster}
-          muted
-          loop
-          autoPlay
-          playsInline
-          disablePictureInPicture
-          preload="auto"
-          className="h-full w-full object-cover"
-          style={{ opacity: 0.5 }}
-        />
-      )}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: 'linear-gradient(180deg, rgba(1,1,1,0.55) 0%, rgba(1,1,1,0.68) 45%, rgba(1,1,1,0.85) 100%)',
-        }}
-      />
-    </motion.div>
-  );
-};
-
 const BrowserPage = () => {
   const reduce = useReducedMotion();
   const [address, setAddress] = useState('');
@@ -429,7 +375,7 @@ const BrowserPage = () => {
 
   return (
     <div className="relative w-full overflow-hidden" style={{ height: '100%', background: '#010101' }}>
-      <HomeBackground />
+      <VideoBackground src={bgVideo} poster={bgPoster} />
       <TopNav />
       <div className="relative flex h-full w-full flex-col pt-14">
         <div

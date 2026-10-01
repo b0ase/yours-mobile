@@ -128,6 +128,9 @@ import {
   type Follow,
 } from './store';
 import { PullToRefresh } from '../ui/PullToRefresh';
+import { VideoBackground } from '../ui/VideoBackground';
+import feedBg from '../brand/bg/feed-waves.mp4';
+import feedPoster from '../brand/bg/feed-waves.jpg';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -1342,10 +1345,11 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
 
   return (
     <div
-      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      className="isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: '#010101' }}
     >
       <PullToRefresh onRefresh={() => load(tab)} />
+      <VideoBackground src={feedBg} poster={feedPoster} scrim="dark" position="fixed" />
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}

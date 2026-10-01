@@ -20,6 +20,8 @@ export type Prefs = {
   oneClickLimit: OneClickLimit;
   /** Amount a one-click tip sends (the last amount you tipped from the tip sheet). */
   quickTip: number;
+  /** Looping video behind Apps, Wallet and Feed. Off: still image only. */
+  animatedBackgrounds: boolean;
 };
 
 export const DEFAULT_PREFS: Prefs = {
@@ -28,6 +30,7 @@ export const DEFAULT_PREFS: Prefs = {
   oneClick: false,
   oneClickLimit: 1_000,
   quickTip: 1_000,
+  animatedBackgrounds: true,
 };
 
 const KEY = 'bwallet.prefs';
@@ -47,6 +50,8 @@ export const parsePrefs = (raw: unknown): Prefs => {
       ? (limit as OneClickLimit)
       : DEFAULT_PREFS.oneClickLimit,
     quickTip: typeof tip === 'number' && Number.isFinite(tip) && tip >= 1 ? Math.floor(tip) : DEFAULT_PREFS.quickTip,
+    animatedBackgrounds:
+      typeof r.animatedBackgrounds === 'boolean' ? r.animatedBackgrounds : DEFAULT_PREFS.animatedBackgrounds,
   };
 };
 
