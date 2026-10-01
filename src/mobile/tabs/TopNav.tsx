@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMyName } from '../names/MyNameBadge';
+import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -28,7 +28,13 @@ export const TopNav = () => {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
-  const myName = useMyName(current);
+  // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
+  const names = useAccountNames(
+    current,
+    accountObj.account?.name ?? '',
+    accountObj.account?.settings?.socialProfile?.displayName ?? '',
+  );
+  const payable = names.paymail || names.handle;
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
 
@@ -83,22 +89,25 @@ export const TopNav = () => {
             className={`text-[15px] font-semibold max-w-[140px] ${ELLIPSIS}`}
             style={{ color: theme.color.global.contrast }}
           >
-            {accountObj.account?.name ?? short(current ?? '')}
+            {names.displayName || short(current ?? '')}
           </span>
           {verified && (
             <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
               <Check size={14} strokeWidth={3} />
             </span>
           )}
-          {myName && (
-            <span className={`text-xs font-semibold max-w-[110px] ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
-              {myName}
+          {payable && payable.toLowerCase() !== names.displayName.toLowerCase() && (
+            <span className={`text-xs font-semibold max-w-[130px] ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
+              · {payable}
             </span>
           )}
           <ChevronDown size={14} strokeWidth={2} color="#8E8E89" className="shrink-0" />
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="font-bold text-[17px] mr-1" style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}>
+          <span
+            className="font-bold text-[17px] mr-1"
+            style={{ fontFamily: "'Space Grotesk', sans-serif", color: '#F2F2F0' }}
+          >
             bWallet
           </span>
           <button
@@ -150,6 +159,11 @@ export const TopNav = () => {
                 {chromeStorageService.getAllAccounts().map((account) => {
                   const id = account.addresses.identityAddress;
                   const isSwitching = switchingTo === id;
+                  const rowNames = accountNamesFor(
+                    id,
+                    account.name,
+                    account.settings?.socialProfile?.displayName ?? '',
+                  );
                   return (
                     <button
                       key={id}
@@ -166,7 +180,7 @@ export const TopNav = () => {
                         <img src={account.icon} className="w-9 h-9 rounded-full object-cover" alt="" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{account.name}</div>
+                        <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{rowNames.label}</div>
                         <div className="text-[11px] font-mono text-[#98A2B3]">
                           {short(account.primaryAddress ?? id)}
                         </div>

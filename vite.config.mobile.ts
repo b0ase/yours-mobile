@@ -136,7 +136,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Obsidian token rows: raised cards (every AssetRow: BSV, MNEE, locks, BSV21).
   'src/components/AssetRow.tsx': [
-    ['className="flex items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"', 'className="flex items-center justify-between w-[92%] mx-auto px-0 py-3.5 mb-2.5 bw-card"'],
+    [
+      'className="flex items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"',
+      'className="flex items-center justify-between w-[92%] mx-auto px-0 py-3.5 mb-2.5 bw-card"',
+    ],
     [
       `        backgroundColor: theme.color.global.row,
         cursor: showPointer ? 'pointer' : 'default',
@@ -174,7 +177,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { ToggleSwitch } from '../components/ToggleSwitch';",
       "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';\nimport { IdentityVerification } from '../mobile/kyc/IdentityVerification';",
     ],
-    ['          {identityPubKey && (', '          <IdentityVerification />\n          <GetYourName />\n          {identityPubKey && ('],
+    // One flow: profile name (upstream) → "Make your name payable" (paymail / OpNS, defaulting to the profile name).
+    [
+      '          {identity.bapId && identity.isPublished && (',
+      "          <GetYourName profileName={identity.isPublished ? identity.profile.name : ''} />\n          {identity.bapId && identity.isPublished && (",
+    ],
+    ['          {identityPubKey && (', '          <IdentityVerification />\n          {identityPubKey && ('],
     // Deep links to Settings → Identity ("Get verified" / "Qualify as an investor" from Market → Shares).
     [
       "    if (query === 'storage') return 'storage';",
@@ -277,6 +285,9 @@ export default mergeConfig(
       // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
       __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
       __MARKET_REPORT_URL__: JSON.stringify(process.env.BWALLET_MARKET_REPORT_URL ?? ''),
+      // bWallet paymail (src/mobile/names/config.ts). Empty = paymail off.
+      __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? ''),
+      __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? ''),
     },
   }),
 );

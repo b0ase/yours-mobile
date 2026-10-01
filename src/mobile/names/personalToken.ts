@@ -58,7 +58,11 @@ export interface PersonalLink {
 }
 
 /** ✓ only when the token id equals the one linked to that name. Mirrors bit-sign's rule. */
-export function isVerified(link: Pick<PersonalLink, 'name' | 'tokenId'> | null | undefined, name: string, tokenId: string): boolean {
+export function isVerified(
+  link: Pick<PersonalLink, 'name' | 'tokenId'> | null | undefined,
+  name: string,
+  tokenId: string,
+): boolean {
   if (!link) return false;
   const a = normId(link.tokenId);
   const k = personalKey(name);
@@ -66,7 +70,11 @@ export function isVerified(link: Pick<PersonalLink, 'name' | 'tokenId'> | null |
 }
 
 /** "$BOASE ✓" for the linked token, "$BOASE" for a copycat with the same ticker. */
-export function tickerLabel(symbol: string, tokenId: string, links: Iterable<Pick<PersonalLink, 'name' | 'tokenId'>>): string {
+export function tickerLabel(
+  symbol: string,
+  tokenId: string,
+  links: Iterable<Pick<PersonalLink, 'name' | 'tokenId'>>,
+): string {
   const sym = (symbol || '').replace(/^\$/, '');
   for (const l of links) if (isVerified(l, sym, tokenId)) return `$${sym} ✓`;
   return `$${sym}`;
@@ -83,7 +91,14 @@ export const isPersonalTokenId = (tokenId: string, links: Iterable<Pick<Personal
 // ── on-chain MAP announcing the link (an extra 0-sat OP_RETURN on the deploy tx) ──
 
 export const personalMapFields = (name: string, ticker: string): string[] => [
-  'app', 'bWallet', 'type', 'personal-token', 'name', personalKey(name), 'ticker', ticker,
+  'app',
+  'bWallet',
+  'type',
+  'personal-token',
+  'name',
+  personalKey(name),
+  'ticker',
+  ticker,
 ];
 
 export function personalMapScript(name: string, ticker: string): LockingScript {
@@ -103,7 +118,11 @@ export function withPersonalMap(ctx: OneSatContext, name: string, ticker: string
           done = true;
           const outputs = [
             ...(args.outputs ?? []),
-            { lockingScript: personalMapScript(name, ticker).toHex(), satoshis: 0, outputDescription: 'Personal token name link (MAP)' },
+            {
+              lockingScript: personalMapScript(name, ticker).toHex(),
+              satoshis: 0,
+              outputDescription: 'Personal token name link (MAP)',
+            },
           ];
           return target.createAction({ ...args, outputs }, originator);
         };
