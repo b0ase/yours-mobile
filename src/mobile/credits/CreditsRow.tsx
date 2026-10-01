@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { sendBsv21 } from '@1sat/actions';
 import { Coins, History, X } from 'lucide-react';
@@ -42,8 +43,9 @@ const MUTED = '#98A2B3';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) =>
-  createPortal(
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => {
+  useBackClose(true, onClose);
+  return createPortal(
     <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div
         className="w-full rounded-t-3xl px-5 pt-4 max-h-[80vh] overflow-y-auto"
@@ -65,6 +67,7 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
     </div>,
     document.body,
   );
+};
 
 export const CreditsRow = () => {
   const { apiContext } = useServiceContext();

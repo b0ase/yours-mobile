@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -185,6 +186,7 @@ const SORT_OPTIONS: { id: FeedSort; label: string; hint: string; icon: ReactNode
 const SortMenu = ({ sort, onChange }: { sort: FeedSort; onChange: (s: FeedSort) => void }) => {
   const btn = useRef<HTMLButtonElement>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  useBackClose(!!at, () => setAt(null));
   const current = SORT_OPTIONS.find((o) => o.id === sort) ?? SORT_OPTIONS[0];
   const open = () => {
     const r = btn.current?.getBoundingClientRect();
@@ -300,8 +302,9 @@ const Avatar = ({ author, size = 40 }: { author: Pick<Author, 'name' | 'avatar' 
   );
 };
 
-const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) =>
-  createPortal(
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) => {
+  useBackClose(true, onClose);
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div
         className="w-full rounded-t-3xl p-4 pb-10 max-h-[85vh] overflow-y-auto"
@@ -319,10 +322,12 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
     </div>,
     document.body,
   );
+};
 
 /** Full-screen layer inside the tab (profile, thread). */
-const Layer = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) =>
-  createPortal(
+const Layer = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) => {
+  useBackClose(true, onBack);
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
@@ -337,6 +342,7 @@ const Layer = ({ title, onBack, children }: { title: string; onBack: () => void;
     </div>,
     document.body,
   );
+};
 
 type PostActions = {
   liked: Set<string>;
@@ -895,6 +901,7 @@ const LockSheet = ({
   const [blocks, setBlocks] = useState<number>(LOCK_DURATIONS[1].blocks);
   const [custom, setCustom] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  useBackClose(confirming, () => setConfirming(false));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const date = unlockDate(blocks).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBackClose } from '../backStack';
 import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personalToken';
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
@@ -165,6 +166,9 @@ const MarketPage = () => {
     name: string;
   } | null>(null);
   const [safetyRev, setSafetyRev] = useState(0);
+  useBackClose(!!pending && !busy, () => setPending(null));
+  useBackClose(!!preview, () => setPreview(null));
+  useBackClose(!!reporting, () => setReporting(null));
   const { handleSelect } = useBottomMenu();
   /** Set while the open room page is a ticket's (from the Tickets filter). */
   const [ticketPage, setTicketPage] = useState<{ ticket: Ticket; holder: boolean } | null>(null);

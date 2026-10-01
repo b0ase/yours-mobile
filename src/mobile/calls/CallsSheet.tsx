@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { useBackClose } from '../backStack';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { CallsList } from './CallsList';
@@ -7,8 +8,9 @@ import { CallsList } from './CallsList';
  * The top bar's phone button: CallsList in a bottom sheet. Portalled to <body> at z-180 so it sits above
  * the tab bar (z-100) and Chat's full-screen layer (z-60), and below an incoming CallScreen (z-200).
  */
-export const CallsSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) =>
-  createPortal(
+export const CallsSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
+  useBackClose(open, onClose);
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -42,3 +44,4 @@ export const CallsSheet = ({ open, onClose }: { open: boolean; onClose: () => vo
     </AnimatePresence>,
     document.body,
   );
+};
