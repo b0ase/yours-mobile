@@ -177,7 +177,7 @@ All endpoints need `Authorization: Bearer <bChat session>`.
 
 Settings → Identity → Get your name: "Use this name" (with "Also mint my personal token" on) runs,
 behind one SendConfirmation, the OpNS bind and a BSV-21 `deployBsv21Mint` with ticker = the name
-(e.g. `BOASE`), supply 1,000,000 by default (editable), decimals 0, icon = ring-b, all to the
+(e.g. `BOASE`), supply 1,000,000 by default (editable), decimals 0, icon = bWallet mark, all to the
 wallet. The deploy tx carries an extra 0-sat MAP output (`app bWallet type personal-token name
 boase ticker BOASE`). The wallet then opens the personal room in bit-sign
 (`POST /rooms/token-gated` with `min 1, purpose community, personal_name`), signatures only; if the

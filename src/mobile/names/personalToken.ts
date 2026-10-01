@@ -134,11 +134,11 @@ export function withPersonalMap(ctx: OneSatContext, name: string, ticker: string
   return { ...ctx, wallet } as OneSatContext;
 }
 
-/** Default icon: the gold ring-b, as an SVG data URI (used when the account has no avatar). */
-export const RING_B_ICON =
+/** Default icon: the bWallet mark (src/mobile/brand/bwallet-mark.svg), as an SVG data URI (used when the account has no avatar). */
+export const BWALLET_MARK_ICON =
   'data:image/svg+xml;base64,' +
   btoa(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="#010101" stroke="#FFD24D" stroke-width="6"/><text x="32" y="44" font-family="Arial,sans-serif" font-size="34" font-weight="700" text-anchor="middle" fill="#FFD24D">b</text></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 4 120 120"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="105"><stop offset="0" stop-color="#FFE58A"/><stop offset=".55" stop-color="#FFD24D"/><stop offset="1" stop-color="#C98F00"/></linearGradient><mask id="m"><rect x="-10" y="-10" width="140" height="140" fill="#fff"/><circle cx="60" cy="72" r="15" fill="#000"/></mask></defs><rect x="-4" y="4" width="120" height="120" fill="#000"/><g transform="translate(56 64) scale(.74) translate(-56 -64)"><g fill="url(#g)" mask="url(#m)"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="33"/></g></g></svg>',
   );
 
 // ── storage ──
