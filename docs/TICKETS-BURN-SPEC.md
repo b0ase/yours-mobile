@@ -212,3 +212,10 @@ Build once burn-on-entry exists (burns are the data). Same Twetch-style board as
 Totals come from the burn ledger (bit-sign) rather than client-side scans, so every timeframe is exact.
 
 9. **Indexing is paid by the creator at mint.** Minting a ticket token includes the 1sat-stack overlay funding (about 1,000 sats per token output) so its burns are indexed at 0-conf. The mint sheet shows this cost.
+
+10. **Speed is the product (hard requirement).** Buy a ticket, see it in the wallet, burn it and be in the room in
+    seconds — never wait for a block. Targets: ticket visible in the buyer's wallet < 2 s after purchase (the wallet
+    tracks its own unconfirmed outputs; no indexer wait); tap "Enter" → room open < 3 s (chained 0-conf: the burn may
+    spend an unconfirmed ticket). If the indexer is slower than the target, bit-sign verifies the submitted burn
+    tx/BEEF itself and grants entry provisionally, then reconciles with the indexer and the nightly re-check.
+    Every step is measured in the phase 0 mainnet test.
