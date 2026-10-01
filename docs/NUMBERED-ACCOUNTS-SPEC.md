@@ -32,23 +32,24 @@ never reused, never changed. It is the collision-free identity: no clash with Ha
   `$handle` with `#123` as a secondary badge (profile, room header, message hover). The default
   `yours-*` handles go away for new accounts: the number replaces them.
 - Paymail: `123@bwallet.space` is a guaranteed paymail for every account, served by
-  `site/lib/paymail.js` resolving the alias to the account's *current* holder identity key (so it
+  `site/lib/paymail.js` resolving the alias to the account's _current_ holder identity key (so it
   follows a sale, §3). Numeric aliases are reserved in the paymail alias rules so nobody can claim
   `123` as a name. `name@bwallet.space` remains the vanity paymail.
 
 ## 2. On-chain ownership
 
-| Option | How | Verdict |
-| --- | --- | --- |
-| A. 1Sat ordinal NFT | One inscription (1 sat) with MAP `app=bWallet type=account no=123`, plus an image (rendered `#123` card) | **Recommended.** Native to the 1Sat market, OrdLock listings already work in our Sell flow, ownership is "who holds the outpoint" which is trivial to check, cheapest to mint |
-| B. BSV-21 supply 1 | `deploy+mint` amt 1, dec 0 | Works with our existing BSV-21 code (`deployBsv21Mint`, `token-mint-proof.ts`), but indexer only tracks it once the fee address is funded, costs more, and a fungible-token model for a unique thing is a poor fit |
+| Option              | How                                                                                                      | Verdict                                                                                                                                                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A. 1Sat ordinal NFT | One inscription (1 sat) with MAP `app=bWallet type=account no=123`, plus an image (rendered `#123` card) | **Recommended.** Native to the 1Sat market, OrdLock listings already work in our Sell flow, ownership is "who holds the outpoint" which is trivial to check, cheapest to mint                                      |
+| B. BSV-21 supply 1  | `deploy+mint` amt 1, dec 0                                                                               | Works with our existing BSV-21 code (`deployBsv21Mint`, `token-mint-proof.ts`), but indexer only tracks it once the fee address is funded, costs more, and a fungible-token model for a unique thing is a poor fit |
 
 Metadata (MAP on the inscription): `app=bWallet`, `type=account`, `no=<n>`, `issuer=bit-sign`,
 `collection=bwallet-accounts`, plus an issuer signature (AIP/SIGMA by a bit-sign key) so a
 copycat inscription saying `no=123` is ignored: **only inscriptions signed by the bit-sign issuer
-key count**. The handle is *not* written into the NFT (it can change; §5).
+key count**. The handle is _not_ written into the NFT (it can change; §5).
 
 **Who mints, who pays.**
+
 - Default: **lazy mint** on first listing. Most accounts are never sold, so minting all of them
   wastes fees and indexer load. Until minted, the account is owned by its identity key as today.
 - Option: mint at creation, paid by the creator (a few sats + indexer fee). Better for "collect
@@ -75,7 +76,7 @@ bit-sign verifies the outpoint is unspent and held by that key, then re-points t
 **What moves:** account number, `$handle`, `123@`/`name@bwallet.space` paymails, rooms the account
 created (`created_by_handle` rows move with the handle rename already in `paymail-handle.ts`),
 followers / following, public post history and reputation, the personal `$NAME` token's room
-ownership *record* (not the tokens themselves).
+ownership _record_ (not the tokens themselves).
 
 **What does not move:** private messages and E2E keys (the old holder's history is deleted from
 the account view; the buyer starts with empty DMs), KYC / verified status ($401 strength resets to
@@ -83,6 +84,7 @@ the buyer's own), balances and any tokens in the seller's wallet (incl. `$NAME` 
 history, linked OAuth providers, sessions.
 
 **Anti-fraud.**
+
 - On transfer: revoke all seller sessions and API tokens, unlink seller wallet addresses from the
   account, rotate the paymail `pki` to the buyer's key.
 - Listing lock: while an OrdLock listing is open, the account is flagged "for sale" publicly;
@@ -152,6 +154,7 @@ create table account_transfers (id bigserial, account_no bigint, from_key text, 
 ```
 
 API (bit-sign):
+
 - `GET /api/accounts/:no` → number, handle, owned_since, transfer_count, listed, origin.
 - `POST /api/accounts/:no/mint-payload` → issuer-signed MAP payload (holder only).
 - `POST /api/accounts/:no/claim` → BRC-43 claim; re-points account (§3).
@@ -160,13 +163,13 @@ API (bit-sign):
 
 ## 8. Phased plan
 
-| Phase | Scope | Effort |
-| --- | --- | --- |
-| 1 | Sequence, backfill, `@123` display, `123@bwallet.space` paymail, drop `yours-*` for new accounts | 2–3 days |
-| 2 | Issuer key, mint payload, lazy mint in wallet, `account_nfts` table | 3–4 days |
-| 3 | Ownership watcher + claim + transfer (session revoke, handle/rooms move, DM wipe), cooldowns | 4–5 days |
-| 4 | Sell flow + Market "Accounts" tab, confirm copy, owned-since UI, contest freeze | 3 days |
-| 5 | Reserved / vanity auction, optional mint-at-creation | 2 days |
+| Phase | Scope                                                                                            | Effort   |
+| ----- | ------------------------------------------------------------------------------------------------ | -------- |
+| 1     | Sequence, backfill, `@123` display, `123@bwallet.space` paymail, drop `yours-*` for new accounts | 2–3 days |
+| 2     | Issuer key, mint payload, lazy mint in wallet, `account_nfts` table                              | 3–4 days |
+| 3     | Ownership watcher + claim + transfer (session revoke, handle/rooms move, DM wipe), cooldowns     | 4–5 days |
+| 4     | Sell flow + Market "Accounts" tab, confirm copy, owned-since UI, contest freeze                  | 3 days   |
+| 5     | Reserved / vanity auction, optional mint-at-creation                                             | 2 days   |
 
 ## 9. Open decisions for the owner
 
@@ -178,3 +181,11 @@ API (bit-sign):
 6. Does the personal `$NAME` room follow the account, or stay with the token holder?
 7. Theft freeze window and who adjudicates.
 8. Backfill numbering for existing HandCash-only accounts as well as wallet accounts (recommended: yes, all accounts).
+
+## Owner decisions (2 Oct 2026)
+
+- **Mint at first listing:** the account NFT is minted only when an account is first listed for sale (seller pays).
+- **Ordinal NFT:** a 1Sat ordinal 1-of-1 signed by the bit-sign issuer key (not BSV-21 supply 1).
+- **No royalty:** bCorp takes no resale royalty on account sales (resale fee 0).
+- Still open: reserved/vanity numbers, DMs on transfer, $NAME room follows account, theft freeze/disputes,
+  numbering HandCash-only accounts.
