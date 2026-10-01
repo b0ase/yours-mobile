@@ -6,10 +6,11 @@ export const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, get
 const KINDS: [WalletKind, string][] = [
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
+  ['tickets', 'Tickets'],
   ['credits', 'Credits'],
 ];
 
-/** Tokens | NFTs | Credits, styled like Market's type switch (market/MarketPage.tsx). */
+/** Tokens | NFTs | Tickets | Credits (four fit a 320px phone: smaller text and padding), styled like Market's type switch (market/MarketPage.tsx). */
 export const WalletKindSwitch = () => {
   const kind = useWalletKind();
   return (
@@ -24,7 +25,7 @@ export const WalletKindSwitch = () => {
           role="tab"
           aria-selected={kind === id}
           onClick={() => setWalletKind(id)}
-          className="flex-1 rounded-lg py-2 text-sm font-bold border-0 outline-none cursor-pointer"
+          className="flex-1 min-w-0 rounded-lg py-2 px-0.5 text-[13px] font-bold border-0 outline-none cursor-pointer"
           style={{ background: kind === id ? '#A1FF8B' : 'transparent', color: kind === id ? '#010101' : '#98A2B3' }}
         >
           {label}

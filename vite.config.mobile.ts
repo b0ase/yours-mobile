@@ -198,11 +198,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '              Tokens\n            </span>',
     ],
   ],
-  // Wallet tab: Tokens | NFTs (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
+  // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [
       "import { ManageTokens } from '../components/ManageTokens';",
-      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';",
+      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';\nimport { TicketsSection } from '../mobile/wallet/TicketsSection';",
     ],
     [
       '        {/* ── Assets section ── */}',
@@ -210,12 +210,23 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* Bottom breathing room */}',
-      '        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <MediaSection />\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <CreditsRow />\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <MediaSection />\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <TicketsSection />\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <CreditsRow />\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [
       '          className="w-full mt-6"\n        >\n          {/* Section header */}\n          <div className="flex items-center px-4 mb-2">',
       '          className="w-full"\n        >\n          {/* Section header */}\n          <div className="hidden">',
+    ],
+  ],
+  // Tokens list: tickets stay listed (sending one is an invite) but carry a "· Ticket" mark.
+  'src/components/Bsv21TokensList.tsx': [
+    [
+      "import { AssetRow } from './AssetRow';",
+      "import { AssetRow } from './AssetRow';\nimport { tokenListLabel } from '../mobile/wallet/ticketMark';",
+    ],
+    [
+      "const getTokenName = (b: Bsv21Balance): string => b.sym || 'Null';",
+      "const getTokenName = (b: Bsv21Balance): string => tokenListLabel(b.sym || 'Null', b.id);",
     ],
   ],
   // Obsidian token rows: raised cards (every AssetRow: BSV, MNEE, locks, BSV21).
