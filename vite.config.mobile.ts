@@ -204,14 +204,18 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',
       '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={null}><MobileRoutes /></Suspense>} />',
     ],
     // Media tab's now-playing bar, app-wide so audio controls follow every tab.
-    ['<UsbBackupPill />', '<UsbBackupPill />\n<Suspense fallback={null}><MiniPlayer /></Suspense>'],
+    // bWallet calls: incoming / in-call screens above every tab (mobile/calls/CallScreen).
+    [
+      '<UsbBackupPill />',
+      '<UsbBackupPill />\n<Suspense fallback={null}><MiniPlayer /></Suspense>\n<Suspense fallback={null}><CallScreen /></Suspense>',
+    ],
   ],
 };
 const mobileText = (): Plugin => ({
