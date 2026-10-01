@@ -1,4 +1,5 @@
 import { safety, type SafetyFilter } from '../market/safety';
+import { mediaSafety } from './media';
 import type { FeedPost } from './post';
 
 /**
@@ -51,11 +52,13 @@ export const addLiked = (liked: string[], txid: string): string[] => {
   return next;
 };
 
-/** Market safety filter (bundled + remote blocklist + reported) plus this device's mutes. */
+/** Market safety filter (bundled + remote blocklist + reported, incl. media refs) plus this device's mutes. */
 export function visiblePosts(posts: FeedPost[], mutes: string[], s: SafetyFilter = safety()): FeedPost[] {
   const muted = new Set(mutes);
   return posts.filter((p) => {
     if (muted.has(p.author.address) || (p.author.bapId && muted.has(p.author.bapId))) return false;
-    return !s.check({ ids: [p.txid], texts: [p.text, p.author.name] }).blocked;
+    // Media refs (outpoints / txids) and media + link URLs go through the same blocklist.
+    const m = mediaSafety(p.media ?? [], p.links ?? []);
+    return !s.check({ ids: [p.txid, ...m.ids], texts: [p.text, p.author.name, ...m.texts] }).blocked;
   });
 }

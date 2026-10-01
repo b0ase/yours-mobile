@@ -1,5 +1,20 @@
 import { OP, Script, Utils } from '@bsv/sdk';
 import { bareName } from '../names/names';
+import { FEED_APP, sourceOf, type Source } from './sources';
+import {
+  dedupeMedia,
+  isPosterName,
+  kindOf,
+  MAX_INLINE_AV_BYTES,
+  MAX_INLINE_TOTAL_BYTES,
+  MAX_POST_IMAGES,
+  mediaFromB,
+  mediaFromMap,
+  mediaFromText,
+  refToOutpoint,
+  type FeedMedia,
+  type LinkEmbed,
+} from './media';
 
 /**
  * Feed: Bitcoin Schema (bitcoinschema.org) social actions, the protocol 1satsocial,
@@ -13,7 +28,7 @@ import { bareName } from '../names/names';
  * Likes / follows are MAP-only (type like + tx, type follow + bapID). Pure helpers here
  * (build, decode, parse the bmap API, fee estimate); network + signing live in feedApi.ts.
  */
-export const FEED_APP = 'bWallet';
+export { FEED_APP } from './sources';
 export const B_PREFIX = '19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut';
 export const MAP_PREFIX = '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5';
 export const AIP_PREFIX = '15PciHG22SNLQJXMoSUaWVi7WSqc7hCfva';
@@ -30,6 +45,10 @@ export type PostImage = { bytes: number[]; mime: string; filename?: string };
 export type PostInput = {
   text: string;
   image?: PostImage | null;
+  /** Further inline B parts: images (up to MAX_POST_IMAGES), small video / audio, a video poster. */
+  media?: PostImage[];
+  /** Media inscribed as 1Sat ordinals first, referenced by outpoint (MAP media_<n> + an ordfs link). */
+  refs?: { outpoint: string; mime: string }[];
   replyTo?: string | null;
   app?: string;
   /** Treechat thread a reply belongs to; written as MAP treechat_thread_id so Treechat can place it. */
@@ -56,14 +75,31 @@ export const isThreadId = (t: string | null | undefined): t is string =>
 
 export const isTxid = (t: string | null | undefined): t is string => !!t && /^[0-9a-f]{64}$/i.test(t);
 
+/** All inline parts of a post, in B order. */
+export const inlineParts = (p: PostInput): PostImage[] => [...(p.image ? [p.image] : []), ...(p.media ?? [])];
+
 export function validatePost(p: PostInput): string | null {
   const text = p.text.trim();
-  if (!text && !p.image) return 'Write something first.';
+  const parts = inlineParts(p);
+  const refs = p.refs ?? [];
+  if (!text && !parts.length && !refs.length) return 'Write something first.';
   if (text.length > MAX_POST_CHARS) return `Keep it under ${MAX_POST_CHARS} characters.`;
-  if (p.image) {
-    if (!/^image\/(jpeg|png|gif|webp)$/i.test(p.image.mime)) return 'Images must be JPEG, PNG, GIF or WebP.';
-    if (p.image.bytes.length > MAX_INLINE_IMAGE_BYTES) return 'That image is too large to post, even after shrinking.';
+  let images = 0;
+  let total = 0;
+  for (const m of parts) {
+    const kind = kindOf(m.mime);
+    total += m.bytes.length;
+    if (kind === 'image' || /^image\//i.test(m.mime)) {
+      if (!/^image\/(jpeg|png|gif|webp)$/i.test(m.mime)) return 'Images must be JPEG, PNG, GIF or WebP.';
+      if (m.bytes.length > MAX_INLINE_IMAGE_BYTES) return 'That image is too large to post, even after shrinking.';
+      if (!isPosterName(m.filename) && ++images > MAX_POST_IMAGES) return `Up to ${MAX_POST_IMAGES} images per post.`;
+    } else if (kind === 'video' || kind === 'audio') {
+      if (m.bytes.length > MAX_INLINE_AV_BYTES) return 'That file is too large to post inline.';
+    } else return 'That file type cannot be posted.';
   }
+  if (total > MAX_INLINE_TOTAL_BYTES) return 'Too much media for one post. Remove something.';
+  if (refs.length > 4) return 'Up to 4 videos or audio files per post.';
+  for (const r of refs) if (!refToOutpoint(r.outpoint) || !kindOf(r.mime)) return 'That media reference is not valid.';
   if (p.replyTo != null && !isTxid(p.replyTo)) return 'That post id is not valid.';
   if (p.threadId != null && !isThreadId(p.threadId)) return 'That thread id is not valid.';
   return null;
@@ -74,22 +110,28 @@ export function buildPostScript(p: PostInput): Script {
   const err = validatePost(p);
   if (err) throw new Error(err);
   const s = opReturn();
-  const text = p.text.trim();
+  const refs = (p.refs ?? []).map((r) => ({ outpoint: refToOutpoint(r.outpoint)!, mime: r.mime.toLowerCase() }));
+  // Inscribed media is also linked in the text, so every client can at least open it.
+  const text = [p.text.trim(), ...refs.map((r) => `https://ordfs.network/${r.outpoint}`)].filter(Boolean).join('\n');
+  let first = true;
   if (text) {
     pushStr(s, B_PREFIX);
     pushStr(s, text);
     pushStr(s, 'text/markdown');
     pushStr(s, 'UTF-8');
+    first = false;
   }
-  if (p.image) {
-    if (text) s.writeBin([PIPE]);
+  for (const m of inlineParts(p)) {
+    if (!first) s.writeBin([PIPE]);
+    first = false;
     pushStr(s, B_PREFIX);
-    s.writeBin(p.image.bytes);
-    pushStr(s, p.image.mime);
+    s.writeBin(m.bytes);
+    pushStr(s, m.mime);
     pushStr(s, 'binary');
-    pushStr(s, p.image.filename || 'image');
+    pushStr(s, m.filename || 'image');
   }
   const kv: [string, string][] = [['type', 'post']];
+  refs.forEach((r, i) => kv.push([`media_${i}`, `${r.outpoint}|${r.mime}`]));
   if (p.replyTo) kv.push(['context', 'tx'], ['tx', p.replyTo.toLowerCase()]);
   if (p.replyTo && p.threadId) kv.push(['treechat_thread_id', p.threadId.toLowerCase()]);
   writeMap(s, kv, p.app ?? FEED_APP);
@@ -171,55 +213,18 @@ export function decodeScript(script: Script): Decoded | null {
 // ── bmap API parsing ─────────────────────────────────────────────────────────
 export type Author = { address: string; bapId: string | null; name: string; avatar: string | null };
 export type FeedImage = { src: string; mime: string };
-/** Where a post was made, from MAP `app`. Everything not ours / Treechat / Twetch is "other". */
-export type Source = 'bwallet' | 'treechat' | 'twetch' | 'other';
-export const SOURCES: { id: Source | 'all'; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'bwallet', label: 'bWallet' },
-  { id: 'treechat', label: 'Treechat' },
-  { id: 'twetch', label: 'Twetch' },
-  { id: 'other', label: 'Other' },
-];
-
-const APP_LABELS: Record<string, string> = {
-  treechat: 'Treechat',
-  treechat_staging: 'Treechat',
-  twetch: 'Twetch',
-  '1satsocial': '1satsocial',
-  '1sat.social': '1satsocial',
-  bsocial: 'bSocial',
-};
-
-export function sourceOf(app: string): Source {
-  const a = app.trim().toLowerCase();
-  if (a === FEED_APP.toLowerCase()) return 'bwallet';
-  if (a === 'treechat' || a.startsWith('treechat_')) return 'treechat';
-  if (a === 'twetch') return 'twetch';
-  return 'other';
-}
-
-/** "Treechat" for the credit line; unknown apps keep their own (trimmed) name; empty → ''. */
-export const sourceLabel = (app: string): string => {
-  const a = app.trim();
-  if (!a || sourceOf(a) === 'bwallet') return '';
-  return APP_LABELS[a.toLowerCase()] ?? a.slice(0, 24);
-};
-
-/**
- * Link to the original on the source app, where a URL pattern is known:
- * Treechat app.treechat.com/p/<thread id> (verified: redirects to /quest/<thread id>);
- * Twetch twetch.com/t/<txid> (the form Twetch users shared on-chain).
- */
-export function sourceUrl(p: Pick<FeedPost, 'source' | 'threadId' | 'txid'>): string | null {
-  if (p.source === 'treechat' && p.threadId) return `https://app.treechat.com/p/${p.threadId}`;
-  if (p.source === 'twetch') return `https://twetch.com/t/${p.txid}`;
-  return null;
-}
+// Source registry (labels, logos, original-post links) lives in sources.ts; re-exported here.
+export { SOURCES, sourceLabel, sourceOf, sourceUrl, type Source } from './sources';
 
 export type FeedPost = {
   txid: string;
   text: string;
+  /** Images only (kept for callers that predate `media`). */
   images: FeedImage[];
+  /** Every image / video / audio, in display order. */
+  media: FeedMedia[];
+  /** YouTube / Vimeo embeds and link cards from the text. */
+  links: LinkEmbed[];
   app: string;
   source: Source;
   /** Treechat thread id (MAP treechat_thread_id), else null. */
@@ -300,23 +305,32 @@ export function parseBmapPost(
   const type = asStr(map.type);
   if (type && type !== 'post' && type !== 'reply') return null;
   let text = '';
-  const images: FeedImage[] = [];
-  for (const b of asArr(d.B).map(asRec)) {
-    const mime = (asStr(b['content-type']) || asStr(b.mediaType)).toLowerCase();
-    const content = asStr(b.content);
-    if (!content) continue;
-    if (mime.startsWith('text/')) {
-      if (!text) text = content;
-    } else if (/^image\/(jpeg|png|gif|webp)$/.test(mime)) {
-      if (/^[A-Za-z0-9+/=\s]+$/.test(content) && content.length > 16)
-        images.push({ src: `data:${mime};base64,${content.replace(/\s/g, '')}`, mime });
-      else {
-        const u = mediaUrl(content);
-        if (u) images.push({ src: u, mime });
+  const fromB: FeedMedia[] = [];
+  const posters: string[] = [];
+  asArr(d.B)
+    .map(asRec)
+    .forEach((b, i) => {
+      const mime = (asStr(b['content-type']) || asStr(b.mediaType)).toLowerCase();
+      const content = asStr(b.content);
+      if (mime.startsWith('text/')) {
+        if (!text && content) text = content;
+        return;
       }
-    }
-  }
-  if (!text && !images.length) return null;
+      const m = mediaFromB({ mime, content, filename: asStr(b.filename) }, txid, i);
+      if (!m) return;
+      if (m.kind === 'image' && isPosterName(asStr(b.filename))) posters.push(m.thumb ?? m.src);
+      else fromB.push(m);
+    });
+  // Twetch keeps the text in MAP comment when the B part is media (literal "null" when none).
+  const comment = asStr(map.comment);
+  if (!text && comment && comment !== 'null') text = comment;
+  const fromText = mediaFromText(text);
+  const media = dedupeMedia([...fromB, ...mediaFromMap(map), ...fromText.media]);
+  const video = media.find((m) => m.kind === 'video');
+  if (video && posters[0]) video.poster = posters[0];
+  text = fromText.text;
+  if (!text && !media.length) return null;
+  const images: FeedImage[] = media.filter((m) => m.kind === 'image').map((m) => ({ src: m.src, mime: m.mime }));
   const ctx = asStr(map.context);
   const app = asStr(map.app);
   const source = sourceOf(app);
@@ -343,6 +357,8 @@ export function parseBmapPost(
     txid: txid.toLowerCase(),
     text: text.slice(0, MAX_POST_CHARS * 2),
     images,
+    media,
+    links: fromText.links,
     app,
     source,
     threadId: isThreadId(threadId) ? threadId.toLowerCase() : null,

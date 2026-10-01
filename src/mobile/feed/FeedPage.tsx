@@ -5,7 +5,9 @@ import {
   Coins,
   Flag,
   Heart,
+  Film,
   ImagePlus,
+  Music,
   MessageCircle,
   MoreHorizontal,
   PenLine,
@@ -16,7 +18,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { sendBsv } from '@1sat/actions';
+import { inscribe, sendBsv } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
 import { SegmentRow, SegmentTitle } from './ChatSegments';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -24,6 +26,10 @@ import { resolveImageUrl, useIdentity } from '../../hooks/useIdentity';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { openDappBrowser } from '../dappBrowser';
+import { fileToBase64, formatBytes, txFeeSats } from '../mint/mint';
+import { PostMedia } from './FeedMedia';
+import { SOURCE_REGISTRY } from './sources';
+import { kindOf, MAX_POST_IMAGES, planAv } from './media';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
 import {
   buildFollowScript,
@@ -61,8 +67,9 @@ import {
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
  * the bmap API (feedApi.ts) and written by this wallet's BAP identity key. Following / For you,
- * compose (text + optional inline image), like, reply, follow, tip, profile, report, mute.
- * Every post and image passes the market safety filter; images stay blurred until tapped.
+ * compose (text + images, video, audio), like, reply, follow, tip, profile, report, mute.
+ * Every post and media ref passes the market safety filter; syndicated images, video posters
+ * and previews stay blurred until tapped.
  */
 const GOLD = '#FFD24D';
 const PANEL = '#121316';
@@ -91,27 +98,41 @@ const saveSource = (v: Source | 'all') => {
   }
 };
 
-/** "via Treechat" credit; a link to the original where the source app has a URL pattern. */
+/**
+ * Source badge: the app's bundled logo (sources.ts registry) on the author row. Tappable to open
+ * the original post where the source has a URL pattern. Unknown apps also keep a "via X" label.
+ */
 const Via = ({ post }: { post: FeedPost }) => {
-  const label = sourceLabel(post.app);
-  if (!label) return null;
+  const info = SOURCE_REGISTRY[post.source] ?? SOURCE_REGISTRY.other;
+  const label = sourceLabel(post.app) || info.label;
   const url = sourceUrl(post);
+  const badge = (
+    <img src={info.icon} alt="" width={16} height={16} className="h-4 w-4 shrink-0 rounded-[4px] object-cover" />
+  );
+  const text =
+    post.source === 'other' && post.app.trim() ? (
+      <span className="text-[11px] truncate" style={{ color: MUTED }}>
+        via {label}
+      </span>
+    ) : null;
   if (!url)
     return (
-      <span className="text-[11px] shrink-0" style={{ color: MUTED }}>
-        via {label}
+      <span className="flex min-w-0 shrink items-center gap-1" title={label} aria-label={`From ${label}`}>
+        {badge}
+        {text}
       </span>
     );
   return (
     <button
-      className="text-[11px] shrink-0 underline decoration-dotted"
-      style={{ color: MUTED }}
+      className="flex min-w-0 shrink items-center gap-1 p-1 -m-1"
+      aria-label={`View on ${label}`}
       onClick={(e) => {
         e.stopPropagation();
         void openDappBrowser(url);
       }}
     >
-      via {label}
+      {badge}
+      {text}
     </button>
   );
 };
@@ -200,36 +221,6 @@ const Layer = ({ title, onBack, children }: { title: string; onBack: () => void;
     document.body,
   );
 
-const PostImageView = ({ src }: { src: string }) => {
-  const [shown, setShown] = useState(false);
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        setShown(true);
-      }}
-      className="relative mt-2 block w-full overflow-hidden rounded-2xl"
-      style={{ border: `1px solid ${LINE}` }}
-    >
-      <img
-        src={src}
-        alt=""
-        loading="lazy"
-        className="w-full max-h-[420px] object-cover"
-        style={shown ? undefined : { filter: 'blur(24px)' }}
-      />
-      {!shown && (
-        <span
-          className="absolute inset-0 flex items-center justify-center text-xs font-bold"
-          style={{ color: 'white' }}
-        >
-          Tap to show image
-        </span>
-      )}
-    </button>
-  );
-};
-
 type PostActions = {
   liked: Set<string>;
   onLike: (p: FeedPost) => void;
@@ -245,7 +236,8 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
   return (
     <article
       className="flex gap-3 px-4 py-3"
-      style={{ borderBottom: `1px solid ${LINE}` }}
+      // Off-screen cards skip layout / paint, which keeps long scrolls light.
+      style={{ borderBottom: `1px solid ${LINE}`, contentVisibility: 'auto', containIntrinsicSize: 'auto 320px' }}
       onClick={() => a.onOpen(post)}
     >
       <button
@@ -281,9 +273,7 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           </div>
         )}
         {post.text && <p className="text-[14px] text-white whitespace-pre-wrap break-words mt-[2px]">{post.text}</p>}
-        {post.images.slice(0, 1).map((img) => (
-          <PostImageView key={img.src.slice(0, 80)} src={img.src} />
-        ))}
+        <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bwallet'} />
         <div className="flex items-center gap-6 mt-2" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => a.onReply(post)}
@@ -334,26 +324,86 @@ const PostList = ({ posts, a, empty }: { posts: FeedPost[] | null; a: PostAction
 
 // ── composer ──────────────────────────────────────────────────────────────────
 
-const shrinkImage = async (file: File): Promise<PostImage> => {
+const shrinkImage = async (file: File | Blob, limit = MAX_INLINE_IMAGE_BYTES, edges = [1280, 1024, 800, 640]) => {
   const bmp = await createImageBitmap(file);
-  for (const [edge, q] of [
-    [1280, 0.82],
-    [1024, 0.75],
-    [800, 0.7],
-    [640, 0.6],
-  ] as const) {
-    const scale = Math.min(1, edge / Math.max(bmp.width, bmp.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', q));
-    if (blob && blob.size <= MAX_INLINE_IMAGE_BYTES) {
-      return { bytes: Array.from(new Uint8Array(await blob.arrayBuffer())), mime: 'image/jpeg', filename: 'image.jpg' };
+  try {
+    for (const edge of edges) {
+      for (const q of [0.82, 0.7, 0.6]) {
+        const scale = Math.min(1, edge / Math.max(bmp.width, bmp.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(bmp.width * scale);
+        canvas.height = Math.round(bmp.height * scale);
+        canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', q));
+        if (blob && blob.size <= limit) return blob;
+      }
     }
+  } finally {
+    bmp.close();
   }
   throw new Error('That image is too large to post, even after shrinking.');
 };
+
+const toPart = async (blob: Blob, mime: string, filename: string): Promise<PostImage> => ({
+  bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
+  mime,
+  filename,
+});
+
+/** A small JPEG of a video's first second, posted inline as the poster (filename poster.jpg). */
+const videoPoster = (file: File): Promise<PostImage | null> =>
+  new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    const done = (r: PostImage | null) => {
+      URL.revokeObjectURL(url);
+      v.removeAttribute('src');
+      v.load();
+      resolve(r);
+    };
+    const timer = setTimeout(() => done(null), 8000);
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.onloadeddata = () => {
+      v.currentTime = Math.min(1, (v.duration || 0) / 2);
+    };
+    v.onseeked = async () => {
+      clearTimeout(timer);
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 480 / Math.max(v.videoWidth, v.videoHeight, 1));
+        canvas.width = Math.max(1, Math.round(v.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(v.videoHeight * scale));
+        canvas.getContext('2d')!.drawImage(v, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.6));
+        done(blob && blob.size <= 60 * 1024 ? await toPart(blob, 'image/jpeg', 'poster.jpg') : null);
+      } catch {
+        done(null);
+      }
+    };
+    v.onerror = () => {
+      clearTimeout(timer);
+      done(null);
+    };
+    v.src = url;
+  });
+
+type Attachment = {
+  id: number;
+  kind: 'image' | 'video' | 'audio';
+  preview: string;
+  name: string;
+  bytes: number;
+  mime: string;
+  /** Inline B part (images, small AV). */
+  part?: PostImage;
+  /** Large AV: inscribed as a 1Sat ordinal before the post. */
+  file?: File;
+  poster?: PostImage | null;
+};
+
+let attachSeq = 0;
 
 const Composer = ({
   replyTo,
@@ -366,64 +416,117 @@ const Composer = ({
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const [text, setText] = useState('');
-  const [image, setImage] = useState<PostImage | null>(null);
-  const [preview, setPreview] = useState('');
+  const [items, setItems] = useState<Attachment[]>([]);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview]);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.preview)), []);
 
-  // Treechat replies point MAP tx at the thread's first post and carry its thread id.
+  const inscribed = items.filter((i) => i.file);
+  // Fee preview: the post itself, with placeholder outpoints for media still to be inscribed.
   const input = {
     text,
-    image,
+    media: items.flatMap((i) => [...(i.part ? [i.part] : []), ...(i.poster ? [i.poster] : [])]),
+    refs: inscribed.map((i) => ({ outpoint: `${'0'.repeat(64)}_0`, mime: i.mime })),
     replyTo: replyTo ? threadRoot(replyTo) : null,
     threadId: replyTo?.source === 'treechat' ? replyTo.threadId : null,
   };
   const invalid = validatePost(input);
+  const rate = chromeStorageService.getCustomFeeRate();
   const fee = useMemo(() => {
     if (invalid) return null;
     try {
-      return estimatePostFee(
-        buildPostScript(input).toBinary().length + AIP_BYTES,
-        chromeStorageService.getCustomFeeRate(),
-      );
+      const post = estimatePostFee(buildPostScript(input).toBinary().length + AIP_BYTES, rate);
+      return post + inscribed.reduce((n, i) => n + txFeeSats(i.bytes, rate), 0);
     } catch {
       return null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, image, invalid]);
+  }, [text, items, invalid, rate]);
 
-  const pick = async (file?: File) => {
-    setError('');
-    if (!file) return;
-    if (!/^image\//.test(file.type)) return setError('Pick an image.');
+  const add = async (file: File) => {
+    const kind = kindOf(file.type);
+    const preview = URL.createObjectURL(file);
+    const base = { id: ++attachSeq, preview, name: file.name || kind || 'file', mime: file.type.toLowerCase() };
     try {
-      const img = await shrinkImage(file);
-      setImage(img);
-      setPreview(URL.createObjectURL(new Blob([new Uint8Array(img.bytes)], { type: img.mime })));
+      if (/^image\//i.test(file.type)) {
+        if (items.filter((i) => i.kind === 'image').length >= MAX_POST_IMAGES)
+          throw new Error(`Up to ${MAX_POST_IMAGES} images per post.`);
+        const blob = await shrinkImage(file);
+        const part = await toPart(blob, 'image/jpeg', `image${items.length + 1}.jpg`);
+        return { ...base, kind: 'image' as const, mime: 'image/jpeg', bytes: blob.size, part };
+      }
+      const plan = planAv(file.size, file.type);
+      if (plan.mode === 'reject') throw new Error(plan.message);
+      const av = kind as 'video' | 'audio';
+      const poster = av === 'video' ? await videoPoster(file) : null;
+      if (plan.mode === 'inline')
+        return { ...base, kind: av, bytes: file.size, part: await toPart(file, base.mime, file.name || av), poster };
+      return { ...base, kind: av, bytes: file.size, file, poster };
     } catch (e) {
-      setError(getErrorMessage(e instanceof Error ? e.message : String(e)));
+      URL.revokeObjectURL(preview);
+      throw e;
     }
   };
+
+  const pick = async (files?: FileList | null) => {
+    setError('');
+    for (const f of Array.from(files ?? [])) {
+      try {
+        const a = await add(f);
+        setItems((list) => [...list, a]);
+      } catch (e) {
+        setError(getErrorMessage(e instanceof Error ? e.message : String(e)));
+      }
+    }
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const remove = (id: number) =>
+    setItems((list) => {
+      const gone = list.find((i) => i.id === id);
+      if (gone) URL.revokeObjectURL(gone.preview);
+      return list.filter((i) => i.id !== id);
+    });
 
   const send = async () => {
     setError('');
     if (invalid) return setError(invalid);
-    if (safety().check({ texts: [text] }).blocked) return setError("This can't be posted from bWallet.");
-    setBusy(true);
+    if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
+      return setError("This can't be posted from bWallet.");
     try {
+      // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
+      const refs: { outpoint: string; mime: string }[] = [];
+      for (const [n, i] of inscribed.entries()) {
+        setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
+        const res = await inscribe.execute(apiContext, {
+          base64Content: fileToBase64(await i.file!.arrayBuffer()),
+          contentType: i.mime,
+          map: { app: 'bWallet', type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
+        });
+        if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
+        refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
+      }
+      // 2. The post: text, inline parts, and the ordinals by outpoint.
+      setBusy('Posting…');
       const tags = [
         'app:bWallet',
         'type:post',
         ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
       ];
-      const txid = await publish(apiContext, buildPostScript(input), replyTo ? 'Feed reply' : 'Feed post', tags);
+      const txid = await publish(
+        apiContext,
+        buildPostScript({ ...input, refs }),
+        replyTo ? 'Feed reply' : 'Feed post',
+        tags,
+      );
       onPosted(txid);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   };
 
@@ -443,32 +546,52 @@ const Composer = ({
         className="w-full rounded-2xl p-3 text-[15px] text-white outline-none resize-none"
         style={{ background: PANEL, border: `1px solid ${LINE}` }}
       />
-      {preview && (
-        <div className="relative mt-2">
-          <img src={preview} alt="" className="w-full max-h-60 object-cover rounded-2xl" />
-          <button
-            onClick={() => {
-              setImage(null);
-              setPreview('');
-            }}
-            className="absolute top-2 right-2 rounded-full p-1"
-            style={{ background: 'rgba(0,0,0,0.7)' }}
-            aria-label="Remove image"
-          >
-            <X size={16} color="white" />
-          </button>
+      {items.length > 0 && (
+        <div className="mt-2 flex gap-2 overflow-x-auto">
+          {items.map((i) => (
+            <div
+              key={i.id}
+              className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl"
+              style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            >
+              {i.kind === 'image' ? (
+                <img src={i.preview} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center">
+                  {i.kind === 'video' ? <Film size={20} color={GOLD} /> : <Music size={20} color={GOLD} />}
+                  <span className="text-[10px] text-white">{formatBytes(i.bytes)}</span>
+                  <span className="text-[9px]" style={{ color: MUTED }}>
+                    {i.file ? '1Sat ordinal' : 'inline'}
+                  </span>
+                </div>
+              )}
+              <button
+                onClick={() => remove(i.id)}
+                className="absolute top-1 right-1 rounded-full p-[2px]"
+                style={{ background: 'rgba(0,0,0,0.7)' }}
+                aria-label="Remove attachment"
+              >
+                <X size={14} color="white" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
       <div className="flex items-center justify-between mt-3">
-        <button onClick={() => fileRef.current?.click()} className="p-2 rounded-full" aria-label="Add image">
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="p-2 rounded-full"
+          aria-label="Add photos, video or audio"
+        >
           <ImagePlus size={20} color={GOLD} />
         </button>
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          multiple
+          accept="image/*,video/mp4,video/webm,video/quicktime,audio/*"
           className="hidden"
-          onChange={(e) => void pick(e.target.files?.[0])}
+          onChange={(e) => void pick(e.target.files)}
         />
         <span className="text-[11px]" style={{ color: text.length > MAX_POST_CHARS ? RED : MUTED }}>
           {text.length}/{MAX_POST_CHARS}
@@ -477,6 +600,8 @@ const Composer = ({
       </div>
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
         Posts are permanent and public on the BSV chain, signed by your identity key.
+        {inscribed.length > 0 &&
+          ` Large video / audio is inscribed first as a 1Sat ordinal you own (${inscribed.length + 1} approvals).`}
       </p>
       {error && (
         <p className="text-xs mt-2" style={{ color: RED }}>
@@ -485,11 +610,11 @@ const Composer = ({
       )}
       <button
         onClick={() => void send()}
-        disabled={busy || !!invalid}
+        disabled={!!busy || !!invalid}
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy ? 'Posting…' : replyTo ? 'Reply' : 'Post'}
+        {busy || (replyTo ? 'Reply' : 'Post')}
       </button>
     </Sheet>
   );
@@ -650,6 +775,9 @@ export const FeedPage = ({ header }: { header: ReactNode }) => {
   };
   const report = (p: FeedPost) => {
     void reportItem({ outpoint: p.txid, name: p.author.name, reason: 'feed-post' });
+    // Hide the post's on-chain media too, wherever else it is referenced.
+    for (const ref of new Set((p.media ?? []).map((m) => m.ref).filter((r): r is string => !!r && r !== p.txid)))
+      void reportItem({ outpoint: ref, name: p.author.name, reason: 'feed-media' });
     setMore(null);
     addSnackbar('Reported. It is hidden on this device.', 'info');
   };
