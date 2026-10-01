@@ -54,7 +54,12 @@ const SettingsHub = () => {
       </div>
       <div className="w-full h-full flex flex-col items-center" style={{ paddingTop: '2.75rem' }}>
         {section === 'settings' && <Settings />}
-        {section === 'tools' && <AppsAndTools />}
+        {section === 'tools' && (
+          // A little clearance below the Settings | Tools | About switch.
+          <div className="w-full pt-6">
+            <AppsAndTools />
+          </div>
+        )}
         {section === 'about' && (
           <div className="w-full px-4 pt-20 flex flex-col gap-3">
             <div className="rounded-xl bg-[#17191E] px-4 py-3">
