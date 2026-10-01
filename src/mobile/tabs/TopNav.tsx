@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useMyName } from '../names/MyNameBadge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Download, Loader2, Plus, Settings, X } from 'lucide-react';
 import logo from '../../assets/logos/horizontal-logo.png';
@@ -27,6 +28,7 @@ export const TopNav = () => {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
+  const myName = useMyName(current);
 
   // Same as upstream TopNav.handleSwitchAccount.
   const handleSwitchAccount = async (identityAddress: string) => {
@@ -53,7 +55,10 @@ export const TopNav = () => {
   };
 
   const action = (icon: React.ReactNode, label: string, onClick: () => void) => (
-    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left active:bg-white/5">
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left active:bg-white/5"
+    >
       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2b2f36]">{icon}</span>
       <span className="text-sm font-semibold text-white">{label}</span>
     </button>
@@ -67,9 +72,17 @@ export const TopNav = () => {
       >
         <button onClick={() => setDrawer(true)} className="flex items-center gap-2 min-w-0" aria-label="Accounts">
           <img src={accountObj.account?.icon ?? activeCircle} className="w-8 h-8 rounded-full object-cover" alt="" />
-          <span className={`text-sm font-semibold max-w-[140px] ${ELLIPSIS}`} style={{ color: theme.color.global.contrast }}>
+          <span
+            className={`text-sm font-semibold max-w-[140px] ${ELLIPSIS}`}
+            style={{ color: theme.color.global.contrast }}
+          >
             {accountObj.account?.name ?? short(current ?? '')}
           </span>
+          {myName && (
+            <span className={`text-xs font-semibold max-w-[110px] ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
+              {myName}
+            </span>
+          )}
         </button>
         <div className="flex items-center gap-2">
           <ThemeBadge theme={theme} />
@@ -110,7 +123,10 @@ export const TopNav = () => {
                       key={id}
                       onClick={() => void handleSwitchAccount(id)}
                       className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left active:bg-white/5"
-                      style={{ background: id === current ? '#17191E' : undefined, opacity: switchingTo && !isSwitching ? 0.4 : 1 }}
+                      style={{
+                        background: id === current ? '#17191E' : undefined,
+                        opacity: switchingTo && !isSwitching ? 0.4 : 1,
+                      }}
                     >
                       {isSwitching ? (
                         <Loader2 size={20} className="animate-spin w-9 h-9 p-2" color="#A1FF8B" />
@@ -119,7 +135,9 @@ export const TopNav = () => {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{account.name}</div>
-                        <div className="text-[11px] font-mono text-[#98A2B3]">{short(account.primaryAddress ?? id)}</div>
+                        <div className="text-[11px] font-mono text-[#98A2B3]">
+                          {short(account.primaryAddress ?? id)}
+                        </div>
                       </div>
                       {id === current && <Check size={16} color="#A1FF8B" />}
                     </button>
