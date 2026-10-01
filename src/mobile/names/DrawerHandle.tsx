@@ -33,7 +33,7 @@ export const DrawerHandle = ({
   const name = paymail || handle;
   const roomKey = link ? tokenKey('bsv21', link.tokenId) : null;
 
-  if (!name)
+  if (!name || !link)
     return (
       <button
         type="button"
@@ -43,7 +43,7 @@ export const DrawerHandle = ({
       >
         <AtSign size={15} color="#FFD24D" />
         <span className="text-sm font-semibold" style={{ color: '#FFD24D' }}>
-          Get your $name
+          {name ? `${name} · Create your room` : 'Get your $name'}
         </span>
       </button>
     );

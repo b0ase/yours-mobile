@@ -5,7 +5,11 @@ import { GetYourName, NODE_SCRIPT_ESTIMATE, PHONE_HASHRATE, REGISTER_FEE_ESTIMAT
 import { getPaymail, setPaymail } from './accountName';
 import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAlias } from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
-import { PERSONAL_FEE_ESTIMATE_SATS } from './claimPersonal';
+import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } from './claimPersonal';
+import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
+import { getMyName } from './myName';
+import { SendConfirmation } from '../../components/SendConfirmation';
+import { useTheme } from '../../hooks/useTheme';
 import { estimateMintFee } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta } from './opnsRegister';
@@ -14,9 +18,10 @@ import { handleTitle, suggestHandle } from './handlePrompt';
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
  * from the Wallet "Get your $name" card. Step 1 claims the free paymail name@b0ase.com (signed by
- * the identity key, no transaction). Step 2 is opt-in: the on-chain OpNS name and the personal
- * $NAME token + room, both via the existing Settings flow (GetYourName), which shows every fee
- * on the standard confirmation sheet before anything is broadcast.
+ * the identity key, no transaction). Step 2, on by default: the personal $NAME token + its
+ * holder-only room (claimPersonal), after the standard confirmation sheet shows the fee.
+ * Optional: the on-chain OpNS name via the Settings flow (GetYourName), also fee-confirmed.
+ * Nothing is broadcast without a confirmation; the user can skip.
  */
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -39,6 +44,36 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const [msg, setMsg] = useState('');
   const [more, setMore] = useState(false);
   const enabled = paymailEnabled();
+  const { theme } = useTheme();
+  const [link, setLink] = useState(() => getPersonalLink(identityAddress));
+  const [withToken, setWithToken] = useState(true);
+  const [supply, setSupply] = useState(DEFAULT_SUPPLY);
+  const [confirming, setConfirming] = useState(false);
+  const [tokenMsg, setTokenMsg] = useState('');
+  useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
+  // The token is named after the claimed handle (paymail alias, else OpNS name), else what's typed.
+  const claimed = (paymail ? paymail.split('@')[0] : '') || getMyName(identityAddress);
+  const tokenName = claimed || alias;
+  const ticker = personalTicker(tokenName);
+  const supplyError = validateSupply(supply);
+
+  const mintToken = async (name = tokenName) => {
+    setConfirming(false);
+    setBusy(true);
+    setTokenMsg('');
+    try {
+      const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
+      setTokenMsg(`$${l.ticker} minted. Opening your room…`);
+      // Signatures only; a fresh token may not be indexed yet. Chat retries until it is.
+      openPersonalRoom(apiContext, identityAddress, l)
+        .then(() => setTokenMsg(`$${l.ticker} minted and your room is open. Invite = send 1 $${l.ticker}.`))
+        .catch(() => setTokenMsg(`$${l.ticker} minted. Your room opens in Chat once the token is indexed.`));
+    } catch (e) {
+      setTokenMsg(e instanceof Error ? e.message : 'Token mint failed');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Live availability, debounced.
   useEffect(() => {
@@ -66,6 +101,9 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       const pm = await claimPaymail(f, apiContext.wallet, alias, { ordAddress, name: profileName });
       setPaymail(identityAddress, pm);
       setPm(pm);
+      // Token + room is part of the flow: go straight to its fee confirmation.
+      if (withToken && !getPersonalLink(identityAddress) && personalTicker(pm.split('@')[0]) && !supplyError)
+        setConfirming(true);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
     } finally {
@@ -190,30 +228,88 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           className="flex flex-col gap-2 rounded-2xl p-4"
           style={{ background: PANEL, border: `1px solid ${BORDER}` }}
         >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-widest" style={{ color: GRAY }}>
+              Your token + room
+            </span>
+            <span className="text-[10px] font-semibold" style={{ color: GOLD }}>
+              ~{PERSONAL_FEE_ESTIMATE_SATS} sats
+            </span>
+          </div>
+          {link ? (
+            <p className="text-xs text-white">
+              <b style={{ color: GOLD }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
+              {link.roomTicker ? 'room open' : 'room opens once indexed'}.
+            </p>
+          ) : (
+            <>
+              <p className="text-[11px]" style={{ color: GRAY }}>
+                A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat room
+                only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not trading.
+                Network fee about {PERSONAL_FEE_ESTIMATE_SATS} sats; you confirm it before anything is sent.
+              </p>
+              <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
+                <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
+                Create my token and room with my handle
+              </label>
+              {withToken && (
+                <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
+                  Supply
+                  <input
+                    value={supply}
+                    inputMode="numeric"
+                    onChange={(e) => setSupply(e.target.value)}
+                    className="flex-1 rounded-lg px-2 py-1 text-xs bg-transparent outline-none text-white"
+                    style={{ border: `1px solid ${supplyError ? '#ff4444' : BORDER}` }}
+                  />
+                </label>
+              )}
+              {withToken && supplyError && (
+                <span className="text-[11px]" style={{ color: '#ff4444' }}>
+                  {supplyError}
+                </span>
+              )}
+              {withToken && claimed && (
+                <button
+                  type="button"
+                  disabled={busy || !ticker || !!supplyError}
+                  onClick={() => setConfirming(true)}
+                  className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
+                  style={{ background: GOLD, color: '#000' }}
+                >
+                  Create ${ticker ?? 'NAME'} token + room
+                </button>
+              )}
+            </>
+          )}
+          {tokenMsg && (
+            <p className="text-xs" style={{ color: GRAY }}>
+              {tokenMsg}
+            </p>
+          )}
+        </div>
+
+        <div
+          className="flex flex-col gap-2 rounded-2xl p-4"
+          style={{ background: PANEL, border: `1px solid ${BORDER}` }}
+        >
           <button
             type="button"
             onClick={() => setMore((m) => !m)}
             className="flex items-center justify-between bg-transparent border-0 p-0 cursor-pointer"
             aria-expanded={more}
           >
-            <span className="text-sm font-semibold text-white">Go on-chain (optional)</span>
+            <span className="text-sm font-semibold text-white">On-chain OpNS name (optional)</span>
             {more ? <ChevronUp size={16} color={GRAY} /> : <ChevronDown size={16} color={GRAY} />}
           </button>
-          <ul className="flex flex-col gap-1.5 text-[11px] list-none p-0 m-0" style={{ color: GRAY }}>
-            <li>
-              <b className="text-white">OpNS name</b>: mined on this phone, one transaction per new character. About{' '}
-              {perChar.toLocaleString()} sats network fee and {perCharTime} of mining per character, plus{' '}
-              {REGISTER_FEE_ESTIMATE_SATS} sats to bind it. Keep the app open while it mines.
-            </li>
-            <li>
-              <b className="text-white">Personal $NAME token + room</b>: about {PERSONAL_FEE_ESTIMATE_SATS} sats. A
-              token for access (not trading) and a chat room only holders can enter.
-            </li>
-            <li>Nothing is sent until you confirm the fee on the next sheet.</li>
-          </ul>
+          <p className="text-[11px] m-0" style={{ color: GRAY }}>
+            Mined on this phone, one transaction per new character. About {perChar.toLocaleString()} sats network fee
+            and {perCharTime} of mining per character, plus {REGISTER_FEE_ESTIMATE_SATS} sats to bind it. Keep the app
+            open while it mines. Nothing is sent until you confirm the fee.
+          </p>
           {more && (
             <div className="pt-2">
-              <GetYourName profileName={paymail ? paymail.split('@')[0] : alias || profileName} />
+              <GetYourName hidePaymail profileName={claimed || alias || profileName} />
             </div>
           )}
         </div>
@@ -223,13 +319,27 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           onClick={onClose}
           className="h-11 rounded-xl text-sm font-semibold cursor-pointer"
           style={
-            paymail
+            claimed && link
               ? { background: GOLD, color: '#000', border: 0 }
               : { background: 'transparent', color: GRAY, border: `1px solid ${BORDER}` }
           }
         >
-          {paymail ? 'Done' : 'Skip for now'}
+          {claimed && link ? 'Done' : 'Skip for now'}
         </button>
+        <SendConfirmation
+          show={confirming}
+          theme={theme}
+          lineItems={[
+            {
+              address: `New token $${ticker ?? 'NAME'} (${Number(supply || 0).toLocaleString()}, to you) + your $${ticker ?? 'NAME'} room`,
+              amount: '1 sat (kept)',
+            },
+          ]}
+          total={`~${PERSONAL_FEE_ESTIMATE_SATS.toLocaleString()} sats network fee`}
+          isProcessing={busy}
+          onConfirm={() => void mintToken()}
+          onCancel={() => setConfirming(false)}
+        />
       </div>
     </div>
   );

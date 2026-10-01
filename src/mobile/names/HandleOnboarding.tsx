@@ -4,9 +4,11 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { accountNamesFor } from './MyNameBadge';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
+import { getPersonalLink, onPersonalChange } from './personalToken';
 import {
   clearPendingPrompt,
   dismissCard,
+  handleComplete,
   getPendingPrompt,
   isCardDismissed,
   onHandlePromptChange,
@@ -17,7 +19,7 @@ import {
 /**
  * Wallet tab (build-time insert into BsvWallet.tsx):
  *  - the "Choose your handle" step after a new wallet / restore (flag set by the onboarding inserts);
- *  - otherwise a dismissible "Get your $name" card until the account has a name.
+ *  - otherwise a dismissible "Get your $name" card until the account has a handle and its room.
  */
 export const HandleOnboarding = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -27,18 +29,22 @@ export const HandleOnboarding = () => {
   const [synced, setSynced] = useState(false);
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState(() => isCardDismissed(id));
+  const [hasRoom, setHasRoom] = useState(() => !!getPersonalLink(id));
 
   useEffect(() => {
     const update = () => {
       setHasName(!!accountNamesFor(id).payable);
       setDismissed(isCardDismissed(id));
+      setHasRoom(!!getPersonalLink(id));
     };
     update();
     const a = onAccountNamesChange(update);
     const b = onHandlePromptChange(update);
+    const c = onPersonalChange(update);
     return () => {
       a();
       b();
+      c();
     };
   }, [id]);
 
@@ -68,7 +74,7 @@ export const HandleOnboarding = () => {
   };
 
   if (open) return <HandleFlow onClose={close} />;
-  if (!id || !shouldShowCard(hasName, dismissed, open)) return null;
+  if (!id || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;
   return (
     <div
       className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
@@ -85,10 +91,12 @@ export const HandleOnboarding = () => {
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-bold" style={{ color: '#FFD24D' }}>
-          Get your $name
+          {hasName ? 'Open your $name room' : 'Get your $name'}
         </div>
         <div className="text-[11px]" style={{ color: '#98A2B3' }}>
-          A free handle people can pay instead of an address.
+          {hasName
+            ? 'Your personal token and a chat room only holders can enter.'
+            : 'A free handle people can pay, plus your own chat room.'}
         </div>
       </div>
       <button
