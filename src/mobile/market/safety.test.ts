@@ -23,18 +23,14 @@ describe('categoryOf', () => {
     expect(categoryOf('image/gif')).toBe('images');
     expect(categoryOf('IMAGE/WEBP; charset=binary')).toBe('images');
   });
+  test('documents', () => {
+    for (const t of ['application/pdf', 'text/plain', 'text/markdown', 'text/html', 'application/msword'])
+      expect(categoryOf(t)).toBe('documents');
+    expect(categoryOf('application/octet-stream', { app: 'bitcoin-writer' })).toBe('documents');
+    expect(categoryOf('application/octet-stream', { app: 'other' })).toBeNull();
+  });
   test('everything else is unclassifiable (hidden)', () => {
-    for (const t of [
-      'text/html',
-      'text/plain',
-      'application/json',
-      'application/bsv-20',
-      'model/gltf-binary',
-      '',
-      null,
-      undefined,
-      'image/',
-    ])
+    for (const t of ['application/json', 'application/bsv-20', 'model/gltf-binary', '', null, undefined, 'image/'])
       expect(categoryOf(t)).toBeNull();
   });
 });

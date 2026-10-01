@@ -41,6 +41,7 @@ import { TicketsPanel, openTicketRoomInChat } from '../tickets/TicketsPanel';
 import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { PullToRefresh } from '../ui/PullToRefresh';
+import { openDappBrowser } from '../dappBrowser';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -99,6 +100,7 @@ const VIEWS: [View, string][] = [
   ['music', 'Music'],
   ['video', 'Video'],
   ['images', 'Images'],
+  ['documents', 'Documents'],
 ];
 /**
  * Tokens side sub-filters. bApps = bCorp and bApp share classes, investor-restricted (SharesPanel).
@@ -187,7 +189,13 @@ const MarketPage = () => {
         await nftFeed(300, (items) =>
           setFeed({
             items,
-            stats: { scanned: 0, nft: 0, unclassified: 0, blocked: 0, counts: { music: 0, video: 0, images: 0 } },
+            stats: {
+              scanned: 0,
+              nft: 0,
+              unclassified: 0,
+              blocked: 0,
+              counts: { music: 0, video: 0, images: 0, documents: 0 },
+            },
             partial: true,
           }),
         ),
@@ -196,7 +204,13 @@ const MarketPage = () => {
       setFeedError(e instanceof Error ? e.message : String(e));
       setFeed({
         items: [],
-        stats: { scanned: 0, nft: 0, unclassified: 0, blocked: 0, counts: { music: 0, video: 0, images: 0 } },
+        stats: {
+          scanned: 0,
+          nft: 0,
+          unclassified: 0,
+          blocked: 0,
+          counts: { music: 0, video: 0, images: 0, documents: 0 },
+        },
       });
     }
   }, []);
@@ -397,9 +411,7 @@ const MarketPage = () => {
           style={{ background: view === id ? '#A1FF8B' : '#17191E', color: view === id ? '#010101' : '#98A2B3' }}
         >
           {label}
-          {feed && (id === 'music' || id === 'video' || id === 'images')
-            ? ` ${feed.items.filter((n) => n.category === id && nftSafe(n)).length}`
-            : ''}
+          {feed && id !== 'collections' ? ` ${feed.items.filter((n) => n.category === id && nftSafe(n)).length}` : ''}
         </button>
       ))}
     </div>
@@ -434,6 +446,8 @@ const MarketPage = () => {
             item={n}
             onPlay={() => playPreview(n)}
             onOpen={() => {
+              // Documents open as-is from ORDFS in the dApp browser (no in-app viewer for PDF / Office).
+              if (n.category === 'documents') return void openDappBrowser(contentUrls(n.origin)[0]);
               if (n.category === 'video') pauseAudio();
               setPreview(n);
             }}

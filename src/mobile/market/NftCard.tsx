@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { EyeOff, Flag, Music, Play } from 'lucide-react';
+import { EyeOff, FileText, Flag, Music, Play } from 'lucide-react';
+import { documentLabel } from '../media/media';
 import { contentUrls } from './indexer';
 import { cachedThumb, loadThumb, thumbUrl } from './thumbs';
 
@@ -146,7 +147,9 @@ export type CardItem = {
   outpoint: string;
   origin: string;
   name: string;
-  category: 'music' | 'video' | 'images';
+  category: 'music' | 'video' | 'images' | 'documents';
+  /** Shown as the type badge on document tiles (PDF, TXT, DOCX...). */
+  contentType?: string;
   collectionId: string | null;
   collectionName: string | null;
   collectionIcon: string | null;
@@ -208,7 +211,20 @@ export const NftCard = ({
               <Music size={30} style={{ color: '#A1FF8B' }} />
             </div>
           ))}
-        {item.category !== 'images' && (
+        {item.category === 'documents' && (
+          // No thumbnails for documents: file icon, title and a type badge. Tap opens it via ORDFS.
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 text-center">
+            <FileText size={34} style={{ color: '#FFD24D' }} />
+            <span className="text-[11px] font-semibold text-white line-clamp-2 break-words">{item.name}</span>
+            <span
+              className="rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
+              style={{ background: '#2b2f36', color: '#FFD24D' }}
+            >
+              {documentLabel(item.contentType) ?? 'DOC'}
+            </span>
+          </div>
+        )}
+        {(item.category === 'music' || item.category === 'video') && (
           <button
             aria-label={item.category === 'music' ? 'Play preview' : 'Preview video'}
             onClick={(e) => {

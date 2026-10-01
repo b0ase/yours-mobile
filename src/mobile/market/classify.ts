@@ -1,18 +1,25 @@
 import { CONTENT_HOSTS, cached, formatSats, isOutpoint, itemInfo, search } from './indexer';
 import { safety } from './safety';
+import { documentLabel, isWriterDocument } from '../media/media';
 
 /**
  * NFT listing categories for the Market tab, by inscription content type:
- * audio/* → music, video/* → video, image/* (incl. svg, gif, webp) → images.
- * Anything else (html, json, text, unknown) is not shown — "unclassifiable is hidden".
+ * audio/* → music, video/* → video, image/* (incl. svg, gif, webp) → images, PDF / text / Markdown /
+ * HTML / RTF / Office or a bWriter MAP app → documents (media/media.ts documentLabel).
+ * Anything else (json, unknown) is not shown — "unclassifiable is hidden".
+ * The 1sat-stack listing search has no content-type filter, so this runs client-side over the feed.
  */
-export type NftCategory = 'music' | 'video' | 'images';
+export type NftCategory = 'music' | 'video' | 'images' | 'documents';
 
-export function categoryOf(contentType: string | null | undefined): NftCategory | null {
+export function categoryOf(
+  contentType: string | null | undefined,
+  map?: Record<string, unknown> | null,
+): NftCategory | null {
   const t = (contentType ?? '').split(';')[0].trim().toLowerCase();
   if (/^audio\/[a-z0-9.+-]+$/.test(t)) return 'music';
   if (/^video\/[a-z0-9.+-]+$/.test(t)) return 'video';
   if (/^image\/[a-z0-9.+-]+$/.test(t)) return 'images';
+  if (documentLabel(t) || (t && isWriterDocument(map))) return 'documents';
   return null;
 }
 
@@ -110,7 +117,7 @@ export const nftFeed = (limit = 300, onPartial?: (items: NftListing[]) => void):
       nft: 0,
       unclassified: 0,
       blocked: 0,
-      counts: { music: 0, video: 0, images: 0 },
+      counts: { music: 0, video: 0, images: 0, documents: 0 },
     };
     const seen = new Set<string>();
     const mapped = await mapLimit(rows, 16, async (r): Promise<NftListing | null> => {
@@ -122,7 +129,7 @@ export const nftFeed = (limit = 300, onPartial?: (items: NftListing[]) => void):
       const info = await itemInfo(outpoint);
       const origin = info?.origin ?? outpoint;
       const contentType = info?.contentType ?? (await headContentType(origin));
-      const category = categoryOf(contentType);
+      const category = categoryOf(contentType, info?.map);
       if (!category || !contentType) {
         stats.unclassified++;
         return null;
