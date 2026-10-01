@@ -88,56 +88,55 @@ export const TopNav = () => {
 
   return (
     <>
+      {/* Five equal slots: Accounts · Calls · b agent · Media · Settings. */}
       <div
-        className="flex items-center justify-between fixed top-0 w-full z-10 px-4 h-14"
+        className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
         style={{ backgroundColor: theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
       >
         <button
           type="button"
           onClick={() => setDrawer(true)}
-          className="w-9 h-9 -ml-1 flex items-center justify-center bg-transparent"
+          className="w-9 h-9 flex items-center justify-center bg-transparent"
           aria-label="Accounts menu"
         >
           <Menu size={22} color="#F2F2F0" />
         </button>
-        {/* The b, fixed in the centre of the bar: opens the b agent. */}
+        <button
+          type="button"
+          aria-label="Calls"
+          onClick={() => setCallsOpen(true)}
+          className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+          style={{ border: '1px solid #2A2A2C' }}
+        >
+          <Phone size={16} color="#F5B800" />
+        </button>
+        {/* The b opens the b agent. */}
         <button
           type="button"
           aria-label="b agent"
           onClick={() => navigate('/m/agent')}
-          className="absolute left-1/2 -translate-x-1/2 w-10 h-10 flex items-center justify-center bg-transparent"
+          className="w-10 h-10 flex items-center justify-center bg-transparent"
         >
           <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
         </button>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            aria-label="Media"
-            onClick={() => navigate('/m/media')}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: '1px solid #2A2A2C' }}
-          >
-            <Play size={16} color="#F5B800" fill="#F5B800" />
-          </button>
-          <button
-            type="button"
-            aria-label="Calls"
-            onClick={() => setCallsOpen(true)}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: '1px solid #2A2A2C' }}
-          >
-            <Phone size={16} color="#F5B800" />
-          </button>
-          <button
-            type="button"
-            aria-label="Settings"
-            onClick={() => go()}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: '1px solid #2A2A2C' }}
-          >
-            <Settings size={16} color="#F2F2F0" />
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label="Media"
+          onClick={() => navigate('/m/media')}
+          className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+          style={{ border: '1px solid #2A2A2C' }}
+        >
+          <Play size={16} color="#F5B800" fill="#F5B800" />
+        </button>
+        <button
+          type="button"
+          aria-label="Settings"
+          onClick={() => go()}
+          className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+          style={{ border: '1px solid #2A2A2C' }}
+        >
+          <Settings size={16} color="#F2F2F0" />
+        </button>
       </div>
 
       <AnimatePresence>

@@ -7,6 +7,7 @@ import { ChatApiError, saveSession } from '../chat/api';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { MAX_INPUT, agentRequest, parseAgentReply, type AgentMessage } from './agent';
+import { TopNav } from '../../components/TopNav';
 
 /**
  * /m/agent — the b agent, opened by the top bar's centre b. bChat's composer agent (same back
@@ -72,11 +73,10 @@ const AgentPage = () => {
   };
 
   return (
-    <div className="w-full h-full flex flex-col" style={{ background: '#010101' }}>
-      <div
-        className="flex items-center gap-2 px-2 pb-2 shrink-0"
-        style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}
-      >
+    // Bottom padding = the tab bar's height (tabs/BottomMenu.tsx, 3.75rem) so the composer sits above it.
+    <div className="w-full h-full flex flex-col" style={{ background: '#010101', paddingBottom: '3.75rem' }}>
+      <TopNav />
+      <div className="flex items-center gap-2 px-2 py-1 shrink-0" style={{ borderBottom: `1px solid ${LINE}` }}>
         <button aria-label="Back" onClick={close} className="p-2">
           <ArrowLeft size={20} color="#fff" />
         </button>
@@ -129,7 +129,7 @@ const AgentPage = () => {
 
       <form
         className="shrink-0 flex items-end gap-2 px-3 pt-2"
-        style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)', borderTop: `1px solid ${LINE}` }}
+        style={{ paddingBottom: 10, borderTop: `1px solid ${LINE}` }}
         onSubmit={(e) => {
           e.preventDefault();
           void send();
