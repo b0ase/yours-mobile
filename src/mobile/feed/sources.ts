@@ -1,4 +1,4 @@
-import bwalletIcon from '../brand/sources/bwallet.png';
+import bchatIcon from '../brand/sources/bchat.png';
 import otherIcon from '../brand/sources/other.png';
 import treechatIcon from '../brand/sources/treechat.png';
 import twetchIcon from '../brand/sources/twetch.png';
@@ -8,11 +8,11 @@ import twetchIcon from '../brand/sources/twetch.png';
  * is one entry here: how to recognise its MAP app, its label and bundled 64px logo
  * (src/mobile/brand/sources/, never hotlinked), and where its original post lives.
  */
-export type Source = 'bwallet' | 'treechat' | 'twetch' | 'other';
+export type Source = 'bchat' | 'treechat' | 'twetch' | 'other';
 
 /**
  * Per-post actions. On-chain ones are Bitcoin Schema transactions signed by the user with
- * `app=bWallet` (never as the source app). `bookmark` and `unlock` live on the source's own
+ * `app=bChat` (never as the source app). `bookmark` and `unlock` live on the source's own
  * servers (Twetch bookmarks, Twetch paid unlocks), so they open the post in the source app.
  */
 export type PostAction =
@@ -53,15 +53,22 @@ export type SourceInfo = {
   actions: SourceActions;
 };
 
-export const FEED_APP = 'bWallet';
+/**
+ * bWallet's own social posts are bChat (one network, two apps): new posts, replies, likes,
+ * locks, reposts and follows are written with MAP `app=bChat`. Posts written before the
+ * rename carry the legacy `app=bWallet`, which still reads as bChat.
+ */
+export const FEED_APP = 'bChat';
+// bchat.online is the app id the Open Rooms spec (docs/OPEN-ROOMS-SPEC.md) gives bChat's on-chain messages.
+const LEGACY_FEED_APPS = ['bchat', 'bchat.online', 'bwallet'];
 
 export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
-  bwallet: {
-    id: 'bwallet',
-    label: 'bWallet',
-    icon: bwalletIcon,
+  bchat: {
+    id: 'bchat',
+    label: 'bChat',
+    icon: bchatIcon,
     color: '#FFD24D',
-    matches: (a) => a === FEED_APP.toLowerCase(),
+    matches: (a) => LEGACY_FEED_APPS.includes(a),
     postUrl: () => null,
     actions: BASIC,
   },
@@ -101,7 +108,7 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
 };
 
 /** Match order: specific sources first, "other" last. */
-const ORDER: Source[] = ['bwallet', 'treechat', 'twetch', 'other'];
+const ORDER: Source[] = ['bchat', 'treechat', 'twetch', 'other'];
 
 export const SOURCES: { id: Source | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -115,6 +122,9 @@ const APP_LABELS: Record<string, string> = {
   bsocial: 'bSocial',
 };
 
+/** A persisted source-filter value, with the pre-rename 'bwallet' id read as 'bchat'. */
+export const migrateSourceId = (v: string | null): string | null => (v === 'bwallet' ? 'bchat' : v);
+
 export function sourceOf(app: string): Source {
   const a = app.trim().toLowerCase();
   return ORDER.find((id) => id !== 'other' && SOURCE_REGISTRY[id].matches(a)) ?? 'other';
@@ -126,7 +136,7 @@ export const sourceInfo = (app: string): SourceInfo => SOURCE_REGISTRY[sourceOf(
 export const sourceLabel = (app: string): string => {
   const a = app.trim();
   const s = sourceOf(a);
-  if (!a || s === 'bwallet') return '';
+  if (!a || s === 'bchat') return '';
   if (s !== 'other') return SOURCE_REGISTRY[s].label;
   return APP_LABELS[a.toLowerCase()] ?? a.slice(0, 24);
 };

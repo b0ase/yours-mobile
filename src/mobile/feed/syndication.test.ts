@@ -45,7 +45,7 @@ const p = (doc: unknown) => parseBmapPost(doc)!;
 
 describe('source app', () => {
   test('sourceOf / sourceLabel from MAP app', () => {
-    expect(sourceOf('bWallet')).toBe('bwallet');
+    expect(sourceOf('bWallet')).toBe('bchat');
     expect(sourceOf('treechat')).toBe('treechat');
     expect(sourceOf('treechat_staging')).toBe('treechat');
     expect(sourceOf('twetch')).toBe('twetch');
@@ -155,11 +155,11 @@ describe('source filter', () => {
 describe('Treechat reply interop', () => {
   test('reply carries context tx (root) + treechat_thread_id, app stays bWallet', () => {
     const d = decodeScript(buildPostScript({ text: 'from bWallet', replyTo: tx(1), threadId: THREAD.toUpperCase() }))!;
-    expect(d.MAP).toEqual({ app: 'bWallet', type: 'post', context: 'tx', tx: tx(1), treechat_thread_id: THREAD });
+    expect(d.MAP).toEqual({ app: 'bChat', type: 'post', context: 'tx', tx: tx(1), treechat_thread_id: THREAD });
   });
   test('thread id needs a reply and a UUID', () => {
     expect(decodeScript(buildPostScript({ text: 'x', threadId: THREAD }))!.MAP).toEqual({
-      app: 'bWallet',
+      app: 'bChat',
       type: 'post',
     });
     expect(validatePost({ text: 'x', replyTo: tx(1), threadId: 'nope' })).toMatch(/thread/);

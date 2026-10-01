@@ -22,7 +22,7 @@ import {
  *
  *   OP_FALSE OP_RETURN
  *     B   <text> text/markdown UTF-8 [| B <image bytes> image/jpeg binary <filename>]
- *   | MAP SET app bWallet type post [context tx tx <parent txid>]
+ *   | MAP SET app bChat type post [context tx tx <parent txid>]
  *   | AIP BITCOIN_ECDSA <address> <sig>          (appended by @1sat/actions applyBapAip)
  *
  * Likes / follows are MAP-only (type like + tx, type follow + bapID). Pure helpers here
@@ -159,7 +159,7 @@ export function buildLikeScript(txid: string, app = FEED_APP, unlike = false): S
 }
 
 /**
- * Branch (repost): the Bitcoin Schema repost, `MAP SET app bWallet type repost context tx tx <txid>`.
+ * Branch (repost): the Bitcoin Schema repost, `MAP SET app bChat type repost context tx tx <txid>`.
  * Twetch's own branch is `type branch tx <txid> action twetch/branch-and-like@0.0.1`, signed by
  * Twetch's server; we share its `tx` key but always write our own app and the schema type.
  */

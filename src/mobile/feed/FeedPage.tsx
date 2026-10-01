@@ -42,7 +42,7 @@ import { openDappBrowser } from '../dappBrowser';
 import { REMOTE_ACTIONS, actionLabel, postActions, type PostAction } from './sources';
 import { fileToBase64, formatBytes, txFeeSats } from '../mint/mint';
 import { PostMedia } from './FeedMedia';
-import { SOURCE_REGISTRY } from './sources';
+import { FEED_APP, SOURCE_REGISTRY, migrateSourceId } from './sources';
 import { kindOf, MAX_POST_IMAGES, planAv } from './media';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
 import {
@@ -124,7 +124,7 @@ type Tab = 'following' | 'foryou';
 const SOURCE_KEY = 'bwallet.feed.source';
 const loadSource = (): Source | 'all' => {
   try {
-    const v = localStorage.getItem(SOURCE_KEY);
+    const v = migrateSourceId(localStorage.getItem(SOURCE_KEY));
     return SOURCES.some((s) => s.id === v) ? (v as Source | 'all') : 'all';
   } catch {
     return 'all';
@@ -425,7 +425,7 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           </div>
         )}
         {post.text && <p className="text-[14px] text-white whitespace-pre-wrap break-words mt-[2px]">{post.text}</p>}
-        <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bwallet'} />
+        <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bchat'} />
         <div className="flex items-center gap-5 mt-2" onClick={(e) => e.stopPropagation()}>
           {postActions(post).row.map((act) => {
             const cls = 'flex items-center gap-1 text-[12px]';
@@ -707,7 +707,7 @@ const Composer = ({
         const res = await inscribe.execute(apiContext, {
           base64Content: fileToBase64(await i.file!.arrayBuffer()),
           contentType: i.mime,
-          map: { app: 'bWallet', type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
+          map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
         });
         if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
         refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });

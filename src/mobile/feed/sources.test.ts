@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  FEED_APP,
   REMOTE_ACTIONS,
   SOURCE_REGISTRY,
   SOURCES,
   actionLabel,
+  migrateSourceId,
   postActions,
   sourceInfo,
   sourceLabel,
@@ -25,10 +27,10 @@ describe('source registry', () => {
       expect(s.icon).not.toMatch(/^https?:/);
       expect(typeof s.postUrl).toBe('function');
     }
-    expect(SOURCES.map((s) => s.id)).toEqual(['all', 'bwallet', 'treechat', 'twetch', 'other']);
+    expect(SOURCES.map((s) => s.id)).toEqual(['all', 'bchat', 'treechat', 'twetch', 'other']);
   });
   test('matching MAP app values', () => {
-    expect(sourceOf(' bWallet ')).toBe('bwallet');
+    expect(sourceOf(' bWallet ')).toBe('bchat');
     expect(sourceOf('treechat_staging')).toBe('treechat');
     expect(sourceOf('TWETCH')).toBe('twetch');
     expect(sourceOf('peck.agents')).toBe('other');
@@ -36,11 +38,25 @@ describe('source registry', () => {
     expect(sourceLabel('bsocial')).toBe('bSocial');
     expect(sourceLabel('bWallet')).toBe('');
   });
+  test("bChat is the wallet's own source; legacy bWallet posts read as bChat", () => {
+    expect(FEED_APP).toBe('bChat');
+    expect(sourceOf('bChat')).toBe('bchat');
+    expect(sourceOf('BCHAT')).toBe('bchat');
+    expect(sourceOf('bchat.online')).toBe('bchat');
+    expect(sourceOf('bWallet')).toBe('bchat');
+    expect(sourceLabel('bChat')).toBe('');
+    expect(sourceInfo('bChat').label).toBe('bChat');
+  });
+  test('persisted bwallet filter migrates to bchat', () => {
+    expect(migrateSourceId('bwallet')).toBe('bchat');
+    expect(migrateSourceId('twetch')).toBe('twetch');
+    expect(migrateSourceId(null)).toBeNull();
+  });
   test('original-post links', () => {
     expect(sourceUrl({ source: 'treechat', threadId: THREAD, txid: TX })).toBe(`https://app.treechat.com/p/${THREAD}`);
     expect(sourceUrl({ source: 'treechat', threadId: null, txid: TX })).toBeNull();
     expect(sourceUrl({ source: 'twetch', threadId: null, txid: TX })).toBe(`https://twetch.com/t/${TX}`);
-    expect(sourceUrl({ source: 'bwallet', threadId: null, txid: TX })).toBeNull();
+    expect(sourceUrl({ source: 'bchat', threadId: null, txid: TX })).toBeNull();
     expect(sourceUrl({ source: 'other', threadId: null, txid: TX })).toBeNull();
   });
 
@@ -62,7 +78,7 @@ describe('source registry', () => {
     expect(actionLabel('branch', 'twetch')).toBe('Branch');
   });
   test('link actions are dropped without an original-post link', () => {
-    const bw = postActions({ source: 'bwallet', threadId: null, txid: TX });
+    const bw = postActions({ source: 'bchat', threadId: null, txid: TX });
     expect(bw.row).toEqual(['reply', 'like', 'tip', 'lock']);
     expect(bw.more).toEqual(['report', 'mute']);
     const tc = postActions({ source: 'treechat', threadId: THREAD, txid: TX });

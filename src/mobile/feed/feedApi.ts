@@ -222,7 +222,7 @@ export async function lockToPost(
           satoshis: 0,
           outputDescription: 'Feed lock',
           basket: BSOCIAL_BASKET,
-          tags: ['app:bWallet', 'type:lock', `tx:${o.postTxid}`],
+          tags: [`app:${FEED_APP}`, 'type:lock', `tx:${o.postTxid}`],
         },
       ],
       options: { acceptDelayedBroadcast: false, randomizeOutputs: false },

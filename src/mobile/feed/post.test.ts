@@ -35,13 +35,13 @@ describe('buildPostScript', () => {
     expect(utf8(d.B[0].content)).toBe('gm from bWallet');
     expect(d.B[0].mime).toBe('text/markdown');
     expect(d.B[0].encoding).toBe('UTF-8');
-    expect(d.MAP).toEqual({ app: 'bWallet', type: 'post' });
+    expect(d.MAP).toEqual({ app: 'bChat', type: 'post' });
     expect(d.aip).toBeNull();
   });
 
   test('reply carries context tx', () => {
     const d = decodeScript(buildPostScript({ text: 'agreed', replyTo: TXID.toUpperCase() }))!;
-    expect(d.MAP).toEqual({ app: 'bWallet', type: 'post', context: 'tx', tx: TXID });
+    expect(d.MAP).toEqual({ app: 'bChat', type: 'post', context: 'tx', tx: TXID });
   });
 
   test('image post: second B with binary bytes', () => {
@@ -80,13 +80,13 @@ describe('like / follow', () => {
   test('like is MAP-only with tx', () => {
     const d = decodeScript(buildLikeScript(TXID))!;
     expect(d.B).toHaveLength(0);
-    expect(d.MAP).toEqual({ app: 'bWallet', type: 'like', tx: TXID });
+    expect(d.MAP).toEqual({ app: 'bChat', type: 'like', tx: TXID });
     expect(utf8(buildLikeScript(TXID).chunks[2].data!)).toBe(MAP_PREFIX);
   });
-  test('unlike', () => expect(decodeScript(buildLikeScript(TXID, 'bWallet', true))!.MAP.type).toBe('unlike'));
+  test('unlike', () => expect(decodeScript(buildLikeScript(TXID, 'bChat', true))!.MAP.type).toBe('unlike'));
   test('follow carries bapID', () => {
     expect(decodeScript(buildFollowScript('4Z3EfnKUpmFZdBbYix33S8RmsdGS'))!.MAP).toEqual({
-      app: 'bWallet',
+      app: 'bChat',
       type: 'follow',
       bapID: '4Z3EfnKUpmFZdBbYix33S8RmsdGS',
     });
@@ -192,14 +192,14 @@ describe('branch and quote', () => {
   test("branch is a Bitcoin Schema repost, app bWallet, sharing Twetch's tx key", () => {
     const d = decodeScript(buildBranchScript(TXID.toUpperCase()))!;
     expect(d.B).toEqual([]);
-    expect(d.MAP).toEqual({ app: 'bWallet', type: 'repost', context: 'tx', tx: TXID });
+    expect(d.MAP).toEqual({ app: 'bChat', type: 'repost', context: 'tx', tx: TXID });
     expect(() => buildBranchScript('nope')).toThrow();
   });
   test('quote is a post naming the original, with its link, never a reply', () => {
     const link = `https://twetch.com/t/${TXID}`;
     const d = decodeScript(buildQuoteScript('  so true ', TXID, link))!;
     expect(Utils.toUTF8(d.B[0].content)).toBe(`so true\n${link}`);
-    expect(d.MAP).toEqual({ app: 'bWallet', type: 'post', quote: TXID });
+    expect(d.MAP).toEqual({ app: 'bChat', type: 'post', quote: TXID });
     expect(d.MAP.app).not.toBe('twetch');
     const parsed = parseBmapPost({
       tx: { h: 'ef'.repeat(32) },
@@ -220,6 +220,6 @@ describe('avatarSeed', () => {
     expect(a).not.toBe(b);
   });
   test('keeps address seeding elsewhere', () => {
-    expect(avatarSeed({ address: relay, name: 'x', bapId: null }, 'bwallet')).toBe(relay);
+    expect(avatarSeed({ address: relay, name: 'x', bapId: null }, 'bchat')).toBe(relay);
   });
 });
