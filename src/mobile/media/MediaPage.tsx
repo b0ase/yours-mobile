@@ -7,6 +7,7 @@ import { MediaViewer } from './MediaViewer';
 import { getState, pauseAudio, subscribe, toggle } from './player';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { TopNav } from '../../components/TopNav';
+import { PullToRefresh } from '../ui/PullToRefresh';
 
 /**
  * /m/media — the top bar's Play button. The wallet's music and video inscriptions as a player:
@@ -53,7 +54,7 @@ const MediaPage = () => {
   const navigate = useNavigate();
   const close = () => navigate(-1);
   useBackClose(true, close);
-  const { items, hasMore, loading, error, loadMore } = useWalletMedia();
+  const { items, hasMore, loading, error, loadMore, reload } = useWalletMedia();
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<MediaItem | null>(null);
   const player = usePlayer();
@@ -168,6 +169,7 @@ const MediaPage = () => {
 
   return (
     <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
+      <PullToRefresh onRefresh={reload} />
       <TopNav />
       <div
         className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1 mt-14"

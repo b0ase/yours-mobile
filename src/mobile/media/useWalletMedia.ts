@@ -87,7 +87,10 @@ export const useWalletMedia = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
 
-  return { items, hasMore, loading, error, loadMore };
+  /** Re-reads the first page (pull to refresh). */
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  return { items, hasMore, loading, error, loadMore, reload };
 };
 
 /** Queues every music item in `list` and starts at `item`. */

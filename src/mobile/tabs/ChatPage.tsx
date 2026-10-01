@@ -8,7 +8,6 @@ import {
   Coins,
   Lock,
   MessageCircle,
-  RefreshCw,
   Search,
   ShoppingCart,
   Trophy,
@@ -76,6 +75,7 @@ import {
   type Bounty,
   type PayoutSpec,
 } from '../chat/bounties';
+import { PullToRefresh } from '../ui/PullToRefresh';
 
 /**
  * Chat tab: TOKEN ROOMS ONLY (owner decision; docs/TOKEN-ROOMS.md). The list is one room per
@@ -1304,6 +1304,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: BG }}
     >
+      <PullToRefresh onRefresh={refresh} disabled={!handle} />
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         <SegmentRow>{header}</SegmentRow>
@@ -1318,14 +1319,6 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               )}
             </span>
           )}
-          <button
-            onClick={refresh}
-            disabled={!handle}
-            aria-label="Refresh"
-            className="p-2 rounded-full active:opacity-60 disabled:opacity-30"
-          >
-            <RefreshCw size={18} color={MUTED} />
-          </button>
         </SegmentTitle>
 
         {!online && (

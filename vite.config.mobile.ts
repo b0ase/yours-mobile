@@ -194,6 +194,23 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '              Tokens\n            </span>',
     ],
   ],
+  // Pull to refresh replaces the balance refresh icon (src/mobile/ui/PullToRefresh).
+  'src/pages/BsvWallet.tsx#ptr': [
+    [
+      "import { getPlatform } from '../platform';",
+      "import { getPlatform } from '../platform';\nimport { PullToRefresh } from '../mobile/ui/PullToRefresh';",
+    ],
+    [
+      "        style={{ minHeight: '100%' }}\n      >\n        {/* ── Legacy migration banner ── */}",
+      "        style={{ minHeight: '100%' }}\n      >\n<PullToRefresh onRefresh={() => refreshUtxos({ notifyIfUnchanged: true })} />\n        {/* ── Legacy migration banner ── */}",
+    ],
+    [
+      '            {!isSyncing && !balanceLoading && (\n              <motion.button',
+      '            {false && !isSyncing && !balanceLoading && (\n              <motion.button',
+    ],
+  ],
+  // UnlockWallet: bigger b mark above "Welcome back".
+  'src/components/UnlockWallet.tsx#logo': [['<YoursIcon width="4rem" />', '<YoursIcon width="7rem" />']],
   // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [

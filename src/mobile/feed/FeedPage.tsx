@@ -20,7 +20,6 @@ import {
   MoreHorizontal,
   PenLine,
   Quote,
-  RefreshCw,
   Repeat2,
   UserCheck,
   UserPlus,
@@ -128,6 +127,7 @@ import {
   visiblePosts,
   type Follow,
 } from './store';
+import { PullToRefresh } from '../ui/PullToRefresh';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -374,7 +374,17 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
 };
 
 /** Full-screen layer inside the tab (profile, thread). */
-const Layer = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) => {
+const Layer = ({
+  title,
+  onBack,
+  onRefresh,
+  children,
+}: {
+  title: string;
+  onBack: () => void;
+  onRefresh?: () => unknown;
+  children: ReactNode;
+}) => {
   useBackClose(true, onBack);
   return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
@@ -387,7 +397,10 @@ const Layer = ({ title, onBack, children }: { title: string; onBack: () => void;
         </button>
         <span className="text-[16px] font-bold text-white truncate">{title}</span>
       </div>
-      <div className="flex-1 overflow-y-auto pb-24">{children}</div>
+      <div className="flex-1 overflow-y-auto pb-24">
+        {onRefresh && <PullToRefresh onRefresh={onRefresh} />}
+        {children}
+      </div>
     </div>,
     document.body,
   );
@@ -1332,6 +1345,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: '#010101' }}
     >
+      <PullToRefresh onRefresh={() => load(tab)} />
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}
@@ -1348,9 +1362,6 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
             className="p-2 rounded-full active:opacity-60"
           >
             <Trophy size={18} color={GOLD} />
-          </button>
-          <button onClick={() => void load(tab)} aria-label="Refresh" className="p-2 rounded-full active:opacity-60">
-            <RefreshCw size={18} color={MUTED} />
           </button>
         </SegmentTitle>
 
@@ -1788,7 +1799,7 @@ const Leaderboard = ({
   );
 
   return (
-    <Layer title="Most locked" onBack={onBack}>
+    <Layer title="Most locked" onBack={onBack} onRefresh={() => load(tf, true)}>
       <div className="flex px-4" style={{ borderBottom: `1px solid ${LINE}` }}>
         {(['people', 'posts'] as BoardKind[]).map((k) => (
           <button
@@ -1819,14 +1830,6 @@ const Leaderboard = ({
             {t.label}
           </button>
         ))}
-        <button
-          onClick={() => void load(tf, true)}
-          aria-label="Refresh leaderboard"
-          className="ml-auto p-2 rounded-full active:opacity-60"
-          disabled={loading}
-        >
-          <RefreshCw size={16} color={MUTED} className={loading ? 'animate-spin' : ''} />
-        </button>
       </div>
       {scope && (
         <p className="px-4 pb-2 text-[11px]" style={{ color: MUTED }}>

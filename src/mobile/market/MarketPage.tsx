@@ -4,7 +4,7 @@ import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personal
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, RefreshCw, ShieldCheck, Tag, X } from 'lucide-react';
+import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, ShieldCheck, Tag, X } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { PageLoader } from '../../components/PageLoader';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -40,6 +40,7 @@ import { SharesPanel } from './SharesPanel';
 import { TicketsPanel, openTicketRoomInChat } from '../tickets/TicketsPanel';
 import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { PullToRefresh } from '../ui/PullToRefresh';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -800,6 +801,15 @@ const MarketPage = () => {
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: '#010101' }}
     >
+      <PullToRefresh
+        onRefresh={() => {
+          clearMarketCache();
+          if (section === 'mine') return loadMine();
+          if (room) return openRoom(room);
+          if (kind === 'tokens' || view === 'collections') return loadBoard();
+          return loadFeed();
+        }}
+      />
       <TopNav />
       {busy && <PageLoader theme={theme} message={busy} />}
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
@@ -808,19 +818,6 @@ const MarketPage = () => {
           <h1 className="text-lg font-bold text-white flex items-center gap-1.5">
             <Flame size={18} style={{ color: '#A1FF8B' }} /> Market
           </h1>
-          <button
-            aria-label="Refresh"
-            onClick={() => {
-              clearMarketCache();
-              if (section === 'mine') void loadMine();
-              else if (room) void openRoom(room);
-              else if (kind === 'tokens' || view === 'collections') void loadBoard();
-              else void loadFeed();
-            }}
-            className="p-2"
-          >
-            <RefreshCw size={16} color="#98A2B3" />
-          </button>
         </div>
         {segment}
         {section === 'trending' && !room && (kind === 'tokens' ? tokenChips : chips)}
