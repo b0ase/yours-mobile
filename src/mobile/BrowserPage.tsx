@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Clock, ExternalLink, Globe } from 'lucide-react';
+import { ArrowRight, Clock, ExternalLink, Github, Globe } from 'lucide-react';
+import { liveBApps } from './bapps';
 import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
@@ -49,13 +50,12 @@ export const normaliseUrl = (typed: string): string | null => {
 // Upstream's featured list, minus sites that no longer resolve (checked 2026-09-29).
 const DEAD_HOSTS = new Set(['taleofshua.com']);
 
+// Third-party apps (Apps › Other apps). Our own live in ./bapps.ts.
 const apps = [
   { name: '1Sat Market', link: ONE_SAT_MARKET_URL, icon: undefined as string | undefined },
-  { name: '1satsocial', link: 'https://1satsocial.online', icon: 'https://1satsocial.online/favicon.ico' },
-  { name: 'bChat', link: 'https://www.bitcoinchat.online', icon: 'https://www.bitcoinchat.online/bchat-apple-touch-icon.png' },
-  { name: 'bMovies', link: 'https://www.bmovies.app', icon: 'https://www.bmovies.app/icons/icon-192.png' },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
+    .filter((a) => new URL(a.link).hostname !== 'yours.org')
     .map((a) => ({ name: a.name, link: a.link, icon: a.icon })),
 ];
 
@@ -83,6 +83,7 @@ const BrowserPage = () => {
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
   const [recent, setRecent] = useState(readRecent);
+  const [section, setSection] = useState<'bapps' | 'other'>('bapps');
 
   const go = (url: string) => {
     setError('');
@@ -157,12 +158,61 @@ const BrowserPage = () => {
           </section>
         )}
 
-        <section className="flex flex-col gap-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#667085]">Apps</h2>
-          {apps.map((app) =>
-            row(`a:${app.link}`, app.name, hostOf(app.link), () => go(app.link), <AppIcon src={app.icon} />),
-          )}
-        </section>
+        <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]">
+          {(
+            [
+              ['bapps', 'bApps'],
+              ['other', 'Other apps'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setSection(id)}
+              className="flex-1 rounded-lg py-1.5 text-xs font-semibold"
+              style={{ background: section === id ? '#2b2f36' : 'transparent', color: section === id ? '#fff' : '#98A2B3' }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {section === 'bapps' ? (
+          <section className="flex flex-col gap-2">
+            {liveBApps().map((app) => (
+              <div key={app.url} className="rounded-xl bg-[#17191E] px-4 py-3 flex flex-col gap-2">
+                <button onClick={() => go(app.url)} className="flex items-center gap-3 text-left">
+                  <AppIcon src={app.icon} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-white">{app.name}</div>
+                    <div className="text-[11px] text-[#98A2B3] leading-snug">{app.verb}</div>
+                  </div>
+                  <ExternalLink size={14} className="shrink-0" style={{ color: '#98A2B3' }} />
+                </button>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span
+                    className="rounded-full px-2 py-0.5 font-semibold"
+                    style={{ background: '#2b2f36', color: app.source ? '#A1FF8B' : '#98A2B3' }}
+                  >
+                    {app.source ? 'Open source' : 'Closed source'}
+                  </span>
+                  {app.source && (
+                    <button onClick={() => go(app.source!)} className="flex items-center gap-1 text-[#98A2B3]">
+                      <Github size={11} /> {hostOf(app.source)}
+                      {new URL(app.source).pathname}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </section>
+        ) : (
+          <section className="flex flex-col gap-2">
+            {apps.map((app) =>
+              row(`a:${app.link}`, app.name, hostOf(app.link), () => go(app.link), <AppIcon src={app.icon} />),
+            )}
+            <p className="text-[10px] text-[#667085] text-center">Not made by The Bitcoin Corporation.</p>
+          </section>
+        )}
 
         <p className="text-[10px] leading-relaxed text-[#667085] text-center px-2">{UNOFFICIAL_NOTICE}</p>
       </div>
