@@ -144,3 +144,15 @@ select {
     sans-serif;
   text-align: center;
 }
+
+/* Android WebView ghost: the Wallet home scroller (BsvWallet.tsx, the only
+   pt-14 pb-16 overflow-y-auto) is not composited, so after framer-motion's
+   staggered entry (opacity + translateY layers on each section) Chromium can
+   leave a stale raster tile of the Receive/Send/Mint row painted inside it,
+   below the asset rows. Giving the scroller its own layer makes it repaint
+   its contents itself. Nothing inside uses position:fixed (MintSheet portals
+   to body), so the new containing block is harmless. */
+.pt-14.pb-16.overflow-y-auto {
+  transform: translateZ(0);
+  isolation: isolate;
+}

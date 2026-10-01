@@ -265,19 +265,73 @@ async function sales(): Promise<RecentListing[]> {
 export const recentListings = (status: 'active' | 'sale' = 'active') =>
   cached(`recent:${status}`, () => (status === 'active' ? liveListings() : sales()));
 
-type OverlayToken = { token_id?: string; output_count?: number; is_active?: boolean; is_blacklisted?: boolean };
+type OverlayToken = {
+  token_id?: string;
+  output_count?: number;
+  is_active?: boolean;
+  is_blacklisted?: boolean;
+  symbol?: string;
+  icon?: string;
+};
+
+export type DirectoryToken = { id: string; sym: string; icon: string | null; outputs: number };
+
+const overlayTokens = () =>
+  cached(
+    'tokens:all',
+    async () => {
+      const rows = (await getJson<OverlayToken[] | null>(`${ONESAT}/bsv21/tokens`, 20_000)) ?? [];
+      return rows
+        .filter((t) => t.token_id && t.is_active && !t.is_blacklisted && parseRoom('bsv21', t.token_id))
+        .sort((a, b) => (b.output_count ?? 0) - (a.output_count ?? 0))
+        .map(
+          (t): DirectoryToken => ({
+            id: t.token_id!,
+            sym: (t.symbol || t.token_id!.slice(0, 8)).replace(/^\$/, ''),
+            icon: t.icon && isOutpoint(t.icon) ? t.icon : null,
+            outputs: t.output_count ?? 0,
+          }),
+        );
+    },
+    10 * 60_000,
+  );
+
+/** Every active BSV-21 token the 1Sat overlay knows (symbol + icon included), most-used first. */
+export const tokenDirectory = (): Promise<DirectoryToken[]> => overlayTokens();
+
+/**
+ * Tokens view list: trending tokens first (by heat), then the rest of the overlay's
+ * active tokens by usage. Deduped by token id.
+ */
+export function mergeTokenBoard(trending: HotRoom[], directory: DirectoryToken[]): HotRoom[] {
+  const out = new Map<string, HotRoom>();
+  const outputs = new Map(directory.map((d) => [d.id, d.outputs]));
+  for (const r of [...trending].filter((r) => r.ref.kind === 'bsv21').sort((a, b) => b.heat - a.heat))
+    out.set(r.ref.key, { ...r, outputs: r.outputs ?? outputs.get(r.ref.id) });
+  for (const d of directory) {
+    const ref = parseRoom('bsv21', d.id);
+    if (!ref || out.has(ref.key)) continue;
+    out.set(ref.key, {
+      ref,
+      title: `$${d.sym}`,
+      subtitle: 'BSV-21 token',
+      icon: d.icon,
+      trades: 0,
+      newListings: 0,
+      floorLabel: null,
+      heat: 0,
+      outputs: d.outputs,
+    });
+  }
+  return [...out.values()];
+}
 
 /** Most-used active BSV-21 tokens in the 1Sat overlay. */
 export const activeTokens = (limit = 20) =>
   cached(
     'tokens',
     async () => {
-      const rows = (await getJson<OverlayToken[] | null>(`${ONESAT}/bsv21/tokens`, 20_000)) ?? [];
-      return rows
-        .filter((t) => t.token_id && t.is_active && !t.is_blacklisted)
-        .sort((a, b) => (b.output_count ?? 0) - (a.output_count ?? 0))
-        .map((t) => t.token_id!)
-        .filter((id) => !!parseRoom('bsv21', id));
+      return (await overlayTokens()).map((t) => t.id);
     },
     10 * 60_000,
   ).then((ids) => ids.slice(0, limit));
@@ -473,6 +527,8 @@ export type HotRoom = {
   newListings: number;
   floorLabel: string | null;
   heat: number;
+  /** Token outputs in the overlay (a holder/usage proxy); tokens only. */
+  outputs?: number;
 };
 
 /** Tokens and collections ranked by recent sales and new listings (1satsocial's hot board, no chat signal). */

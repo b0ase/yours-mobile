@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
@@ -17,6 +17,9 @@ import {
   contentUrls,
   formatSats,
   hotBoard,
+  mergeTokenBoard,
+  tokenDirectory,
+  type DirectoryToken,
   parseRoom,
   roomMarket,
   roomMeta,
@@ -149,7 +152,7 @@ const MarketPage = () => {
     collectionId?: string | null;
     name: string;
   } | null>(null);
-  const [, setSafetyRev] = useState(0);
+  const [safetyRev, setSafetyRev] = useState(0);
 
   useEffect(() => {
     void refreshSafety();
@@ -160,7 +163,15 @@ const MarketPage = () => {
     setFeedError('');
     setFeed(null);
     try {
-      setFeed(await nftFeed(300, (items) => setFeed({ items, stats: { scanned: 0, nft: 0, unclassified: 0, blocked: 0, counts: { music: 0, video: 0, images: 0 } }, partial: true })));
+      setFeed(
+        await nftFeed(300, (items) =>
+          setFeed({
+            items,
+            stats: { scanned: 0, nft: 0, unclassified: 0, blocked: 0, counts: { music: 0, video: 0, images: 0 } },
+            partial: true,
+          }),
+        ),
+      );
     } catch (e) {
       setFeedError(e instanceof Error ? e.message : String(e));
       setFeed({
@@ -175,10 +186,15 @@ const MarketPage = () => {
   }, [kind, view, feed, loadFeed]);
 
   const [loadingBoard, setLoadingBoard] = useState(false);
+  const [directory, setDirectory] = useState<DirectoryToken[] | null>(null);
   const loadBoard = useCallback(async () => {
     setError('');
     setRooms(null);
     setLoadingBoard(true);
+    // The full active-token list is one fast request: show it while trending ranks.
+    void tokenDirectory()
+      .then(setDirectory)
+      .catch(() => setDirectory([]));
     try {
       setRooms(await hotBoard((partial) => setRooms(partial)));
     } catch (e) {
@@ -428,6 +444,90 @@ const MarketPage = () => {
     </section>
   );
 
+  // Tokens view: trending first, then every active overlay token, paged on scroll.
+  const PAGE = 40;
+  const [shown, setShown] = useState(PAGE);
+  const [floors, setFloors] = useState<Record<string, { floor: string | null; listings: number }>>({});
+  const tokenRows = useMemo(
+    () => mergeTokenBoard(rooms ?? [], directory ?? []).filter(roomSafe),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rooms, directory, safetyRev],
+  );
+  const visibleTokens = tokenRows.slice(0, shown);
+  const floorsAsked = useRef(new Set<string>());
+  useEffect(() => {
+    if (kind !== 'tokens') return;
+    const todo = visibleTokens.filter((r) => r.heat === 0 && !floorsAsked.current.has(r.ref.key));
+    todo.forEach((r) => floorsAsked.current.add(r.ref.key));
+    let i = 0;
+    const next = async (): Promise<void> => {
+      const r = todo[i++];
+      if (!r) return;
+      const m = await roomMarket(r.ref).catch(() => null);
+      if (m) setFloors((f) => ({ ...f, [r.ref.key]: { floor: m.floorLabel ?? null, listings: m.buyableCount ?? 0 } }));
+      return next();
+    };
+    void Promise.all([next(), next(), next(), next()]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, visibleTokens.length, tokenRows]);
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) setShown((n) => n + PAGE);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [kind, tokenRows.length, shown]);
+
+  const tokenList = (
+    <section className="flex flex-col gap-2">
+      {tokenRows.length === 0 && (rooms === null || directory === null) && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">Loading tokens…</p>
+      )}
+      {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
+      {error && <p className="text-xs text-[#F97066]">{error}</p>}
+      {tokenRows.length === 0 && rooms !== null && directory !== null && !error && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
+      )}
+      {visibleTokens.map((r, i) => {
+        const f = floors[r.ref.key];
+        const listings = r.heat > 0 ? r.newListings : f?.listings;
+        const floor = r.floorLabel ?? f?.floor ?? null;
+        const stats = [
+          r.trades ? `${r.trades} sales` : null,
+          listings ? `${listings} listed` : null,
+          r.outputs ? `${r.outputs.toLocaleString()} outputs` : null,
+        ].filter(Boolean);
+        return (
+          <button
+            key={r.ref.key}
+            onClick={() => void openRoom(r)}
+            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+          >
+            <span className="w-6 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
+            <Art outpoint={r.icon} kind="bsv21" collectionId={r.ref.id} />
+            <div className="min-w-0 flex-1">
+              <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>
+                {r.title}
+                {r.heat > 0 && <Flame size={11} className="inline ml-1" style={{ color: '#A1FF8B' }} />}
+              </div>
+              <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{['Token', ...stats].join(' · ')}</div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-[10px] text-[#667085]">Floor</div>
+              <div className="text-xs font-semibold" style={{ color: '#A1FF8B' }}>
+                {floor ?? '—'}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+      {shown < tokenRows.length && <div ref={sentinel} className="h-8" />}
+    </section>
+  );
+
   const trending = (
     <section className="flex flex-col gap-2">
       {rooms === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading the order book…</p>}
@@ -546,17 +646,19 @@ const MarketPage = () => {
           You have no open {kind === 'tokens' ? 'token' : 'NFT'} listings.
         </p>
       )}
-      {mine?.filter((o) => isTokenOutput(o) === (kind === 'tokens')).map((o) => (
-        <div key={o.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
-          <div className={`min-w-0 flex-1 text-sm text-white ${ELLIPSIS}`}>{getOutputName(o, 'Listing')}</div>
-          <button
-            onClick={() => void cancel(o)}
-            className="rounded-lg px-3 py-1.5 text-xs font-bold bg-[#2b2f36] text-white"
-          >
-            Cancel
-          </button>
-        </div>
-      ))}
+      {mine
+        ?.filter((o) => isTokenOutput(o) === (kind === 'tokens'))
+        .map((o) => (
+          <div key={o.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
+            <div className={`min-w-0 flex-1 text-sm text-white ${ELLIPSIS}`}>{getOutputName(o, 'Listing')}</div>
+            <button
+              onClick={() => void cancel(o)}
+              className="rounded-lg px-3 py-1.5 text-xs font-bold bg-[#2b2f36] text-white"
+            >
+              Cancel
+            </button>
+          </div>
+        ))}
     </section>
   );
 
@@ -639,9 +741,11 @@ const MarketPage = () => {
           ? mineView
           : room
             ? roomView
-            : kind === 'tokens' || view === 'collections'
-              ? trending
-              : nftGrid}
+            : kind === 'tokens'
+              ? tokenList
+              : view === 'collections'
+                ? trending
+                : nftGrid}
         <p className="text-[10px] text-[#667085] text-center">Listings from the 1Sat order book (api.1sat.app).</p>
       </div>
       {confirm}

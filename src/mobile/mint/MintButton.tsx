@@ -213,10 +213,11 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   const usd = (n: number | null) => (n === null ? '' : ` (~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)})`);
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+    // z above the bottom tab bar (BottomMenu z-[100]) so the sheet's lower options aren't hidden.
+    <div className="fixed inset-0 z-[150] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div
         className="w-full max-w-md rounded-t-2xl p-4 overflow-y-auto"
-        style={{ background: PANEL, color: '#fff', maxHeight: '92vh', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+        style={{ background: PANEL, color: '#fff', maxHeight: 'calc(100dvh - env(safe-area-inset-top) - 24px)', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
       >
         <div className="flex items-center justify-between mb-3">
           <span className="font-bold text-lg" style={{ color: GOLD }}>

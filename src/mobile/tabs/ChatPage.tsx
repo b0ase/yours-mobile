@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowUp, Coins, Lock, MessageCircle, RefreshCw, Search, ShoppingCart, UserPlus, WifiOff, X } from 'lucide-react';
 import { sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
@@ -426,8 +427,10 @@ const Conversation = ({
 
 // ───────────────────────────── Sheets ─────────────────────────────
 
-const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => (
-  <div className="fixed inset-0 z-[70] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => 
+  // Portal to body + z above BottomMenu (z-[100]): the room view's z-[60] layer would trap it under the tab bar.
+  createPortal(
+  <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
     <div
       className="w-full rounded-t-3xl px-5 pt-4"
       style={{ background: '#0e0e0e', borderTop: `1px solid ${LINE}`, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
@@ -441,8 +444,9 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
       </div>
       {children}
     </div>
-  </div>
-);
+  </div>,
+    document.body,
+  )
 
 /** A room you can't enter: "Hold 1 $FILM to join" + Buy in Market. */
 const LockedRoom = ({
