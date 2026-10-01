@@ -51,7 +51,7 @@ const Art = ({
     const img = (
       <img src={urls[i]} alt="" onError={() => setI(i + 1)} className="h-10 w-10 rounded-lg object-cover shrink-0" />
     );
-    // Collection art is blurred (unless allow-listed) like every NFT thumbnail; token icons are shown.
+    // Collection art shows as-is; blocked collections are already filtered out.
     return kind === 'coll' ? (
       <div className="h-10 w-10 rounded-lg overflow-hidden shrink-0 text-[0px]">
         <Blurred collectionId={collectionId}>{img}</Blurred>

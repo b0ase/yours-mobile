@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { EyeOff, Flag, Music, Play } from 'lucide-react';
 import { contentUrls } from './indexer';
-import { safety } from './safety';
 
 /**
  * Media thumbnail behind the always-on blur: image and video previews are
@@ -18,7 +17,10 @@ export const Blurred = ({
   children: ReactNode;
 }) => {
   const [shown, setShown] = useState(false);
-  const blur = !shown && (forceBlur ?? !safety().isAllowlisted(collectionId)); // forceBlur set (Media tab): blur only flagged items
+  // Blocked items never reach the Market (the safety filter drops them), so only items the
+  // filter flags (e.g. your own NFTs in Media) are blurred. Everything else shows as-is.
+  void collectionId;
+  const blur = !shown && !!forceBlur;
   return (
     <div className="relative w-full h-full overflow-hidden">
       <div className="w-full h-full" style={blur ? { filter: 'blur(18px)', transform: 'scale(1.15)' } : undefined}>
