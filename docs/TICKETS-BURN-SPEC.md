@@ -201,6 +201,24 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
 8. **No legal opinion.** Not budgeted. Keep the product framed as access to rooms (no talk of returns or investment)
    and keep resale fees at 0 by default.
 
+## Owner decision (2 Oct 2026): fixed supply only
+
+**Fixed supply only. No authority minting, re-releases or batch top-ups for tickets.** Every
+ticket token is minted once with `deploy+mint`; its supply never grows.
+
+Reason (owner): for speculators a fixed supply is a benefit. Letting issuers expand supply adds
+legal risk (being sued by holders whose tickets were diluted), which may be why GorillaPool
+doesn't support authority minting. If a creator wants a later drop, it is planned as a **separate
+fixed-supply token** (and its own room, or an extra room key) — never a top-up of an existing id.
+
+This supersedes the "authority minting" option in the BRC-162 section below.
+
+Also (2 Oct 2026): **implicit burns are now accepted by the bit-sign verifier**
+(burned = valid token inputs − transfer outputs kept; explicit `op:burn` outputs count as burned;
+zero-output burns of the last ticket work). Indexers don't label implicit burns, so bit-sign's
+ledger is the source of truth; the reconciler confirms an implicit burn once the tx is mined and
+its transfer outputs (if any) are indexer-valid. PR: https://github.com/b0ase/bit-sign/pull/48
+
 ## Leaderboards (later)
 
 Build once burn-on-entry exists (burns are the data). Same Twetch-style board as the Feed's "Most locked"
@@ -242,7 +260,7 @@ spending an authority input lets value outputs be minted; otherwise value output
 | Feature | Effect on tickets |
 | --- | --- |
 | **Implicit burn** | Entry = spend N ticket units and write back `held − N` as change (or nothing). No `burn` output and no inscription. Burning your last ticket needs **zero** token outputs. |
-| **Authority minting** | Creator deploys with authority (`OP_0 OP_0`) and mints later: re-releases, batch drops and top-ups for a room without a new token id, so room keys (`bsv21:<id>`) stay stable. Authority can be delegated (e.g. to a co-host) or ended. |
+| ~~**Authority minting**~~ | **Not used** (owner decision, 2 Oct 2026: fixed supply only). It would let a creator mint more later (re-releases, top-ups) under the same id; we don't allow that for tickets. |
 | **Any-script locking** | The token prefix sits in front of any script, so a ticket could be locked to a covenant that only allows it to be burned into one room (or only spent with a room-entry MAP output). It needs a contract, and our verifier's P2PKH-only owner rule (§2) would have to accept it. Later, not v1. |
 | Smaller outputs | No inscription envelope (about 100 bytes less per output) and script-readable id/amount. |
 
@@ -263,7 +281,7 @@ already counts it).
 | **GorillaPool / legacy** `shruggr/1sat-indexer` | **No** | **No.** Only `deploy+mint`, `transfer` and `burn` (`mod/onesat/bsv21.go` L114, L145) | Yes, de facto | HEAD `f9ac70f`, last commit 8 Dec 2025 (maintenance only). Its `feat/binary` branch (Oct 2024) is unrelated. |
 | **@1sat/templates** — ours `0.0.33`; npm latest `0.0.40` (1 Oct 2026) | **No.** Latest has a `Shrug` template (`dist/shrug`), not BRC-162. | Yes, JSON ops typed (`BSV21Operation` includes `deploy+auth`, `auth`, `mint`) | n/a | `node_modules/@1sat/templates/dist/bsv21/bsv21.d.ts`; `npm pack @1sat/templates@latest` |
 | **@1sat/actions** — ours `0.0.212`; npm latest `0.0.229` | **No** | Yes, JSON (`deployBsv21` with `deploy+auth`, auth spend to mint / transfer / end authority) | No helper. You'd build a transfer with smaller change by hand. | `dist/tokens/index.d.ts` L89–170 |
-| **bit-sign** `src/lib/ticket-burn-verify.ts` (origin/main `300134c`, 1 Oct) | **No** (inscription-only `decodeInscription`) | No (`BSV21_OPS` = `deploy+mint`, `transfer`, `burn`) | **No.** Only counts `op:burn` outputs. | L108, L173–183, L313, L321 |
+| **bit-sign** `src/lib/ticket-burn-verify.ts` (origin/main `300134c`, 1 Oct) | **No** (inscription-only `decodeInscription`) | No (`BSV21_OPS` = `deploy+mint`, `transfer`, `burn`) | **No** at `300134c`; **yes** since the implicit-burns PR (https://github.com/b0ase/bit-sign/pull/48): burned = valid inputs − transfer outputs. | L108, L173–183, L313, L321 |
 
 ### Recommendation
 
@@ -273,13 +291,12 @@ spec has no implementations. A binary ticket would be invisible to indexers and 
 
 Do now (no new protocol):
 
-1. **Make the verifier accept both** explicit (`op:burn`) and implicit burns for JSON tokens:
+1. **Done:** the verifier accepts both explicit (`op:burn`) and implicit burns for JSON tokens:
    burned = `valid token inputs − token outputs`. That's the same accounting BRC-162 needs, so the
    verifier is ready when binary arrives. The wallet keeps writing an explicit `burn` output for
-   now, because it's the only form an indexer reports as a burn.
-2. **Use JSON authority minting** (`deploy+auth`) for rooms that want re-releases or batch drops.
-   It's supported today by 1sat-stack and `@1sat/actions` (not GorillaPool). Fixed-supply rooms
-   keep `deploy+mint`.
+   now, because it's the only form an indexer reports as a burn. (https://github.com/b0ase/bit-sign/pull/48)
+2. **No authority minting.** All tickets are fixed supply (`deploy+mint`), per the owner decision
+   of 2 Oct 2026. Drops, if ever, are planned as separate fixed-supply tokens/rooms.
 3. **Watch** 1sat-stack for a BRC-162 parser (likely evolving `pkg/shrug`). When it lands, add
    binary as an opt-in mint format.
 
@@ -293,8 +310,8 @@ Do now (no new protocol):
   (minimal script numbers, max 2^64−1, 32-byte natural-order txid id) until `@1sat/templates` has
   one.
 - Mint (`mintTicket.ts`): binary deploy must be **vout 0** (today the inscription can sit at any
-  vout; ids are `…_1` on the live list). Optional authority deploy (`OP_0 OP_0`) plus a
-  "Release more" action that spends the authority output. Ticket parsing in `tickets.ts` /
+  vout; ids are `…_1` on the live list). Fixed-supply deploy only (no authority deploy, no
+  "Release more"). Ticket parsing in `tickets.ts` /
   `walletTickets` must accept both id forms (`<txid>_0` ⇄ 32-byte wire id).
 
 **bit-sign verifier** (`ticket-burn-verify.ts`)
@@ -305,8 +322,8 @@ Do now (no new protocol):
   Binary wins over JSON when both parse. Map roles to deploy, auth or value.
 - Balance: `burned = Σ valid value inputs − Σ value outputs` (plus any explicit `op:burn` for JSON),
   require `burned ≥ minAmount` and `outputs ≤ inputs`. Return `burned` from this.
-- Provenance (c): accept an authority **mint** ancestor (a tx spending a valid authority input of
-  the same token) as a value source, not only `deploy+mint` genesis.
+- Provenance (c): genesis stays the only value source (fixed supply; authority mints are not
+  accepted for tickets).
 - Owner rule: keep P2PKH-only for v1. Room-locked (covenant) tickets would need a per-room
   allow-list of suffix scripts.
 - Selftests: golden vectors from BRC-162 examples (fixed deploy, authority deploy, value,
