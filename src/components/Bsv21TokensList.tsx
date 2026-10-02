@@ -58,13 +58,15 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
 
       // TODO: Re-implement token price fetching with new API
       const data: PriceData[] = [];
-      setTokens(orderedTokens.length ? orderedTokens : tokensProp);
+      // Favourites first, then every other held token (new ones, e.g. a fresh $NAME, must show too).
+      const rest = tokensProp.filter((t) => !orderedTokens.includes(t));
+      setTokens([...orderedTokens, ...rest]);
       setPriceData(data);
     };
 
     loadSavedTokens();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tokensProp]);
 
   const handleOnDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
