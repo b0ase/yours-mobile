@@ -19,6 +19,8 @@ pnpm cap:sync >/dev/null
 (cd android && ./gradlew --quiet clean assembleRelease)
 pnpm cap:sync:store >/dev/null
 (cd android && ./gradlew --quiet bundleRelease)
+# Restore the default build in android/ and ios/ so later iOS/dev builds aren't the store variant.
+pnpm cap:sync >/dev/null
 
 VERSION=$(sed -nE 's/.*versionName "([^"]+)".*/\1/p' android/app/build.gradle)
 mkdir -p dist
