@@ -1,6 +1,6 @@
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
@@ -11,7 +11,7 @@ import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { openDappBrowser } from './dappBrowser';
-import { openBapp, setBappFrameVisible } from './bappFrame/bappFrame';
+import { getBappFrameState, openBapp, setBappFrameVisible, subscribeBappFrame } from './bappFrame/bappFrame';
 import app_onesatsocialIcon from './brand/apps/1satsocial.png';
 import app_treechatIcon from './brand/apps/treechat.png';
 import app_twetchIcon from './brand/apps/twetch.png';
@@ -422,6 +422,8 @@ const BrowserPage = () => {
   const [arranging, setArranging] = useState(false);
   useBackClose(!!info, () => setInfo(null));
   useBackClose(arranging, () => setArranging(false));
+  // An open bApp owns the frame: hide the address bar while it shows.
+  const bappOpen = useSyncExternalStore(subscribeBappFrame, () => !!getBappFrameState().session);
   // Arranging ends (auto "Done") when leaving Home: another page/filter, a tab tap or the app backgrounding.
   useEffect(() => {
     if (page !== 0) setArranging(false);
@@ -672,7 +674,7 @@ const BrowserPage = () => {
           resize the page) it rides on top of the keyboard instead. */}
       <div
         className="absolute left-0 right-0 z-[101] px-4"
-        style={{ bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM }}
+        style={{ bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM, display: bappOpen ? 'none' : undefined }}
       >
         <div
           className="rounded-[22px] p-1 backdrop-blur-md"
