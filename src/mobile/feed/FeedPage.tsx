@@ -213,10 +213,11 @@ const Via = ({ post }: { post: FeedPost }) => {
 /** Selected source chip colour: the source's brand colour ("All" is gold). */
 const chipColor = (id: Source | 'all') => (id === 'all' ? GOLD : (SOURCE_REGISTRY[id].color ?? GOLD));
 
-type FeedSort = 'latest' | 'locked';
+type FeedSort = 'latest' | 'popular' | 'locked';
 
 const SORT_OPTIONS: { id: FeedSort; label: string; hint: string; icon: ReactNode }[] = [
   { id: 'latest', label: 'Latest', hint: 'Newest posts first', icon: <Clock size={16} /> },
+  { id: 'popular', label: 'Most popular', hint: 'Most likes and replies', icon: <Heart size={16} /> },
   { id: 'locked', label: 'Most locked', hint: 'Ranked by BSV locked behind them', icon: <Lock size={16} /> },
 ];
 
@@ -1251,7 +1252,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     return out;
   }, [fetchedLocks, myLocks, height]);
   const sorted = useMemo(
-    () => (shown && tab === 'foryou' && sort === 'locked' ? rankByLocked(shown, lockSummaries) : shown),
+    () =>
+      shown && tab === 'foryou' && sort === 'locked'
+        ? rankByLocked(shown, lockSummaries)
+        : shown && tab === 'foryou' && sort === 'popular'
+          ? [...shown].sort((a, b) => b.likes + b.replies - (a.likes + a.replies) || b.at - a.at)
+          : shown,
     [shown, tab, sort, lockSummaries],
   );
 

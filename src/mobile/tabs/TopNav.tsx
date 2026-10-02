@@ -13,6 +13,8 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CallsSheet } from '../calls/CallsSheet';
 import { DrawerHandle } from '../names/DrawerHandle';
+import { getPersonalLink } from '../names/personalToken';
+import { identityRowText } from '../names/identityText';
 import { HandleFlow } from '../names/HandleFlow';
 import { AccountAvatar, useAvatar } from '../names/AccountAvatar';
 import { getLocalAvatar, isDefaultAvatar, pickAvatar, resolveAvatarUrl } from '../names/avatar';
@@ -221,11 +223,18 @@ export const TopNav = () => {
                           {rowNames.displayName || rowNames.label}
                           {id === current && verified && <Check size={13} strokeWidth={3} color="#2ecc71" />}
                         </div>
-                        {rowNames.payable && rowNames.payable.toLowerCase() !== rowNames.displayName.toLowerCase() && (
-                          <div className={`text-[15px] font-extrabold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
-                            {rowNames.payable}
-                          </div>
-                        )}
+                        {(() => {
+                          // Always show the $handle: the personal token ticker, else the paymail/OpNS name.
+                          const ticker = getPersonalLink(id)?.ticker;
+                          const tag = ticker
+                            ? `$${ticker.replace(/^\$/, '').toUpperCase()}`
+                            : identityRowText(rowNames.displayName, rowNames.paymail, rowNames.handle).tag;
+                          return tag ? (
+                            <div className={`text-[15px] font-extrabold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
+                              {tag}
+                            </div>
+                          ) : null;
+                        })()}
                         <div className="text-[11px] font-mono text-[#98A2B3]">
                           {short(account.primaryAddress ?? id)}
                         </div>

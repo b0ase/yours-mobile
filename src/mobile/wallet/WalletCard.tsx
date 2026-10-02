@@ -179,7 +179,7 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
             {receiveAddress && (
               <div className="bw-wcard-addrrow">
                 <span className="bw-wcard-addr" aria-label="Your BSV address">
-                  {receiveAddress.match(/.{1,4}/g)?.join(' ')}
+                  {receiveAddress}
                 </span>
                 <button
                   type="button"

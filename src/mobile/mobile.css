@@ -488,7 +488,7 @@ body,
 .bw-wcard-addr {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: clamp(9px, 2.7vw, 11.5px);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
   color: #d9d4c5;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.8), 0 -1px 0 rgba(255, 255, 255, 0.12);
   white-space: nowrap;
@@ -506,6 +506,7 @@ body,
 }
 
 .bw-wcard-addrrow {
+  margin-bottom: 8px;
   display: flex;
   align-items: center;
   gap: 4px;
