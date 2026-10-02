@@ -68,7 +68,7 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
     id: 'bchat',
     label: 'bChat',
     icon: bchatIcon,
-    color: '#FFD24D',
+    color: '#FFFFFF',
     matches: (a) => LEGACY_FEED_APPS.includes(a),
     postUrl: () => null,
     actions: BASIC,
