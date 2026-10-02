@@ -243,29 +243,31 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
           icon={<Bot size={16} />}
           label="Mode"
           description={
-            prefs.mode === 'paid' ? 'Each message is paid in BSV from this wallet' : 'Uses your own AI provider key'
-          }
-          right={
-            <Pills label="b agent mode" options={MODES} value={prefs.mode} onChange={(v) => setPrefs({ mode: v })} />
+            prefs.mode === 'paid' ? 'Pay per message from this wallet' : 'Use your own AI provider key'
           }
           isFirst
         />
+        <div className="px-4 pb-3 pl-12">
+          <Pills label="b agent mode" options={MODES} value={prefs.mode} onChange={(v) => setPrefs({ mode: v })} />
+        </div>
         <Divider />
         {prefs.mode === 'paid' ? (
           <Row
             icon={<Bot size={16} />}
             label="Daily limit"
-            description={`The b agent never spends more than this a day${hasRate(rate) ? ' (USD at today’s BSV price)' : ' (sats; USD price unavailable)'}. Messages under your one-click limit skip the confirm.`}
-            right={
-              <Pills
-                label="Daily limit"
-                options={DAILY_LIMITS.map((v) => ({ id: v, label: v ? money(v, rate) : 'Off' }))}
-                value={prefs.dailyLimitSats}
-                onChange={(v) => setPrefs({ dailyLimitSats: v })}
-              />
-            }
+            description="The most the b agent can spend in a day. Small messages under your one-click limit skip the confirm."
             isLast
           />
+        ) : null}
+        {prefs.mode === 'paid' ? (
+          <div className="px-4 pb-3 pl-12">
+            <Pills
+              label="Daily limit"
+              options={DAILY_LIMITS.map((v) => ({ id: v, label: v ? money(v, rate) : 'Off' }))}
+              value={prefs.dailyLimitSats}
+              onChange={(v) => setPrefs({ dailyLimitSats: v })}
+            />
+          </div>
         ) : (
           <Row
             icon={<KeyRound size={16} />}
