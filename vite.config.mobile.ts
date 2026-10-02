@@ -169,7 +169,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx#obsidian': [
     [
       "import { getPlatform } from '../platform';",
-      "import { getPlatform } from '../platform';\nimport { WalletIdentity } from '../mobile/wallet/WalletIdentity';",
+      "import { getPlatform } from '../platform';\nimport { WalletCard } from '../mobile/wallet/WalletCard';",
     ],
     // Account avatar lives in the top bar (gold ring); the home starts with the balance label.
     [
@@ -180,7 +180,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '          className="flex flex-col items-center mt-1"\n        >\n          <div className="flex items-center gap-2">',
-      '          className="flex flex-col items-center mt-1 bw-balance"\n        >\n<SectionBoundary name="Identity"><WalletIdentity /></SectionBoundary>\n<span className="bw-label">Total balance</span>\n          <div className="flex items-center gap-2">',
+      '          className="hidden"\n        >\n          <div className="flex items-center gap-2">',
+    ],
+    // Balance as a membership card (src/mobile/wallet/WalletCard); the old balance block below it is hidden.
+    [
+      '        {/* ── USD balance ── */}',
+      '<SectionBoundary name="Card"><WalletCard usd={bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0)} sats={Math.round(bsvBalance * 100_000_000)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={balanceFailed} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} /></SectionBoundary>\n        {/* ── USD balance ── */}',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',

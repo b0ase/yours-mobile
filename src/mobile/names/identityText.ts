@@ -1,7 +1,7 @@
 import { bareName } from './names';
 
 /**
- * Text for the account identity beside the Wallet balance (WalletIdentity). Pure.
+ * Text for the account identity on the Wallet card (WalletCard). Pure.
  *  name — the account / profile name ('' when it just repeats the handle);
  *  tag  — "$testy" (paymail alias, else the OpNS name), '' when the account has no handle;
  *  full — "testy@bwallet.space" (the paymail in full; '' without one);

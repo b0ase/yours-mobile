@@ -224,3 +224,235 @@ body,
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 0 0 1px #23252b;
 }
+
+/* Wallet home card (src/mobile/wallet/WalletCard.tsx). A membership card, not a payment card. */
+.bw-wcard-wrap {
+  width: calc(100vw - 32px);
+  max-width: 398px;
+  margin: 12px auto 0;
+  perspective: 1200px;
+}
+.bw-wcard {
+  position: relative;
+  aspect-ratio: 1.586 / 1;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.bw-wcard.is-flipped {
+  transform: rotateY(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-wcard {
+    transition: none;
+  }
+}
+.bw-wcard-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background:
+    linear-gradient(
+      115deg,
+      transparent 30%,
+      rgba(255, 210, 77, 0.1) 46%,
+      rgba(255, 236, 170, 0.16) 50%,
+      transparent 64%
+    ),
+    radial-gradient(120% 90% at 0% 0%, #2a2a2c 0%, transparent 60%),
+    linear-gradient(160deg, #1b1b1d 0%, #0b0b0c 55%, #050505 100%);
+  border: 1px solid rgba(255, 210, 77, 0.22);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #f2f2f0;
+}
+.bw-wcard-front {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+.bw-wcard-back {
+  transform: rotateY(180deg);
+  display: flex;
+  flex-direction: column;
+}
+.bw-wcard-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bw-wcard-mark {
+  width: 34px;
+  height: 34px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.bw-wcard-brand {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #8e8e89;
+}
+.bw-wcard-centre {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.bw-wcard-usd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Space Grotesk', Inter, system-ui, sans-serif;
+  font-size: clamp(30px, 10vw, 42px);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.bw-wcard-sats {
+  font-size: 12px;
+  color: #8e8e89;
+}
+.bw-wcard-retry {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #8e8e89;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.bw-wcard-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bw-wcard-holder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.bw-wcard-handle {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffd24d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+.bw-wcard-icon {
+  padding: 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.bw-wcard-getname {
+  font-size: 12px;
+  font-weight: 700;
+  color: #000;
+  background: linear-gradient(135deg, #ffd24d, #eab300);
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.bw-wcard-since {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: #8e8e89;
+  flex-shrink: 0;
+}
+.bw-wcard-since b {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  color: #d8d8d4;
+}
+.bw-wcard-stripe {
+  height: 22%;
+  margin-top: 7%;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #050505, #1a1a1a 50%, #050505);
+}
+.bw-wcard-backbody {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 10px;
+  min-height: 0;
+}
+.bw-wcard-qr {
+  height: 100%;
+  aspect-ratio: 1;
+  max-height: 100px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 3px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.bw-wcard-qr img,
+.bw-wcard-qr-empty {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 6px;
+}
+.bw-wcard-backinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.bw-wcard-label {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8e8e89;
+}
+.bw-wcard-addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: #f2f2f0;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.bw-wcard-sig {
+  background: repeating-linear-gradient(-45deg, #efe9da 0 6px, #e6dfcc 6px 12px);
+  border-radius: 4px;
+  padding: 0 8px;
+  overflow: hidden;
+}
+.bw-wcard-sig-name {
+  font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', 'Bradley Hand', cursive;
+  font-size: 20px;
+  line-height: 1.4;
+  color: #1b2a5a;
+  white-space: nowrap;
+}
+.bw-wcard-sig-line {
+  font-size: 9px;
+  color: #8e8e89;
+  font-family: ui-monospace, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
