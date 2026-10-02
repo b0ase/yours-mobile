@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router-dom';
+import { TermsGate } from '../ugc/UgcSheets';
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
 const SettingsHub = lazy(() => import('./SettingsHub'));
@@ -18,8 +19,23 @@ const MobileRoutes = () => (
       {/* The top bar's centre b: the b agent. */}
       <Route path="agent" element={<AgentPage />} />
       <Route path="market" element={<MarketPage />} />
-      <Route path="feed" element={<FeedTab />} />
-      <Route path="chat" element={<ChatPage />} />
+      {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
+      <Route
+        path="feed"
+        element={
+          <TermsGate>
+            <FeedTab />
+          </TermsGate>
+        }
+      />
+      <Route
+        path="chat"
+        element={
+          <TermsGate>
+            <ChatPage />
+          </TermsGate>
+        }
+      />
     </Routes>
   </Suspense>
 );

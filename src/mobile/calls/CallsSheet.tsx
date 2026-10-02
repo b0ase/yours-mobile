@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { TermsGate } from '../ugc/UgcSheets';
 import { useBackClose } from '../backStack';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
@@ -37,7 +38,9 @@ export const CallsSheet = ({ open, onClose }: { open: boolean; onClose: () => vo
                 <X size={18} color="#98A2B3" />
               </button>
             </div>
-            <CallsList onLeave={onClose} />
+            <TermsGate compact>
+              <CallsList onLeave={onClose} />
+            </TermsGate>
           </motion.div>
         </>
       )}

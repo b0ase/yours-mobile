@@ -1,12 +1,13 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Bot, KeyRound } from 'lucide-react';
+import { ArrowLeft, Bot, KeyRound, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { hasRate, money, useBsvUsd } from '../money/money';
 import { DAILY_LIMITS, useAgentPrefs, type AgentMode } from '../agent/agentPrefs';
 import { PROVIDERS, PROVIDER_IDS, callProvider, cleanModel, type ProviderId } from '../agent/providers';
 import { deleteKey, loadKey, maskKey, saveKey } from '../agent/keyStore';
 import { STORE_AGENT_NOTE, STORE_BUILD } from '../storeBuild';
+import { consentInfo, consentTarget, hasConsent, revokeConsent } from '../agent/consent';
 
 /**
  * Settings › b agent: how the b agent is paid for. Pay per message (BSV, with a daily limit) or
@@ -237,6 +238,10 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = useAgentPrefs();
   const rate = useBsvUsd();
   const [keyScreen, setKeyScreen] = useState(false);
+  const target = consentTarget(prefs.mode, prefs.provider);
+  const [allowed, setAllowed] = useState(() => hasConsent(target));
+  useEffect(() => setAllowed(hasConsent(target)), [target]);
+  const info = consentInfo(target);
   return (
     <>
       <Section title="b agent">
@@ -263,7 +268,6 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
             icon={<Bot size={16} />}
             label="Daily limit"
             description="The most the b agent can spend in a day. Small messages under your one-click limit skip the confirm."
-            isLast
           />
         ) : null}
         {prefs.mode === 'paid' ? (
@@ -281,9 +285,34 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
             label="Provider, model and key"
             description={`${PROVIDERS[prefs.provider].label} · ${prefs.models[prefs.provider]}`}
             onClick={() => setKeyScreen(true)}
-            isLast
           />
         )}
+        <Divider />
+        <Row
+          icon={<ShieldCheck size={16} />}
+          label={`Sharing with ${info.provider}`}
+          description={
+            allowed
+              ? `Allowed: your b agent messages and recent conversation go to ${info.provider}. Revoke to stop; b will ask again before sending.`
+              : `Not allowed. b asks before sending anything to ${info.provider}.`
+          }
+          right={
+            allowed ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  revokeConsent(target);
+                  setAllowed(false);
+                }}
+                className="rounded-full px-3 py-1 text-[11px] font-bold"
+                style={{ border: '1px solid #ff6b6b', color: '#ff6b6b' }}
+              >
+                Revoke
+              </button>
+            ) : undefined
+          }
+          isLast
+        />
       </Section>
       {keyScreen && <KeyScreen onBack={() => setKeyScreen(false)} />}
     </>

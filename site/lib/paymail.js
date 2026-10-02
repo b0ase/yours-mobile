@@ -170,6 +170,7 @@ function matchOutputs(tx, expected) {
  *   insertPayment(row)                    getPayment(reference) → row|null
  *   updatePayment(reference, patch)       listInbox(identityKey) → rows (status 'received')
  *   countRecentPayments(alias, sinceIso) → number
+ *   deleteByKey(identityKey) → { aliases, payments } (counts)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
 function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now() }) {
@@ -353,6 +354,19 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
         }
       }
       return [200, { collected: done }];
+    },
+
+    // Account deletion (Apple 5.1.1(v), Google Play): removes the alias and every inbox row for
+    // this identity key. The wallet collects the inbox first, so no uncollected payment's
+    // derivation data is lost. On-chain payments themselves are unaffected.
+    delete: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'delete', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!body.fields || body.fields.confirm !== 'DELETE') return [400, { error: 'confirm must be DELETE' }];
+      const key = String(body.identityKey).toLowerCase();
+      const row = await store.getAliasByKey(key);
+      const removed = await store.deleteByKey(key);
+      return [200, { deleted: true, alias: row ? row.alias : null, ...removed }];
     },
   };
 }

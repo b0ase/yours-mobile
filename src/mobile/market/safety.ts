@@ -12,7 +12,7 @@ import bundled from './blocklist.json';
  *      BWALLET_MARKET_BLOCKLIST_URL=https://… (vite.config.mobile.ts; empty
  *      default = bundled only). Cached for 1h.
  *   3. the user's local hidden list (Report button).
- * Report also POSTs to BWALLET_MARKET_REPORT_URL when set (empty = local only).
+ * Report also POSTs to BWALLET_MARKET_REPORT_URL (default: bit-sign /api/bitsign/report; empty = local only).
  *
  * Keyword decisions (see safety.test.ts): matching is whole-word and
  * case-insensitive, so "Essex", "Sussex", "Middlesex", "adultery",

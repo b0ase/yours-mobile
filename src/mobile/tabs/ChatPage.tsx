@@ -82,6 +82,8 @@ import {
 } from '../chat/bounties';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { DmsPage, type DmConversationProps } from '../chat/DmsPage';
+import { UserSafetyButton } from '../ugc/UserSafety';
+import { isBlocked, onUgcChange } from '../ugc/ugc';
 
 /**
  * Chat › Chatrooms: TOKEN ROOMS ONLY (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -168,6 +170,7 @@ const Conversation = ({
   onInvite,
   onBans,
   onBounties,
+  peer = null,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -183,6 +186,8 @@ const Conversation = ({
   onBans: (() => void) | null;
   /** Null hides the Bounties button (1:1 DMs). */
   onBounties: (() => void) | null;
+  /** A 1:1's other person: shows Report / Block (Apple 1.2). */
+  peer?: string | null;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
@@ -302,7 +307,13 @@ const Conversation = ({
       });
   };
 
-  const items = useMemo(() => threadItems(messages, me), [messages, me]);
+  // Blocked people's messages are hidden here (ugc/ugc.ts); re-filter when the block list changes.
+  const [blockTick, setBlockTick] = useState(0);
+  useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
+  const items = useMemo(
+    () => threadItems(messages.filter((m) => !isBlocked(m.author_handle)), me),
+    [messages, me, blockTick], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
 
@@ -331,6 +342,7 @@ const Conversation = ({
           </div>
           {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
         </div>
+        {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
         {onBans && (
           <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Bans">
             <Ban size={18} color={MUTED} />
@@ -1558,7 +1570,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
 /** A 1:1 conversation for the DMs segment: the same view, without token-room extras. */
 const DmConversation = (p: DmConversationProps) => (
-  <Conversation {...p} entry={null} onLocked={() => p.onBack()} onInvite={null} onBans={null} onBounties={null} />
+  <Conversation
+    {...p}
+    entry={null}
+    onLocked={() => p.onBack()}
+    onInvite={null}
+    onBans={null}
+    onBounties={null}
+    peer={/↔/.test(p.room.name || '') ? roomTitle(p.room, p.me).replace(/^\$/, '') : null}
+  />
 );
 
 const ChatPage = () => (

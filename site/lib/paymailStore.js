@@ -54,6 +54,16 @@ function supabaseStore(env = process.env, f = fetch) {
       (await req(
         `bwallet_paymail_payments?identity_key=eq.${q(k)}&status=eq.received&order=received_at.asc&limit=50`,
       )) ?? [],
+    deleteByKey: async (k) => {
+      const del = async (table) =>
+        (await req(`${table}?identity_key=eq.${q(k)}`, {
+          method: 'DELETE',
+          headers: { Prefer: 'return=representation' },
+        })) ?? [];
+      const payments = (await del('bwallet_paymail_payments')).length;
+      const aliases = (await del('bwallet_paymail_aliases')).length;
+      return { aliases, payments };
+    },
     countRecentPayments: async (alias, since) => {
       const r = await f(
         `${url}/rest/v1/bwallet_paymail_payments?alias=eq.${q(alias)}&created_at=gte.${q(since)}&select=reference`,

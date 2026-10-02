@@ -441,6 +441,33 @@ export class BchatClient {
     await this.call('DELETE', `/api/bitsign/me/contacts?id=${encodeURIComponent(id)}`);
   }
 
+  // ── Safety and account (bit-sign feat/store-fixes; src/mobile/ugc, src/mobile/account) ──
+
+  /** Handles this account has blocked (bit-sign /api/bitsign/me/blocks). */
+  async blocks(): Promise<string[]> {
+    const r = await this.call<{ blocked?: string[] }>('GET', '/api/bitsign/me/blocks');
+    return r.blocked ?? [];
+  }
+
+  /** Block $handle: the server refuses DMs between you both. */
+  async block(handle: string): Promise<void> {
+    await this.call('POST', '/api/bitsign/me/blocks', { handle: handle.trim().replace(/^\$/, '') });
+  }
+
+  async unblock(handle: string): Promise<void> {
+    await this.call('DELETE', '/api/bitsign/me/blocks', { handle: handle.trim().replace(/^\$/, '') });
+  }
+
+  /** Delete this bChat account (identity-key signed; see src/mobile/account/deleteAccount.ts). */
+  async deleteAccount(body: {
+    identity_key: string;
+    timestamp: string;
+    signature: string;
+    confirm: 'DELETE';
+  }): Promise<{ status?: string; retained?: string[]; note?: string }> {
+    return this.call('POST', '/api/bitsign/account/delete', body);
+  }
+
   /** Open (or find) the 1:1 room with $handle (Chat › DMs). Returns its ticker. */
   async openDirect(handle: string): Promise<string> {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/direct', {

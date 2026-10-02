@@ -19,6 +19,8 @@ type Deps = {
   idb?: Pick<IDBFactory, 'databases' | 'deleteDatabase'>;
   session?: Pick<Storage, 'setItem'>;
   wait?: (ms: number) => Promise<void>;
+  /** Open the restore screen after the reload (Forgot password). Account deletion passes false. */
+  restore?: boolean;
 };
 
 const deleteDb = (idb: Pick<IDBFactory, 'deleteDatabase'>, name: string) =>
@@ -37,6 +39,7 @@ export const wipeLocalWallet = async ({
   idb = indexedDB,
   session = sessionStorage,
   wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  restore = true,
 }: Deps): Promise<void> => {
   // Biometrics first, so the old passKey can't come back even if a later step fails.
   await native.biometricRemove({ key: '' }).catch(() => undefined);
@@ -59,6 +62,7 @@ export const wipeLocalWallet = async ({
     await deleteDb(idb, db.name);
   }
 
+  if (!restore) return;
   try {
     session.setItem(RESTORE_FLAG, '1');
   } catch {

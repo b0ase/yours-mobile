@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Flag, Loader2 } from 'lucide-react';
 import { sendBsv } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -18,6 +18,9 @@ import { loadKey } from './keyStore';
 import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
 import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PaidBackend, type PriceInfo, type Quote } from './paid';
 import { STORE_BUILD } from '../storeBuild';
+import { consentTarget, grantConsent, hasConsent } from './consent';
+import { ConsentSheet } from './ConsentSheet';
+import { ReportSheet } from '../ugc/UgcSheets';
 
 /** Store build: no paid endpoints are ever called (own key only, storeBuild.ts). */
 const storeNoPaid: PaidBackend = {
@@ -108,6 +111,9 @@ const AgentPage = () => {
   const [keyReady, setKeyReady] = useState<boolean | null>(null);
   const [confirm, setConfirm] = useState<{ sats: number; resolve: (ok: boolean) => void } | null>(null);
   const [unanswered, setUnanswered] = useState<Unanswered | null>(null);
+  // Third-party AI consent (agent/consent.ts): asked before the first message to each provider.
+  const [consentAsk, setConsentAsk] = useState<((ok: boolean) => void) | null>(null);
+  const [reportingReply, setReportingReply] = useState<{ text: string; index: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const provider = PROVIDERS[prefs.provider];
 
@@ -211,6 +217,14 @@ const AgentPage = () => {
       setError(SECRET_WARNING);
       return;
     }
+    // ⚠ Nothing leaves the phone for an AI provider the user has not allowed (Apple 5.1.2(i)).
+    const target = consentTarget(prefs.mode, prefs.provider);
+    if (!hasConsent(target)) {
+      const ok = await new Promise<boolean>((resolve) => setConsentAsk(() => resolve));
+      setConsentAsk(null);
+      if (!ok) return;
+      grantConsent(target);
+    }
     const next: AgentMessage[] = [...messages, { role: 'user', text }];
     setMessages(next);
     setInput('');
@@ -301,6 +315,16 @@ const AgentPage = () => {
               }
             >
               {m.text}
+              {m.role === 'assistant' && (
+                <button
+                  onClick={() => setReportingReply({ text: m.text, index: i })}
+                  className="mt-1.5 flex items-center gap-1 text-[11px]"
+                  style={{ color: MUTED }}
+                  aria-label="Report response"
+                >
+                  <Flag size={11} /> Report response
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -361,6 +385,25 @@ const AgentPage = () => {
           </button>
         </div>
       </form>
+      {consentAsk && (
+        <ConsentSheet
+          target={consentTarget(prefs.mode, prefs.provider)}
+          onAllow={() => consentAsk(true)}
+          onCancel={() => consentAsk(false)}
+        />
+      )}
+      {reportingReply && (
+        <ReportSheet
+          title="Report this response"
+          report={{
+            kind: 'ai_response',
+            target: `b-agent:${prefs.mode === 'paid' ? 'paid' : `${prefs.provider}/${prefs.models[prefs.provider]}`}`,
+            content: reportingReply.text,
+            details: `the user's message: ${messages[reportingReply.index - 1]?.text.slice(0, 1000) ?? ''}`,
+          }}
+          onClose={() => setReportingReply(null)}
+        />
+      )}
       {confirm && (
         <ConfirmSheet
           sats={confirm.sats}

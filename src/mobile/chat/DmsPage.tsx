@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { MessageCircle, Plus, Search, Users, WifiOff, X } from 'lucide-react';
+import { isBlocked, onUgcChange } from '../ugc/ugc';
+import { syncBlocks } from '../ugc/UserSafety';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
@@ -164,7 +166,16 @@ export const DmsPage = ({
     return off;
   }, []);
 
-  const dms = useMemo(() => (rooms ? dmRooms(rooms) : null), [rooms]);
+  // Blocked people's DMs are hidden (ugc/ugc.ts); the server also refuses new messages both ways.
+  const [blockTick, setBlockTick] = useState(0);
+  useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
+  useEffect(() => {
+    if (handle) void syncBlocks(client);
+  }, [client, handle]);
+  const dms = useMemo(
+    () => (rooms ? dmRooms(rooms).filter((r) => !isBlocked(roomTitle(r, handle || ''))) : null),
+    [rooms, handle, blockTick], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const contacts = useMemo(
     () => mergeContacts(bchatContacts, friends, sheet ? loadFollows() : [], handle),
     [bchatContacts, friends, sheet, handle],

@@ -84,6 +84,20 @@ export const claimPaymail = async (
   return String(j.paymail);
 };
 
+/**
+ * Account deletion: remove this identity's paymail alias and its inbox from the paymail server
+ * (site/lib/paymail.js `delete`). Collect the inbox first, or uncollected payments' derivation
+ * data is lost with it.
+ */
+export const deletePaymail = async (
+  f: Fetch,
+  wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
+): Promise<{ alias: string | null }> => {
+  if (!paymailEnabled()) return { alias: null };
+  const j = await postJson(f, api('delete'), await signRequest(wallet, 'delete', { confirm: 'DELETE' }));
+  return { alias: typeof j.alias === 'string' ? j.alias : null };
+};
+
 /** The paymail already registered for this identity key (public lookup), or undefined. */
 export const lookupPaymail = async (f: Fetch, identityKey: string): Promise<string | undefined> => {
   if (!paymailEnabled()) return undefined;

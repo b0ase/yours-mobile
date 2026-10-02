@@ -49,6 +49,7 @@ import { PostMedia } from './FeedMedia';
 import { FEED_APP, SOURCE_REGISTRY, migrateSourceId, textOn } from './sources';
 import { kindOf, MAX_POST_IMAGES, planAv } from './media';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
+import { ReportSheet } from '../ugc/UgcSheets';
 import {
   buildFollowScript,
   buildBranchScript,
@@ -1581,6 +1582,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           actions={actions}
           mutes={blocked}
           safetyTick={safetyTick}
+          onBlock={() => {
+            if (profile === 'me') return;
+            setBlocks((b) => addBlock(b, { address: profile.address, bapId: profile.bapId, name: profile.name }));
+            setProfile(null);
+            addSnackbar(`Blocked ${profile.name}. Unblock in Settings → Privacy.`, 'info');
+          }}
         />
       )}
       {board && (
@@ -1628,6 +1635,7 @@ const ProfileView = ({
   actions,
   mutes,
   safetyTick,
+  onBlock,
 }: {
   author: Author;
   isMe: boolean;
@@ -1637,7 +1645,10 @@ const ProfileView = ({
   actions: PostActions;
   mutes: string[];
   safetyTick: number;
+  /** Block this author (hides their posts on this device). */
+  onBlock: () => void;
 }) => {
+  const [reporting, setReporting] = useState(false);
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -1686,7 +1697,39 @@ const ProfileView = ({
             {following ? <UserCheck size={15} /> : <UserPlus size={15} />} {following ? 'Following' : 'Follow'}
           </button>
         )}
+        {!isMe && (
+          <button
+            onClick={() => setReporting(true)}
+            className="mt-2 inline-flex items-center gap-1.5 text-xs"
+            style={{ color: MUTED }}
+          >
+            <Flag size={12} /> Report or block
+          </button>
+        )}
       </div>
+      {reporting && (
+        <ReportSheet
+          title={`Report or block ${author.name}`}
+          report={{
+            kind: 'user',
+            target: author.bapId ? `bap:${author.bapId}` : author.address ? `address:${author.address}` : author.name,
+            details: `feed author: ${author.name}`,
+          }}
+          onClose={() => setReporting(false)}
+          extra={
+            <button
+              onClick={() => {
+                setReporting(false);
+                onBlock();
+              }}
+              className="rounded-xl py-2.5 text-sm font-semibold"
+              style={{ background: '#2b2f36', color: '#ff6b6b' }}
+            >
+              Block {author.name}
+            </button>
+          }
+        />
+      )}
       {error && (
         <p className="text-center text-xs pt-4" style={{ color: RED }}>
           {error}
