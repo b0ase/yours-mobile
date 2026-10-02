@@ -7,7 +7,10 @@ import {
   ArrowUp,
   Ban,
   Coins,
+  Info,
   Lock,
+  Plus,
+  ShieldCheck,
   MessageCircle,
   Search,
   ShoppingCart,
@@ -82,11 +85,22 @@ import {
 } from '../chat/bounties';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { DmsPage, type DmConversationProps } from '../chat/DmsPage';
-import { UserSafetyButton } from '../ugc/UserSafety';
-import { isBlocked, onUgcChange } from '../ugc/ugc';
+import { setBlocked, syncBlocks, UserSafetyButton } from '../ugc/UserSafety';
+import { blockedHandles, onUgcChange } from '../ugc/ugc';
+import {
+  browseList,
+  byActivity,
+  isOpenRoom,
+  isStaff,
+  openInfo,
+  parsePublicRooms,
+  withoutBlocked,
+  type PublicRoom,
+} from '../chat/openRooms';
+import { longPress, MessageMenu, NewRoomSheet, OpenRoomSheet, useRoomCard } from '../chat/OpenRoomSheets';
 
 /**
- * Chat › Chatrooms: TOKEN ROOMS ONLY (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
+ * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
  * segment (chat/DmsPage.tsx, owner reversal of the earlier no-DMs rule). The list is one room per
  * BSV-21 token / 1Sat collection this wallet holds at or above the room minimum — buy a token
  * and its room appears; sell it and the room goes.
@@ -171,6 +185,9 @@ const Conversation = ({
   onBans,
   onBounties,
   peer = null,
+  openRoom = null,
+  hidden,
+  onMessageMenu = null,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -188,6 +205,12 @@ const Conversation = ({
   onBounties: (() => void) | null;
   /** A 1:1's other person: shows Report / Block (Apple 1.2). */
   peer?: string | null;
+  /** Open rooms (no token): the info button, and read-only once closed. */
+  openRoom?: { closed: boolean; visibility: 'public' | 'invite'; onInfo: () => void } | null;
+  /** Message ids removed by a moderator in this session. */
+  hidden?: ReadonlySet<string>;
+  /** Long-press a message: report / block / delete. */
+  onMessageMenu?: ((m: ChatMessage) => void) | null;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
@@ -307,13 +330,14 @@ const Conversation = ({
       });
   };
 
-  // Blocked people's messages are hidden here (ugc/ugc.ts); re-filter when the block list changes.
+  // Blocked people's messages are hidden here (ugc/ugc.ts, synced with bit-sign's
+  // bchat_user_blocks); re-filter when the block list changes.
   const [blockTick, setBlockTick] = useState(0);
   useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
-  const items = useMemo(
-    () => threadItems(messages.filter((m) => !isBlocked(m.author_handle)), me),
-    [messages, me, blockTick], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  const items = useMemo(() => {
+    const shown = withoutBlocked(messages, new Set(blockedHandles()));
+    return threadItems(hidden?.size ? shown.filter((m) => !hidden.has(m.id)) : shown, me);
+  }, [messages, me, hidden, blockTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
 
@@ -338,11 +362,18 @@ const Conversation = ({
               ? 'waiting for network…'
               : entry
                 ? `${entry.gate.key.startsWith('coll:') ? entry.gate.symbol : `$${entry.gate.symbol}`} · ${members} holder${members === 1 ? '' : 's'} · you hold ${amountLabel(entry.holding.amountRaw, entry.gate)}`
-                : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
+                : openRoom
+                  ? `${members} member${members === 1 ? '' : 's'} · ${openRoom.visibility === 'public' ? 'Public' : 'Invite only'}${openRoom.closed ? ' · Closed' : ''}`
+                  : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
           </div>
           {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
         </div>
         {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
+        {openRoom && (
+          <button onClick={openRoom.onInfo} className="p-2 rounded-full active:opacity-60" aria-label="Room info">
+            <Info size={20} color={GOLD} />
+          </button>
+        )}
         {onBans && (
           <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Bans">
             <Ban size={18} color={MUTED} />
@@ -426,6 +457,7 @@ const Conversation = ({
               className={`flex ${it.mine ? 'justify-end' : 'justify-start'} ${it.firstOfGroup ? 'mt-2' : 'mt-[3px]'}`}
             >
               <div
+                {...(onMessageMenu && !it.message.pending ? longPress(() => onMessageMenu(it.message)) : {})}
                 className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug"
                 style={{
                   borderRadius: 18,
@@ -467,6 +499,19 @@ const Conversation = ({
         )}
       </div>
 
+      {openRoom?.closed ? (
+        <div
+          className="px-4 pt-3 text-center text-xs shrink-0"
+          style={{
+            paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)',
+            background: '#0b0b0b',
+            color: MUTED,
+            borderTop: `1px solid ${LINE}`,
+          }}
+        >
+          This room is closed. You can read it, but no one can post.
+        </div>
+      ) : (
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -505,6 +550,7 @@ const Conversation = ({
           <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
         </button>
       </form>
+      )}
     </div>
   );
 };
@@ -1101,7 +1147,56 @@ const isAdmin = (room: ChatRoom, me: string) => {
   return !!by && n(by) === n(me);
 };
 
-/** Token rooms (the Chatrooms segment); `header` is the Chat tab's Chatrooms | DMs | Calls switch. */
+const ListLabel = ({ children }: { children: React.ReactNode }) => (
+  <div className="px-4 pt-4 pb-1 text-[11px] font-bold uppercase tracking-wider" style={{ color: MUTED }}>
+    {children}
+  </div>
+);
+
+/** A joined open room (no token) in "Your rooms". */
+const OpenRoomRow = ({ room, me, onOpen }: { room: ChatRoom; me: string; onOpen: () => void }) => {
+  const info = openInfo(room);
+  const unread = room.unread ?? 0;
+  const title = room.name || `$${room.ticker}`;
+  return (
+    <li>
+      <button onClick={onOpen} className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]">
+        <Avatar title={title} />
+        <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+          <div className="flex items-baseline gap-2">
+            <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+              <span className={ELLIPSIS}>{title}</span>
+              {info?.official && <ShieldCheck size={14} color={GOLD} className="shrink-0" />}
+              {info?.visibility === 'invite' && <Lock size={12} color={MUTED} className="shrink-0" />}
+            </span>
+            <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
+              {listTimeLabel(room.last_message?.created_at ?? room.updated_at)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-[2px]">
+            <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+              {info?.closed ? 'Closed' : previewText(room, me)}
+            </span>
+            {unread > 0 && (
+              <span
+                className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+    </li>
+  );
+};
+
+/**
+ * Chat › Chatrooms: "Your rooms" (joined open + token rooms), "Public rooms" (open rooms anyone
+ * can join, docs/TOKEN-ROOMS.md › Open rooms), "+ New room", and Token rooms (full build only).
+ * `header` is the Chat tab's Chatrooms | DMs | Calls switch.
+ */
 const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const myName = useChatDisplayName();
   const { apiContext } = useServiceContext();
@@ -1126,6 +1221,14 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [opening, setOpening] = useState('');
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
   const [accepted, setAccepted] = useState<Set<string>>(new Set());
+  // Open rooms (no token): every build, store build included.
+  const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([]);
+  const [newRoom, setNewRoom] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [msgMenu, setMsgMenu] = useState<ChatMessage | null>(null);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const openTicker = open && isOpenRoom(open.room) ? open.room.ticker : null;
+  const { card, reload: reloadCard } = useRoomCard(client, openTicker);
   const { chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const autoTried = useRef(false);
@@ -1189,6 +1292,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   useEffect(() => {
     if (!handle) return;
     setIgnored(loadInviteList(handle, 'ignored'));
+    void syncBlocks(client);
     setAccepted(loadInviteList(handle, 'accepted'));
     if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1199,6 +1303,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     void walletHoldings(apiContext)
       .then(setHoldings)
       .catch(() => setHoldings([]));
+    client
+      .openRooms()
+      .then((d) => setPublicRooms(parsePublicRooms(d)))
+      .catch(() => {});
     client
       .rooms()
       .then((r) => {
@@ -1269,6 +1377,62 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     void openEntry(e);
   };
 
+  const q = query.trim().toLowerCase().replace(/^\$/, '');
+  const myOpen = useMemo(
+    () =>
+      (rooms ?? [])
+        .filter(isOpenRoom)
+        .filter((r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q)),
+    [rooms, q],
+  );
+  const browse = useMemo(
+    () => browseList(publicRooms, new Set((rooms ?? []).map((r) => r.ticker.toUpperCase())), query),
+    [publicRooms, rooms, query],
+  );
+  const tokenMine = shown.filter(({ e }) => e.status === 'member');
+  const tokenOther = shown.filter(({ e }) => e.status !== 'member');
+  const yours = useMemo(() => {
+    const at = (r: ChatRoom | null) => Date.parse(r?.last_message?.created_at ?? r?.updated_at ?? '') || 0;
+    const list: ({ kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] })[] = [
+      ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
+      ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
+    ];
+    return list.sort((a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room));
+  }, [myOpen, tokenMine]);
+
+  const openOpenRoom = (room: ChatRoom) => {
+    setRooms((cur) => cur?.map((r) => (r.ticker === room.ticker ? { ...r, unread: 0 } : r)) ?? cur);
+    setHidden(new Set());
+    setOpen({ room, entry: null });
+  };
+  const stubRoom = (ticker: string, name: string, extra: Partial<ChatRoom> = {}): ChatRoom => ({
+    id: ticker,
+    ticker,
+    name,
+    party_count: 1,
+    metadata: { kind: 'open', open: {} },
+    ...extra,
+  });
+  const joinPublic = async (r: PublicRoom) => {
+    setOpening(r.ticker);
+    try {
+      await client.joinOpenRoom({ ticker: r.ticker });
+      openOpenRoom(
+        stubRoom(r.ticker, r.name, {
+          party_count: r.memberCount + 1,
+          metadata: { kind: 'open', open: { visibility: 'public', description: r.description, official: r.official } },
+        }),
+      );
+      refresh();
+    } catch (e) {
+      if (e instanceof ChatApiError && e.status === 401) return authLost();
+      setListError(errText(e));
+    } finally {
+      setOpening('');
+    }
+  };
+  const blockUser = (target: string) => void setBlocked(client, target, true);
+
   const buy = (key: string) => {
     const ref = parseTokenKey(key);
     setLocked(null);
@@ -1325,115 +1489,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
-  return (
-    <div
-      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: '100%', background: BG }}
-    >
-      <PullToRefresh onRefresh={refresh} disabled={!handle} />
-      <TopNav />
-      <div className="w-full pt-16 flex flex-col">
-        <SegmentRow>{header}</SegmentRow>
-        <SegmentTitle title="Chatrooms">
-          {handle && (
-            <span className="mr-1 flex flex-col items-end leading-tight">
-              <span className="text-[12px] font-semibold text-white">{myName || `$${handle}`}</span>
-              {myName && (
-                <span className="text-[10px]" style={{ color: MUTED }}>
-                  ${handle}
-                </span>
-              )}
-            </span>
-          )}
-        </SegmentTitle>
-
-        {!online && (
-          <div
-            className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
-            style={{ background: '#1a1408', color: '#e6c76a' }}
-          >
-            <WifiOff size={14} /> You're offline. Chatrooms will refresh when you reconnect.
-          </div>
-        )}
-
-        {handle && entries && entries.length > 4 && (
-          <div
-            className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
-          >
-            <Search size={15} color={MUTED} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search chatrooms"
-              className="flex-1 bg-transparent py-2 text-sm text-white outline-none"
-            />
-            {query && (
-              <button onClick={() => setQuery('')} aria-label="Clear">
-                <X size={14} color={MUTED} />
-              </button>
-            )}
-          </div>
-        )}
-
-        {!handle && (
-          <div className="px-6 pt-16 flex flex-col items-center text-center gap-3">
-            <div
-              className="h-16 w-16 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(145deg,#2a2208,#0d0b04)', border: '1px solid #3a2f0c' }}
-            >
-              <MessageCircle size={28} color={GOLD} />
-            </div>
-            <h2 className="text-lg font-bold text-white">Token chatrooms</h2>
-            <p className="text-xs" style={{ color: MUTED }}>
-              Every token you hold has a chatroom for its holders. Signs in to bChat with this wallet's identity key —
-              no password.
-            </p>
-            <button
-              onClick={signIn}
-              disabled={signingIn || !online}
-              className="mt-2 rounded-2xl px-6 py-3 text-sm font-bold disabled:opacity-50"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {signingIn ? 'Signing in…' : 'Sign in with wallet'}
-            </button>
-            {authError && <p className="text-xs text-[#F97066]">{authError}</p>}
-          </div>
-        )}
-
-        {handle && entries === null && !listError && (
-          <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            Loading chatrooms…
-          </div>
-        )}
-        {handle && listError && entries === null && (
-          <div className="text-center text-xs pt-10 text-[#F97066]">
-            {listError}
-            <div>
-              <button onClick={refresh} className="mt-3 underline" style={{ color: GOLD }}>
-                Try again
-              </button>
-            </div>
-          </div>
-        )}
-        {handle && entries && entries.length === 0 && (
-          <div className="px-8 pt-14 text-center">
-            <p className="text-sm text-white font-semibold">No chatrooms yet</p>
-            <p className="text-xs mt-1" style={{ color: MUTED }}>
-              Buy a token in Market to join its chatroom.
-            </p>
-            <button
-              onClick={() => handleSelect(asMenuItem('market'))}
-              className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              <ShoppingCart size={15} /> Market
-            </button>
-          </div>
-        )}
-
-        <ul className="w-full">
-          {shown.map(({ e, invite }) => {
+  /** One token room row (unchanged from the token-only list). */
+  const renderTokenRow = ({ e, invite }: (typeof shown)[number]) => {
             const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
             const personal = personalOf(e);
             if (invite === 'invite' && personal && ROOMS) {
@@ -1516,8 +1573,202 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                 </button>
               </li>
             );
-          })}
-        </ul>
+  };
+
+  return (
+    <div
+      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      style={{ height: '100%', background: BG }}
+    >
+      <PullToRefresh onRefresh={refresh} disabled={!handle} />
+      <TopNav />
+      <div className="w-full pt-16 flex flex-col">
+        <SegmentRow>{header}</SegmentRow>
+        <SegmentTitle title="Chatrooms">
+          {handle && (
+            <span className="mr-1 flex flex-col items-end leading-tight">
+              <span className="text-[12px] font-semibold text-white">{myName || `$${handle}`}</span>
+              {myName && (
+                <span className="text-[10px]" style={{ color: MUTED }}>
+                  ${handle}
+                </span>
+              )}
+            </span>
+          )}
+        </SegmentTitle>
+
+        {!online && (
+          <div
+            className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
+            style={{ background: '#1a1408', color: '#e6c76a' }}
+          >
+            <WifiOff size={14} /> You're offline. Chatrooms will refresh when you reconnect.
+          </div>
+        )}
+
+        {handle && (rooms?.length ?? 0) + publicRooms.length > 4 && (
+          <div
+            className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          >
+            <Search size={15} color={MUTED} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search chatrooms"
+              className="flex-1 bg-transparent py-2 text-sm text-white outline-none"
+            />
+            {query && (
+              <button onClick={() => setQuery('')} aria-label="Clear">
+                <X size={14} color={MUTED} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {!handle && (
+          <div className="px-6 pt-16 flex flex-col items-center text-center gap-3">
+            <div
+              className="h-16 w-16 rounded-2xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(145deg,#2a2208,#0d0b04)', border: '1px solid #3a2f0c' }}
+            >
+              <MessageCircle size={28} color={GOLD} />
+            </div>
+            <h2 className="text-lg font-bold text-white">Chatrooms</h2>
+            <p className="text-xs" style={{ color: MUTED }}>
+              {ROOMS
+                ? 'Join public rooms, start your own, and chat with the holders of every token you own.'
+                : 'Join public rooms or start your own.'}{' '}
+              Signs in to bChat with this wallet's identity key — no password.
+            </p>
+            <button
+              onClick={signIn}
+              disabled={signingIn || !online}
+              className="mt-2 rounded-2xl px-6 py-3 text-sm font-bold disabled:opacity-50"
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              {signingIn ? 'Signing in…' : 'Sign in with wallet'}
+            </button>
+            {authError && <p className="text-xs text-[#F97066]">{authError}</p>}
+          </div>
+        )}
+
+        {handle && (
+          <div className="px-4 pb-1 flex">
+            <button
+              onClick={() => setNewRoom(true)}
+              className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              <Plus size={16} strokeWidth={2.6} /> New room
+            </button>
+          </div>
+        )}
+        {handle && rooms === null && !listError && (
+          <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
+            Loading chatrooms…
+          </div>
+        )}
+        {handle && listError && (
+          <div className="text-center text-xs pt-4 px-6 text-[#F97066]">
+            {listError}
+            <div>
+              <button onClick={refresh} className="mt-2 underline" style={{ color: GOLD }}>
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
+
+        {handle && rooms && (
+          <>
+            <ListLabel>Your rooms</ListLabel>
+            {yours.length === 0 && (
+              <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
+                You haven’t joined any rooms yet. Pick a public room below or start your own.
+              </p>
+            )}
+            <ul className="w-full">
+              {yours.map((y) =>
+                y.kind === 'open' ? (
+                  <OpenRoomRow
+                    key={y.room.ticker}
+                    room={y.room}
+                    me={handle}
+                    onOpen={() => openOpenRoom(y.room)}
+                  />
+                ) : (
+                  renderTokenRow(y.item)
+                ),
+              )}
+            </ul>
+
+            <ListLabel>Public rooms</ListLabel>
+            {browse.length === 0 && (
+              <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
+                {query ? 'No public rooms match.' : 'No other public rooms right now. Start one.'}
+              </p>
+            )}
+            <ul className="w-full">
+              {browse.map((r) => (
+                <li key={r.ticker} className="flex items-center gap-3 px-4 py-[10px]">
+                  <Avatar title={r.name} />
+                  <div className="flex-1 min-w-0">
+                    <div className={`flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                      <span className={ELLIPSIS}>{r.name}</span>
+                      {r.official && <ShieldCheck size={14} color={GOLD} className="shrink-0" />}
+                    </div>
+                    <div className={`text-[12px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                      {r.memberCount} member{r.memberCount === 1 ? '' : 's'}
+                      {r.description ? ` · ${r.description}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => void joinPublic(r)}
+                    disabled={!!opening}
+                    className="rounded-xl px-3 py-1 text-xs font-bold disabled:opacity-50"
+                    style={{ background: GOLD, color: '#1a1300' }}
+                  >
+                    {opening === r.ticker ? '…' : 'Join'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            {/* Token rooms: full build only. The store build hides the section entirely (storeBuild.ts). */}
+            {ROOMS && (
+              <>
+                <ListLabel>Token rooms</ListLabel>
+                {entries === null && (
+                  <div className="text-center text-xs py-4" style={{ color: MUTED }}>
+                    Loading token rooms…
+                  </div>
+                )}
+                {entries && entries.length === 0 && (
+                  <div className="px-8 pt-4 pb-6 text-center">
+                    <p className="text-sm text-white font-semibold">No token rooms yet</p>
+                    <p className="text-xs mt-1" style={{ color: MUTED }}>
+                      Buy a token in Market to join its chatroom.
+                    </p>
+                    <button
+                      onClick={() => handleSelect(asMenuItem('market'))}
+                      className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
+                      style={{ background: GOLD, color: '#1a1300' }}
+                    >
+                      <ShoppingCart size={15} /> Market
+                    </button>
+                  </div>
+                )}
+                {entries && entries.length > 0 && tokenOther.length === 0 && (
+                  <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
+                    You’re in every token room you hold. They’re under Your rooms.
+                  </p>
+                )}
+                <ul className="w-full">{tokenOther.map(renderTokenRow)}</ul>
+              </>
+            )}
+          </>
+        )}
       </div>
 
       {locked && (
@@ -1538,8 +1789,19 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           online={online}
           onAuthLost={authLost}
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
-          onBans={isAdmin(open.room, handle) ? () => setBanning(true) : null}
-          onBounties={() => setShowBounties(true)}
+          onBans={!openTicker && isAdmin(open.room, handle) ? () => setBanning(true) : null}
+          onBounties={openTicker ? null : () => setShowBounties(true)}
+          openRoom={
+            openTicker
+              ? {
+                  closed: card?.closed ?? openInfo(open.room)?.closed ?? false,
+                  visibility: card?.visibility ?? openInfo(open.room)?.visibility ?? 'public',
+                  onInfo: () => setShowInfo(true),
+                }
+              : null
+          }
+          hidden={hidden}
+          onMessageMenu={setMsgMenu}
           onLocked={(r) => {
             setOpen(null);
             setLocked({ gate: r.gate, heldRaw: r.heldRaw, members: r.room?.members ?? null });
@@ -1549,6 +1811,43 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             setOpen(null);
             refresh();
           }}
+        />
+      )}
+      {newRoom && handle && (
+        <NewRoomSheet
+          client={client}
+          onClose={() => setNewRoom(false)}
+          onDone={(r) => {
+            setNewRoom(false);
+            openOpenRoom(stubRoom(r.ticker, r.name));
+            refresh();
+          }}
+        />
+      )}
+      {showInfo && open && card && handle && (
+        <OpenRoomSheet
+          client={client}
+          card={card}
+          me={handle}
+          onClose={() => setShowInfo(false)}
+          onChanged={reloadCard}
+          onLeft={() => {
+            setShowInfo(false);
+            setOpen(null);
+            refresh();
+          }}
+        />
+      )}
+      {msgMenu && open && handle && (
+        <MessageMenu
+          client={client}
+          ticker={open.room.ticker}
+          message={msgMenu}
+          me={handle}
+          canDelete={!!openTicker && isStaff(card) && !card?.closed}
+          onDeleted={() => setHidden((cur) => new Set(cur).add(msgMenu.id))}
+          onBlock={blockUser}
+          onClose={() => setMsgMenu(null)}
         />
       )}
       {banning && open && <BansSheet client={client} ticker={open.room.ticker} onClose={() => setBanning(false)} />}

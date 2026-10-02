@@ -64,7 +64,7 @@ export const TERMS_POINTS = [
 
 // ── Reports ──
 
-export type ReportKind = 'feed_post' | 'market_item' | 'dm_message' | 'room_message' | 'user' | 'ai_response' | 'bapp';
+export type ReportKind = 'feed_post' | 'market_item' | 'dm_message' | 'room_message' | 'room' | 'user' | 'ai_response' | 'bapp';
 export const REPORT_REASONS: { id: string; label: string }[] = [
   { id: 'harassment', label: 'Harassment or bullying' },
   { id: 'hate', label: 'Hate or discrimination' },
