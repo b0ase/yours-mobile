@@ -9,7 +9,7 @@ export type AgentRole = 'user' | 'assistant';
 export type AgentMessage = { role: AgentRole; text: string };
 
 /** Most recent turns sent each time (stateless backends; keeps requests and prices bounded). */
-export const MAX_TURNS = 20;
+export const MAX_TURNS = 8;
 export const MAX_INPUT = 2000;
 
 /** The transcript to send: blank turns dropped, last MAX_TURNS kept. */

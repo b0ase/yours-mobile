@@ -9,6 +9,12 @@ describe('transcript', () => {
     expect(t.length).toBe(MAX_TURNS);
     expect(t[0].text).toBe('m5');
   });
+
+  test('history is capped at 8 turns (bit-sign refuses more)', () => {
+    expect(MAX_TURNS).toBe(8);
+    const many: AgentMessage[] = Array.from({ length: 20 }, (_, i) => ({ role: 'user', text: `m${i}` }));
+    expect(transcript(many).length).toBe(8);
+  });
 });
 
 describe('looksLikeSecret', () => {
