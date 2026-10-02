@@ -259,7 +259,15 @@ const AgentPage = () => {
           <ArrowLeft size={20} color="#fff" />
         </button>
         <img src={bGlyph} alt="" width={22} height={22} />
-        <h1 className="text-lg font-bold text-white">b agent</h1>
+        <h1 className="text-lg font-bold text-white shrink-0">b agent</h1>
+        <button
+          type="button"
+          onClick={() => navigate('/m/settings')}
+          className="ml-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-right text-[11px] pr-2"
+          style={{ color: MUTED }}
+        >
+          {status}
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
@@ -315,14 +323,6 @@ const AgentPage = () => {
           void send();
         }}
       >
-        <button
-          type="button"
-          onClick={() => navigate('/m/settings')}
-          className="text-left text-[11px]"
-          style={{ color: MUTED }}
-        >
-          {status}
-        </button>
         <div className="flex items-end gap-2">
           <textarea
             value={input}
