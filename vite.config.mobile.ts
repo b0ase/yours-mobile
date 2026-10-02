@@ -428,7 +428,10 @@ export default mergeConfig(
       __MINT_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MINT_FEE_ADDRESS ?? ''),
       // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
       __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
-      __MARKET_REPORT_URL__: JSON.stringify(process.env.BWALLET_MARKET_REPORT_URL ?? ''),
+      // Reports go to bit-sign's moderation queue (content_reports); owner acts within 24h (Apple 1.2).
+      __MARKET_REPORT_URL__: JSON.stringify(
+        process.env.BWALLET_MARKET_REPORT_URL ?? 'https://www.bitcoinchat.online/api/bitsign/report',
+      ),
       // bWallet paymail (src/mobile/names/config.ts): name@bwallet.space, served by pay.bwallet.space.
       // Set BWALLET_PAYMAIL_DOMAIN='' to build with paymail off.
       __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'bwallet.space'),

@@ -253,6 +253,26 @@ Build: `pnpm build:mobile:store`, `pnpm cap:sync:store`, `pnpm ios:store`, `pnpm
 `scripts/android-release.sh` now builds the APK from the default build and the AAB (Play) from the store
 build. Note that after it runs, the `android/` web assets are the store build.
 
+## Fixed on `feat/store-fixes` (2 Oct 2026)
+
+Server side is bit-sign PR `feat/store-fixes` (migration `migrations/20261002_store_safety.sql`, applied by hand).
+Contact everywhere: info@bitcoincorporation.website.
+
+- **Account deletion (section 7).** Settings › Account & safety › Delete account (`src/mobile/account/`). It lists what is
+  deleted and what cannot be (on-chain data; KYC, signed agreements and registers kept by law), asks for the $handle or
+  DELETE, then: collects and deletes the paymail (signed `delete` op in `site/lib/paymail.js`), deletes the bChat account
+  (bit-sign `POST /api/bitsign/account/delete`, identity-key signature, fresh sign-in), clears local data, and removes the
+  account from the phone (the existing account-removal steps, or a full wipe when it is the only account). Web page for
+  Google: https://www.bitcoinchat.online/delete-account.
+- **UGC (section 6).** Terms with a zero-tolerance clause (bitcoinchat.online/terms#conduct) must be agreed once before
+  Feed, Chat/DMs or Calls (`src/mobile/ugc/`), and are linked in Settings. DMs have Report / Block in the conversation
+  header; Feed profiles have Report or block. Blocks hide DMs and messages locally and go to bit-sign
+  `/api/bitsign/me/blocks`, which refuses 1:1 messages both ways. Feed/Market reports now default to bit-sign
+  `POST /api/bitsign/report` (`content_reports`, rate-limited). **Someone must review `content_reports` daily (24 h).**
+- **AI consent (section 8).** Before the first b agent message per provider a sheet names the provider (paid mode:
+  bit-sign then Anthropic; own key: the chosen provider), says what is sent (message + last 8 turns + fixed instructions)
+  and what is not. Stored per provider; Settings › b agent › Revoke. Agent replies have "Report response".
+
 ## Prioritised fix list
 
 1. **Org enrolment** (Apple Organization account under The Bitcoin Corporation Ltd; Play organisation account), 3.1.5(i). *Owner.*

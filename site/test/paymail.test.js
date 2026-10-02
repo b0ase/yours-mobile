@@ -24,6 +24,13 @@ const memStore = () => {
     updatePayment: async (ref, patch) => void Object.assign(pays.get(ref), patch),
     listInbox: async (k) => [...pays.values()].filter((p) => p.identity_key === k && p.status === 'received'),
     countRecentPayments: async () => 0,
+    deleteByKey: async (k) => {
+      let a = 0;
+      let p = 0;
+      for (const [key, r] of aliases) if (r.identity_key === k) (aliases.delete(key), a++);
+      for (const [ref, r] of pays) if (r.identity_key === k) (pays.delete(ref), p++);
+      return { aliases: a, payments: p };
+    },
   };
 };
 
@@ -269,5 +276,35 @@ describe('production config: bwallet.space primary, b0ase.com legacy', () => {
     const [s] = await h.p2pDestination({ handle: 'erin@b0ase.com' }, { satoshis: 1000 });
     expect(s).toBe(200);
     expect((await h.register({}, await user().sign('register', { alias: 'erin' })))[0]).toBe(409);
+  });
+});
+
+describe('delete (account deletion)', () => {
+  test('a signed delete removes the alias and its inbox; others are untouched', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    const v = user();
+    await h.register({}, await u.sign('register', { alias: 'gone' }));
+    await h.register({}, await v.sign('register', { alias: 'stays' }));
+    store.pays.set('r1', { reference: 'r1', identity_key: u.identityKey, alias: 'gone', status: 'collected' });
+    expect((await h.delete({}, await u.sign('delete', { confirm: 'nope' })))[0]).toBe(400);
+    const [s, r] = await h.delete({}, await u.sign('delete', { confirm: 'DELETE' }));
+    expect(s).toBe(200);
+    expect(r).toMatchObject({ deleted: true, alias: 'gone', aliases: 1, payments: 1 });
+    expect(store.aliases.has('gone')).toBe(false);
+    expect(store.aliases.has('stays')).toBe(true);
+    expect((await h.pki({ handle: 'gone@pay.test' }))[0]).toBe(404);
+  });
+
+  test('refuses a delete signed by another key', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    const v = user();
+    await h.register({}, await u.sign('register', { alias: 'mine' }));
+    const forged = { ...(await v.sign('delete', { confirm: 'DELETE' })), identityKey: u.identityKey };
+    expect((await h.delete({}, forged))[0]).toBe(401);
+    expect(store.aliases.has('mine')).toBe(true);
   });
 });

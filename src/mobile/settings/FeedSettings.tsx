@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Ban, Bell, Bookmark, Newspaper, PlayCircle, Sparkles, Zap } from 'lucide-react';
+import { ArrowLeft, Ban, Bell, Bookmark, FileText, Mail, Newspaper, PlayCircle, Sparkles, Trash2, Zap } from 'lucide-react';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -8,6 +8,9 @@ import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
+import { TermsScreen } from '../ugc/UgcSheets';
+import { SUPPORT_EMAIL } from '../ugc/ugc';
+import { DeleteAccountScreen } from '../account/DeleteAccountScreen';
 import { hasRate, money, useBsvUsd } from '../money/money';
 import {
   loadBlocks,
@@ -228,7 +231,7 @@ const HiddenScreen = ({ onBack }: { onBack: () => void }) => {
 
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
-  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | null>(null);
+  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | 'terms' | 'delete' | null>(null);
   const rate = useBsvUsd();
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
@@ -392,6 +395,33 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           isLast
         />
       </Section>
+      <Section title="Account & safety">
+        <Row
+          icon={<FileText size={16} />}
+          label="Terms of use"
+          description="Zero tolerance for objectionable content and abusive users"
+          onClick={() => setScreen('terms')}
+          isFirst
+        />
+        <Divider />
+        <Row
+          icon={<Mail size={16} />}
+          label="Contact and reports"
+          description={SUPPORT_EMAIL}
+          onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
+        />
+        <Divider />
+        <Row
+          icon={<Trash2 size={16} />}
+          label="Delete account"
+          description="Delete your paymail, $handle, bChat profile and messages"
+          onClick={() => setScreen('delete')}
+          isLast
+          danger
+        />
+      </Section>
+      {screen === 'terms' && <TermsScreen onBack={() => setScreen(null)} />}
+      {screen === 'delete' && <DeleteAccountScreen onBack={() => setScreen(null)} />}
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
     </>

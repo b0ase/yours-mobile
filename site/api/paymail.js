@@ -1,7 +1,7 @@
 // bWallet paymail (bsvalias) endpoint. Routed by site/vercel.json rewrites:
 //   /.well-known/bsvalias                     → ?op=caps
 //   /api/paymail/<op>/<handle>[/<pubkey>]     → ?op=<op>&handle=…&pubkey=…
-//   /api/paymail/<op>                         → ?op=<op>   (register, lookup, inbox, ack)
+//   /api/paymail/<op>                         → ?op=<op>   (register, lookup, inbox, ack, delete)
 // Env: PAYMAIL_DOMAIN (primary, default bwallet-nine.vercel.app), PAYMAIL_DOMAINS (optional,
 //      comma-separated extra domains served with the same aliases), PAYMAIL_BASE_URL (optional),
 //      SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ARC_URL / ARC_API_KEY (optional).
@@ -22,6 +22,7 @@ const ROUTES = {
   lookup: ['GET', 'lookup'],
   inbox: ['POST', 'inbox'],
   ack: ['POST', 'ack'],
+  delete: ['POST', 'delete'],
 };
 
 const hits = new Map();
