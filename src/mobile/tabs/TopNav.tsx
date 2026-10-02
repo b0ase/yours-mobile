@@ -172,26 +172,6 @@ export const TopNav = () => {
                   <X size={18} color="#98A2B3" />
                 </button>
               </div>
-              <div className="flex items-center gap-3 px-4 pb-3">
-                <AccountAvatar src={avatar} size={40} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <span className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>
-                      {names.displayName || short(current ?? '')}
-                    </span>
-                    {verified && (
-                      <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
-                        <Check size={14} strokeWidth={3} />
-                      </span>
-                    )}
-                  </div>
-                  {payable && payable.toLowerCase() !== names.displayName.toLowerCase() && (
-                    <div className={`text-lg leading-tight font-extrabold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
-                      {payable}
-                    </div>
-                  )}
-                </div>
-              </div>
               <DrawerHandle
                 identityAddress={current}
                 paymail={names.paymail}
@@ -237,7 +217,10 @@ export const TopNav = () => {
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{rowNames.displayName || rowNames.label}</div>
+                        <div className={`flex items-center gap-1 text-sm font-semibold text-white ${ELLIPSIS}`}>
+                          {rowNames.displayName || rowNames.label}
+                          {id === current && verified && <Check size={13} strokeWidth={3} color="#2ecc71" />}
+                        </div>
                         {rowNames.payable && rowNames.payable.toLowerCase() !== rowNames.displayName.toLowerCase() && (
                           <div className={`text-[15px] font-extrabold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
                             {rowNames.payable}

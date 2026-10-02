@@ -12,7 +12,7 @@ import { useAccountNames } from '../names/MyNameBadge';
 import { identityRowText } from '../names/identityText';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import type { BalanceView } from './balanceLoad';
-import { cardSats, memberSince, shortAddr } from './walletCardText';
+import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
   /** Total in US dollars (BSV at the current rate, plus MNEE when enabled). */
@@ -37,6 +37,12 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
   const { chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
+  const [unit, setUnit] = useState<CardUnit>(loadCardUnit);
+  const pickUnit = (u: CardUnit) => (e: MouseEvent) => {
+    e.stopPropagation();
+    setUnit(u);
+    saveCardUnit(u);
+  };
   const [handleOpen, setHandleOpen] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
@@ -98,6 +104,19 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
         <div className="bw-wcard-face bw-wcard-front" aria-hidden={flipped}>
           <div className="bw-wcard-top">
             <img src={bGlyph} alt="bWallet" className="bw-wcard-mark" />
+            <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
+              {(['usd', 'bsv'] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  aria-pressed={unit === u}
+                  className={unit === u ? 'is-on' : undefined}
+                  onClick={pickUnit(u)}
+                >
+                  {u === 'usd' ? '$' : 'BSV'}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="bw-wcard-centre">
             {view === 'spinner' ? (
@@ -109,10 +128,10 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
             ) : (
               <>
                 <span className="bw-wcard-usd" title={syncing ? 'Syncing…' : 'Balance'}>
-                  {formatUSD(usd)}
+                  {unit === 'usd' ? formatUSD(usd) : cardBsv(sats)}
                   {syncing && <Loader2 size={16} className="animate-spin bw-wcard-sync" color="#8e8e89" />}
                 </span>
-                <span className="bw-wcard-sats">{cardSats(sats)}</span>
+                <span className="bw-wcard-sats">{unit === 'usd' ? cardSats(sats) : formatUSD(usd)}</span>
               </>
             )}
             {failed && (

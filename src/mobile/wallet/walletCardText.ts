@@ -12,3 +12,26 @@ export const memberSince = (createdAt?: number): string => {
 
 /** "1AbcD…wXyZ" for addresses / key fingerprints. */
 export const shortAddr = (a: string): string => (a && a.length > 14 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a);
+
+/** "0.01234567 BSV" from sats (8 dp, trailing zeros kept to 2). */
+export const cardBsv = (sats: number): string => {
+  const v = (Math.max(0, Math.round(sats)) / 1e8).toFixed(8).replace(/(\.\d{2}\d*?)0+$/, '$1');
+  return `${v} BSV`;
+};
+
+const UNIT_KEY = 'bw-card-unit';
+export type CardUnit = 'usd' | 'bsv';
+export const loadCardUnit = (): CardUnit => {
+  try {
+    return localStorage.getItem(UNIT_KEY) === 'bsv' ? 'bsv' : 'usd';
+  } catch {
+    return 'usd';
+  }
+};
+export const saveCardUnit = (u: CardUnit) => {
+  try {
+    localStorage.setItem(UNIT_KEY, u);
+  } catch {
+    /* private mode */
+  }
+};

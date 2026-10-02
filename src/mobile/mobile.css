@@ -461,3 +461,25 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.bw-wcard-unit {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 210, 77, 0.2);
+}
+.bw-wcard-unit button {
+  border: 0;
+  background: transparent;
+  color: #8e8e89;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.bw-wcard-unit button.is-on {
+  background: #ffd24d;
+  color: #111;
+}

@@ -50,20 +50,9 @@ export const DrawerHandle = ({
 
   return (
     <div
-      className="mx-2 mb-2 flex flex-col gap-1.5 rounded-xl px-3 py-2.5"
+      className="mx-2 mb-2 flex flex-col gap-1.5 rounded-xl px-3 py-2"
       style={{ background: '#17191E', border: '1px solid #2b2f36' }}
     >
-      <span className="text-[10px] uppercase tracking-widest" style={{ color: '#98A2B3' }}>
-        Your handle
-      </span>
-      <span className="text-sm font-semibold break-all" style={{ color: '#FFD24D' }}>
-        {name}
-      </span>
-      {paymail && handle && (
-        <span className="text-[11px]" style={{ color: '#98A2B3' }}>
-          OpNS: {handle}
-        </span>
-      )}
       {roomKey && (
         <button
           type="button"
