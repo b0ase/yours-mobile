@@ -4,7 +4,7 @@ import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { useSnackbar } from '../../hooks/useSnackbar';
-import { formatSmallUsd, indexAutoPay, satsToUsd } from './indexAutoPay';
+import { indexAutoPay } from './indexAutoPay';
 import { markIndexingPaid } from './pendingIndexing';
 import {
   INDEX_FUND_NETWORK_SATS,
@@ -15,6 +15,7 @@ import {
   overlayStatus,
   type OverlayStatus,
 } from './indexFund';
+import { money, moneyWithSats } from '../money/money';
 
 /**
  * "Finish setting up $X": for a token this wallet minted whose 1sat-stack indexing was never
@@ -67,11 +68,7 @@ export const FinishIndexing = ({
     try {
       const r = await fundIndexing(apiContext, tokenId, ticker, { status, timeoutMs: 8000 });
       setMsg(`Done. $${ticker} will show in wallets and its room within a minute (tx ${r.txid.slice(0, 8)}…).`);
-      if (oneTap)
-        addSnackbar(
-          `Paid ${r.sats.toLocaleString()} sats (~${formatSmallUsd(satsToUsd(r.sats, exchangeRate))}) to index $${ticker}`,
-          'success',
-        );
+      if (oneTap) addSnackbar(`Paid ${moneyWithSats(r.sats, exchangeRate)} to index $${ticker}`, 'success');
       markIndexingPaid(tokenId);
       onFunded?.();
     } catch (e) {
@@ -95,7 +92,7 @@ export const FinishIndexing = ({
       </div>
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
         ${ticker} is in your wallet, but the 1Sat indexer won't list it (in other wallets, the Market or its room) until
-        its indexing is paid{sats ? `: ${sats.toLocaleString()} sats, once` : ''}.
+        its indexing is paid{sats ? `: ${money(sats, exchangeRate)}, once` : ''}.
       </p>
       {!msg || !getFundRecord(tokenId) ? (
         <button
@@ -109,7 +106,7 @@ export const FinishIndexing = ({
           className="h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
           style={{ background: '#FFD24D', color: '#000' }}
         >
-          {status ? `Pay ${sats?.toLocaleString()} sats to index $${ticker}` : 'Indexer has not seen it yet'}
+          {status ? `Pay ${money(sats ?? 0, exchangeRate)} to index $${ticker}` : 'Indexer has not seen it yet'}
         </button>
       ) : null}
       {msg && (
@@ -120,8 +117,8 @@ export const FinishIndexing = ({
       <SendConfirmation
         show={confirming}
         theme={theme}
-        lineItems={[{ address: 'Indexing', amount: `${(sats ?? 0).toLocaleString()} sats` }]}
-        total={`~${((sats ?? 0) + INDEX_FUND_NETWORK_SATS).toLocaleString()} sats`}
+        lineItems={[{ address: 'Indexing', amount: money(sats ?? 0, exchangeRate) }]}
+        total={`~${moneyWithSats((sats ?? 0) + INDEX_FUND_NETWORK_SATS, exchangeRate)}`}
         isProcessing={busy}
         onConfirm={() => void fund()}
         onCancel={() => !busy && setConfirming(false)}

@@ -8,6 +8,7 @@ import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
+import { hasRate, money, useBsvUsd } from '../money/money';
 import {
   loadBlocks,
   loadBookmarks,
@@ -228,7 +229,9 @@ const HiddenScreen = ({ onBack }: { onBack: () => void }) => {
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<'bookmarks' | 'hidden' | null>(null);
-  const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: v.toLocaleString() }));
+  const rate = useBsvUsd();
+  // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
+  const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
   return (
     <>
       <Section title="Feed">
@@ -278,7 +281,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           label="One-click pay"
           description={
             prefs.oneClick
-              ? `Tips and locks up to ${prefs.oneClickLimit.toLocaleString()} sats skip the confirm (max ${MAX_PER_MINUTE} a minute)`
+              ? `Tips and locks up to ${money(prefs.oneClickLimit, rate)}${hasRate(rate) ? ` (${prefs.oneClickLimit.toLocaleString()} sats)` : ''} skip the confirm (max ${MAX_PER_MINUTE} a minute)`
               : 'Always confirm tips and locks'
           }
           right={<Toggle label="One-click pay" on={prefs.oneClick} onChange={(v) => setPrefs({ oneClick: v })} />}
@@ -290,8 +293,12 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
             <Divider />
             <Row
               icon={<Zap size={16} />}
-              label="Limit per action (sats)"
-              description="Anything above this asks first"
+              label="Limit per action"
+              description={
+                hasRate(rate)
+                  ? 'Anything above this asks first (USD at today’s BSV price)'
+                  : 'Anything above this asks first (sats; USD price unavailable)'
+              }
               right={
                 <Pills
                   label="One-click limit"

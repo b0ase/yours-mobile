@@ -20,6 +20,7 @@ import {
   totalPriceSats,
   unitPrice,
   usd,
+  perTokenSats,
   validateSell,
   type ListingRecord,
 } from './sell';
@@ -59,6 +60,14 @@ describe('amounts', () => {
     expect(validateSell(5n, 5n, 1)).toBeNull();
   });
 
+  test('perTokenSats: dollars and cents at the rate, sats without one', () => {
+    expect(perTokenSats('1.00', 50)).toBeCloseTo(2_000_000, 6);
+    expect(perTokenSats('$0.01', 50)).toBeCloseTo(20_000, 6);
+    expect(perTokenSats('1.001', 50)).toBe(0);
+    expect(perTokenSats('', 50)).toBe(0);
+    expect(perTokenSats('1000', 0)).toBe(1000);
+    expect(perTokenSats('abc', 0)).toBe(0);
+  });
   test('usd', () => {
     expect(usd(100_000_000, 50)).toBe('≈ $50.00');
     expect(usd(1000, 0)).toBe('');

@@ -1,3 +1,5 @@
+import { hasRate, moneyNow } from '../money/money';
+import { cachedExchangeRate } from '../../utils/wallet';
 /**
  * bWallet notifications: pure logic (no I/O) — the item list, unread state, "what is new since
  * last time" diffs, mention matching and per-category filtering. engine.ts does the polling.
@@ -167,9 +169,11 @@ export const nativeId = (id: string): number => {
 };
 
 export const formatSatsShort = (sats: number): string =>
-  sats >= 1e6
-    ? `${(sats / 1e8).toFixed(sats >= 1e8 ? 2 : 4).replace(/\.?0+$/, '')} BSV`
-    : `${sats.toLocaleString()} sats`;
+  hasRate(cachedExchangeRate())
+    ? moneyNow(sats)
+    : sats >= 1e6
+      ? `${(sats / 1e8).toFixed(sats >= 1e8 ? 2 : 4).replace(/\.?0+$/, '')} BSV`
+      : `${sats.toLocaleString()} sats`;
 
 /**
  * One unspent output newly seen at one of the user's addresses → what to say about it.

@@ -12,6 +12,7 @@ import { inscribeIcon } from '../tickets/mintTicket';
 import { MAX_ICON_BYTES, TICKET_BLOCKED, suggestTicker } from '../tickets/tickets';
 import { deployToken, openTokenRoom, type MintedToken } from './mintToken';
 import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } from './token';
+import { money, moneyWithSats } from '../money/money';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -53,7 +54,6 @@ export const TokenMint = ({
     }));
 
   const cost = tokenCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), exchangeRate);
-  const usd = (n: number | null) => (n === null ? '' : ` (~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)})`);
 
   const pickIcon = async (file: File | undefined) => {
     setError('');
@@ -237,10 +237,10 @@ export const TokenMint = ({
       />
 
       <p className="text-xs" style={{ color: '#bbb' }}>
-        Estimated network fee: {cost.networkSats.toLocaleString()} sats
+        Estimated network fee: {money(cost.networkSats, exchangeRate)}
         {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
-        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Indexing (so wallets
-        list it): {cost.indexSats.toLocaleString()} sats · Total ≈ {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
+        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Indexing (so wallets
+        list it): {money(cost.indexSats, exchangeRate)} · Total ≈ {moneyWithSats(cost.totalSats, exchangeRate)}
       </p>
       {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
       <button
@@ -267,12 +267,12 @@ export const TokenMint = ({
           // SendConfirmation truncates labels over 16 characters: keep them short.
           { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tokens` },
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
-          { address: 'Network fee', amount: `${cost.networkSats.toLocaleString()} sats` },
-          ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }] : []),
+          { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
+          ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),
           // Creator pays 1sat indexing at mint, so wallets and the room gate can see the token.
-          { address: 'Indexing', amount: `${cost.indexSats.toLocaleString()} sats` },
+          { address: 'Indexing', amount: `${money(cost.indexSats, exchangeRate)}` },
         ]}
-        total={`${cost.totalSats.toLocaleString()} sats${usd(cost.usd)}`}
+        total={moneyWithSats(cost.totalSats, exchangeRate)}
         isProcessing={!!busy}
         onConfirm={() => void mint()}
         onCancel={() => !busy && setConfirming(false)}

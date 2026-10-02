@@ -11,6 +11,7 @@ import { dataUrlBytes, getLocalAvatar, paymailAvatar, resizeAvatar, setLocalAvat
 import { claimPaymail, paymailEnabled } from './paymail';
 import { getPaymail } from './accountName';
 import { bareName } from './names';
+import { moneyNow } from '../money/money';
 
 /** BAP profile update tx (~400 B) on top of the image inscription. */
 const PROFILE_TX_SATS = 60;
@@ -124,7 +125,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
           className="text-[11px] font-semibold bg-transparent border-0 p-0 cursor-pointer underline disabled:opacity-40"
           style={{ color: '#FFD24D' }}
         >
-          Publish photo to my public profile (~{cost.toLocaleString()} sats)
+          Publish photo to my public profile (~{moneyNow(cost)})
         </button>
       )}
       {msg && (
@@ -137,9 +138,9 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
         theme={theme}
         lineItems={[
           { address: 'Photo (on-chain)', amount: `${Math.ceil(bytes / 1024)} KB` },
-          { address: 'Network fee', amount: `~${cost.toLocaleString()} sats` },
+          { address: 'Network fee', amount: `~${moneyNow(cost)}` },
         ]}
-        total={`~${cost.toLocaleString()} sats`}
+        total={`~${moneyNow(cost)}`}
         isProcessing={busy}
         onConfirm={() => void publish()}
         onCancel={() => !busy && setConfirming(false)}

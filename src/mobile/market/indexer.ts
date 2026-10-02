@@ -1,3 +1,5 @@
+import { hasRate, moneyNow } from '../money/money';
+import { cachedExchangeRate } from '../../utils/wallet';
 /**
  * Market data from the 1Sat indexers (1sat-stack at api.1sat.app). Ported from
  * the 1satsocial project (src/lib/{hot,listings,market,indexer,content,room-ref}.ts)
@@ -389,13 +391,19 @@ export function formatAmount(amount: bigint, dec: number): string {
   return whole.toLocaleString('en-US') + (frac ? `.${frac}` : '');
 }
 
+/** USD first at the live rate; sats/BSV only when the rate is unknown. (Name kept for callers.) */
 export function formatSats(sats: number): string {
+  if (hasRate(cachedExchangeRate())) return moneyNow(sats);
   if (sats >= 1e8) return `${(sats / 1e8).toLocaleString('en-US', { maximumFractionDigits: 4 })} BSV`;
   return `${sats.toLocaleString('en-US')} sats`;
 }
 
 const formatPerToken = (sats: number) =>
-  sats >= 1 ? formatSats(Math.round(sats)) : `${sats.toPrecision(2).replace(/\.?0+$/, '')} sats`;
+  hasRate(cachedExchangeRate())
+    ? moneyNow(sats)
+    : sats >= 1
+      ? formatSats(Math.round(sats))
+      : `${sats.toPrecision(2).replace(/\.?0+$/, '')} sats`;
 
 // ── per-item market ──────────────────────────────────────────────────────────
 export type Listing = {

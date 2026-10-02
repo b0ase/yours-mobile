@@ -82,6 +82,21 @@ export function totalPriceSats(raw: bigint, dec: number, pricePerToken: number):
 export const unitPrice = (totalSats: number, raw: bigint, dec: number) =>
   raw > 0n ? (totalSats * 10 ** dec) / Number(raw) : 0;
 
+/**
+ * Per-token price in sats from what the user typed: dollars-and-cents when the BSV/USD rate is known
+ * (converted at listing time), else sats (fallback). 0 when invalid.
+ */
+export function perTokenSats(input: string, rate: number): number {
+  if (rate > 0) {
+    const t = input.trim().replace(/^\$/, '');
+    if (!/^\d*(\.\d{0,2})?$/.test(t) || !/\d/.test(t)) return 0;
+    const usdEach = Number(t);
+    return usdEach > 0 ? (usdEach / rate) * 1e8 : 0;
+  }
+  const n = Number(input);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 export const usd = (sats: number, exchangeRate: number) =>
   exchangeRate > 0 ? `≈ $${((sats / 1e8) * exchangeRate).toFixed(sats * exchangeRate >= 1e8 ? 2 : 4)}` : '';
 

@@ -3,6 +3,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { cancelListing, myListings, type MyListing } from './sellActions';
 import { fromRaw, onListingsChanged, removeRecord } from './sell';
+import { moneyNow } from '../money/money';
 
 const GOLD = '#FFD24D';
 const STATUS: Record<MyListing['status'], { label: string; color: string }> = {
@@ -55,7 +56,7 @@ export const MyTokenListings = ({ emptyText }: { emptyText?: string }) => {
                 {fromRaw(BigInt(l.amount), l.dec)} ${l.symbol}
               </div>
               <div className="text-xs text-[#98A2B3]">
-                {l.priceSats.toLocaleString()} sats · <span style={{ color: s.color }}>{s.label}</span>
+                {moneyNow(l.priceSats)} · <span style={{ color: s.color }}>{s.label}</span>
               </div>
             </div>
             {l.status === 'gone' ? (

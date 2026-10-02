@@ -1,3 +1,5 @@
+import { hasRate, moneyNow } from '../money/money';
+import { cachedExchangeRate } from '../../utils/wallet';
 import { Lock } from '@1sat/templates';
 import { Script, Transaction } from '@bsv/sdk';
 import { buildLikeScript, isTxid } from './post';
@@ -108,6 +110,7 @@ export function rankByLocked<T extends { txid: string; at: number }>(
 export const unlockDate = (blocks: number, now = Date.now()) => new Date(now + blocks * 10 * 60 * 1000);
 
 export function formatLocked(sats: number): string {
+  if (hasRate(cachedExchangeRate())) return moneyNow(sats);
   if (sats >= 100_000) {
     const bsv = sats / 1e8;
     return `${bsv >= 1 ? bsv.toFixed(2) : Number(bsv.toFixed(4)).toString()} BSV`;

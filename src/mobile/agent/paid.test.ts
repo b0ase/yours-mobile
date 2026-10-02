@@ -13,12 +13,19 @@ import { addSpend, dayOf, parseAgentPrefs, spentToday } from './agentPrefs';
 const ADDR = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 
 describe('pricing', () => {
-  test('formatPrice shows sats and ≈USD', () => {
-    expect(formatPrice(1000, 40)).toBe('1,000 sats ≈ $0.0004');
-    expect(formatPrice(100_000, 40)).toBe('100,000 sats ≈ $0.04');
+  test('formatPrice is USD first, sats only without a rate', () => {
+    expect(formatPrice(1000, 40)).toBe('$0.0004');
+    expect(formatPrice(100_000, 40)).toBe('$0.04');
     expect(formatPrice(500, 0)).toBe('500 sats');
+    expect(formatPrice(33_334, 30, 0.01)).toBe('$0.01');
+    expect(formatPrice(500, 0, 0.01)).toBe('$0.01');
   });
 
+  test('parsePrice: reads usd when present', () => {
+    expect(parsePrice({ enabled: true, usd: 0.01, sats: 2000, bsvUsd: 50 }).usd).toBe(0.01);
+    expect(parsePrice({ enabled: true, sats: 2000, bsvUsd: 50 }).usd).toBeNull();
+    expect(parsePrice({ enabled: true, usd: -1, sats: 2000 }).usd).toBeNull();
+  });
   test('parsePrice: disabled unless a sane positive price', () => {
     expect(parsePrice({ enabled: true, sats: 2000, bsvUsd: 40, model: 'm' }).enabled).toBe(true);
     expect(parsePrice({ enabled: true, sats: 0 }).enabled).toBe(false);

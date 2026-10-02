@@ -23,6 +23,7 @@ import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import { estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
+import { moneyNow } from '../money/money';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -255,7 +256,7 @@ export const GetYourName = ({
         },
         { address: `Then bind ${p.name} → your identity key`, amount: '1 sat (kept)' },
       ];
-    if (p.kind === 'buy') return [{ address: `Buy OpNS name "${p.name}"`, amount: `${p.price.toLocaleString()} sats` }];
+    if (p.kind === 'buy') return [{ address: `Buy OpNS name "${p.name}"`, amount: moneyNow(p.price) }];
     const lines = p.tokenOnly ? [] : [{ address: `OpNS: ${p.name} → your identity key`, amount: '1 sat (kept)' }];
     const t = personalTicker(p.name);
     if (t && (p.tokenOnly || mintsToken(p.name))) {
@@ -265,7 +266,7 @@ export const GetYourName = ({
       });
       lines.push({
         address: 'Indexing',
-        amount: `${PERSONAL_INDEX_SATS.toLocaleString()} sats`,
+        amount: moneyNow(PERSONAL_INDEX_SATS),
       });
     }
     return lines;
@@ -452,7 +453,7 @@ export const GetYourName = ({
                 <b style={{ color: fg }}>{result.name}</b> is taken
                 {result.owner ? ` (owner ${result.owner.slice(0, 8)}…)` : ''}.
                 {owned.some((o) => o.name === result.name) ? ' You own it — use it below.' : ''}
-                {result.listing ? ` For sale: ${result.listing.price.toLocaleString()} sats.` : ''}
+                {result.listing ? ` For sale: ${moneyNow(result.listing.price)}.` : ''}
               </p>
               {result.listing && !owned.some((o) => o.name === result.name) && (
                 <button
@@ -624,7 +625,7 @@ export const GetYourName = ({
         show={!!pending}
         theme={theme}
         lineItems={pending ? confirmLines(pending) : []}
-        total={`~${(pending ? fee(pending) : REGISTER_FEE_ESTIMATE_SATS).toLocaleString()} sats network fee`}
+        total={`~${moneyNow(pending ? fee(pending) : REGISTER_FEE_ESTIMATE_SATS)} network fee`}
         isProcessing={busy}
         onConfirm={() => pending && confirm(pending)}
         onCancel={() => setPending(null)}

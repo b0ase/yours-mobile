@@ -12,9 +12,12 @@
  * never paid twice. Pure helpers here (tested in paid.test.ts) plus the PaidBackend interface.
  */
 import type { AgentMessage } from './agent';
+import { fmtUsd, money } from '../money/money';
 
 export type PriceInfo = {
   enabled: boolean;
+  /** Price of one message in US dollars, when the server says (USD-first display). null = derive from sats. */
+  usd: number | null;
   /** Price of one message, in sats. */
   sats: number;
   /** BSV price in USD the server used (0 = unknown). */
@@ -46,8 +49,10 @@ export const parsePrice = (data: unknown): PriceInfo => {
   const sats = posInt(d.sats);
   const bsvUsd = typeof d.bsvUsd === 'number' && d.bsvUsd > 0 ? d.bsvUsd : 0;
   const enabled = d.enabled === true && sats > 0 && sats <= MAX_MESSAGE_SATS;
+  const usd = typeof d.usd === 'number' && Number.isFinite(d.usd) && d.usd > 0 ? d.usd : null;
   return {
     enabled,
+    usd,
     sats,
     bsvUsd,
     model: typeof d.model === 'string' ? d.model : '',
@@ -71,13 +76,9 @@ export const parseTurn = (data: unknown): string => {
   return typeof t === 'string' && t.trim() ? t.trim() : 'No reply.';
 };
 
-/** "1,234 sats ≈ $0.0005" (USD part only when the rate is known). */
-export const formatPrice = (sats: number, bsvUsd: number): string => {
-  const s = `${sats.toLocaleString('en-US')} sats`;
-  if (!(bsvUsd > 0)) return s;
-  const usd = (sats / 1e8) * bsvUsd;
-  return `${s} ≈ $${usd >= 0.01 ? usd.toFixed(2) : usd.toFixed(4)}`;
-};
+/** USD first: the server's `usd` when given, else sats at the rate ("$0.0005"); "1,234 sats" when neither is known. */
+export const formatPrice = (sats: number, bsvUsd: number, usd: number | null = null): string =>
+  usd !== null && usd > 0 ? fmtUsd(usd) : money(sats, bsvUsd);
 
 export type PayDecision =
   | { kind: 'auto' }
@@ -101,11 +102,11 @@ export const payDecision = (
   return oneClickOk() ? { kind: 'auto' } : { kind: 'confirm' };
 };
 
-export const refuseText = (reason: 'limit-off' | 'over-daily' | 'over-max', limit: number) =>
+export const refuseText = (reason: 'limit-off' | 'over-daily' | 'over-max', limit: number, bsvUsd = 0) =>
   reason === 'limit-off'
     ? 'Paid messages are switched off. Set a daily limit in Settings › b agent.'
     : reason === 'over-daily'
-      ? `This would go over your daily b agent limit (${limit.toLocaleString('en-US')} sats). Raise it in Settings › b agent, or use your own API key.`
+      ? `This would go over your daily b agent limit (${money(limit, bsvUsd)}). Raise it in Settings › b agent, or use your own API key.`
       : 'That price is higher than bWallet allows for one message.';
 
 /** Body for the answer call. Only the transcript and the guide: never a key. */

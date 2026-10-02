@@ -24,6 +24,7 @@ import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
+import { moneyNow } from '../money/money';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
@@ -253,7 +254,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
               Your token + room
             </span>
             <span className="text-[10px] font-semibold" style={{ color: GOLD }}>
-              ~{PERSONAL_FEE_ESTIMATE_SATS} sats
+              ~{moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}
             </span>
           </div>
           {link ? (
@@ -270,9 +271,9 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
               <p className="text-[11px]" style={{ color: GRAY }}>
                 A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat room
                 only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not trading.
-                About {PERSONAL_FEE_ESTIMATE_SATS.toLocaleString()} sats: ~{PERSONAL_NETWORK_FEE_SATS} network fee plus{' '}
-                {PERSONAL_INDEX_SATS.toLocaleString()} so other wallets and your room can see the token (1Sat indexing,
-                paid once). You confirm it before anything is sent.
+                About {moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}: ~{moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee plus{' '}
+                {moneyNow(PERSONAL_INDEX_SATS)} so other wallets and your room can see the token (1Sat indexing, paid
+                once). You confirm it before anything is sent.
               </p>
               <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
                 <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
@@ -336,10 +337,10 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
               address: `$${ticker ?? 'NAME'} + room`.slice(0, 16),
               amount: `${Number(supply || 0).toLocaleString()} tokens`,
             },
-            { address: 'Network fee', amount: `~${PERSONAL_NETWORK_FEE_SATS.toLocaleString()} sats` },
-            { address: 'Indexing', amount: `${PERSONAL_INDEX_SATS.toLocaleString()} sats` },
+            { address: 'Network fee', amount: `~${moneyNow(PERSONAL_NETWORK_FEE_SATS)}` },
+            { address: 'Indexing', amount: moneyNow(PERSONAL_INDEX_SATS) },
           ]}
-          total={`~${PERSONAL_FEE_ESTIMATE_SATS.toLocaleString()} sats`}
+          total={`~${moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}`}
           isProcessing={busy}
           onConfirm={() => void mintToken()}
           onCancel={() => setConfirming(false)}

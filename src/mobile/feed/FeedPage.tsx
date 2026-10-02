@@ -100,16 +100,7 @@ import {
 } from './locks';
 import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
 import { oneClick } from '../settings/oneClick';
-import {
-  formatUsd,
-  isMe,
-  rankPeople,
-  rankPosts,
-  TIMEFRAMES,
-  cutoff,
-  type LeaderboardData,
-  type Timeframe,
-} from './leaderboard';
+import { isMe, rankPeople, rankPosts, TIMEFRAMES, cutoff, type LeaderboardData, type Timeframe } from './leaderboard';
 import { fetchExchangeRate } from '../../utils/wallet';
 import {
   addBlock,
@@ -136,6 +127,7 @@ import { PullToRefresh } from '../ui/PullToRefresh';
 import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
+import { fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -860,7 +852,7 @@ const Composer = ({
         />
         <span className="text-[11px]" style={{ color: text.length > MAX_POST_CHARS ? RED : MUTED }}>
           {text.length}/{MAX_POST_CHARS}
-          {fee != null ? ` · fee ≈ ${fee.toLocaleString()} sats` : ''}
+          {fee != null ? ` · fee ≈ ${moneyNow(fee)}` : ''}
         </span>
       </div>
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
@@ -894,9 +886,12 @@ const sendTip = async (apiContext: ApiCtx, post: FeedPost, sats: number) => {
 const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
-  const [sats, setSats] = useState(TIP_PRESETS[1]);
+  const [sats, setSats] = useState<number>(TIP_PRESETS[1]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // USD-first: the custom amount is typed in dollars when the rate is known (sent as sats).
+  const rate = useBsvUsd();
+  const [usdText, setUsdText] = useState('');
   const tip = async () => {
     setBusy(true);
     setError('');
@@ -904,7 +899,7 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
       await sendTip(apiContext, post, sats);
       // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
       savePrefs({ quickTip: sats });
-      addSnackbar(`Tipped ${post.author.name} ${sats.toLocaleString()} sats`, 'success');
+      addSnackbar(`Tipped ${post.author.name} ${money(sats, rate)}`, 'success');
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -921,7 +916,10 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
         {TIP_PRESETS.map((v) => (
           <button
             key={v}
-            onClick={() => setSats(v)}
+            onClick={() => {
+              setSats(v);
+              setUsdText('');
+            }}
             className="flex-1 rounded-xl py-2 text-sm font-bold"
             style={
               v === sats
@@ -929,20 +927,43 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
                 : { background: PANEL, color: 'white', border: `1px solid ${LINE}` }
             }
           >
-            {v.toLocaleString()}
+            {money(v, rate)}
           </button>
         ))}
       </div>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={1}
-        value={sats}
-        onChange={(e) => setSats(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
-        className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
-        style={{ background: PANEL, border: `1px solid ${LINE}` }}
-        aria-label="Satoshis"
-      />
+      {hasRate(rate) ? (
+        <>
+          <input
+            inputMode="decimal"
+            placeholder={`Other amount, e.g. ${fmtUsd(0.05)}`}
+            value={usdText}
+            onChange={(e) => {
+              const v = e.target.value.replace(/^\$/, '');
+              if (!/^\d*(\.\d{0,2})?$/.test(v)) return;
+              setUsdText(v);
+              const n = usdToSats(Number(v), rate);
+              if (n) setSats(n);
+            }}
+            className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            aria-label="Amount in US dollars"
+          />
+          <p className="text-[11px] mt-1" style={{ color: MUTED }}>
+            {satsNote(sats, rate)}
+          </p>
+        </>
+      ) : (
+        <input
+          type="number"
+          inputMode="numeric"
+          min={1}
+          value={sats}
+          onChange={(e) => setSats(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
+          className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          aria-label="Satoshis"
+        />
+      )}
       {error && (
         <p className="text-xs mt-2" style={{ color: RED }}>
           {error}
@@ -954,7 +975,7 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy ? 'Sending…' : `Send ${sats.toLocaleString()} sats`}
+        {busy ? 'Sending…' : `Send ${money(sats, rate)}`}
       </button>
     </Sheet>
   );
@@ -1284,7 +1305,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     if (!p.author.address || !oneClick.take(sats).ok) return setTipping(p);
     try {
       await sendTip(apiContext, p, sats);
-      addSnackbar(`Tipped ${p.author.name} ${sats.toLocaleString()} sats (one-click)`, 'success');
+      addSnackbar(`Tipped ${p.author.name} ${moneyNow(sats)} (one-click)`, 'success');
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
     }
@@ -1892,7 +1913,7 @@ const Leaderboard = ({
       </div>
       {rate > 0 && (
         <div className="text-[11px]" style={{ color: MUTED }}>
-          {formatUsd(sats, rate)}
+          {satsNote(sats, rate)}
         </div>
       )}
     </div>

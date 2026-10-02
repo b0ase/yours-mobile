@@ -13,11 +13,12 @@ import {
   indexingFeeSats,
   listingTxBytes,
   networkFeeSats,
+  perTokenSats,
   toRaw,
   totalPriceSats,
-  usd,
   validateSell,
 } from './sell';
+import { fmtSats, hasRate, money, satsNote } from '../money/money';
 
 const GOLD = '#FFD24D';
 const BG = '#17191E';
@@ -30,7 +31,7 @@ export type SellTarget = { tokenId: string; symbol: string; dec: number; heldRaw
 const ERR: Record<string, string> = {
   quantity: 'Enter how many to sell',
   'over-balance': "That's more than you hold",
-  price: 'Enter a price of at least 1 sat',
+  price: 'Enter a price (at least 1 sat in total)',
 };
 
 /** Bottom sheet: list some of a BSV-21 token (a ticket, a $NAME token, any token) for sale. */
@@ -61,7 +62,11 @@ export const SellSheet = ({
 
   const unit = target.isTicket ? 'ticket' : `$${target.symbol}`;
   const qtyRaw = toRaw(qty, target.dec);
-  const perToken = Number(price);
+  // USD-first: the price field is dollars and cents when the rate is known, sats otherwise.
+  const usdMode = hasRate(rate);
+  const perToken = perTokenSats(price, rate);
+  // The field's unit flips if the rate arrives after typing: clear it rather than reinterpret it.
+  useEffect(() => setPrice(''), [usdMode]);
   const total = qtyRaw ? totalPriceSats(qtyRaw, target.dec, perToken) : 0;
   const error = qty || price ? validateSell(qtyRaw, target.heldRaw, total) : null;
   const indexing = qtyRaw ? indexingFeeSats(qtyRaw, target.heldRaw, fpo ?? DEFAULT_FEE_PER_OUTPUT) : 0;
@@ -83,7 +88,7 @@ export const SellSheet = ({
         amount: qtyRaw,
         priceSats: total,
       });
-      addSnackbar(`Listed ${qty} ${unit} for ${total.toLocaleString()} sats`, 'success');
+      addSnackbar(`Listed ${qty} ${unit} for ${money(total, rate)}${usdMode ? ` (${fmtSats(total)})` : ''}`, 'success');
       onListed?.(qtyRaw);
       onClose();
     } catch (e) {
@@ -147,28 +152,37 @@ export const SellSheet = ({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-[#98A2B3]">Price per {target.isTicket ? 'ticket' : 'token'} (sats)</span>
-          <input
-            inputMode="numeric"
-            value={price}
-            onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setPrice(e.target.value)}
-            placeholder="1000"
-            className={input}
-            style={{ borderColor: LINE }}
-          />
-          {perToken > 0 && <span className="text-[11px] text-[#667085]">{usd(perToken, rate)} each</span>}
+          <span className="text-xs text-[#98A2B3]">
+            Price per {target.isTicket ? 'ticket' : 'token'} {usdMode ? '(US$)' : '(sats — USD price unavailable)'}
+          </span>
+          <div className="relative">
+            {usdMode && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-base text-[#98A2B3]">$</span>}
+            <input
+              inputMode="decimal"
+              value={price}
+              onChange={(e) =>
+                (usdMode ? /^\d*(\.\d{0,2})?$/ : /^\d*\.?\d*$/).test(e.target.value) && setPrice(e.target.value)
+              }
+              placeholder={usdMode ? '1.00' : '1000'}
+              className={input}
+              style={{ borderColor: LINE, paddingLeft: usdMode ? '1.5rem' : undefined }}
+            />
+          </div>
+          {usdMode && perToken > 0 && (
+            <span className="text-[11px] text-[#667085]">{satsNote(Math.round(perToken), rate)} each</span>
+          )}
         </label>
 
         <div className="flex flex-col gap-1.5 rounded-xl p-3" style={{ background: '#0F1013' }}>
-          {row('You receive when sold', `${total.toLocaleString()} sats`, usd(total, rate))}
-          {row('Network fee', `~${network.toLocaleString()} sats`)}
+          {row('You receive when sold', money(total, rate), satsNote(total, rate))}
+          {row('Network fee', `~${money(network, rate)}`)}
           {row(
             'Indexing fee',
-            `${indexing.toLocaleString()} sats`,
+            money(indexing, rate),
             qtyRaw && qtyRaw < target.heldRaw ? 'listing + your change' : 'listing',
           )}
           <div className="h-px my-1" style={{ background: LINE }} />
-          {row('You pay now', `~${(network + indexing).toLocaleString()} sats`, usd(network + indexing, rate))}
+          {row('You pay now', `~${money(network + indexing, rate)}`, satsNote(network + indexing, rate))}
         </div>
 
         <p className="text-[11px] leading-relaxed text-[#667085] m-0">

@@ -26,6 +26,7 @@ import {
   type Ticket,
   type TicketForm,
 } from './tickets';
+import { hasRate, money, moneyWithSats, satsNote, usdToSats } from '../money/money';
 
 /**
  * MINT → "Start a room": mint a ticket (BSV-21, fixed supply, 0 decimals) and open its holders'
@@ -67,8 +68,8 @@ export const TicketMint = ({
       ...(k === 'name' && !tickerTouched ? { ticker: suggestTicker(v) } : {}),
     }));
 
+  const [priceUsd, setPriceUsd] = useState('');
   const cost = ticketCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), exchangeRate);
-  const usd = (n: number | null) => (n === null ? '' : ` (~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)})`);
 
   const pickIcon = async (file: File | undefined) => {
     setError('');
@@ -341,25 +342,50 @@ export const TicketMint = ({
               onChange={(e) => set('eventDate')(e.target.value)}
             />
           </label>
-          <label className="text-xs" style={{ color: '#999' }}>
-            Price per ticket in sats (optional, shown in the Market)
-            <input
-              className={`${input} mt-1`}
-              style={inputStyle}
-              inputMode="numeric"
-              placeholder="e.g. 1000"
-              value={form.priceSats}
-              onChange={(e) => set('priceSats')(e.target.value)}
-            />
-          </label>
+          {hasRate(exchangeRate) ? (
+            <label className="text-xs" style={{ color: '#999' }}>
+              Price per ticket in US$ (optional, shown in the Market)
+              <input
+                className={`${input} mt-1`}
+                style={inputStyle}
+                inputMode="decimal"
+                placeholder="e.g. 5.00"
+                value={priceUsd}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/^\$/, '');
+                  if (!/^\d*(\.\d{0,2})?$/.test(v)) return;
+                  setPriceUsd(v);
+                  // Stored on the ticket in sats, converted at today's rate.
+                  set('priceSats')(String(usdToSats(Number(v), exchangeRate) ?? ''));
+                }}
+              />
+              {Number(form.priceSats) > 0 && (
+                <span className="block mt-0.5 text-[11px]" style={{ color: '#666' }}>
+                  {satsNote(Number(form.priceSats), exchangeRate)}
+                </span>
+              )}
+            </label>
+          ) : (
+            <label className="text-xs" style={{ color: '#999' }}>
+              Price per ticket in sats (optional; USD price unavailable right now)
+              <input
+                className={`${input} mt-1`}
+                style={inputStyle}
+                inputMode="numeric"
+                placeholder="e.g. 1000"
+                value={form.priceSats}
+                onChange={(e) => set('priceSats')(e.target.value)}
+              />
+            </label>
+          )}
         </div>
       )}
 
       <p className="text-xs" style={{ color: '#bbb' }}>
-        Estimated network fee: {cost.networkSats.toLocaleString()} sats
+        Estimated network fee: {money(cost.networkSats, exchangeRate)}
         {cost.txCount > 1 ? ' (2 transactions: icon + ticket)' : ''}
-        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Indexing (so wallets
-        list it): {cost.indexSats.toLocaleString()} sats · Total ≈ {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
+        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Indexing (so wallets
+        list it): {money(cost.indexSats, exchangeRate)} · Total ≈ {moneyWithSats(cost.totalSats, exchangeRate)}
       </p>
       {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
       <button
@@ -386,12 +412,12 @@ export const TicketMint = ({
           // SendConfirmation truncates labels over 16 characters: keep them short.
           { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tickets` },
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
-          { address: 'Network fee', amount: `${cost.networkSats.toLocaleString()} sats` },
-          ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }] : []),
+          { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
+          ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),
           // Creator pays 1sat indexing at mint, so wallets and the room gate can see the token.
-          { address: 'Indexing', amount: `${cost.indexSats.toLocaleString()} sats` },
+          { address: 'Indexing', amount: `${money(cost.indexSats, exchangeRate)}` },
         ]}
-        total={`${cost.totalSats.toLocaleString()} sats${usd(cost.usd)}`}
+        total={moneyWithSats(cost.totalSats, exchangeRate)}
         isProcessing={!!busy}
         onConfirm={() => void mint()}
         onCancel={() => !busy && setConfirming(false)}

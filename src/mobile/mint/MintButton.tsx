@@ -29,6 +29,7 @@ import {
   wocTxUrl,
   type Collection,
 } from './mint';
+import { money, moneyWithSats } from '../money/money';
 
 /**
  * "Mint" — gold button beside Receive / Send on the Wallet tab (build-time insert into
@@ -219,7 +220,6 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   const kind = picked?.file.type.split('/')[0];
   const input = 'w-full rounded-xl px-3 py-2 text-sm outline-none border bg-transparent';
   const inputStyle = { borderColor: BORDER, color: '#fff' };
-  const usd = (n: number | null) => (n === null ? '' : ` (~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)})`);
 
   return (
     // z above the bottom tab bar (BottomMenu z-[100]) so the sheet's lower options aren't hidden.
@@ -376,10 +376,10 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             )}
             {cost && (
               <p className="text-xs" style={{ color: '#bbb' }}>
-                Estimated network fee: {cost.networkSats.toLocaleString()} sats
+                Estimated network fee: {money(cost.networkSats, exchangeRate)}
                 {cost.txCount > 1 ? ' (2 transactions: collection + item)' : ''}
-                {cost.feeSats > 0 && <> · bWallet mint fee (1%): {cost.feeSats.toLocaleString()} sats</>} · Total ≈{' '}
-                {cost.totalSats.toLocaleString()} sats{usd(cost.usd)}
+                {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
+                {moneyWithSats(cost.totalSats, exchangeRate)}
               </p>
             )}
             {formError && <p style={{ color: '#ff6b6b' }}>{formError}</p>}
@@ -423,12 +423,12 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         theme={theme}
         lineItems={[
           { address: `Inscribe "${title.trim()}"`, amount: picked ? formatBytes(picked.file.size) : '' },
-          ...(cost ? [{ address: 'Network fee (est.)', amount: `${cost.networkSats.toLocaleString()} sats` }] : []),
+          ...(cost ? [{ address: 'Network fee (est.)', amount: `${money(cost.networkSats, exchangeRate)}` }] : []),
           ...(cost && cost.feeSats > 0
-            ? [{ address: 'bWallet mint fee (1%)', amount: `${cost.feeSats.toLocaleString()} sats` }]
+            ? [{ address: 'bWallet mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }]
             : []),
         ]}
-        total={cost ? `${cost.totalSats.toLocaleString()} sats${usd(cost.usd)}` : undefined}
+        total={cost ? moneyWithSats(cost.totalSats, exchangeRate) : undefined}
         isProcessing={busy}
         onConfirm={() => void mint()}
         onCancel={() => !busy && setConfirming(false)}

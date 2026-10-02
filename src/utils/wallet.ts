@@ -4,6 +4,9 @@ import { YoursEventName } from '../inject';
 
 let exchangeRateCache: { rate: number; timestamp: number } | null = null;
 
+/** Last known USD-per-BSV rate (even if past its TTL), or 0 if never fetched. Synchronous, for display. */
+export const cachedExchangeRate = (): number => exchangeRateCache?.rate ?? 0;
+
 export async function fetchExchangeRate(chain: string, wocApiKey?: string): Promise<number> {
   if (exchangeRateCache && Date.now() - exchangeRateCache.timestamp < EXCHANGE_RATE_CACHE_TTL) {
     return exchangeRateCache.rate;

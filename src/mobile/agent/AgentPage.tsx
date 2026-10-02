@@ -18,6 +18,7 @@ import { loadKey } from './keyStore';
 import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
 import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PriceInfo, type Quote } from './paid';
 import { TopNav } from '../../components/TopNav';
+import { money } from '../money/money';
 
 /**
  * /m/agent — the b agent, opened by the top bar's centre b. Helps people use bWallet (guide.ts).
@@ -35,11 +36,13 @@ type Unanswered = { quote: Quote; txid: string; messages: AgentMessage[] };
 const ConfirmSheet = ({
   sats,
   bsvUsd,
+  usd,
   onPay,
   onCancel,
 }: {
   sats: number;
   bsvUsd: number;
+  usd: number | null;
   onPay: () => void;
   onCancel: () => void;
 }) => {
@@ -59,8 +62,13 @@ const ConfirmSheet = ({
       >
         <p className="text-base font-bold text-white">Pay for this message?</p>
         <p className="mt-1 text-sm" style={{ color: MUTED }}>
-          {formatPrice(sats, bsvUsd)} from this wallet, plus a small network fee.
+          {formatPrice(sats, bsvUsd, usd)} from this wallet, plus a small network fee.
         </p>
+        {(usd !== null || bsvUsd > 0) && (
+          <p className="mt-0.5 text-[11px]" style={{ color: MUTED, opacity: 0.7 }}>
+            Paid as {sats.toLocaleString('en-US')} sats
+          </p>
+        )}
         <button
           onClick={onPay}
           className="mt-4 w-full rounded-2xl py-3 text-sm font-bold"
@@ -135,6 +143,7 @@ const AgentPage = () => {
             live &&
             setPrice({
               enabled: false,
+              usd: null,
               sats: 0,
               bsvUsd: 0,
               model: '',
@@ -169,7 +178,7 @@ const AgentPage = () => {
       spentToday(loadSpend(), Date.now()),
       () => oneClick.take(quote.sats).ok,
     );
-    if (decision.kind === 'refuse') throw new Error(refuseText(decision.reason, prefs.dailyLimitSats));
+    if (decision.kind === 'refuse') throw new Error(refuseText(decision.reason, prefs.dailyLimitSats, bsvUsd));
     if (decision.kind === 'confirm' && !(await askConfirm(quote.sats))) return null;
     const res = await sendBsv.execute(apiContext, { requests: [{ address: quote.payTo, satoshis: quote.sats }] });
     if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
@@ -234,7 +243,7 @@ const AgentPage = () => {
       : price === null
         ? 'Checking the price…'
         : price.enabled
-          ? `${formatPrice(price.sats, bsvUsd)} per message · today ${today.toLocaleString('en-US')} / ${prefs.dailyLimitSats.toLocaleString('en-US')} sats`
+          ? `${formatPrice(price.sats, bsvUsd, price.usd)} per message · today ${money(today, bsvUsd)} / ${money(prefs.dailyLimitSats, bsvUsd)}`
           : (price.reason ?? 'Paid messages are not available yet.');
   const canSend = prefs.mode === 'own' ? keyReady !== false : !!price?.enabled;
 
@@ -345,6 +354,7 @@ const AgentPage = () => {
         <ConfirmSheet
           sats={confirm.sats}
           bsvUsd={bsvUsd}
+          usd={price?.usd && confirm.sats === price.sats ? price.usd : null}
           onPay={() => {
             confirm.resolve(true);
             setConfirm(null);

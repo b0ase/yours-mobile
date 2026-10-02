@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Bot, KeyRound } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { hasRate, money, useBsvUsd } from '../money/money';
 import { DAILY_LIMITS, useAgentPrefs, type AgentMode } from '../agent/agentPrefs';
 import { PROVIDERS, PROVIDER_IDS, callProvider, cleanModel, type ProviderId } from '../agent/providers';
 import { deleteKey, loadKey, maskKey, saveKey } from '../agent/keyStore';
@@ -233,6 +234,7 @@ const KeyScreen = ({ onBack }: { onBack: () => void }) => {
 
 export const AgentSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = useAgentPrefs();
+  const rate = useBsvUsd();
   const [keyScreen, setKeyScreen] = useState(false);
   return (
     <>
@@ -252,12 +254,12 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
         {prefs.mode === 'paid' ? (
           <Row
             icon={<Bot size={16} />}
-            label="Daily limit (sats)"
-            description="The b agent never spends more than this a day. Messages under your one-click limit skip the confirm."
+            label="Daily limit"
+            description={`The b agent never spends more than this a day${hasRate(rate) ? ' (USD at today’s BSV price)' : ' (sats; USD price unavailable)'}. Messages under your one-click limit skip the confirm.`}
             right={
               <Pills
                 label="Daily limit"
-                options={DAILY_LIMITS.map((v) => ({ id: v, label: v ? v.toLocaleString('en-US') : 'Off' }))}
+                options={DAILY_LIMITS.map((v) => ({ id: v, label: v ? money(v, rate) : 'Off' }))}
                 value={prefs.dailyLimitSats}
                 onChange={(v) => setPrefs({ dailyLimitSats: v })}
               />

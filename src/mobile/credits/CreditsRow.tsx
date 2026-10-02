@@ -28,6 +28,7 @@ import {
   type CreditsInfo,
   type Pending,
 } from './credits';
+import { moneyNow } from '../money/money';
 
 /**
  * Wallet tab "Credits" row (build-time insert into BsvWallet.tsx, vite.config.mobile.ts):
@@ -253,7 +254,7 @@ const TopUpSheet = ({
       </div>
       <div className="text-xs mt-2" style={{ color: MUTED }}>
         {cost !== null
-          ? `Costs ${cost.toLocaleString('en-US')} sats at ${info.priceSats} sats per credit`
+          ? `Costs ${moneyNow(cost)} at ${moneyNow(info.priceSats ?? 0)} per credit`
           : info.priceSats
             ? ''
             : 'Price not set yet'}
