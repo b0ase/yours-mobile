@@ -17,6 +17,7 @@ import {
 import { getFundRecord, showOnWallet } from '../tokens/indexFund';
 import { FinishIndexing } from '../tokens/FinishIndexing';
 import { AvatarPicker } from './AvatarPicker';
+import { paidFeaturesEnabled } from '../storeBuild';
 import { paymailAvatar } from './avatar';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
 import { getMyName } from './myName';
@@ -58,7 +59,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const enabled = paymailEnabled();
   const { theme } = useTheme();
   const [link, setLink] = useState(() => getPersonalLink(identityAddress));
-  const [withToken, setWithToken] = useState(true);
+  // Store build: free paymail only, no personal token + holder room (storeBuild.ts).
+  const [withToken, setWithToken] = useState(paidFeaturesEnabled);
   const [supply, setSupply] = useState(DEFAULT_SUPPLY);
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
@@ -266,7 +268,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           {link && !busy && !getFundRecord(link.tokenId) ? (
             <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} compact />
           ) : null}
-          {link ? null : (
+          {link || !paidFeaturesEnabled() ? null : (
             <>
               <p className="text-[11px]" style={{ color: GRAY }}>
                 A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat room

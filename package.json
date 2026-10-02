@@ -72,13 +72,17 @@
     "release": "tsx scripts/release.ts",
     "debug:ext": "tsx scripts/debug-extension.ts",
     "build:mobile": "vite build -c vite.config.mobile.ts && vite build -c vite.config.dapp.ts",
+    "build:mobile:store": "VITE_STORE_BUILD=1 pnpm build:mobile",
     "build:web": "vite build -c vite.config.web.ts",
     "preview:web": "vite preview -c vite.config.web.ts --port 4781 --strictPort",
     "preview:mobile": "vite preview -c vite.config.mobile.ts --port 4780 --strictPort",
     "test:mobile-smoke": "tsx scripts/mobile-smoke.ts",
     "cap:sync": "pnpm build:mobile && cap sync",
+    "cap:sync:store": "pnpm build:mobile:store && cap sync",
     "ios": "pnpm cap:sync && cap open ios",
+    "ios:store": "pnpm cap:sync:store && cap open ios",
     "android": "pnpm cap:sync && cap open android",
+    "android:store": "pnpm cap:sync:store && cap open android",
     "pin:upstream": "tsx scripts/pin-from-bun-lock.ts && pnpm install"
   },
   "devDependencies": {

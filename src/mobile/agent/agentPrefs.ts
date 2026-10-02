@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PROVIDERS, PROVIDER_IDS, cleanModel, isProviderId, type ProviderId } from './providers';
+import { agentModeFor } from '../storeBuild';
 
 /**
  * b agent settings (Settings › b agent). Device-wide localStorage: UI choices only. Keys are NOT
@@ -32,7 +33,8 @@ export const parseAgentPrefs = (raw: unknown): AgentPrefs => {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const models = r.models && typeof r.models === 'object' ? (r.models as Record<string, unknown>) : {};
   return {
-    mode: r.mode === 'own' || r.mode === 'paid' ? r.mode : DEFAULT_AGENT_PREFS.mode,
+    // Store build: own key only (storeBuild.ts).
+    mode: agentModeFor(r.mode === 'own' || r.mode === 'paid' ? r.mode : DEFAULT_AGENT_PREFS.mode),
     provider: isProviderId(r.provider) ? r.provider : DEFAULT_AGENT_PREFS.provider,
     models: Object.fromEntries(PROVIDER_IDS.map((p) => [p, cleanModel(p, models[p])])) as Record<ProviderId, string>,
     dailyLimitSats: (DAILY_LIMITS as readonly unknown[]).includes(r.dailyLimitSats)

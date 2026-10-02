@@ -6,6 +6,7 @@ import { hasRate, money, useBsvUsd } from '../money/money';
 import { DAILY_LIMITS, useAgentPrefs, type AgentMode } from '../agent/agentPrefs';
 import { PROVIDERS, PROVIDER_IDS, callProvider, cleanModel, type ProviderId } from '../agent/providers';
 import { deleteKey, loadKey, maskKey, saveKey } from '../agent/keyStore';
+import { STORE_AGENT_NOTE, STORE_BUILD } from '../storeBuild';
 
 /**
  * Settings › b agent: how the b agent is paid for. Pay per message (BSV, with a daily limit) or
@@ -243,13 +244,19 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
           icon={<Bot size={16} />}
           label="Mode"
           description={
-            prefs.mode === 'paid' ? 'Pay per message from this wallet' : 'Use your own AI provider key'
+            STORE_BUILD
+              ? STORE_AGENT_NOTE
+              : prefs.mode === 'paid'
+                ? 'Pay per message from this wallet'
+                : 'Use your own AI provider key'
           }
           isFirst
         />
-        <div className="px-4 pb-3 pl-12">
-          <Pills label="b agent mode" options={MODES} value={prefs.mode} onChange={(v) => setPrefs({ mode: v })} />
-        </div>
+        {!STORE_BUILD && (
+          <div className="px-4 pb-3 pl-12">
+            <Pills label="b agent mode" options={MODES} value={prefs.mode} onChange={(v) => setPrefs({ mode: v })} />
+          </div>
+        )}
         <Divider />
         {prefs.mode === 'paid' ? (
           <Row

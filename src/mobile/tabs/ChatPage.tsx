@@ -24,6 +24,10 @@ import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
+import { STORE_ROOM_NOTE, tokenRoomsEnabled } from '../storeBuild';
+
+/** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
+const ROOMS = tokenRoomsEnabled();
 import {
   amountLabel,
   buildTokenRoomList,
@@ -551,13 +555,15 @@ const LockedRoom = ({
           ? `You hold ${amountLabel(heldRaw, gate)}.`
           : 'Holding the token is your membership.'}
       </p>
-      <button
-        onClick={onBuy}
-        className="mt-2 w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2"
-        style={{ background: GOLD, color: '#1a1300' }}
-      >
-        <ShoppingCart size={16} /> Buy in Market
-      </button>
+      {ROOMS && (
+        <button
+          onClick={onBuy}
+          className="mt-2 w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          <ShoppingCart size={16} /> Buy in Market
+        </button>
+      )}
     </div>
   </Sheet>
 );
@@ -1261,6 +1267,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
   const openEntry = useCallback(
     async (entry: TokenRoomEntry) => {
+      if (!ROOMS) return setListError(STORE_ROOM_NOTE);
       setOpening(entry.key);
       try {
         await prove(entry.key);
@@ -1417,7 +1424,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           {shown.map(({ e, invite }) => {
             const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
             const personal = personalOf(e);
-            if (invite === 'invite' && personal) {
+            if (invite === 'invite' && personal && ROOMS) {
               return (
                 <li key={e.key} className="flex items-center gap-3 px-4 py-[10px]">
                   <Avatar title={e.gate.symbol} />
@@ -1446,8 +1453,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               );
             }
             const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
-            const sub =
-              e.status === 'start'
+            const sub = !ROOMS
+              ? STORE_ROOM_NOTE
+              : e.status === 'start'
                 ? 'No room yet — tap to start it'
                 : e.status === 'join'
                   ? `${e.members ?? 0} holder${e.members === 1 ? '' : 's'} · tap to join`
@@ -1458,7 +1466,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               <li key={e.key}>
                 <button
                   onClick={() => void openEntry(e)}
-                  disabled={!!opening}
+                  disabled={!!opening || !ROOMS}
                   className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
                 >
                   <Avatar title={e.gate.symbol} />

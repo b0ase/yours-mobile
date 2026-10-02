@@ -16,7 +16,15 @@ import { BWALLET_GUIDE } from './guide';
 import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
 import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
-import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PriceInfo, type Quote } from './paid';
+import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PaidBackend, type PriceInfo, type Quote } from './paid';
+import { STORE_BUILD } from '../storeBuild';
+
+/** Store build: no paid endpoints are ever called (own key only, storeBuild.ts). */
+const storeNoPaid: PaidBackend = {
+  price: () => Promise.reject(new Error('Use your own AI provider key')),
+  quote: () => Promise.reject(new Error('Use your own AI provider key')),
+  turn: () => Promise.reject(new Error('Use your own AI provider key')),
+};
 import { TopNav } from '../../components/TopNav';
 import { money } from '../money/money';
 
@@ -123,7 +131,10 @@ const AgentPage = () => {
     [apiContext],
   );
   const backend = useMemo(
-    () => bitsignPaidBackend((method, path, body) => withClient((c) => c.agentCall(method, path, body))),
+    () =>
+      STORE_BUILD
+        ? storeNoPaid
+        : bitsignPaidBackend((method, path, body) => withClient((c) => c.agentCall(method, path, body))),
     [withClient],
   );
 

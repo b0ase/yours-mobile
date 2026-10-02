@@ -1,0 +1,276 @@
+# bWallet store audit (App Store and Google Play)
+
+Status: code-level audit of `bwallet` as at 2 Oct 2026 (branch `feat/store-build`). This is not legal advice.
+It reviews the code against the Apple App Store Review Guidelines and the Google Play Developer Program
+Policies. Where I am confident of a guideline number I cite it. Where I am not, it is marked **(verify)**.
+Store policy changes often, so check the current text before you submit.
+
+"Store build" means the build distributed through the App Store or Google Play. It is produced with
+`pnpm build:mobile:store` (`VITE_STORE_BUILD=1`, see `src/mobile/storeBuild.ts`). The default build
+(`pnpm build:mobile`, direct download and APK) is unchanged.
+
+Risk: **High** means likely rejection or removal. **Med** means likely reviewer questions or a metadata/form fix.
+**Low** means hygiene.
+
+---
+
+## 1. Paying bCorp in crypto to unlock features
+
+Apple 3.1.1 says digital features and content unlocked inside the app must use In-App Purchase. Apps
+"may not use their own mechanisms to unlock content or functionality, such as license keys, augmented
+reality markers, QR codes, cryptocurrencies and cryptocurrency wallets". Apple 3.1.5(iii) allows a wallet
+to *transmit* crypto, but paying the developer for in-app features is still covered by 3.1.1. Google Play's
+Payments policy requires Play Billing for in-app digital goods and services. Its exemptions cover payments
+for physical goods and some peer-to-peer cases, but not the developer charging for app features. I believe
+there is no general crypto exemption for developer-charged features **(verify the current Play text)**.
+
+| # | Feature | Files | Rule | Risk | Fix (store build) |
+|---|---------|-------|------|------|-------------------|
+| 1.1 | b agent "Pay per message": BSV is sent to a bit-sign quote address for each AI answer | `src/mobile/agent/paid.ts`, `agent/AgentPage.tsx`, `settings/AgentSettings.tsx` | Apple 3.1.1; Play Payments | **High** | **Done.** Own-key mode only. `parseAgentPrefs` forces `own` mode and the paid backend is replaced, so `/api/bitsign/agent/{price,quote,turn}` is not in the store bundle (checked with grep). Settings shows "Use your own AI provider key". |
+| 1.2 | bCredits ($BCREDIT) top-up to the bCorp treasury, spent in bCorp apps | `credits/CreditsRow.tsx`, `credits/credits.ts`, `chat/api.ts` (credits methods), Wallet "Credits" tab | Apple 3.1.1 (prepaid credits for digital services are IAP territory); Play Payments | **High** | **Done.** The Credits tab and row are hidden. The client methods remain but are unreachable. |
+| 1.3 | Mint creation fee (1%) to `BWALLET_MINT_FEE_ADDRESS` | `mint/mint.ts` | Apple 3.1.1 | **High** if the address is set | **Done.** The fee address is forced to `''` in the store build. |
+| 1.4 | Market fee (1%) and ticket resale fee to bCorp | `market/fee.ts`, `sell/sell.ts` | Apple 3.1.1 / 3.1.5(iii) | **High** if set | **Done.** The address is forced to `''`. Trading is also off (section 3). |
+| 1.5 | Token indexing fee (`indexFund.ts`, `WalletIndexing`, `FinishIndexing`, `indexAutoPay`): sats go to the 1Sat overlay fee address, a third party and not bCorp | `tokens/*` | Probably acceptable (it's a network/service fee to a third party, like miner fees). But it is a cost to make a token "work" in the app **(judgement call)** | Med | **Done (conservative).** Token minting is hidden, so indexing cards and the badge are hidden too. |
+| 1.6 | $name/handle: the paymail `name@bwallet.space` is free. The personal $NAME token and room cost a network fee plus indexing | `names/HandleFlow.tsx`, `names/claimPersonal.ts` | The free paymail is fine. The personal token is token-gated access (section 2) | Med | **Done.** The store build offers only the free paymail. The personal token/room option is hidden. |
+| 1.7 | Avatar publish: an on-chain inscription plus a network fee only, with nothing paid to bCorp | `names/AvatarPicker.tsx` | Not an IAP issue (miner fee only) | Low | No change. |
+| 1.8 | OpNS name: PoW-mined on the phone, network fee only | `names/GetYourName.tsx`, `names/opns*.ts` | Not an IAP issue | Low | No change. |
+| 1.9 | Paid inbound calls | `calls/*` | None found. Calls are free (WebRTC via bit-sign signalling) | n/a | n/a |
+
+**Anti-steering.** The store build just hides these features. It does not say "available on
+bwallet.space". Apple's link-out rules differ by storefront: the US has allowed external purchase links
+since the 2025 Epic injunction, and the EU uses the DMA entitlement and alternative terms. Outside those
+storefronts, 3.1.1 and 3.1.3 still bar buttons, links and calls to action that steer to outside purchasing.
+Hiding the features is the only option that is safe in every storefront. If you want a link in the US/EU,
+make it a per-storefront decision (open decision D5).
+
+## 2. Token-gated chatrooms and tickets
+
+| # | Feature | Files | Rule | Risk | Fix |
+|---|---------|-------|------|------|-----|
+| 2.1 | Chat › Chatrooms: holding ≥ N of a token admits you to its room ("Hold 1 $FILM to join", "Buy in Market") | `tabs/ChatPage.tsx`, `chat/tokenRooms.ts`, `chat/OpenTokenRoomButton.tsx`, `docs/TOKEN-ROOMS.md` | Apple 3.1.1 (crypto/NFT ownership may not unlock app functionality; NFTs can *display* owned items only) | **High** | **Done.** Rooms are still listed (the user's holdings) but cannot be opened, joined or started. Each row reads "Token rooms aren't available in this version of bWallet." There is no "Buy in Market" button, the invite "Join" is hidden, and the "Room" button on token pages is hidden. DMs are unaffected. |
+| 2.2 | Tickets: mint room tickets, Wallet › Tickets tab, Market › Tickets, resale | `tickets/*`, `wallet/TicketsSection.tsx`, `market/MarketPage.tsx` | Apple 3.1.1; Play blockchain content policy **(verify)** | **High** | **Done.** The Tickets tab, the Market Tickets filter, and the "Mint a chatroom" choice are hidden. |
+
+Alternatives considered: (a) hide Chatrooms entirely, which is clean but leaves Chat with only DMs; (b) let
+existing members keep chatting, which is still access unlocked by a token. I chose to list the rooms but
+make them non-joinable. That is the least-surprise compliant option. Changing it is open decision D2.
+
+## 3. Market / OrdLock trading: is it an exchange?
+
+`market/MarketPage.tsx` lists 1Sat OrdLock listings from the indexer and buys them with `@1sat/actions`
+`buyBsv21` / `buyOrdinal`. `sell/*` creates OrdLock listings. Settlement is non-custodial and atomic on
+chain, and bCorp optionally takes a 1% fee.
+
+- Apple 3.1.5(iii) says exchange or trading functionality may be offered only on approved exchanges, and only
+  by apps from the exchange itself or an entity with appropriate licensing in every region the app is
+  offered **(verify the exact wording)**. A peer-to-peer order-book Market for fungible tokens looks enough
+  like crypto trading that a reviewer could treat it as an exchange. bCorp holds no exchange licence. **High.**
+- Google Play's Cryptocurrency Exchanges and Software Wallets policy (in force since 2025 in many
+  jurisdictions) requires registration or licensing for exchange-like functionality in listed countries.
+  Purely non-custodial software wallets are generally excluded, but an in-app marketplace with a fee is
+  ambiguous. **High (verify country list).**
+- Market › bApps (`SharesPanel.tsx`, `kyc/kyc.ts`) shows bCorp/bApp share offers to investors with
+  KYC (Veriff via bit-sign). That is a **securities offering inside the app**, regulated in its own right
+  (UK FSMA s21 financial promotion, US securities law). Apple 3.1.5 and 5.1.1(ix) (highly regulated fields)
+  and Play's Financial Services policy apply. **High.**
+
+**Decision: view-only.** The store build hides every Buy button, the confirm sheet cannot fire (`buy()`
+returns early), selling and listing are off (`SELL_ENABLED` is false), and the bApps and Tickets filters are
+hidden. Browsing NFT and token listings and floor prices stays on. Note that showing prices for
+speculative tokens may still invite questions (section 4).
+
+## 4. Personal tokens and NFTs
+
+| # | Item | Files | Rule | Risk | Fix |
+|---|------|-------|------|------|-----|
+| 4.1 | Mint a token (BSV-21) and personal $NAME tokens, which can be traded peer to peer | `tokens/TokenMint.tsx`, `names/claimPersonal.ts` | Apple 3.1.5(iv)? ICO/crypto offerings must come from established, licensed institutions **(verify the clause number)**. Play: no promotion of tokens as investments | **High** if marketed as an investment. The copy already says "for access, not trading" | **Done.** Token minting and the personal token are hidden in the store build. |
+| 4.2 | Mint media (NFT) | `mint/MintButton.tsx`, `mint/mint.ts` | Apple 3.1.1 allows apps to sell NFTs *via IAP* and to let users view their own NFTs; minting your own content with only a network fee is not a sale by the developer | Med | Kept, with no bCorp fee. Reviewer notes should explain it. |
+| 4.3 | NFT viewing (Wallet › NFTs media library) | `media/*` | Apple 3.1.1 allows viewing. Play's blockchain-based content policy allows it, but tokenised assets must not be marketed as earning opportunities and NFT "loot boxes" are banned **(verify)** | Low | Kept. |
+| 4.4 | Feed "Lock" (lock BSV behind posts, ranked by "Most locked") | `feed/locks.ts`, `feed/FeedPage.tsx` | The user's own funds are time-locked with no payout, so no gambling element | Low | Kept. Explain it in review notes. |
+
+## 5. In-app browser and bApps (Apple 4.7)
+
+`mobile/BrowserPage.tsx`, `mobile/dappBrowser.ts`, `mobile/bapps.ts`, `mobile/radarApps.ts`: there is a
+curated directory (Apps tab) of about 150 third-party web apps, opened in an in-app WebView that injects the
+wallet provider.
+
+- Apple 4.7 allows HTML5 mini apps. Under 4.7 the developer is responsible for that content meeting the
+  guidelines, mini apps must not offer digital goods outside IAP, and 4.7.2/4.7.3 limit extending native
+  APIs to that code **(verify the sub-clauses)**. The injected wallet lets third-party pages request
+  payments for *their* digital content. That is arguably 3.1.5(iii)-permitted crypto transmission, but a
+  reviewer may see it as non-IAP digital purchases inside the app. **Med-High.**
+- Fixes: (a) the curated list must exclude gambling and adult apps (already the stated rule,
+  `radarApps.ts:134`); review the entries again before each submission. (b) Add a "Report this app" item in
+  the browser menu. (c) Consider hiding the open-any-URL bar in the store build if Apple objects
+  (**open decision D4**, not done here so the BrowserPage merge with `feat/bapp-frame` stays easy).
+  (d) Index the directory in the review notes.
+- The "Buy BSV" group (third-party KYC onramps: onramper, cex.io and others) is commented out in
+  `radarApps.ts:147-148` and stays hidden. **Keep it hidden.** On Play, linking to onramps is generally fine,
+  but on Apple it is outside 3.1.1's reach (physical/financial) only if the onramp is the merchant **(verify)**.
+
+## 6. User-generated content (Apple 1.2; Play UGC policy)
+
+Apple 1.2 requires: a way to filter objectionable material, a mechanism to report offensive content with
+timely responses, the ability to block abusive users, published contact information, and (in practice)
+EULA/terms acceptance with zero tolerance for objectionable content. Play's UGC policy is similar.
+
+| Surface | Report | Block | Mute | Filter | Files | Risk |
+|---------|--------|-------|------|--------|-------|------|
+| Feed | Yes (`reportItem`, but posts only to `BWALLET_MARKET_REPORT_URL`, which is **empty by default**, so reports stay on the device) | Yes (`addBlock`) | Yes | Yes (`market/safety.ts` text/blocklist) | `feed/FeedPage.tsx`, `feed/store.ts` | **High** until reports reach a moderated server |
+| Market NFTs | Yes (same local-only report) | n/a | n/a | Yes (blocklist) | `market/safety.ts`, `NftCard.tsx` | Med |
+| Chatrooms | **No** | **No** | **No** | **No** | `tabs/ChatPage.tsx` | **High** (hidden in the store build anyway, section 2) |
+| DMs | **No** | **No** (only delete contact) | **No** | **No** | `chat/DmsPage.tsx`, `chat/ContactViews.tsx` | **High** |
+| Calls | No | Yes (`/wallet-calls/blocks`) | n/a | n/a | `calls/api.ts`, `CallsList.tsx` | Med |
+| EULA / terms | **None in app** (only the Credits terms line) | | | | `tabs/SettingsHub.tsx` | **High** |
+
+Fixes: (1) set `BWALLET_MARKET_REPORT_URL` to a bit-sign moderation endpoint and commit to a 24-hour
+response; (2) add Report and Block to DMs (bit-sign needs a block list for bChat DMs); (3) add a
+terms/EULA acceptance screen on first run with a zero-tolerance clause, plus a link in Settings; (4) publish a
+support contact in the app and on the store listing.
+
+## 7. Account deletion (Apple 5.1.1(v); Google Play account deletion)
+
+The wallet itself is local and non-custodial: "Forgot password" wipe (`forgot/wipe.ts`) deletes it from
+the device. But the app **creates server-side accounts**: the paymail `name@bwallet.space`
+(pay.bwallet.space), the bChat/bit-sign account (signed in with the identity key), call blocks, KYC
+records, and feed posts (on chain, so they cannot be deleted).
+
+- Apple 5.1.1(v) says an app that supports account creation must let users initiate deletion in the app.
+  **High.**
+- Google requires an in-app deletion path **and** a web link to request deletion in the Data safety form.
+  **High.**
+- Fix: add Settings › Delete account. It should call bit-sign to delete the paymail, the bChat profile,
+  rooms membership and call data, then wipe the local wallet. Add a web page (for example
+  bwallet.space/delete) and explain that on-chain data can't be erased.
+
+## 8. Third-party AI (Apple 5.1.2(i); Google AI-generated content)
+
+- b agent own-key mode sends the transcript plus a guide prompt directly from the phone to
+  `api.anthropic.com`, `api.openai.com` or `openrouter.ai` (`agent/providers.ts`). The paid mode (not
+  in the store build) sends it to bit-sign, which forwards it to its model provider.
+- Apple 5.1.2(i) (Nov 2025 update) says you must clearly disclose where personal data is shared with
+  third parties, **including third-party AI**, and obtain explicit permission first. There is **no consent
+  screen today.** **High.**
+- Google's AI-Generated Content policy requires in-app reporting/flagging of offensive AI output for
+  apps that generate content with AI **(verify scope; it applies to "AI content generators")**. **Med.**
+- Fix: show a first-use consent sheet on the b agent ("Messages you send are processed by <provider>
+  under their terms. Don't share your recovery phrase.") with Allow/Cancel, stored per provider. Add a
+  "Report reply" action on agent messages. `looksLikeSecret` already blocks seed phrases, which is good.
+
+## 9. Privacy labels and Google Data safety: data collected or sent
+
+| Data | Sent to | Purpose | Linked to user |
+|------|---------|---------|----------------|
+| Public keys, addresses, txids, UTXO queries | api.1sat.app, ordinals.gorillapool.io, ordfs.network, api.whatsonchain.com | Wallet function | Yes (pseudonymous) |
+| Identity key signatures, handle, avatar URL, chat messages, DMs, room membership | www.bitcoinchat.online (bit-sign) | bChat, calls signalling | Yes |
+| Paymail alias and identity pubkey | pay.bwallet.space | Paymail | Yes |
+| Feed posts, likes, follows, locks (on chain) and reads | bmap-api-production.up.railway.app, on chain | Social feed | Yes (public) |
+| Voice audio (peer to peer WebRTC; TURN/STUN servers via bit-sign **(verify)**) | Other user | Calls | Yes |
+| AI chat transcript | Anthropic / OpenAI / OpenRouter (own key) or bit-sign (paid) | b agent | Yes |
+| KYC: ID document and selfie | Veriff via the bit-sign web flow (`kyc/config.ts`) | Identity verification | Yes |
+| Exchange rate requests | whatsonchain / price APIs | Display | No |
+| Third-party bApps | Whatever each site collects (in-app browser) | n/a | Disclose as third-party |
+| HandCash (upstream integration) | cloud.handcash.io | Optional | Yes |
+
+Apple privacy label: Contact Info (none unless KYC), Identifiers (User ID = identity key), User Content
+(messages, audio, photos/avatar, posts), Financial Info (wallet addresses/transactions **(verify whether
+Apple counts on-chain data)**), Sensitive Info (KYC). No tracking and no ad SDKs were found. The Data safety
+form should mark the same data, with encryption in transit = yes (HTTPS) and deletion = yes once section 7
+is built.
+
+## 10. Permissions, usage strings and background modes
+
+Files: `ios/App/App/Info.plist` and `android/app/src/main/AndroidManifest.xml`.
+
+| Item | Finding | Risk | Fix |
+|------|---------|------|-----|
+| `NSMicrophoneUsageDescription` | Present ("voice calls") | Low | OK |
+| `NSFaceIDUsageDescription` | Present | Low | OK |
+| `NSCameraUsageDescription` / `NSPhotoLibraryUsageDescription` | **Missing.** The avatar and Mint pickers use `<input type=file>`, which can offer "Take Photo". WKWebView needs the camera string or the app crashes when the camera is chosen **(verify on device)** | **Med-High** (crash = 2.1 rejection) | Add `NSCameraUsageDescription` (and `NSPhotoLibraryAddUsageDescription` if saving). |
+| `UIBackgroundModes = audio` | Used for calls and music playback (MiniPlayer). Apple 2.5.4 allows audio only for audible content. OK for the player, but reviewers test it | Med | Keep, and state in the review notes that the music player and calls use it. |
+| VoIP / CallKit / PushKit | **Not used.** Incoming calls ring only while the app is open (polling/socket). This is acceptable. Note that if you add PushKit later, Apple requires CallKit reporting for every VoIP push | Low | Describe calls accurately in metadata ("while the app is open"). |
+| Push | Only `@capacitor/local-notifications` (no remote push). Android 13+ needs `POST_NOTIFICATIONS` (merged from the plugin manifest; **verify** in the merged manifest) | Low | OK |
+| Android `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `INTERNET` | Appropriate | Low | Fill in Play's permission declaration only if prompted. |
+
+## 11. Export compliance
+
+`ITSAppUsesNonExemptEncryption` is **absent** from Info.plist, so App Store Connect asks on every
+upload. The app uses standard crypto: HTTPS, plus ECDSA/AES for wallet keys and message encryption
+(BRC-2/78). That generally qualifies for the "standard encryption algorithms" exemption under EAR
+5D992 / category 5 part 2 note 4 **(verify with counsel; France may need a declaration)**. **Low-Med.**
+Fix: add `ITSAppUsesNonExemptEncryption = false` once the exemption is confirmed. Otherwise upload the
+self-classification report.
+
+## 12. Wallet published by an organisation (Apple 3.1.5(i))
+
+Apple 3.1.5(i) says wallet apps may only be offered by developers enrolled as an organisation. bCorp has a
+D-U-N-S number (The Bitcoin Corporation Ltd). Enrol as an Organization (not Individual) and publish under
+that account. Google requires an organisation account for financial-features apps **(verify)**. The
+upload-key certificate CN is "Yours Wallet Mobile (unofficial)" (`scripts/android-release.sh`), which is
+fine for signing, but the store developer name must be bCorp. **High until enrolment is done.**
+
+Also check Apple 4.1 (copycats) and 5.2 (IP): the fork is of Yours Wallet (MIT), and the store listing must
+not suggest it is the official Yours Wallet. **Med.**
+
+## 13. External purchase of BSV
+
+The "Buy BSV" onramp group stays hidden (`radarApps.ts:147`). In the store build there is no in-app link
+to buy BSV with fiat. **Keep it that way.** Re-enable it only after open decision D5. Receiving BSV is fine.
+
+## 14. Gambling
+
+There is no gambling in the wallet code. The bApp directory explicitly skips gambling and adult apps
+(`radarApps.ts:134`, `:937`). The Feed "Lock" has no chance element. Zero Dice (a bCorp portfolio company)
+is **not** in `bapps.ts`; keep it out of the store build. If it is ever listed, Apple 5.3 and Play's Real-Money
+Gambling policy (licence, geo-restriction, and on Apple a free app) apply. **Low.**
+
+## 15. Age rating
+
+The app has user-generated content (feed, DMs, calls), an unrestricted in-app web browser, and crypto. Apple's
+2025 questionnaire: "Unrestricted web access" plus UGC usually gives **18+** under the new age tiers (it was
+17+ under the old ones) **(verify in App Store Connect)**. On Google Play, IARC with "users interact" and
+"shares location: no" usually gives Teen or Mature. Crypto/financial apps commonly declare 18+ in the target audience.
+**Med.** Fix: answer the questionnaire honestly and set the Play target audience to 18+.
+
+---
+
+## What the store build changes (`VITE_STORE_BUILD=1`)
+
+All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
+
+- **b agent**: own-key mode only. The mode picker and daily limit are hidden and the note reads "Use your own AI
+  provider key". The paid endpoints are never called and are not in the bundle.
+- **No paying bCorp**: Credits (tab and row) are hidden; the Mint, Market and ticket-resale fee addresses are
+  blank; token and personal-token minting are hidden (so no indexing fee prompts or badge). The free paymail is
+  kept. No "available on the web" text is shown (hidden everywhere, see section 1).
+- **Token-gated rooms**: Wallet › Tickets is hidden; Chat lists token rooms but they can't be opened,
+  joined or bought into; the "Room" buttons are hidden; "Mint a chatroom" is hidden.
+- **Market**: view-only. There is no Buy, Sell or List, and the bApps (share offers) and Tickets filters are hidden.
+- **Unchanged**: peer-to-peer send/receive, paymail, tips and Feed locks, NFT viewing and media minting
+  (with no fee), DMs, calls, the Feed, the Apps browser, and settings.
+- **Buy BSV**: stays hidden (it was already hidden in both builds).
+
+Build: `pnpm build:mobile:store`, `pnpm cap:sync:store`, `pnpm ios:store`, `pnpm android:store`.
+`scripts/android-release.sh` now builds the APK from the default build and the AAB (Play) from the store
+build. Note that after it runs, the `android/` web assets are the store build.
+
+## Prioritised fix list
+
+1. **Org enrolment** (Apple Organization account under The Bitcoin Corporation Ltd; Play organisation account), 3.1.5(i). *Owner.*
+2. **Ship only the store build** to the stores (done in this branch). Confirm in review notes that there is no in-app purchase of digital features.
+3. **Account deletion** in the app plus a web deletion link (paymail, bChat, calls, KYC). Needs bit-sign endpoints. 5.1.1(v) and Play.
+4. **UGC safety**: EULA/terms acceptance; Report and Block in DMs; send Feed/Market reports to a monitored server (`BWALLET_MARKET_REPORT_URL`); a support contact. Apple 1.2.
+5. **AI consent sheet** before the first b agent message, naming the provider, plus a "Report reply" action. Apple 5.1.2(i), Play AI content.
+6. **Remove or disclose securities**: keep the bApps share offers out of the store build (done); get legal review before any in-app share offer.
+7. **Add `NSCameraUsageDescription`** (and test the camera path), and **`ITSAppUsesNonExemptEncryption`** after the exemption is confirmed.
+8. **Privacy label and Data safety** forms from section 9; update `PRIVACY_POLICY.md` for bit-sign, paymail, AI providers and Veriff.
+9. **bApp directory review** before each submission (no gambling, adult or exchange apps); add "Report this app" in the browser.
+10. **Age rating** 18+ and accurate call/background-audio descriptions in the review notes.
+
+## Open decisions for the owner
+
+- **D1** Market in the store build: view-only (chosen), or hide the Market tab entirely to avoid any exchange perception?
+- **D2** Token rooms: listed but non-joinable (chosen), or hidden entirely, or allowed for NFT-only "display" rooms?
+- **D3** Media (NFT) minting in the store build: kept with no fee. Keep it?
+- **D4** In-app browser in the store build: keep the free URL bar, or allow the curated directory only? (Left alone so `feat/bapp-frame` merges cleanly.)
+- **D5** US/EU link-outs to bwallet.space for Credits, paid agent and names, and the Buy BSV onramps: per-storefront, after legal review.
+- **D6** Is the 1Sat indexing fee (a third-party fee) acceptable on store builds if token minting returns?

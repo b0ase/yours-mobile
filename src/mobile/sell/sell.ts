@@ -10,6 +10,7 @@
  * BSV-21 only, behind `SELL_ENABLED` (true in the mobile build, see vite.config.mobile.ts).
  */
 import { BSV21, OrdLock } from '@1sat/templates';
+import { bcorpFeeAddress, marketTradingEnabled } from '../storeBuild';
 import { LockingScript, Script } from '@bsv/sdk';
 
 declare const __BWALLET_SELL__: boolean | undefined;
@@ -17,12 +18,14 @@ declare const __MARKET_FEE_ADDRESS__: string | undefined;
 declare const __TICKET_RESALE_FEE_RATE__: string | undefined;
 
 /** bWallet-only switch: listing creation is on in the mobile build, off elsewhere (extension). */
-export const SELL_ENABLED = typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
+/** Off in a store build: the Market is view-only there (storeBuild.ts). */
+export const SELL_ENABLED =
+  marketTradingEnabled() && typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
 
 // ── ticket resale fee (owner: 0 by default; NOT the general 1% Market fee) ──
 
 const ADDRESS_RE = /^1[1-9A-HJ-NP-Za-km-z]{24,34}$/;
-const feeAddress = typeof __MARKET_FEE_ADDRESS__ === 'string' ? __MARKET_FEE_ADDRESS__.trim() : '';
+const feeAddress = bcorpFeeAddress(typeof __MARKET_FEE_ADDRESS__ === 'string' ? __MARKET_FEE_ADDRESS__.trim() : '');
 const feeRate = typeof __TICKET_RESALE_FEE_RATE__ === 'string' ? Number(__TICKET_RESALE_FEE_RATE__) : 0;
 
 /** Rate in [0, 0.5]; anything else (unset, NaN, negative) = 0. */

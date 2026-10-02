@@ -39,6 +39,7 @@ import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { SharesPanel } from './SharesPanel';
+import { marketFiltersFor, marketTradingEnabled } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel, openTicketRoomInChat } from '../tickets/TicketsPanel';
@@ -112,12 +113,14 @@ const VIEWS: [View, string][] = [
  * you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
 type TokenFilter = 'all' | 'bapps' | 'shares' | 'tickets';
-const TOKEN_FILTERS: [TokenFilter, string, boolean][] = [
+// Store build: no bApps share offers or Tickets; the Market is view-only (storeBuild.ts).
+const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
   ['bapps', 'bApps 🔒', true],
   ['shares', 'Shares', false],
   ['tickets', 'Tickets', true],
-];
+]);
+const TRADING = marketTradingEnabled();
 const KIND_KEY = 'bwallet.market.kind';
 const readKind = (): Kind => {
   try {
@@ -293,6 +296,7 @@ const MarketPage = () => {
   }, []);
 
   const buy = async ({ room: r, listing }: Pending) => {
+    if (!TRADING) return;
     setBusy('Buying…');
     try {
       // Ticket resales use the ticket resale fee (default 0), not the general Market fee.
@@ -735,6 +739,7 @@ const MarketPage = () => {
                 {formatSats(l.priceSats)}
               </div>
             </div>
+            {TRADING && (
             <button
               disabled={!l.buyable}
               onClick={() => setPending({ room, listing: l })}
@@ -743,6 +748,7 @@ const MarketPage = () => {
             >
               {l.buyable ? (ticketPage ? 'Buy ticket' : 'Buy') : 'Unavailable'}
             </button>
+            )}
             {room.ref.kind === 'coll' && (
               <button
                 aria-label="Report"
