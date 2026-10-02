@@ -266,7 +266,8 @@ All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
 - **Token-gated rooms**: Wallet › Tickets is hidden; Chat lists token rooms but they can't be opened,
   joined or bought into; the "Room" buttons are hidden; "Mint a chatroom" is hidden. Open rooms (no token
   needed) work in every build.
-- **Market**: buy, sell and list stay on (non-custodial, no bCorp fee, section 3). The bApps (share offers) and Tickets filters are hidden.
+- **Market**: buy, sell and list stay on (non-custodial, no bCorp fee, section 3). The Tickets filter is hidden. bApps is now a
+  plain token filter in every build (`market/bappTokens.ts`); the share-offer panel and the Shares chip are gone (2 Oct 2026).
 - **Unchanged**: peer-to-peer send/receive, paymail, tips and Feed locks, NFT viewing and media minting
   (with no fee), DMs, calls, the Feed, the Apps browser, and settings.
 - **Buy BSV**: stays hidden (it was already hidden in both builds).

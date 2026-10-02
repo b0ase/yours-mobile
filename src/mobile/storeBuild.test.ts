@@ -21,7 +21,6 @@ const KINDS = [
 const FILTERS = [
   ['all', 'All tokens', true],
   ['bapps', 'bApps', true],
-  ['shares', 'Shares', false],
   ['tickets', 'Tickets', true],
 ] as const;
 
@@ -49,8 +48,8 @@ describe('storeBuild', () => {
   });
 
   test('market filters: no bApps / Tickets in a store build', () => {
-    expect(marketFiltersFor(FILTERS, true).map((f) => f[0])).toEqual(['all', 'shares']);
-    expect(marketFiltersFor(FILTERS, false)).toHaveLength(4);
+    expect(marketFiltersFor(FILTERS, true).map((f) => f[0])).toEqual(['all', 'bapps']);
+    expect(marketFiltersFor(FILTERS, false)).toHaveLength(3);
   });
 
   test('trading, token rooms, paid features and mint choices', () => {

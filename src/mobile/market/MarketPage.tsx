@@ -38,7 +38,7 @@ import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
-import { SharesPanel } from './SharesPanel';
+import { isBappToken } from './bappTokens';
 import { marketFiltersFor, marketTradingEnabled } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
@@ -108,16 +108,14 @@ const VIEWS: [View, string][] = [
   ['documents', 'Documents'],
 ];
 /**
- * Tokens side sub-filters. bApps = bCorp and bApp share classes, investor-restricted (SharesPanel).
- * Shares (other companies listing their own shares) is a coming-soon placeholder. Tickets = rooms
- * you can buy into (src/mobile/tickets/TicketsPanel.tsx).
+ * Tokens side sub-filters. bApps = the bApps' own tokens (bappTokens.ts), listed like any other token.
+ * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
-type TokenFilter = 'all' | 'bapps' | 'shares' | 'tickets';
-// Store build: no bApps share offers or Tickets; the Market is view-only (storeBuild.ts).
+type TokenFilter = 'all' | 'bapps' | 'tickets';
+// Store build: no Tickets (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
-  ['bapps', 'bApps 🔒', true],
-  ['shares', 'Shares', false],
+  ['bapps', 'bApps', true],
   ['tickets', 'Tickets', true],
 ]);
 const TRADING = marketTradingEnabled();
@@ -499,7 +497,8 @@ const MarketPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rooms, directory, safetyRev],
   );
-  const visibleTokens = tokenRows.slice(0, shown);
+  const filteredTokens = tokenFilter === 'bapps' ? tokenRows.filter((r) => isBappToken(r.ref.id)) : tokenRows;
+  const visibleTokens = filteredTokens.slice(0, shown);
   // Tickers are not unique: flag every ticker more than one token id uses (issuer check on those rows).
   const dupTickers = useMemo(
     () =>
@@ -568,8 +567,10 @@ const MarketPage = () => {
       )}
       {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && <p className="text-xs text-[#F97066]">{error}</p>}
-      {tokenRows.length === 0 && rooms !== null && directory !== null && !error && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
+      {filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">
+          {tokenFilter === 'bapps' ? 'No bApp tokens listed yet.' : 'No tokens found.'}
+        </p>
       )}
       {visibleTokens.map((r, i) => {
         // Personal tokens ($BOASE): social / access only. Badge, no floor, no price talk.
@@ -607,7 +608,7 @@ const MarketPage = () => {
           </button>
         );
       })}
-      {shown < tokenRows.length && <div ref={sentinel} className="h-8" />}
+      {shown < filteredTokens.length && <div ref={sentinel} className="h-8" />}
     </section>
   );
 
@@ -878,9 +879,7 @@ const MarketPage = () => {
         ) : room ? (
           roomView
         ) : kind === 'tokens' ? (
-          tokenFilter === 'bapps' ? (
-            <SharesPanel />
-          ) : tokenFilter === 'tickets' ? (
+          tokenFilter === 'tickets' ? (
             <TicketsPanel
               art={(icon, id) => <Art outpoint={icon} kind="bsv21" collectionId={id} />}
               onBuy={(t, holder) =>

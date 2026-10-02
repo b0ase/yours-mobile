@@ -31,8 +31,8 @@ export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits
 export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(kinds: readonly T[], store = STORE_BUILD): T[] =>
   store ? kinds.filter((k) => !STORE_HIDDEN_WALLET_KINDS.includes(k[0])) : [...kinds];
 
-/** Market Tokens sub-filters: no bApps (share offers) or Tickets (room access) in a store build. */
-export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['bapps', 'tickets'];
+/** Market Tokens sub-filters: no Tickets (room access) in a store build. bApps is a plain token filter. */
+export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['tickets'];
 export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(filters: readonly T[], store = STORE_BUILD): T[] =>
   store ? filters.filter((f) => !STORE_HIDDEN_MARKET_FILTERS.includes(f[0])) : [...filters];
 
