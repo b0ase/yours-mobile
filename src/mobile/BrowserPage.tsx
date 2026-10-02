@@ -1,3 +1,4 @@
+import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -239,9 +240,7 @@ const ArrangeGrid = ({
   onRemove: (t: Tile) => void;
 }) => {
   const gridRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: number; from: number; to: number; sx: number; sy: number; rects: DOMRect[] } | null>(
-    null,
-  );
+  const drag = useRef<{ id: number; from: number; to: number; sx: number; sy: number; rects: DOMRect[] } | null>(null);
   const [live, setLive] = useState<{ from: number; to: number; dx: number; dy: number } | null>(null);
   const order = live ? moveItem(tiles, live.from, live.to) : tiles;
   const dragKey = live ? tiles[live.from]?.key : undefined;
@@ -422,6 +421,21 @@ const BrowserPage = () => {
   const [arranging, setArranging] = useState(false);
   useBackClose(!!info, () => setInfo(null));
   useBackClose(arranging, () => setArranging(false));
+  // Arranging ends (auto "Done") when leaving Home: another page/filter, a tab tap or the app backgrounding.
+  useEffect(() => {
+    if (page !== 0) setArranging(false);
+  }, [page]);
+  useEffect(() => {
+    if (!arranging) return;
+    const done = () => setArranging(false);
+    const onHide = () => document.hidden && done();
+    window.addEventListener(TAB_TAP, done);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      window.removeEventListener(TAB_TAP, done);
+      document.removeEventListener('visibilitychange', onHide);
+    };
+  }, [arranging]);
 
   useLayoutEffect(() => {
     const el = pager.current;
@@ -462,7 +476,11 @@ const BrowserPage = () => {
   const favouriteTiles = favourites.map((u) => ALL_TILES.find((t) => t.url === u)).filter((t): t is Tile => !!t);
   // Indices come from the visible tiles; map them back to the stored list (which may hold unknown URLs).
   const reorderHome = (from: number, to: number) => {
-    const next = moveItem(favourites, favourites.indexOf(favouriteTiles[from].url), favourites.indexOf(favouriteTiles[to].url));
+    const next = moveItem(
+      favourites,
+      favourites.indexOf(favouriteTiles[from].url),
+      favourites.indexOf(favouriteTiles[to].url),
+    );
     setFavourites(next);
     writeFavourites(next);
   };
