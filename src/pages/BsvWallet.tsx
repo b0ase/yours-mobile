@@ -1222,8 +1222,11 @@ export const BsvWallet = () => {
                 border: '1px solid rgba(253,176,34,0.2)',
               }}
             >
-              <span className="text-xs leading-snug" style={{ color: '#FDB022' }}>
-                <span style={{ fontWeight: 600 }}>Don't see your assets?</span> Open the migration tool.
+              <span
+                className="text-xs leading-snug min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+                style={{ color: '#FDB022' }}
+              >
+                <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
               </span>
               <ArrowRight size={14} style={{ color: '#FDB022' }} className="shrink-0" />
             </motion.button>
