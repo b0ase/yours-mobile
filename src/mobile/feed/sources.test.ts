@@ -89,10 +89,10 @@ describe('source registry', () => {
 });
 
 describe('source colours', () => {
-  test('Treechat purple, Twetch blue, bChat gold', () => {
+  test('Treechat purple, Twetch blue, bChat white', () => {
     expect(SOURCE_REGISTRY.treechat.color).toBe('#8C80E4');
     expect(SOURCE_REGISTRY.twetch.color).toBe('#085AF6');
-    expect(SOURCE_REGISTRY.bchat.color).toBe('#FFD24D');
+    expect(SOURCE_REGISTRY.bchat.color).toBe('#FFFFFF');
   });
 
   test('textOn picks the readable text colour', () => {
