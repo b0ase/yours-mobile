@@ -219,3 +219,114 @@ Totals come from the burn ledger (bit-sign) rather than client-side scans, so ev
     spend an unconfirmed ticket). If the indexer is slower than the target, bit-sign verifies the submitted burn
     tx/BEEF itself and grants entry provisionally, then reconciles with the indexer and the nightly re-check.
     Every step is measured in the phase 0 mainnet test.
+
+## BRC-162 (binary BSV-21) — research, 2 Oct 2026
+
+Read-only research. Sources: [BRC-162](https://bsv.brc.dev/tokens/0162) (binary encoding) and
+[BRC-161](https://bsv.brc.dev/tokens/0161) (the JSON encoding we use today; same token model).
+BRC-162's own "Implementations" section says **"None yet."**
+
+### What it is
+
+Every token output starts with a script prefix instead of an `ord` inscription:
+`<id | OP_0> <amt | OP_0> OP_2DROP [<payload> OP_DROP] <any locking script>`. No tag; the layout
+is the marker. Role comes from id/amount: empty id + amt>0 = fixed-supply deploy, empty id + 0 =
+authority deploy, id + 0 = authority, id + amt>0 = value. Binary deploys must be **vout 0** and the
+id on the wire is the 32-byte txid (36 bytes only for legacy BRC-161 tokens deployed at vout≠0).
+Deploy metadata (`sym`, `dec`, `icon`) is an optional DAG-CBOR payload. Validation per token:
+spending an authority input lets value outputs be minted; otherwise value outputs need
+`inputs ≥ outputs`, and **any surplus is burned implicitly**; `O > I` burns all the inputs.
+
+### What it would change for tickets
+
+| Feature | Effect on tickets |
+| --- | --- |
+| **Implicit burn** | Entry = spend N ticket units and write back `held − N` as change (or nothing). No `burn` output and no inscription. Burning your last ticket needs **zero** token outputs. |
+| **Authority minting** | Creator deploys with authority (`OP_0 OP_0`) and mints later: re-releases, batch drops and top-ups for a room without a new token id, so room keys (`bsv21:<id>`) stay stable. Authority can be delegated (e.g. to a co-host) or ended. |
+| **Any-script locking** | The token prefix sits in front of any script, so a ticket could be locked to a covenant that only allows it to be burned into one room (or only spent with a room-entry MAP output). It needs a contract, and our verifier's P2PKH-only owner rule (§2) would have to accept it. Later, not v1. |
+| Smaller outputs | No inscription envelope (about 100 bytes less per output) and script-readable id/amount. |
+
+Note: **implicit burns already work with JSON tokens on both indexers, from the code.** 1sat-stack
+admits transfer/burn outputs when `tokensIn >= transferOut + burnOut` and does not require
+equality (`pkg/bsv21/topic_validated.go` ~L249–257, HEAD `7a1e9ca`, 21 Sep 2026). The legacy
+indexer only rejects `Amt > balance` (`mod/onesat/bsv21.go` PreSave, HEAD `f9ac70f`). In both, a
+transfer that writes back less than it spends drops the surplus. This is untested on mainnet, and
+the indexers don't report it as a burn, so "burned" has to come from our ledger (bit-sign
+already counts it).
+
+### Support status (2 Oct 2026)
+
+| Component | BRC-162 binary decode | Authority mint | Implicit burn | Evidence |
+| --- | --- | --- | --- | --- |
+| **1sat-stack** (`b-open-io/1sat-stack`, api.1sat.app) | **No.** `pkg/template/bsv21/bsv21.go` `Decode()` only reads `inscription.Decode(scr)` (JSON `application/bsv-20`). No `OP_2DROP` parsing in `pkg/bsv21/*`. | **Yes, JSON form** (BRC-161 `deploy+auth` / `auth` / `mint`; `topic_validated.go` admits mint/auth outputs when `hasAuthInput`) | Yes, de facto (`>=` rule above) | HEAD `7a1e9ca`. Live `GET /1sat/bsv21/tokens` lists inscription tokens only (ids `…_1`). A binary token couldn't be found because the decoder can't see one. |
+| 1sat-stack **Shrug** (a precursor binary format: `<"¯\_(ツ)_/¯"> <36-byte id> OP_2DROP <amt> OP_DROP …`) | Different wire format from BRC-162 | Designed | Designed | `pkg/shrug/topic_validated.go`, `pkg/lookup/shrug.go` exist but are **unwired**; `docs/plans/shrug-parity.md` says "In Progress". This is the most likely base for BRC-162 support. |
+| **GorillaPool / legacy** `shruggr/1sat-indexer` | **No** | **No.** Only `deploy+mint`, `transfer` and `burn` (`mod/onesat/bsv21.go` L114, L145) | Yes, de facto | HEAD `f9ac70f`, last commit 8 Dec 2025 (maintenance only). Its `feat/binary` branch (Oct 2024) is unrelated. |
+| **@1sat/templates** — ours `0.0.33`; npm latest `0.0.40` (1 Oct 2026) | **No.** Latest has a `Shrug` template (`dist/shrug`), not BRC-162. | Yes, JSON ops typed (`BSV21Operation` includes `deploy+auth`, `auth`, `mint`) | n/a | `node_modules/@1sat/templates/dist/bsv21/bsv21.d.ts`; `npm pack @1sat/templates@latest` |
+| **@1sat/actions** — ours `0.0.212`; npm latest `0.0.229` | **No** | Yes, JSON (`deployBsv21` with `deploy+auth`, auth spend to mint / transfer / end authority) | No helper. You'd build a transfer with smaller change by hand. | `dist/tokens/index.d.ts` L89–170 |
+| **bit-sign** `src/lib/ticket-burn-verify.ts` (origin/main `300134c`, 1 Oct) | **No** (inscription-only `decodeInscription`) | No (`BSV21_OPS` = `deploy+mint`, `transfer`, `burn`) | **No.** Only counts `op:burn` outputs. | L108, L173–183, L313, L321 |
+
+### Recommendation
+
+**Keep the JSON `burn` op for v1. Don't adopt BRC-162 until 1sat-stack indexes it on
+api.1sat.app.** No indexer, library or verifier we depend on reads binary BSV-21 today, and the
+spec has no implementations. A binary ticket would be invisible to indexers and to other wallets.
+
+Do now (no new protocol):
+
+1. **Make the verifier accept both** explicit (`op:burn`) and implicit burns for JSON tokens:
+   burned = `valid token inputs − token outputs`. That's the same accounting BRC-162 needs, so the
+   verifier is ready when binary arrives. The wallet keeps writing an explicit `burn` output for
+   now, because it's the only form an indexer reports as a burn.
+2. **Use JSON authority minting** (`deploy+auth`) for rooms that want re-releases or batch drops.
+   It's supported today by 1sat-stack and `@1sat/actions` (not GorillaPool). Fixed-supply rooms
+   keep `deploy+mint`.
+3. **Watch** 1sat-stack for a BRC-162 parser (likely evolving `pkg/shrug`). When it lands, add
+   binary as an opt-in mint format.
+
+### Changes needed when we adopt (or go dual)
+
+**Wallet**
+
+- Burn builder (`burn.ts`, phase 2): add an `implicit` mode. Spend ticket UTXOs ≥ N and write one
+  change value output `<id32> <held−N> OP_2DROP <P2PKH>`, or none if burning everything. Keep the
+  MAP `room-entry` OP_RETURN. A binary encoder/decoder is about 60 lines over `@bsv/sdk` `Script`
+  (minimal script numbers, max 2^64−1, 32-byte natural-order txid id) until `@1sat/templates` has
+  one.
+- Mint (`mintTicket.ts`): binary deploy must be **vout 0** (today the inscription can sit at any
+  vout; ids are `…_1` on the live list). Optional authority deploy (`OP_0 OP_0`) plus a
+  "Release more" action that spends the authority output. Ticket parsing in `tickets.ts` /
+  `walletTickets` must accept both id forms (`<txid>_0` ⇄ 32-byte wire id).
+
+**bit-sign verifier** (`ticket-burn-verify.ts`)
+
+- `decodeTokenOut`: before `decodeInscription`, try the binary prefix (chunk 0 = 32/36-byte push
+  or `OP_0`, chunk 1 = minimal script number or `OP_0`, chunk 2 = `OP_2DROP`, optional
+  `<push> OP_DROP`). Reject non-minimal amounts, amounts above 2^64−1, and 36-byte ids with vout 0.
+  Binary wins over JSON when both parse. Map roles to deploy, auth or value.
+- Balance: `burned = Σ valid value inputs − Σ value outputs` (plus any explicit `op:burn` for JSON),
+  require `burned ≥ minAmount` and `outputs ≤ inputs`. Return `burned` from this.
+- Provenance (c): accept an authority **mint** ancestor (a tx spending a valid authority input of
+  the same token) as a value source, not only `deploy+mint` genesis.
+- Owner rule: keep P2PKH-only for v1. Room-locked (covenant) tickets would need a per-room
+  allow-list of suffix scripts.
+- Selftests: golden vectors from BRC-162 examples (fixed deploy, authority deploy, value,
+  authority, payload, 36-byte legacy id, invalid encodings).
+
+### Fee math (1sat-stack overlay, 1,000 sats per admitted output)
+
+1sat-stack charges per **indexed output**: `Debits = outputCount × feePerOutput`. The live list
+shows `fee_per_output: 1000`, e.g. `$DOG` with `output_count 22`, `debits 22000`
+(`pkg/bsv21/status.go`, `manager.go` L139–147). Token inputs and burned surplus are not
+outputs, so they aren't charged.
+
+| Room entry (burn N) | Token outputs | Indexing fee |
+| --- | --- | --- |
+| Explicit `burn` op (today), keeps change | burn + change = 2 | 2,000 sats |
+| Explicit `burn` op, burns last ticket | burn = 1 | 1,000 sats |
+| Implicit burn, keeps change | change = 1 | **1,000 sats** |
+| Implicit burn, burns last ticket | 0 | **0** |
+
+The fee comes out of the creator's prepaid fund (decision 9), so implicit burns halve what a
+creator must prefund per entry: about 1 output instead of 2. A zero-output burn produces no
+admitted output, so the indexer has nothing to show for it. Entry then depends on bit-sign
+verifying the BEEF, which it already does (decision 10).
