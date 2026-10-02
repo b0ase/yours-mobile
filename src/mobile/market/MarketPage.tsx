@@ -38,7 +38,8 @@ import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
-import { isBappToken } from './bappTokens';
+import { isBappToken, unlaunchedBapps } from './bappTokens';
+import { BAPPS } from '../bapps';
 import { marketFiltersFor, marketTradingEnabled } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
@@ -567,10 +568,8 @@ const MarketPage = () => {
       )}
       {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && <p className="text-xs text-[#F97066]">{error}</p>}
-      {filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">
-          {tokenFilter === 'bapps' ? 'No bApp tokens listed yet.' : 'No tokens found.'}
-        </p>
+      {tokenFilter !== 'bapps' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
       )}
       {visibleTokens.map((r, i) => {
         // Personal tokens ($BOASE): social / access only. Badge, no floor, no price talk.
@@ -609,6 +608,28 @@ const MarketPage = () => {
         );
       })}
       {shown < filteredTokens.length && <div ref={sentinel} className="h-8" />}
+      {/* bApps with no token yet: what they are, nothing for sale. */}
+      {tokenFilter === 'bapps' &&
+        unlaunchedBapps(BAPPS).map((a) => (
+          <button
+            key={a.name}
+            onClick={() => void openDappBrowser(a.url)}
+            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+          >
+            {a.icon ? (
+              <img src={a.icon} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+            ) : (
+              <div className="h-10 w-10 shrink-0 rounded-lg bg-[#2b2f36]" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>${a.name}</div>
+              <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{a.verb}</div>
+            </div>
+            <span className="shrink-0 rounded-full bg-[#2b2f36] px-2 py-0.5 text-[10px] font-semibold text-[#98A2B3]">
+              Not launched
+            </span>
+          </button>
+        ))}
     </section>
   );
 
