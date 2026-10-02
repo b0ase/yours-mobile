@@ -15,6 +15,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -65,6 +66,15 @@ import org.json.JSONObject;
  */
 @CapacitorPlugin(name = "YoursNative")
 public class YoursNativePlugin extends Plugin {
+
+    /**
+     * In-frame bApps (src/mobile/bappFrame) are cross-origin iframes in the wallet WebView; Android
+     * blocks their cookies by default, which breaks their logins. Only allowlisted bApps are framed.
+     */
+    @Override
+    public void load() {
+        CookieManager.getInstance().setAcceptThirdPartyCookies(getBridge().getWebView(), true);
+    }
 
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final String STORAGE_ALIAS = "yours_storage_v1";

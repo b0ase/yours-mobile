@@ -43,6 +43,13 @@ export type BApp = {
   icon?: string;
   /** GitHub repo URL when open source; omit for closed source. */
   source?: string;
+  /**
+   * Opens full screen instead of inside bWallet's frame: the site sends X-Frame-Options or
+   * CSP frame-ancestors that refuse the wallet (checked 2026-10-02). Remove once the site
+   * allows `frame-ancestors capacitor://localhost https://localhost` (docs/BAPP-FRAME.md).
+   * Sites without this flag are still probed at open time and fall back automatically.
+   */
+  noFrame?: boolean;
 };
 
 const suite = (repo: string) => `https://github.com/bitcoin-apps-suite/${repo}`;
@@ -59,6 +66,7 @@ export const BAPPS: BApp[] = [
   {
     name: 'bChat',
     url: 'https://www.bitcoinchat.online',
+    noFrame: true,
     verb: 'Chat, voice and video messages, tokenised group chats',
     group: 'featured',
     status: 'live',
@@ -67,6 +75,7 @@ export const BAPPS: BApp[] = [
   {
     name: 'bMovies',
     url: 'https://www.bmovies.app',
+    noFrame: true,
     verb: 'Watch and back tokenised films',
     group: 'featured',
     status: 'live',
@@ -75,6 +84,7 @@ export const BAPPS: BApp[] = [
   {
     name: 'bMusic',
     url: 'https://www.bmovies.app/bmusic',
+    noFrame: true,
     verb: 'Tokenise your music; fans who hold it make the video with you',
     group: 'featured',
     status: 'live',
@@ -110,6 +120,7 @@ export const BAPPS: BApp[] = [
   {
     name: 'bMail',
     url: 'https://bitcoin-email.vercel.app',
+    noFrame: true,
     verb: 'Send email that pays and gets paid',
     group: 'work',
     status: 'live',
@@ -119,6 +130,7 @@ export const BAPPS: BApp[] = [
   {
     name: 'bDrive',
     url: 'https://bitcoin-drive.vercel.app',
+    noFrame: true,
     verb: 'Store and share files on-chain',
     group: 'work',
     status: 'live',

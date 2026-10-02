@@ -11,6 +11,7 @@ import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { openDappBrowser } from './dappBrowser';
+import { openBapp, setBappFrameVisible } from './bappFrame/bappFrame';
 import app_onesatsocialIcon from './brand/apps/1satsocial.png';
 import app_treechatIcon from './brand/apps/treechat.png';
 import app_twetchIcon from './brand/apps/twetch.png';
@@ -491,11 +492,21 @@ const BrowserPage = () => {
     if (!next.some((u) => ALL_TILES.some((x) => x.url === u))) setArranging(false);
   };
 
-  const go = (url: string) => {
+  // The in-frame bApp shows only while this page (the Apps tab) is on screen.
+  useEffect(() => {
+    setBappFrameVisible(true);
+    return () => setBappFrameVisible(false);
+  }, []);
+
+  const go = (url: string, bapp?: BApp) => {
     setError('');
     rememberRecent(url);
     setRecent(readRecent());
-    openDappBrowser(url).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    // bApps run inside the wallet frame (falling back to full screen); everything else full screen.
+    const bappForUrl = bapp ?? BAPP_TILES.find((t) => t.url === url)?.bapp;
+    (bappForUrl ? openBapp(bappForUrl.name, url) : openDappBrowser(url)).catch((e: unknown) =>
+      setError(e instanceof Error ? e.message : String(e)),
+    );
   };
 
   const submit = (e: React.FormEvent) => {
@@ -522,7 +533,7 @@ const BrowserPage = () => {
           <AppTile
             key={t.key}
             tile={t}
-            onOpen={() => go(t.url)}
+            onOpen={() => go(t.url, t.bapp)}
             onInfo={() => setInfo(t)}
             onArrange={
               i === 0

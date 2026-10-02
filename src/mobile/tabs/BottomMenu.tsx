@@ -2,6 +2,7 @@ import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-reac
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
+import { BappFrameHost } from '../bappFrame/BappFrameHost';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
@@ -29,29 +30,33 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
     chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
   ).length;
   return (
-    <div
-      className="flex items-center w-full absolute bottom-0 z-[100]"
-      style={{
-        height: '3.75rem',
-        backgroundColor: theme.color.component.bottomMenuBackground,
-        borderTop: '1px solid #1C1C1E',
-      }}
-    >
-      {TABS.map((t) => (
-        <Menu
-          key={t.id}
-          label={t.label}
-          theme={theme}
-          icon={t.icon}
-          onClick={() => {
-            handleSelect(asMenuItem(t.id));
-            // Re-tapping the lit tab (e.g. from Media or the b agent) must still navigate back to it.
-            window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
-          }}
-          isSelected={active === t.id}
-          badge={t.id === 'bsv' && pending ? String(pending) : undefined}
-        />
-      ))}
-    </div>
+    <>
+      {/* In-frame bApp: lives with the tab bar so it survives tab switches. */}
+      <BappFrameHost />
+      <div
+        className="flex items-center w-full absolute bottom-0 z-[100]"
+        style={{
+          height: '3.75rem',
+          backgroundColor: theme.color.component.bottomMenuBackground,
+          borderTop: '1px solid #1C1C1E',
+        }}
+      >
+        {TABS.map((t) => (
+          <Menu
+            key={t.id}
+            label={t.label}
+            theme={theme}
+            icon={t.icon}
+            onClick={() => {
+              handleSelect(asMenuItem(t.id));
+              // Re-tapping the lit tab (e.g. from Media or the b agent) must still navigate back to it.
+              window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
+            }}
+            isSelected={active === t.id}
+            badge={t.id === 'bsv' && pending ? String(pending) : undefined}
+          />
+        ))}
+      </div>
+    </>
   );
 };

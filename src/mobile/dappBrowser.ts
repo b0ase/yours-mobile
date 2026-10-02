@@ -48,7 +48,30 @@ export const onOverlayCountChanged = (count: number) => {
   }
 };
 
+let contextFactory: ContextFactory | undefined;
+
+/**
+ * One wallet call from a site, on behalf of `origin` (already verified by the caller: the native
+ * WebView's frame info, or a postMessage from our own bApp iframe). Returns the wallet's
+ * { success, data, error } reply. Shared by the full-screen browser and in-frame bApps.
+ */
+export const handleSiteCall = async (origin: string, url: string, type: string, params: unknown) => {
+  if (!contextFactory) throw new Error('Wallet not ready');
+  const o = new URL(origin);
+  if (o.protocol !== 'https:' && o.protocol !== 'http:') throw new Error('Unsupported origin');
+  if (!isCWIEventName(type)) throw new Error(`Unsupported request: ${type}`);
+  if (url.startsWith(o.origin)) lastUrls.set(o.origin, url);
+  let chrome = contexts.get(o.origin);
+  if (!chrome) {
+    chrome = contextFactory(`dapp:${o.origin}`, o.origin, url);
+    contexts.set(o.origin, chrome);
+  }
+  // originator is derived from the verified origin, as content.ts derives it from window.location.host.
+  return chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: o.host });
+};
+
 export const initDappBrowser = (createContext: ContextFactory) => {
+  contextFactory = createContext;
   if (!isNative) return;
 
   void YoursNative.addListener('browserClosed', () => {
@@ -59,19 +82,8 @@ export const initDappBrowser = (createContext: ContextFactory) => {
   void YoursNative.addListener('browserRequest', async (req) => {
     let response: unknown;
     try {
-      const origin = new URL(req.origin);
-      if (origin.protocol !== 'https:' && origin.protocol !== 'http:') throw new Error('Unsupported origin');
-      if (req.url?.startsWith(origin.origin)) lastUrls.set(origin.origin, req.url);
       const { type, params } = JSON.parse(req.payload) as { type: string; params?: unknown };
-      if (!isCWIEventName(type)) throw new Error(`Unsupported request: ${type}`);
-      let chrome = contexts.get(origin.origin);
-      if (!chrome) {
-        chrome = createContext(`dapp:${origin.origin}`, origin.origin, req.url);
-        contexts.set(origin.origin, chrome);
-      }
-      // originator is derived from the native-reported origin, as content.ts
-      // derives it from window.location.host.
-      response = await chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: origin.host });
+      response = await handleSiteCall(req.origin, req.url ?? '', type, params);
     } catch (error) {
       response = { success: false, error: error instanceof Error ? error.message : String(error) };
     }
