@@ -3,6 +3,7 @@ package org.yours.wallet;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
@@ -603,7 +604,26 @@ public class YoursNativePlugin extends Plugin {
             return;
         }
         am.setMode(on ? AudioManager.MODE_IN_COMMUNICATION : AudioManager.MODE_NORMAL);
-        am.setSpeakerphoneOn(on);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+: route communication audio to the built-in speaker (setSpeakerphoneOn is deprecated).
+            if (on) {
+                for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                    if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                        am.setCommunicationDevice(d);
+                        break;
+                    }
+                }
+            } else {
+                am.clearCommunicationDevice();
+            }
+        } else {
+            setSpeakerphoneLegacy(am, on);
+        }
         call.resolve();
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void setSpeakerphoneLegacy(AudioManager am, boolean on) {
+        am.setSpeakerphoneOn(on);
     }
 }

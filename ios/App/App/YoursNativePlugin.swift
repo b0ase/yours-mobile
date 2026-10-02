@@ -274,7 +274,7 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 let session = AVAudioSession.sharedInstance()
                 if on {
-                    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
+                    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
                 }
                 try session.overrideOutputAudioPort(on ? .speaker : .none)
                 call.resolve()
