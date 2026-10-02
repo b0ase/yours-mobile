@@ -1,6 +1,7 @@
 # bWallet store audit (App Store and Google Play)
 
-Status: code-level audit of `bwallet` as at 2 Oct 2026 (branch `feat/store-build`). This is not legal advice.
+Status: code-level audit of `bwallet` as at 2 Oct 2026 (branch `feat/store-build`), revised the same day after
+`5f7954b` brought back token minting, Market trading and indexing in the store build (see section 3). This is not legal advice.
 It reviews the code against the Apple App Store Review Guidelines and the Google Play Developer Program
 Policies. Where I am confident of a guideline number I cite it. Where I am not, it is marked **(verify)**.
 Store policy changes often, so check the current text before you submit.
@@ -29,8 +30,8 @@ there is no general crypto exemption for developer-charged features **(verify th
 | 1.1 | b agent "Pay per message": BSV is sent to a bit-sign quote address for each AI answer | `src/mobile/agent/paid.ts`, `agent/AgentPage.tsx`, `settings/AgentSettings.tsx` | Apple 3.1.1; Play Payments | **High** | **Done.** Own-key mode only. `parseAgentPrefs` forces `own` mode and the paid backend is replaced, so `/api/bitsign/agent/{price,quote,turn}` is not in the store bundle (checked with grep). Settings shows "Use your own AI provider key". |
 | 1.2 | bCredits ($BCREDIT) top-up to the bCorp treasury, spent in bCorp apps | `credits/CreditsRow.tsx`, `credits/credits.ts`, `chat/api.ts` (credits methods), Wallet "Credits" tab | Apple 3.1.1 (prepaid credits for digital services are IAP territory); Play Payments | **High** | **Done.** The Credits tab and row are hidden. The client methods remain but are unreachable. |
 | 1.3 | Mint creation fee (1%) to `BWALLET_MINT_FEE_ADDRESS` | `mint/mint.ts` | Apple 3.1.1 | **High** if the address is set | **Done.** The fee address is forced to `''` in the store build. |
-| 1.4 | Market fee (1%) and ticket resale fee to bCorp | `market/fee.ts`, `sell/sell.ts` | Apple 3.1.1 / 3.1.5(iii) | **High** if set | **Done.** The address is forced to `''`. Trading is also off (section 3). |
-| 1.5 | Token indexing fee (`indexFund.ts`, `WalletIndexing`, `FinishIndexing`, `indexAutoPay`): sats go to the 1Sat overlay fee address, a third party and not bCorp | `tokens/*` | Probably acceptable (it's a network/service fee to a third party, like miner fees). But it is a cost to make a token "work" in the app **(judgement call)** | Med | **Done (conservative).** Token minting is hidden, so indexing cards and the badge are hidden too. |
+| 1.4 | Market fee (1%) and ticket resale fee to bCorp | `market/fee.ts`, `sell/sell.ts` | Apple 3.1.1 / 3.1.5(iii) | **High** if set | **Done.** The address is forced to `''`. Trading stays on with no bCorp fee (section 3). |
+| 1.5 | Token indexing fee (`indexFund.ts`, `WalletIndexing`, `FinishIndexing`, `indexAutoPay`): sats go to the 1Sat overlay fee address, a third party and not bCorp | `tokens/*` | Probably acceptable (it's a network/service fee to a third party, like miner fees). But it is a cost to make a token "work" in the app **(judgement call)** | Med | **On.** Token minting is back in the store build (`5f7954b`), so indexing is on (`indexingEnabled`). The fee goes to the 1Sat overlay, not bCorp; treat it like a miner fee and say so in the review notes. |
 | 1.6 | $name/handle: the paymail `name@bwallet.space` is free. The personal $NAME token and room cost a network fee plus indexing | `names/HandleFlow.tsx`, `names/claimPersonal.ts` | The free paymail is fine. The personal token is token-gated access (section 2) | Med | **Done.** The store build offers only the free paymail. The personal token/room option is hidden. |
 | 1.7 | Avatar publish: an on-chain inscription plus a network fee only, with nothing paid to bCorp | `names/AvatarPicker.tsx` | Not an IAP issue (miner fee only) | Low | No change. |
 | 1.8 | OpNS name: PoW-mined on the phone, network fee only | `names/GetYourName.tsx`, `names/opns*.ts` | Not an IAP issue | Low | No change. |
@@ -73,16 +74,36 @@ chain, and bCorp optionally takes a 1% fee.
   (UK FSMA s21 financial promotion, US securities law). Apple 3.1.5 and 5.1.1(ix) (highly regulated fields)
   and Play's Financial Services policy apply. **High.**
 
-**Decision: view-only.** The store build hides every Buy button, the confirm sheet cannot fire (`buy()`
-returns early), selling and listing are off (`SELL_ENABLED` is false), and the bApps and Tickets filters are
-hidden. Browsing NFT and token listings and floor prices stays on. Note that showing prices for
-speculative tokens may still invite questions (section 4).
+**Precedent.** Non-custodial wallets with in-app swaps are on both stores without exchange licences:
+Phantom (Solana; routes swaps through on-chain aggregators such as Jupiter and charges a fee of about
+0.85%), the Uniswap wallet, MetaMask, Trust Wallet and Coinbase Wallet. Uniswap Labs holds no exchange
+licence; the SEC investigated it in 2024 and closed the case in early 2025. Apple's practice has been to read
+3.1.5(iii) as covering apps that *are* exchanges (custody of customer funds, order matching), not wallets that
+let users trade on chain from their own keys **(verify current wording and enforcement before submitting)**.
+
+The OrdLock Market is the same kind of thing: the trade is an atomic swap on chain between two users' own
+wallets, bCorp never holds the tokens or the money and does not match orders, and in the store build bCorp
+takes no fee (less than Phantom takes).
+
+**Decision (revised 2 Oct 2026): trading on.** Buy, sell and list stay on in the store build
+(`marketTradingEnabled`, `5f7954b`) with no bCorp fee (`bcorpFeeAddress`). The bApps (share offers) and Tickets
+filters stay hidden. What still applies:
+
+- **Country rules, not Apple's.** UK: since October 2023 the FCA financial promotions regime has required
+  crypto promotions to show risk warnings and a cooling-off period for first-time buyers. Some wallets restrict
+  swaps in some regions for this. Google Play's Cryptocurrency Exchanges and Software Wallets policy asks for
+  registration in listed countries **(verify the country list)**. These depend on where the app is listed.
+- **No investment framing.** No "earn" or "returns" wording, and no price-up hype in the app or the store listing.
+- **Securities stay out.** Market › bApps (share offers with KYC) is a securities offering, not a token swap, and
+  stays hidden. Phantom and Uniswap don't do this either.
+- **Review notes** should describe the Market as non-custodial on-chain trading between users and cite the
+  wallets above as precedent.
 
 ## 4. Personal tokens and NFTs
 
 | # | Item | Files | Rule | Risk | Fix |
 |---|------|-------|------|------|-----|
-| 4.1 | Mint a token (BSV-21) and personal $NAME tokens, which can be traded peer to peer | `tokens/TokenMint.tsx`, `names/claimPersonal.ts` | Apple 3.1.5(iv)? ICO/crypto offerings must come from established, licensed institutions **(verify the clause number)**. Play: no promotion of tokens as investments | **High** if marketed as an investment. The copy already says "for access, not trading" | **Done.** Token minting and the personal token are hidden in the store build. |
+| 4.1 | Mint a token (BSV-21) and personal $NAME tokens, which can be traded peer to peer | `tokens/TokenMint.tsx`, `names/claimPersonal.ts` | Apple 3.1.5(iv)? ICO/crypto offerings must come from established, licensed institutions **(verify the clause number)**. Play: no promotion of tokens as investments | **High** if marketed as an investment. The copy already says "for access, not trading" | **Token minting on** (no bCorp fee, `mintChoicesFor` = token + media). The personal $NAME token and room stay hidden (`paidFeaturesEnabled`). Keep the "for access, not trading" copy and never market tokens as investments. |
 | 4.2 | Mint media (NFT) | `mint/MintButton.tsx`, `mint/mint.ts` | Apple 3.1.1 allows apps to sell NFTs *via IAP* and to let users view their own NFTs; minting your own content with only a network fee is not a sale by the developer | Med | Kept, with no bCorp fee. Reviewer notes should explain it. |
 | 4.3 | NFT viewing (Wallet › NFTs media library) | `media/*` | Apple 3.1.1 allows viewing. Play's blockchain-based content policy allows it, but tokenised assets must not be marketed as earning opportunities and NFT "loot boxes" are banned **(verify)** | Low | Kept. |
 | 4.4 | Feed "Lock" (lock BSV behind posts, ranked by "Most locked") | `feed/locks.ts`, `feed/FeedPage.tsx` | The user's own funds are time-locked with no payout, so no gambling element | Low | Kept. Explain it in review notes. |
@@ -117,7 +138,7 @@ EULA/terms acceptance with zero tolerance for objectionable content. Play's UGC 
 |---------|--------|-------|------|--------|-------|------|
 | Feed | Yes (`reportItem`, but posts only to `BWALLET_MARKET_REPORT_URL`, which is **empty by default**, so reports stay on the device) | Yes (`addBlock`) | Yes | Yes (`market/safety.ts` text/blocklist) | `feed/FeedPage.tsx`, `feed/store.ts` | **High** until reports reach a moderated server |
 | Market NFTs | Yes (same local-only report) | n/a | n/a | Yes (blocklist) | `market/safety.ts`, `NftCard.tsx` | Med |
-| Chatrooms | **No** | **No** | **No** | **No** | `tabs/ChatPage.tsx` | **High** (hidden in the store build anyway, section 2) |
+| Chatrooms | Yes (room and message, `/api/bitsign/report`) | Yes (author) | n/a | Owners/mods delete messages, close rooms | `tabs/ChatPage.tsx`, `chat/OpenRoomSheets.tsx` | Med (open rooms are in every build, `b9f7260`; token rooms stay hidden in the store build) |
 | DMs | **No** | **No** (only delete contact) | **No** | **No** | `chat/DmsPage.tsx`, `chat/ContactViews.tsx` | **High** |
 | Calls | No | Yes (`/wallet-calls/blocks`) | n/a | n/a | `calls/api.ts`, `CallsList.tsx` | Med |
 | EULA / terms | **None in app** (only the Credits terms line) | | | | `tabs/SettingsHub.tsx` | **High** |
@@ -240,18 +261,19 @@ All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
 - **b agent**: own-key mode only. The mode picker and daily limit are hidden and the note reads "Use your own AI
   provider key". The paid endpoints are never called and are not in the bundle.
 - **No paying bCorp**: Credits (tab and row) are hidden; the Mint, Market and ticket-resale fee addresses are
-  blank; token and personal-token minting are hidden (so no indexing fee prompts or badge). The free paymail is
-  kept. No "available on the web" text is shown (hidden everywhere, see section 1).
+  blank; the personal token and room are hidden. Token minting stays (no bCorp fee), with the third-party
+  indexing fee. The free paymail is kept. No "available on the web" text is shown (hidden everywhere, see section 1).
 - **Token-gated rooms**: Wallet › Tickets is hidden; Chat lists token rooms but they can't be opened,
-  joined or bought into; the "Room" buttons are hidden; "Mint a chatroom" is hidden.
-- **Market**: view-only. There is no Buy, Sell or List, and the bApps (share offers) and Tickets filters are hidden.
+  joined or bought into; the "Room" buttons are hidden; "Mint a chatroom" is hidden. Open rooms (no token
+  needed) work in every build.
+- **Market**: buy, sell and list stay on (non-custodial, no bCorp fee, section 3). The bApps (share offers) and Tickets filters are hidden.
 - **Unchanged**: peer-to-peer send/receive, paymail, tips and Feed locks, NFT viewing and media minting
   (with no fee), DMs, calls, the Feed, the Apps browser, and settings.
 - **Buy BSV**: stays hidden (it was already hidden in both builds).
 
 Build: `pnpm build:mobile:store`, `pnpm cap:sync:store`, `pnpm ios:store`, `pnpm android:store`.
 `scripts/android-release.sh` now builds the APK from the default build and the AAB (Play) from the store
-build. Note that after it runs, the `android/` web assets are the store build.
+build, then restores the default build in `android/` and `ios/` (`5734919`).
 
 ## Fixed on `feat/store-fixes` (2 Oct 2026)
 
@@ -288,9 +310,9 @@ Contact everywhere: info@bitcoincorporation.website.
 
 ## Open decisions for the owner
 
-- **D1** Market in the store build: view-only (chosen), or hide the Market tab entirely to avoid any exchange perception?
+- **D1** Market in the store build: **decided 2 Oct 2026, trading on** (non-custodial, no bCorp fee; section 3). Revisit if a reviewer objects or per country.
 - **D2** Token rooms: listed but non-joinable (chosen), or hidden entirely, or allowed for NFT-only "display" rooms?
 - **D3** Media (NFT) minting in the store build: kept with no fee. Keep it?
 - **D4** In-app browser in the store build: keep the free URL bar, or allow the curated directory only? (Left alone so `feat/bapp-frame` merges cleanly.)
 - **D5** US/EU link-outs to bwallet.space for Credits, paid agent and names, and the Buy BSV onramps: per-storefront, after legal review.
-- **D6** Is the 1Sat indexing fee (a third-party fee) acceptable on store builds if token minting returns?
+- **D6** The 1Sat indexing fee on store builds: token minting is back, so the fee is on. Treated as a third-party network fee; explain it in the review notes.
