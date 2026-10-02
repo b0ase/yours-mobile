@@ -10,7 +10,6 @@ import { AccountAvatar, useAvatar } from '../names/AccountAvatar';
 import { HandleFlow } from '../names/HandleFlow';
 import { useAccountNames } from '../names/MyNameBadge';
 import { identityRowText } from '../names/identityText';
-import bGlyph from '../brand/bwallet-glyph.svg';
 import type { BalanceView } from './balanceLoad';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
@@ -103,7 +102,33 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
         {/* ── Front ── */}
         <div className="bw-wcard-face bw-wcard-front" aria-hidden={flipped}>
           <div className="bw-wcard-top">
-            <img src={bGlyph} alt="bWallet" className="bw-wcard-mark" />
+            <div className="bw-wcard-holder">
+              <AccountAvatar src={avatar} size={22} />
+              {t.tag ? (
+                <>
+                  <span className="bw-wcard-handle">{t.tag}</span>
+                  {verified && (
+                    <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
+                      <Check size={13} strokeWidth={3} />
+                    </span>
+                  )}
+                  <button type="button" onClick={copy(t.copy)} aria-label={`Copy ${t.copy}`} className="bw-wcard-icon">
+                    <Copy size={15} color="#98A2B3" />
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="bw-wcard-getname"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setHandleOpen(true);
+                  }}
+                >
+                  Get your $name
+                </button>
+              )}
+            </div>
             <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
               {(['usd', 'bsv'] as const).map((u) => (
                 <button
@@ -150,39 +175,22 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
               </button>
             )}
           </div>
-          {receiveAddress && (
-            <div className="bw-wcard-addr" aria-label="Your BSV address">
-              {receiveAddress.match(/.{1,4}/g)?.join(' ')}
-            </div>
-          )}
           <div className="bw-wcard-bottom">
-            <div className="bw-wcard-holder">
-              <AccountAvatar src={avatar} size={22} />
-              {t.tag ? (
-                <>
-                  <span className="bw-wcard-handle">{t.tag}</span>
-                  {verified && (
-                    <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
-                      <Check size={13} strokeWidth={3} />
-                    </span>
-                  )}
-                  <button type="button" onClick={copy(t.copy)} aria-label={`Copy ${t.copy}`} className="bw-wcard-icon">
-                    <Copy size={15} color="#98A2B3" />
-                  </button>
-                </>
-              ) : (
+            {receiveAddress && (
+              <div className="bw-wcard-addrrow">
+                <span className="bw-wcard-addr" aria-label="Your BSV address">
+                  {receiveAddress.match(/.{1,4}/g)?.join(' ')}
+                </span>
                 <button
                   type="button"
-                  className="bw-wcard-getname"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setHandleOpen(true);
-                  }}
+                  onClick={copy(receiveAddress)}
+                  aria-label="Copy BSV address"
+                  className="bw-wcard-icon"
                 >
-                  Get your $name
+                  <Copy size={14} color="#98A2B3" />
                 </button>
-              )}
-            </div>
+              </div>
+            )}
             {since && (
               <div className="bw-wcard-since">
                 <span>MEMBER SINCE</span>

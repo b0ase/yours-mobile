@@ -504,3 +504,10 @@ body,
 .bw-wcard-usd.is-bsv {
   font-size: clamp(20px, 6.6vw, 30px);
 }
+
+.bw-wcard-addrrow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
