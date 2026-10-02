@@ -192,3 +192,25 @@ the caller's bChat handle.
 - **Bans**: room admin → ban icon in the room. Membership = holds ≥ min AND not banned
   (bit-sign `ticker_room_bans`, `/rooms/[ticker]/bans`).
 - Personal tokens are access tokens: Market shows a "Personal token" badge and no floor/price.
+
+## Open rooms (no token)
+
+Chat › Chatrooms also has **open rooms**: anyone signed in to bChat can start one, with a name, an
+optional description and a visibility — **public** (listed under "Public rooms", anyone joins) or
+**invite only** (joined with the owner's 8-character invite code, or added by the owner / a moderator).
+They are in **every build, including the store build**; nothing is paid or token-gated. In the store
+build the Token rooms section is hidden entirely (`tokenRoomsEnabled()` is unchanged).
+
+- List: "Your rooms" (joined open rooms + token rooms you're in), "Public rooms", "+ New room"
+  (create, or "Have an invite code?"), then Token rooms (full build only).
+- Server: bit-sign `/api/bitsign/rooms/open` (create / list), `/open/join` (code or ticker),
+  `/open/[ticker]` (card + leave / remove / add / delete_message / close / mod / rotate_code),
+  `/api/bitsign/report`. An open room is a normal bChat room with `metadata.kind = 'open'`, so
+  messages, unread counts and push are the same as token rooms. Rate limits and the room-name
+  filter are server-side.
+- Owner and moderators remove members, delete messages and close the room (read-only). Members leave.
+- Safety: long-press a message to report it, block its author (local, per handle: their messages are
+  hidden everywhere in Chatrooms) or, as staff, delete it. Room info › Report room.
+- Seeded: **bWallet Lounge** (ticker `LOUNGE`), bCorp's official public room
+  (bit-sign `migrations/20261002_seed_bwallet_lounge.sql`).
+- Code: `src/mobile/chat/openRooms.ts` (pure, tested), `chat/OpenRoomSheets.tsx`, `tabs/ChatPage.tsx`.

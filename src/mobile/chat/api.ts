@@ -448,6 +448,53 @@ export class BchatClient {
     });
     return r.ticker;
   }
+
+  // ── Open rooms: no token to hold (docs/TOKEN-ROOMS.md › Open rooms) ──
+
+  /** Public open rooms (raw; parsed by parsePublicRooms). */
+  async openRooms(q = ''): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/rooms/open${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  }
+
+  async createOpenRoom(body: {
+    name: string;
+    description?: string;
+    visibility: 'public' | 'invite';
+  }): Promise<{ ticker: string; name: string; invite_code: string | null }> {
+    return this.call('POST', '/api/bitsign/rooms/open', body);
+  }
+
+  /** Join by invite code / link, or a public room by ticker. */
+  async joinOpenRoom(by: { code: string } | { ticker: string }): Promise<{ ticker: string; name: string }> {
+    return this.call('POST', '/api/bitsign/rooms/open/join', by);
+  }
+
+  /** The room card: description, role, members, and (owner / moderators) the invite code. */
+  async openRoomCard(ticker: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/rooms/open/${encodeURIComponent(ticker.replace(/^\$/, ''))}`);
+  }
+
+  async openRoomAction(
+    ticker: string,
+    action: 'leave' | 'remove' | 'add' | 'delete_message' | 'close' | 'mod' | 'unmod' | 'rotate_code',
+    extra: { handle?: string; message_id?: string } = {},
+  ): Promise<{ invite_code?: string }> {
+    return this.call('POST', `/api/bitsign/rooms/open/${encodeURIComponent(ticker.replace(/^\$/, ''))}`, {
+      action,
+      ...extra,
+    });
+  }
+
+  /** Report a message, a room or a user for review. */
+  async report(body: {
+    kind: 'message' | 'room' | 'user';
+    ticker?: string;
+    message_id?: string;
+    handle?: string;
+    reason?: string;
+  }): Promise<void> {
+    await this.call('POST', '/api/bitsign/report', body);
+  }
 }
 
 // ── Session persistence (per wallet identity) ──
