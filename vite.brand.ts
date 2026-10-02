@@ -101,7 +101,7 @@ const BCORP_TEXT: Swaps = {
     // Yours users don't know a Yours seed restores as bWallet: list Yours by name too (same import path), with its green leaf.
     [
       "import masterWallet from '../../assets/master-wallet.svg';",
-      "import masterWallet from '../../assets/master-wallet.svg';\nimport yoursOriginalLogo from '../../assets/logos/icon.png';",
+      "import masterWallet from '../../assets/master-wallet.svg';\nimport yoursOriginalLogo from '../../mobile/brand/restore/yours-leaf.png';",
     ],
     [
       "    {\n      id: 'relayx',",
