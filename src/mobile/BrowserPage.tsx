@@ -5,6 +5,7 @@ import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react'
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { useBackClose } from './backStack';
+import { moveItem } from './reorder';
 import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
@@ -214,6 +215,126 @@ const AppTile = ({
   );
 };
 
+/**
+ * Home in arrange mode (iPhone-style): tiles jiggle, drag to reorder (pointer events, so touch and
+ * mouse both work in WKWebView / Android WebView), "−" removes. Tapping a tile opens nothing.
+ * touch-action:none is only set here, so the page scrolls normally outside arrange mode.
+ */
+const ArrangeGrid = ({
+  tiles,
+  onReorder,
+  onRemove,
+}: {
+  tiles: Tile[];
+  onReorder: (from: number, to: number) => void;
+  onRemove: (t: Tile) => void;
+}) => {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ id: number; from: number; to: number; sx: number; sy: number; rects: DOMRect[] } | null>(
+    null,
+  );
+  const [live, setLive] = useState<{ from: number; to: number; dx: number; dy: number } | null>(null);
+  const order = live ? moveItem(tiles, live.from, live.to) : tiles;
+  const dragKey = live ? tiles[live.from]?.key : undefined;
+
+  const down = (i: number, e: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current || (e.target as HTMLElement).closest('[data-remove]')) return;
+    const cells = Array.from(gridRef.current?.children ?? []) as HTMLElement[];
+    drag.current = {
+      id: e.pointerId,
+      from: i,
+      to: i,
+      sx: e.clientX,
+      sy: e.clientY,
+      rects: cells.map((c) => c.getBoundingClientRect()),
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // capture unsupported: moves still arrive while the finger stays on the tile
+    }
+    setLive({ from: i, to: i, dx: 0, dy: 0 });
+  };
+
+  const move = (e: React.PointerEvent) => {
+    const s = drag.current;
+    if (!s || e.pointerId !== s.id) return;
+    let best = s.to;
+    let bestD = Infinity;
+    s.rects.forEach((r, k) => {
+      const d = (r.left + r.width / 2 - e.clientX) ** 2 + (r.top + r.height / 2 - e.clientY) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = k;
+      }
+    });
+    s.to = best;
+    setLive({ from: s.from, to: best, dx: e.clientX - s.sx, dy: e.clientY - s.sy });
+  };
+
+  const up = (e: React.PointerEvent) => {
+    const s = drag.current;
+    if (!s || e.pointerId !== s.id) return;
+    drag.current = null;
+    setLive(null);
+    if (s.to !== s.from) onReorder(s.from, s.to);
+  };
+
+  return (
+    <div ref={gridRef} className="grid grid-cols-4 gap-x-3 gap-y-5">
+      {order.map((t, slot) => {
+        const dragging = t.key === dragKey;
+        const s = drag.current;
+        // The dragged tile follows the finger: its start cell + pointer delta, relative to its current slot.
+        const x = dragging && live && s ? s.rects[live.from].left + live.dx - s.rects[slot].left : 0;
+        const y = dragging && live && s ? s.rects[live.from].top + live.dy - s.rects[slot].top : 0;
+        const from = tiles.indexOf(t);
+        return (
+          <motion.div
+            key={t.key}
+            layout={!dragging}
+            transition={{ type: 'spring', stiffness: 500, damping: 38 }}
+            onPointerDown={(e) => down(from, e)}
+            onPointerMove={move}
+            onPointerUp={up}
+            onPointerCancel={up}
+            onContextMenu={(e) => e.preventDefault()}
+            className="relative flex flex-col items-center gap-1.5 min-w-0 select-none"
+            style={{
+              x,
+              y,
+              zIndex: dragging ? 10 : 0,
+              touchAction: 'none',
+              WebkitTouchCallout: 'none',
+              WebkitUserSelect: 'none',
+            }}
+            aria-label={`${t.name}, drag to move`}
+          >
+            <div
+              className={`relative ${dragging ? '' : `bw-jiggle${slot % 2 ? ' bw-jiggle-alt' : ''}`}`}
+              style={{ transform: dragging ? 'scale(1.12)' : undefined, opacity: dragging ? 0.9 : 1 }}
+            >
+              <TileIcon tile={t} />
+              <button
+                data-remove
+                type="button"
+                aria-label={`Remove ${t.name} from Home`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => onRemove(t)}
+                className="absolute -top-1.5 -left-1.5 flex h-5 w-5 items-center justify-center rounded-full text-[13px] font-bold leading-none"
+                style={{ background: '#d0d5dd', color: '#010101' }}
+              >
+                −
+              </button>
+            </div>
+            <span className={`w-full ${ONE_LINE} text-center text-[11px] leading-tight text-white`}>{t.name}</span>
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+};
+
 const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) => g.tiles)];
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
@@ -289,7 +410,9 @@ const BrowserPage = () => {
   const [replay, setReplay] = useState<{ page: number; n: number }>({ page: -1, n: 0 });
   const pager = useRef<HTMLDivElement>(null);
   const pageRef = useRef(page);
+  const [arranging, setArranging] = useState(false);
   useBackClose(!!info, () => setInfo(null));
+  useBackClose(arranging, () => setArranging(false));
 
   useLayoutEffect(() => {
     const el = pager.current;
@@ -328,6 +451,18 @@ const BrowserPage = () => {
     writeFavourites(next);
   };
   const favouriteTiles = favourites.map((u) => ALL_TILES.find((t) => t.url === u)).filter((t): t is Tile => !!t);
+  // Indices come from the visible tiles; map them back to the stored list (which may hold unknown URLs).
+  const reorderHome = (from: number, to: number) => {
+    const next = moveItem(favourites, favourites.indexOf(favouriteTiles[from].url), favourites.indexOf(favouriteTiles[to].url));
+    setFavourites(next);
+    writeFavourites(next);
+  };
+  const removeFromHome = (t: Tile) => {
+    const next = favourites.filter((u) => u !== t.url);
+    setFavourites(next);
+    writeFavourites(next);
+    if (!next.some((u) => ALL_TILES.some((x) => x.url === u))) setArranging(false);
+  };
 
   const go = (url: string) => {
     setError('');
@@ -369,7 +504,21 @@ const BrowserPage = () => {
     if (i === 0) {
       return (
         <>
-          {favouriteTiles.length > 0 ? (
+          {arranging && favouriteTiles.length > 0 ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-[#98A2B3]">Drag to rearrange. Tap − to remove.</span>
+                <button
+                  onClick={() => setArranging(false)}
+                  className="rounded-full px-4 py-1.5 text-[13px] font-bold"
+                  style={{ background: '#FFD24D', color: '#010101' }}
+                >
+                  Done
+                </button>
+              </div>
+              <ArrangeGrid tiles={favouriteTiles} onReorder={reorderHome} onRemove={removeFromHome} />
+            </div>
+          ) : favouriteTiles.length > 0 ? (
             grid(0, favouriteTiles)
           ) : (
             <p className="text-sm text-[#98A2B3] text-center py-10">
@@ -575,6 +724,18 @@ const BrowserPage = () => {
                   <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
                   {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
                 </button>
+                {isFavourite(info) && (
+                  <button
+                    onClick={() => {
+                      setInfo(null);
+                      setArranging(true);
+                      goPage(0);
+                    }}
+                    className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                  >
+                    Arrange Home
+                  </button>
+                )}
                 {info.bapp?.source && (
                   <button
                     onClick={() => {

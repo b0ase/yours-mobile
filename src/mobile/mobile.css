@@ -2,6 +2,24 @@
  * Mobile layout: fill the device screen and respect the safe areas.
  */
 
+/* Apps > Home arrange mode: iOS-style jiggle (2D transforms only). */
+@keyframes bw-jiggle {
+  0% { transform: rotate(-1.6deg); }
+  50% { transform: rotate(1.6deg); }
+  100% { transform: rotate(-1.6deg); }
+}
+.bw-jiggle {
+  animation: bw-jiggle 0.28s ease-in-out infinite;
+}
+.bw-jiggle-alt {
+  animation-delay: -0.14s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-jiggle {
+    animation: none;
+  }
+}
+
 html,
 body,
 #root {
