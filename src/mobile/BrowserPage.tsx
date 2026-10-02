@@ -477,6 +477,8 @@ const BrowserPage = () => {
     setFavourites(next);
     writeFavourites(next);
   };
+  // An app lives in one place: on Home it leaves bApps / Other apps, and returns when removed from Home.
+  const notHome = (tiles: Tile[]) => tiles.filter((t) => !favourites.includes(t.url));
   const favouriteTiles = favourites.map((u) => ALL_TILES.find((t) => t.url === u)).filter((t): t is Tile => !!t);
   // Indices come from the visible tiles; map them back to the stored list (which may hold unknown URLs).
   const reorderHome = (from: number, to: number) => {
@@ -604,18 +606,18 @@ const BrowserPage = () => {
     if (i === 1) {
       return (
         <>
-          {grid(1, BAPP_TILES)}
+          {grid(1, notHome(BAPP_TILES))}
           {note(`Touch and hold an app for details. Grey dot = demo. ${UNOFFICIAL_NOTICE}`)}
         </>
       );
     }
     return (
       <>
-        {grid(2, OTHER_TILES)}
-        {RADAR_SECTIONS.map((g) => (
+        {grid(2, notHome(OTHER_TILES))}
+        {RADAR_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
           <div key={g.label} className="flex flex-col gap-3">
             <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
-            {grid(2, g.tiles)}
+            {grid(2, notHome(g.tiles))}
           </div>
         ))}
         {note('Not made by The Bitcoin Corporation. Sources: BSVRadar, Metanet app store.')}
