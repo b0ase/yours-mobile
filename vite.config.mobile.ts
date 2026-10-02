@@ -171,6 +171,9 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
   'src/pages/onboarding/RestoreAccount.tsx': [
+    // Colour on the RelayX tile (white mark on its #2669FF blue) and Twetch's real icon (its brand is monochrome).
+    ["import relayXLogo from '../../assets/relayx.svg';", "import relayXLogo from '../../mobile/brand/restore/relayx.svg';"],
+    ["import twetchLogo from '../../assets/twetch.svg';", "import twetchLogo from '../../mobile/brand/apps/twetch.png';"],
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     ["import { useNavigate } from 'react-router-dom';", "import { useNavigate } from 'react-router-dom';\nimport { markSweepPrompt } from '../../mobile/sweep/sweepPending';\nimport simplycashLogo from '../../mobile/brand/simplycash.png';"],
     ["    {\n      id: 'other',\n      label: 'Other',", "    {\n      id: 'simplycash' as SupportedWalletImports,\n      label: 'SimplyCash',\n      logo: <img src={simplycashLogo} alt=\"SimplyCash\" style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.5rem' }} />,\n    },\n    {\n      id: 'other',\n      label: 'Other',"],

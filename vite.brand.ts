@@ -98,14 +98,14 @@ const BCORP_TEXT: Swaps = {
   'src/pages/onboarding/RestoreAccount.tsx': [
     ['alt="Yours"', 'alt="bWallet"'],
     ['Upload Yours JSON', 'Upload wallet backup JSON'],
-    // Yours users don't know a Yours seed restores as bWallet: list Yours by name too (same import path).
+    // Yours users don't know a Yours seed restores as bWallet: list Yours by name too (same import path), with its green leaf.
     [
       "import masterWallet from '../../assets/master-wallet.svg';",
-      "import masterWallet from '../../assets/master-wallet.svg';\nimport yoursOriginalLogo from '../../mobile/brand/yours-white-logo.png';",
+      "import masterWallet from '../../assets/master-wallet.svg';\nimport yoursOriginalLogo from '../../assets/logos/icon.png';",
     ],
     [
       "    {\n      id: 'relayx',",
-      "    {\n      id: 'yours',\n      label: 'Yours Wallet',\n      logo: (\n        <div className=\"flex items-center justify-center rounded-lg\" style={{ backgroundColor: '#000', width: '2.25rem', height: '2.25rem', padding: '0.35rem' }}>\n          <img src={yoursOriginalLogo} alt=\"Yours Wallet\" style={{ width: '1rem', height: 'auto' }} />\n        </div>\n      ),\n    },\n    {\n      id: 'relayx',",
+      "    {\n      id: 'yours',\n      label: 'Yours Wallet',\n      logo: (\n        <div className=\"flex items-center justify-center rounded-lg\" style={{ backgroundColor: '#000', width: '2.25rem', height: '2.25rem', padding: '0.35rem' }}>\n          <img src={yoursOriginalLogo} alt=\"Yours Wallet\" style={{ width: '1.4rem', height: 'auto' }} />\n        </div>\n      ),\n    },\n    {\n      id: 'relayx',",
     ],
     ['key={opt.id}', 'key={opt.label}'],
   ],
