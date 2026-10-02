@@ -19,7 +19,7 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // Release signing: scripts/android-release.sh supplies these from the macOS
+    // Release signing: scripts/channel-build.sh supplies these from the macOS
     // Keychain at build time. Nothing secret lives in the repo.
     signingConfigs {
         release {
@@ -29,6 +29,22 @@ android {
                 keyAlias "upload"
                 keyPassword System.getenv("YOURS_UPLOAD_PASSWORD")
             }
+        }
+    }
+    // Release channels (src/mobile/channel.ts). play keeps the original ID; direct (the APK from the
+    // site) has its own ID and name so both install side by side. Build with scripts/channel-build.sh,
+    // which puts the matching web bundle in place first.
+    flavorDimensions = ["channel"]
+    productFlavors {
+        play {
+            dimension "channel"
+            buildConfigField "String", "CHANNEL", '"android-play"'
+        }
+        direct {
+            dimension "channel"
+            applicationIdSuffix ".direct"
+            versionNameSuffix "-direct"
+            buildConfigField "String", "CHANNEL", '"android-direct"'
         }
     }
     buildTypes {

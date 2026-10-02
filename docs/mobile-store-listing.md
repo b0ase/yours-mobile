@@ -77,5 +77,5 @@ project only as "Based on the open-source Yours Wallet" in descriptions.
 
 ## Google Play: testing tracks
 
-1. **Internal testing** (Test and release → Testing → Internal testing): create a release, upload ``dist/bcorp-wallet-<version>.aab` (from `scripts/android-release.sh`)`, add testers by email list, and share the opt-in link.
+1. **Internal testing** (Test and release → Testing → Internal testing): create a release, upload `dist/bwallet-<version>-play.aab` (from `pnpm release:android-play`), add testers by email list, and share the opt-in link.
 2. **Closed testing** before production: new personal developer accounts need 12+ testers opted in for 14 days before production access.

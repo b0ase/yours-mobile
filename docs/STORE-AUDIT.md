@@ -271,7 +271,10 @@ All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
   (with no fee), DMs, calls, the Feed, the Apps browser, and settings.
 - **Buy BSV**: stays hidden (it was already hidden in both builds).
 
-Build: `pnpm build:mobile:store`, `pnpm cap:sync:store`, `pnpm ios:store`, `pnpm android:store`.
+Build: `pnpm release:ios-store` / `pnpm release:android-play` (store rules) and `pnpm release:ios-private` /
+`pnpm release:android-direct` (everything on), via `scripts/channel-build.sh` and `src/mobile/channel.ts`.
+The private channels have their own app IDs (`.private`, `.direct`) and are named "bWallet ✦". The older
+`pnpm build:mobile:store` / `cap:sync:store` still work.
 `scripts/android-release.sh` now builds the APK from the default build and the AAB (Play) from the store
 build, then restores the default build in `android/` and `ios/` (`5734919`).
 

@@ -83,6 +83,10 @@
     "ios:store": "pnpm cap:sync:store && cap open ios",
     "android": "pnpm cap:sync && cap open android",
     "android:store": "pnpm cap:sync:store && cap open android",
+    "release:ios-store": "bash scripts/channel-build.sh ios-store",
+    "release:ios-private": "bash scripts/channel-build.sh ios-private",
+    "release:android-play": "bash scripts/channel-build.sh android-play",
+    "release:android-direct": "bash scripts/channel-build.sh android-direct",
     "pin:upstream": "tsx scripts/pin-from-bun-lock.ts && pnpm install"
   },
   "devDependencies": {

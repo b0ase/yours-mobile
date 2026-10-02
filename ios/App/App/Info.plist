@@ -7,7 +7,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>bWallet</string>
+	<string>$(BWALLET_DISPLAY_NAME)</string>
+	<key>BWalletChannel</key>
+	<string>$(BWALLET_CHANNEL)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

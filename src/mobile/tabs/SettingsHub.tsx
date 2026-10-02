@@ -9,6 +9,7 @@ declare const __MOBILE_VERSION__: string;
 import { AppsAndTools } from '../../pages/AppsAndTools';
 import { Settings } from '../../pages/Settings';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { versionLabel } from '../channel';
 
 /**
  * Settings tab: upstream Settings, plus upstream Tools (locks, sweep, decoder,
@@ -64,7 +65,7 @@ const SettingsHub = () => {
           <div className="w-full px-4 pt-20 flex flex-col gap-3">
             <div className="rounded-xl bg-[#17191E] px-4 py-3">
               <div className="text-sm font-semibold text-white">{theme.settings.displayName}</div>
-              <div className="text-[11px] text-[#98A2B3]">Version {__MOBILE_VERSION__}</div>
+              <div className="text-[11px] text-[#98A2B3]">Version {versionLabel(__MOBILE_VERSION__)}</div>
             </div>
             <button
               onClick={() => void openDappBrowser(theme.settings.repo)}

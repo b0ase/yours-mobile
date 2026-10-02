@@ -329,7 +329,9 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         config.userContentController = content
         config.websiteDataStore = .default()
         // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
-        config.applicationNameForUserAgent = "Mobile/15E148 bWallet/1 YoursWalletMobile/1"
+        // bWalletChannel: ios-store or ios-private (Info.plist BWalletChannel, set by scripts/channel-build.sh).
+        let channel = Bundle.main.object(forInfoDictionaryKey: "BWalletChannel") as? String ?? "ios-store"
+        config.applicationNameForUserAgent = "Mobile/15E148 bWallet/1 YoursWalletMobile/1 bWalletChannel/\(channel)"
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self

@@ -1,6 +1,7 @@
 /**
  * Store build switch. `pnpm build:mobile:store` (VITE_STORE_BUILD=1) builds the variant shipped through
- * the App Store / Google Play; the default build (direct download / APK) is unchanged.
+ * the App Store / Google Play; the default build (direct download / APK) is unchanged. The ios-store and
+ * android-play channels (channel.ts) turn it on too.
  *
  * In a store build the wallet never asks the user to pay bCorp to unlock app features, and holding a
  * token never unlocks app functionality (Apple 3.1.1 / 3.1.5, Google Play Payments policy). See
@@ -11,7 +12,10 @@
  * `import.meta.env.VITE_STORE_BUILD` is written literally so Vite inlines it and Rollup drops the
  * dead branches (the paid b agent endpoints are not in the store bundle).
  */
-export const STORE_BUILD: boolean = import.meta.env.VITE_STORE_BUILD === '1';
+export const STORE_BUILD: boolean =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play';
 
 /** b agent: own-key mode only in a store build (no pay-per-message to bCorp). */
 export const agentModeFor = <M extends string>(mode: M, store = STORE_BUILD): M | 'own' => (store ? 'own' : mode);
