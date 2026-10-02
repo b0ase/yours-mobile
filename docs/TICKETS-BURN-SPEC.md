@@ -10,6 +10,16 @@ Today a "spend" room is recorded on chain but works as `hold` (`SPEND_ENTRY_SUPP
 `WalletTicket.entry` is always `'hold'`). This spec turns on one spend mode: **spend N per entry,
 to burn**.
 
+## Pricing principle
+
+**Charge in dollars, users pay in sats** (owner, 2 Oct 2026). Every price, fee, cap and threshold
+is set and shown in US dollars and cents. Sats appear only at payment time (converted at the live
+BSV/USD rate) or as small secondary text. bCorp keeps revenue in BSV by default; BSV may
+appreciate, and that is part of the margin. Our costs (AI, hosting, indexing) are in USD, so prices
+must cover them. Protocol-level sat amounts (1-sat outputs, the indexer's per-output fee, miner fee
+rates) are facts of the protocol, not our pricing; they are quoted with a USD equivalent. USD
+figures here use ~$19.75/BSV (1,000 sats ≈ $0.0002).
+
 ## 1. Mechanics
 
 **Ticket.** Unchanged: one BSV-21 token per room, 0 decimals, fixed supply chosen by the creator
@@ -133,8 +143,8 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
   - Creator-side levers that do work: the creator controls N, expiry and future drops, and can
     give perks (pinned messages, a later room) to entries made via the bWallet Market.
   - A future listing contract could enforce a royalty output in the script; out of scope.
-- **Example:** 1,000 tickets, N = 1, lifetime pass, 7-day room. Creator sells 600 at 2,000 sats
-  (1.2M sats). 400 people enter: 400 burned, 600 left. In the final two days only 600 can still
+- **Example:** 1,000 tickets, N = 1, lifetime pass, 7-day room. Creator sells 600 at $1.00
+  ($600, paid in sats at the live rate). 400 people enter: 400 burned, 600 left. In the final two days only 600 can still
   get in, some held by people who've already entered, so resale asks may rise. If a 24 h pass is
   used instead, an active member burns up to 7, so supply could be gone by day 5. That drives
   demand, but members may feel squeezed. Neither price outcome is promised.
@@ -155,7 +165,7 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
   uniqueness rule. Spam rooms: the existing safety filter and blocklist apply.
 - **Early closure / refunds:** burns can't be undone. If a creator closes a room before expiry,
   the server marks entries `refunded` and the creator is asked to (not forced to) send
-  replacement tickets or sats; the Market flags creators who closed early. bCorp should not
+  replacement tickets or a payment; the Market flags creators who closed early. bCorp should not
   promise refunds it can't pay. Indexer outage: existing members stay in (current gate rule) and
   new entries wait.
 
@@ -229,7 +239,7 @@ Build once burn-on-entry exists (burns are the data). Same Twetch-style board as
 
 Totals come from the burn ledger (bit-sign) rather than client-side scans, so every timeframe is exact.
 
-9. **Indexing is paid by the creator at mint.** Minting a ticket token includes the 1sat-stack overlay funding (about 1,000 sats per token output) so its burns are indexed at 0-conf. The mint sheet shows this cost.
+9. **Indexing is paid by the creator at mint.** Minting a ticket token includes the 1sat-stack overlay funding (the protocol's fee of 1,000 sats per token output, ≈ $0.0002 at $19.75/BSV) so its burns are indexed at 0-conf. The mint sheet shows this cost in USD, with sats as secondary text.
 
 10. **Speed is the product (hard requirement).** Buy a ticket, see it in the wallet, burn it and be in the room in
     seconds — never wait for a block. Targets: ticket visible in the buyer's wallet < 2 s after purchase (the wallet
@@ -257,12 +267,12 @@ spending an authority input lets value outputs be minted; otherwise value output
 
 ### What it would change for tickets
 
-| Feature | Effect on tickets |
-| --- | --- |
-| **Implicit burn** | Entry = spend N ticket units and write back `held − N` as change (or nothing). No `burn` output and no inscription. Burning your last ticket needs **zero** token outputs. |
-| ~~**Authority minting**~~ | **Not used** (owner decision, 2 Oct 2026: fixed supply only). It would let a creator mint more later (re-releases, top-ups) under the same id; we don't allow that for tickets. |
-| **Any-script locking** | The token prefix sits in front of any script, so a ticket could be locked to a covenant that only allows it to be burned into one room (or only spent with a room-entry MAP output). It needs a contract, and our verifier's P2PKH-only owner rule (§2) would have to accept it. Later, not v1. |
-| Smaller outputs | No inscription envelope (about 100 bytes less per output) and script-readable id/amount. |
+| Feature                   | Effect on tickets                                                                                                                                                                                                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Implicit burn**         | Entry = spend N ticket units and write back `held − N` as change (or nothing). No `burn` output and no inscription. Burning your last ticket needs **zero** token outputs.                                                                                                                      |
+| ~~**Authority minting**~~ | **Not used** (owner decision, 2 Oct 2026: fixed supply only). It would let a creator mint more later (re-releases, top-ups) under the same id; we don't allow that for tickets.                                                                                                                 |
+| **Any-script locking**    | The token prefix sits in front of any script, so a ticket could be locked to a covenant that only allows it to be burned into one room (or only spent with a room-entry MAP output). It needs a contract, and our verifier's P2PKH-only owner rule (§2) would have to accept it. Later, not v1. |
+| Smaller outputs           | No inscription envelope (about 100 bytes less per output) and script-readable id/amount.                                                                                                                                                                                                        |
 
 Note: **implicit burns already work with JSON tokens on both indexers, from the code.** 1sat-stack
 admits transfer/burn outputs when `tokensIn >= transferOut + burnOut` and does not require
@@ -274,14 +284,14 @@ already counts it).
 
 ### Support status (2 Oct 2026)
 
-| Component | BRC-162 binary decode | Authority mint | Implicit burn | Evidence |
-| --- | --- | --- | --- | --- |
-| **1sat-stack** (`b-open-io/1sat-stack`, api.1sat.app) | **No.** `pkg/template/bsv21/bsv21.go` `Decode()` only reads `inscription.Decode(scr)` (JSON `application/bsv-20`). No `OP_2DROP` parsing in `pkg/bsv21/*`. | **Yes, JSON form** (BRC-161 `deploy+auth` / `auth` / `mint`; `topic_validated.go` admits mint/auth outputs when `hasAuthInput`) | Yes, de facto (`>=` rule above) | HEAD `7a1e9ca`. Live `GET /1sat/bsv21/tokens` lists inscription tokens only (ids `…_1`). A binary token couldn't be found because the decoder can't see one. |
-| 1sat-stack **Shrug** (a precursor binary format: `<"¯\_(ツ)_/¯"> <36-byte id> OP_2DROP <amt> OP_DROP …`) | Different wire format from BRC-162 | Designed | Designed | `pkg/shrug/topic_validated.go`, `pkg/lookup/shrug.go` exist but are **unwired**; `docs/plans/shrug-parity.md` says "In Progress". This is the most likely base for BRC-162 support. |
-| **GorillaPool / legacy** `shruggr/1sat-indexer` | **No** | **No.** Only `deploy+mint`, `transfer` and `burn` (`mod/onesat/bsv21.go` L114, L145) | Yes, de facto | HEAD `f9ac70f`, last commit 8 Dec 2025 (maintenance only). Its `feat/binary` branch (Oct 2024) is unrelated. |
-| **@1sat/templates** — ours `0.0.33`; npm latest `0.0.40` (1 Oct 2026) | **No.** Latest has a `Shrug` template (`dist/shrug`), not BRC-162. | Yes, JSON ops typed (`BSV21Operation` includes `deploy+auth`, `auth`, `mint`) | n/a | `node_modules/@1sat/templates/dist/bsv21/bsv21.d.ts`; `npm pack @1sat/templates@latest` |
-| **@1sat/actions** — ours `0.0.212`; npm latest `0.0.229` | **No** | Yes, JSON (`deployBsv21` with `deploy+auth`, auth spend to mint / transfer / end authority) | No helper. You'd build a transfer with smaller change by hand. | `dist/tokens/index.d.ts` L89–170 |
-| **bit-sign** `src/lib/ticket-burn-verify.ts` (origin/main `300134c`, 1 Oct) | **No** (inscription-only `decodeInscription`) | No (`BSV21_OPS` = `deploy+mint`, `transfer`, `burn`) | **No** at `300134c`; **yes** since the implicit-burns PR (https://github.com/b0ase/bit-sign/pull/48): burned = valid inputs − transfer outputs. | L108, L173–183, L313, L321 |
+| Component                                                                                                | BRC-162 binary decode                                                                                                                                      | Authority mint                                                                                                                  | Implicit burn                                                                                                                                   | Evidence                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1sat-stack** (`b-open-io/1sat-stack`, api.1sat.app)                                                    | **No.** `pkg/template/bsv21/bsv21.go` `Decode()` only reads `inscription.Decode(scr)` (JSON `application/bsv-20`). No `OP_2DROP` parsing in `pkg/bsv21/*`. | **Yes, JSON form** (BRC-161 `deploy+auth` / `auth` / `mint`; `topic_validated.go` admits mint/auth outputs when `hasAuthInput`) | Yes, de facto (`>=` rule above)                                                                                                                 | HEAD `7a1e9ca`. Live `GET /1sat/bsv21/tokens` lists inscription tokens only (ids `…_1`). A binary token couldn't be found because the decoder can't see one.                        |
+| 1sat-stack **Shrug** (a precursor binary format: `<"¯\_(ツ)_/¯"> <36-byte id> OP_2DROP <amt> OP_DROP …`) | Different wire format from BRC-162                                                                                                                         | Designed                                                                                                                        | Designed                                                                                                                                        | `pkg/shrug/topic_validated.go`, `pkg/lookup/shrug.go` exist but are **unwired**; `docs/plans/shrug-parity.md` says "In Progress". This is the most likely base for BRC-162 support. |
+| **GorillaPool / legacy** `shruggr/1sat-indexer`                                                          | **No**                                                                                                                                                     | **No.** Only `deploy+mint`, `transfer` and `burn` (`mod/onesat/bsv21.go` L114, L145)                                            | Yes, de facto                                                                                                                                   | HEAD `f9ac70f`, last commit 8 Dec 2025 (maintenance only). Its `feat/binary` branch (Oct 2024) is unrelated.                                                                        |
+| **@1sat/templates** — ours `0.0.33`; npm latest `0.0.40` (1 Oct 2026)                                    | **No.** Latest has a `Shrug` template (`dist/shrug`), not BRC-162.                                                                                         | Yes, JSON ops typed (`BSV21Operation` includes `deploy+auth`, `auth`, `mint`)                                                   | n/a                                                                                                                                             | `node_modules/@1sat/templates/dist/bsv21/bsv21.d.ts`; `npm pack @1sat/templates@latest`                                                                                             |
+| **@1sat/actions** — ours `0.0.212`; npm latest `0.0.229`                                                 | **No**                                                                                                                                                     | Yes, JSON (`deployBsv21` with `deploy+auth`, auth spend to mint / transfer / end authority)                                     | No helper. You'd build a transfer with smaller change by hand.                                                                                  | `dist/tokens/index.d.ts` L89–170                                                                                                                                                    |
+| **bit-sign** `src/lib/ticket-burn-verify.ts` (origin/main `300134c`, 1 Oct)                              | **No** (inscription-only `decodeInscription`)                                                                                                              | No (`BSV21_OPS` = `deploy+mint`, `transfer`, `burn`)                                                                            | **No** at `300134c`; **yes** since the implicit-burns PR (https://github.com/b0ase/bit-sign/pull/48): burned = valid inputs − transfer outputs. | L108, L173–183, L313, L321                                                                                                                                                          |
 
 ### Recommendation
 
@@ -329,19 +339,19 @@ Do now (no new protocol):
 - Selftests: golden vectors from BRC-162 examples (fixed deploy, authority deploy, value,
   authority, payload, 36-byte legacy id, invalid encodings).
 
-### Fee math (1sat-stack overlay, 1,000 sats per admitted output)
+### Fee math (1sat-stack overlay protocol fee: 1,000 sats ≈ $0.0002 per admitted output)
 
 1sat-stack charges per **indexed output**: `Debits = outputCount × feePerOutput`. The live list
 shows `fee_per_output: 1000`, e.g. `$DOG` with `output_count 22`, `debits 22000`
 (`pkg/bsv21/status.go`, `manager.go` L139–147). Token inputs and burned surplus are not
 outputs, so they aren't charged.
 
-| Room entry (burn N) | Token outputs | Indexing fee |
-| --- | --- | --- |
-| Explicit `burn` op (today), keeps change | burn + change = 2 | 2,000 sats |
-| Explicit `burn` op, burns last ticket | burn = 1 | 1,000 sats |
-| Implicit burn, keeps change | change = 1 | **1,000 sats** |
-| Implicit burn, burns last ticket | 0 | **0** |
+| Room entry (burn N)                      | Token outputs     | Indexing fee             |
+| ---------------------------------------- | ----------------- | ------------------------ |
+| Explicit `burn` op (today), keeps change | burn + change = 2 | 2,000 sats ≈ $0.0004     |
+| Explicit `burn` op, burns last ticket    | burn = 1          | 1,000 sats ≈ $0.0002     |
+| Implicit burn, keeps change              | change = 1        | **1,000 sats ≈ $0.0002** |
+| Implicit burn, burns last ticket         | 0                 | **0**                    |
 
 The fee comes out of the creator's prepaid fund (decision 9), so implicit burns halve what a
 creator must prefund per entry: about 1 output instead of 2. A zero-output burn produces no

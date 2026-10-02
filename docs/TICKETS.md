@@ -6,6 +6,16 @@ A ticket is a fungible BSV-21 token (fixed supply, 0 decimals). Holding one gets
 holders' room (gate: hold 1). Tickets are access passes. They are not investments; never describe
 them in terms of returns.
 
+## Pricing principle
+
+**Charge in dollars, users pay in sats** (owner, 2 Oct 2026). Every price, fee, cap and threshold
+is set and shown in US dollars and cents. Sats appear only at payment time (converted at the live
+BSV/USD rate) or as small secondary text. bCorp keeps revenue in BSV by default; BSV may
+appreciate, and that is part of the margin. Our costs (AI, hosting, indexing) are in USD, so prices
+must cover them. Protocol-level sat amounts (1-sat outputs, the indexer's per-output fee, miner fee
+rates) are facts of the protocol, not our pricing; they are quoted with a USD equivalent. USD
+figures here use ~$19.75/BSV (1,000 sats ≈ $0.0002).
+
 ## Minting (Wallet → Mint → Start a room)
 
 `src/mobile/tickets/TicketMint.tsx`, `mintTicket.ts`, `tickets.ts`.
@@ -44,8 +54,9 @@ Plain tokens (Wallet → Mint → Mint a token, `src/mobile/tokens/`) use the sa
 room-open helpers (`deployBsv21`, `openRoom` in `mintTicket.ts`) without the `type=ticket` MAP tag.
 Every token still gets a holders' room.
 
-Event date and price are under "More options". The price is the creator's asking price and is
-shown in the Market. Selling still uses the 1Sat order book (OrdLock listings). Upstream has
+Event date and price are under "More options". The price is the creator's asking price, set and
+shown in USD in the Market (the on-chain `price=<sats>` tag is a protocol field written at the live
+rate; the UI shows dollars, with sats as secondary text). Selling still uses the 1Sat order book (OrdLock listings). Upstream has
 listing creation disabled for now (see `ordlock-listing-disable.md`).
 
 ## Discovery: why a registry
@@ -82,7 +93,7 @@ Until the endpoint ships, the wallet ignores the 404s. Each device then sees onl
 
 `TicketsPanel.tsx` lists rooms you can buy into. Each row shows the icon, the room name,
 `$TICKER`, the event date, the member count (from `GET rooms/token-gated?key=` when signed in to
-chat), and the price. The price is the cheapest live listing, or else the asking price.
+chat), and the price in USD. The price is the cheapest live listing, or else the asking price.
 
 - Holders see **Open room**, which goes straight to Chat.
 - Others see **Buy ticket**. This opens the ticket's market page, which uses the existing

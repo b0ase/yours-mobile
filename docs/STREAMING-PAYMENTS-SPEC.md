@@ -7,12 +7,24 @@ Builds on: `docs/TICKETS-BURN-SPEC.md` (meter units, 0-conf entry), the Phase 0 
 `migrations/20261001_credits.sql`), wallet `src/mobile/settings/oneClick.ts`, `src/mobile/credits`,
 `src/mobile/media`, and the paymail P2P destination in `site/lib/paymail.js`.
 
+## Pricing principle
+
+**Charge in dollars, users pay in sats** (owner, 2 Oct 2026). Every price, fee, cap and threshold
+is set and shown in US dollars and cents. Sats appear only at payment time (converted at the live
+BSV/USD rate) or as small secondary text. bCorp keeps revenue in BSV by default; BSV may
+appreciate, and that is part of the margin. Our costs (AI, hosting, indexing) are in USD, so prices
+must cover them. Protocol-level sat amounts (1-sat outputs, the indexer's per-output fee, miner fee
+rates) are facts of the protocol, not our pricing; they are quoted with a USD equivalent. USD
+figures here use ~$19.75/BSV (1,000 sats ≈ $0.0002).
+
 ## 0. Numbers we design around
 
-- Target price: **100 sats/second**. That is 360,000 sats an hour, about **$0.07/hour** at ~$19.74/BSV.
-  Creators can set any rate (1 sat/s up to whatever they like).
+- Target price: **$0.10 per listener-hour** (owner decision). At ~$19.75/BSV that is paid as about
+  140 sats/second (≈ 506,000 sats an hour); the sat rate follows the live BSV/USD rate. Creators set
+  any USD rate they like; the wallet converts it to a sats-per-second rate at session start.
 - Phase 0 mainnet: a tx is accepted in **~0.3 s**; chained 0-conf spends work.
-- Broadcaster (ARC) policy is **~100 sat/kB**. A minimal payment tx (~250 bytes) costs **~25 sats**.
+- Broadcaster (ARC) protocol fee rate is **~100 sat/kB** (a network fact). A minimal payment tx
+  (~250 bytes) costs **~25 sats**, about $0.000005.
 - Budget: £10 in the bank. No new paid infra: reuse bit-sign (Vercel + Hetzner Supabase) and the
   bwallet paymail server.
 
@@ -21,21 +33,22 @@ Builds on: `docs/TICKETS-BURN-SPEC.md` (meter units, 0-conf entry), the Phase 0 
 1. **Live radio / audio** (bRadio, station streams): listen while paying; the mini player shows spend.
 2. **Video streams** (bMovies, live shows): same, at a higher creator-set rate.
 3. **Timed chat rooms** (bChat): `meter_unit = 'seconds'` rooms, already modelled in the burn spec;
-   this spec adds paying in sats instead of only by burning tickets.
+   this spec adds paying per second (priced in USD, paid in sats) instead of only by burning tickets.
 4. **Pay-per-second calls** (1:1 or small group voice/video, e.g. consultations): caller pays callee.
 
 ## 2. Wallet UX
 
 - **Streaming allowance, approved once per stream.** On "Play" / "Join", one sheet shows:
-  creator, rate ("100 sats/sec, about 7 cents an hour"), a **rate cap** (refuse if the creator raises
+  creator, rate ("$0.10 an hour", with "≈ 140 sats/s" as small secondary text), a **rate cap** (refuse if the creator raises
   the rate above it), a **session cap** (default e.g. 30 min worth, editable), and "Stop anytime".
   One tap approves. Nothing else prompts until a cap is hit.
 - **Live spend counter** in the MiniPlayer (`src/mobile/media/MiniPlayer.tsx`) and in the room header:
-  "1,240 sats · 12:24". Tapping it opens the allowance with Stop / Raise cap.
+  "$0.02 · 12:24" (sats as secondary text). Tapping it opens the allowance with Stop / Raise cap.
 - **Auto-stop**: stops paying (and the stream stops) when the session cap is reached, the balance
   (or credits) would drop below a floor, the app is killed, or the user taps Stop. A warning shows ~30 s
   before the cap.
-- **Receipts / history**: each session becomes one history row (creator, duration, sats, txids or
+- **Receipts / history**: each session becomes one history row (creator, duration, USD amount with
+  the sats actually paid, txids or
   credit ledger ids). Uses the existing activity list and the credits ledger view (`CreditsRow`).
 - **No refunds** (owner decision). Unused prepaid stays as credit for later.
 
@@ -43,7 +56,7 @@ Builds on: `docs/TICKETS-BURN-SPEC.md` (meter units, 0-conf entry), the Phase 0 
 
 ### (A) On-chain micropayment every N seconds
 
-Wallet pays `rate × N` sats every N seconds (N = 10–60) to the creator's paymail P2P destination
+Wallet pays `rate × N` (the USD rate converted to sats at the live rate) every N seconds (N = 10–60) to the creator's paymail P2P destination
 (`/p2p-destination/{alias}@{domain}` in `site/lib/paymail.js`) or a plain address. It sends the tx
 (BEEF) to the stream gate, which checks the outputs pay the creator the expected amount (same shape as
 `verifyTicketBurn`: parse BEEF, match outputs, 0-conf) and broadcasts it. Each verified payment extends
@@ -62,7 +75,7 @@ with `meter_unit = 'seconds'`). The gate debits per second (in batches, e.g. eve
 `session:tick`). Creator balances are settled on-chain periodically (daily, or when owed ≥ a threshold).
 
 - Pros: zero per-tick fees, instant, works on flaky networks, one approval covers many streams,
-  cheapest for very low rates (1–10 sats/s).
+  cheapest for very low rates (under ~$0.01 per hour).
 - Cons: the platform holds funds between top-up and settlement (custody and trust), needs a
   settlement job and reconciliation, and credits terms say they can't be cashed out, so creator-side
   payouts need their own accounting.
@@ -72,22 +85,22 @@ with `meter_unit = 'seconds'`). The gate debits per second (in batches, e.g. eve
 One funding tx, then signed updates off-chain, one closing tx. Best of both but needs channel
 scripts, wallet support and dispute handling. Park until A or B is live and used.
 
-### Fee math (ARC ~100 sat/kB, ~25 sats per minimal tx, at 100 sats/s)
+### Fee math (ARC ~100 sat/kB, ~25 sats ≈ $0.000005 per minimal tx, at $0.10/hour ≈ 140 sats/s)
 
-| Pay every | Payment | Fee | Fee as % | Txs/hour | Fees/hour   |
-| --------- | ------- | --- | -------- | -------- | ----------- |
-| 1 s       | 100     | 25  | 25%      | 3,600    | 90,000 sats |
-| 10 s      | 1,000   | 25  | 2.5%     | 360      | 9,000       |
-| 30 s      | 3,000   | 25  | 0.8%     | 120      | 3,000       |
-| 60 s      | 6,000   | 25  | 0.4%     | 60       | 1,500       |
+| Pay every | Payment (sats) | Fee (sats) | Fee as % | Txs/hour | Fees/hour            |
+| --------- | -------------- | ---------- | -------- | -------- | -------------------- |
+| 1 s       | 140            | 25         | 18%      | 3,600    | 90,000 sats ≈ $0.018 |
+| 10 s      | 1,400          | 25         | 1.8%     | 360      | 9,000 ≈ $0.0018      |
+| 30 s      | 4,200          | 25         | 0.6%     | 120      | 3,000 ≈ $0.0006      |
+| 60 s      | 8,400          | 25         | 0.3%     | 60       | 1,500 ≈ $0.0003      |
 
-Every second on-chain would add 25% and 3,600 txs/hour per listener. At 1 sat/s even a 60 s interval
-is 60 sats paid for 25 sats of fee (42%), so low rates belong on credits.
+Every second on-chain would add 18% and 3,600 txs/hour per listener. At $0.001/hour (≈ 1.4 sats/s)
+even a 60 s interval is ~84 sats paid for 25 sats of fee (30%), so very low rates belong on credits.
 
 ### Recommendation
 
 Ship **(A) at N = 30 s by default** (10 s for calls, where trust matters more), because it needs no
-custody and reuses the verify code we already have. Add **(B)** for rates under ~20 sats/s and for
+custody and reuses the verify code we already have. Add **(B)** for rates under ~$0.015/hour and for
 users who prefer a topped-up balance. The wallet picks automatically: rate × N ≥ 40 × fee → on-chain,
 else credits.
 
@@ -132,7 +145,7 @@ debits keyed by `session:tick`). Add two tables:
 
 ```sql
 stream_configs  (stream_id PK, owner_handle, kind ('audio'|'video'|'room'|'call'),
-                 rate_sats_per_sec BIGINT > 0, pay_to TEXT, platform_fee_bps INT DEFAULT 0,
+                 rate_usd_micros_per_hour BIGINT > 0,  -- price in USD; sats derived at pay time pay_to TEXT, platform_fee_bps INT DEFAULT 0,
                  token_secret_ref TEXT, created_at)
 stream_sessions (id PK, stream_id, user_handle, mode ('chain'|'credits'), rate, interval_s,
                  started_at, paid_until, ended_at, sats_total BIGINT, status)
@@ -143,7 +156,7 @@ stream_payments (id PK, session_id, txid UNIQUE NULL, ledger_id NULL, sats, seco
 **Wallet module** `src/mobile/streaming/allowance.ts` (pure, tested like `oneClick.ts`):
 
 ```ts
-type StreamAllowance = { streamId: string; rateCap: number; sessionCapSats: number;
+type StreamAllowance = { streamId: string; rateCapUsd: number; sessionCapUsd: number; // caps in USD
                          spent: number; startedAt: number; stopped: boolean };
 decideStreamPayment(a, sats, rate, balance, now):
   { ok: true } | { ok: false; reason: 'stopped'|'rate-cap'|'session-cap'|'low-balance'|'rate' }
@@ -166,8 +179,8 @@ updates the counter; stopping playback stops the loop.
 | ----- | ------------------------------------------------------------------------------------------------------- | -------- |
 | 1     | Wallet allowance module + tests; allowance sheet; live counter in MiniPlayer                            | 2–3 days |
 | 2     | bit-sign stream routes, mode A (reuse BEEF parse/broadcast from burn verify), signed tokens, migrations | 3–4 days |
-| 3     | One real integration: a radio stream with signed-URL gating; mainnet test at 100 sats/s, N = 30         | 2 days   |
-| 4     | Timed bChat rooms on `seconds` allowance paid in sats; calls gate                                       | 2–3 days |
+| 3     | One real integration: a radio stream with signed-URL gating; mainnet test at $0.10/hour, N = 30         | 2 days   |
+| 4     | Timed bChat rooms on `seconds` allowance (USD price, paid in sats); calls gate                          | 2–3 days |
 | 5     | Mode B (credits ticks + settlement job + reconciler)                                                    | 3–4 days |
 | 6     | HLS key rotation for video; creator self-serve registration                                             | 3 days   |
 | Later | Payment channels (C)                                                                                    | —        |
@@ -176,15 +189,15 @@ updates the counter; stopping playback stops the loop.
 
 1. Default interval N: 30 s (fees 0.8%) or 10 s (less trust, 2.5%)?
 2. Ship mode B at all in v1, given custody of prepaid sats until settlement?
-3. Session cap default (30 min? a sat amount?) and the low-balance floor.
+3. Session cap default (30 min? a dollar amount?) and the low-balance floor (in USD).
 4. Who runs gating for small creators: our Vercel proxy route, or snippet-only?
 5. Payment for a call: caller only, or split between participants?
 6. Mode B settlement cadence and minimum payout.
-7. Does a timed room accept both ticket burns and sats, or one per room?
+7. Does a timed room accept both ticket burns and per-second payment, or one per room?
 
 ## Owner decisions (2 Oct 2026)
 
-1. **Price point:** about $0.10 per listener-hour is fine (≈ 140 sats/s at $19.74/BSV). Creators still set their own rate.
+1. **Price point:** about $0.10 per listener-hour is fine (paid as ≈ 140 sats/s at $19.75/BSV). Creators still set their own rate.
 2. **Margin:** at that price there is room for a platform fee of up to ~25%, configurable per stream (default 0 for
    creators who self-host). It funds hosting the gating proxy for small creators; self-hosting creators pay nothing.
 3. **Direct payouts are the default.** Mode A (on-chain every N seconds, straight to the creator) is the product.
@@ -195,5 +208,5 @@ updates the counter; stopping playback stops the loop.
    snippet for self-hosting.
 6. **Calls are free by default.** Anyone may set a price to **receive** calls and advertise it (e.g. solicitors,
    therapists): the caller pays the callee per second; there is no caller-side or split charge otherwise.
-7. **Timed rooms:** the creator configures entry per room — ticket burns, sats, or either.
+7. **Timed rooms:** the creator configures entry per room — ticket burns, per-second payment (USD price, paid in sats), or either.
 8. **Interval:** pay every **30 s for streams** and rooms, every **10 s for paid calls**.

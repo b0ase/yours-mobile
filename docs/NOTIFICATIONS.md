@@ -18,6 +18,8 @@
     calls via the calls store.
   - 1Sat indexer: new unspent outputs at your identity / BSV / ordinals addresses (BSV, tokens,
     tickets, ordinals) and your listings spent by a tx this wallet did not make (sales).
+- Amounts in payment and sale notifications are shown in USD (at the live BSV/USD rate), with
+  sats as small secondary text, per the pricing principle ("charge in dollars, users pay in sats").
 - Bell with unread badge in the Feed header; list; per-category toggles in Settings.
 - OS permission is asked once: after the first post, after minting your name token, when the bell
   is opened or a toggle is switched on — never at launch.

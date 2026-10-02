@@ -48,11 +48,21 @@ Metadata (MAP on the inscription): `app=bWallet`, `type=account`, `no=<n>`, `iss
 copycat inscription saying `no=123` is ignored: **only inscriptions signed by the bit-sign issuer
 key count**. The handle is _not_ written into the NFT (it can change; §5).
 
+## Pricing principle
+
+**Charge in dollars, users pay in sats** (owner, 2 Oct 2026). Every price, fee, cap and threshold
+is set and shown in US dollars and cents. Sats appear only at payment time (converted at the live
+BSV/USD rate) or as small secondary text. bCorp keeps revenue in BSV by default; BSV may
+appreciate, and that is part of the margin. Our costs (AI, hosting, indexing) are in USD, so prices
+must cover them. Protocol-level sat amounts (1-sat outputs, the indexer's per-output fee, miner fee
+rates) are facts of the protocol, not our pricing; they are quoted with a USD equivalent. USD
+figures here use ~$19.75/BSV (1,000 sats ≈ $0.0002).
+
 **Who mints, who pays.**
 
 - Default: **lazy mint** on first listing. Most accounts are never sold, so minting all of them
   wastes fees and indexer load. Until minted, the account is owned by its identity key as today.
-- Option: mint at creation, paid by the creator (a few sats + indexer fee). Better for "collect
+- Option: mint at creation, paid by the creator (well under $0.01: a 1-sat output plus the indexer's protocol fee, shown in USD). Better for "collect
   your number" marketing. Owner decision; reserved numbers are minted by bCorp up front.
 - Minting is done by the wallet (the user signs), with bit-sign co-signing the issuer MAP
   signature via an API that returns the signed payload for `account_no` only to that account's
@@ -100,7 +110,7 @@ Reuse the Sell flow: Settings → Account → "Sell account #123" lists the NFT 
 seller's price (lazy-mints first if needed). It appears in Market under an "Accounts" tab and on
 1Sat marketplaces as the `bwallet-accounts` collection. Resale fee 0 by default, configurable
 (royalty to bCorp is an owner decision). Price discovery is the open market; the profile shows last
-sale price. Collectibility: low numbers, round numbers, and early accounts with history are the
+sale price in USD. Collectibility: low numbers, round numbers, and early accounts with history are the
 expected premium; the reserved/vanity pool (§1) can be auctioned through the same listing.
 
 Confirm screen must say plainly: "You are selling your account. The buyer gets your number,
@@ -150,7 +160,7 @@ create table account_nfts (
   contested_until timestamptz
 );
 create table account_transfers (id bigserial, account_no bigint, from_key text, to_key text,
-  txid text, price_sats bigint, at timestamptz default now());
+  txid text, price_usd_cents bigint, price_sats bigint, at timestamptz default now());
 ```
 
 API (bit-sign):
