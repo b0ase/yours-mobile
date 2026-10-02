@@ -52,7 +52,7 @@ import { retryPersonalRoom } from '../names/claimPersonal';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
-import { asMenuItem } from './tabs';
+import { asMenuItem, TAB_TAP } from './tabs';
 import { ChatTabs, SegmentRow, SegmentTitle, useChatDisplayName } from '../feed/ChatSegments';
 import {
   avatarHue,
@@ -341,13 +341,20 @@ const Conversation = ({
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
 
-  // Portal to body + z above BottomMenu (z-[100]) so the tab bar doesn't cover the composer; sheets sit at z-[150].
+  // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex flex-col" style={{ background: BG }}>
+    <div
+      className="fixed left-0 right-0 z-[110] flex flex-col"
+      style={{
+        top: 'calc(env(safe-area-inset-top) + 3.5rem)',
+        bottom: 'calc(env(safe-area-inset-bottom) + 3.75rem)',
+        background: BG,
+      }}
+    >
       <div
         className="flex items-center gap-3 px-2 pb-2 shrink-0"
         style={{
-          paddingTop: 'calc(env(safe-area-inset-top) + 8px)',
+          paddingTop: 8,
           background: 'linear-gradient(180deg, #16140c 0%, #0b0b0b 100%)',
           borderBottom: `1px solid ${LINE}`,
         }}
@@ -504,7 +511,7 @@ const Conversation = ({
         <div
           className="px-4 pt-3 text-center text-xs shrink-0"
           style={{
-            paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)',
+            paddingBottom: 12,
             background: '#0b0b0b',
             color: MUTED,
             borderTop: `1px solid ${LINE}`,
@@ -520,7 +527,7 @@ const Conversation = ({
         }}
         className="flex items-end gap-2 px-3 pt-2 shrink-0"
         style={{
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)',
+          paddingBottom: 8,
           background: '#0b0b0b',
           borderTop: `1px solid ${LINE}`,
         }}
@@ -1250,6 +1257,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       setSigningIn(false);
     }
   }, [client, apiContext]);
+
+  // Tapping the Chat tab inside a room goes back to the room list.
+  useEffect(() => {
+    const onTap = (e: Event) => {
+      if ((e as CustomEvent).detail === 'chat') setOpen(null);
+    };
+    window.addEventListener(TAB_TAP, onTap);
+    return () => window.removeEventListener(TAB_TAP, onTap);
+  }, []);
 
   const authLost = useCallback(() => {
     client.signOut();
