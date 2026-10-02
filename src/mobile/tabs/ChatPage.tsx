@@ -49,6 +49,9 @@ import {
 import { addToInviteList, inviteLine, inviteState, loadInviteList } from '../chat/invites';
 import { knownPersonal, rememberPersonal, tickerLabel } from '../names/personalToken';
 import { retryPersonalRoom } from '../names/claimPersonal';
+import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
+import { setupLabel, useRoomSetup } from '../tokens/useRoomSetup';
+import type { OwnToken } from '../tokens/indexFund';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
@@ -1202,6 +1205,42 @@ const OpenRoomRow = ({ room, me, onOpen }: { room: ChatRoom; me: string; onOpen:
 };
 
 /**
+ * One of the user's own tokens whose room isn't set up yet (incl. the personal $NAME token): shown in
+ * "Your rooms" as not open, with the shared paid setup (tokens/useRoomSetup). Hidden once open or
+ * paid, and while the indexer doesn't answer. Not rendered in a store build (ROOMS).
+ */
+const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }) => {
+  const s = useRoomSetup(token.tokenId, token.ticker, { onDone });
+  if (!s.total || (!s.needs && !s.msg)) return null;
+  const title = `$${token.ticker}`;
+  return (
+    <li className="flex items-center gap-3 px-4 py-[10px]">
+      <Avatar title={title} />
+      <div className="flex-1 min-w-0">
+        <div className={`flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+          <span className={ELLIPSIS}>{title}</span>
+          <Lock size={12} color={MUTED} className="shrink-0" />
+        </div>
+        <div className="text-[13px] line-clamp-2" style={{ color: MUTED }}>
+          {s.msg || 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'}
+        </div>
+      </div>
+      {s.needs && (
+        <button
+          onClick={s.start}
+          disabled={s.busy}
+          className="shrink-0 rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          {setupLabel(s.total.totalSats, s.rate, 'Set up your room')}
+        </button>
+      )}
+      {s.sheet}
+    </li>
+  );
+};
+
+/**
  * Chat › Chatrooms: "Your rooms" (joined open + token rooms), "Public rooms" (open rooms anyone
  * can join, docs/TOKEN-ROOMS.md › Open rooms), "+ New room", and Token rooms (full build only).
  * `header` is the Chat tab's Chatrooms | DMs | Calls switch.
@@ -1706,6 +1745,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               </p>
             )}
             <ul className="w-full">
+              {ROOMS &&
+                ownTokens(identityAddress).map((t) => (
+                  <SetupRoomRow
+                    key={t.tokenId}
+                    token={t}
+                    onDone={() => {
+                      void recheckPendingIndexing(apiContext, identityAddress);
+                      // The indexer lists it within about a second; then the room opens like any other.
+                      setTimeout(() => {
+                        if (identityAddress)
+                          void retryPersonalRoom(apiContext, identityAddress, client).then((r) => r && refresh());
+                        refresh();
+                      }, 5000);
+                    }}
+                  />
+                ))}
               {yours.map((y) =>
                 y.kind === 'open' ? (
                   <OpenRoomRow key={y.room.ticker} room={y.room} me={handle} onOpen={() => openOpenRoom(y.room)} />

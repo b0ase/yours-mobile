@@ -1,29 +1,13 @@
-import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
-import { SendConfirmation } from '../../components/SendConfirmation';
-import { useServiceContext } from '../../hooks/useServiceContext';
-import { useTheme } from '../../hooks/useTheme';
-import { useSnackbar } from '../../hooks/useSnackbar';
-import { indexAutoPay } from './indexAutoPay';
-import { markIndexingPaid } from './pendingIndexing';
-import {
-  INDEX_FUND_NETWORK_SATS,
-  fundAmount,
-  fundIndexing,
-  getFundRecord,
-  needsIndexFunding,
-  overlayStatus,
-  type OverlayStatus,
-} from './indexFund';
-import { money, moneyWithSats } from '../money/money';
+import { money } from '../money/money';
+import { dismissRoomSetup } from './roomSetup';
+import { useRoomSetup } from './useRoomSetup';
 
 /**
- * "Finish setting up $X": for a token this wallet minted whose 1sat-stack indexing was never
- * funded (minted before bWallet paid indexing at mint, or the funding step failed). Checks the
- * overlay status (read-only); only when it needs funding does it show a button. The payment goes
- * through the standard confirmation sheet, except one-tap: a fee under Settings → Payments →
- * "Index own tokens" (default $0.10, at a known BSV/USD rate, rate-limited: indexAutoPay.ts) pays
- * on the tap itself. Nothing is sent without a tap.
+ * "Set up $X's room": for a token this wallet minted whose room isn't set up yet (1Sat indexing
+ * unfunded). Minting no longer pays this; the card offers it, with "Not now" to hide it for that
+ * token (Settings › My tokens and Chat still offer it). Price and payment: useRoomSetup /
+ * roomSetup.ts. Nothing is sent without a tap; nothing shows while the indexer doesn't answer.
  */
 export const FinishIndexing = ({
   tokenId,
@@ -31,54 +15,19 @@ export const FinishIndexing = ({
   onFunded,
   compact = false,
   exchangeRate = 0,
+  dismissible = true,
 }: {
   tokenId: string;
   ticker: string;
   onFunded?: () => void;
   compact?: boolean;
-  /** USD per BSV; 0 / unknown = always confirm. */
+  /** USD per BSV; 0 = use the live rate (unknown = no bCorp fee, always confirm). */
   exchangeRate?: number;
+  dismissible?: boolean;
 }) => {
-  const { addSnackbar } = useSnackbar();
-  const { apiContext } = useServiceContext();
-  const { theme } = useTheme();
-  const [status, setStatus] = useState<OverlayStatus | null | undefined>(undefined);
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-
-  useEffect(() => {
-    let live = true;
-    overlayStatus(apiContext, tokenId)
-      .then((s) => live && setStatus(s))
-      .catch(() => live && setStatus(null));
-    return () => {
-      live = false;
-    };
-  }, [apiContext, tokenId]);
-
-  // Already paid from this device and waiting for the indexer: don't offer to pay twice.
-  const paid = getFundRecord(tokenId);
+  const s = useRoomSetup(tokenId, ticker, { exchangeRate, onDone: onFunded });
   // Unknown (indexer slow or hasn't seen the token): say nothing rather than ask for money.
-  if (!status || !needsIndexFunding(status) || (paid && !msg)) return null;
-  const sats = status ? fundAmount(status) : null;
-
-  const fund = async (oneTap = false) => {
-    setBusy(true);
-    setMsg('');
-    try {
-      const r = await fundIndexing(apiContext, tokenId, ticker, { status, timeoutMs: 8000 });
-      setMsg(`Done. $${ticker} will show in wallets and its room within a minute (tx ${r.txid.slice(0, 8)}…).`);
-      if (oneTap) addSnackbar(`Paid ${moneyWithSats(r.sats, exchangeRate)} to index $${ticker}`, 'success');
-      markIndexingPaid(tokenId);
-      onFunded?.();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Could not send the indexing payment');
-    } finally {
-      setBusy(false);
-      setConfirming(false);
-    }
-  };
+  if (!s.status || !s.total || (!s.needs && !s.msg)) return null;
 
   return (
     <div
@@ -88,48 +37,44 @@ export const FinishIndexing = ({
       <div className="flex items-center gap-2">
         <Sparkles size={15} color="#FFD24D" />
         <span className="text-sm font-bold" style={{ color: '#FFD24D' }}>
-          Finish setting up ${ticker}
+          Set up ${ticker}'s room
         </span>
       </div>
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
-        ${ticker} is in your wallet, but the 1Sat indexer won't list it (in other wallets, the Market or its room) until
-        its indexing balance is topped up
-        {status.minFunding
-          ? ` to ${money(status.minFunding, exchangeRate)}`
-          : sats
-            ? `: ${money(sats, exchangeRate)}`
-            : ''}
-        . Each transfer is then charged from that balance.
+        Setting up lists ${ticker} in other wallets and the Market and opens its chat room. One payment of about{' '}
+        {money(s.total.totalSats, s.rate)}, which includes the 1Sat indexer's minimum balance (transfers are then
+        charged from it).
       </p>
-      {!msg || !getFundRecord(tokenId) ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            // One tap under the threshold (total incl. network fee); otherwise the confirm sheet.
-            if (sats && indexAutoPay.take(sats + INDEX_FUND_NETWORK_SATS, exchangeRate).ok) void fund(true);
-            else setConfirming(true);
-          }}
-          className="h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-          style={{ background: '#FFD24D', color: '#000' }}
-        >
-          {`Pay ${money(sats ?? 0, exchangeRate)} to index $${ticker}`}
-        </button>
+      {s.needs ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={s.busy}
+            onClick={s.start}
+            className="flex-1 h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
+            style={{ background: '#FFD24D', color: '#000' }}
+          >
+            {`Set up · ${money(s.total.totalSats, s.rate)}`}
+          </button>
+          {dismissible && (
+            <button
+              type="button"
+              disabled={s.busy}
+              onClick={() => dismissRoomSetup(tokenId)}
+              className="h-10 px-4 rounded-xl text-sm font-semibold bg-transparent cursor-pointer disabled:opacity-40"
+              style={{ color: '#98A2B3', border: '1px solid #2a2d35' }}
+            >
+              Not now
+            </button>
+          )}
+        </div>
       ) : null}
-      {msg && (
+      {s.msg && (
         <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
-          {msg}
+          {s.msg}
         </p>
       )}
-      <SendConfirmation
-        show={confirming}
-        theme={theme}
-        lineItems={[{ address: 'Indexing', amount: money(sats ?? 0, exchangeRate) }]}
-        total={`~${moneyWithSats((sats ?? 0) + INDEX_FUND_NETWORK_SATS, exchangeRate)}`}
-        isProcessing={busy}
-        onConfirm={() => void fund()}
-        onCancel={() => !busy && setConfirming(false)}
-      />
+      {s.sheet}
     </div>
   );
 };

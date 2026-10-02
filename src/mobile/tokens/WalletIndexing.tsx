@@ -6,8 +6,8 @@ import { FinishIndexing } from './FinishIndexing';
 import { notifyIfPermitted, recheckPendingIndexing, takeSessionReminder, usePendingIndexing } from './pendingIndexing';
 
 /**
- * Wallet screen: a "Finish setting up $X" card for each of the user's own tokens whose indexing fee
- * is unpaid, plus one reminder per app session (snackbar, and a local notification when permission
+ * Wallet screen: a "Set up $X's room" card for each of the user's own tokens whose room isn't set up
+ * (and that didn't get "Not now"), plus one reminder per app session (snackbar, and a local notification when permission
  * was already granted). The Wallet tab badge reads the same list (src/mobile/tabs/BottomMenu.tsx).
  */
 /** Hidden in a store build (paid indexing, storeBuild.ts). */
@@ -22,10 +22,12 @@ const WalletIndexingInner = ({ exchangeRate = 0 }: { exchangeRate?: number }) =>
 
   useEffect(() => {
     if (!takeSessionReminder(list.length)) return;
-    const what = list.length === 1 ? `$${list[0].ticker}` : `${list.length} of your tokens`;
-    const text = `${what} needs its indexing fee paid before other wallets and the Market can see it.`;
+    const text =
+      list.length === 1
+        ? `Set up $${list[0].ticker}'s room to list it in other wallets and the Market.`
+        : `Set up rooms for ${list.length} of your tokens to list them in other wallets and the Market.`;
     addSnackbar(text, 'info');
-    void notifyIfPermitted('Finish setting up your token', text);
+    void notifyIfPermitted('Set up your token room', text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.length]);
 

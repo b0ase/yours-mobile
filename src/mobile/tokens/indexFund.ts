@@ -13,21 +13,22 @@ import type { ChromeStorageObject } from '../../services/types/chromeStorage.typ
  * docs/TICKETS-BURN-PHASE0.md §6: status.fee_address ~0.4 s after deploy, is_active ~0.75 s after
  * funding).
  *
- * Owner decision: the creator pays indexing at mint (users pay for their own tokens and $handle
- * tokens). Right after the deploy (same confirmation), bWallet sends INDEX_FUND_SATS to the fee
- * address. Later transfers pay their own per-output fee (sendBsv21 adds it).
+ * Owner decision (3 Oct 2026): minting no longer pays indexing. The creator sets up the token's
+ * room later ("Set up $X's room", tokens/roomSetup.ts): one confirmed tx that tops the fee address
+ * up to the indexer minimum, plus a bCorp setup fee output outside a store build. Later transfers
+ * pay their own per-output fee (sendBsv21 adds it).
  *
  * Since 2 Oct 2026 the indexer keeps a token inactive until its balance reaches `min_funding`
- * (10,000,000 sats = 0.1 BSV); 3,000 sats no longer lists anything. The mint quote is that minimum,
- * so the confirm sheet shows what is actually paid. Lower it here if 1Sat lowers min_funding.
+ * (10,000,000 sats = 0.1 BSV); 3,000 sats no longer lists anything. Lower INDEX_FUND_SATS here if
+ * 1Sat lowers min_funding.
  */
 
-/** Creator funding at mint: the indexer's minimum balance for a listed token (min_funding). */
+/** Default room-setup funding: the indexer's minimum balance for a listed token (min_funding). */
 export const INDEX_FUND_SATS = 10_000_000;
 export const DEFAULT_FEE_PER_OUTPUT = 1000;
 /** Funding tx: one input, change, one P2PKH output (~230 B at ~100 sat/kB). */
 export const INDEX_FUND_NETWORK_SATS = 30;
-/** Total the confirm sheet adds for indexing. */
+/** Indexing total for a confirm sheet (funding + its tx fee). */
 export const indexCostSats = (fund = INDEX_FUND_SATS) => fund + INDEX_FUND_NETWORK_SATS;
 
 export type OverlayStatus = {
@@ -101,7 +102,7 @@ export async function waitForOverlayStatus(
   }
 }
 
-// ── local record (so "Finish setting up $X" knows what's pending) ──
+// ── local record (so "Set up $X's room" knows what's pending) ──
 
 const KEY = (tokenId: string) => `bwallet.indexFund.${normId(tokenId)}`;
 export type FundRecord = { txid: string; sats: number; at: number };
@@ -137,10 +138,16 @@ export async function fundIndexing(
   ctx: OneSatContext,
   tokenId: string,
   ticker: string,
-  opts: { fund?: number; status?: OverlayStatus | null; timeoutMs?: number } = {},
+  opts: {
+    fund?: number;
+    status?: OverlayStatus | null;
+    timeoutMs?: number;
+    /** Extra outputs in the SAME tx (the bCorp room setup fee): all paid together or not at all. */
+    extraOutputs?: { address: string; satoshis: number; outputDescription: string }[];
+  } = {},
 ): Promise<{ txid: string; sats: number; feeAddress: string }> {
   const status = opts.status ?? (await waitForOverlayStatus(ctx, tokenId, { timeoutMs: opts.timeoutMs }));
-  if (!status) throw new Error(`The indexer hasn't seen $${ticker} yet. Try "Finish setting up" again in a minute.`);
+  if (!status) throw new Error(`The indexer hasn't seen $${ticker} yet. Try setting up its room again in a minute.`);
   const sats = fundAmount(status, opts.fund);
   const description = indexFundDescription(ticker);
   let res: { txid?: string };
@@ -153,6 +160,13 @@ export async function fundIndexing(
           satoshis: sats,
           outputDescription: 'Token indexing fee (1sat overlay)',
         },
+        ...(opts.extraOutputs ?? [])
+          .filter((o) => o.address && o.satoshis > 0)
+          .map((o) => ({
+            lockingScript: new P2PKH().lock(o.address).toHex(),
+            satoshis: o.satoshis,
+            outputDescription: o.outputDescription,
+          })),
       ],
       labels: [INDEX_FUND_LABEL],
       options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
@@ -227,24 +241,6 @@ export const rememberOwnToken = (t: OwnToken) => {
     /* storage unavailable / no window in tests */
   }
 };
-
-/**
- * After a deploy: fund indexing, but never fail the mint because of it (the token exists and is
- * in the wallet either way); the error is returned so the UI can offer "Finish setting up".
- */
-export async function fundAfterDeploy(
-  ctx: OneSatContext,
-  tokenId: string,
-  ticker: string,
-): Promise<{ ok: true; txid: string } | { ok: false; error: string }> {
-  rememberOwnToken({ tokenId, ticker });
-  try {
-    const r = await fundIndexing(ctx, tokenId, ticker);
-    return { ok: true, txid: r.txid };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
 
 /** Favourite-token list with `id` added (front), deduped. The Wallet tab lists only favourites. */
 export const withFavorite = (list: string[] | undefined, id: string): string[] => {

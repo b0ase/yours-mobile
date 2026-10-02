@@ -132,7 +132,7 @@ export const TicketMint = ({
           ${done.ticket.ticker} is minted: {Number(done.ticket.supply ?? 0).toLocaleString()} tickets in your wallet.{' '}
           {done.room
             ? `The room "${done.ticket.name}" is open.`
-            : 'The room opens as soon as the network indexes the ticket (usually a few minutes).'}
+            : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
         </p>
         <p className="text-xs" style={{ color: '#999' }}>
           {TICKET_COPY}
@@ -384,8 +384,9 @@ export const TicketMint = ({
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {money(cost.networkSats, exchangeRate)}
         {cost.txCount > 1 ? ' (2 transactions: icon + ticket)' : ''}
-        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Indexing (so wallets
-        list it): {money(cost.indexSats, exchangeRate)} · Total ≈ {moneyWithSats(cost.totalSats, exchangeRate)}
+        {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
+        {moneyWithSats(cost.totalSats, exchangeRate)}. Its room and Market listing can be set up later (Settings › My
+        tokens).
       </p>
       {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
       <button
@@ -414,8 +415,6 @@ export const TicketMint = ({
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
           { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),
-          // Creator pays 1sat indexing at mint, so wallets and the room gate can see the token.
-          { address: 'Indexing', amount: `${money(cost.indexSats, exchangeRate)}` },
         ]}
         total={moneyWithSats(cost.totalSats, exchangeRate)}
         isProcessing={!!busy}

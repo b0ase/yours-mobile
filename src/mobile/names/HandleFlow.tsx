@@ -8,7 +8,6 @@ import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAli
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
   PERSONAL_FEE_ESTIMATE_SATS,
-  PERSONAL_INDEX_SATS,
   PERSONAL_NETWORK_FEE_SATS,
   deployPersonalToken,
   openPersonalRoom,
@@ -91,7 +90,9 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       // Signatures only; a fresh token may not be indexed yet. Chat retries until it is.
       openPersonalRoom(apiContext, identityAddress, l)
         .then(() => setTokenMsg(`$${l.ticker} minted and your room is open. Invite = send 1 $${l.ticker}.`))
-        .catch(() => setTokenMsg(`$${l.ticker} minted. Your room opens in Chat once the token is indexed.`));
+        .catch(() =>
+          setTokenMsg(`$${l.ticker} minted. Set up your room from Chat or Settings › My tokens when you're ready.`),
+        );
     } catch (e) {
       setTokenMsg(e instanceof Error ? e.message : 'Token mint failed');
     } finally {
@@ -262,7 +263,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           {link ? (
             <p className="text-xs text-white">
               <b style={{ color: GOLD }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
-              {link.roomTicker ? 'room open' : 'room opens once indexed'}.
+              {link.roomTicker ? 'room open' : 'room not set up yet'}.
             </p>
           ) : null}
           {link && !busy && !getFundRecord(link.tokenId) ? (
@@ -273,9 +274,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
               <p className="text-[11px]" style={{ color: GRAY }}>
                 A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat room
                 only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not trading.
-                About {moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}: ~{moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee plus{' '}
-                {moneyNow(PERSONAL_INDEX_SATS)} so other wallets and your room can see the token (1Sat indexing, paid
-                once). You confirm it before anything is sent.
+                About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. Your room can be set up later (it lists the
+                token in other wallets and opens its chat). You confirm it before anything is sent.
               </p>
               <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
                 <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
@@ -340,7 +340,6 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
               amount: `${Number(supply || 0).toLocaleString()} tokens`,
             },
             { address: 'Network fee', amount: `~${moneyNow(PERSONAL_NETWORK_FEE_SATS)}` },
-            { address: 'Indexing', amount: moneyNow(PERSONAL_INDEX_SATS) },
           ]}
           total={`~${moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}`}
           isProcessing={busy}
