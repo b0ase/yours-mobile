@@ -29,7 +29,7 @@ describe('wallet layout', () => {
       '<MediaSection />',
       '<TicketsSection />',
       '<CreditsRow />',
-      '<WalletIdentity />',
+      '<WalletCard ',
     ]) {
       const inserts = cfg.split(tag).slice(1);
       expect(inserts.length).toBeGreaterThan(0);
