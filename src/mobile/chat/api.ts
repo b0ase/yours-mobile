@@ -472,6 +472,14 @@ export class BchatClient {
     await this.call('DELETE', '/api/bitsign/me/bookmarks', { txid });
   }
 
+  /**
+   * bCorp sponsors a new user's first mint: a small gift of sats to their own address (bit-sign
+   * /api/bitsign/sponsor/mint; once per handle and address, only to a near-empty wallet).
+   */
+  async sponsorMint(address: string): Promise<{ txid?: string; sats?: number }> {
+    return this.call('POST', '/api/bitsign/sponsor/mint', { address });
+  }
+
   /** Delete this bChat account (identity-key signed; see src/mobile/account/deleteAccount.ts). */
   async deleteAccount(body: {
     identity_key: string;

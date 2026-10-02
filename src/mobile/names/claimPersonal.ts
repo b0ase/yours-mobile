@@ -1,4 +1,4 @@
-import { bsv21FieldsFromOutput, deployBsv21Mint, type OneSatContext } from '@1sat/actions';
+import { bsv21FieldsFromOutput, deployBsv21Mint, syncAddresses, type OneSatContext } from '@1sat/actions';
 import { BSV21_BASKET } from '@1sat/types';
 import { isNative } from '../native';
 import { withIssuerSignature } from '../issuer/issuerSign';
@@ -43,21 +43,49 @@ export const PERSONAL_NETWORK_FEE_SATS = 110;
  */
 export const PERSONAL_FEE_ESTIMATE_SATS = PERSONAL_NETWORK_FEE_SATS;
 
+/** Did a mint fail only because the wallet can't pay its network fee? */
+export const isFundsError = (e: string | undefined) => !!e && /insufficient|not enough|no (utxos|funds)|funds/i.test(e);
+
+const SPONSOR_WAIT_MS = 2000;
+const SPONSOR_TRIES = 6;
+
 export async function deployPersonalToken(
   ctx: OneSatContext,
-  input: { identityAddress: string; name: string; supply: string; icon?: string },
+  input: {
+    identityAddress: string;
+    name: string;
+    supply: string;
+    icon?: string;
+    /**
+     * The wallet's own BSV address. With it, an empty wallet asks bCorp to sponsor the mint fee
+     * (bit-sign /api/bitsign/sponsor/mint), waits for the gift to sync, then mints.
+     */
+    payAddress?: string;
+  },
 ): Promise<PersonalLink> {
   const ticker = personalTicker(input.name);
   if (!ticker) throw new Error('That name cannot be a token ticker');
   const bad = validateSupply(input.supply);
   if (bad) throw new Error(bad);
   const supply = cleanSupply(input.supply);
-  const res = await deployBsv21Mint.execute(withIssuerSignature(withPersonalMap(ctx, input.name, ticker), 'bsv21'), {
-    symbol: ticker,
-    amount: supply,
-    decimals: PERSONAL_DECIMALS,
-    icon: input.icon || BWALLET_MARK_ICON,
-  });
+  const deploy = () =>
+    deployBsv21Mint.execute(withIssuerSignature(withPersonalMap(ctx, input.name, ticker), 'bsv21'), {
+      symbol: ticker,
+      amount: supply,
+      decimals: PERSONAL_DECIMALS,
+      icon: input.icon || BWALLET_MARK_ICON,
+    });
+  let res = await deploy();
+  if (isFundsError(res.error) && input.payAddress) {
+    // bCorp covers a new user's mint fee: a small gift to their own address, then mint as usual.
+    const client = await chatClient(ctx);
+    await client.sponsorMint(input.payAddress);
+    for (let i = 0; i < SPONSOR_TRIES && isFundsError(res.error); i++) {
+      await new Promise((ok) => setTimeout(ok, SPONSOR_WAIT_MS));
+      await syncAddresses.execute(ctx, { count: 5 }).catch(() => undefined);
+      res = await deploy();
+    }
+  }
   if (res.error || !res.tokenId) throw new Error(res.error || 'Token deploy failed');
   void registerIssuer(res.tokenId);
   const link: PersonalLink = {

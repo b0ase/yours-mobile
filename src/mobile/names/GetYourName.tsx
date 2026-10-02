@@ -136,7 +136,12 @@ export const GetYourName = ({
   const supplyError = validateSupply(supply);
 
   const mintPersonal = async (name: string) => {
-    const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
+    const l = await deployPersonalToken(apiContext, {
+      identityAddress,
+      name,
+      supply,
+      payAddress: account?.addresses?.bsvAddress,
+    });
     void showOnWallet(chromeStorageService, l.tokenId);
     void askNotifyPermissionOnce();
     setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet. Opening your room…`);

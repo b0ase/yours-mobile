@@ -82,7 +82,12 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
     setBusy(true);
     setTokenMsg('');
     try {
-      const l = await deployPersonalToken(apiContext, { identityAddress, name, supply });
+      const l = await deployPersonalToken(apiContext, {
+        identityAddress,
+        name,
+        supply,
+        payAddress: account?.addresses?.bsvAddress,
+      });
       // Its balance is local: show it on the Wallet tab now, not when an indexer catches up.
       void showOnWallet(chromeStorageService, l.tokenId);
       void askNotifyPermissionOnce();
