@@ -418,6 +418,9 @@ type PostActions = {
   onOpen: (p: FeedPost) => void;
   onAuthor: (a: Author) => void;
   onMore: (p: FeedPost) => void;
+  /** Saved to this phone's Bookmarks list (store.ts); separate from Twetch's own bookmarks under "…". */
+  bookmarked: (txid: string) => boolean;
+  onBookmark: (p: FeedPost) => void;
   /** Branch, quote, copy link, open / bookmark / unlock in the source app. */
   onAction: (p: FeedPost, action: PostAction) => void;
 };
@@ -542,6 +545,15 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
               </button>
             );
           })}
+          <button
+            onClick={() => a.onBookmark(post)}
+            className="ml-auto flex items-center"
+            style={{ color: a.bookmarked(post.txid) ? GOLD : MUTED }}
+            aria-label={a.bookmarked(post.txid) ? 'Remove bookmark' : 'Bookmark'}
+            aria-pressed={a.bookmarked(post.txid)}
+          >
+            <Bookmark size={16} fill={a.bookmarked(post.txid) ? GOLD : 'none'} />
+          </button>
         </div>
         {!!locked?.total && (
           <div className="mt-1 flex items-center gap-1 text-[11px]" style={{ color: GOLD }}>
@@ -1366,6 +1378,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     onOpen: setThread,
     onAuthor: setProfile,
     onMore: setMore,
+    bookmarked: (txid) => isBookmarked(bookmarks, txid),
+    onBookmark: bookmark,
     onAction,
   };
 
@@ -1565,7 +1579,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
               <div className="px-8 pt-14 text-center">
                 <p className="text-sm text-white font-semibold">No bookmarks yet</p>
                 <p className="text-xs mt-1" style={{ color: MUTED }}>
-                  Tap ··· on a post, then Save to bookmarks.
+                  Tap the bookmark on a post to save it here.
                 </p>
               </div>
             }
