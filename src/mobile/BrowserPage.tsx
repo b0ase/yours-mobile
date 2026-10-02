@@ -259,7 +259,7 @@ const writeFavourites = (urls: string[]) => {
 };
 
 // Home-screen pages, swiped left/right (CSS scroll-snap); the switch tracks the page.
-const PAGES = ['Favourites', 'bApps', 'Other apps'] as const;
+const PAGES = ['Home', 'bApps', 'Other apps'] as const;
 const PAGE_KEY = 'bwallet:apps-page';
 
 const readPage = () => {
@@ -373,7 +373,7 @@ const BrowserPage = () => {
             grid(0, favouriteTiles)
           ) : (
             <p className="text-sm text-[#98A2B3] text-center py-10">
-              No favourites yet. Touch and hold any app, then Add to favourites.
+              Nothing on Home yet. Touch and hold any app, then Add to Home.
             </p>
           )}
           {recent.length > 0 && (
@@ -573,7 +573,7 @@ const BrowserPage = () => {
                   className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
                 >
                   <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
-                  {isFavourite(info) ? 'Remove from favourites' : 'Add to favourites'}
+                  {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
                 </button>
                 {info.bapp?.source && (
                   <button

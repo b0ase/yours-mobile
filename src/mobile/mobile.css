@@ -504,7 +504,7 @@ body,
 
 
 .bw-wcard-addrrow {
-  margin-bottom: 8px;
+  margin-bottom: 16px;
   display: flex;
   align-items: center;
   gap: 4px;
