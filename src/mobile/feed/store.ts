@@ -109,6 +109,11 @@ export const mutedAccounts = (mutes: string[], names: Record<string, string>): {
 export const MAX_BOOKMARKS = 500;
 export const loadBookmarks = (): FeedPost[] =>
   read<FeedPost[]>(LS.bookmarks, []).filter((p) => p && typeof p.txid === 'string' && !!p.author);
+export const saveBookmarks = (posts: FeedPost[]): FeedPost[] => {
+  const next = posts.slice(0, MAX_BOOKMARKS);
+  write(LS.bookmarks, next);
+  return next;
+};
 export const isBookmarked = (bookmarks: FeedPost[], txid: string) => bookmarks.some((p) => p.txid === txid);
 export const toggleBookmark = (bookmarks: FeedPost[], p: FeedPost): FeedPost[] => {
   const next = isBookmarked(bookmarks, p.txid)

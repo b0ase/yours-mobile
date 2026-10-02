@@ -458,6 +458,20 @@ export class BchatClient {
     await this.call('DELETE', '/api/bitsign/me/blocks', { handle: handle.trim().replace(/^\$/, '') });
   }
 
+  /** Feed bookmarks synced across this account's devices (bit-sign /api/bitsign/me/bookmarks). */
+  async bookmarks<P extends { txid: string }>(): Promise<P[]> {
+    const r = await this.call<{ bookmarks?: { post?: P }[] }>('GET', '/api/bitsign/me/bookmarks');
+    return (r.bookmarks ?? []).map((b) => b.post).filter((p): p is P => !!p && typeof p.txid === 'string');
+  }
+
+  async addBookmark(post: { txid: string }): Promise<void> {
+    await this.call('POST', '/api/bitsign/me/bookmarks', { post });
+  }
+
+  async removeBookmark(txid: string): Promise<void> {
+    await this.call('DELETE', '/api/bitsign/me/bookmarks', { txid });
+  }
+
   /** Delete this bChat account (identity-key signed; see src/mobile/account/deleteAccount.ts). */
   async deleteAccount(body: {
     identity_key: string;

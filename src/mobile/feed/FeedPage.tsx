@@ -113,7 +113,6 @@ import {
   loadBlocks,
   loadBookmarks,
   rememberMuteName,
-  toggleBookmark,
   type HiddenAccount,
   isFollowing,
   loadFollows,
@@ -124,6 +123,7 @@ import {
   visiblePosts,
   type Follow,
 } from './store';
+import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from './bookmarkSync';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
@@ -1175,6 +1175,10 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [blocks, setBlocks] = useState<HiddenAccount[]>(loadBlocks);
   const [bookmarks, setBookmarks] = useState<FeedPost[]>(loadBookmarks);
   const [showBookmarks, setShowBookmarks] = useState(false);
+  // Pull bookmarks saved on this account's other devices when the Feed opens and when the list opens.
+  useEffect(() => {
+    void syncBookmarks(bookmarkClient()).then(setBookmarks);
+  }, [showBookmarks]);
   // Mutes + blocks: hidden in the feed and threads. Blocks alone: hidden on profiles too.
   const blocked = useMemo(() => blockKeys(blocks), [blocks]);
   const hidden = useMemo(() => [...mutes, ...blocked], [mutes, blocked]);
@@ -1314,8 +1318,9 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   };
   const bookmark = (p: FeedPost) => {
     const on = isBookmarked(bookmarks, p.txid);
-    setBookmarks((b) => toggleBookmark(b, p));
+    setBookmarks((b) => toggleSyncedBookmark(b, p));
     setMore(null);
+    void syncBookmarks(bookmarkClient()).then(setBookmarks);
     addSnackbar(on ? 'Removed from bookmarks' : 'Saved to bookmarks', 'success');
   };
   const tip = async (p: FeedPost) => {

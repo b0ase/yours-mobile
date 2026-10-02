@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Ban, Bell, Bookmark, FileText, Mail, Newspaper, PlayCircle, Sparkles, Trash2, Zap } from 'lucide-react';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
@@ -20,10 +20,10 @@ import {
   mutedAccounts,
   removeBlock,
   removeMute,
-  toggleBookmark,
   type HiddenAccount,
 } from '../feed/store';
 import type { FeedPost } from '../feed/post';
+import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from '../feed/bookmarkSync';
 
 /**
  * Settings → Feed / Payments / Privacy (mobile). Rendered inside upstream Settings' main page via the
@@ -169,6 +169,9 @@ const ListRow = ({
 
 const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
   const [items, setItems] = useState<FeedPost[]>(loadBookmarks);
+  useEffect(() => {
+    void syncBookmarks(bookmarkClient()).then(setItems);
+  }, []);
   return (
     <Screen title="Bookmarks" onBack={onBack}>
       {items.length ? (
@@ -179,13 +182,16 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
               title={p.author.name}
               sub={p.text || `${p.media?.length ?? 0} attachment(s)`}
               action="Remove"
-              onAction={() => setItems((b) => toggleBookmark(b, p))}
+              onAction={() => {
+                setItems((b) => toggleSyncedBookmark(b, p));
+                void syncBookmarks(bookmarkClient()).then(setItems);
+              }}
             />
           ))}
           <Note>To read, like or reply, open Bookmarks from the bookmark button on the Feed.</Note>
         </>
       ) : (
-        <Note>Nothing saved yet. Tap ··· on a post, then Save to bookmarks.</Note>
+        <Note>Nothing saved yet. Tap the bookmark on a post to save it.</Note>
       )}
     </Screen>
   );
