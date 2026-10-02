@@ -275,7 +275,7 @@ const AgentPage = () => {
           <div className="m-auto text-center">
             <img src={bGlyph} alt="" width={56} height={56} className="mx-auto mb-3" />
             <p className="text-sm" style={{ color: MUTED }}>
-              Ask about using bWallet
+              Talk to b
             </p>
           </div>
         )}
