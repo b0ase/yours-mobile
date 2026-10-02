@@ -12,18 +12,20 @@ import {
   withOwnToken,
   type OwnToken,
 } from './indexFund';
+import { ROOM_SETUP_DISMISSED_EVENT, withoutDismissed } from './roomSetup';
 
 /**
  * Own tokens (minted on this device, plus the account's personal $NAME token) whose indexing fee is
  * still unpaid and that the indexer already knows (so paying is possible). Shared by the Wallet tab
- * badge, the Wallet cards and the once-per-session reminder.
+ * badge, the Wallet cards and the once-per-session reminder. usePendingIndexing leaves out tokens
+ * whose card got "Not now" (roomSetup.ts); ownTokens() lists every own token (Settings, Chat).
  */
 const EVENT = 'bwallet-pending-indexing';
 let pending: OwnToken[] = [];
 let checking: Promise<void> | null = null;
 let checkedFor: string | null = null;
 
-const ownTokens = (identityAddress?: string): OwnToken[] => {
+export const ownTokens = (identityAddress?: string): OwnToken[] => {
   let list = listOwnTokens();
   const link = getPersonalLink(identityAddress);
   if (link) list = withOwnToken(list, { tokenId: link.tokenId, ticker: link.ticker });
@@ -56,11 +58,15 @@ export const recheckPendingIndexing = (ctx: OneSatContext, identityAddress?: str
 export const markIndexingPaid = (tokenId: string) => publish(pending.filter((t) => t.tokenId !== tokenId));
 
 export const usePendingIndexing = (ctx: OneSatContext | undefined, identityAddress?: string): OwnToken[] => {
-  const [list, setList] = useState(pending);
+  const [list, setList] = useState(() => withoutDismissed(pending));
   useEffect(() => {
-    const on = () => setList(pending);
+    const on = () => setList(withoutDismissed(pending));
     window.addEventListener(EVENT, on);
-    return () => window.removeEventListener(EVENT, on);
+    window.addEventListener(ROOM_SETUP_DISMISSED_EVENT, on);
+    return () => {
+      window.removeEventListener(EVENT, on);
+      window.removeEventListener(ROOM_SETUP_DISMISSED_EVENT, on);
+    };
   }, []);
   useEffect(() => {
     if (!ctx) return;

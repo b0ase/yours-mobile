@@ -9,12 +9,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { bareName, checkOpnsAvailability, type Availability } from './names';
 import { getMyName, onMyNameChange, setMyName } from './myName';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
-import {
-  PERSONAL_FEE_ESTIMATE_SATS,
-  PERSONAL_INDEX_SATS,
-  deployPersonalToken,
-  openPersonalRoom,
-} from './claimPersonal';
+import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } from './claimPersonal';
 import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
@@ -150,7 +145,9 @@ export const GetYourName = ({
       .then((t) =>
         setMsg(`$${l.ticker} minted and your room ${t ? `$${t} ` : ''}is open. Invite = send 1 $${l.ticker}.`),
       )
-      .catch(() => setMsg(`$${l.ticker} minted. Your room opens in Chat once the token is indexed.`));
+      .catch(() =>
+        setMsg(`$${l.ticker} minted. Set up your room from Chat or Settings › My tokens when you're ready.`),
+      );
   };
 
   const bind = async (n: { name: string; id: string; tokenOnly?: boolean }) => {
@@ -264,10 +261,6 @@ export const GetYourName = ({
         address: `New token $${t} (${Number(supply).toLocaleString()}, to you) + your $${t} room`,
         amount: '1 sat (kept)',
       });
-      lines.push({
-        address: 'Indexing',
-        amount: moneyNow(PERSONAL_INDEX_SATS),
-      });
     }
     return lines;
   };
@@ -293,7 +286,7 @@ export const GetYourName = ({
       <div className="flex flex-col gap-2">
         <p className="text-[11px]" style={{ color: gray }}>
           A personal token, ticker <b style={{ color: fg }}>${t}</b>, all to your wallet, plus a room only holders can
-          enter. Invite = send 1 ${t}. It's for access, not trading.
+          enter. Invite = send 1 ${t}. It's for access, not trading. The room can be set up later.
         </p>
         <label className="text-[11px] flex items-center gap-2" style={{ color: gray }}>
           Supply
@@ -606,8 +599,8 @@ export const GetYourName = ({
           {link ? (
             <p className="text-xs" style={{ color: fg }}>
               <b style={{ color: gold }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
-              {link.roomTicker ? 'room open' : 'room opens once indexed'}. Invite someone by sending them 1 $
-              {link.ticker} from the room.
+              {link.roomTicker ? 'room open' : 'room not set up yet'}. Invite someone by sending them 1 ${link.ticker}{' '}
+              from the room.
             </p>
           ) : (
             tokenOptions()

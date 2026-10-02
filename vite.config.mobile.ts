@@ -475,6 +475,10 @@ export default mergeConfig(
       __TICKET_RESALE_FEE_RATE__: JSON.stringify(process.env.BWALLET_TICKET_RESALE_FEE_RATE ?? '0'),
       // Wallet tab Mint creation fee (src/mobile/mint/mint.ts). Empty = no fee.
       __MINT_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MINT_FEE_ADDRESS ?? ''),
+      // "Set up $X's room" bCorp fee (src/mobile/tokens/roomSetup.ts): USD price, paid in sats to this address.
+      // Empty address = no fee; a store build never charges it (bcorpFeeAddress).
+      __ROOM_SETUP_FEE_USD__: JSON.stringify(process.env.BWALLET_ROOM_SETUP_FEE_USD ?? '1'),
+      __ROOM_SETUP_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_ROOM_SETUP_FEE_ADDRESS ?? ''),
       // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
       __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
       // Reports go to bit-sign's moderation queue (content_reports); owner acts within 24h (Apple 1.2).

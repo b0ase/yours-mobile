@@ -5,6 +5,7 @@ import {
   Ban,
   Bell,
   Bookmark,
+  Coins,
   Download,
   FileText,
   Mail,
@@ -38,6 +39,10 @@ import {
 } from '../feed/store';
 import type { FeedPost } from '../feed/post';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from '../feed/bookmarkSync';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
+import { setupLabel, useRoomSetup } from '../tokens/useRoomSetup';
+import type { OwnToken } from '../tokens/indexFund';
 
 /**
  * Settings → Feed / Payments / Privacy (mobile). Rendered inside upstream Settings' main page via the
@@ -249,9 +254,82 @@ const HiddenScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
+/** One own token: "Room open" or "Not set up" + the shared setup flow (useRoomSetup). */
+const MyTokenRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }) => {
+  const s = useRoomSetup(token.tokenId, token.ticker, { onDone });
+  const state =
+    s.status === undefined
+      ? 'Checking…'
+      : s.status === null
+        ? 'The indexer didn’t answer. Try again later.'
+        : s.open
+          ? 'Room open'
+          : s.waiting
+            ? 'Setting up… (usually under a minute)'
+            : 'Not set up';
+  return (
+    <div className="mb-2 rounded-xl px-3 py-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <p className="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold text-white">
+            ${token.ticker}
+          </p>
+          <p className="mt-0.5 text-xs" style={{ color: s.open ? GOLD : MUTED }}>
+            {state}
+          </p>
+        </div>
+        {s.needs && s.total && (
+          <button
+            onClick={s.start}
+            disabled={s.busy}
+            className="shrink-0 rounded-full px-3 py-1 text-xs font-bold disabled:opacity-40"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+          >
+            {setupLabel(s.total.totalSats, s.rate)}
+          </button>
+        )}
+      </div>
+      {s.msg && (
+        <p className="mt-2 text-xs" style={{ color: MUTED }}>
+          {s.msg}
+        </p>
+      )}
+      {s.sheet}
+    </div>
+  );
+};
+
+/** Settings › My tokens: every own token (incl. ones whose Wallet card got "Not now"). */
+const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
+  const tokens = ownTokens(identityAddress);
+  return (
+    <Screen title="My tokens" onBack={onBack}>
+      {tokens.length ? (
+        <>
+          {tokens.map((t) => (
+            <MyTokenRow
+              key={t.tokenId}
+              token={t}
+              onDone={() => void recheckPendingIndexing(apiContext, identityAddress)}
+            />
+          ))}
+          <Note>
+            Setting up a token’s room lists it in other wallets and the Market and opens its chat room. You confirm the
+            price before anything is sent.
+          </Note>
+        </>
+      ) : (
+        <Note>Tokens you mint in bWallet show here.</Note>
+      )}
+    </Screen>
+  );
+};
+
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
-  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | null>(null);
+  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | null>(null);
   const rate = useBsvUsd();
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
@@ -335,7 +413,15 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           </>
         )}
       </Section>
-      <Section title="Token indexing">
+      <Section title="Tokens">
+        <Row
+          icon={<Coins size={16} />}
+          label="My tokens"
+          description="Your tokens and their rooms: set up the ones that aren't listed yet"
+          onClick={() => setScreen('tokens')}
+          isFirst
+        />
+        <Divider />
         <Row
           icon={<Zap size={16} />}
           label="One-tap indexing fee"
@@ -352,7 +438,6 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
               onChange={(v) => setPrefs({ indexAutoPayUsd: v })}
             />
           }
-          isFirst
           isLast
         />
       </Section>
@@ -452,6 +537,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       {screen === 'sweep' && <HdSweepScreen onBack={() => setScreen(null)} />}
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
+      {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
     </>
   );
 };

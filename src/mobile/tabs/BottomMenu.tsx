@@ -24,7 +24,7 @@ export default Menu;
 
 export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) => {
   const active = tabFor(selected);
-  // Own tokens with an unpaid indexing fee: count on the Wallet tab.
+  // Own tokens whose room isn't set up (minus "Not now"): count on the Wallet tab.
   const { apiContext, chromeStorageService } = useServiceContext();
   const pending = usePendingIndexing(
     apiContext,

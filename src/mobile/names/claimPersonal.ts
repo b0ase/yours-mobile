@@ -3,7 +3,7 @@ import { BSV21_BASKET } from '@1sat/types';
 import { isNative } from '../native';
 import { withIssuerSignature } from '../issuer/issuerSign';
 import { registerIssuer } from '../issuer/issuerVerify';
-import { fundAfterDeploy, indexCostSats } from '../tokens/indexFund';
+import { rememberOwnToken } from '../tokens/indexFund';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings } from '../chat/holdings';
@@ -37,10 +37,11 @@ import {
 
 // deploy+mint inscription (~250 B) + MAP (~100 B) + issuer MAP+AIP (~300 B) + inputs/change at ~100 sat/kB.
 export const PERSONAL_NETWORK_FEE_SATS = 110;
-/** Indexing: the creator pre-funds the token's 1sat-stack fee address at mint (tokens/indexFund.ts). */
-export const PERSONAL_INDEX_SATS = indexCostSats();
-/** Everything the confirm sheet shows for the token + room. */
-export const PERSONAL_FEE_ESTIMATE_SATS = PERSONAL_NETWORK_FEE_SATS + PERSONAL_INDEX_SATS;
+/**
+ * Everything the confirm sheet shows for the token + room. No indexing at mint: the room is set up
+ * later, as a separate confirmed payment (tokens/roomSetup.ts).
+ */
+export const PERSONAL_FEE_ESTIMATE_SATS = PERSONAL_NETWORK_FEE_SATS;
 
 export async function deployPersonalToken(
   ctx: OneSatContext,
@@ -68,10 +69,8 @@ export async function deployPersonalToken(
     roomTicker: null,
   };
   setPersonalLink(input.identityAddress, link);
-  // Second tx: fund indexing so other wallets, the Market and bit-sign's room gate can see it.
-  // Never fails the claim (the token is minted and in this wallet); "Finish setting up" retries.
-  const fund = await fundAfterDeploy(ctx, res.tokenId, ticker);
-  if (!fund.ok) console.warn('[personal] indexing not funded yet:', fund.error);
+  // Minting no longer pays indexing; "Set up $X's room" offers it later.
+  rememberOwnToken({ tokenId: res.tokenId, ticker });
   return link;
 }
 
