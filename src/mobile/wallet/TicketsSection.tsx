@@ -16,6 +16,7 @@ import { parseLookup, type TokenRoomLookup } from '../chat/tokenRooms';
 import { getPersonalLink, knownPersonal, onPersonalChange } from '../names/personalToken';
 import { registryTickets } from '../tickets/mintTicket';
 import { localTickets, mergeTickets, onTicketsChanged } from '../tickets/tickets';
+import { IssuerBadge } from '../issuer/IssuerBadge';
 import {
   SOURCE_LABEL,
   buildWalletTickets,
@@ -168,6 +169,7 @@ export const TicketsSection = () => {
               <div className={`text-[11px] ${ELLIPSIS}`} style={{ color: t.canEnter ? '#667085' : '#F97066' }}>
                 {entryLine(t)}
               </div>
+              <IssuerBadge tokenId={t.tokenId} compact />
             </div>
             {SELL_ENABLED && BigInt(t.heldRaw || '0') > 0n && (
               <button

@@ -20,7 +20,7 @@ export const MAX_MINT_BYTES = 10 * 1024 * 1024;
 export const DOWNSCALE_SUGGEST_BYTES = 1024 * 1024;
 export const MINT_FEE_RATE = 0.01;
 /** Rough bytes for inputs, change, envelope + MAP + SIGMA around the body. */
-export const TX_OVERHEAD_BYTES = 600;
+export const TX_OVERHEAD_BYTES = 900; // inputs, change, fee output + issuer signature (MAP + AIP, ~300 B)
 export const ACCEPT = 'image/*,video/*,audio/*';
 
 const configured = typeof __MINT_FEE_ADDRESS__ === 'string' ? __MINT_FEE_ADDRESS__.trim() : '';

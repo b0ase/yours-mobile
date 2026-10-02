@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../hooks/useTheme';
 import { formatLargeNumber, formatUSD } from '../utils/format';
@@ -34,6 +35,8 @@ export type AssetRowProps = {
   decimals?: number;
   onGetMneeClick?: () => void;
   onClick?: () => void;
+  /** Extra line under "Balance" (e.g. the token's issuer badge). */
+  subline?: ReactNode;
 };
 
 export const AssetRow = (props: AssetRowProps) => {
@@ -50,6 +53,7 @@ export const AssetRow = (props: AssetRowProps) => {
     onGetMneeClick,
     animate = false,
     decimals,
+    subline,
   } = props;
   const { theme } = useTheme();
   const isDisplaySat = isLock && balance < 0.0001;
@@ -81,6 +85,7 @@ export const AssetRow = (props: AssetRowProps) => {
           <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
             {isLock ? 'Next unlock' : 'Balance'}
           </span>
+          {subline}
         </div>
       </div>
 

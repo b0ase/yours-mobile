@@ -1,3 +1,4 @@
+import { IssuerBadge } from '../issuer/IssuerBadge';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Tag, X } from 'lucide-react';
@@ -123,6 +124,7 @@ export const SellSheet = ({
             <X size={18} color="#98A2B3" />
           </button>
         </div>
+        <IssuerBadge tokenId={target.tokenId} />
 
         <label className="flex flex-col gap-1">
           <span className="flex justify-between text-xs text-[#98A2B3]">
