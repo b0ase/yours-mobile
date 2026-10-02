@@ -90,20 +90,29 @@ else
   TEAM=${DEVELOPMENT_TEAM:-ZQ4NX9NJ89}
   VERSION=$(sed -nE 's/.*MARKETING_VERSION = ([^;]+);.*/\1/p' ios/App/App.xcodeproj/project.pbxproj | head -1)
   OVR=(PRODUCT_BUNDLE_IDENTIFIER="$APP_ID" BWALLET_DISPLAY_NAME="$NAME" BWALLET_CHANNEL="$CH" DEVELOPMENT_TEAM="$TEAM")
-  XB=(xcodebuild -project ios/App/App.xcodeproj -scheme App -allowProvisioningUpdates -quiet)
+  XB=(xcodebuild -project ios/App/App.xcodeproj -scheme App -allowProvisioningUpdates)
+  # Full xcodebuild output goes to a log; on failure print its error lines (-quiet can fail silently).
+  xb() {
+    local log=/tmp/bw-$CH-xcodebuild.log
+    if ! "${XB[@]}" "$@" "${OVR[@]}" >"$log" 2>&1; then
+      echo "    ✗ xcodebuild failed (full log: $log):" >&2
+      grep -E "error:|\*\* (BUILD|ARCHIVE) FAILED|Code ?Sign|provisioning" "$log" | grep -v DVTDeveloperAccount | head -12 >&2
+      return 1
+    fi
+  }
 
   if [[ -n ${INSTALL:-} ]]; then
     for SIM in $(xcrun simctl list devices booted | grep -oE '[0-9A-F-]{36}'); do
       echo "▸ iOS simulator $SIM"
-      "${XB[@]}" -configuration Debug -destination "id=$SIM" -derivedDataPath "/tmp/bw-$CH-sim" build "${OVR[@]}"
-      xcrun simctl install "$SIM" "/tmp/bw-$CH-sim/Build/Products/Debug-iphonesimulator/App.app"
-      xcrun simctl launch --terminate-running-process "$SIM" "$APP_ID" >/dev/null
+      xb -configuration Debug -destination "id=$SIM" -derivedDataPath "/tmp/bw-$CH-sim" build
+      retry "install on simulator $SIM" xcrun simctl install "$SIM" "/tmp/bw-$CH-sim/Build/Products/Debug-iphonesimulator/App.app"
+      retry "launch on simulator $SIM" xcrun simctl launch --terminate-running-process "$SIM" "$APP_ID"
     done
     xcrun devicectl list devices 2>/dev/null | awk '/available \(paired\)|connected/' \
       | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | while read -r DEV; do
       UDID=$(xcrun devicectl device info details --device "$DEV" 2>/dev/null | awk -F': ' '/udid/ {print $2; exit}')
       echo "▸ iPhone $DEV"
-      "${XB[@]}" -configuration Debug -destination "id=$UDID" -derivedDataPath "/tmp/bw-$CH-dev" build "${OVR[@]}"
+      xb -configuration Debug -destination "id=$UDID" -derivedDataPath "/tmp/bw-$CH-dev" build
       # A USB / Wi-Fi iPhone drops out now and then (locked, asleep, tunnel restarting): retry, and say why.
       retry "install on $DEV" xcrun devicectl device install app --device "$DEV" "/tmp/bw-$CH-dev/Build/Products/Debug-iphoneos/App.app"
       retry "launch on $DEV (unlock the iPhone)" xcrun devicectl device process launch --terminate-existing --device "$DEV" "$APP_ID" \
@@ -112,7 +121,7 @@ else
   else
     ARCHIVE="dist/bwallet-$VERSION-$CH.xcarchive"
     echo "▸ xcodebuild archive"
-    "${XB[@]}" -configuration Release -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" archive "${OVR[@]}"
+    xb -configuration Release -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" archive
     echo "built $ARCHIVE (export from Xcode › Organizer: App Store Connect for ios-store, Ad Hoc for ios-private)"
   fi
 fi
