@@ -116,7 +116,8 @@ const ORDER: Source[] = ['bchat', 'treechat', 'twetch', 'other'];
 
 export const SOURCES: { id: Source | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
-  ...ORDER.map((id) => ({ id, label: SOURCE_REGISTRY[id].label })),
+  // No "Other" chip: those posts still show under All.
+  ...ORDER.filter((id) => id !== 'other').map((id) => ({ id, label: SOURCE_REGISTRY[id].label })),
 ];
 
 /** Pretty names for "other" apps we know by name. */
@@ -127,7 +128,8 @@ const APP_LABELS: Record<string, string> = {
 };
 
 /** A persisted source-filter value, with the pre-rename 'bwallet' id read as 'bchat'. */
-export const migrateSourceId = (v: string | null): string | null => (v === 'bwallet' ? 'bchat' : v);
+export const migrateSourceId = (v: string | null): string | null =>
+  v === 'bwallet' ? 'bchat' : v === 'other' ? 'all' : v;
 
 export function sourceOf(app: string): Source {
   const a = app.trim().toLowerCase();
