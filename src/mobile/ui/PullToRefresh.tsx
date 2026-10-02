@@ -172,7 +172,6 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
               style={{
                 width: 20,
                 height: 20,
-                transform: reduce ? undefined : `rotate(${progress * 270}deg)`,
                 opacity: shouldRefresh(pull) || refreshing ? 1 : 0.7,
               }}
             />
