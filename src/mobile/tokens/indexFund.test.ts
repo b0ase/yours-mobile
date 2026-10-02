@@ -149,3 +149,16 @@ test('withFavorite puts the new token first, deduped', () => {
   expect(withFavorite(undefined, `${'a'.repeat(64)}.0`)).toEqual([ID]);
   expect(withFavorite(['x', ID], ID)).toEqual([ID, 'x']);
 });
+
+describe('min_funding (indexer change, 2 Oct 2026)', () => {
+  test('parsed when present, 0 when absent', () => {
+    const FEE2 = '1MCFoVgirBpx8ogF6Cbkkr1nrFxgdEaPeZ';
+    expect(parseOverlayStatus({ status: { fee_address: FEE2, min_funding: 10_000_000 } })?.minFunding).toBe(10_000_000);
+    expect(parseOverlayStatus({ status: { fee_address: FEE2 } })?.minFunding).toBe(0);
+  });
+  test('the payment tops the balance up to the minimum ($TESTY: balance 2,000, minimum 10,000,000)', () => {
+    expect(fundAmount({ feePerOutput: 1000, balance: 2000, minFunding: 10_000_000 })).toBe(9_998_000);
+    expect(fundAmount({ feePerOutput: 1000, balance: -47_000, minFunding: 10_000_000 })).toBe(10_000_000);
+    expect(fundAmount({ feePerOutput: 1000 })).toBe(3000);
+  });
+});

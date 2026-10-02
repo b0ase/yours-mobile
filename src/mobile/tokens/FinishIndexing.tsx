@@ -59,7 +59,8 @@ export const FinishIndexing = ({
 
   // Already paid from this device and waiting for the indexer: don't offer to pay twice.
   const paid = getFundRecord(tokenId);
-  if (status === undefined || (status && !needsIndexFunding(status)) || (paid && !msg)) return null;
+  // Unknown (indexer slow or hasn't seen the token): say nothing rather than ask for money.
+  if (!status || !needsIndexFunding(status) || (paid && !msg)) return null;
   const sats = status ? fundAmount(status) : null;
 
   const fund = async (oneTap = false) => {
@@ -91,13 +92,15 @@ export const FinishIndexing = ({
         </span>
       </div>
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
-        ${ticker} is in your wallet, but the 1Sat indexer won't list it (in other wallets, the Market or its room) until
-        its indexing is paid{sats ? `: ${money(sats, exchangeRate)}, once` : ''}.
+        ${ticker} is in your wallet, but the 1Sat indexer won't list it (in other wallets, the Market or its room)
+        until its indexing balance is topped up
+        {status.minFunding ? ` to ${money(status.minFunding, exchangeRate)}` : sats ? `: ${money(sats, exchangeRate)}` : ''}. Each
+        transfer is then charged from that balance.
       </p>
       {!msg || !getFundRecord(tokenId) ? (
         <button
           type="button"
-          disabled={busy || !status}
+          disabled={busy}
           onClick={() => {
             // One tap under the threshold (total incl. network fee); otherwise the confirm sheet.
             if (sats && indexAutoPay.take(sats + INDEX_FUND_NETWORK_SATS, exchangeRate).ok) void fund(true);
@@ -106,7 +109,7 @@ export const FinishIndexing = ({
           className="h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
           style={{ background: '#FFD24D', color: '#000' }}
         >
-          {status ? `Pay ${money(sats ?? 0, exchangeRate)} to index $${ticker}` : 'Indexer has not seen it yet'}
+          {`Pay ${money(sats ?? 0, exchangeRate)} to index $${ticker}`}
         </button>
       ) : null}
       {msg && (

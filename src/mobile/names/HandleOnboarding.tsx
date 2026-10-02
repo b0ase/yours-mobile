@@ -6,9 +6,6 @@ import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 import { recoverPersonalLink } from './claimPersonal';
-import { FinishIndexing } from '../tokens/FinishIndexing';
-import { getFundRecord } from '../tokens/indexFund';
-import { SectionBoundary } from '../wallet/SectionBoundary';
 import {
   clearPendingPrompt,
   dismissCard,
@@ -88,16 +85,7 @@ export const HandleOnboarding = () => {
   };
 
   if (open) return <HandleFlow onClose={close} />;
-  const link = hasRoom ? getPersonalLink(id) : null;
-  // Minted but never indexed (e.g. before bWallet paid indexing at mint): offer to finish it.
-  if (link && !getFundRecord(link.tokenId))
-    return (
-      <div className="w-[92%] mt-4">
-        <SectionBoundary name="Finish setting up">
-          <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} />
-        </SectionBoundary>
-      </div>
-    );
+  // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   if (!id || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;
   return (
     <div

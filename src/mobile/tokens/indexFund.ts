@@ -31,6 +31,11 @@ export type OverlayStatus = {
   feePerOutput: number;
   isActive: boolean;
   balance: number;
+  /**
+   * Balance the indexer wants before it lists the token (`min_funding`, 10,000,000 sats = 0.1 BSV
+   * when this was added on 2 Oct 2026; earlier a few thousand sats activated a token). 0 = not sent.
+   */
+  minFunding: number;
 };
 
 /** Pull the funding fields out of a 1sat-stack token details response (null = not known yet). */
@@ -43,15 +48,21 @@ export function parseOverlayStatus(details: unknown): OverlayStatus | null {
     feePerOutput: fpo,
     isActive: s.is_active === true,
     balance: typeof s.balance === 'number' ? s.balance : 0,
+    minFunding: typeof s.min_funding === 'number' && s.min_funding > 0 ? s.min_funding : 0,
   };
 }
 
 /** Does this token still need its indexing funded? Unknown status (not seen yet) = yes. */
 export const needsIndexFunding = (s: OverlayStatus | null) => !s || !s.isActive || s.balance < s.feePerOutput;
 
-/** Sats to send: at least the configured pre-fund, never less than one output's fee. */
-export const fundAmount = (s: Pick<OverlayStatus, 'feePerOutput'>, fund = INDEX_FUND_SATS) =>
-  Math.max(fund, s.feePerOutput);
+/**
+ * Sats to send: enough to bring the balance up to the indexer's minimum (when it sets one), and
+ * at least the configured pre-fund and one output's fee.
+ */
+export const fundAmount = (
+  s: Pick<OverlayStatus, 'feePerOutput'> & Partial<Pick<OverlayStatus, 'balance' | 'minFunding'>>,
+  fund = INDEX_FUND_SATS,
+) => Math.max(fund, s.feePerOutput, (s.minFunding ?? 0) - Math.max(0, s.balance ?? 0));
 
 const normId = (id: string) => id.replace('.', '_');
 
