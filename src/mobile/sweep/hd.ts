@@ -41,7 +41,11 @@ export function phraseProblem(phrase: string): string | null {
 
 /** `m/44'/145'/0'`, also accepting h for hardened and a missing leading m/. */
 export function normalizePath(path: string): string | null {
-  const p = path.trim().replace(/[hH]/g, "'").replace(/^m?\/?/, 'm/').replace(/\/+$/, '');
+  const p = path
+    .trim()
+    .replace(/[hH]/g, "'")
+    .replace(/^m?\/?/, 'm/')
+    .replace(/\/+$/, '');
   return /^m(\/\d+'?)+$/.test(p) ? p : null;
 }
 

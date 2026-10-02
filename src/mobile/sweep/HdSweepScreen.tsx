@@ -92,7 +92,9 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
   const { apiContext } = useServiceContext();
   const [phrase, setPhrase] = useState('');
   const [passphrase, setPassphrase] = useState('');
-  const [presetId, setPresetId] = useState(PRESETS.some((p) => p.id === initialPreset) ? initialPreset! : PRESETS[0].id);
+  const [presetId, setPresetId] = useState(
+    PRESETS.some((p) => p.id === initialPreset) ? initialPreset! : PRESETS[0].id,
+  );
   const [customPath, setCustomPath] = useState('');
   const [step, setStep] = useState<'enter' | 'scanning' | 'review' | 'sweeping' | 'done'>('enter');
   const [progress, setProgress] = useState('');
@@ -140,7 +142,10 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
             const key = accountKey(rec.phrase, pass, path);
             const old = accountKeyNonCompliant(rec.phrase, pass, path);
             const differs = old && addressAt(old, path, 0, 0).address !== addressAt(key, path, 0, 0).address;
-            return [{ label: path, path, key }, ...(differs ? [{ label: `${path} (older SimplyCash)`, path, key: old! }] : [])];
+            return [
+              { label: path, path, key },
+              ...(differs ? [{ label: `${path} (older SimplyCash)`, path, key: old! }] : []),
+            ];
           });
       for (const { label, path, key: account } of accounts) {
         if (cancelled.current) return;
@@ -171,9 +176,7 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
         setStep('review');
         return;
       }
-      setError(
-        'No used addresses on any of the usual paths. Check the phrase and passphrase, or try a custom path.',
-      );
+      setError('No used addresses on any of the usual paths. Check the phrase and passphrase, or try a custom path.');
       setStep('enter');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The scan failed. Try again.');
@@ -186,7 +189,8 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
     setStep('sweeping');
     const { assets, keyFor } = found;
     const out: Result[] = [];
-    const toInputs = (os: IndexedOutput[]) => os.map((o) => ({ outpoint: o.outpoint, satoshis: o.satoshis ?? 0, score: 0 }));
+    const toInputs = (os: IndexedOutput[]) =>
+      os.map((o) => ({ outpoint: o.outpoint, satoshis: o.satoshis ?? 0, score: 0 }));
     const keysFor = (inputs: { outpoint: string }[]) => inputs.map((i) => PrivateKey.fromWif(keyFor.get(i.outpoint)!));
 
     if (assets.funding.length) {
@@ -230,8 +234,7 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
   };
 
   const a = found?.assets;
-  const nothing =
-    !!a && !a.funding.length && !a.ordinals.length && !a.bsv21Tokens.length;
+  const nothing = !!a && !a.funding.length && !a.ordinals.length && !a.bsv21Tokens.length;
   const skipped = a ? a.opnsNames.length + a.bsv20Tokens.length + a.locked.length : 0;
 
   return createPortal(
@@ -249,8 +252,8 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
         {step === 'enter' && (
           <>
             <p className="text-xs" style={{ color: MUTED }}>
-              Move everything from an old wallet (SimplyCash and other 12 or 24-word wallets) into this bWallet
-              account. The phrase stays on this phone and is forgotten when you leave this screen.
+              Move everything from an old wallet (SimplyCash and other 12 or 24-word wallets) into this bWallet account.
+              The phrase stays on this phone and is forgotten when you leave this screen.
             </p>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-white">Recovery phrase</span>
@@ -309,7 +312,11 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
                 style={{ background: PANEL, border: `1px solid ${LINE}` }}
               />
             </label>
-            {error && <p className="text-xs" style={{ color: RED }}>{error}</p>}
+            {error && (
+              <p className="text-xs" style={{ color: RED }}>
+                {error}
+              </p>
+            )}
             <button
               onClick={() => void scan()}
               disabled={!phrase.trim()}
@@ -357,9 +364,7 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
               )}
             </div>
             {nothing ? (
-              <p className="text-sm text-white">
-                This wallet was used, but there is nothing left in it to sweep.
-              </p>
+              <p className="text-sm text-white">This wallet was used, but there is nothing left in it to sweep.</p>
             ) : (
               <button
                 onClick={() => void sweep()}

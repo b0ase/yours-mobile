@@ -52,7 +52,11 @@ describe('HD sweep', () => {
       path: "m/44'/145'/0'",
       passphrase: 'my:secret',
     });
-    expect(parseRecovery(`  ${PHRASE.toUpperCase()} `)).toEqual({ phrase: PHRASE, path: undefined, passphrase: undefined });
+    expect(parseRecovery(`  ${PHRASE.toUpperCase()} `)).toEqual({
+      phrase: PHRASE,
+      path: undefined,
+      passphrase: undefined,
+    });
     expect(parseRecovery('xprv9s21ZrQH143K').xprv).toBe('xprv9s21ZrQH143K');
   });
 
@@ -63,7 +67,9 @@ describe('HD sweep', () => {
     }
     // This phrase's keys have no leading zero byte, so both ways agree.
     const old = accountKeyNonCompliant(PHRASE, '', "m/44'/145'/0'")!;
-    expect(addressAt(old, 'x', 0, 0).address).toBe(addressAt(accountKey(PHRASE, '', "m/44'/145'/0'"), 'x', 0, 0).address);
+    expect(addressAt(old, 'x', 0, 0).address).toBe(
+      addressAt(accountKey(PHRASE, '', "m/44'/145'/0'"), 'x', 0, 0).address,
+    );
     expect(accountKeyNonCompliant(PHRASE, '', "m/44'/0/0'")).toBeNull();
   });
 

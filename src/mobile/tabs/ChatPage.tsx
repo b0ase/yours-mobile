@@ -520,44 +520,44 @@ const Conversation = ({
           This room is closed. You can read it, but no one can post.
         </div>
       ) : (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          send(draft);
-        }}
-        className="flex items-end gap-2 px-3 pt-2 shrink-0"
-        style={{
-          paddingBottom: 8,
-          background: '#0b0b0b',
-          borderTop: `1px solid ${LINE}`,
-        }}
-      >
-        {/* v2 hook: attachment / voice note / video note buttons go here (rooms/[ticker]/media). */}
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !isNative) {
-              e.preventDefault();
-              send(draft);
-            }
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            send(draft);
           }}
-          rows={1}
-          maxLength={4000}
-          placeholder={online ? 'Message' : 'Offline'}
-          className="flex-1 resize-none rounded-2xl px-4 py-[9px] text-[15px] text-white outline-none max-h-32"
-          style={{ background: PANEL, border: `1px solid ${LINE}` }}
-        />
-        <button
-          type="submit"
-          disabled={!draft.trim()}
-          aria-label="Send"
-          className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-          style={{ background: GOLD }}
+          className="flex items-end gap-2 px-3 pt-2 shrink-0"
+          style={{
+            paddingBottom: 8,
+            background: '#0b0b0b',
+            borderTop: `1px solid ${LINE}`,
+          }}
         >
-          <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
-        </button>
-      </form>
+          {/* v2 hook: attachment / voice note / video note buttons go here (rooms/[ticker]/media). */}
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !isNative) {
+                e.preventDefault();
+                send(draft);
+              }
+            }}
+            rows={1}
+            maxLength={4000}
+            placeholder={online ? 'Message' : 'Offline'}
+            className="flex-1 resize-none rounded-2xl px-4 py-[9px] text-[15px] text-white outline-none max-h-32"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          />
+          <button
+            type="submit"
+            disabled={!draft.trim()}
+            aria-label="Send"
+            className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
+            style={{ background: GOLD }}
+          >
+            <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
+          </button>
+        </form>
       )}
     </div>,
     document.body,
@@ -1397,10 +1397,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
   const q = query.trim().toLowerCase().replace(/^\$/, '');
   const myOpen = useMemo(
-    () =>
-      (rooms ?? [])
-        .filter(isOpenRoom)
-        .filter((r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q)),
+    () => (rooms ?? []).filter(isOpenRoom).filter((r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q)),
     [rooms, q],
   );
   const browse = useMemo(
@@ -1415,7 +1412,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    return list.sort((a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room));
+    return list.sort(
+      (a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room),
+    );
   }, [myOpen, tokenMine]);
 
   const openOpenRoom = (room: ChatRoom) => {
@@ -1509,88 +1508,88 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
   /** One token room row (unchanged from the token-only list). */
   const renderTokenRow = ({ e, invite }: (typeof shown)[number]) => {
-            const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
-            const personal = personalOf(e);
-            if (invite === 'invite' && personal && ROOMS) {
-              return (
-                <li key={e.key} className="flex items-center gap-3 px-4 py-[10px]">
-                  <Avatar title={e.gate.symbol} />
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{inviteLine(personal)}</div>
-                    <div className={`text-[12px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-                      {title} · {e.members ?? 0} holder{e.members === 1 ? '' : 's'}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => acceptInvite(e)}
-                    disabled={!!opening}
-                    className="rounded-xl px-3 py-1 text-xs font-bold"
-                    style={{ background: GOLD, color: '#1a1300' }}
-                  >
-                    Join
-                  </button>
-                  <button
-                    onClick={() => ignoreInvite(e.key)}
-                    className="rounded-xl px-3 py-1 text-xs font-bold text-white"
-                    style={{ background: PANEL }}
-                  >
-                    Ignore
-                  </button>
-                </li>
-              );
-            }
-            const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
-            const sub = !ROOMS
-              ? STORE_ROOM_NOTE
-              : e.status === 'start'
-                ? 'No room yet — tap to start it'
-                : e.status === 'join'
-                  ? `${e.members ?? 0} holder${e.members === 1 ? '' : 's'} · tap to join`
+    const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
+    const personal = personalOf(e);
+    if (invite === 'invite' && personal && ROOMS) {
+      return (
+        <li key={e.key} className="flex items-center gap-3 px-4 py-[10px]">
+          <Avatar title={e.gate.symbol} />
+          <div className="flex-1 min-w-0">
+            <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{inviteLine(personal)}</div>
+            <div className={`text-[12px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+              {title} · {e.members ?? 0} holder{e.members === 1 ? '' : 's'}
+            </div>
+          </div>
+          <button
+            onClick={() => acceptInvite(e)}
+            disabled={!!opening}
+            className="rounded-xl px-3 py-1 text-xs font-bold"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
+            Join
+          </button>
+          <button
+            onClick={() => ignoreInvite(e.key)}
+            className="rounded-xl px-3 py-1 text-xs font-bold text-white"
+            style={{ background: PANEL }}
+          >
+            Ignore
+          </button>
+        </li>
+      );
+    }
+    const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
+    const sub = !ROOMS
+      ? STORE_ROOM_NOTE
+      : e.status === 'start'
+        ? 'No room yet — tap to start it'
+        : e.status === 'join'
+          ? `${e.members ?? 0} holder${e.members === 1 ? '' : 's'} · tap to join`
+          : e.room
+            ? previewText(e.room, handle || '')
+            : '';
+    return (
+      <li key={e.key}>
+        <button
+          onClick={() => void openEntry(e)}
+          disabled={!!opening || !ROOMS}
+          className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+        >
+          <Avatar title={e.gate.symbol} />
+          <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+            <div className="flex items-baseline gap-2">
+              <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
+              <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
+                {opening === e.key
+                  ? 'opening…'
                   : e.room
-                    ? previewText(e.room, handle || '')
-                    : '';
-            return (
-              <li key={e.key}>
-                <button
-                  onClick={() => void openEntry(e)}
-                  disabled={!!opening || !ROOMS}
-                  className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+                    ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
+                    : ''}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-[2px]">
+              <span
+                className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
+                style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
+              >
+                <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
+              </span>
+              <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                {sub}
+              </span>
+              {unread > 0 && (
+                <span
+                  className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
+                  style={{ background: GOLD, color: '#1a1300' }}
                 >
-                  <Avatar title={e.gate.symbol} />
-                  <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
-                    <div className="flex items-baseline gap-2">
-                      <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
-                      <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-                        {opening === e.key
-                          ? 'opening…'
-                          : e.room
-                            ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
-                            : ''}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-[2px]">
-                      <span
-                        className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
-                        style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
-                      >
-                        <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
-                      </span>
-                      <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-                        {sub}
-                      </span>
-                      {unread > 0 && (
-                        <span
-                          className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
-                          style={{ background: GOLD, color: '#1a1300' }}
-                        >
-                          {unread > 99 ? '99+' : unread}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              </li>
-            );
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              )}
+            </div>
+          </div>
+        </button>
+      </li>
+    );
   };
 
   return (
@@ -1709,12 +1708,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             <ul className="w-full">
               {yours.map((y) =>
                 y.kind === 'open' ? (
-                  <OpenRoomRow
-                    key={y.room.ticker}
-                    room={y.room}
-                    me={handle}
-                    onOpen={() => openOpenRoom(y.room)}
-                  />
+                  <OpenRoomRow key={y.room.ticker} room={y.room} me={handle} onOpen={() => openOpenRoom(y.room)} />
                 ) : (
                   renderTokenRow(y.item)
                 ),

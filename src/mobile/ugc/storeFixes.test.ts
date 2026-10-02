@@ -142,7 +142,9 @@ describe('account deletion', () => {
     const wallet = new ProtoWallet(PrivateKey.fromRandom());
     const body = await signRequest(wallet, 'delete', { confirm: 'DELETE' });
     expect(await server.verifySigned(body, 'delete')).toBeNull();
-    expect(await server.verifySigned({ ...body, fields: { confirm: 'DELETE', x: '1' } }, 'delete')).toBe('Bad signature');
+    expect(await server.verifySigned({ ...body, fields: { confirm: 'DELETE', x: '1' } }, 'delete')).toBe(
+      'Bad signature',
+    );
     expect(typeof deletePaymail).toBe('function');
   });
   test('a bit-sign deletion signature verifies against the identity key', async () => {

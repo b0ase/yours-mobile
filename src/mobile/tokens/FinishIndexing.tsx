@@ -92,10 +92,14 @@ export const FinishIndexing = ({
         </span>
       </div>
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
-        ${ticker} is in your wallet, but the 1Sat indexer won't list it (in other wallets, the Market or its room)
-        until its indexing balance is topped up
-        {status.minFunding ? ` to ${money(status.minFunding, exchangeRate)}` : sats ? `: ${money(sats, exchangeRate)}` : ''}. Each
-        transfer is then charged from that balance.
+        ${ticker} is in your wallet, but the 1Sat indexer won't list it (in other wallets, the Market or its room) until
+        its indexing balance is topped up
+        {status.minFunding
+          ? ` to ${money(status.minFunding, exchangeRate)}`
+          : sats
+            ? `: ${money(sats, exchangeRate)}`
+            : ''}
+        . Each transfer is then charged from that balance.
       </p>
       {!msg || !getFundRecord(tokenId) ? (
         <button

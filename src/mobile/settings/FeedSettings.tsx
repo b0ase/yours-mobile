@@ -1,6 +1,19 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Ban, Bell, Bookmark, Download, FileText, Mail, Newspaper, PlayCircle, Sparkles, Trash2, Zap } from 'lucide-react';
+import {
+  ArrowLeft,
+  Ban,
+  Bell,
+  Bookmark,
+  Download,
+  FileText,
+  Mail,
+  Newspaper,
+  PlayCircle,
+  Sparkles,
+  Trash2,
+  Zap,
+} from 'lucide-react';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';

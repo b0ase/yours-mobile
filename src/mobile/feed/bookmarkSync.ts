@@ -48,9 +48,7 @@ export const unsynced = (local: FeedPost[], server: FeedPost[]): FeedPost[] => {
 export const applyOps = (list: FeedPost[], ops: BookmarkOp[]): FeedPost[] =>
   ops.reduce(
     (acc, o) =>
-      o.op === 'add'
-        ? [o.post, ...acc.filter((p) => p.txid !== o.post.txid)]
-        : acc.filter((p) => p.txid !== o.txid),
+      o.op === 'add' ? [o.post, ...acc.filter((p) => p.txid !== o.post.txid)] : acc.filter((p) => p.txid !== o.txid),
     list,
   );
 

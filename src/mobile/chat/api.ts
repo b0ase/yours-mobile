@@ -525,7 +525,6 @@ export class BchatClient {
       ...extra,
     });
   }
-
 }
 
 // ── Session persistence (per wallet identity) ──

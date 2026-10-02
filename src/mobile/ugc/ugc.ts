@@ -64,7 +64,15 @@ export const TERMS_POINTS = [
 
 // ── Reports ──
 
-export type ReportKind = 'feed_post' | 'market_item' | 'dm_message' | 'room_message' | 'room' | 'user' | 'ai_response' | 'bapp';
+export type ReportKind =
+  | 'feed_post'
+  | 'market_item'
+  | 'dm_message'
+  | 'room_message'
+  | 'room'
+  | 'user'
+  | 'ai_response'
+  | 'bapp';
 export const REPORT_REASONS: { id: string; label: string }[] = [
   { id: 'harassment', label: 'Harassment or bullying' },
   { id: 'hate', label: 'Hate or discrimination' },
@@ -99,7 +107,12 @@ export const sendReport = async (http: Http, r: Report, url = REPORT_URL): Promi
   let status = 0;
   let data: unknown = null;
   try {
-    ({ status, data } = await http({ method: 'POST', url, headers: { Accept: 'application/json' }, body: reportBody(r) }));
+    ({ status, data } = await http({
+      method: 'POST',
+      url,
+      headers: { Accept: 'application/json' },
+      body: reportBody(r),
+    }));
   } catch {
     throw new Error(`Couldn't send the report. Check your connection, or email ${SUPPORT_EMAIL}.`);
   }

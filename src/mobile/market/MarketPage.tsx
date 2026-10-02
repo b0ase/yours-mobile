@@ -762,14 +762,14 @@ const MarketPage = () => {
               </div>
             </div>
             {TRADING && (
-            <button
-              disabled={!l.buyable}
-              onClick={() => setPending({ room, listing: l })}
-              className="rounded-lg px-3 py-1.5 text-xs font-bold"
-              style={{ background: l.buyable ? '#A1FF8B' : '#2b2f36', color: l.buyable ? '#010101' : '#667085' }}
-            >
-              {l.buyable ? (ticketPage ? 'Buy ticket' : 'Buy') : 'Unavailable'}
-            </button>
+              <button
+                disabled={!l.buyable}
+                onClick={() => setPending({ room, listing: l })}
+                className="rounded-lg px-3 py-1.5 text-xs font-bold"
+                style={{ background: l.buyable ? '#A1FF8B' : '#2b2f36', color: l.buyable ? '#010101' : '#667085' }}
+              >
+                {l.buyable ? (ticketPage ? 'Buy ticket' : 'Buy') : 'Unavailable'}
+              </button>
             )}
             {room.ref.kind === 'coll' && (
               <button
