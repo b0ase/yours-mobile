@@ -25,6 +25,19 @@ case "$CH" in
 esac
 
 restore() { pnpm build:mobile >/dev/null && pnpm exec cap sync >/dev/null; }
+
+# retry "<what>" cmd…: up to 3 tries, 5 s apart; on the last failure print the tool's own error.
+retry() {
+  local what=$1 out
+  shift
+  for n in 1 2 3; do
+    if out=$("$@" 2>&1); then return 0; fi
+    [[ $n -lt 3 ]] && sleep 5
+  done
+  echo "    ✗ $what failed:" >&2
+  echo "$out" | grep -iE "error|fail|locked|unable|not" | head -5 >&2
+  return 1
+}
 trap restore EXIT
 
 echo "▸ web build ($CH)"
@@ -91,8 +104,10 @@ else
       UDID=$(xcrun devicectl device info details --device "$DEV" 2>/dev/null | awk -F': ' '/udid/ {print $2; exit}')
       echo "▸ iPhone $DEV"
       "${XB[@]}" -configuration Debug -destination "id=$UDID" -derivedDataPath "/tmp/bw-$CH-dev" build "${OVR[@]}"
-      xcrun devicectl device install app --device "$DEV" "/tmp/bw-$CH-dev/Build/Products/Debug-iphoneos/App.app" >/dev/null
-      xcrun devicectl device process launch --terminate-existing --device "$DEV" "$APP_ID" >/dev/null
+      # A USB / Wi-Fi iPhone drops out now and then (locked, asleep, tunnel restarting): retry, and say why.
+      retry "install on $DEV" xcrun devicectl device install app --device "$DEV" "/tmp/bw-$CH-dev/Build/Products/Debug-iphoneos/App.app"
+      retry "launch on $DEV (unlock the iPhone)" xcrun devicectl device process launch --terminate-existing --device "$DEV" "$APP_ID" \
+        || echo "    installed; open it on the phone"
     done
   else
     ARCHIVE="dist/bwallet-$VERSION-$CH.xcarchive"

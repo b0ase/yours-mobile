@@ -9,6 +9,8 @@ cd "$(dirname "$0")/.."
 for CH in ${CHANNELS:-android-direct ios-private}; do
   [[ $CH == android-* && -n ${SKIP_ANDROID:-} ]] && continue
   [[ $CH == ios-* && -n ${SKIP_IOS:-} ]] && continue
-  INSTALL=1 bash scripts/channel-build.sh "$CH" || echo "✗ $CH failed"
+  LOG=/tmp/run-all-$CH.log
+  INSTALL=1 bash scripts/channel-build.sh "$CH" 2>&1 | tee "$LOG"
+  [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "✗ $CH failed (full log: $LOG):"; grep -iE "error|✗|fail" "$LOG" | tail -8; }
 done
 echo "✓ done"
