@@ -260,7 +260,7 @@ All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
 
 - **b agent**: own-key mode only. The mode picker and daily limit are hidden and the note reads "Use your own AI
   provider key". The paid endpoints are never called and are not in the bundle.
-- **No paying bCorp**: Credits (tab and row) are hidden; the Mint, Market and ticket-resale fee addresses are
+- **No paying bCorp**: Credits are shelved in every build (2 Oct 2026; tab, row and Settings note gone); the Mint, Market and ticket-resale fee addresses are
   blank; the personal token and room are hidden. Token minting stays (no bCorp fee), with the third-party
   indexing fee. The free paymail is kept. No "available on the web" text is shown (hidden everywhere, see section 1).
 - **Token-gated rooms**: Wallet › Tickets is hidden; Chat lists token rooms but they can't be opened,
