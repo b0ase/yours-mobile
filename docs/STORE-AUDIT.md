@@ -282,7 +282,7 @@ build, then restores the default build in `android/` and `ios/` (`5734919`).
 ## Fixed on `feat/store-fixes` (2 Oct 2026)
 
 Server side is bit-sign PR `feat/store-fixes` (migration `migrations/20261002_store_safety.sql`, applied by hand).
-Contact everywhere: info@bitcoincorporation.website.
+Contact everywhere: bitcoincorp11@gmail.com.
 
 - **Account deletion (section 7).** Settings › Account & safety › Delete account (`src/mobile/account/`). It lists what is
   deleted and what cannot be (on-chain data; KYC, signed agreements and registers kept by law), asks for the $handle or

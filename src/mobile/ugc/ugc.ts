@@ -10,7 +10,7 @@
  */
 import { BCHAT_ORIGIN, type Http } from '../chat/api';
 
-export const SUPPORT_EMAIL = 'info@bitcoincorporation.website';
+export const SUPPORT_EMAIL = 'bitcoincorp11@gmail.com';
 export const TERMS_URL = `${BCHAT_ORIGIN}/terms#conduct`;
 export const DELETE_ACCOUNT_URL = `${BCHAT_ORIGIN}/delete-account`;
 export const REPORT_URL = `${BCHAT_ORIGIN}/api/bitsign/report`;

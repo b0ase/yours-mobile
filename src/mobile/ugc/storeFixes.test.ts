@@ -59,7 +59,7 @@ describe('terms (Apple 1.2)', () => {
     expect(termsAccepted()).toBe(true);
   });
   test('the support contact is the owner’s address', () => {
-    expect(SUPPORT_EMAIL).toBe('info@bitcoincorporation.website');
+    expect(SUPPORT_EMAIL).toBe('bitcoincorp11@gmail.com');
   });
 });
 
