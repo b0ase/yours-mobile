@@ -1,6 +1,8 @@
 import { bsv21FieldsFromOutput, deployBsv21Mint, type OneSatContext } from '@1sat/actions';
 import { BSV21_BASKET } from '@1sat/types';
 import { isNative } from '../native';
+import { withIssuerSignature } from '../issuer/issuerSign';
+import { registerIssuer } from '../issuer/issuerVerify';
 import { fundAfterDeploy, indexCostSats } from '../tokens/indexFund';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
@@ -33,8 +35,8 @@ import {
  * retries (`retryPersonalRoom`) until it goes through.
  */
 
-// deploy+mint inscription (~250 B) + MAP (~100 B) + inputs/change at ~100 sat/kB.
-export const PERSONAL_NETWORK_FEE_SATS = 80;
+// deploy+mint inscription (~250 B) + MAP (~100 B) + issuer MAP+AIP (~300 B) + inputs/change at ~100 sat/kB.
+export const PERSONAL_NETWORK_FEE_SATS = 110;
 /** Indexing: the creator pre-funds the token's 1sat-stack fee address at mint (tokens/indexFund.ts). */
 export const PERSONAL_INDEX_SATS = indexCostSats();
 /** Everything the confirm sheet shows for the token + room. */
@@ -49,13 +51,14 @@ export async function deployPersonalToken(
   const bad = validateSupply(input.supply);
   if (bad) throw new Error(bad);
   const supply = cleanSupply(input.supply);
-  const res = await deployBsv21Mint.execute(withPersonalMap(ctx, input.name, ticker), {
+  const res = await deployBsv21Mint.execute(withIssuerSignature(withPersonalMap(ctx, input.name, ticker), 'bsv21'), {
     symbol: ticker,
     amount: supply,
     decimals: PERSONAL_DECIMALS,
     icon: input.icon || BWALLET_MARK_ICON,
   });
   if (res.error || !res.tokenId) throw new Error(res.error || 'Token deploy failed');
+  void registerIssuer(res.tokenId);
   const link: PersonalLink = {
     name: personalKey(input.name),
     tokenId: res.tokenId,

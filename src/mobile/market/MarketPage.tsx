@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
+import { IssuerBadge, SharedTickerNote } from '../issuer/IssuerBadge';
+import { duplicateTickers, sharedTickerWarning } from '../issuer/issuerVerify';
 import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personalToken';
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
@@ -494,6 +496,17 @@ const MarketPage = () => {
     [rooms, directory, safetyRev],
   );
   const visibleTokens = tokenRows.slice(0, shown);
+  // Tickers are not unique: flag every ticker more than one token id uses (issuer check on those rows).
+  const dupTickers = useMemo(
+    () =>
+      duplicateTickers(
+        [...tokenRows, ...(rooms ?? [])]
+          .filter((r) => r.ref.kind === 'bsv21')
+          .map((r) => ({ ticker: r.title.replace(/^\$/, ''), tokenId: r.ref.id })),
+      ),
+    [tokenRows, rooms],
+  );
+  const dupFor = (title: string) => dupTickers.get(title.replace(/^\$/, '').toUpperCase());
   const personalLinks = knownPersonal();
   const personalRow = (r: Pick<HotRoom, 'ref' | 'title' | 'icon'>, i: number) => (
     <button
@@ -579,6 +592,7 @@ const MarketPage = () => {
                 {r.heat > 0 && <Flame size={11} className="inline ml-1" style={{ color: '#A1FF8B' }} />}
               </div>
               <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{['Token', ...stats].join(' · ')}</div>
+              {dupFor(r.title) && <IssuerBadge tokenId={r.ref.id} compact />}
             </div>
             <div className="text-right shrink-0">
               <div className="text-[10px] text-[#667085]">Floor</div>
@@ -644,11 +658,17 @@ const MarketPage = () => {
       >
         <ArrowLeft size={14} /> {ticketPage ? 'Tickets' : 'Trending'}
       </button>
+      {room.ref.kind === 'bsv21' && (
+        <SharedTickerNote
+          text={sharedTickerWarning(room.title.replace(/^\$/, ''), dupFor(room.title) ?? [room.ref.id])}
+        />
+      )}
       <div className="flex items-center gap-3">
         <Art outpoint={room.icon} kind={room.ref.kind} collectionId={room.ref.id} />
         <div className="min-w-0">
           <div className="text-base font-bold text-white">{room.title}</div>
           <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{room.subtitle}</div>
+          {room.ref.kind === 'bsv21' && <IssuerBadge tokenId={room.ref.id} />}
         </div>
         {ticketPage ? (
           ticketPage.holder && (

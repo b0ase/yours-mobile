@@ -1,3 +1,4 @@
+import { IssuerBadge } from '../issuer/IssuerBadge';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
@@ -324,6 +325,7 @@ const Conversation = ({
                 ? `${entry.gate.key.startsWith('coll:') ? entry.gate.symbol : `$${entry.gate.symbol}`} · ${members} holder${members === 1 ? '' : 's'} · you hold ${amountLabel(entry.holding.amountRaw, entry.gate)}`
                 : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
           </div>
+          {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
         </div>
         {onBans && (
           <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Bans">

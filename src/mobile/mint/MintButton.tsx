@@ -10,6 +10,8 @@ import { getOutputName } from '../../utils/format';
 import { TicketMint } from '../tickets/TicketMint';
 import { TokenMint } from '../tokens/TokenMint';
 import { TOKEN_COPY } from '../tokens/token';
+import { withIssuerSignature } from '../issuer/issuerSign';
+import { registerIssuer } from '../issuer/issuerVerify';
 import {
   ACCEPT,
   BLOCKED_MESSAGE,
@@ -176,8 +178,18 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
       const contentType = picked.file.type;
       const name = title.trim();
       let res: { txid?: string; error?: string };
+      // Issuer signature in the same tx; register each signed mint with bit-sign after broadcast.
+      let signedAt: number | null = null;
+      const signed = (ctx: typeof apiContext) =>
+        withIssuerSignature(ctx, 'ordinal', (r) => {
+          signedAt = r.index;
+        });
+      const register = (txid?: string) => {
+        if (txid && signedAt !== null) void registerIssuer(`${txid}_${signedAt}`);
+        signedAt = null;
+      };
       if (collection.kind === 'none') {
-        res = await inscribe.execute(withFeeOutput(apiContext, cost.feeSats), {
+        res = await inscribe.execute(signed(withFeeOutput(apiContext, cost.feeSats)), {
           base64Content,
           contentType,
           map: buildMap({ title, description, collection }),
@@ -185,7 +197,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
       } else {
         let collectionId = collection.kind === 'existing' ? collection.id : '';
         if (collection.kind === 'new') {
-          const c = await mintCollection.execute(apiContext, {
+          const c = await mintCollection.execute(signed(apiContext), {
             base64Content,
             contentType,
             name: collection.name.trim(),
@@ -194,9 +206,10 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             app: MINT_APP,
           });
           if (!c.txid || c.error) throw new Error(c.error || 'Collection mint failed');
+          register(c.txid);
           collectionId = collectionIdFrom(c.txid, c.collectionId);
         }
-        res = await mintCollectionItem.execute(withFeeOutput(apiContext, cost.feeSats), {
+        res = await mintCollectionItem.execute(signed(withFeeOutput(apiContext, cost.feeSats)), {
           base64Content,
           contentType,
           name,
@@ -205,6 +218,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         });
       }
       if (!res.txid || res.error) throw new Error(res.error || 'Mint failed');
+      register(res.txid);
       setTxid(res.txid);
       setConfirming(false);
       setStep('done');

@@ -1,3 +1,4 @@
+import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -166,6 +167,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                                   showPointer={true}
                                   icon={t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON}
                                   ticker={truncate(getTokenName(t), 10, 0)}
+                                  subline={<IssuerBadge tokenId={t.id} compact />}
                                   usdBalance={
                                     (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
                                     (exchangeRate / BSV_DECIMAL_CONVERSION) *
@@ -207,6 +209,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                           showPointer={true}
                           icon={b.icon ? resolveIcon(b.icon) : GENERIC_TOKEN_ICON}
                           ticker={getTokenName(b)}
+                          subline={<IssuerBadge tokenId={b.id} compact />}
                           usdBalance={
                             (priceData.find((p) => p.id === b.id)?.satPrice ?? 0) *
                             (exchangeRate / BSV_DECIMAL_CONVERSION) *

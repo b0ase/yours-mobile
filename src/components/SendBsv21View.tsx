@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag } from 'lucide-react';
 import { SellSheet } from '../mobile/sell/SellSheet';
 import { SELL_ENABLED } from '../mobile/sell/sell';
+import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
 
 export interface Token {
   isConfirmed: boolean;
@@ -287,6 +288,9 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
                   {truncate(token.info.id, 8, 6)}
                 </span>
               </motion.button>
+            </Show>
+            <Show when={!!token.info.id}>
+              <IssuerBadge tokenId={token.info.id} />
             </Show>
           </div>
 
