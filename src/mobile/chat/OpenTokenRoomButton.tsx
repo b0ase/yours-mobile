@@ -1,3 +1,4 @@
+import { tokenRoomsEnabled } from '../storeBuild';
 import { MessageCircle } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
@@ -22,7 +23,8 @@ export const OpenTokenRoomButton = ({
 }) => {
   const { handleSelect } = useBottomMenu();
   const key = id ? tokenKey(kind, id) : null;
-  if (!key) return null;
+  // Store build: token rooms don't open (storeBuild.ts).
+  if (!key || !tokenRoomsEnabled()) return null;
   return (
     <button
       type="button"

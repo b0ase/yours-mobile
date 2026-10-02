@@ -2,6 +2,7 @@ import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-reac
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
+import { paidFeaturesEnabled } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
@@ -49,7 +50,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
             window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
           }}
           isSelected={active === t.id}
-          badge={t.id === 'bsv' && pending ? String(pending) : undefined}
+          badge={t.id === 'bsv' && pending && paidFeaturesEnabled() ? String(pending) : undefined}
         />
       ))}
     </div>

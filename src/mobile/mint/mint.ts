@@ -1,4 +1,5 @@
 import validate from 'bitcoin-address-validation';
+import { bcorpFeeAddress } from '../storeBuild';
 import { P2PKH, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
 import { safety, type SafetyFilter } from '../market/safety';
@@ -23,7 +24,8 @@ export const MINT_FEE_RATE = 0.01;
 export const TX_OVERHEAD_BYTES = 900; // inputs, change, fee output + issuer signature (MAP + AIP, ~300 B)
 export const ACCEPT = 'image/*,video/*,audio/*';
 
-const configured = typeof __MINT_FEE_ADDRESS__ === 'string' ? __MINT_FEE_ADDRESS__.trim() : '';
+// Store build: no fee to bCorp (storeBuild.ts).
+const configured = bcorpFeeAddress(typeof __MINT_FEE_ADDRESS__ === 'string' ? __MINT_FEE_ADDRESS__.trim() : '');
 export const mintFeeAddress = (address = configured): string => (address && validate(address) ? address : '');
 
 export const isMintableType = (t: string) => /^(image|video|audio)\//i.test(t);

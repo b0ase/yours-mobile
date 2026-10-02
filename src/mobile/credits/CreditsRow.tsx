@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { paidFeaturesEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { sendBsv21 } from '@1sat/actions';
@@ -70,7 +71,10 @@ const Sheet = ({ title, onClose, children }: { title: string; onClose: () => voi
   );
 };
 
-export const CreditsRow = () => {
+/** Hidden in a store build (no paying bCorp in the app, storeBuild.ts). */
+export const CreditsRow = () => (paidFeaturesEnabled() ? <CreditsRowInner /> : null);
+
+const CreditsRowInner = () => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [info, setInfo] = useState<CreditsInfo | null>(null);

@@ -5,6 +5,9 @@
 # Keychain entry "yours-mobile-android-upload" and never written to disk.
 #
 #   bash scripts/android-release.sh      → dist/bcorp-wallet-<version>.apk/.aab + SHA256SUMS
+#
+# The APK (direct download) uses the default build; the AAB (Google Play) uses the store build
+# (VITE_STORE_BUILD=1, src/mobile/storeBuild.ts, docs/STORE-AUDIT.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}
@@ -13,7 +16,9 @@ YOURS_UPLOAD_PASSWORD=$(security find-generic-password -s yours-mobile-android-u
 export YOURS_UPLOAD_PASSWORD
 
 pnpm cap:sync >/dev/null
-(cd android && ./gradlew --quiet clean assembleRelease bundleRelease)
+(cd android && ./gradlew --quiet clean assembleRelease)
+pnpm cap:sync:store >/dev/null
+(cd android && ./gradlew --quiet bundleRelease)
 
 VERSION=$(sed -nE 's/.*versionName "([^"]+)".*/\1/p' android/app/build.gradle)
 mkdir -p dist

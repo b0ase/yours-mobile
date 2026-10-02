@@ -1,0 +1,47 @@
+/**
+ * Store build switch. `pnpm build:mobile:store` (VITE_STORE_BUILD=1) builds the variant shipped through
+ * the App Store / Google Play; the default build (direct download / APK) is unchanged.
+ *
+ * In a store build the wallet never asks the user to pay bCorp to unlock app features, and holding a
+ * token never unlocks app functionality (Apple 3.1.1 / 3.1.5, Google Play Payments policy). See
+ * docs/STORE-AUDIT.md. Peer-to-peer send / receive, tips and viewing NFTs stay on.
+ *
+ * Every gate is here so the list of what changes is in one place. Helpers take the flag as a
+ * parameter (default STORE_BUILD) so they are unit-tested both ways (storeBuild.test.ts).
+ * `import.meta.env.VITE_STORE_BUILD` is written literally so Vite inlines it and Rollup drops the
+ * dead branches (the paid b agent endpoints are not in the store bundle).
+ */
+export const STORE_BUILD: boolean = import.meta.env.VITE_STORE_BUILD === '1';
+
+/** b agent: own-key mode only in a store build (no pay-per-message to bCorp). */
+export const agentModeFor = <M extends string>(mode: M, store = STORE_BUILD): M | 'own' => (store ? 'own' : mode);
+
+/** Shown in Settings › b agent in place of the mode / daily-limit pickers. */
+export const STORE_AGENT_NOTE = 'Use your own AI provider key';
+
+/** Fee addresses that pay bCorp (Mint, Market, ticket resale): none in a store build. */
+export const bcorpFeeAddress = (address: string, store = STORE_BUILD): string => (store ? '' : address);
+
+/** Wallet tab switch: no Tickets (token-gated rooms) or Credits (prepaid bCorp credits) in a store build. */
+export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits'];
+export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(kinds: readonly T[], store = STORE_BUILD): T[] =>
+  store ? kinds.filter((k) => !STORE_HIDDEN_WALLET_KINDS.includes(k[0])) : [...kinds];
+
+/** Market Tokens sub-filters: no bApps (share offers) or Tickets (room access) in a store build. */
+export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['bapps', 'tickets'];
+export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(filters: readonly T[], store = STORE_BUILD): T[] =>
+  store ? filters.filter((f) => !STORE_HIDDEN_MARKET_FILTERS.includes(f[0])) : [...filters];
+
+/** Market buy / sell / list (OrdLock trading): view-only in a store build. */
+export const marketTradingEnabled = (store = STORE_BUILD) => !store;
+
+/** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
+export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
+export const STORE_ROOM_NOTE = 'Token rooms aren’t available in this version of bWallet.';
+
+/** Wallet › Mint choices: media (NFT) only in a store build; no chatroom tickets or tokens. */
+export type MintChoice = 'ticket' | 'token' | 'media';
+export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] => (store ? ['media'] : ['ticket', 'token', 'media']);
+
+/** Paid features shown outside a store build only: Credits, paid indexing, personal token + room. */
+export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;

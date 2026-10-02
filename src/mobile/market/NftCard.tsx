@@ -3,6 +3,7 @@ import { EyeOff, FileText, Flag, Music, Play } from 'lucide-react';
 import { documentLabel } from '../media/media';
 import { contentUrls } from './indexer';
 import { cachedThumb, loadThumb, thumbUrl } from './thumbs';
+import { marketTradingEnabled } from '../storeBuild';
 
 /** True once the element has come within `margin` of the viewport (sticky). */
 export function useNearViewport<T extends Element>(margin = '400px') {
@@ -255,7 +256,7 @@ export const NftCard = ({
           <span className="text-[11px] font-semibold truncate" style={{ color: '#A1FF8B' }}>
             {item.priceLabel}
           </span>
-          {item.buyable && (
+          {item.buyable && marketTradingEnabled() && (
             <button
               onClick={onBuy}
               className="rounded-lg px-2.5 py-1 text-[11px] font-bold"

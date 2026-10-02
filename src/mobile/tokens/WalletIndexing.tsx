@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { paidFeaturesEnabled } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { FinishIndexing } from './FinishIndexing';
@@ -9,7 +10,11 @@ import { notifyIfPermitted, recheckPendingIndexing, takeSessionReminder, usePend
  * is unpaid, plus one reminder per app session (snackbar, and a local notification when permission
  * was already granted). The Wallet tab badge reads the same list (src/mobile/tabs/BottomMenu.tsx).
  */
-export const WalletIndexing = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
+/** Hidden in a store build (paid indexing, storeBuild.ts). */
+export const WalletIndexing = (props: { exchangeRate?: number }) =>
+  paidFeaturesEnabled() ? <WalletIndexingInner {...props} /> : null;
+
+const WalletIndexingInner = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;

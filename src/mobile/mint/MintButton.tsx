@@ -9,6 +9,10 @@ import { useTheme } from '../../hooks/useTheme';
 import { getOutputName } from '../../utils/format';
 import { TicketMint } from '../tickets/TicketMint';
 import { TokenMint } from '../tokens/TokenMint';
+import { mintChoicesFor } from '../storeBuild';
+
+/** Store build: media (NFT) only (storeBuild.ts). */
+const CHOICES = new Set(mintChoicesFor());
 import { TOKEN_COPY } from '../tokens/token';
 import { withIssuerSignature } from '../issuer/issuerSign';
 import { registerIssuer } from '../issuer/issuerVerify';
@@ -266,13 +270,17 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
         {step === 'choose' && (
           <div className="flex flex-col gap-3">
-            <Choice
-              icon={<Ticket size={18} />}
-              title="Mint a chatroom"
-              sub="Mint tickets that grant entry to your new chatrooms."
-              onClick={() => setStep('ticket')}
-            />
-            <Choice icon={<Coins size={18} />} title="Mint a token" sub={TOKEN_COPY} onClick={() => setStep('token')} />
+            {CHOICES.has('ticket') && (
+              <Choice
+                icon={<Ticket size={18} />}
+                title="Mint a chatroom"
+                sub="Mint tickets that grant entry to your new chatrooms."
+                onClick={() => setStep('ticket')}
+              />
+            )}
+            {CHOICES.has('token') && (
+              <Choice icon={<Coins size={18} />} title="Mint a token" sub={TOKEN_COPY} onClick={() => setStep('token')} />
+            )}
             <Choice
               icon={<ImageIcon size={18} />}
               title="Mint media (NFT)"
@@ -282,11 +290,11 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
           </div>
         )}
 
-        {step === 'ticket' && (
+        {step === 'ticket' && CHOICES.has('ticket') && (
           <TicketMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
         )}
 
-        {step === 'token' && (
+        {step === 'token' && CHOICES.has('token') && (
           <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
         )}
 

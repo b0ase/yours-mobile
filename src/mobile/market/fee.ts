@@ -1,4 +1,5 @@
 import validate from 'bitcoin-address-validation';
+import { bcorpFeeAddress } from '../storeBuild';
 
 /**
  * Marketplace fee: an extra, clearly labelled "Marketplace fee" output on
@@ -14,7 +15,8 @@ declare const __MARKET_FEE_ADDRESS__: string;
 
 export const MARKET_FEE_RATE = 0.01;
 
-const configured = typeof __MARKET_FEE_ADDRESS__ === 'string' ? __MARKET_FEE_ADDRESS__.trim() : '';
+// Store build: no fee to bCorp (storeBuild.ts).
+const configured = bcorpFeeAddress(typeof __MARKET_FEE_ADDRESS__ === 'string' ? __MARKET_FEE_ADDRESS__.trim() : '');
 
 /** The fee address, or '' when unset/invalid (no fee is charged). */
 export const marketFeeAddress = (address = configured): string => (address && validate(address) ? address : '');
