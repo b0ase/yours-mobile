@@ -8,12 +8,15 @@ import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { scanAddress, type ScannedAssets, type TokenBalance } from '../../sweep/scanner';
 import { moneyNow } from '../money/money';
+import { HD } from '@bsv/sdk';
 import {
   FALLBACK_PATHS,
   PRESETS,
   accountKey,
+  accountKeyNonCompliant,
+  addressAt,
   normalizePath,
-  normalizePhrase,
+  parseRecovery,
   phraseProblem,
   scanAccount,
   type HdAddress,
@@ -117,20 +120,32 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const chosenPath = preset.id === 'custom' ? normalizePath(customPath) : preset.path;
 
   const scan = async () => {
-    const problem = phraseProblem(phrase);
+    // SimplyCash recovery strings carry their own path and passphrase: `words:path:passphrase`.
+    const rec = parseRecovery(phrase);
+    const problem = rec.xprv ? null : phraseProblem(rec.phrase);
     if (problem) return setError(problem);
-    if (!chosenPath) return setError("That path doesn't look right. Example: m/44'/145'/0'");
+    const pass = rec.passphrase ?? passphrase;
+    const firstPath = rec.path ?? chosenPath;
+    if (!firstPath && !rec.xprv) return setError("That path doesn't look right. Example: m/44'/145'/0'");
     if (!apiContext.services) return setError('Wallet services are not ready yet. Try again in a moment.');
     setError('');
     setStep('scanning');
     try {
-      // The chosen path first; if it was never used, the common alternatives.
-      const paths = [chosenPath, ...FALLBACK_PATHS.filter((p) => p !== chosenPath)];
-      for (const path of paths) {
+      // The chosen path first, then the common alternatives. Each path is also tried with the old
+      // (non-compliant) derivation early SimplyCash wallets used, when that gives different keys.
+      const paths = [firstPath!, ...FALLBACK_PATHS.filter((p) => p !== firstPath)];
+      const accounts: { label: string; path: string; key: HD }[] = rec.xprv
+        ? [{ label: 'xprv', path: 'xprv', key: HD.fromString(rec.xprv) }]
+        : paths.flatMap((path) => {
+            const key = accountKey(rec.phrase, pass, path);
+            const old = accountKeyNonCompliant(rec.phrase, pass, path);
+            const differs = old && addressAt(old, path, 0, 0).address !== addressAt(key, path, 0, 0).address;
+            return [{ label: path, path, key }, ...(differs ? [{ label: `${path} (older SimplyCash)`, path, key: old! }] : [])];
+          });
+      for (const { label, path, key: account } of accounts) {
         if (cancelled.current) return;
-        const account = accountKey(phrase, passphrase, path);
         const used = await scanAccount(account, path, woCUsed, (checked, n) =>
-          setProgress(`${path}: checked ${checked} addresses, ${n} used`),
+          setProgress(`${label}: checked ${checked} addresses, ${n} used`),
         );
         if (!used.length) continue;
         const assets = emptyAssets();
@@ -152,7 +167,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
           tokens.push(...r.bsv21Tokens);
         }
         assets.bsv21Tokens = mergeTokens(tokens);
-        setFound({ path, addresses: used, assets, keyFor });
+        setFound({ path: label, addresses: used, assets, keyFor });
         setStep('review');
         return;
       }
@@ -242,13 +257,12 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
               <textarea
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
-                onBlur={() => setPhrase((p) => normalizePhrase(p))}
                 rows={3}
                 autoCapitalize="off"
                 autoCorrect="off"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="12 or 24 words"
+                placeholder="12 or 24 words (a SimplyCash recovery string with :path:passphrase also works)"
                 className="rounded-xl px-3 py-2 text-sm text-white outline-none"
                 style={{ background: PANEL, border: `1px solid ${LINE}` }}
               />
