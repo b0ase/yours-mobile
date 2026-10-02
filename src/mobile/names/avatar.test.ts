@@ -44,3 +44,13 @@ describe('avatar', () => {
     expect(dataUrlBytes('data:image/jpeg;base64,AA==')).toBe(1);
   });
 });
+
+describe('toAvatarUri', () => {
+  test('an NFT id becomes a 1sat:// link; links are kept', async () => {
+    const { toAvatarUri } = await import('./avatar');
+    const tx = 'a'.repeat(64);
+    expect(toAvatarUri(` ${tx}_0 `)).toBe(`1sat://${tx}_0`);
+    expect(toAvatarUri(`${tx.toUpperCase()}.2`)).toBe(`1sat://${tx}_2`);
+    expect(toAvatarUri('https://x.com/a.png')).toBe('https://x.com/a.png');
+  });
+});

@@ -127,6 +127,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
+    // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
+    ["import { useNavigate } from 'react-router-dom';", "import { useNavigate } from 'react-router-dom';\nimport { AccountIconField } from '../../mobile/names/AccountIconField';"],
+    [
+      "        <Input\n          theme={theme}\n          placeholder=\"Icon URL\"\n          type=\"text\"\n          value={iconURL}\n          onChange={(e) => setIconURL(e.target.value)}\n        />",
+      "        <AccountIconField value={iconURL} onChange={setIconURL} />",
+    ],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
@@ -138,6 +144,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // WIF / JSON import and master (zip) restore: same step for the imported account, after the name sync.
   'src/pages/onboarding/ImportAccount.tsx': [
+    // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
+    ["import { useNavigate } from 'react-router-dom';", "import { useNavigate } from 'react-router-dom';\nimport { AccountIconField } from '../../mobile/names/AccountIconField';"],
+    [
+      "        <Input\n          theme={theme}\n          placeholder=\"Icon URL\"\n          type=\"text\"\n          value={iconURL}\n          onChange={(e) => setIconURL(e.target.value)}\n        />",
+      "        <AccountIconField value={iconURL} onChange={setIconURL} />",
+    ],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
@@ -159,6 +171,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
   'src/pages/onboarding/RestoreAccount.tsx': [
+    // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
+    ["import { useNavigate } from 'react-router-dom';", "import { useNavigate } from 'react-router-dom';\nimport { AccountIconField } from '../../mobile/names/AccountIconField';"],
+    [
+      "        <Input\n          theme={theme}\n          placeholder=\"Icon URL\"\n          type=\"text\"\n          value={iconURL}\n          onChange={(e) => setIconURL(e.target.value)}\n        />",
+      "        <AccountIconField value={iconURL} onChange={setIconURL} />",
+    ],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",

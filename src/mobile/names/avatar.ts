@@ -38,6 +38,13 @@ export function resolveAvatarUrl(uri: string, contentBase = 'https://ordfs.netwo
   return uri;
 }
 
+/** What someone typed as an avatar: an NFT id (`<txid>_<n>`, also `<txid>.<n>`) becomes 1sat://…; anything else is kept. */
+export function toAvatarUri(input: string): string {
+  const v = input.trim();
+  const m = v.match(/^([0-9a-f]{64})[._](\d+)$/i);
+  return m ? `1sat://${m[1].toLowerCase()}_${m[2]}` : v;
+}
+
 /** What the paymail profile can serve: a public https URL up to 512 chars, else ''. */
 export function paymailAvatar(url: string | null | undefined): string {
   const u = (url || '').trim();
