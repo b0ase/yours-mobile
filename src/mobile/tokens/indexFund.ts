@@ -13,13 +13,17 @@ import type { ChromeStorageObject } from '../../services/types/chromeStorage.typ
  * docs/TICKETS-BURN-PHASE0.md §6: status.fee_address ~0.4 s after deploy, is_active ~0.75 s after
  * funding).
  *
- * Owner decision: the creator pays indexing at mint. Right after the deploy (same confirmation),
- * bWallet sends INDEX_FUND_SATS to the fee address. Later transfers pay their own per-output fee
- * (sendBsv21 adds it).
+ * Owner decision: the creator pays indexing at mint (users pay for their own tokens and $handle
+ * tokens). Right after the deploy (same confirmation), bWallet sends INDEX_FUND_SATS to the fee
+ * address. Later transfers pay their own per-output fee (sendBsv21 adds it).
+ *
+ * Since 2 Oct 2026 the indexer keeps a token inactive until its balance reaches `min_funding`
+ * (10,000,000 sats = 0.1 BSV); 3,000 sats no longer lists anything. The mint quote is that minimum,
+ * so the confirm sheet shows what is actually paid. Lower it here if 1Sat lowers min_funding.
  */
 
-/** Creator pre-fund at mint: the deploy output plus headroom (3 outputs at the default rate). */
-export const INDEX_FUND_SATS = 3000;
+/** Creator funding at mint: the indexer's minimum balance for a listed token (min_funding). */
+export const INDEX_FUND_SATS = 10_000_000;
 export const DEFAULT_FEE_PER_OUTPUT = 1000;
 /** Funding tx: one input, change, one P2PKH output (~230 B at ~100 sat/kB). */
 export const INDEX_FUND_NETWORK_SATS = 30;
@@ -56,13 +60,13 @@ export function parseOverlayStatus(details: unknown): OverlayStatus | null {
 export const needsIndexFunding = (s: OverlayStatus | null) => !s || !s.isActive || s.balance < s.feePerOutput;
 
 /**
- * Sats to send: enough to bring the balance up to the indexer's minimum (when it sets one), and
- * at least the configured pre-fund and one output's fee.
+ * Sats to send. When the indexer states a minimum: exactly what brings the balance up to it (a
+ * fresh mint: the whole minimum). Otherwise the configured funding. Never less than one output's fee.
  */
 export const fundAmount = (
   s: Pick<OverlayStatus, 'feePerOutput'> & Partial<Pick<OverlayStatus, 'balance' | 'minFunding'>>,
   fund = INDEX_FUND_SATS,
-) => Math.max(fund, s.feePerOutput, (s.minFunding ?? 0) - Math.max(0, s.balance ?? 0));
+) => Math.max(s.feePerOutput, s.minFunding ? s.minFunding - Math.max(0, s.balance ?? 0) : fund);
 
 const normId = (id: string) => id.replace('.', '_');
 

@@ -43,5 +43,6 @@ SETTINGS (account drawer › Settings)
 - Notifications are controlled in the phone's system settings for bWallet.
 - Security: Face ID / Touch ID / fingerprint unlock, password, and backing up the recovery phrase are in Settings. Back up your recovery phrase on paper, offline; anyone with it controls the wallet, and bCorp cannot recover it for you.
 - Tools (Settings › Tools): locks, sweep a private key into the wallet (done on the device, not with this assistant), transaction decoder.
+- Sweep from another wallet (Settings › Account & safety): move coins and tokens from an old 12/24-word wallet such as SimplyCash into this account. The phrase is typed into that screen only, never into this chat. Restore › SimplyCash on the restore page starts the same thing for a new wallet.
 
 If you are not sure how something works in bWallet, say so rather than guessing.`;

@@ -25,7 +25,7 @@ describe('overlay status', () => {
   test('parses the funding fields', () => {
     expect(
       parseOverlayStatus(details({ fee_address: FEE, fee_per_output: 1000, is_active: true, balance: 1000 })),
-    ).toEqual({ feeAddress: FEE, feePerOutput: 1000, isActive: true, balance: 1000 });
+    ).toEqual({ feeAddress: FEE, feePerOutput: 1000, isActive: true, balance: 1000, minFunding: 0 });
   });
   test('unknown token / junk → null; missing fee rate → default', () => {
     expect(parseOverlayStatus(null)).toBeNull();
@@ -40,9 +40,9 @@ describe('overlay status', () => {
     expect(needsIndexFunding({ ...s, isActive: true, balance: 999 })).toBe(true);
     expect(needsIndexFunding({ ...s, isActive: true, balance: 1000 })).toBe(false);
   });
-  test('amount: the pre-fund, never below one output fee', () => {
+  test('amount: the mint funding (the indexer minimum), never below one output fee', () => {
     expect(fundAmount({ feePerOutput: 1000 })).toBe(INDEX_FUND_SATS);
-    expect(fundAmount({ feePerOutput: 5000 })).toBe(5000);
+    expect(fundAmount({ feePerOutput: 5000 }, 3000)).toBe(5000);
     expect(indexCostSats()).toBe(INDEX_FUND_SATS + INDEX_FUND_NETWORK_SATS);
   });
 });
@@ -159,6 +159,7 @@ describe('min_funding (indexer change, 2 Oct 2026)', () => {
   test('the payment tops the balance up to the minimum ($TESTY: balance 2,000, minimum 10,000,000)', () => {
     expect(fundAmount({ feePerOutput: 1000, balance: 2000, minFunding: 10_000_000 })).toBe(9_998_000);
     expect(fundAmount({ feePerOutput: 1000, balance: -47_000, minFunding: 10_000_000 })).toBe(10_000_000);
-    expect(fundAmount({ feePerOutput: 1000 })).toBe(3000);
+    expect(fundAmount({ feePerOutput: 1000 })).toBe(INDEX_FUND_SATS);
+    expect(fundAmount({ feePerOutput: 1000, balance: 0, minFunding: 10_000_000 })).toBe(INDEX_FUND_SATS);
   });
 });

@@ -34,7 +34,7 @@ describe('guide', () => {
     for (const w of [
       'Apps · Market · Wallet · Feed · Chat',
       'Tickets',
-      'Credits',
+      'Sweep from another wallet',
       'bwallet.space',
       'One-click',
       'seed phrase',
