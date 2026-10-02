@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useReducedMotion } from 'framer-motion';
-import glyph from '../brand/bwallet-glyph.svg';
 import { DECIDE, THRESHOLD, gestureIntent, rubberBand, shouldRefresh } from './pullMath';
 
 /**
@@ -125,7 +124,7 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
           aria-hidden={!refreshing}
           role={refreshing ? 'status' : undefined}
           aria-label={refreshing ? 'Refreshing' : undefined}
-          className="pointer-events-none fixed left-1/2 z-[60]"
+          className="pointer-events-none fixed left-1/2 z-[5]"
           style={{
             top,
             width: 40,
@@ -165,16 +164,6 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
                 transform="rotate(-90 20 20)"
               />
             </svg>
-            <img
-              src={glyph}
-              alt=""
-              className="absolute inset-0 m-auto"
-              style={{
-                width: 20,
-                height: 20,
-                opacity: shouldRefresh(pull) || refreshing ? 1 : 0.7,
-              }}
-            />
           </div>
           <style>{'@keyframes bw-ptr-spin{to{transform:rotate(360deg)}}'}</style>
         </div>,

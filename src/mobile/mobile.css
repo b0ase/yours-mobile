@@ -233,7 +233,7 @@ body,
 }
 .bw-wcard {
   position: relative;
-  aspect-ratio: 1.586 / 1;
+  aspect-ratio: 1.85 / 1;
   touch-action: pan-y;
   cursor: pointer;
   outline: none;

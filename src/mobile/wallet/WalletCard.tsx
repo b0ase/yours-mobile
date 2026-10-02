@@ -98,7 +98,6 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
         <div className="bw-wcard-face bw-wcard-front" aria-hidden={flipped}>
           <div className="bw-wcard-top">
             <img src={bGlyph} alt="bWallet" className="bw-wcard-mark" />
-            <span className="bw-wcard-brand">bWallet · Just b.</span>
           </div>
           <div className="bw-wcard-centre">
             {view === 'spinner' ? (

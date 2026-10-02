@@ -186,7 +186,7 @@ export const TopNav = () => {
                     )}
                   </div>
                   {payable && payable.toLowerCase() !== names.displayName.toLowerCase() && (
-                    <div className={`text-xs font-semibold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
+                    <div className={`text-lg leading-tight font-extrabold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
                       {payable}
                     </div>
                   )}
@@ -237,7 +237,12 @@ export const TopNav = () => {
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{rowNames.label}</div>
+                        <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{rowNames.displayName || rowNames.label}</div>
+                        {rowNames.payable && rowNames.payable.toLowerCase() !== rowNames.displayName.toLowerCase() && (
+                          <div className={`text-[15px] font-extrabold ${ELLIPSIS}`} style={{ color: '#FFD24D' }}>
+                            {rowNames.payable}
+                          </div>
+                        )}
                         <div className="text-[11px] font-mono text-[#98A2B3]">
                           {short(account.primaryAddress ?? id)}
                         </div>
