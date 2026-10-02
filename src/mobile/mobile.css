@@ -501,9 +501,7 @@ body,
   white-space: nowrap;
   max-width: 100%;
 }
-.bw-wcard-usd.is-bsv {
-  font-size: clamp(20px, 6.6vw, 30px);
-}
+
 
 .bw-wcard-addrrow {
   margin-bottom: 8px;
