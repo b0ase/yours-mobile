@@ -88,11 +88,11 @@ const mergeTokens = (all: TokenBalance[]): TokenBalance[] => {
  *
  * The phrase and passphrase live only in this screen's state; they are cleared on leaving.
  */
-export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
+export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; initialPreset?: string }) => {
   const { apiContext } = useServiceContext();
   const [phrase, setPhrase] = useState('');
   const [passphrase, setPassphrase] = useState('');
-  const [presetId, setPresetId] = useState(PRESETS[0].id);
+  const [presetId, setPresetId] = useState(PRESETS.some((p) => p.id === initialPreset) ? initialPreset! : PRESETS[0].id);
   const [customPath, setCustomPath] = useState('');
   const [step, setStep] = useState<'enter' | 'scanning' | 'review' | 'sweeping' | 'done'>('enter');
   const [progress, setProgress] = useState('');

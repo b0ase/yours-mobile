@@ -117,12 +117,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // "Choose your handle" after create / restore, else a dismissible "Get your $name" card (src/mobile/names).
     [
       "import { CreditsRow } from '../mobile/credits/CreditsRow';",
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';",
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
     ],
     // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
     [
       '</SectionBoundary>\n        </motion.div>',
-      '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>',
+      '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>\n<SectionBoundary name="Sweep"><SweepPrompt /></SectionBoundary>',
     ],
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
@@ -171,6 +171,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
   'src/pages/onboarding/RestoreAccount.tsx': [
+    // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
+    ["import { useNavigate } from 'react-router-dom';", "import { useNavigate } from 'react-router-dom';\nimport { markSweepPrompt } from '../../mobile/sweep/sweepPending';\nimport simplycashLogo from '../../mobile/brand/simplycash.png';"],
+    ["    {\n      id: 'other',\n      label: 'Other',", "    {\n      id: 'simplycash' as SupportedWalletImports,\n      label: 'SimplyCash',\n      logo: <img src={simplycashLogo} alt=\"SimplyCash\" style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.5rem' }} />,\n    },\n    {\n      id: 'other',\n      label: 'Other',"],
+    ["  const handleWalletSelection = (wallet?: SupportedWalletImports) => {\n    setImportWallet(wallet);", "  const handleWalletSelection = (wallet?: SupportedWalletImports) => {\n    // SimplyCash spreads coins over many addresses: make a bWallet, then sweep into it (src/mobile/sweep).\n    if (wallet === ('simplycash' as SupportedWalletImports)) {\n      markSweepPrompt('simplycash');\n      newWallet ? navigate('/create-wallet') : onNavigateBack('create-account');\n      return;\n    }\n    setImportWallet(wallet);"],
     // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
     ["import { useNavigate } from 'react-router-dom';", "import { useNavigate } from 'react-router-dom';\nimport { AccountIconField } from '../../mobile/names/AccountIconField';"],
     [
