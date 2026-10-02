@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>The bApp standard · bWallet</title>
+    <meta
+      name="description"
+      content="The bApp standard, v0.1 draft: how a web app runs inside bWallet, between the wallet's bars, using its identity, $handle and payments. Charge in dollars, users pay in sats."
+    />
+    <meta name="theme-color" content="#000000" />
+    <link rel="canonical" href="https://bwallet-nine.vercel.app/bapps/" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .doc { padding: 120px 0 72px; }
+      .doc h1 { font: 700 clamp(2.2rem, 6vw, 3.6rem)/1.05 var(--hf); margin: 0 0 18px; letter-spacing: -0.02em; }
+      .doc h2 { font: 600 1.35rem/1.25 var(--hf); margin: 0 0 10px; }
+      .doc .grid { display: grid; gap: 16px; margin-top: 48px; }
+      @media (min-width: 760px) { .doc .grid { grid-template-columns: 1fr 1fr; } }
+      .doc .item { background: linear-gradient(180deg, var(--card-a), var(--card-b)); border: 1px solid var(--edge); border-radius: var(--r); padding: 22px; min-width: 0; }
+      .doc .item p, .doc .item li { color: var(--muted); margin: 0 0 8px; }
+      .doc .item ul { padding-left: 18px; margin: 0; }
+      .doc code { font-size: 0.88em; color: var(--ink); background: rgba(255, 255, 255, 0.06); padding: 1px 6px; border-radius: 6px; word-break: break-word; }
+      .doc pre { overflow-x: auto; background: #0b0b0d; border: 1px solid var(--edge); border-radius: 12px; padding: 14px; font-size: 0.85rem; margin: 10px 0 0; }
+      .doc pre code { background: none; padding: 0; }
+      .tag { display: inline-block; font: 600 0.7rem/1 var(--hf); letter-spacing: 0.12em; text-transform: uppercase; color: #000; background: var(--gold-hi); border-radius: 999px; padding: 4px 8px; margin-left: 6px; vertical-align: 3px; }
+      .tag.live { background: transparent; color: var(--gold-hi); box-shadow: inset 0 0 0 1px rgba(255, 210, 77, 0.5); }
+      .rule { margin-top: 40px; padding: 22px; border-radius: var(--r); border: 1px solid rgba(255, 210, 77, 0.45); background: rgba(245, 184, 0, 0.06); font: 600 clamp(1.2rem, 3vw, 1.6rem)/1.3 var(--hf); }
+      .repo { margin-top: 48px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="topbar">
+      <div class="wrap topbar-in">
+        <a class="brand" href="/"><img src="/logo.svg" alt="" width="30" height="30" /><span>bWallet</span></a>
+        <nav aria-label="Sections"><a href="/#apps">Apps</a><a href="/#identity">Identity</a><a href="/bapps/">bApp standard</a></nav>
+      </div>
+    </header>
+    <main id="main" class="doc">
+      <div class="wrap">
+        <p class="eyebrow">For developers · v0.1 draft</p>
+        <h1>The <span class="gold">bApp</span> standard</h1>
+        <p class="lede">
+          A bApp is a web app that lives inside bWallet, between the wallet's top bar and its tab bar. It brings no
+          navigation of its own. It uses the wallet's identity, your $handle and payments instead of logins and card
+          forms.
+        </p>
+        <p class="rule">Charge in dollars. Users pay in sats.</p>
+
+        <div class="grid">
+          <section class="item">
+            <h2>Naming <span class="tag live">Convention</span></h2>
+            <p>bApp names start with a lowercase b: bChat, bMail, bDrive. A bApp usually has its own BSV-21 token, <code>$b&lt;Name&gt;</code>, such as <code>$bMail</code>.</p>
+            <p>No b means a standalone venture, not a bApp.</p>
+          </section>
+          <section class="item">
+            <h2>Detection <span class="tag live">Live</span></h2>
+            <p>bWallet's browser adds <code>bWallet/1 YoursWalletMobile/1</code> to the user agent.</p>
+            <pre><code>/\bYoursWalletMobile\/\d+/.test(navigator.userAgent)</code></pre>
+          </section>
+          <section class="item">
+            <h2>Layout</h2>
+            <ul>
+              <li>No top bar, tab bar or back arrow of your own.</li>
+              <li>Respect safe areas; no <code>position: fixed</code> bars at the edges.</li>
+              <li>Dark theme: background <code>#010101</code>, gold <code>#FFD24D</code>.</li>
+              <li>Hosting inside the wallet frame (top bar <code>h-14</code>, tab bar <code>3.75rem</code>) <span class="tag">Proposed</span>. Today apps open in a full-screen browser.</li>
+            </ul>
+          </section>
+          <section class="item">
+            <h2>Identity <span class="tag live">Live</span></h2>
+            <p>bWallet injects <code>window.CWI</code>, a BRC-100 wallet. Connect by asking for the identity key. No passwords, ever.</p>
+            <pre><code>await CWI.waitForAuthentication({})
+await CWI.getPublicKey({ identityKey: true })</code></pre>
+            <p>Reading the user's $handle <span class="tag">Proposed</span></p>
+          </section>
+          <section class="item">
+            <h2>Payments</h2>
+            <p>Apps quote prices in USD. The wallet converts at the live rate and pays in sats. The user confirms, or the one-click limit they set applies.</p>
+            <p>Today: <code>createAction</code> in sats. A USD request, <code>requestPayment({ usd })</code> <span class="tag">Proposed</span></p>
+          </section>
+          <section class="item">
+            <h2>Back</h2>
+            <p>The wallet owns Back. It walks your page history, then closes the app, so make your screens real history entries.</p>
+            <p>A back registry for your sheets, like the wallet's own <code>useBackClose</code> <span class="tag">Proposed</span></p>
+          </section>
+          <section class="item">
+            <h2>Manifest: <code>bapp.json</code> <span class="tag">Proposed</span></h2>
+            <p>Name, short name, icon, start URL, category, permissions, USD price model, your token (<code>ticker</code>, <code>tokenId</code>), and your identity key, signed by that key.</p>
+          </section>
+          <section class="item">
+            <h2>Listing &amp; the tick</h2>
+            <p>bApps appear under Apps › bApps. Signed manifests and self-listing <span class="tag">Proposed</span>: a verified issuer's key earns the same tick their tokens get, and the listing links to the app's token market and room.</p>
+          </section>
+          <section class="item">
+            <h2>Security <span class="tag live">Live</span></h2>
+            <p>The wallet takes each request's origin from the WebView, not from the page. Permissions are kept per origin. Apps never see keys or seeds.</p>
+          </section>
+          <section class="item">
+            <h2>Versioning</h2>
+            <p>The spec is versioned <code>0.x</code> while it's a draft. The user-agent number is the bridge version. Detect new methods by checking that they exist.</p>
+          </section>
+        </div>
+
+        <p class="repo">
+          Full spec, manifest schema and a hello-world bApp: github.com/b0ase/bitcoinappsuite (coming soon).
+        </p>
+      </div>
+    </main>
+    <footer class="foot">
+      <div class="wrap foot-in">
+        <a class="brand" href="/"><img src="/logo.svg" alt="" width="24" height="24" /><span>bWallet</span></a>
+        <p>By The Bitcoin Corporation Ltd. Based on the open-source <a href="https://github.com/yours-org/yours-wallet" rel="noopener">Yours Wallet</a> (MIT); not affiliated with or endorsed by its authors.</p>
+        <p><a href="/privacy.html">Privacy policy</a></p>
+      </div>
+    </footer>
+  </body>
+</html>
