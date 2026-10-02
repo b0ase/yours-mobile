@@ -68,7 +68,14 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
       .then(() => addSnackbar('Copied', 'success'))
       .catch(() => undefined);
   };
-  const flip = () => setFlipped((f) => !f);
+  const [turning, setTurning] = useState(false);
+  // Swap faces at the midpoint of the 2D turn (CSS .is-turning).
+  const flip = () => {
+    if (turning) return;
+    setTurning(true);
+    setTimeout(() => setFlipped((f) => !f), 220);
+    setTimeout(() => setTurning(false), 440);
+  };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -80,7 +87,7 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
   return (
     <div className="bw-wcard-wrap">
       <div
-        className={`bw-wcard${flipped ? ' is-flipped' : ''}`}
+        className={`bw-wcard${turning ? ' is-turning' : ''}`}
         role="button"
         tabIndex={0}
         aria-label={flipped ? 'Show card front' : 'Show receive QR and identity'}

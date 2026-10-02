@@ -230,23 +230,30 @@ body,
   width: calc(100vw - 32px);
   max-width: 398px;
   margin: 12px auto 0;
-  perspective: 1200px;
 }
 .bw-wcard {
   position: relative;
   aspect-ratio: 1.586 / 1;
-  transform-style: preserve-3d;
-  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  touch-action: pan-y;
   cursor: pointer;
   outline: none;
   -webkit-tap-highlight-color: transparent;
 }
-.bw-wcard.is-flipped {
-  transform: rotateY(180deg);
+/* 2D flip (no preserve-3d: 3D layers swallowed scroll gestures on iOS WebKit). */
+.bw-wcard.is-turning {
+  animation: bw-wcard-turn 0.44s ease-in-out;
+}
+@keyframes bw-wcard-turn {
+  50% {
+    transform: scaleX(0.02);
+  }
+}
+.bw-wcard-face[aria-hidden='true'] {
+  visibility: hidden;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bw-wcard {
-    transition: none;
+  .bw-wcard.is-turning {
+    animation: none;
   }
 }
 .bw-wcard-face {
@@ -254,8 +261,6 @@ body,
   inset: 0;
   border-radius: 18px;
   overflow: hidden;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
   background:
     linear-gradient(
       115deg,
@@ -279,7 +284,6 @@ body,
   padding: 14px 16px;
 }
 .bw-wcard-back {
-  transform: rotateY(180deg);
   display: flex;
   flex-direction: column;
 }
