@@ -3,7 +3,7 @@ import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { BappFrameHost } from '../bappFrame/BappFrameHost';
-import { paidFeaturesEnabled } from '../storeBuild';
+import { indexingEnabled } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
@@ -54,7 +54,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
               window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
             }}
             isSelected={active === t.id}
-            badge={t.id === 'bsv' && pending && paidFeaturesEnabled() ? String(pending) : undefined}
+            badge={t.id === 'bsv' && pending && indexingEnabled() ? String(pending) : undefined}
           />
         ))}
       </div>

@@ -54,13 +54,13 @@ describe('storeBuild', () => {
   });
 
   test('trading, token rooms, paid features and mint choices', () => {
-    expect(marketTradingEnabled(true)).toBe(false);
+    expect(marketTradingEnabled(true)).toBe(true);
     expect(marketTradingEnabled(false)).toBe(true);
     expect(tokenRoomsEnabled(true)).toBe(false);
     expect(tokenRoomsEnabled(false)).toBe(true);
     expect(paidFeaturesEnabled(true)).toBe(false);
     expect(paidFeaturesEnabled(false)).toBe(true);
-    expect(mintChoicesFor(true)).toEqual(['media']);
+    expect(mintChoicesFor(true)).toEqual(['token', 'media']);
     expect(mintChoicesFor(false)).toEqual(['ticket', 'token', 'media']);
   });
 });

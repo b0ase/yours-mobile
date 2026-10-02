@@ -11,7 +11,7 @@ import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { openDappBrowser } from './dappBrowser';
-import { getBappFrameState, openBapp, setBappFrameVisible, subscribeBappFrame } from './bappFrame/bappFrame';
+import { allowFrameUrls, getBappFrameState, openBapp, setBappFrameVisible, subscribeBappFrame } from './bappFrame/bappFrame';
 import app_onesatsocialIcon from './brand/apps/1satsocial.png';
 import app_treechatIcon from './brand/apps/treechat.png';
 import app_twetchIcon from './brand/apps/twetch.png';
@@ -345,6 +345,7 @@ const ArrangeGrid = ({
 };
 
 const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) => g.tiles)];
+allowFrameUrls(ALL_TILES.filter((t) => !t.bapp?.noFrame).map((t) => t.url));
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
 const FAV_KEY = 'bwallet:favourite-apps';
@@ -504,9 +505,11 @@ const BrowserPage = () => {
     setError('');
     rememberRecent(url);
     setRecent(readRecent());
-    // bApps run inside the wallet frame (falling back to full screen); everything else full screen.
-    const bappForUrl = bapp ?? BAPP_TILES.find((t) => t.url === url)?.bapp;
-    (bappForUrl ? openBapp(bappForUrl.name, url) : openDappBrowser(url)).catch((e: unknown) =>
+    // Every app tile runs inside the wallet frame when its site allows it (else full screen);
+    // typed addresses open full screen.
+    const tile = ALL_TILES.find((t) => t.url === url);
+    const name = bapp?.name ?? tile?.name;
+    (name ? openBapp(name, url) : openDappBrowser(url)).catch((e: unknown) =>
       setError(e instanceof Error ? e.message : String(e)),
     );
   };

@@ -14,6 +14,11 @@ export type BappSession = { name: string; url: string; origin: string; key: numb
 /** Exact origins of every bApp tile: the only pages we will frame or answer. */
 export const BAPP_FRAME_ALLOWLIST = frameAllowlist(BAPPS.filter((a) => !a.noFrame).map((a) => a.url));
 
+/** Every curated app tile may run in-frame too (headers permitting); typed URLs stay full screen. */
+export const allowFrameUrls = (urls: readonly string[]) => {
+  for (const o of frameAllowlist(urls)) BAPP_FRAME_ALLOWLIST.add(o);
+};
+
 type State = { session: BappSession | null; visible: boolean; opening: string | null };
 let state: State = { session: null, visible: false, opening: null };
 const listeners = new Set<() => void>();

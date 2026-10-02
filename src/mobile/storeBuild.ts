@@ -32,16 +32,23 @@ export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['bapps', 'tickets
 export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(filters: readonly T[], store = STORE_BUILD): T[] =>
   store ? filters.filter((f) => !STORE_HIDDEN_MARKET_FILTERS.includes(f[0])) : [...filters];
 
-/** Market buy / sell / list (OrdLock trading): view-only in a store build. */
-export const marketTradingEnabled = (store = STORE_BUILD) => !store;
+/**
+ * Market buy / sell / list: on in every build. It is peer-to-peer OrdLock trading between users'
+ * own wallets (like Phantom's swaps), with no bCorp fee in a store build (bcorpFeeAddress).
+ */
+export const marketTradingEnabled = (_store = STORE_BUILD) => true;
 
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
 export const STORE_ROOM_NOTE = 'Token rooms aren’t available in this version of bWallet.';
 
-/** Wallet › Mint choices: media (NFT) only in a store build; no chatroom tickets or tokens. */
+/** Wallet › Mint choices: tokens and media in a store build (no bCorp fee); no chatroom tickets. */
 export type MintChoice = 'ticket' | 'token' | 'media';
-export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] => (store ? ['media'] : ['ticket', 'token', 'media']);
+export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>
+  store ? ['token', 'media'] : ['ticket', 'token', 'media'];
+
+/** Token indexing fee: paid to the third-party 1Sat overlay (a network cost, like gas), so on everywhere. */
+export const indexingEnabled = (_store = STORE_BUILD) => true;
 
 /** Paid features shown outside a store build only: Credits, paid indexing, personal token + room. */
 export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;

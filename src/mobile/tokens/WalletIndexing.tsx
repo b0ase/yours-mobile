@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { paidFeaturesEnabled } from '../storeBuild';
+import { indexingEnabled } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { FinishIndexing } from './FinishIndexing';
@@ -12,7 +12,7 @@ import { notifyIfPermitted, recheckPendingIndexing, takeSessionReminder, usePend
  */
 /** Hidden in a store build (paid indexing, storeBuild.ts). */
 export const WalletIndexing = (props: { exchangeRate?: number }) =>
-  paidFeaturesEnabled() ? <WalletIndexingInner {...props} /> : null;
+  indexingEnabled() ? <WalletIndexingInner {...props} /> : null;
 
 const WalletIndexingInner = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
