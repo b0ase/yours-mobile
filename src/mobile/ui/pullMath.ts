@@ -14,3 +14,13 @@ export const gestureIntent = (dx: number, dy: number): 'pull' | 'cancel' | 'unde
   if (Math.abs(dx) < DECIDE && Math.abs(dy) < DECIDE) return 'undecided';
   return dy > 0 && dy > Math.abs(dx) ? 'pull' : 'cancel';
 };
+
+/** Push past the bottom: a short, stiffer stretch that only bounces back (no refresh). */
+export const MAX_PUSH = 48;
+export const pushBand = (dy: number): number => (dy <= 0 ? 0 : Math.min(MAX_PUSH, (70 * dy) / (140 + dy)));
+
+/** At the bottom, the first decisive move: vertical-up pushes, anything else lets go. */
+export const pushIntent = (dx: number, dy: number): 'push' | 'cancel' | 'undecided' => {
+  if (Math.abs(dx) < DECIDE && Math.abs(dy) < DECIDE) return 'undecided';
+  return dy < 0 && -dy > Math.abs(dx) ? 'push' : 'cancel';
+};

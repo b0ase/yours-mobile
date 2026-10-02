@@ -19,3 +19,19 @@ describe('pull to refresh', () => {
     expect(gestureIntent(3, 20)).toBe('pull');
   });
 });
+
+describe('push past the bottom', () => {
+  test('only a decisive upward move pushes', async () => {
+    const { pushIntent } = await import('./pullMath');
+    expect(pushIntent(0, 3)).toBe('undecided');
+    expect(pushIntent(2, -20)).toBe('push');
+    expect(pushIntent(2, 20)).toBe('cancel');
+    expect(pushIntent(30, -10)).toBe('cancel');
+  });
+  test('a short, capped bounce', async () => {
+    const { pushBand, MAX_PUSH } = await import('./pullMath');
+    expect(pushBand(-5)).toBe(0);
+    expect(pushBand(40)).toBeLessThan(40);
+    expect(pushBand(10_000)).toBe(MAX_PUSH);
+  });
+});
