@@ -153,19 +153,24 @@ const RADAR_SECTIONS = RADAR_GROUPS.map((g) => ({
 })).filter((g) => g.tiles.length > 0);
 
 const LONG_PRESS_MS = 450;
+/** Keep holding a Home tile this long and Home goes straight into arrange mode (like iPhone). */
+const ARRANGE_PRESS_MS = 1100;
 
 const AppTile = ({
   tile,
   onOpen,
   onInfo,
+  onArrange,
   label = true,
 }: {
   tile: Tile;
   onOpen: () => void;
   onInfo: () => void;
+  onArrange?: () => void;
   label?: boolean;
 }) => {
   const timer = useRef<number>();
+  const arrangeTimer = useRef<number>();
   const fired = useRef(false);
   const start = () => {
     fired.current = false;
@@ -173,8 +178,12 @@ const AppTile = ({
       fired.current = true;
       onInfo();
     }, LONG_PRESS_MS);
+    if (onArrange) arrangeTimer.current = window.setTimeout(onArrange, ARRANGE_PRESS_MS);
   };
-  const cancel = () => window.clearTimeout(timer.current);
+  const cancel = () => {
+    window.clearTimeout(timer.current);
+    window.clearTimeout(arrangeTimer.current);
+  };
   return (
     <motion.button
       whileTap={{ scale: 0.9 }}
@@ -492,7 +501,20 @@ const BrowserPage = () => {
         transition={reduce ? { duration: 0.2 } : { type: 'spring', stiffness: 260, damping: 28, mass: 0.9 }}
       >
         {tiles.map((t) => (
-          <AppTile key={t.key} tile={t} onOpen={() => go(t.url)} onInfo={() => setInfo(t)} />
+          <AppTile
+            key={t.key}
+            tile={t}
+            onOpen={() => go(t.url)}
+            onInfo={() => setInfo(t)}
+            onArrange={
+              i === 0
+                ? () => {
+                    setInfo(null);
+                    setArranging(true);
+                  }
+                : undefined
+            }
+          />
         ))}
       </motion.div>
     );
