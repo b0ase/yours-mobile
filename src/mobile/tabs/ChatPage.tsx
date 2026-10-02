@@ -341,8 +341,9 @@ const Conversation = ({
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
 
-  return (
-    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: BG }}>
+  // Portal to body + z above BottomMenu (z-[100]) so the tab bar doesn't cover the composer; sheets sit at z-[150].
+  return createPortal(
+    <div className="fixed inset-0 z-[110] flex flex-col" style={{ background: BG }}>
       <div
         className="flex items-center gap-3 px-2 pb-2 shrink-0"
         style={{
@@ -551,7 +552,8 @@ const Conversation = ({
         </button>
       </form>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 };
 
@@ -559,7 +561,7 @@ const Conversation = ({
 
 const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => {
   useBackClose(true, onClose);
-  // Portal to body + z above BottomMenu (z-[100]): the room view's z-[60] layer would trap it under the tab bar.
+  // Portal to body + z above BottomMenu (z-[100]): sheets must also clear the room view (z-[110]).
   return createPortal(
     <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div
