@@ -495,3 +495,12 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* BSV amounts are long ("BSV 0.01234567"): smaller, never wrap. */
+.bw-wcard-usd {
+  white-space: nowrap;
+  max-width: 100%;
+}
+.bw-wcard-usd.is-bsv {
+  font-size: clamp(20px, 6.6vw, 30px);
+}

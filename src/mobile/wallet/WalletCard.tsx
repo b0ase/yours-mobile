@@ -127,7 +127,10 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
               </span>
             ) : (
               <>
-                <span className="bw-wcard-usd" title={syncing ? 'Syncing…' : 'Balance'}>
+                <span
+                  className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}`}
+                  title={syncing ? 'Syncing…' : 'Balance'}
+                >
                   {unit === 'usd' ? formatUSD(usd) : cardBsv(sats)}
                   {syncing && <Loader2 size={16} className="animate-spin bw-wcard-sync" color="#8e8e89" />}
                 </span>
