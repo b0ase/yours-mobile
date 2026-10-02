@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Ban, Bell, Bookmark, FileText, Mail, Newspaper, PlayCircle, Sparkles, Trash2, Zap } from 'lucide-react';
+import { ArrowLeft, Ban, Bell, Bookmark, Download, FileText, Mail, Newspaper, PlayCircle, Sparkles, Trash2, Zap } from 'lucide-react';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -11,6 +11,7 @@ import { AgentSettings } from './AgentSettings';
 import { TermsScreen } from '../ugc/UgcSheets';
 import { SUPPORT_EMAIL } from '../ugc/ugc';
 import { DeleteAccountScreen } from '../account/DeleteAccountScreen';
+import { HdSweepScreen } from '../sweep/HdSweepScreen';
 import { hasRate, money, useBsvUsd } from '../money/money';
 import {
   loadBlocks,
@@ -237,7 +238,7 @@ const HiddenScreen = ({ onBack }: { onBack: () => void }) => {
 
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
-  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | 'terms' | 'delete' | null>(null);
+  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | null>(null);
   const rate = useBsvUsd();
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
@@ -403,11 +404,18 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       </Section>
       <Section title="Account & safety">
         <Row
+          icon={<Download size={16} />}
+          label="Sweep from another wallet"
+          description="Move coins and tokens from SimplyCash or another 12/24-word wallet"
+          onClick={() => setScreen('sweep')}
+          isFirst
+        />
+        <Divider />
+        <Row
           icon={<FileText size={16} />}
           label="Terms of use"
           description="Zero tolerance for objectionable content and abusive users"
           onClick={() => setScreen('terms')}
-          isFirst
         />
         <Divider />
         <Row
@@ -428,6 +436,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       </Section>
       {screen === 'terms' && <TermsScreen onBack={() => setScreen(null)} />}
       {screen === 'delete' && <DeleteAccountScreen onBack={() => setScreen(null)} />}
+      {screen === 'sweep' && <HdSweepScreen onBack={() => setScreen(null)} />}
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
     </>
