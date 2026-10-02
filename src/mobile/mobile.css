@@ -483,3 +483,15 @@ body,
   background: #ffd24d;
   color: #111;
 }
+
+/* Public BSV address on the card front (in place of a card number). */
+.bw-wcard-addr {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: clamp(9px, 2.7vw, 11.5px);
+  letter-spacing: 0.06em;
+  color: #d9d4c5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.8), 0 -1px 0 rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

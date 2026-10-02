@@ -147,6 +147,11 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
               </button>
             )}
           </div>
+          {receiveAddress && (
+            <div className="bw-wcard-addr" aria-label="Your BSV address">
+              {receiveAddress.match(/.{1,4}/g)?.join(' ')}
+            </div>
+          )}
           <div className="bw-wcard-bottom">
             <div className="bw-wcard-holder">
               <AccountAvatar src={avatar} size={22} />
