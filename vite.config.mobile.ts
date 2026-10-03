@@ -30,7 +30,7 @@ const FRAME_SHIM = `<script>(function(){var m=window.parent!==window&&window.par
 // Brand plugins (brand(), bcorpText(), bcorpColours()) are shared with the
 // extension build: see vite.brand.ts. Mobile adds its own theme, tab bar and
 // top nav swaps on top.
-const MOBILE_SWAPS: Record<string, string> = {
+export const MOBILE_SWAPS: Record<string, string> = {
   [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/mobile/brand/theme.ts'),
   // Mobile tab bar: Wallet · Market · Apps · Feed · Chat (src/mobile/tabs).
   [resolve(__dirname, 'src/components/BottomMenu.tsx')]: resolve(__dirname, 'src/mobile/tabs/BottomMenu.tsx'),
@@ -413,7 +413,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
   ],
 };
-const mobileText = (): Plugin => ({
+export const mobileText = (): Plugin => ({
   name: 'mobile-text',
   enforce: 'pre',
   transform(code, id) {
@@ -454,6 +454,34 @@ const mobilePages = (): Plugin => ({
   },
 });
 
+/** Build-time constants for every build that runs the mobile UI (Capacitor, web, Chrome extension). */
+export const MOBILE_DEFINES = {
+  ...brandDefines(),
+  __BWALLET_EXTENSION__: 'false',
+  __MOBILE_VERSION__: JSON.stringify(version),
+  // Market tab fee address (src/mobile/market/fee.ts). Empty = no fee.
+  __MARKET_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MARKET_FEE_ADDRESS ?? ''),
+  // bWallet re-enables BSV-21 OrdLock listings (Sell tickets); resale fee on tickets defaults to 0.
+  __BWALLET_SELL__: 'true',
+  __TICKET_RESALE_FEE_RATE__: JSON.stringify(process.env.BWALLET_TICKET_RESALE_FEE_RATE ?? '0'),
+  // Wallet tab Mint creation fee (src/mobile/mint/mint.ts). Empty = no fee.
+  __MINT_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MINT_FEE_ADDRESS ?? ''),
+  // "Set up $X's room" bCorp fee (src/mobile/tokens/roomSetup.ts): USD price, paid in sats to this address.
+  // Empty address = no fee; a store build never charges it (bcorpFeeAddress).
+  __ROOM_SETUP_FEE_USD__: JSON.stringify(process.env.BWALLET_ROOM_SETUP_FEE_USD ?? '1'),
+  __ROOM_SETUP_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_ROOM_SETUP_FEE_ADDRESS ?? ''),
+  // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
+  __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
+  // Reports go to bit-sign's moderation queue (content_reports); owner acts within 24h (Apple 1.2).
+  __MARKET_REPORT_URL__: JSON.stringify(
+    process.env.BWALLET_MARKET_REPORT_URL ?? 'https://www.bitcoinchat.online/api/bitsign/report',
+  ),
+  // bWallet paymail (src/mobile/names/config.ts): name@bwallet.space, served by pay.bwallet.space.
+  // Set BWALLET_PAYMAIL_DOMAIN='' to build with paymail off.
+  __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'bwallet.space'),
+  __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.bwallet.space'),
+};
+
 export default mergeConfig(
   baseConfig,
   defineConfig({
@@ -474,30 +502,6 @@ export default mergeConfig(
       format: 'es',
       plugins: () => [brand(), bcorpText(), bcorpColours(), polyfills()],
     },
-    define: {
-      __MOBILE_VERSION__: JSON.stringify(version),
-      ...brandDefines(),
-      // Market tab fee address (src/mobile/market/fee.ts). Empty = no fee.
-      __MARKET_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MARKET_FEE_ADDRESS ?? ''),
-      // bWallet re-enables BSV-21 OrdLock listings (Sell tickets); resale fee on tickets defaults to 0.
-      __BWALLET_SELL__: 'true',
-      __TICKET_RESALE_FEE_RATE__: JSON.stringify(process.env.BWALLET_TICKET_RESALE_FEE_RATE ?? '0'),
-      // Wallet tab Mint creation fee (src/mobile/mint/mint.ts). Empty = no fee.
-      __MINT_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_MINT_FEE_ADDRESS ?? ''),
-      // "Set up $X's room" bCorp fee (src/mobile/tokens/roomSetup.ts): USD price, paid in sats to this address.
-      // Empty address = no fee; a store build never charges it (bcorpFeeAddress).
-      __ROOM_SETUP_FEE_USD__: JSON.stringify(process.env.BWALLET_ROOM_SETUP_FEE_USD ?? '1'),
-      __ROOM_SETUP_FEE_ADDRESS__: JSON.stringify(process.env.BWALLET_ROOM_SETUP_FEE_ADDRESS ?? ''),
-      // Market safety filter (src/mobile/market/safety.ts): optional remote blocklist JSON and report endpoint. Empty = off.
-      __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
-      // Reports go to bit-sign's moderation queue (content_reports); owner acts within 24h (Apple 1.2).
-      __MARKET_REPORT_URL__: JSON.stringify(
-        process.env.BWALLET_MARKET_REPORT_URL ?? 'https://www.bitcoinchat.online/api/bitsign/report',
-      ),
-      // bWallet paymail (src/mobile/names/config.ts): name@bwallet.space, served by pay.bwallet.space.
-      // Set BWALLET_PAYMAIL_DOMAIN='' to build with paymail off.
-      __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'bwallet.space'),
-      __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.bwallet.space'),
-    },
+    define: MOBILE_DEFINES,
   }),
 );

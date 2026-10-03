@@ -45,7 +45,13 @@ function brandManifest() {
   manifest.name = NAME;
   manifest.short_name = NAME;
   manifest.description = 'The BSV wallet for tokens, media and apps.';
-  manifest.action = { ...manifest.action, default_title: NAME, default_icon: iconSet };
+  // Side panel instead of the 360x600 popup: the mobile UI is phone-shaped (vite.config.ts).
+  const { default_popup: _popup, ...action } = manifest.action;
+  manifest.action = { ...action, default_title: NAME, default_icon: iconSet };
+  manifest.side_panel = { default_path: 'index.html' };
+  manifest.permissions = [...new Set([...manifest.permissions, 'sidePanel'])];
+  // 1Sat overlay submit sends an x-topics header api.1sat.app's CORS rejects; host access skips CORS.
+  manifest.host_permissions = [...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*'])];
   manifest.icons = iconSet;
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 

@@ -1,0 +1,3 @@
+/* bWalletX Chrome extension: the mobile UI's styles (vite.config.ts links this into every page). */
+@import '@fontsource/space-grotesk/700.css';
+@import './mobile.css';

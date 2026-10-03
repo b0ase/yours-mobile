@@ -121,7 +121,11 @@ const BCORP_TEXT: Swaps = {
 export const EXTENSION_TEXT: Swaps = {
   'src/content.ts': [["console.log('🌱 Yours Wallet Loaded');", ''] as [string, string]],
   'src/background.ts': [
-    ["console.log('Yours Wallet Background Script Running!');", "console.log('bWalletX background running');"],
+    [
+      "console.log('Yours Wallet Background Script Running!');",
+      // bWalletX opens in Chrome's side panel when the toolbar icon is clicked (scripts/build.ts manifest).
+      "console.log('bWalletX background running');\nchrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});",
+    ],
   ],
   'src/pages/Settings.tsx': [
     [

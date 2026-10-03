@@ -19,6 +19,7 @@ import app_tempoIcon from './brand/apps/tempo.png';
 import bgVideo from './brand/bg/liquid-gold.mp4';
 import bgPoster from './brand/bg/liquid-gold.jpg';
 import { VideoBackground } from './ui/VideoBackground';
+import { IS_EXTENSION } from './extension';
 import { useKeyboardInset } from './ui/keyboardInset';
 
 /**
@@ -511,6 +512,8 @@ const BrowserPage = () => {
     // typed addresses open full screen.
     const tile = ALL_TILES.find((t) => t.url === url);
     const name = bapp?.name ?? tile?.name;
+    // Chrome extension: Chrome is the browser, so apps open in a normal tab and connect to the extension.
+    if (IS_EXTENSION) return void chrome.tabs.create({ url });
     (name ? openBapp(name, url) : openDappBrowser(url)).catch((e: unknown) =>
       setError(e instanceof Error ? e.message : String(e)),
     );
