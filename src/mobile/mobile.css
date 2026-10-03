@@ -4,9 +4,15 @@
 
 /* Apps > Home arrange mode: iOS-style jiggle (2D transforms only). */
 @keyframes bw-jiggle {
-  0% { transform: rotate(-1.6deg); }
-  50% { transform: rotate(1.6deg); }
-  100% { transform: rotate(-1.6deg); }
+  0% {
+    transform: rotate(-1.6deg);
+  }
+  50% {
+    transform: rotate(1.6deg);
+  }
+  100% {
+    transform: rotate(-1.6deg);
+  }
 }
 .bw-jiggle {
   animation: bw-jiggle 0.28s ease-in-out infinite;
@@ -508,7 +514,9 @@ body,
   font-size: clamp(9px, 2.7vw, 11.5px);
   letter-spacing: 0.02em;
   color: #d9d4c5;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.8), 0 -1px 0 rgba(255, 255, 255, 0.12);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.8),
+    0 -1px 0 rgba(255, 255, 255, 0.12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -519,7 +527,6 @@ body,
   white-space: nowrap;
   max-width: 100%;
 }
-
 
 .bw-wcard-addrrow {
   margin-bottom: 16px;

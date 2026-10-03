@@ -28,7 +28,8 @@ export const consentInfo = (t: ConsentTarget): ConsentInfo =>
   t === 'paid'
     ? {
         provider: 'Anthropic',
-        route: 'bWallet’s server (bitcoinchat.online, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
+        route:
+          'bWallet’s server (bitcoinchat.online, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
         terms: 'Anthropic’s commercial terms and privacy policy (anthropic.com/legal)',
       }
     : {
@@ -40,7 +41,8 @@ export const consentInfo = (t: ConsentTarget): ConsentInfo =>
 /** What the sheet says is sent, and what is not. Kept here so the test can hold it to MAX_TURNS. */
 export const SENT_TEXT = `Your message and the recent conversation (up to the last ${MAX_TURNS} messages), plus bWallet’s fixed instructions to b.`;
 /** Pay-per-message also needs the payment proven: bWallet's server sees the txid and your bChat sign-in, not the provider. */
-export const PAID_EXTRA_TEXT = 'To check your payment, bWallet’s server also receives the payment’s transaction id and your bChat sign-in. Anthropic does not.';
+export const PAID_EXTRA_TEXT =
+  'To check your payment, bWallet’s server also receives the payment’s transaction id and your bChat sign-in. Anthropic does not.';
 export const NOT_SENT_TEXT =
   'Nothing else from your wallet: not your keys or recovery phrase, balances, addresses, contacts, chats or files.';
 
@@ -62,7 +64,8 @@ const write = (v: Partial<Record<ConsentTarget, string>>) => {
 };
 
 export const hasConsent = (t: ConsentTarget) => !!read()[t];
-export const grantConsent = (t: ConsentTarget, now = Date.now()) => write({ ...read(), [t]: new Date(now).toISOString() });
+export const grantConsent = (t: ConsentTarget, now = Date.now()) =>
+  write({ ...read(), [t]: new Date(now).toISOString() });
 export const revokeConsent = (t: ConsentTarget) => {
   const v = read();
   delete v[t];

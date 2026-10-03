@@ -199,7 +199,12 @@ export const NewRoomSheet = ({
           <p className="text-[11px]" style={{ color: MUTED }}>
             Free. No token needed. Be kind: rooms that break the rules get closed.
           </p>
-          <button onClick={create} disabled={busy || !name.trim()} className={goldBtn} style={{ background: GOLD, color: '#1a1300' }}>
+          <button
+            onClick={create}
+            disabled={busy || !name.trim()}
+            className={goldBtn}
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
             {busy ? 'Creating…' : 'Create room'}
           </button>
         </div>
@@ -213,12 +218,21 @@ export const NewRoomSheet = ({
             className={inputCls}
             style={inputStyle}
           />
-          <button onClick={join} disabled={busy || !code.trim()} className={goldBtn} style={{ background: GOLD, color: '#1a1300' }}>
+          <button
+            onClick={join}
+            disabled={busy || !code.trim()}
+            className={goldBtn}
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
             {busy ? 'Joining…' : 'Join room'}
           </button>
         </div>
       )}
-      {error && <p className="text-xs mt-2" style={{ color: RED }}>{error}</p>}
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
     </OSheet>
   );
 };
@@ -327,7 +341,11 @@ export const OpenRoomSheet = ({
             <span className="flex-1 text-lg font-bold tracking-widest" style={{ color: GOLD }}>
               {formatInviteCode(card.inviteCode)}
             </span>
-            <button onClick={copyCode} className="rounded-lg px-3 py-1 text-xs font-bold inline-flex items-center gap-1" style={{ background: GOLD, color: '#1a1300' }}>
+            <button
+              onClick={copyCode}
+              className="rounded-lg px-3 py-1 text-xs font-bold inline-flex items-center gap-1"
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
               <Copy size={12} /> Share
             </button>
           </div>
@@ -376,7 +394,10 @@ export const OpenRoomSheet = ({
               <span className="flex-1 text-sm text-white">
                 ${h}
                 {roleTag(h) && (
-                  <span className="ml-2 text-[10px] font-bold rounded-full px-2 py-[1px]" style={{ background: '#2a2208', color: GOLD }}>
+                  <span
+                    className="ml-2 text-[10px] font-bold rounded-full px-2 py-[1px]"
+                    style={{ background: '#2a2208', color: GOLD }}
+                  >
                     {roleTag(h)}
                   </span>
                 )}
@@ -441,7 +462,11 @@ export const OpenRoomSheet = ({
                 : 'Close this room for everyone? It becomes read-only and leaves the public list. This can’t be undone.'}
             </p>
             <div className="flex gap-2">
-              <button onClick={() => setConfirm(null)} className="flex-1 rounded-lg py-2 text-xs font-bold text-white" style={{ background: PANEL }}>
+              <button
+                onClick={() => setConfirm(null)}
+                className="flex-1 rounded-lg py-2 text-xs font-bold text-white"
+                style={{ background: PANEL }}
+              >
                 Cancel
               </button>
               <button
@@ -456,7 +481,11 @@ export const OpenRoomSheet = ({
           </div>
         )}
       </div>
-      {error && <p className="text-xs mt-2" style={{ color: RED }}>{error}</p>}
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
       {reporting && (
         <ReportSheet
           title={`Report ${card.name}`}
@@ -511,7 +540,8 @@ export const MessageMenu = ({
     }
   };
 
-  const row = 'w-full rounded-xl py-3 px-4 text-sm font-semibold text-left inline-flex items-center gap-3 disabled:opacity-50';
+  const row =
+    'w-full rounded-xl py-3 px-4 text-sm font-semibold text-left inline-flex items-center gap-3 disabled:opacity-50';
 
   return (
     <OSheet title={author ? `$${author}` : 'Message'} onClose={onClose}>
@@ -519,38 +549,47 @@ export const MessageMenu = ({
         {message.body}
       </p>
       <div className="flex flex-col gap-2">
-          <>
-            {!mine && (
-              <button onClick={() => setReporting(true)} className={row} style={{ background: PANEL, color: '#fff' }}>
-                <Flag size={16} /> Report message
-              </button>
-            )}
-            {!mine && author && (
-              <button
-                onClick={() => {
-                  onBlock(author);
-                  addSnackbar(`Blocked $${author}. You won’t see their messages.`, 'success');
-                  onClose();
-                }}
-                className={row}
-                style={{ background: PANEL, color: '#fff' }}
-              >
-                <Ban size={16} /> Block ${author}
-              </button>
-            )}
-            {canDelete && (
-              <button onClick={() => void remove()} disabled={busy} className={row} style={{ background: PANEL, color: RED }}>
-                <Trash2 size={16} /> Delete for everyone
-              </button>
-            )}
-            {mine && !canDelete && (
-              <p className="text-xs" style={{ color: MUTED }}>
-                This is your message.
-              </p>
-            )}
-          </>
+        <>
+          {!mine && (
+            <button onClick={() => setReporting(true)} className={row} style={{ background: PANEL, color: '#fff' }}>
+              <Flag size={16} /> Report message
+            </button>
+          )}
+          {!mine && author && (
+            <button
+              onClick={() => {
+                onBlock(author);
+                addSnackbar(`Blocked $${author}. You won’t see their messages.`, 'success');
+                onClose();
+              }}
+              className={row}
+              style={{ background: PANEL, color: '#fff' }}
+            >
+              <Ban size={16} /> Block ${author}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => void remove()}
+              disabled={busy}
+              className={row}
+              style={{ background: PANEL, color: RED }}
+            >
+              <Trash2 size={16} /> Delete for everyone
+            </button>
+          )}
+          {mine && !canDelete && (
+            <p className="text-xs" style={{ color: MUTED }}>
+              This is your message.
+            </p>
+          )}
+        </>
       </div>
-      {error && <p className="text-xs mt-2" style={{ color: RED }}>{error}</p>}
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
       {reporting && (
         <ReportSheet
           title="Report message"

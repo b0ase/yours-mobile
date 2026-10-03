@@ -279,7 +279,12 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
               />
             )}
             {CHOICES.has('token') && (
-              <Choice icon={<Coins size={18} />} title="Mint a token" sub={TOKEN_COPY} onClick={() => setStep('token')} />
+              <Choice
+                icon={<Coins size={18} />}
+                title="Mint a token"
+                sub={TOKEN_COPY}
+                onClick={() => setStep('token')}
+              />
             )}
             <Choice
               icon={<ImageIcon size={18} />}

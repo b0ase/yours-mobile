@@ -67,7 +67,11 @@ export const UserSafetyButton = ({
   if (!h) return null;
   return (
     <>
-      <button onClick={() => setOpen(true)} className="p-2 rounded-full active:opacity-60" aria-label={`Report or block $${h}`}>
+      <button
+        onClick={() => setOpen(true)}
+        className="p-2 rounded-full active:opacity-60"
+        aria-label={`Report or block $${h}`}
+      >
         <Flag size={size} color={MUTED} />
       </button>
       {open && (
