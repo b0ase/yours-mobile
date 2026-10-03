@@ -19,6 +19,7 @@ import { estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
 import { moneyNow } from '../money/money';
+import { walletOutpoint } from '../market/walletOutpoint';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -204,7 +205,7 @@ export const GetYourName = ({
       if (p.kind === 'bind') await bind(p);
       else if (p.kind === 'mint') await registerNew(p.name);
       else {
-        const res = await buyOpns.execute(apiContext, { outpoint: p.outpoint, name: p.name });
+        const res = await buyOpns.execute(apiContext, { outpoint: walletOutpoint(p.outpoint), name: p.name });
         if (res.error) throw new Error(res.error);
         setMsg(`You bought ${p.name}. Binding it to your identity…`);
         const mine = (await refreshOwned()).find((o) => o.name === p.name);
