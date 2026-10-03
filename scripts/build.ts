@@ -225,11 +225,13 @@ async function main() {
     const done = spinner(`${idx} Building ${step.name}...`);
     const t = Date.now();
 
+    const unmute = mute();
     try {
-      const unmute = mute();
       await build({ configFile: resolve(root, step.cfg), logLevel: 'silent' });
       unmute();
     } catch (err) {
+      // Unmute first, or the error printed below is swallowed and the build fails silently.
+      unmute();
       done(`${fail('✗')} ${idx} ${step.name}  ${fail('FAILED')}`);
       throw err;
     }
