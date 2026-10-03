@@ -12,7 +12,9 @@ const META = resolve(__dirname, '.build-meta.json');
 
 // Same rule as vite.brand.ts: BRAND=bcorp (default) is bWallet; yours keeps upstream's manifest.
 const BRAND = ['yours', 'bwallet'].find((b) => b === (process.env.BRAND ?? process.env.MOBILE_BRAND)) ?? 'bcorp';
-const BRAND_ICONS = resolve(root, 'assets/bwallet-ext');
+// The extension is a full-feature build, so it ships as bWalletX with the b+x icons (scripts/gen-bwalletx-mark.sh).
+const BRAND_ICONS = resolve(root, 'assets/bwalletx-ext');
+const NAME = 'bWalletX';
 
 /**
  * bWallet builds: rewrite build/manifest.json and the PWA manifest, and replace the
@@ -40,18 +42,18 @@ function brandManifest() {
     '48': 'icons/icon48.png',
     '128': 'icons/icon128.png',
   };
-  manifest.name = 'bWallet';
-  manifest.short_name = 'bWallet';
+  manifest.name = NAME;
+  manifest.short_name = NAME;
   manifest.description = 'The BSV wallet for tokens, media and apps.';
-  manifest.action = { ...manifest.action, default_title: 'bWallet', default_icon: iconSet };
+  manifest.action = { ...manifest.action, default_title: NAME, default_icon: iconSet };
   manifest.icons = iconSet;
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
   const pwaPath = resolve(dist, 'pwa-manifest.json');
   if (existsSync(pwaPath)) {
     const pwa = JSON.parse(readFileSync(pwaPath, 'utf-8'));
-    pwa.short_name = 'bWallet';
-    pwa.name = 'bWallet';
+    pwa.short_name = NAME;
+    pwa.name = NAME;
     pwa.description = manifest.description;
     pwa.icons = [16, 48, 128, 192, 512].map((s) => ({
       src: `icons/icon${s}.png`,

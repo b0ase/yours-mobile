@@ -121,23 +121,23 @@ const BCORP_TEXT: Swaps = {
 export const EXTENSION_TEXT: Swaps = {
   'src/content.ts': [["console.log('🌱 Yours Wallet Loaded');", ''] as [string, string]],
   'src/background.ts': [
-    ["console.log('Yours Wallet Background Script Running!');", "console.log('bWallet background running');"],
+    ["console.log('Yours Wallet Background Script Running!');", "console.log('bWalletX background running');"],
   ],
   'src/pages/Settings.tsx': [
     [
       '        {buildInfo}\n      </div>',
-      '        {buildInfo}\n      </div>\n      <div className="text-center text-[10px] pb-4 px-4" style={{ color: \'#667085\' }}>bWallet (beta) by The Bitcoin Corporation Ltd. Based on the open-source Yours Wallet (MIT licence); not affiliated with or endorsed by its authors.</div>',
+      '        {buildInfo}\n      </div>\n      <div className="text-center text-[10px] pb-4 px-4" style={{ color: \'#667085\' }}>bWalletX (beta) by The Bitcoin Corporation Ltd. Based on the open-source Yours Wallet (MIT licence); not affiliated with or endorsed by its authors.</div>',
     ],
   ],
-  'src/pages/usb/RepickFlow.tsx': [['The dialog will name Yours Wallet.', 'The dialog will name bWallet.']],
+  'src/pages/usb/RepickFlow.tsx': [['The dialog will name Yours Wallet.', 'The dialog will name bWalletX.']],
   'src/pages/usb/EnrollFlow.tsx': [['already has a Yours key file', 'already has a wallet key file']],
   'src/pages/usb/AddFlow.tsx': [['already has a Yours key file', 'already has a wallet key file']],
   'src/pages/usb/RestoreFlow.tsx': [
     ['No Yours backup found on this drive', 'No wallet backup found on this drive'],
-    ['Open the Yours icon;', 'Open the bWallet icon;'],
+    ['Open the Yours icon;', 'Open the bWalletX icon;'],
   ],
   'src/pages/usb/UsbFlow.tsx': [
-    ['Click the Yours icon to open your wallet.', 'Click the bWallet icon to open your wallet.'],
+    ['Click the Yours icon to open your wallet.', 'Click the bWalletX icon to open your wallet.'],
   ],
   'src/services/usbBackup.ts': [
     ['written by a different version of Yours.', 'written by a different version of the wallet.'],

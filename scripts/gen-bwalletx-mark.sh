@@ -46,4 +46,10 @@ magick "$T/icon.png" -alpha remove -alpha off $X/AppIconX.appiconset/AppIcon-512
 cp $X/AppIcon.appiconset/Contents.json $X/AppIconX.appiconset/
 for f in splash-2732x2732.png splash-2732x2732-1.png splash-2732x2732-2.png; do cp "$T/splash.png" "$X/SplashX.imageset/$f"; done
 cp $X/Splash.imageset/Contents.json $X/SplashX.imageset/
+# Chrome extension icons (scripts/build.ts)
+E=assets/bwalletx-ext
+mkdir -p $E
+for s in 16 32 48 128 192 512; do rsvg-convert -w "$s" -h "$s" $B/bwalletx-mark.svg -o "$E/icon$s.png"; done
+cp "$E/icon512.png" "$E/maskable-512.png"
+magick "$E/icon16.png" "$E/icon32.png" "$E/icon48.png" "$E/favicon.ico"
 echo "bWalletX marks generated"
