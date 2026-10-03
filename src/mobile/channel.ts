@@ -2,7 +2,7 @@
  * Release channel, chosen at build time with VITE_CHANNEL (scripts/channel-build.sh):
  *
  *   ios-store       App Store            com.bitcoincorp.bwallet          store rules (storeBuild.ts)
- *   ios-private     Ad Hoc / EU direct   com.bitcoincorp.bwalletx         everything on (bWalletX)
+ *   ios-private     Ad Hoc / EU direct   com.bitcoincorp.bwallet.private  everything on (bWalletX)
  *   android-play    Google Play          com.bitcoincorp.bwallet          store rules
  *   android-direct  APK from the site    com.bitcoincorp.bwallet.direct   everything on (bWalletX)
  *

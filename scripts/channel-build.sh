@@ -10,7 +10,7 @@
 # emulators (release-signed, so existing data is kept), booted iPhone simulators and USB iPhones (Debug builds).
 #
 # App IDs: the store channels keep com.bitcoincorp.bwallet ("bWallet"); android-direct is .direct and ios-private is
-# com.bitcoincorp.bwalletx, both named "bWalletX" with the b+x icon and splash (scripts/gen-bwalletx-mark.sh), so a
+# .private (kept so existing installs update in place and keep their wallet), both named "bWalletX" with the b+x icon and splash (scripts/gen-bwalletx-mark.sh), so a
 # bWalletX build sits beside the store one (separate wallets; restore from the phrase).
 # The Android upload key lives outside the repo (~/.yours-mobile/upload-keystore.jks); its password is read from
 # the macOS Keychain entry "yours-mobile-android-upload" and never written to disk.
@@ -89,7 +89,7 @@ else
   NAME=bWallet
   ICON=AppIcon
   if [[ $CH == ios-private ]]; then
-    APP_ID=com.bitcoincorp.bwalletx; NAME="bWalletX"; ICON=AppIconX
+    APP_ID=$APP_ID.private; NAME="bWalletX"; ICON=AppIconX
     # The launch storyboard names the "Splash" image: swap in the b+x splash for this build only.
     SPL=ios/App/App/Assets.xcassets
     cp "$SPL"/SplashX.imageset/*.png "$SPL/Splash.imageset/"
