@@ -130,16 +130,18 @@ export const TopNav = () => {
           className="relative w-10 h-10 flex items-center justify-center bg-transparent"
         >
           <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
-          {/* bWalletX builds wear the x, so anyone can see which app is running (store app: plain b). */}
+          {/* bWalletX builds wear a sharp x beside the b, so anyone can see which app is running (store app: plain b). */}
           {X_MARK && (
-            <span
+            <svg
               aria-hidden
               data-testid="bx-mark"
-              className="absolute top-0.5 right-0.5 w-[15px] h-[15px] rounded-full flex items-center justify-center"
-              style={{ background: '#000', border: '1.5px solid #F5B800' }}
+              viewBox="0 0 12 12"
+              width={9}
+              height={9}
+              className="absolute top-[7px] right-[5px]"
             >
-              <X size={10} strokeWidth={3.5} color="#F5B800" />
-            </span>
+              <path d="M2 2L10 10M10 2L2 10" stroke="#F5B800" strokeWidth={2.6} strokeLinecap="square" />
+            </svg>
           )}
         </button>
         <button

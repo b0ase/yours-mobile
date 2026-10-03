@@ -282,15 +282,13 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
     ],
   ],
-  // UnlockWallet: bigger b mark above "Welcome back"; bWalletX builds show the b+x (storeBuild.isBWalletX).
-  'src/components/UnlockWallet.tsx#logo': [
+  // UnlockWallet: bigger b mark above "Welcome back" (YoursIcon shows the b+x in bWalletX builds).
+  'src/components/UnlockWallet.tsx#logo': [['<YoursIcon width="4rem" />', '<YoursIcon width="7rem" />']],
+  // Welcome, unlock and every other YoursIcon: the b+x tile in bWalletX builds (storeBuild.isBWalletX).
+  'src/components/YoursIcon.tsx': [
     [
-      "import { YoursIcon } from './YoursIcon';",
-      "import { YoursIcon } from './YoursIcon';\nimport bxGlyph from '../mobile/brand/bwalletx-glyph.svg';\nimport { isBWalletX } from '../mobile/storeBuild';",
-    ],
-    [
-      '<YoursIcon width="4rem" />',
-      '{isBWalletX() ? <img src={bxGlyph} alt="bWalletX" style={{ width: \'5.2rem\', height: \'5.2rem\' }} /> : <YoursIcon width="7rem" />}',
+      "import walletIcon from '../assets/logos/icon.png';",
+      "import plainIcon from '../assets/logos/icon.png';\nimport bxIcon from '../mobile/brand/bcorpx/icon.png';\nimport { isBWalletX } from '../mobile/storeBuild';\nconst walletIcon = isBWalletX() ? bxIcon : plainIcon;",
     ],
   ],
   // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).

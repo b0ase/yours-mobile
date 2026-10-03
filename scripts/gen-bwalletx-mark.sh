@@ -19,6 +19,7 @@ magick -size 2732x2732 xc:black "$T/s.png" -gravity center -composite "$T/splash
 
 mkdir -p $B/bcorpx
 rsvg-convert -w 76 -h 76 $B/bwalletx-glyph.svg -o $B/bcorpx/white-logo.png
+rsvg-convert -w 512 -h 512 $B/bwalletx-mark.svg -o $B/bcorpx/icon.png # YoursIcon (welcome / unlock)
 
 # Android (direct flavour)
 RES=android/app/src/direct/res
