@@ -623,3 +623,21 @@ export const hotBoard = (onPartial?: (rooms: HotRoom[]) => void): Promise<HotRoo
     });
     return rank(enriched.filter((r): r is HotRoom => !!r));
   });
+
+/** Past sales of a BSV-21 token, oldest first: whole-token price in sats (GorillaPool). For the wallet's price chart. */
+export type Sale = { height: number; satsPerToken: number };
+export const tokenSales = (tokenId: string, limit = 60): Promise<Sale[]> =>
+  cached(`sales:${tokenId}`, async () => {
+    const r = await fetch(
+      `https://ordinals.gorillapool.io/api/bsv20/market/sales?id=${encodeURIComponent(tokenId)}&limit=${limit}&dir=desc`,
+    );
+    if (!r.ok) return [];
+    const rows = (await r.json()) as { amt: string; price: string; dec?: number; spendHeight?: number; height: number }[];
+    return rows
+      .map((s) => {
+        const tokens = Number(s.amt) / 10 ** (s.dec ?? 0);
+        return { height: s.spendHeight || s.height, satsPerToken: tokens > 0 ? Number(s.price) / tokens : 0 };
+      })
+      .filter((s) => s.satsPerToken > 0)
+      .sort((a, b) => a.height - b.height);
+  });

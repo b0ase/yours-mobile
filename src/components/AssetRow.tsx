@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../hooks/useTheme';
 import { formatLargeNumber, formatUSD } from '../utils/format';
@@ -37,7 +37,7 @@ export type AssetRowProps = {
   onClick?: () => void;
   /** Extra line under "Balance" (e.g. the token's issuer badge). */
   subline?: ReactNode;
-  /** Full-width strip under the row (bWallet: Buy · Sell · Chat on tokens). */
+  /** bWalletX: tapping the card opens this panel under it (chart, Buy · Sell · Chat) instead of onClick. */
   actions?: ReactNode;
 };
 
@@ -59,6 +59,7 @@ export const AssetRow = (props: AssetRowProps) => {
     actions,
   } = props;
   const { theme } = useTheme();
+  const [open, setOpen] = useState(false);
   const isDisplaySat = isLock && balance < 0.0001;
   const displayDecimals = decimals ?? (isDisplaySat ? 0 : 3);
   // bWallet: no "Get MNEE" button (owner, 3 Oct 2026); a zero MNEE balance shows like any other.
@@ -75,7 +76,11 @@ export const AssetRow = (props: AssetRowProps) => {
         cursor: showPointer ? 'pointer' : 'default',
         border: `1px solid ${theme.color.global.gray}14`,
       }}
-      onClick={onClick}
+      onClick={(e) => {
+        if (!actions) return onClick?.();
+        e.stopPropagation();
+        setOpen((o) => !o);
+      }}
     >
       {/* Left: icon + name */}
       <div className="flex items-center flex-1 min-w-0 ml-3">
@@ -117,7 +122,7 @@ export const AssetRow = (props: AssetRowProps) => {
       >
         <GradientButton theme={theme} onClick={onGetMneeClick} />
       </Show>
-      {actions && <div className="basis-full w-full px-3 pt-2">{actions}</div>}
+      {actions && open && <div className="basis-full w-full px-3 pt-2.5">{actions}</div>}
     </motion.div>
   );
 };
