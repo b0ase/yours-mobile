@@ -6,6 +6,11 @@
  */
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { CustomListenerName, type RequestEventDetail, type RequestParams } from '../../inject';
+import { CWI } from '../../cwi';
+import { announceWallet } from '../../brand/discovery';
+import { appNameFor, isBWalletX } from '../storeBuild';
+import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
+import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
 
 type AndroidBridge = { postMessage: (data: string) => void; onmessage: ((e: { data: string }) => void) | null };
 type IosBridge = { postMessage: (data: string) => Promise<string> };
@@ -53,3 +58,9 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
       reply({ success: false, error: error instanceof Error ? error.message : String(error) }),
     );
 });
+
+// Discovery (wallet-connect spec §3): the in-app browser has exactly one wallet; say which.
+announceWallet(
+  { name: appNameFor(), icon: isBWalletX() ? bxIcon : bIcon, rdns: 'space.bwallet.mobile', kind: 'in-app' },
+  CWI,
+);

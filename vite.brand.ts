@@ -90,6 +90,14 @@ const BCORP_TEXT: Swaps = {
     ],
   ],
   'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
+  // getVersion() names this wallet, not Yours (wallet-connect spec §3.2). Only the real extension has
+  // chrome.sidePanel; the mobile shell's chrome shim doesn't.
+  'src/background.ts': [
+    [
+      'data: { version: `yours-wallet-${chrome.runtime.getManifest().version}` },',
+      "data: { version: `${'sidePanel' in chrome ? 'bwalletx' : 'bwallet-mobile'}-${chrome.runtime.getManifest().version}` },",
+    ],
+  ],
   'src/components/UpgradeNotification.tsx': [['Welcome to Yours Wallet 5.0', 'Welcome to bWallet']],
   'src/components/BackupPromo.tsx': [['Yours Wallet now uses', 'bWallet uses']],
   'src/components/ProviderPicker.tsx': [
@@ -119,7 +127,11 @@ const BCORP_TEXT: Swaps = {
  * app does not show (USB key flows, Settings footer, content/background logs).
  */
 export const EXTENSION_TEXT: Swaps = {
-  'src/content.ts': [["console.log('🌱 Yours Wallet Loaded');", ''] as [string, string]],
+  'src/content.ts': [
+    ["console.log('🌱 Yours Wallet Loaded');", ''],
+    // Only bWalletX's own page event (src/brand/cwi.ts), so a request meant for Yours never reaches us.
+    ['self.addEventListener(CustomListenerName.YOURS_REQUEST,', "self.addEventListener('bWalletXRequest',"],
+  ],
   'src/background.ts': [
     [
       "console.log('Yours Wallet Background Script Running!');",
@@ -188,7 +200,13 @@ export const bcorpColours = (): Plugin => ({
 
 /** Extension theme: bWallet name and badge, without the mobile-only Browser tab. */
 export const EXTENSION_SWAPS: Record<string, string> =
-  BRAND === 'yours' ? {} : { [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/brand/extensionTheme.ts') };
+  BRAND === 'yours'
+    ? {}
+    : {
+        [resolve(__dirname, 'src/theme.ts')]: resolve(__dirname, 'src/brand/extensionTheme.ts'),
+        // Page-side wallet: own request event, discovery announce, no window.CWI overwrite.
+        [resolve(__dirname, 'src/cwi.ts')]: resolve(__dirname, 'src/brand/cwi.ts'),
+      };
 
 /** All brand plugins for one extension bundle. */
 export const extensionBrandPlugins = ({ emitAvatar = false } = {}): Plugin[] => [
