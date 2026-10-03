@@ -75,6 +75,7 @@ import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay } from '../mobile/wallet/payNav';
+import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -1460,6 +1461,7 @@ export const BsvWallet = () => {
                 Manage Tokens List
               </span>
             </motion.button>
+            <FindTokensButton style={listItemStyle} onFound={() => setRandomKey(Math.random())} />
           </motion.div>
         </Show>
 
