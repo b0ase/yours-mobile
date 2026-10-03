@@ -428,6 +428,33 @@ export type RoomMarket = {
 
 const EMPTY: RoomMarket = { listings: [], floorLabel: null, floorSats: null, live: 0, buyableCount: 0 };
 
+type GpListing = { outpoint: string; amt: string; price: string; owner?: string; spend?: string; id: string };
+
+/** Live BSV-21 listings from GorillaPool, cheapest first, in the txo/search row shape; null if unavailable. */
+async function gorillaListings(tokenId: string): Promise<SearchRow[] | null> {
+  try {
+    const rows = await getJson<GpListing[] | null>(
+      `https://ordinals.gorillapool.io/api/bsv20/market?id=${encodeURIComponent(tokenId)}&limit=100&dir=asc&sort=price_per_token`,
+      6_000,
+    );
+    if (!Array.isArray(rows)) return null;
+    return rows
+      .filter((r) => !r.spend && r.id === tokenId && Number(r.price) > 0)
+      .map(
+        (r) =>
+          ({
+            outpoint: r.outpoint,
+            data: {
+              bsv21: { id: r.id, amt: r.amt },
+              ordlock: { price: Number(r.price), seller: r.owner ? { AddressString: r.owner } : undefined },
+            },
+          }) as unknown as SearchRow,
+      );
+  } catch {
+    return null;
+  }
+}
+
 /** Which BSV-21 listing outpoints the 1Sat overlay recognises. */
 async function overlayValid(tokenId: string, outpoints: string[]): Promise<Set<string>> {
   if (!outpoints.length) return new Set();
@@ -470,16 +497,22 @@ async function loadMarket(room: RoomRef, limit: number): Promise<RoomMarket> {
       buyableCount: listings.length,
     };
   }
+  // GorillaPool's token market answers in under a second; 1Sat's txo/search takes 7–15 s for busy
+  // tokens (measured 3 Oct 2026). Use GorillaPool first, fall back to the search if it fails.
   // eslint-disable-next-line prefer-const
   let [rows, meta] = await Promise.all([
-    search({
-      key: [`bsv21:${room.id}`, 'ordlock'],
-      join: 'intersect',
-      unspent: 'true',
-      rev: 'true',
-      limit: '100',
-      tags: 'bsv21,ordlock',
-    }),
+    gorillaListings(room.id).then(
+      (r) =>
+        r ??
+        search({
+          key: [`bsv21:${room.id}`, 'ordlock'],
+          join: 'intersect',
+          unspent: 'true',
+          rev: 'true',
+          limit: '100',
+          tags: 'bsv21,ordlock',
+        }),
+    ),
     roomMeta(room.kind, room.id),
   ]);
   const seen = new Set<string>();
