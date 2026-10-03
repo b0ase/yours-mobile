@@ -302,9 +302,35 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     void healIndexFundActions(accountContext.baseWallet).then((r) => {
       if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
     });
+    void preferLocalStorage(accountContext);
   }
 
   return accountContext?.wallet ?? null;
+};
+
+/**
+ * bWallet: keep the wallet's main copy on the device, 1Sat storage as the backup (owner, 4 Oct 2026).
+ * 1Sat's remote storage caps BEEF depth at 12, so token buys with a deep ancestry fail while it is
+ * active ("Maximum BEEF depth exceeded"). Once per account, switch a remote-active wallet to local;
+ * setActiveStorage merges both stores first, and the remote stays as a backup. Someone who later
+ * picks remote again in Wallet Backup keeps that choice (the flag is set).
+ */
+const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
+  try {
+    const { account } = chromeStorageService.getCurrentAccountObject();
+    const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
+    if (!account || !config?.activeRemote || config.localFirst) return;
+    console.log('[background] storage: switching active to this device (remote stays a backup)');
+    await ctx.setActiveStorage('local');
+    const remotes = config.remotes?.includes(config.activeRemote) ? config.remotes : [...(config.remotes ?? []), config.activeRemote];
+    await chromeStorageService.updateNested('accounts', {
+      [account.addresses.identityAddress]: {
+        storageConfig: { ...config, activeRemote: undefined, remotes, localFirst: true },
+      } as unknown as Account,
+    });
+  } catch (err) {
+    console.warn('[background] storage: could not switch to local-active:', err);
+  }
 };
 
 // Start initialization — clean up stale popup windows then initialize wallet.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { withBeefHint } from '../../brand/walletError';
 import { useBackClose } from '../backStack';
 import { IssuerBadge, SharedTickerNote } from '../issuer/IssuerBadge';
 import { duplicateTickers, sharedTickerWarning } from '../issuer/issuerVerify';
@@ -139,7 +140,8 @@ const PURCHASE_ERRORS: Record<string, string> = {
   'not-an-ordlock-listing': "This isn't a standard 1Sat listing, so it can't be bought here.",
   'services-required-for-purchase': 'The wallet is still starting up. Try again in a moment.',
 };
-const purchaseError = (e: unknown) => {
+const purchaseError = (e: unknown) => withBeefHint(purchaseText(e));
+const purchaseText = (e: unknown) => {
   if (typeof e === 'string' && PURCHASE_ERRORS[e]) return PURCHASE_ERRORS[e];
   const generic = getErrorMessage(e);
   // Never hide the real reason behind a generic message.

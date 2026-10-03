@@ -7,8 +7,17 @@
 type Review = { txid?: string; status?: string; competingTxs?: string[]; competingBeef?: unknown };
 type Send = { txid?: string; status?: string };
 
+const BEEF_HINT =
+  ' Your wallet is using 1Sat online storage, which can only handle short histories. Fix: Settings › Wallet Backup › make "This Browser" active, then try again.';
+
+/** Add the how-to-fix line to a BEEF depth error (once). */
+export const withBeefHint = (text: string) =>
+  /BEEF depth exceeded/i.test(text) && !text.includes('Wallet Backup') ? text + BEEF_HINT : text;
+
 export function describeWalletError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
+  const text = error instanceof Error ? error.message : String(error);
+  if (/BEEF depth exceeded/i.test(text)) return withBeefHint(text);
+  if (!(error instanceof Error)) return text;
   const e = error as Error & { reviewActionResults?: Review[]; sendWithResults?: Send[]; code?: string };
   const parts: string[] = [];
   for (const r of e.reviewActionResults ?? []) {
