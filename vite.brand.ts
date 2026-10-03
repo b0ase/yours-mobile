@@ -94,6 +94,12 @@ const BCORP_TEXT: Swaps = {
   // getVersion() names this wallet, not Yours (wallet-connect spec §3.2). Only the real extension has
   // chrome.sidePanel; the mobile shell's chrome shim doesn't.
   'src/background.ts': [
+    // Rapid spends (game reloads, several Loads before a block) build an unconfirmed chain deeper than
+    // wallet-toolbox's default BEEF recursion limit of 12 ("Maximum BEEF depth exceeded"). Allow 64.
+    [
+      '  accountContext = ctx;\n',
+      "  accountContext = ctx;\n  for (const st of (((ctx.storage as any)?._stores ?? []) as any[]).map((m: any) => m?.storage))\n    if (st && typeof st.maxRecursionDepth === 'number') st.maxRecursionDepth = 64;\n",
+    ],
     [
       'data: { version: `yours-wallet-${chrome.runtime.getManifest().version}` },',
       "data: { version: `${'sidePanel' in chrome ? 'bwalletx' : 'bwallet-mobile'}-${chrome.runtime.getManifest().version}` },",
