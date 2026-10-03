@@ -24,6 +24,7 @@ import app_bexchangeIcon from './brand/apps/bexchange.png';
 import app_beduIcon from './brand/apps/bedu.png';
 import app_bsocialIcon from './brand/apps/bsocial.png';
 import app_bmapsIcon from './brand/apps/bmaps.png';
+import app_tokenblasterIcon from './brand/apps/tokenblaster.png';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
@@ -80,6 +81,14 @@ export const BAPPS: BApp[] = [
     group: 'featured',
     status: 'live',
     icon: app_bmoviesIcon,
+  },
+  {
+    name: 'TokenBlaster',
+    url: 'https://www.tokenblaster.lol/blast',
+    verb: 'Load your token into the gun and blast it at the chain',
+    group: 'featured',
+    status: 'live',
+    icon: app_tokenblasterIcon,
   },
   {
     name: 'bMusic',
