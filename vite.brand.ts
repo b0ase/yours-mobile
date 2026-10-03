@@ -118,6 +118,12 @@ const BCORP_TEXT: Swaps = {
   'src/components/UpgradeNotification.tsx': [['Welcome to Yours Wallet 5.0', 'Welcome to bWallet']],
   'src/components/BackupPromo.tsx': [['Yours Wallet now uses', 'bWallet uses']],
   'src/components/ProviderPicker.tsx': [
+    // The status check signs with the wallet: when the wallet itself isn't running, say so instead of
+    // blaming the provider ("may be temporarily down").
+    [
+      'Unable to reach this provider. It may be temporarily down.',
+      "{result?.status === 'error' && /wallet not (available|initialized)/i.test(result.error ?? '') ? 'Your wallet isn\\'t running: lock and unlock bWalletX, then try again.' : `Unable to reach this provider (${result?.status === 'error' ? result.error : ''}).`}",
+    ],
     ['Official storage partner of Yours Wallet.', 'Default wallet storage provider.'],
   ],
   'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bWallet"']],
