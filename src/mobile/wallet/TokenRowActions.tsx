@@ -11,7 +11,16 @@ import { marketTradingEnabled, tokenRoomsEnabled } from '../storeBuild';
  * the Market, Sell opens the token page (its Sell sheet lists an OrdLock), Chat opens the token's
  * room. Store build: no Buy/Sell (Market view-only) and no rooms, so nothing shows.
  */
-export const TokenRowActions = ({ tokenId, onSell }: { tokenId: string; onSell: () => void }) => {
+export const TokenRowActions = ({
+  tokenId,
+  onSell,
+  onBuy,
+}: {
+  /** BSV-21 id; omitted for BSV / MNEE (Buy and Chat then open the Market and Chat tabs as they are). */
+  tokenId?: string;
+  onSell: () => void;
+  onBuy?: () => void;
+}) => {
   const { handleSelect } = useBottomMenu();
   const trade = marketTradingEnabled();
   const rooms = tokenRoomsEnabled();
@@ -24,7 +33,7 @@ export const TokenRowActions = ({ tokenId, onSell }: { tokenId: string; onSell: 
         e.stopPropagation();
         onClick();
       }}
-      className="flex flex-1 items-center justify-center gap-1.5 h-8 rounded-lg text-xs font-bold border-0 outline-none cursor-pointer"
+      className="flex flex-1 items-center justify-center gap-1.5 h-7 rounded-lg text-xs font-bold border-0 outline-none cursor-pointer"
       style={{ background: '#17191E', color: '#FFD24D' }}
     >
       {icon}
@@ -36,13 +45,14 @@ export const TokenRowActions = ({ tokenId, onSell }: { tokenId: string; onSell: 
     <div className="flex w-full gap-2">
       {trade &&
         btn('Buy', <ShoppingCart size={13} />, () => {
-          requestMarketToken({ kind: 'bsv21', id: tokenId });
+          if (onBuy) return onBuy();
+          if (tokenId) requestMarketToken({ kind: 'bsv21', id: tokenId });
           handleSelect(asMenuItem('market'));
         })}
       {trade && btn('Sell', <Tag size={13} />, onSell)}
       {rooms &&
         btn('Chat', <MessageCircle size={13} />, () => {
-          const key = tokenKey('bsv21', tokenId);
+          const key = tokenId && tokenKey('bsv21', tokenId);
           if (key) requestChatRoom(key);
           handleSelect(asMenuItem('chat'));
         })}

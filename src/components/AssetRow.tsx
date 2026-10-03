@@ -86,10 +86,12 @@ export const AssetRow = (props: AssetRowProps) => {
           <span className="text-sm font-semibold leading-tight" style={{ color: theme.color.global.contrast }}>
             {ticker}
           </span>
-          <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
-            {isLock ? 'Next unlock' : 'Balance'}
-          </span>
-          {subline}
+          {/* One line under the name on every card (issuer badge replaces "Balance"), so cards match in height. */}
+          {subline ?? (
+            <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
+              {isLock ? 'Next unlock' : 'Balance'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -115,7 +117,7 @@ export const AssetRow = (props: AssetRowProps) => {
       >
         <GradientButton theme={theme} onClick={onGetMneeClick} />
       </Show>
-      {actions && <div className="basis-full w-full px-3 pt-2.5">{actions}</div>}
+      {actions && <div className="basis-full w-full px-3 pt-2">{actions}</div>}
     </motion.div>
   );
 };
