@@ -267,8 +267,9 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
     ],
     [
-      '            {!isSyncing && !balanceLoading && (\n              <motion.button',
-      '            {false && !isSyncing && !balanceLoading && (\n              <motion.button',
+      // Phone: pull to refresh instead. Extension (no pull gesture): keep the button.
+      '            {!balanceLoading && (\n              <motion.button',
+      '            {__BWALLET_EXTENSION__ && !balanceLoading && (\n              <motion.button',
     ],
   ],
   // Own tokens with an unpaid indexing fee: cards under the action buttons (src/mobile/tokens/WalletIndexing).
