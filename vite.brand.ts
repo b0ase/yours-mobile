@@ -90,16 +90,20 @@ const BCORP_TEXT: Swaps = {
       "if (!uri) return '';\n  if (uri.includes('i.ibb.co/zGcthBv/yours-org-light.png')) return 'bwallet-avatar.png';",
     ],
   ],
+  // Rapid unconfirmed spends (several game Loads or Market buys before a block, token listings with
+  // long unconfirmed histories) exceed wallet-toolbox's BEEF recursion limit of 12 ("Maximum BEEF
+  // depth exceeded. Limit is 12"). Raise the default at build time in every bundled copy.
+  'node_modules/@bsv/wallet-toolbox-client/out/index.client.mjs': [
+    ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+  ],
+  'node_modules/@1sat/connect/dist/index.js': [['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;']],
+  'node_modules/@1sat/client/node_modules/@bsv/wallet-toolbox-client/out/index.client.mjs': [
+    ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+  ],
   'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
   // getVersion() names this wallet, not Yours (wallet-connect spec §3.2). Only the real extension has
   // chrome.sidePanel; the mobile shell's chrome shim doesn't.
   'src/background.ts': [
-    // Rapid spends (game reloads, several Loads before a block) build an unconfirmed chain deeper than
-    // wallet-toolbox's default BEEF recursion limit of 12 ("Maximum BEEF depth exceeded"). Allow 64.
-    [
-      '  accountContext = ctx;\n',
-      "  accountContext = ctx;\n  for (const st of (((ctx.storage as any)?._stores ?? []) as any[]).map((m: any) => m?.storage))\n    if (st && typeof st.maxRecursionDepth === 'number') st.maxRecursionDepth = 64;\n",
-    ],
     [
       'data: { version: `yours-wallet-${chrome.runtime.getManifest().version}` },',
       "data: { version: `${'sidePanel' in chrome ? 'bwalletx' : 'bwallet-mobile'}-${chrome.runtime.getManifest().version}` },",
