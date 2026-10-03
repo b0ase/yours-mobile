@@ -104,6 +104,12 @@ const BCORP_TEXT: Swaps = {
   // getVersion() names this wallet, not Yours (wallet-connect spec §3.2). Only the real extension has
   // chrome.sidePanel; the mobile shell's chrome shim doesn't.
   'src/background.ts': [
+    // Keep the broadcast reason behind "results require review" (src/brand/walletError.ts).
+    [
+      "import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';",
+      "import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';\nimport { describeWalletError } from './brand/walletError';",
+    ],
+    ['error: error instanceof Error ? error.message : String(error),', 'error: describeWalletError(error),'],
     [
       'data: { version: `yours-wallet-${chrome.runtime.getManifest().version}` },',
       "data: { version: `${'sidePanel' in chrome ? 'bwalletx' : 'bwallet-mobile'}-${chrome.runtime.getManifest().version}` },",
