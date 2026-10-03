@@ -52,9 +52,17 @@ export async function recoverPurchases(wallet: WalletInterface, pages = 10): Pro
   for (const s of list) {
     const txo = owners.get(`${s.spend}_0`);
     if (!txo?.owner || txo.spend) continue; // unknown, or already moved on
-    const keyID = `${s.id}-${s.outpoint}`;
-    const { publicKey } = await wallet.getPublicKey({ protocolID: P1SAT_PROTOCOL, keyID, counterparty: 'self', forSelf: true });
-    if (PublicKey.fromString(publicKey).toAddress() !== txo.owner) continue;
+    // Our Market passes the listing as `txid.vout` (walletOutpoint); other callers may use `txid_vout`.
+    let keyID = '';
+    for (const op of [s.outpoint.replace(/_(\d+)$/, '.$1'), s.outpoint]) {
+      const k = `${s.id}-${op}`;
+      const { publicKey } = await wallet.getPublicKey({ protocolID: P1SAT_PROTOCOL, keyID: k, counterparty: 'self', forSelf: true });
+      if (PublicKey.fromString(publicKey).toAddress() === txo.owner) {
+        keyID = k;
+        break;
+      }
+    }
+    if (!keyID) continue;
 
     const sym = s.sym || s.id.slice(0, 8);
     const held = await wallet.listOutputs({ basket: BSV21_BASKET, tags: bsv21FilterTags({ tokenId: s.id }), limit: 1000 });
