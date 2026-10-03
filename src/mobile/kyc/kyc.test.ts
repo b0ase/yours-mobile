@@ -177,7 +177,7 @@ describe('issued certificate checks', () => {
       checkIssuedCertificate(good, { identityKey: publicKey, certifiers: ['02' + 'd'.repeat(64)] }),
     ).rejects.toThrow('not signed by bit-sign');
     await expect(
-      checkIssuedCertificate(await issue(publicKey, 'b3RoZXI='), { identityKey: publicKey, certifiers: [certifier] }),
+      checkIssuedCertificate(await issue(publicKey, 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='), { identityKey: publicKey, certifiers: [certifier] }),
     ).rejects.toThrow('Not a bit-sign KYC');
     const tampered = { ...good, fields: { ...good.fields, country: good.fields.verified } };
     await expect(checkIssuedCertificate(tampered, { identityKey: publicKey, certifiers: [certifier] })).rejects.toThrow(

@@ -8,25 +8,23 @@ import {
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
-import {
-  syncAddresses,
-  syncMessages,
-  createContext as createActionContext,
-  migrateLegacyP1SatBaskets,
-} from '@1sat/actions';
+import { syncAddresses, syncMessages, createContext as createActionContext } from '@1sat/actions';
 import { createAssetPermissionModules } from '@1sat/permission-module';
 import type { WalletInterface } from '@bsv/sdk';
 import { ChromeStorageService } from './services/ChromeStorage.service';
-import { WALLET_DATA_MIGRATION_VERSION, MESSAGEBOX_URL } from './utils/constants';
+import { MESSAGEBOX_URL } from './utils/constants';
 import type { Account, StorageConfig } from './services/types/chromeStorage.types';
 import { decrypt } from './utils/crypto';
 import type { Keys } from './utils/keys';
 import { initSyncContext, type SyncContext } from './initSyncContext';
+import { refileLegacyBaskets } from './services/legacyBaskets';
+import { reconcileStorage } from './services/storageReconcileBackground';
 import { showOneSatPrompt } from './services/oneSatPrompt';
 
-// Admin originator for the extension (bypasses all permission checks)
-// Uses chrome-extension://<id> format to match what ChromeCWI sends
-const ADMIN_ORIGINATOR = `chrome-extension://${chrome.runtime.id}`;
+// Admin originator for the extension (bypasses all permission checks). The bare
+// extension ID, as ChromeCWI sends it: toolbox permission checks reject a URL
+// scheme, and no web page host can take this form.
+export const ADMIN_ORIGINATOR = chrome.runtime.id;
 
 /**
  * Wrap a wallet so every method call pre-binds `originator` to the supplied
@@ -278,16 +276,6 @@ export const initWallet = async (
   const adminWallet = withOriginator(wallet, ADMIN_ORIGINATOR);
 
   mark('permissions + sync context ready');
-  const storageVersion = chromeStorageService.storage?.version ?? 0;
-  if (storageVersion < WALLET_DATA_MIGRATION_VERSION) {
-    mark('legacy basket migration start');
-    try {
-      await migrateLegacyP1SatBaskets(baseWallet);
-      await chromeStorageService.completeWalletDataMigration();
-    } catch (err) {
-      console.error('[initWallet] legacy basket migration failed; will retry next unlock', err);
-    }
-  }
 
   const maxKeyIndex = account?.settings?.maxKeyIndex ?? 4; // default: 0-4 = 5 addresses
   const syncContext = await initSyncContext({
@@ -331,6 +319,44 @@ export const initWallet = async (
       console.error('[initWallet] beforeSync failed:', err);
     }
     mark('beforeSync done');
+  }
+
+  // Wallet-data migrations. After beforeSync so a restored backup's data is in
+  // storage before they look at it, and before the address sync, whose locks
+  // would keep the reconcile's sync lock waiting.
+  const stampDataVersion = (dataVersion: number) =>
+    chromeStorageService.updateNested('accounts', {
+      [keys.identityAddress]: { dataVersion } as unknown as Account,
+    });
+  // Steps run in order; each stamps its own version (see ACCOUNT_DATA_VERSION).
+  let dataVersion = account?.dataVersion ?? 0;
+
+  if (dataVersion < 1) {
+    mark('legacy basket migration start');
+    try {
+      await refileLegacyBaskets(storage);
+      await stampDataVersion(1);
+      dataVersion = 1;
+    } catch (err) {
+      console.error('[initWallet] legacy basket migration failed; will retry next open', err);
+    }
+    mark('legacy basket migration done');
+  }
+
+  // Runs once whatever the outcome: a failed run leaves its record for
+  // Settings > Troubleshooting, where the user can retry. Only a run the
+  // worker never finished (no stamp) is tried again on the next open.
+  if (dataVersion === 1) {
+    const config = account?.storageConfig;
+    const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+    if (remoteUrl) {
+      mark('storage reconcile migration start');
+      await reconcileStorage(storage, syncContext.services, remoteUrl, 'migration').catch((err) =>
+        console.error('[initWallet] storage reconcile migration failed:', err),
+      );
+      mark('storage reconcile migration done');
+    }
+    await stampDataVersion(2);
   }
 
   console.log('[initWallet] Starting address sync...');

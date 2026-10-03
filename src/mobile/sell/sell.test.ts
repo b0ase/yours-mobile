@@ -101,7 +101,8 @@ describe('fees', () => {
 });
 
 describe('listing script', () => {
-  test('round-trips through @1sat/templates (BSV21 + OrdLock decode)', () => {
+  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
+  test.skip('round-trips through @1sat/templates (BSV21 + OrdLock decode)', () => {
     const script = buildListingScript(TOKEN, 42n, cancel, pay, 12345);
     const back = decodeListing(script);
     expect(back).toEqual({ tokenId: TOKEN, amount: 42n, priceSats: 12345, seller: cancel });
@@ -114,7 +115,8 @@ describe('listing script', () => {
     expect(tok.getAmount()).toBe(42n);
   });
 
-  test('inscription comes first (1Sat market format), OrdLock follows', () => {
+  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
+  test.skip('inscription comes first (1Sat market format), OrdLock follows', () => {
     const hex = buildListingScript(TOKEN, 1n, cancel, pay, 1).toHex();
     expect(hex.startsWith('0063036f7264')).toBe(true); // OP_FALSE OP_IF "ord"
     const json = Buffer.from(hex, 'hex').toString('latin1');
@@ -123,7 +125,8 @@ describe('listing script', () => {
     expect(json).toContain('"amt":"1"');
   });
 
-  test('rejects bad prices; non-listings decode to null', () => {
+  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
+  test.skip('rejects bad prices; non-listings decode to null', () => {
     expect(() => buildListingScript(TOKEN, 1n, cancel, pay, 0)).toThrow();
     expect(() => buildListingScript(TOKEN, 1n, cancel, pay, 1.5)).toThrow();
     expect(decodeListing(new Script())).toBeNull();
@@ -131,7 +134,8 @@ describe('listing script', () => {
     expect(decodeListing(plain)?.priceSats).toBe(5);
   });
 
-  test('listing tx size estimate covers the real listing script', () => {
+  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
+  test.skip('listing tx size estimate covers the real listing script', () => {
     const len = buildListingScript(TOKEN, 10n ** 12n, cancel, pay, 10 ** 9).toBinary().length;
     expect(listingTxBytes(1, len, true)).toBeGreaterThan(len);
   });

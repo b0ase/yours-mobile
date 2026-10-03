@@ -47,7 +47,10 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
 
   useEffect(() => {
     const loadSavedTokens = async () => {
-      if (!tokensProp.length) return;
+      if (!tokensProp.length) {
+        setTokens([]);
+        return;
+      }
       const { account } = chromeStorageService.getCurrentAccountObject();
       if (!account) return;
       const favoriteTokenIds = account?.settings?.favoriteTokens || [];
@@ -64,6 +67,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
       setPriceData(data);
     };
 
+    // Re-run when the parent's list changes (e.g. favorites edited in Manage Tokens).
     loadSavedTokens();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokensProp]);

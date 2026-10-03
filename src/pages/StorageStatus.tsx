@@ -131,16 +131,15 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   const remotes = info?.storageConfig?.remotes ?? [];
   const remotesKey = remotes.join(',');
   const stableRemotes = useMemo(() => remotes, [remotesKey]);
-  const stableKnownUrls = useMemo(() => KNOWN_PROVIDERS.map((p) => p.url), []);
+  const knownAccountUrls = useMemo(() => Object.fromEntries(KNOWN_PROVIDERS.map((p) => [p.url, p.accountUrl])), []);
   const { statusMap, loading: statusLoading } = useRemoteStatus(
     apiContext.wallet as any,
     stableRemotes,
-    stableKnownUrls,
+    knownAccountUrls,
   );
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<'active' | 'remove' | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [repairing, setRepairing] = useState(false);
   const [showProviderPicker, setShowProviderPicker] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [subView, _setSubView] = useState<SubView>({ type: 'main' });
@@ -231,21 +230,6 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   };
 
   const handleSync = () => triggerSync();
-
-  const handleRepairSync = () => {
-    if (repairing || syncing || busy) return;
-    setRepairing(true);
-    addSnackbar('Repairing sync (local → remote)...', 'info');
-    chrome.runtime.sendMessage({ action: 'STORAGE_REPAIR_SYNC' }, (response) => {
-      setRepairing(false);
-      if (response?.success) {
-        addSnackbar('Repair complete — remote is active', 'success');
-        fetchInfo();
-      } else if (response?.error) {
-        addSnackbar(response.error, 'error');
-      }
-    });
-  };
 
   const handleSetActive = async (target: 'local' | string) => {
     setBusyAction('active');
@@ -778,28 +762,14 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
         {/* Sync */}
         <motion.button
           whileTap={{ scale: 0.98 }}
-          onClick={syncing || repairing ? undefined : handleSync}
-          disabled={syncing || repairing}
+          onClick={syncing ? undefined : handleSync}
+          disabled={syncing}
           className="flex items-center justify-center gap-2 w-full mt-3 py-2 rounded-lg text-xs font-medium border-0 outline-none cursor-pointer disabled:opacity-50"
           style={{ color: gray, background: 'rgba(255,255,255,0.04)' }}
         >
           <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Syncing...' : 'Sync Now'}
         </motion.button>
-
-        {/* Repair: local then remote — fixes config-only promote without full push */}
-        {remotes.length > 0 && (
-          <motion.button
-            whileTap={{ scale: 0.98 }}
-            onClick={repairing || syncing || busy ? undefined : handleRepairSync}
-            disabled={repairing || syncing || busy}
-            className="flex items-center justify-center gap-2 w-full mt-2 py-2 rounded-lg text-xs font-medium border-0 outline-none cursor-pointer disabled:opacity-50"
-            style={{ color: '#FDB022', background: 'rgba(253,176,34,0.08)' }}
-          >
-            <AlertTriangle size={11} className={repairing ? 'animate-pulse' : ''} />
-            {repairing ? 'Repairing...' : 'Repair Sync'}
-          </motion.button>
-        )}
       </div>
 
       {/* Backup storage */}

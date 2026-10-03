@@ -19,8 +19,12 @@ declare const __TICKET_RESALE_FEE_RATE__: string | undefined;
 
 /** bWallet-only switch: listing creation is on in the mobile build, off elsewhere (extension). */
 /** Off in a store build: the Market is view-only there (storeBuild.ts). */
+// Paused (4 Oct 2026): @1sat/templates 0.0.41 turned off OrdLock v1 listing creation (OPL-4690:
+// "List via OrdLock v2"), and @1sat/actions has no v2 listing for BSV-21 yet. Buying and cancelling
+// existing listings still work. Re-enable on a v2 token listing.
+const SELL_PAUSED = true;
 export const SELL_ENABLED =
-  marketTradingEnabled() && typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
+  !SELL_PAUSED && marketTradingEnabled() && typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
 
 // ── ticket resale fee (owner: 0 by default; NOT the general 1% Market fee) ──
 
