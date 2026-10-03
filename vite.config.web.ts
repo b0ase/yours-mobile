@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
 
 /**
- * bWallet web wallet: the mobile UI as a static site (build-web/), for any
+ * bWalletX web wallet (web.bwalletx.com): the mobile UI as a static site (build-web/), for any
  * browser. Same code and storage as `pnpm preview:mobile`: Capacitor's web
  * fallbacks run (src/mobile/native.ts), so the wallet's storage.local, which
  * holds the password-encrypted keys, lives in this browser's localStorage and
@@ -13,7 +13,7 @@ import mobileConfig from './vite.config.mobile';
  */
 
 const BANNER = 'Web wallet beta — your keys stay in this browser. Connecting other websites is coming soon.';
-const ICONS = resolve(__dirname, 'assets/bwallet-ext');
+const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
 
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
@@ -26,12 +26,12 @@ const webShell = (): Plugin => ({
         .replace(
           '</head>',
           [
-            '    <meta name="description" content="bWallet: the BSV wallet for tokens, media and apps." />',
+            '    <meta name="description" content="bWalletX: the BSV wallet for tokens, media and apps." />',
             '    <link rel="manifest" href="./manifest.webmanifest" />',
             '    <link rel="icon" href="./favicon.ico" sizes="any" />',
             '    <link rel="apple-touch-icon" href="./icons/icon192.png" />',
             '    <meta name="apple-mobile-web-app-capable" content="yes" />',
-            '    <meta name="apple-mobile-web-app-title" content="bWallet" />',
+            '    <meta name="apple-mobile-web-app-title" content="bWalletX" />',
             '  </head>',
           ].join('\n'),
         )
@@ -43,13 +43,15 @@ const webShell = (): Plugin => ({
       this.emitFile({ type: 'asset', fileName: `icons/${f}`, source: readFileSync(resolve(ICONS, f)) });
     }
     this.emitFile({ type: 'asset', fileName: 'favicon.ico', source: readFileSync(resolve(ICONS, 'favicon.ico')) });
+    // Hosting headers (no framing, no referrer) for Vercel: web.bwalletx.com.
+    this.emitFile({ type: 'asset', fileName: 'vercel.json', source: readFileSync(resolve(__dirname, 'src/web/vercel.json')) });
     this.emitFile({
       type: 'asset',
       fileName: 'manifest.webmanifest',
       source: JSON.stringify(
         {
-          name: 'bWallet',
-          short_name: 'bWallet',
+          name: 'bWalletX',
+          short_name: 'bWalletX',
           description: 'The BSV wallet for tokens, media and apps.',
           start_url: './',
           scope: './',

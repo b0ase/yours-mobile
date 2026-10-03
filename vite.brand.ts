@@ -173,7 +173,7 @@ export const bcorpText = (extra: Swaps = {}): Plugin => {
       return transform.call(this, code, id);
     },
     transformIndexHtml: (html) =>
-      BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', '<title>bWallet</title>') : html,
+      BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', `<title>${STORE ? 'bWallet' : 'bWalletX'}</title>`) : html,
   };
 };
 
