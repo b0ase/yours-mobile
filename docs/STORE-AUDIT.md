@@ -314,7 +314,7 @@ Contact everywhere: bitcoincorp11@gmail.com.
 
 ## Open decisions for the owner
 
-- **D1** Market in the store build: **decided 2 Oct 2026, trading on** (non-custodial, no bCorp fee; section 3). Revisit if a reviewer objects or per country.
+- **D1** Market in the store build: **view-only since 3 Oct 2026.** Build 8 was rejected under 3.1.5(iii); buy / sell / list stay in bWalletX only.
 - **D2** Token rooms: listed but non-joinable (chosen), or hidden entirely, or allowed for NFT-only "display" rooms?
 - **D3** Media (NFT) minting in the store build: kept with no fee. Keep it?
 - **D4** In-app browser in the store build: keep the free URL bar, or allow the curated directory only? (Left alone so `feat/bapp-frame` merges cleanly.)

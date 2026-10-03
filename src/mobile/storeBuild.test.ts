@@ -53,7 +53,7 @@ describe('storeBuild', () => {
   });
 
   test('trading, token rooms, paid features and mint choices', () => {
-    expect(marketTradingEnabled(true)).toBe(true);
+    expect(marketTradingEnabled(true)).toBe(false);
     expect(marketTradingEnabled(false)).toBe(true);
     expect(tokenRoomsEnabled(true)).toBe(false);
     expect(tokenRoomsEnabled(false)).toBe(true);

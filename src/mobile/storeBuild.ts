@@ -41,10 +41,10 @@ export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(
 ): T[] => (store ? filters.filter((f) => !STORE_HIDDEN_MARKET_FILTERS.includes(f[0])) : [...filters]);
 
 /**
- * Market buy / sell / list: on in every build. It is peer-to-peer OrdLock trading between users'
- * own wallets (like Phantom's swaps), with no bCorp fee in a store build (bcorpFeeAddress).
+ * Market buy / sell / list: off in a store build, where the Market is view-only. App Review rejected
+ * build 8 under 3.1.5(iii) (exchange functionality needs a licensed exchange); bWalletX keeps trading.
  */
-export const marketTradingEnabled = (_store = STORE_BUILD) => true;
+export const marketTradingEnabled = (store = STORE_BUILD) => !store;
 
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
