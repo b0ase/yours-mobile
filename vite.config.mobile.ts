@@ -296,7 +296,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx#allTokens': [
     [
       'const filtered = bsv21s.filter((t) => t.id && account?.settings?.favoriteTokens?.includes(t.id));',
-      'const favs = account?.settings?.favoriteTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || BigInt(t.amt || "0") > 0n));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
+      'const favs = account?.settings?.favoriteTokens ?? [];\n    const hidden = (account?.settings as { hiddenTokens?: string[] } | undefined)?.hiddenTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || (BigInt(t.amt || "0") > 0n && !hidden.includes(t.id))));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
     ],
   ],
   // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).

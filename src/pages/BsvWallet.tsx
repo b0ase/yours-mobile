@@ -76,6 +76,8 @@ import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay } from '../mobile/wallet/payNav';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
+import { BsvPriceChart } from '../mobile/wallet/PriceChart';
+import { useTabHome } from '../mobile/tabs/useTabHome';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -170,6 +172,12 @@ export const BsvWallet = () => {
   const [manageFavorites, setManageFavorites] = useState(false);
   const [account, setAccount] = useState<Account>();
   const [token, setToken] = useState<{ isConfirmed: boolean; info: Bsv21Balance } | null>(null);
+  // Tapping the Wallet tab returns here from Manage Tokens, a token page, Send, Receive…
+  useTabHome('bsv', () => {
+    setManageFavorites(false);
+    setToken(null);
+    setPageState('main');
+  });
   const services = theme.settings.services;
   const [filteredTokens, setFilteredTokens] = useState<Bsv21Balance[]>([]);
   const [randomKey, setRandomKey] = useState(Math.random());
@@ -1291,7 +1299,7 @@ export const BsvWallet = () => {
                 </motion.div>
               )}
             </AnimatePresence>
-            {!isSyncing && !balanceLoading && (
+            {!balanceLoading && (
               <motion.button
                 whileHover={{ opacity: 1 }}
                 whileTap={{ scale: 0.9 }}
@@ -1461,7 +1469,7 @@ export const BsvWallet = () => {
                 Manage Tokens List
               </span>
             </motion.button>
-            <FindTokensButton style={listItemStyle} onFound={() => setRandomKey(Math.random())} />
+            <FindTokensButton style={listItemStyle} onFound={() => void getAndSetAccountAndBsv21s().then(() => setRandomKey(Math.random()))} />
           </motion.div>
         </Show>
 
@@ -1801,6 +1809,11 @@ export const BsvWallet = () => {
             Send BSV
           </h2>
         </div>
+      </div>
+
+      {/* BSV price, last 30 days */}
+      <div className="w-full mb-5 rounded-2xl p-4" style={{ background: theme.color.global.row }}>
+        <BsvPriceChart />
       </div>
 
       {/* Balance chip — MAX is single-recipient only */}

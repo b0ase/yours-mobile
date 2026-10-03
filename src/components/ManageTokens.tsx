@@ -23,13 +23,36 @@ export const ManageTokens = (props: ManageTokensProps) => {
   const { tokens: tokensProp, theme, onBack } = props;
   const { chromeStorageService } = useServiceContext();
   const [favoriteTokens, setFavoriteTokens] = useState<string[]>([]);
+  // bWallet: held tokens show by default, so the switch means "shown in Wallet". Hiding a held
+  // token records it here; the Wallet list skips hidden ones (owner, 4 Oct 2026).
+  const [hiddenTokens, setHiddenTokens] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const { account } = chromeStorageService.getCurrentAccountObject();
     setFavoriteTokens(account?.settings?.favoriteTokens || []);
+    setHiddenTokens((account?.settings as { hiddenTokens?: string[] } | undefined)?.hiddenTokens || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const isHeld = (id: string) => tokensProp.some((t) => t.id === id && BigInt(t.amt || '0') > 0n);
+  const isShown = (id: string) => favoriteTokens.includes(id) || (isHeld(id) && !hiddenTokens.includes(id));
+
+  const handleToggleShown = async (tokenId: string) => {
+    const show = !isShown(tokenId);
+    const favs = show
+      ? favoriteTokens.includes(tokenId) ? favoriteTokens : favoriteTokens.concat(tokenId)
+      : favoriteTokens.filter((id) => id !== tokenId);
+    const hidden = show ? hiddenTokens.filter((id) => id !== tokenId) : hiddenTokens.includes(tokenId) ? hiddenTokens : hiddenTokens.concat(tokenId);
+    setFavoriteTokens(favs);
+    setHiddenTokens(hidden);
+    const { account, selectedAccount } = chromeStorageService.getCurrentAccountObject();
+    if (!account || !selectedAccount) return;
+    const update: Partial<ChromeStorageObject['accounts']> = {
+      [selectedAccount]: { ...account, settings: { ...account.settings, favoriteTokens: favs, hiddenTokens: hidden } as typeof account.settings },
+    };
+    await chromeStorageService.updateNested('accounts', update);
+  };
 
   const handleToggleFavorite = async (tokenId: string) => {
     setFavoriteTokens((prev) => (prev.includes(tokenId) ? prev.filter((id) => id !== tokenId) : [...prev, tokenId]));
@@ -165,7 +188,7 @@ export const ManageTokens = (props: ManageTokensProps) => {
                         }}
                       />
                     </motion.button>
-                    <ToggleSwitch on={isFav} theme={theme} onChange={() => t?.id && handleToggleFavorite(t.id)} />
+                    <ToggleSwitch on={!!t?.id && isShown(t.id)} theme={theme} onChange={() => t?.id && handleToggleShown(t.id)} />
                   </div>
                 </motion.div>
               );

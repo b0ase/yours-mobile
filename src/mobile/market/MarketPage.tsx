@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { withBeefHint } from '../../brand/walletError';
+import { useTabHome } from '../tabs/useTabHome';
 import { useBackClose } from '../backStack';
 import { IssuerBadge, SharedTickerNote } from '../issuer/IssuerBadge';
 import { duplicateTickers, sharedTickerWarning } from '../issuer/issuerVerify';
@@ -201,6 +202,13 @@ const MarketPage = () => {
   const { handleSelect } = useBottomMenu();
   /** Set while the open room page is a ticket's (from the Tickets filter). */
   const [ticketPage, setTicketPage] = useState<{ ticket: Ticket; holder: boolean } | null>(null);
+  // Tapping the Market tab returns to the board from a room, an NFT preview or a ticket page.
+  useTabHome('market', () => {
+    setRoom(null);
+    setPreview(null);
+    setTicketPage(null);
+    setPending(null);
+  });
 
   useEffect(() => {
     void refreshSafety();
