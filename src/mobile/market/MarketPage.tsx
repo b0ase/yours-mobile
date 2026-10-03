@@ -340,7 +340,8 @@ const MarketPage = () => {
       if (ticketPage) setTicketPage({ ...ticketPage, holder: true });
       setPending(null);
       clearMarketCache();
-      if (room) setMarket(await roomMarket(room.ref));
+      // Refresh in the background: the purchase is done, and listings can take a while to reload.
+      if (room) void roomMarket(room.ref).then(setMarket, () => {});
       else void loadFeed();
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : 'Purchase failed', 'error');
