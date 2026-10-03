@@ -22,11 +22,14 @@ export const brandDefines = () => ({
 });
 
 const LOGO_DIR = BRAND === 'bcorp' ? 'src/mobile/brand/bcorp' : 'src/mobile/brand';
+// bWalletX = every non-store build (src/mobile/storeBuild.ts): its unlock-screen b wears the x.
+const STORE = process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+const WHITE_LOGO_DIR = BRAND === 'bcorp' && !STORE ? 'src/mobile/brand/bcorpx' : LOGO_DIR;
 const BWALLET_ASSETS: Record<string, string> = {
   [resolve(__dirname, 'src/utils/constants.ts')]: resolve(__dirname, 'src/mobile/brand/constants.ts'),
   [resolve(__dirname, 'src/assets/logos/icon.png')]: resolve(__dirname, LOGO_DIR, 'icon.png'),
   [resolve(__dirname, 'src/assets/logos/horizontal-logo.png')]: resolve(__dirname, LOGO_DIR, 'horizontal-logo.png'),
-  [resolve(__dirname, 'src/assets/logos/white-logo.png')]: resolve(__dirname, LOGO_DIR, 'white-logo.png'),
+  [resolve(__dirname, 'src/assets/logos/white-logo.png')]: resolve(__dirname, WHITE_LOGO_DIR, 'white-logo.png'),
 };
 
 /**

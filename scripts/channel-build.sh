@@ -9,8 +9,9 @@
 # INSTALL=1 installs and launches it on every connected target for that platform instead: Android phones and
 # emulators (release-signed, so existing data is kept), booted iPhone simulators and USB iPhones (Debug builds).
 #
-# App IDs: the store channels keep com.bitcoincorp.bwallet; android-direct is .direct and ios-private is .private,
-# named "bWalletX", so a private build sits beside the store one (separate wallets; restore from the phrase).
+# App IDs: the store channels keep com.bitcoincorp.bwallet ("bWallet"); android-direct is .direct and ios-private is
+# com.bitcoincorp.bwalletx, both named "bWalletX" with the b+x icon and splash (scripts/gen-bwalletx-mark.sh), so a
+# bWalletX build sits beside the store one (separate wallets; restore from the phrase).
 # The Android upload key lives outside the repo (~/.yours-mobile/upload-keystore.jks); its password is read from
 # the macOS Keychain entry "yours-mobile-android-upload" and never written to disk.
 # Afterwards android/ and ios/ hold the default (dev) web build again.
@@ -86,10 +87,18 @@ if [[ $CH == android-* ]]; then
 else
   APP_ID=com.bitcoincorp.bwallet
   NAME=bWallet
-  if [[ $CH == ios-private ]]; then APP_ID=$APP_ID.private; NAME="bWalletX"; fi
+  ICON=AppIcon
+  if [[ $CH == ios-private ]]; then
+    APP_ID=com.bitcoincorp.bwalletx; NAME="bWalletX"; ICON=AppIconX
+    # The launch storyboard names the "Splash" image: swap in the b+x splash for this build only.
+    SPL=ios/App/App/Assets.xcassets
+    cp "$SPL"/SplashX.imageset/*.png "$SPL/Splash.imageset/"
+    trap 'git checkout -q -- "$SPL/Splash.imageset"; restore' EXIT
+  fi
   TEAM=${DEVELOPMENT_TEAM:-ZQ4NX9NJ89}
   VERSION=$(sed -nE 's/.*MARKETING_VERSION = ([^;]+);.*/\1/p' ios/App/App.xcodeproj/project.pbxproj | head -1)
-  OVR=(PRODUCT_BUNDLE_IDENTIFIER="$APP_ID" BWALLET_DISPLAY_NAME="$NAME" BWALLET_CHANNEL="$CH" DEVELOPMENT_TEAM="$TEAM")
+  OVR=(PRODUCT_BUNDLE_IDENTIFIER="$APP_ID" BWALLET_DISPLAY_NAME="$NAME" BWALLET_CHANNEL="$CH" DEVELOPMENT_TEAM="$TEAM"
+    ASSETCATALOG_COMPILER_APPICON_NAME="$ICON")
   XB=(xcodebuild -project ios/App/App.xcodeproj -scheme App -allowProvisioningUpdates)
   # Full xcodebuild output goes to a log; on failure print its error lines (-quiet can fail silently).
   xb() {

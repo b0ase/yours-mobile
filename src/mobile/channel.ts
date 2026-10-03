@@ -2,9 +2,9 @@
  * Release channel, chosen at build time with VITE_CHANNEL (scripts/channel-build.sh):
  *
  *   ios-store       App Store            com.bitcoincorp.bwallet          store rules (storeBuild.ts)
- *   ios-private     Ad Hoc / EU direct   com.bitcoincorp.bwallet.private  everything on
+ *   ios-private     Ad Hoc / EU direct   com.bitcoincorp.bwalletx         everything on (bWalletX)
  *   android-play    Google Play          com.bitcoincorp.bwallet          store rules
- *   android-direct  APK from the site    com.bitcoincorp.bwallet.direct   everything on
+ *   android-direct  APK from the site    com.bitcoincorp.bwallet.direct   everything on (bWalletX)
  *
  * Unset = 'dev' (local builds), which behaves like the private channels. Store rules key off
  * isStoreChannel; the app IDs and home-screen names are set natively (android/app/build.gradle
