@@ -18,6 +18,7 @@ import { ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag } from 'l
 import { SellSheet } from '../mobile/sell/SellSheet';
 import { SELL_ENABLED } from '../mobile/sell/sell';
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
+import { PriceChart } from '../mobile/wallet/PriceChart';
 
 export interface Token {
   isConfirmed: boolean;
@@ -293,6 +294,13 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
               <IssuerBadge tokenId={token.info.id} />
             </Show>
           </div>
+
+          {/* Market chart */}
+          <Show when={!!token.info.id}>
+            <div className="mx-4 mb-5 rounded-2xl p-4" style={{ background: row }}>
+              <PriceChart tokenId={token.info.id} />
+            </div>
+          </Show>
 
           {/* Send form */}
           <form noValidate onSubmit={(e) => handleSendBSV21(e)} className="flex flex-col w-full px-4 gap-3">

@@ -75,7 +75,6 @@ import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay } from '../mobile/wallet/payNav';
-import { TokenRowActions, tokenPanelEnabled } from '../mobile/wallet/TokenRowActions';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -1381,17 +1380,6 @@ export const BsvWallet = () => {
               setSendSource('main');
               setPageState('send');
             }}
-            actions={
-              tokenPanelEnabled() ? (
-                <TokenRowActions
-                  onSend={() => {
-                    setSendSource('main');
-                    setPageState('send');
-                  }}
-                  onReceive={() => setPageState('receive')}
-                />
-              ) : undefined
-            }
           />
           <Show when={services.mnee}>
             <AssetRow
@@ -1413,18 +1401,6 @@ export const BsvWallet = () => {
                   setPageState('sendMNEE');
                 }
               }}
-              actions={
-                tokenPanelEnabled() ? (
-                  <TokenRowActions
-                    onReceive={() => setPageState('receive')}
-                    onSend={() => {
-                      if (legacyMneeBalance > 0) return setShowLegacyMneePrompt(true);
-                      setSendSource('main');
-                      setPageState('sendMNEE');
-                    }}
-                  />
-                ) : undefined
-              }
             />
           </Show>
           {lockData && (
@@ -1461,7 +1437,6 @@ export const BsvWallet = () => {
                   setSendSource('main');
                   handleTokenClick(t);
                 }}
-                onReceive={() => setPageState('receive')}
               />
             )}
           </motion.div>

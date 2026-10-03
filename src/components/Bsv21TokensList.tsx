@@ -1,5 +1,4 @@
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
-import { TokenRowActions, tokenPanelEnabled } from '../mobile/wallet/TokenRowActions';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -27,14 +26,12 @@ export type Bsv21TokensListProps = {
   theme: Theme;
   hideStatusLabels?: boolean;
   onTokenClick: (token: Bsv21Balance) => void;
-  /** bWalletX card panel: the wallet's Receive page. */
-  onReceive?: () => void;
 };
 
 const getTokenName = (b: Bsv21Balance): string => b.sym || 'Null';
 
 export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
-  const { tokens: tokensProp, theme, onTokenClick, onReceive, hideStatusLabels = false } = props;
+  const { tokens: tokensProp, theme, onTokenClick, hideStatusLabels = false } = props;
   const { chromeStorageService, apiContext } = useServiceContext();
   const [priceData, setPriceData] = useState<PriceData[]>([]);
   const [tokens, setTokens] = useState<Bsv21Balance[]>([]);
@@ -173,16 +170,6 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                                   icon={t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON}
                                   ticker={truncate(getTokenName(t), 10, 0)}
                                   subline={<IssuerBadge tokenId={t.id} compact />}
-                                  actions={
-                                    tokenPanelEnabled() ? (
-                                      <TokenRowActions
-                                        tokenId={t.id}
-                                        usdPerBsv={exchangeRate}
-                                        onSend={() => onTokenClick(t)}
-                                        onReceive={onReceive}
-                                      />
-                                    ) : undefined
-                                  }
                                   usdBalance={
                                     (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
                                     (exchangeRate / BSV_DECIMAL_CONVERSION) *
