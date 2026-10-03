@@ -48,6 +48,7 @@ import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { openDappBrowser } from '../dappBrowser';
+import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -300,15 +301,18 @@ const MarketPage = () => {
     try {
       // Ticket resales use the ticket resale fee (default 0), not the general Market fee.
       const fee = ticketPage ? ticketResaleFeeOptions() : marketFeeOptions();
+      const outpoint = walletOutpoint(listing.outpoint);
+      const ctx = purchaseContext(apiContext, outpoint);
       const res =
         r.ref.kind === 'bsv21'
-          ? await buyBsv21.execute(apiContext, {
+          ? await buyBsv21.execute(ctx, {
               tokenId: r.ref.id,
-              outpoint: listing.outpoint,
+              outpoint,
               amount: listing.amount ?? '0',
               ...fee,
+              ...MODULE_FINISHES,
             })
-          : await buyOrdinal.execute(apiContext, { outpoint: listing.outpoint, ...fee });
+          : await buyOrdinal.execute(ctx, { outpoint, ...fee, ...MODULE_FINISHES });
       if (!res.txid || res.error) {
         addSnackbar(getErrorMessage(res.error), 'error');
         return;
