@@ -38,6 +38,7 @@ import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
+import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
 import { BAPPS } from '../bapps';
 import { marketFiltersFor, marketTradingEnabled } from '../storeBuild';
@@ -144,7 +145,7 @@ const nftSafe = (n: NftListing) =>
 
 const MarketPage = () => {
   const { theme } = useTheme();
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [section, setSection] = useState<'trending' | 'mine'>('trending');
   const [tokenFilter, setTokenFilter] = useState<TokenFilter>('all');
@@ -317,6 +318,8 @@ const MarketPage = () => {
         addSnackbar(getErrorMessage(res.error), 'error');
         return;
       }
+      // The Wallet tab lists favourite tokens only: show what was just bought there.
+      if (r.ref.kind === 'bsv21') void showOnWallet(chromeStorageService, r.ref.id);
       addSnackbar(ticketPage ? 'Ticket bought: you can open the room now.' : 'Purchase sent!', 'success');
       if (ticketPage) setTicketPage({ ...ticketPage, holder: true });
       setPending(null);

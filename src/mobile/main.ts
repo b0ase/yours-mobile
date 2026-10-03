@@ -18,6 +18,7 @@ import {
   topOverlayId,
 } from './overlays';
 import { INTERNAL_ORIGIN, MOBILE_EXTENSION_ID, type Sender } from './protocol';
+import { installOverlayFetch } from './overlayFetch';
 import '@fontsource/space-grotesk/700.css';
 import './mobile.css';
 
@@ -28,6 +29,9 @@ import './mobile.css';
  */
 
 declare const __MOBILE_VERSION__: string;
+
+// Token submissions to the 1Sat indexer go through native HTTP (CORS bug on api.1sat.app).
+installOverlayFetch();
 
 // Scopes Android-only WebView paint workarounds in mobile.css.
 if (Capacitor.getPlatform() === 'android') document.documentElement.classList.add('android');
