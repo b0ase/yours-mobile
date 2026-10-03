@@ -291,6 +291,14 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import plainIcon from '../assets/logos/icon.png';\nimport bxIcon from '../mobile/brand/bcorpx/icon.png';\nimport { isBWalletX } from '../mobile/storeBuild';\nconst walletIcon = isBWalletX() ? bxIcon : plainIcon;",
     ],
   ],
+  // Wallet › Tokens: every BSV-21 token you hold, favourites first (upstream lists favourites only,
+  // so tokens you mint or receive never appeared until starred in Manage tokens).
+  'src/pages/BsvWallet.tsx#allTokens': [
+    [
+      'const filtered = bsv21s.filter((t) => t.id && account?.settings?.favoriteTokens?.includes(t.id));',
+      'const favs = account?.settings?.favoriteTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || BigInt(t.amt || "0") > 0n));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
+    ],
+  ],
   // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [

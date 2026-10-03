@@ -4,16 +4,16 @@ import { walletKindsFor } from '../storeBuild';
 
 export const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
 
-// Store build: no Tickets (storeBuild.ts). Credits ($BCREDIT) are shelved in every build (2 Oct 2026):
-// the code stays (src/mobile/credits, WalletKindGate kind="credits") but nothing opens it.
+// Tokens | NFTs. Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
+// (owner, 3 Oct 2026); the Tickets view (WalletKindGate kind="tickets") is kept but nothing opens it.
+// Credits ($BCREDIT) are shelved the same way (2 Oct 2026).
 const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
-  ['tickets', 'Tickets'],
 ]);
 const SHOWN = new Set(KINDS.map(([k]) => k));
 
-/** Tokens | NFTs | Tickets (sized so four fit a 320px phone), styled like Market's type switch (market/MarketPage.tsx). */
+/** Tokens | NFTs (sized so four fit a 320px phone), styled like Market's type switch (market/MarketPage.tsx). */
 export const WalletKindSwitch = () => {
   const kind = useWalletKind();
   return (
