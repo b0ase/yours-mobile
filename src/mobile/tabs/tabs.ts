@@ -12,8 +12,8 @@ export type MobileTab = MenuItems | 'market' | 'feed' | 'chat';
 /** Window event fired on every bottom-bar tap (useBottomMenu routes it even if the tab is already selected). */
 export const TAB_TAP = 'bwallet:tab-tap';
 
-/** Bottom bar order, left to right: Apps · Market · Wallet · Feed · Chat (Wallet in the centre; still the default tab). */
-export const TAB_ORDER: MobileTab[] = ['browser', 'market', 'bsv', 'feed', 'chat'];
+/** Bottom bar order, left to right: Wallet · Market · Apps · Feed · Chat (Wallet first and the default tab; Apps in the centre). */
+export const TAB_ORDER: MobileTab[] = ['bsv', 'market', 'browser', 'feed', 'chat'];
 
 export const asMenuItem = (tab: MobileTab) => tab as MenuItems;
 
