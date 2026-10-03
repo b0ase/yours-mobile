@@ -93,12 +93,20 @@ const BCORP_TEXT: Swaps = {
   // Rapid unconfirmed spends (several game Loads or Market buys before a block, token listings with
   // long unconfirmed histories) exceed wallet-toolbox's BEEF recursion limit of 12 ("Maximum BEEF
   // depth exceeded. Limit is 12"). Raise the default at build time in every bundled copy.
+  // Sync chunks default to ~10 MB; wallet.1sat.app answers anything over ~1 MB with HTTP 400
+  // ERR_AUTH_MALFORMED, so a wallet with a big history could never back up (seen on iPhone, 4 Oct 2026).
+  // Ask for ~400 KB chunks (JSON + base64 roughly doubles that on the wire).
   'node_modules/@bsv/wallet-toolbox-client/out/index.client.mjs': [
     ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+    ['maxRoughSize: maxRoughSize || 1e7', 'maxRoughSize: maxRoughSize || 4e5'],
   ],
-  'node_modules/@1sat/connect/dist/index.js': [['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;']],
+  'node_modules/@1sat/connect/dist/index.js': [
+    ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+    ['maxRoughSize: maxRoughSize || 1e7', 'maxRoughSize: maxRoughSize || 4e5'],
+  ],
   'node_modules/@1sat/client/node_modules/@bsv/wallet-toolbox-client/out/index.client.mjs': [
     ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+    ['maxRoughSize: maxRoughSize || 1e7', 'maxRoughSize: maxRoughSize || 4e5'],
   ],
   'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
   // getVersion() names this wallet, not Yours (wallet-connect spec §3.2). Only the real extension has

@@ -229,7 +229,14 @@ export const initWallet = async (
     remoteStorage,
     setActiveStorage,
     addRemote,
-  } = await createWebWallet(walletConfig);
+  } = await createWebWallet(walletConfig).catch(async (err: unknown) => {
+    // A backup that won't connect (e.g. 1Sat answering HTTP 400 to the iPhone WebView's auth
+    // handshake) must not take the whole wallet down: the device's own copy is authoritative when
+    // it's active. Open without backups; the address sync still finds funds on chain.
+    if (activeRemote || !backups?.length) throw err;
+    console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
+    return createWebWallet({ ...walletConfig, backups: [] });
+  });
   mark(
     `createWebWallet done; active=${storage.getActiveStoreName?.() ?? '?'} stores=${JSON.stringify(
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
