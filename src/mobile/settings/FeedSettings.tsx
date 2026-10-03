@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   Coins,
   Download,
   FileText,
+  Globe,
   Mail,
   Newspaper,
   PlayCircle,
@@ -22,6 +23,10 @@ import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
+import { PairedSitesList } from '../pair/PairedSitesList';
+import { IS_EXTENSION } from '../extension';
+
+const PairSheet = lazy(() => import('../pair/PairSheet'));
 import { TermsScreen } from '../ugc/UgcSheets';
 import { SUPPORT_EMAIL } from '../ugc/ugc';
 import { DeleteAccountScreen } from '../account/DeleteAccountScreen';
@@ -329,7 +334,9 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
 
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
-  const [screen, setScreen] = useState<'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | null>(null);
+  const [screen, setScreen] = useState<
+    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | null
+  >(null);
   const rate = useBsvUsd();
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
@@ -500,6 +507,18 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           isLast
         />
       </Section>
+      {!IS_EXTENSION && (
+        <Section title="Connections">
+          <Row
+            icon={<Globe size={16} />}
+            label="Paired websites"
+            description="Sites on your computer connected with Scan to connect"
+            onClick={() => setScreen('paired')}
+            isFirst
+            isLast
+          />
+        </Section>
+      )}
       <Section title="Account & safety">
         <Row
           icon={<Download size={16} />}
@@ -538,6 +557,16 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
+      {screen === 'paired' && (
+        <Screen title="Paired websites" onBack={() => setScreen(null)}>
+          <PairedSitesList onScan={() => setScreen('scan')} />
+        </Screen>
+      )}
+      {screen === 'scan' && (
+        <Suspense fallback={null}>
+          <PairSheet onClose={() => setScreen('paired')} />
+        </Suspense>
+      )}
     </>
   );
 };

@@ -1,11 +1,24 @@
 {
   "rewrites": [
-    { "source": "/.well-known/bsvalias", "destination": "/api/paymail?op=caps" },
+    {
+      "source": "/pair",
+      "destination": "/pair.html"
+    },
+    {
+      "source": "/.well-known/bsvalias",
+      "destination": "/api/paymail?op=caps"
+    },
     {
       "source": "/api/paymail/:op/:handle/:pubkey",
       "destination": "/api/paymail?op=:op&handle=:handle&pubkey=:pubkey"
     },
-    { "source": "/api/paymail/:op/:handle", "destination": "/api/paymail?op=:op&handle=:handle" },
-    { "source": "/api/paymail/:op", "destination": "/api/paymail?op=:op" }
+    {
+      "source": "/api/paymail/:op/:handle",
+      "destination": "/api/paymail?op=:op&handle=:handle"
+    },
+    {
+      "source": "/api/paymail/:op",
+      "destination": "/api/paymail?op=:op"
+    }
   ]
 }

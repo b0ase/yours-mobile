@@ -28,6 +28,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>bWallet uses the camera to scan a website's QR code when you connect your wallet to it.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>bWallet uses the microphone for voice calls with other bWallet users.</string>
 	<key>NSFaceIDUsageDescription</key>

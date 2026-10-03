@@ -1,13 +1,17 @@
 import { routeFor } from './tabs';
-import { useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Download, Loader2, Menu, Phone, Play, Plus, Settings, X } from 'lucide-react';
+import { Check, Download, Loader2, Menu, Phone, Play, Plus, ScanLine, Settings, X } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { isBWalletX } from '../storeBuild';
+import { IS_EXTENSION } from '../extension';
+import { initPairing } from '../pair/sessions';
+
+const PairSheet = lazy(() => import('../pair/PairSheet'));
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -45,6 +49,11 @@ export const TopNav = () => {
   const [handleOpen, setHandleOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [callsOpen, setCallsOpen] = useState(false);
+  const [pairOpen, setPairOpen] = useState(false);
+  // Phone pairing (QR from a desktop site): reconnect paired sites. The extension is itself on the desktop.
+  useEffect(() => {
+    if (!IS_EXTENSION) initPairing();
+  }, []);
   useBackClose(drawer && !switchingTo, () => setDrawer(false));
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
@@ -262,6 +271,11 @@ export const TopNav = () => {
               <div className="border-t border-white/5 px-2 py-2">
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {action(<Download size={16} color="#fff" />, 'Import account', () => go('restore-account'))}
+                {!IS_EXTENSION &&
+                  action(<ScanLine size={16} color="#fff" />, 'Scan to connect a website', () => {
+                    setDrawer(false);
+                    setPairOpen(true);
+                  })}
                 {action(<Settings size={16} color="#fff" />, 'Settings', () => go())}
               </div>
             </motion.div>
@@ -269,6 +283,11 @@ export const TopNav = () => {
         )}
       </AnimatePresence>
       <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} />
+      {pairOpen && (
+        <Suspense fallback={null}>
+          <PairSheet onClose={() => setPairOpen(false)} />
+        </Suspense>
+      )}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
     </>
   );

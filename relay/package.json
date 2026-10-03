@@ -1,0 +1,14 @@
+{
+  "name": "bwallet-pair-relay",
+  "private": true,
+  "description": "Phone pairing relay (wallet-connect spec §4.7): forwards end-to-end encrypted frames between a site and bWallet.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test relay.test.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  }
+}
