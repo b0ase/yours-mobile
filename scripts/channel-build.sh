@@ -10,7 +10,7 @@
 # emulators (release-signed, so existing data is kept), booted iPhone simulators and USB iPhones (Debug builds).
 #
 # App IDs: the store channels keep com.bitcoincorp.bwallet; android-direct is .direct and ios-private is .private,
-# named "bWallet ✦", so a private build sits beside the store one (separate wallets; restore from the phrase).
+# named "bWalletX", so a private build sits beside the store one (separate wallets; restore from the phrase).
 # The Android upload key lives outside the repo (~/.yours-mobile/upload-keystore.jks); its password is read from
 # the macOS Keychain entry "yours-mobile-android-upload" and never written to disk.
 # Afterwards android/ and ios/ hold the default (dev) web build again.
@@ -86,7 +86,7 @@ if [[ $CH == android-* ]]; then
 else
   APP_ID=com.bitcoincorp.bwallet
   NAME=bWallet
-  if [[ $CH == ios-private ]]; then APP_ID=$APP_ID.private; NAME="bWallet ✦"; fi
+  if [[ $CH == ios-private ]]; then APP_ID=$APP_ID.private; NAME="bWalletX"; fi
   TEAM=${DEVELOPMENT_TEAM:-ZQ4NX9NJ89}
   VERSION=$(sed -nE 's/.*MARKETING_VERSION = ([^;]+);.*/\1/p' ios/App/App.xcodeproj/project.pbxproj | head -1)
   OVR=(PRODUCT_BUNDLE_IDENTIFIER="$APP_ID" BWALLET_DISPLAY_NAME="$NAME" BWALLET_CHANNEL="$CH" DEVELOPMENT_TEAM="$TEAM")

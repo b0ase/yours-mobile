@@ -5,6 +5,8 @@ import {
   bcorpFeeAddress,
   marketFiltersFor,
   marketTradingEnabled,
+  isBWalletX,
+  appNameFor,
   mintChoicesFor,
   paidFeaturesEnabled,
   tokenRoomsEnabled,
@@ -61,5 +63,12 @@ describe('storeBuild', () => {
     expect(paidFeaturesEnabled(false)).toBe(true);
     expect(mintChoicesFor(true)).toEqual(['token', 'media']);
     expect(mintChoicesFor(false)).toEqual(['ticket', 'token', 'media']);
+  });
+
+  test('bWalletX branding outside the store build', () => {
+    expect(isBWalletX(true)).toBe(false);
+    expect(isBWalletX(false)).toBe(true);
+    expect(appNameFor(true)).toBe('bWallet');
+    expect(appNameFor(false)).toBe('bWalletX');
   });
 });

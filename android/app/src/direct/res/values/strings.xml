@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
 <!-- android-direct channel (APK from the site): own name and ID so it sits beside the Play build. -->
 <resources>
-    <string name="app_name">bWallet ✦</string>
-    <string name="title_activity_main">bWallet ✦</string>
+    <string name="app_name">bWalletX</string>
+    <string name="title_activity_main">bWalletX</string>
     <string name="package_name">com.bitcoincorp.bwallet.direct</string>
     <string name="custom_url_scheme">com.bitcoincorp.bwallet.direct</string>
 </resources>

@@ -60,3 +60,7 @@ export const indexingEnabled = (_store = STORE_BUILD) => true;
 
 /** Paid features shown outside a store build only: Credits, paid indexing, personal token + room. */
 export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;
+
+/** bWalletX = every non-store build (private channels, web, dev); the store app is plain bWallet. */
+export const isBWalletX = (store = STORE_BUILD) => !store;
+export const appNameFor = (store = STORE_BUILD) => (store ? 'bWallet' : 'bWalletX');

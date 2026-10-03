@@ -7,6 +7,7 @@ import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Download, Loader2, Menu, Phone, Play, Plus, Settings, X } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { isBWalletX } from '../storeBuild';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -28,6 +29,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
  * Switching reuses upstream TopNav's sequence verbatim.
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
+const X_MARK = isBWalletX();
 const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 export const TopNav = () => {
@@ -121,13 +123,24 @@ export const TopNav = () => {
         {/* The b opens the b agent. */}
         <button
           type="button"
-          aria-label="b agent"
+          aria-label={X_MARK ? 'bX agent' : 'b agent'}
           // Toggle: the b opens the b agent, and closes it again when it's already open.
           onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
           aria-pressed={onAgent}
-          className="w-10 h-10 flex items-center justify-center bg-transparent"
+          className="relative w-10 h-10 flex items-center justify-center bg-transparent"
         >
           <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
+          {/* bWalletX builds wear the x, so anyone can see which app is running (store app: plain b). */}
+          {X_MARK && (
+            <span
+              aria-hidden
+              data-testid="bx-mark"
+              className="absolute top-0.5 right-0.5 w-[15px] h-[15px] rounded-full flex items-center justify-center"
+              style={{ background: '#000', border: '1.5px solid #F5B800' }}
+            >
+              <X size={10} strokeWidth={3.5} color="#F5B800" />
+            </span>
+          )}
         </button>
         <button
           type="button"
