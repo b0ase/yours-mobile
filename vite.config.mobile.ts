@@ -333,8 +333,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   // Obsidian token rows: raised cards (every AssetRow: BSV, MNEE, locks, BSV21).
   'src/components/AssetRow.tsx': [
     [
-      'className="flex items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"',
-      'className="flex items-center justify-between w-[92%] mx-auto px-0 py-3.5 mb-2.5 bw-card"',
+      'className="flex flex-wrap items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"',
+      'className="flex flex-wrap items-center justify-between w-[92%] mx-auto px-0 py-3.5 mb-2.5 bw-card"',
     ],
     [
       `        backgroundColor: theme.color.global.row,

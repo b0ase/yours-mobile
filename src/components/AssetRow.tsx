@@ -37,6 +37,8 @@ export type AssetRowProps = {
   onClick?: () => void;
   /** Extra line under "Balance" (e.g. the token's issuer badge). */
   subline?: ReactNode;
+  /** Full-width strip under the row (bWallet: Buy · Sell · Chat on tokens). */
+  actions?: ReactNode;
 };
 
 export const AssetRow = (props: AssetRowProps) => {
@@ -54,18 +56,20 @@ export const AssetRow = (props: AssetRowProps) => {
     animate = false,
     decimals,
     subline,
+    actions,
   } = props;
   const { theme } = useTheme();
   const isDisplaySat = isLock && balance < 0.0001;
   const displayDecimals = decimals ?? (isDisplaySat ? 0 : 3);
-  const isMneeBalanceZero = !!isMNEE && usdBalance === 0;
+  // bWallet: no "Get MNEE" button (owner, 3 Oct 2026); a zero MNEE balance shows like any other.
+  const isMneeBalanceZero = false && !!isMNEE && usdBalance === 0;
 
   return (
     <motion.div
       whileHover={animate ? { scale: 1.015, x: 2 } : {}}
       whileTap={showPointer ? { scale: 0.985 } : {}}
       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-      className="flex items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"
+      className="flex flex-wrap items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"
       style={{
         backgroundColor: theme.color.global.row,
         cursor: showPointer ? 'pointer' : 'default',
@@ -111,6 +115,7 @@ export const AssetRow = (props: AssetRowProps) => {
       >
         <GradientButton theme={theme} onClick={onGetMneeClick} />
       </Show>
+      {actions && <div className="basis-full w-full px-3 pt-2.5">{actions}</div>}
     </motion.div>
   );
 };

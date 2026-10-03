@@ -1,4 +1,5 @@
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
+import { TokenRowActions } from '../mobile/wallet/TokenRowActions';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -170,6 +171,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                                   icon={t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON}
                                   ticker={truncate(getTokenName(t), 10, 0)}
                                   subline={<IssuerBadge tokenId={t.id} compact />}
+                                  actions={<TokenRowActions tokenId={t.id} onSell={() => onTokenClick(t)} />}
                                   usdBalance={
                                     (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
                                     (exchangeRate / BSV_DECIMAL_CONVERSION) *
