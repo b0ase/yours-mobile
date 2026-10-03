@@ -3,7 +3,12 @@ import type { WalletInterface } from '@bsv/sdk';
 import { ANNOUNCE_WALLET, REQUEST_WALLET, announceWallet, claimWindowCwi, type WalletAnnouncement } from './discovery';
 
 const wallet = {} as WalletInterface;
-const info = { name: 'bWalletX', icon: 'data:image/png;base64,AA', rdns: 'com.bwalletx.extension', kind: 'extension' as const };
+const info = {
+  name: 'bWalletX',
+  icon: 'data:image/png;base64,AA',
+  rdns: 'com.bwalletx.extension',
+  kind: 'extension' as const,
+};
 
 describe('wallet discovery', () => {
   test('announces on load and on every request, with a frozen detail', () => {

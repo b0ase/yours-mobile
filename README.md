@@ -5,9 +5,9 @@
 The BSV wallet for tokens, media and apps, by The Bitcoin Corporation Ltd. Non-custodial: keys are
 encrypted on your device and never leave it.
 
-| App | Where | What |
-|---|---|---|
-| **bWallet** | App Store, Google Play | Store build: send, receive, tokens, media, names; Market is view-only |
+| App          | Where                                                                            | What                                                                          |
+| ------------ | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **bWallet**  | App Store, Google Play                                                           | Store build: send, receive, tokens, media, names; Market is view-only         |
 | **bWalletX** | Android APK, private iOS, Chrome extension, [bwalletx.com](https://bwalletx.com) | Everything: Market trading, token rooms, tickets, $handle tokens, the b agent |
 
 - **Phone apps:** Capacitor build of the wallet UI (`src/mobile/`). Channels and store rules:

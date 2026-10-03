@@ -94,7 +94,9 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
       setStep(null);
     } catch (e) {
       setStep(null);
-      setError(`${e instanceof Error ? e.message : String(e)} Nothing was removed from this phone. Try again, or email ${SUPPORT_EMAIL}.`);
+      setError(
+        `${e instanceof Error ? e.message : String(e)} Nothing was removed from this phone. Try again, or email ${SUPPORT_EMAIL}.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -155,13 +157,16 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
               <div className="text-sm font-bold text-white">What can’t be deleted</div>
               {list(KEPT, MUTED)}
             </div>
-            <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: PANEL, border: `1px solid ${GOLD}55` }}>
+            <div
+              className="rounded-2xl p-4 flex flex-col gap-2"
+              style={{ background: PANEL, border: `1px solid ${GOLD}55` }}
+            >
               <div className="text-sm font-bold" style={{ color: GOLD }}>
                 Back up first
               </div>
               <p className="text-[13px] leading-snug text-white">
-                Your funds are not deleted: they stay on the blockchain. Without your recovery phrase you will lose access
-                to them. Settings › Wallet Backup.
+                Your funds are not deleted: they stay on the blockchain. Without your recovery phrase you will lose
+                access to them. Settings › Wallet Backup.
               </p>
             </div>
             <label className="text-xs font-semibold" style={{ color: MUTED }} htmlFor="delete-confirm">
@@ -194,7 +199,11 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
             </button>
             <p className="text-[11px]" style={{ color: MUTED }}>
               The request is signed with this account’s identity key. More detail:{' '}
-              <button onClick={() => void openDappBrowser(DELETE_ACCOUNT_URL)} className="underline" style={{ color: GOLD }}>
+              <button
+                onClick={() => void openDappBrowser(DELETE_ACCOUNT_URL)}
+                className="underline"
+                style={{ color: GOLD }}
+              >
                 bitcoinchat.online/delete-account
               </button>
               . Questions: {SUPPORT_EMAIL}

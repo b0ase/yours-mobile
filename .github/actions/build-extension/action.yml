@@ -1,39 +1,49 @@
 name: Build extension
-description: Install the pinned toolchain, then check, build, verify, and package the extension into release/
+description: Install the pinned toolchain (pnpm; bun for tests), then check, test, build, verify, and package the extension into release/
 
 runs:
   using: composite
   steps:
-    - name: Set up Bun
-      uses: oven-sh/setup-bun@v2
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
       with:
-        bun-version-file: .bun-version
+        version: 10.28.0
 
     - name: Set up Node
       uses: actions/setup-node@v7
       with:
         node-version-file: .nvmrc
+        cache: pnpm
+
+    - name: Set up Bun (test runner)
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: .bun-version
 
     - name: Install dependencies
       shell: bash
-      run: bun install --frozen-lockfile
+      run: pnpm install --frozen-lockfile
 
     - name: Check formatting
       shell: bash
-      run: bun run format:check
+      run: pnpm run format:check
 
     - name: Typecheck
       shell: bash
-      run: bun run typecheck
+      run: pnpm run typecheck
+
+    - name: Test
+      shell: bash
+      run: pnpm test
 
     - name: Build
       shell: bash
-      run: bun run build
+      run: pnpm run build
 
     - name: Verify build output
       shell: bash
-      run: bun run verify:build
+      run: pnpm run verify:build
 
     - name: Package
       shell: bash
-      run: bun run package
+      run: pnpm run package

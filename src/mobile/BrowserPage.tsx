@@ -11,7 +11,13 @@ import { TopNav } from '../components/TopNav';
 import { ONE_SAT_MARKET_URL, featuredApps } from '../utils/constants';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { openDappBrowser } from './dappBrowser';
-import { allowFrameUrls, getBappFrameState, openBapp, setBappFrameVisible, subscribeBappFrame } from './bappFrame/bappFrame';
+import {
+  allowFrameUrls,
+  getBappFrameState,
+  openBapp,
+  setBappFrameVisible,
+  subscribeBappFrame,
+} from './bappFrame/bappFrame';
 import app_onesatsocialIcon from './brand/apps/1satsocial.png';
 import app_treechatIcon from './brand/apps/treechat.png';
 import app_twetchIcon from './brand/apps/twetch.png';

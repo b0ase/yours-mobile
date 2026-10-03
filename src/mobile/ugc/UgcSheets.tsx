@@ -30,7 +30,10 @@ export const useTermsAccepted = () => {
 
 /** The terms card: the zero-tolerance summary, a link to the full text, and Agree. */
 export const TermsCard = ({ onAgree, agreed }: { onAgree?: () => void; agreed?: boolean }) => (
-  <div className="w-full rounded-2xl p-5 flex flex-col gap-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+  <div
+    className="w-full rounded-2xl p-5 flex flex-col gap-3"
+    style={{ background: PANEL, border: `1px solid ${LINE}` }}
+  >
     <div className="flex items-center gap-2">
       <ShieldCheck size={20} color={GOLD} />
       <span className="text-base font-bold text-white">Terms of use</span>
@@ -47,7 +50,11 @@ export const TermsCard = ({ onAgree, agreed }: { onAgree?: () => void; agreed?: 
         </li>
       ))}
     </ul>
-    <button onClick={() => void openDappBrowser(TERMS_URL)} className="self-start text-xs underline" style={{ color: GOLD }}>
+    <button
+      onClick={() => void openDappBrowser(TERMS_URL)}
+      className="self-start text-xs underline"
+      style={{ color: GOLD }}
+    >
       Read the full terms
     </button>
     {agreed ? (
@@ -85,7 +92,11 @@ export const TermsGate = ({ children, compact }: { children: ReactNode; compact?
   return (
     <div
       className="w-full h-full overflow-y-auto px-4 flex flex-col items-center"
-      style={{ paddingTop: 'calc(var(--wallet-inset-top, 0px) + 4.5rem)', paddingBottom: '7rem', background: '#010101' }}
+      style={{
+        paddingTop: 'calc(var(--wallet-inset-top, 0px) + 4.5rem)',
+        paddingBottom: '7rem',
+        background: '#010101',
+      }}
     >
       <TermsCard />
     </div>
@@ -165,7 +176,11 @@ export const ReportSheet = ({
               {note.text}
             </p>
             {extra}
-            <button onClick={onClose} className="rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: LINE }}>
+            <button
+              onClick={onClose}
+              className="rounded-xl py-2.5 text-sm font-semibold text-white"
+              style={{ background: LINE }}
+            >
               Close
             </button>
           </>

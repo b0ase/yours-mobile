@@ -26,7 +26,13 @@ const extensionCss = (): Plugin => ({
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [brand(EXTENSION_SWAPS, { emitAvatar: true }), mobileText(), bcorpText(EXTENSION_TEXT), bcorpColours(), extensionCss()],
+    plugins: [
+      brand(EXTENSION_SWAPS, { emitAvatar: true }),
+      mobileText(),
+      bcorpText(EXTENSION_TEXT),
+      bcorpColours(),
+      extensionCss(),
+    ],
     define: { ...MOBILE_DEFINES, __BWALLET_EXTENSION__: 'true' },
   }),
 );

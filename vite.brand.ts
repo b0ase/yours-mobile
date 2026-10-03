@@ -23,7 +23,8 @@ export const brandDefines = () => ({
 
 const LOGO_DIR = BRAND === 'bcorp' ? 'src/mobile/brand/bcorp' : 'src/mobile/brand';
 // bWalletX = every non-store build (src/mobile/storeBuild.ts): its unlock-screen b wears the x.
-const STORE = process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+const STORE =
+  process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
 const WHITE_LOGO_DIR = BRAND === 'bcorp' && !STORE ? 'src/mobile/brand/bcorpx' : LOGO_DIR;
 const BWALLET_ASSETS: Record<string, string> = {
   [resolve(__dirname, 'src/utils/constants.ts')]: resolve(__dirname, 'src/mobile/brand/constants.ts'),
@@ -173,7 +174,9 @@ export const bcorpText = (extra: Swaps = {}): Plugin => {
       return transform.call(this, code, id);
     },
     transformIndexHtml: (html) =>
-      BRAND === 'bcorp' ? html.replace('<title>Yours Wallet</title>', `<title>${STORE ? 'bWallet' : 'bWalletX'}</title>`) : html,
+      BRAND === 'bcorp'
+        ? html.replace('<title>Yours Wallet</title>', `<title>${STORE ? 'bWallet' : 'bWalletX'}</title>`)
+        : html,
   };
 };
 

@@ -158,7 +158,9 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
                   style={(() => {
                     // Same size as the $ balance; long amounts shrink to stay on one line.
                     const len = (unit === 'usd' ? formatUSD(usd) : cardBsv(sats)).length;
-                    return len > 11 ? { fontSize: `clamp(18px, ${Math.min(10, 120 / len).toFixed(2)}vw, 42px)` } : undefined;
+                    return len > 11
+                      ? { fontSize: `clamp(18px, ${Math.min(10, 120 / len).toFixed(2)}vw, 42px)` }
+                      : undefined;
                   })()}
                 >
                   {unit === 'usd' ? formatUSD(usd) : cardBsv(sats)}

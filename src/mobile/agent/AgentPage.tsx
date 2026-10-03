@@ -16,7 +16,15 @@ import { BWALLET_GUIDE } from './guide';
 import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
 import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
-import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PaidBackend, type PriceInfo, type Quote } from './paid';
+import {
+  bitsignPaidBackend,
+  formatPrice,
+  payDecision,
+  refuseText,
+  type PaidBackend,
+  type PriceInfo,
+  type Quote,
+} from './paid';
 import { STORE_BUILD } from '../storeBuild';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';

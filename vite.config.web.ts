@@ -44,7 +44,11 @@ const webShell = (): Plugin => ({
     }
     this.emitFile({ type: 'asset', fileName: 'favicon.ico', source: readFileSync(resolve(ICONS, 'favicon.ico')) });
     // Hosting headers (no framing, no referrer) for Vercel: web.bwalletx.com.
-    this.emitFile({ type: 'asset', fileName: 'vercel.json', source: readFileSync(resolve(__dirname, 'src/web/vercel.json')) });
+    this.emitFile({
+      type: 'asset',
+      fileName: 'vercel.json',
+      source: readFileSync(resolve(__dirname, 'src/web/vercel.json')),
+    });
     this.emitFile({
       type: 'asset',
       fileName: 'manifest.webmanifest',
