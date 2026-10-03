@@ -93,10 +93,43 @@ const BCORP_TEXT: Swaps = {
   // Rapid unconfirmed spends (several game Loads or Market buys before a block, token listings with
   // long unconfirmed histories) exceed wallet-toolbox's BEEF recursion limit of 12 ("Maximum BEEF
   // depth exceeded. Limit is 12"). Raise the default at build time in every bundled copy.
+  // Market buys made before the Oct 2026 upstream merge stored their token details (customInstructions)
+  // encrypted twice, and the permissions manager removes one layer, so balances skipped them. Peel up
+  // to three layers when a decrypted value is still base64 ciphertext; anything else is unchanged.
   'node_modules/@bsv/wallet-toolbox-client/out/index.client.mjs': [
     ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+    [
+      'async maybeDecryptMetadata(ciphertext) {',
+      'async maybeDecryptMetadata(ciphertext) {\n' +
+        '    let value = await this.maybeDecryptMetadataOnce(ciphertext);\n' +
+        '    for (let i = 0; i < 2 && value !== ciphertext && /^[A-Za-z0-9+/]{40,}={0,2}$/.test(value); i++) {\n' +
+        '      const next = await this.maybeDecryptMetadataOnce(value);\n' +
+        '      if (next === value) break;\n' +
+        '      ciphertext = value;\n' +
+        '      value = next;\n' +
+        '    }\n' +
+        '    return value;\n' +
+        '  }\n' +
+        '  async maybeDecryptMetadataOnce(ciphertext) {',
+    ],
   ],
-  'node_modules/@1sat/connect/dist/index.js': [['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;']],
+  'node_modules/@1sat/connect/dist/index.js': [
+    ['this.maxRecursionDepth = 12;', 'this.maxRecursionDepth = 64;'],
+    [
+      'async maybeDecryptMetadata(ciphertext) {',
+      'async maybeDecryptMetadata(ciphertext) {\n' +
+        '    let value = await this.maybeDecryptMetadataOnce(ciphertext);\n' +
+        '    for (let i = 0; i < 2 && value !== ciphertext && /^[A-Za-z0-9+/]{40,}={0,2}$/.test(value); i++) {\n' +
+        '      const next = await this.maybeDecryptMetadataOnce(value);\n' +
+        '      if (next === value) break;\n' +
+        '      ciphertext = value;\n' +
+        '      value = next;\n' +
+        '    }\n' +
+        '    return value;\n' +
+        '  }\n' +
+        '  async maybeDecryptMetadataOnce(ciphertext) {',
+    ],
+  ],
   'src/components/SyncingBlocks.tsx': [['Yours SPV Wallet will be ready', 'bWallet will be ready']],
   // getVersion() names this wallet, not Yours (wallet-connect spec §3.2). Only the real extension has
   // chrome.sidePanel; the mobile shell's chrome shim doesn't.

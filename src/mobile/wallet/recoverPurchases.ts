@@ -16,7 +16,7 @@ const ONESAT = 'https://api.1sat.app/1sat';
 type Sale = { id: string; outpoint: string; spend: string; amt: string; sym?: string; dec?: number; icon?: string };
 type Txo = { outpoint: string; owner?: string; spend?: string };
 
-export type RecoverResult = { checked: number; found: { sym: string; amt: string }[]; failed: string[] };
+export type RecoverResult = { checked: number; found: { sym: string; amt: string }[]; held: string[]; failed: string[] };
 
 const sales = async (pages: number): Promise<Sale[]> => {
   const all: Sale[] = [];
@@ -47,7 +47,7 @@ const txos = async (outpoints: string[]): Promise<Map<string, Txo>> => {
 export async function recoverPurchases(wallet: WalletInterface, pages = 10): Promise<RecoverResult> {
   const list = await sales(pages);
   const owners = await txos(list.map((s) => `${s.spend}_0`));
-  const result: RecoverResult = { checked: list.length, found: [], failed: [] };
+  const result: RecoverResult = { checked: list.length, found: [], held: [], failed: [] };
 
   for (const s of list) {
     const txo = owners.get(`${s.spend}_0`);
@@ -65,8 +65,20 @@ export async function recoverPurchases(wallet: WalletInterface, pages = 10): Pro
     if (!keyID) continue;
 
     const sym = s.sym || s.id.slice(0, 8);
-    const held = await wallet.listOutputs({ basket: BSV21_BASKET, tags: bsv21FilterTags({ tokenId: s.id }), limit: 1000 });
-    if (held.outputs.some((o) => o.outpoint === `${s.spend}.0`)) continue;
+    const held = await wallet.listOutputs({
+      basket: BSV21_BASKET,
+      tags: bsv21FilterTags({ tokenId: s.id }),
+      includeTags: true,
+      includeCustomInstructions: true,
+      limit: 1000,
+    });
+    const mine = held.outputs.find((o) => o.outpoint === `${s.spend}.0`);
+    if (mine) {
+      // Already filed: say so, with what the balance code reads (diagnosing tokens that don't show).
+      result.held.push(sym);
+      console.warn('[recover] already in wallet', sym, JSON.stringify(mine));
+      continue;
+    }
     try {
       const r = await fetch(`${ONESAT}/beef/${s.spend}`);
       if (!r.ok) throw new Error(`transaction ${r.status}`);

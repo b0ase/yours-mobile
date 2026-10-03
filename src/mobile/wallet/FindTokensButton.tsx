@@ -16,12 +16,14 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
     try {
       const r = await recoverPurchases(apiContext.wallet);
       if (r.found.length) {
-        addSnackbar(`Found ${r.found.map((f) => f.sym).join(', ')}. They're back in your wallet.`, 'success');
+        addSnackbar(`Updated: ${r.found.map((f) => f.sym).join(', ')}.`, 'success');
         onFound?.();
       } else if (r.failed.length) addSnackbar(`Couldn't add: ${r.failed[0]}`, 'error');
-      else addSnackbar(`Checked ${r.checked} recent market sales: nothing missing.`, 'info');
+      else if (r.held.length)
+        addSnackbar(`Already in your wallet's records: ${r.held.join(', ')}. Checked ${r.checked} sales.`, 'info');
+      else addSnackbar('Token balances are up to date.', 'info');
     } catch (e) {
-      addSnackbar(`Search failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+      addSnackbar(`Couldn't refresh: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -36,7 +38,7 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
     >
       {busy ? <Loader2 size={16} className="animate-spin" color="#98A2B3" /> : <SearchCheck size={16} color="#98A2B3" />}
       <span className="text-sm font-semibold" style={{ color: '#98A2B3' }}>
-        {busy ? 'Searching the market for your buys…' : 'Find missing tokens'}
+        {busy ? 'Refreshing…' : 'Refresh token balances'}
       </span>
     </motion.button>
   );
