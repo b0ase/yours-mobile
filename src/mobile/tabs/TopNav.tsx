@@ -10,6 +10,7 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
 import { initPairing } from '../pair/sessions';
+import { onPairLink, takePairLink } from '../pair/links';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 import { useTheme } from '../../hooks/useTheme';
@@ -50,6 +51,20 @@ export const TopNav = () => {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [callsOpen, setCallsOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
+  const [pairLink, setPairLink] = useState<string | null>(null);
+  // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
+  useEffect(() => {
+    if (IS_EXTENSION) return;
+    const show = () => {
+      const url = takePairLink();
+      if (url) {
+        setPairLink(url);
+        setPairOpen(true);
+      }
+    };
+    show();
+    return onPairLink(show);
+  }, []);
   // Phone pairing (QR from a desktop site): reconnect paired sites. The extension is itself on the desktop.
   useEffect(() => {
     if (!IS_EXTENSION) initPairing();
@@ -285,7 +300,13 @@ export const TopNav = () => {
       <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} />
       {pairOpen && (
         <Suspense fallback={null}>
-          <PairSheet onClose={() => setPairOpen(false)} />
+          <PairSheet
+            initial={pairLink ?? undefined}
+            onClose={() => {
+              setPairOpen(false);
+              setPairLink(null);
+            }}
+          />
         </Suspense>
       )}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}

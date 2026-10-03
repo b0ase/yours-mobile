@@ -59,7 +59,7 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   };
   await until(() => states.find((s) => s.k === 'qr'));
   const link = (states.find((s) => s.k === 'qr') as { link: string }).link;
-  expect(link).toStartWith('https://bwallet.space/pair?v=1&r=localhost');
+  expect(link).toStartWith('https://www.bwallet.space/pair?v=1&r=localhost');
 
   const pending = await phone.beginPairing(link);
   expect(pending.origin).toBe(SITE_ORIGIN);

@@ -3,7 +3,7 @@
  * bWallet. Kept dependency-light (@bsv/sdk + WebCrypto) so the same file can be copied into sites
  * until it ships as @b0ase/wallet.
  *
- *   QR:     https://bwallet.space/pair?v=1&r=<relay host>&c=<channel>&k=<site pubkey>&o=<origin>&e=<expiry>
+ *   QR:     https://www.bwallet.space/pair?v=1&r=<relay host>&c=<channel>&k=<site pubkey>&o=<origin>&e=<expiry>
  *   key:    ECDH(secp256k1) → HKDF-SHA256(salt = channel bytes, info = "bwallet-pair-v1") → AES-256-GCM
  *   frame:  { s: seq, n: nonce b64, d: ciphertext b64 }, AAD = "<sender role>|<s>", s strictly increasing
  *   code:   first 2 bytes of SHA-256(key bits) → 4 digits, shown on both screens
@@ -12,7 +12,9 @@ import { PrivateKey, PublicKey } from '@bsv/sdk';
 
 export const PAIR_VERSION = '1';
 export const PAIR_INFO = 'bwallet-pair-v1';
-export const PAIR_HOST = 'bwallet.space';
+// www: the bare domain redirects there, and app-link checks (Apple's AASA) don't follow redirects.
+export const PAIR_HOST = 'www.bwallet.space';
+const PAIR_HOSTS = new Set([PAIR_HOST, 'bwallet.space']);
 export const DEFAULT_RELAY = 'relay.bwallet.space';
 export const QR_LIFETIME_S = 120;
 
@@ -61,7 +63,7 @@ export function pairUrl(link: PairLink): string {
 export function parsePairUrl(text: string, nowS = Math.floor(Date.now() / 1000)): PairLink {
   const u = new URL(text.trim());
   const ok =
-    (u.protocol === 'https:' && u.host === PAIR_HOST && u.pathname === '/pair') ||
+    (u.protocol === 'https:' && PAIR_HOSTS.has(u.host) && u.pathname === '/pair') ||
     (u.protocol === 'bwallet:' && /pair/.test(u.href));
   if (!ok) throw new Error('Not a bWallet pairing code');
   const g = (k: string) => u.searchParams.get(k) ?? '';
