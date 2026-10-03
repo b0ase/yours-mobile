@@ -1,20 +1,39 @@
-> **bWallet (iOS & Android)** — this repository's `mobile` branch is bWallet, the BSV wallet for
-> tokens, published by The Bitcoin Corporation Ltd. Based on the open-source Yours Wallet (MIT, © 2024 Daniel
-> Wagner, David Case); not affiliated with or endorsed by its authors. See [MOBILE.md](MOBILE.md). The rest of
-> this README is upstream's, describing the Yours Wallet Chrome extension.
+![bWallet / bWalletX](docs/brand/github-social-preview.png)
 
-![Example Image](/public/banner.png)
+# bWallet / bWalletX
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/yours-org/yours-wallet/actions/workflows/ci.yml/badge.svg)](https://github.com/yours-org/yours-wallet/actions/workflows/ci.yml)
+The BSV wallet for tokens, media and apps, by The Bitcoin Corporation Ltd. Non-custodial: keys are
+encrypted on your device and never leave it.
 
-<a href="https://chromewebstore.google.com/detail/yours-wallet/mlbnicldlpdimbjdcncnklfempedeipj" target="_blank">Download Chrome Extension</a>
+| App | Where | What |
+|---|---|---|
+| **bWallet** | App Store, Google Play | Store build: send, receive, tokens, media, names; Market is view-only |
+| **bWalletX** | Android APK, private iOS, Chrome extension, [bwalletx.com](https://bwalletx.com) | Everything: Market trading, token rooms, tickets, $handle tokens, the b agent |
 
-# Yours Wallet
+- **Phone apps:** Capacitor build of the wallet UI (`src/mobile/`). Channels and store rules:
+  `src/mobile/channel.ts`, `src/mobile/storeBuild.ts`, `scripts/channel-build.sh`. See [MOBILE.md](MOBILE.md).
+- **Chrome extension (bWalletX):** the full app in Chrome's side panel; `pnpm build`, output in `build/`.
+  Sites find it with the `brc100:announceWallet` event (`src/brand/discovery.ts`).
+- **Branding:** upstream files stay unchanged; names, logos and screens are swapped in at build time
+  (`vite.brand.ts`, `vite.config.mobile.ts`).
 
-Open-source, non-custodial BSV wallet built on BRC-100. Chrome extension with multi-device sync, on-chain identity, and ordinal support.
+```bash
+pnpm install
+pnpm build            # bWalletX Chrome extension → build/
+pnpm build:mobile     # phone web bundle → build-mobile/
+bash scripts/channel-build.sh android-direct   # or ios-store | ios-private | android-play
+bun test src
+```
 
-## What It Does
+## Based on Yours Wallet
+
+bWallet is a fork of [Yours Wallet](https://github.com/yours-org/yours-wallet) (MIT, © 2024 Daniel
+Wagner, David Case), and is not affiliated with or endorsed by its authors. The Yours-branded mobile
+port we shared with the Yours team is tagged
+[`yours-mobile-v0.1`](https://github.com/b0ase/yours-mobile/tree/yours-mobile-v0.1). The rest of this
+README is upstream's, describing the Yours Wallet extension this code builds on.
+
+### What It Does
 
 Yours Wallet manages BSV, 1Sat Ordinals, BSV-21 tokens, and MNEE stablecoins from a single Chrome extension. It uses the BRC-100 wallet standard for transaction management, which means your wallet tracks both your keys and your transaction history to locate assets on-chain.
 
