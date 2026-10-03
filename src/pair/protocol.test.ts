@@ -46,4 +46,16 @@ describe('pairing protocol', () => {
       `wss://relay.bwallet.space/v1/c/${link.c}?role=site&e=${e}`,
     );
   });
+
+  test('large frames (a signed transaction with its proofs) round-trip', async () => {
+    const c = newChannel();
+    const S = PrivateKey.fromRandom();
+    const P = PrivateKey.fromRandom();
+    const site = await deriveSession(S, P.toPublicKey().toString(), c);
+    const phone = await deriveSession(P, S.toPublicKey().toString(), c);
+    const tx = Array.from({ length: 400_000 }, (_, i) => i % 256);
+    const f = await new Sealer(phone.key, 'wallet').seal({ t: 'res', id: '9', result: { txid: 'ab', tx } });
+    const back = (await new Sealer(site.key, 'site').open(f)) as { result: { tx: number[] } };
+    expect(back.result.tx.length).toBe(400_000);
+  });
 });
