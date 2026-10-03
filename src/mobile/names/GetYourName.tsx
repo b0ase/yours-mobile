@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { askNotifyPermissionOnce } from '../notify/engine';
-import { buyOpns, listOpns, registerOpns } from '@1sat/actions';
+import { buyOrdinal, listOpns, registerOpns } from '@1sat/actions';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { Input } from '../../components/Input';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -19,7 +19,7 @@ import { estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
 import { moneyNow } from '../money/money';
-import { walletOutpoint } from '../market/walletOutpoint';
+import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -27,7 +27,7 @@ import { walletOutpoint } from '../market/walletOutpoint';
  *  - Paymail: claim <alias>@BWALLET_PAYMAIL_DOMAIN (signed by the identity key, no fee). Hidden when unconfigured.
  *  - OpNS: search; for a free name, Register this name mines it on-device (Web Worker) and broadcasts
  *    one mint per missing character, then auto-runs Use this name (registerOpns). Names you own can be
- *    bound with Use this name; listed names can be bought (buyOpns).
+ *    bound with Use this name; listed names can be bought (buyOrdinal with OpNS defaults).
  * Every transaction goes through the standard SendConfirmation sheet first.
  */
 // registerOpns = self-transfer of the 1-sat name ordinal + MAP; ~300-400 bytes at 100 sat/kB.
@@ -205,7 +205,17 @@ export const GetYourName = ({
       if (p.kind === 'bind') await bind(p);
       else if (p.kind === 'mint') await registerNew(p.name);
       else {
-        const res = await buyOpns.execute(apiContext, { outpoint: walletOutpoint(p.outpoint), name: p.name });
+        // buyOpns is buyOrdinal with OpNS defaults, but it drops usePermissionModule,
+        // which the module-wrapped wallet needs (see MODULE_FINISHES); call buyOrdinal directly.
+        const outpoint = walletOutpoint(p.outpoint);
+        const res = await buyOrdinal.execute(purchaseContext(apiContext, outpoint), {
+          outpoint,
+          name: p.name.slice(0, 64),
+          contentType: 'application/op-ns',
+          basket: 'opns',
+          tags: ['opns'],
+          ...MODULE_FINISHES,
+        });
         if (res.error) throw new Error(res.error);
         setMsg(`You bought ${p.name}. Binding it to your identity…`);
         const mine = (await refreshOwned()).find((o) => o.name === p.name);
