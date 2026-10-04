@@ -1595,7 +1595,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     const sub = !ROOMS
       ? STORE_ROOM_NOTE
       : e.status === 'start'
-        ? 'No room yet — tap to start it'
+        ? 'Tap to open the holders\' room'
         : e.status === 'join'
           ? `${e.members ?? 0} holder${e.members === 1 ? '' : 's'} · tap to join`
           : e.room
