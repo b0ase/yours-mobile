@@ -22,6 +22,7 @@ import { SELL_ENABLED } from '../mobile/sell/sell';
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
 import { PriceChart } from '../mobile/wallet/PriceChart';
 import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
+import { GroupSendBar } from '../mobile/send/GroupSend';
 
 export interface Token {
   isConfirmed: boolean;
@@ -334,7 +335,14 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
   const tokenName = getTokenName(token.info);
 
   const anyRecipientEmpty = recipients.some((r) => !r.address || !r.amountInput);
-  const submitDisabled = isProcessing || anyRecipientEmpty;
+  // Group send: the running total across every recipient; Send stays off while it exceeds the balance.
+  const groupTotal = recipients.reduce<bigint | null>((acc, r) => {
+    if (acc === null || !r.amountInput) return acc;
+    const a = toAtomic(r.amountInput);
+    return a === null ? null : acc + a;
+  }, 0n);
+  const overBalance = groupTotal !== null && groupTotal > maxAmount;
+  const submitDisabled = isProcessing || anyRecipientEmpty || overBalance;
 
   return (
     <Show when={token !== null}>
@@ -519,6 +527,15 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
               ))}
             </AnimatePresence>
 
+            <GroupSendBar
+              recipients={recipients}
+              setRecipients={setRecipients}
+              total={groupTotal}
+              max={maxAmount}
+              fmt={(a) => showAmount(a, token.info.dec)}
+              ticker={tokenName}
+              newRecipient={newRecipient}
+            />
             {/* Add recipient */}
             <motion.button
               whileHover={{ scale: 1.01 }}
