@@ -23,6 +23,7 @@ import {
 } from './agentAccounts';
 import { sweepBack } from './sweepBack';
 import { StrategySection } from './StrategySection';
+import { ExportForCli } from './ExportForCli';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -312,6 +313,8 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
             </button>
           )}
         </div>
+
+        {isCurrent && <ExportForCli id={id} name={acct.name || 'agent'} />}
 
         <div className={section} style={{ background: CARD }}>
           <div className="text-sm font-bold text-white">Labels</div>

@@ -11,6 +11,7 @@ import {
   type Loaded,
   type StrategyRules,
 } from './strategy';
+import { saveTextFile } from './saveText';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -32,14 +33,8 @@ export const describeRules = (r: StrategyRules) =>
     r.stop?.downPct && `Stops if the account is down ${r.stop.downPct}%`,
   ].filter(Boolean) as string[];
 
-const download = (l: Loaded) => {
-  const blob = new Blob([JSON.stringify(l.strategy, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${l.strategy.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${l.strategy.version}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-};
+const download = (l: Loaded) =>
+  saveTextFile(`${l.strategy.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${l.strategy.version}.json`, JSON.stringify(l.strategy, null, 2));
 
 /**
  * Agent account › Strategy (SMART-WALLET-SPEC.md §3): load a strategy file (pick or paste), see its goals
@@ -121,7 +116,7 @@ export const StrategySection = ({ id }: { id: string }) => {
           <button type="button" onClick={() => setEditing(true)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
             Load another
           </button>
-          <button type="button" onClick={() => download(loaded)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
+          <button type="button" onClick={() => void download(loaded)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
             Save file
           </button>
           <button type="button" onClick={() => unloadStrategy(id)} className={`${btn} flex-1`} style={{ background: LINE, color: '#FDA29B' }}>
