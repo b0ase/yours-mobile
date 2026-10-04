@@ -15,7 +15,9 @@ import {
   Sparkles,
   Trash2,
   Zap,
+  LockKeyhole,
 } from 'lucide-react';
+import { ChangePassword } from './ChangePassword';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -91,14 +93,19 @@ const Pills = <T extends string | number>({
   onChange: (v: T) => void;
   label: string;
 }) => (
-  <div className="flex gap-1.5" role="radiogroup" aria-label={label} onClick={(e) => e.stopPropagation()}>
+  <div
+    className="grid grid-flow-col auto-cols-fr gap-1.5 w-full"
+    role="radiogroup"
+    aria-label={label}
+    onClick={(e) => e.stopPropagation()}
+  >
     {options.map((o) => (
       <button
         key={String(o.id)}
         role="radio"
         aria-checked={o.id === value}
         onClick={() => onChange(o.id)}
-        className="rounded-full px-2.5 py-1 text-[11px] font-bold"
+        className="rounded-full px-1 py-1.5 text-[11px] font-bold whitespace-nowrap text-center"
         style={
           o.id === value
             ? { background: GOLD, color: '#1a1300' }
@@ -335,7 +342,7 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
-    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | null
+    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | null
   >(null);
   const rate = useBsvUsd();
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
@@ -343,20 +350,15 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   return (
     <>
       <Section title="Feed">
-        <Row
-          icon={<Newspaper size={16} />}
-          label="Default feed"
-          description="What the Feed opens to"
-          right={
-            <Pills
-              label="Default feed"
-              options={FEEDS}
-              value={prefs.defaultFeed}
-              onChange={(v) => setPrefs({ defaultFeed: v })}
-            />
-          }
-          isFirst
-        />
+        <Row icon={<Newspaper size={16} />} label="Default feed" description="What the Feed opens to" isFirst />
+        <div className="px-4 pb-3 pl-12">
+          <Pills
+            label="Default feed"
+            options={FEEDS}
+            value={prefs.defaultFeed}
+            onChange={(v) => setPrefs({ defaultFeed: v })}
+          />
+        </div>
         <Divider />
         <Row
           icon={<PlayCircle size={16} />}
@@ -407,18 +409,28 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
                   ? 'Anything above this asks first (USD at today’s BSV price)'
                   : 'Anything above this asks first (sats; USD price unavailable)'
               }
-              right={
-                <Pills
-                  label="One-click limit"
-                  options={limits}
-                  value={prefs.oneClickLimit}
-                  onChange={(v) => setPrefs({ oneClickLimit: v })}
-                />
-              }
               isLast
             />
+            <div className="px-4 pb-3 pl-12">
+              <Pills
+                label="One-click limit"
+                options={limits}
+                value={prefs.oneClickLimit}
+                onChange={(v) => setPrefs({ oneClickLimit: v })}
+              />
+            </div>
           </>
         )}
+      </Section>
+      <Section title="Security">
+        <Row
+          icon={<LockKeyhole size={16} />}
+          label="Change password"
+          description="Set a new unlock password (no old password needed while unlocked)"
+          onClick={() => setScreen('password')}
+          isFirst
+          isLast
+        />
       </Section>
       <Section title="Tokens">
         <Row
@@ -437,16 +449,16 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
               ? `Your own tokens' indexing fee pays on one tap when under $${prefs.indexAutoPayUsd.toFixed(2)}`
               : "Always confirm your tokens' indexing fee"
           }
-          right={
-            <Pills
-              label="One-tap indexing limit"
-              options={INDEX_AUTOPAY_USD.map((v) => ({ id: v, label: v ? `$${v.toFixed(2)}` : 'Off' }))}
-              value={prefs.indexAutoPayUsd}
-              onChange={(v) => setPrefs({ indexAutoPayUsd: v })}
-            />
-          }
           isLast
         />
+        <div className="px-4 pb-3 pl-12">
+          <Pills
+            label="One-tap indexing limit"
+            options={INDEX_AUTOPAY_USD.map((v) => ({ id: v, label: v ? `$${v.toFixed(2)}` : 'Off' }))}
+            value={prefs.indexAutoPayUsd}
+            onChange={(v) => setPrefs({ indexAutoPayUsd: v })}
+          />
+        </div>
       </Section>
       <Section title="Notifications">
         {CATEGORIES.map((c, i) => (
@@ -557,6 +569,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
+      {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />

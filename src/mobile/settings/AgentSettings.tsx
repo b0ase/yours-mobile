@@ -44,14 +44,19 @@ const Pills = <T extends string | number>({
   onChange: (v: T) => void;
   label: string;
 }) => (
-  <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label} onClick={(e) => e.stopPropagation()}>
+  <div
+    className="grid grid-flow-col auto-cols-fr gap-1.5 w-full"
+    role="radiogroup"
+    aria-label={label}
+    onClick={(e) => e.stopPropagation()}
+  >
     {options.map((o) => (
       <button
         key={String(o.id)}
         role="radio"
         aria-checked={o.id === value}
         onClick={() => onChange(o.id)}
-        className="rounded-full px-2.5 py-1 text-[11px] font-bold"
+        className="rounded-full px-1 py-1.5 text-[11px] font-bold whitespace-nowrap text-center"
         style={
           o.id === value
             ? { background: GOLD, color: '#1a1300' }

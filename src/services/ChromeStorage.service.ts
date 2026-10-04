@@ -14,7 +14,7 @@ import {
   INACTIVITY_LIMIT,
   MAINNET_ADDRESS_PREFIX,
 } from '../utils/constants';
-import { decrypt, encrypt } from '../utils/crypto';
+import { decrypt, encrypt, generateRandomSalt } from '../utils/crypto';
 import { derivePassKey, type UsbUnlockMaterial } from './passKey';
 import { probeSticks } from './UsbKey.service';
 import { Keys } from '../utils/keys';
@@ -524,6 +524,39 @@ export class ChromeStorageService {
   switchAccount = async (identityAddress: string): Promise<void> => {
     await this.update({ selectedAccount: identityAddress });
     await sendMessageAsync({ action: YoursEventName.SWITCH_ACCOUNT });
+  };
+
+  /**
+   * Change the wallet password while unlocked (bWallet, owner 4 Oct 2026). Needs no old password: the
+   * session passKey (present only while unlocked) decrypts every account's keys, which are re-encrypted
+   * under a key derived from the new password and a fresh salt, written in one set, then the session
+   * key is swapped. Refused with the USB security key on (that re-key has its own flow).
+   */
+  changePassword = async (newPassword: string): Promise<void> => {
+    if (!newPassword || newPassword.length < 8) throw new Error('Use at least 8 characters');
+    if (this.getUsbSecurity()?.enabled) throw new Error('Turn off the USB security key before changing the password');
+    const passKey = await this.getPassKey();
+    if (!passKey) throw new Error('Unlock the wallet first');
+    const { accounts, keyRekey } = await this.get(['accounts', 'keyRekey']);
+    if (keyRekey) throw new Error('Wallet keys are being re-encrypted; try again in a moment');
+    const salt = generateRandomSalt();
+    const newKey = await derivePassKey(newPassword, salt, undefined);
+    const next: Record<string, Account> = {};
+    for (const [id, acct] of Object.entries((accounts || {}) as Record<string, Account>)) {
+      if (!acct?.encryptedKeys) {
+        next[id] = acct;
+        continue;
+      }
+      const plain = await decrypt(acct.encryptedKeys, passKey); // throws if the session key is stale
+      JSON.parse(plain);
+      const sealed = await encrypt(plain, newKey);
+      // Prove the new blob opens with the new key before anything is written.
+      if ((await decrypt(sealed, newKey)) !== plain) throw new Error('Password change check failed; nothing was changed');
+      next[id] = { ...acct, encryptedKeys: sealed };
+    }
+    await this.set({ accounts: next, salt } as Partial<ChromeStorageObject>);
+    await this.setPassKey(newKey);
+    await this.getAndSetStorage();
   };
 
   /**

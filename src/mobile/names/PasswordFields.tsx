@@ -41,7 +41,10 @@ export const PasswordFields = ({
   confirm,
   setPassword,
   setConfirm,
+  askSaved = false,
 }: {
+  /** Create Account: a required "I've saved it" tick, so nobody moves on without a copy. */
+  askSaved?: boolean;
   newWallet: boolean;
   username: string;
   password: string;
@@ -142,6 +145,15 @@ export const PasswordFields = ({
             </button>
           )}
         </div>
+      )}
+      {askSaved && newWallet && (
+        <label className="flex items-start gap-2 mt-1 text-xs" style={{ color: '#D0D5DD' }}>
+          <input type="checkbox" required className="mt-0.5" />
+          <span>
+            I've saved this password somewhere safe. bWalletX can't show it again; only your recovery phrase can reset
+            it.
+          </span>
+        </label>
       )}
     </div>
   );
