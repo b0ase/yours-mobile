@@ -331,7 +331,6 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
   const contrast = theme.color.global.contrast;
   const row = theme.color.global.row;
   const accent = theme.color.component.primaryButtonLeftGradient;
-  const accentRight = theme.color.component.primaryButtonRightGradient;
   const tokenName = getTokenName(token.info);
 
   const anyRecipientEmpty = recipients.some((r) => !r.address || !r.amountInput);
@@ -589,11 +588,9 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
                 whileTap={!submitDisabled ? { scale: 0.98 } : undefined}
                 type="submit"
                 disabled={submitDisabled}
-                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{
-                  background: `linear-gradient(135deg, ${accent}, ${accentRight})`,
-                  color: theme.color.component.primaryButtonText,
-                }}
+                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                // Same look as Buy · Sell · Chat (owner, 4 Oct 2026).
+                style={{ backgroundColor: '#17191E', borderColor: '#3a2f0c', color: '#FFD24D' }}
               >
                 <Send size={14} />
                 {isProcessing ? 'Sending...' : 'Send'}
