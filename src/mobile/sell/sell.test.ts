@@ -1,6 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import { BSV21, OrdLock } from '@1sat/templates';
-import { LockingScript, PrivateKey, Script } from '@bsv/sdk';
+import { BSV21, OrdLock, OrdLockV2 } from '@1sat/templates';
+import { BigNumber, LockingScript, P2PKH, PrivateKey, Script, Utils } from '@bsv/sdk';
+import { ORD_LOCK_PREFIX, ORD_LOCK_SUFFIX } from '@1sat/types';
+
+/** OrdLock v1 bytes as @1sat/templates 0.0.33 built them (creation is off in 0.0.41; decode stays). */
+const v1Lock = (cancelAddress: string, payAddress: string, price: number) => {
+  const w = new Utils.Writer();
+  w.writeUInt64LEBn(new BigNumber(price));
+  const payout = new P2PKH().lock(Utils.fromBase58Check(payAddress).data as number[]).toBinary();
+  w.writeVarIntNum(payout.length);
+  w.write(payout);
+  return new Script()
+    .writeScript(Script.fromHex(ORD_LOCK_PREFIX))
+    .writeBin(Utils.fromBase58Check(cancelAddress).data as number[])
+    .writeBin(w.toArray())
+    .writeScript(Script.fromHex(ORD_LOCK_SUFFIX));
+};
 import {
   addRecord,
   buildListingScript,
@@ -101,22 +116,20 @@ describe('fees', () => {
 });
 
 describe('listing script', () => {
-  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
-  test.skip('round-trips through @1sat/templates (BSV21 + OrdLock decode)', () => {
+  test('round-trips through @1sat/templates (BSV21 + OrdLock v2 decode)', () => {
     const script = buildListingScript(TOKEN, 42n, cancel, pay, 12345);
     const back = decodeListing(script);
-    expect(back).toEqual({ tokenId: TOKEN, amount: 42n, priceSats: 12345, seller: cancel });
+    expect(back).toEqual({ tokenId: TOKEN, amount: 42n, priceSats: 12345, seller: cancel, v2: true });
 
-    const lock = OrdLock.decode(script)!;
+    const lock = OrdLockV2.decode(script)!;
     expect(lock.price).toBe(12345n);
-    expect(OrdLock.isOrdLock(script)).toBe(true);
+    expect(OrdLockV2.isOrdLockV2(script)).toBe(true);
     const tok = BSV21.decode(script)!;
     expect(tok.getOperation()).toBe('transfer');
     expect(tok.getAmount()).toBe(42n);
   });
 
-  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
-  test.skip('inscription comes first (1Sat market format), OrdLock follows', () => {
+  test('inscription comes first (1Sat market format), OrdLock follows', () => {
     const hex = buildListingScript(TOKEN, 1n, cancel, pay, 1).toHex();
     expect(hex.startsWith('0063036f7264')).toBe(true); // OP_FALSE OP_IF "ord"
     const json = Buffer.from(hex, 'hex').toString('latin1');
@@ -125,17 +138,18 @@ describe('listing script', () => {
     expect(json).toContain('"amt":"1"');
   });
 
-  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
-  test.skip('rejects bad prices; non-listings decode to null', () => {
+  test('rejects bad prices; non-listings decode to null', () => {
     expect(() => buildListingScript(TOKEN, 1n, cancel, pay, 0)).toThrow();
     expect(() => buildListingScript(TOKEN, 1n, cancel, pay, 1.5)).toThrow();
     expect(decodeListing(new Script())).toBeNull();
-    const plain = BSV21.transfer(TOKEN, 1n).lock(new LockingScript(OrdLock.lock(cancel, pay, 5).chunks));
-    expect(decodeListing(plain)?.priceSats).toBe(5);
+    // Existing v1 listings (built with v1 bytes; creation is off in @1sat/templates) still decode.
+    const v1 = BSV21.transfer(TOKEN, 1n).lock(
+      new LockingScript(v1Lock(cancel, pay, 5).chunks),
+    );
+    expect(decodeListing(v1)).toMatchObject({ priceSats: 5, v2: false });
   });
 
-  // Skipped: OrdLock v1 listing creation is off in @1sat/templates 0.0.41 (see sell.ts SELL_PAUSED).
-  test.skip('listing tx size estimate covers the real listing script', () => {
+  test('listing tx size estimate covers the real listing script', () => {
     const len = buildListingScript(TOKEN, 10n ** 12n, cancel, pay, 10 ** 9).toBinary().length;
     expect(listingTxBytes(1, len, true)).toBeGreaterThan(len);
   });

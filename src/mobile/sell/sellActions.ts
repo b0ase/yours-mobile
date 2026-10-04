@@ -21,7 +21,7 @@ import {
   sendBsv21,
   type OneSatContext,
 } from '@1sat/actions';
-import { BSV21, OrdLock } from '@1sat/templates';
+import { BSV21, OrdLock, OrdLockV2 } from '@1sat/templates';
 import { Beef, P2PKH, PublicKey, Transaction, type CreateActionOutput } from '@bsv/sdk';
 import { search } from '../market/indexer';
 import {
@@ -154,7 +154,7 @@ export async function cancelListing(ctx: OneSatContext, record: ListingRecord): 
   const args = await prepareP1SatArgs(ctx, {
     description: `Cancel ${record.symbol ? `$${record.symbol} ` : ''}listing`.slice(0, 50),
     inputBEEF,
-    inputs: [{ outpoint, inputDescription: 'Listed tokens', unlockingScriptLength: 108 }],
+    inputs: [{ outpoint, inputDescription: 'Listed tokens', unlockingScriptLength: decoded.v2 ? 120 : 108 }],
     outputs,
     options: { randomizeOutputs: false },
   });
@@ -169,7 +169,10 @@ export async function cancelListing(ctx: OneSatContext, record: ListingRecord): 
       );
       if (idx < 0) throw new Error('Listing input missing from the transaction');
       if (!tx.inputs[idx].sourceTransaction) tx.inputs[idx].sourceTransaction = listingTx;
-      const unlock = await OrdLock.cancelWithWallet(ctx.wallet, P1SAT_PROTOCOL, record.keyID, 'self').sign(tx, idx);
+      const unlocker = decoded.v2
+        ? OrdLockV2.cancelWithWallet(ctx.wallet, P1SAT_PROTOCOL, record.keyID, 'self')
+        : OrdLock.cancelWithWallet(ctx.wallet, P1SAT_PROTOCOL, record.keyID, 'self');
+      const unlock = await unlocker.sign(tx, idx);
       return { [idx]: { unlockingScript: unlock.toHex() } };
     },
     { spends: [{ outpoint, scheme: 'bsv21' }], permissionScheme: 'bsv21' } as Parameters<

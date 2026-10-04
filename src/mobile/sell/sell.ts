@@ -9,7 +9,7 @@
  * Upstream Yours disables listing creation (ORDLOCK_LISTING_DISABLED); bWallet re-enables it for
  * BSV-21 only, behind `SELL_ENABLED` (true in the mobile build, see vite.config.mobile.ts).
  */
-import { BSV21, OrdLock } from '@1sat/templates';
+import { BSV21, OrdLock, OrdLockV2 } from '@1sat/templates';
 import { bcorpFeeAddress, marketTradingEnabled } from '../storeBuild';
 import { LockingScript, Script } from '@bsv/sdk';
 
@@ -22,7 +22,7 @@ declare const __TICKET_RESALE_FEE_RATE__: string | undefined;
 // Paused (4 Oct 2026): @1sat/templates 0.0.41 turned off OrdLock v1 listing creation (OPL-4690:
 // "List via OrdLock v2"), and @1sat/actions has no v2 listing for BSV-21 yet. Buying and cancelling
 // existing listings still work. Re-enable on a v2 token listing.
-const SELL_PAUSED = true;
+const SELL_PAUSED = false;
 export const SELL_ENABLED =
   !SELL_PAUSED && marketTradingEnabled() && typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
 
@@ -148,7 +148,10 @@ export const CANCEL_TX_BYTES = 10 + (41 + 110) + (9 + 170) + 34 + 148 + 34;
 
 // ── scripts ──
 
-/** The listing locking script: BSV-21 transfer inscription wrapped around an OrdLock. */
+/**
+ * The listing locking script: BSV-21 transfer inscription wrapped around an OrdLock v2 (the format
+ * 1Sat now lists in; v1 creation is off in @1sat/templates 0.0.41, OPL-4690). buyBsv21 reads v2 first.
+ */
 export function buildListingScript(
   tokenId: string,
   amount: bigint,
@@ -157,20 +160,21 @@ export function buildListingScript(
   priceSats: number,
 ): LockingScript {
   if (!(priceSats >= 1) || !Number.isInteger(priceSats)) throw new Error('Price must be a whole number of sats');
-  const ordLock = OrdLock.lock(cancelAddress, payAddress, priceSats);
+  const ordLock = OrdLockV2.lock(cancelAddress, payAddress, priceSats);
   return BSV21.transfer(tokenId, amount).lock(new LockingScript(ordLock.chunks));
 }
 
-export type DecodedListing = { tokenId: string; amount: bigint; priceSats: number; seller: string };
+export type DecodedListing = { tokenId: string; amount: bigint; priceSats: number; seller: string; v2: boolean };
 
 /** Read a listing script back (what a buyer / the indexer sees). null when it isn't one. */
 export function decodeListing(script: Script): DecodedListing | null {
-  const lock = OrdLock.decode(script);
+  const v2 = OrdLockV2.decode(script);
+  const lock = v2 ?? OrdLock.decode(script);
   const tok = BSV21.decode(script);
   if (!lock || !tok) return null;
   const tokenId = tok.getTokenId();
   if (!tokenId || tok.getOperation() !== 'transfer') return null;
-  return { tokenId, amount: tok.getAmount(), priceSats: Number(lock.price), seller: lock.seller };
+  return { tokenId, amount: tok.getAmount(), priceSats: Number(lock.price), seller: lock.seller, v2: !!v2 };
 }
 
 // ── local record of our listings (cancel needs the key, the indexer is the truth for "still live") ──
