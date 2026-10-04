@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
-import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, SOCIAL_ALIAS_RE, toAlias } from './paymail';
+import { claimPaymail, lookupPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, SOCIAL_ALIAS_RE, toAlias } from './paymail';
 import { clearSocial, socialProof } from '../social/socialLogin';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
@@ -65,6 +65,26 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
+  // A restored wallet already owns its name: show it instead of suggesting a new one. (The background
+  // name sync may not have finished when this opens.)
+  useEffect(() => {
+    if (paymail || !enabled) return;
+    let live = true;
+    apiContext.wallet
+      .getPublicKey({ identityKey: true })
+      .then(({ publicKey }) => lookupPaymail(f, publicKey))
+      .then((p) => {
+        if (!live || !p) return;
+        setPaymail(identityAddress, p);
+        setPm(p);
+        if (!socialProof()) setAlias(p.split('@')[0]);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Continue with X / Google on Create Account: offer its verified handle (b0asex.x / theirname.gmail).
   const [socialAlias] = useState<string | null>(() => {
     const a = socialProof()?.profile.alias ?? null;

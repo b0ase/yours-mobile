@@ -214,6 +214,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import twetchLogo from '../../assets/twetch.svg';",
       "import twetchLogo from '../../mobile/brand/apps/twetch.png';",
     ],
+    // Continue with X / Google on Restore too (owner, 4 Oct 2026): the restored wallet can claim its verified name.
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { SocialSignIn } from '../../mobile/social/SocialSignIn';",
+    ],
+    [
+      '      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
+      '      <SocialSignIn onProfile={() => undefined} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
+    ],
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     [
       "import { useNavigate } from 'react-router-dom';",

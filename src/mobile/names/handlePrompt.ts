@@ -86,7 +86,8 @@ export const shouldShowCard = (complete: boolean, dismissed: boolean, onboarding
 /** First suggestion for the handle input: the profile name, else the account name ("Account 1" → ''). */
 export const suggestHandle = (profileName = '', accountName = ''): string => {
   for (const n of [profileName, accountName]) {
-    if (!n || /^account\s*\d*$/i.test(n.trim())) continue;
+    // Placeholders are never offered as a handle ("Account 1", the default "Anonymous", the app name).
+    if (!n || /^(account\s*\d*|anonymous|anon|bwallet|bwalletx|yours|wallet)$/i.test(n.trim())) continue;
     const a = toAlias(n);
     if (a) return a;
   }
