@@ -1137,29 +1137,37 @@ a.btn-store {
   }
 }
 
-/* Home only: a second, quieter row of in-page section links, distinct from the page links above. */
+/* Home only: in-page sections as a centred row of small pills under the page links. */
 .section-nav {
-  border-top: 1px solid #ffffff14;
-  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 0 10px;
 }
 .section-nav .wrap {
   display: flex;
-  gap: 20px;
+  justify-content: center;
+  gap: 6px;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-top: 7px;
-  padding-bottom: 7px;
 }
 .section-nav a {
-  color: #8a8a86;
+  color: #c9c9c4;
   text-decoration: none;
-  font: 500 0.8rem var(--hf);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: 500 0.82rem var(--hf);
   white-space: nowrap;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.15s, color 0.15s;
 }
 .section-nav a:hover {
-  color: var(--gold-hi);
+  color: #000;
+  background: var(--gold);
+  border-color: var(--gold);
+}
+@media (max-width: 859px) {
+  .section-nav .wrap {
+    justify-content: flex-start;
+  }
 }
 .topbar nav.section-nav {
   display: block;
