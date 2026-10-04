@@ -9,6 +9,14 @@
       "destination": "/social.html"
     },
     {
+      "source": "/api/social/:provider/callback",
+      "destination": "/api/social?op=:provider"
+    },
+    {
+      "source": "/api/social/:op",
+      "destination": "/api/social?op=:op"
+    },
+    {
       "source": "/.well-known/bsvalias",
       "destination": "/api/paymail?op=caps"
     },

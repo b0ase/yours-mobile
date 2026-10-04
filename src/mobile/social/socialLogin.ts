@@ -1,20 +1,20 @@
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BchatClient, defaultHttp, type SocialProfile } from '../chat/api';
+import type { SocialProfile } from '../chat/api';
+import { BWALLET_PAYMAIL_API } from '../names/config';
 import { IS_EXTENSION } from '../extension';
 
 /**
- * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bit-sign proves the X @name or
- * Gmail address; the new wallet then records it and may claim the matching verified paymail
+ * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bWalletX's own sign-in service
+ * (paymail server, site/lib/social.js) proves the X @name or Gmail address; the new wallet then records it and may claim the matching verified paymail
  * (b0asex.x@bwalletx.com, theirname.gmail@bwalletx.com) with its personal token and room.
  *
- * 1. start: a random secret stays here; bit-sign gets only its sha256 and returns the sign-in URL,
- *    opened in the system browser (Google refuses embedded web views).
- * 2. return: bit-sign → www.bwallet.space/social#t=<ticket> → the app (universal link, or the
+ * 1. start: a random secret stays here; the sign-in service gets only its sha256 and returns the
+ *    provider's sign-in URL, opened in the system browser (Google refuses embedded web views).
+ * 2. return: pay server → www.bwallet.space/social#t=<ticket> → the app (universal link, or the
  *    bwalletx:// scheme from that page; the extension reads the tab). preview() fills name + photo.
  * 3. Choose your handle: the paymail server registers <name>.x / <name>.gmail with the ticket +
- *    secret (it asks the sign-in service what they prove). bWalletX keeps the record; bit-sign
- *    stores nothing (owner, 4 Oct 2026).
+ *    secret. bWalletX keeps the record; bit-sign plays no part.
  */
 
 export type SocialProvider = 'x' | 'google';
@@ -49,14 +49,24 @@ export const socialProfile = () => read()?.profile ?? null;
 export const socialError = () => lastError;
 export const clearSocial = () => write(null);
 
-const client = () => new BchatClient(defaultHttp(Capacitor.isNativePlatform()));
+// bWalletX's own sign-in service (site/lib/social.js on the paymail server).
+const post = async <T>(op: string, body: unknown): Promise<T> => {
+  const r = await fetch(`${BWALLET_PAYMAIL_API}/api/social/${op}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = (await r.json().catch(() => ({}))) as T & { error?: string };
+  if (!r.ok) throw new Error(j.error || `Sign-in failed (${r.status})`);
+  return j;
+};
 const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 
 export async function startSocial(provider: SocialProvider): Promise<void> {
   lastError = '';
   const secret = hex(crypto.getRandomValues(new Uint8Array(32)));
   const vh = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)));
-  const url = await client().socialStart(provider, vh);
+  const { authorizeUrl: url } = await post<{ authorizeUrl: string }>('start', { provider, verifier_hash: vh });
   write({ provider, secret, at: Date.now() });
   if (IS_EXTENSION && typeof chrome !== 'undefined' && chrome.tabs) {
     const tab = await chrome.tabs.create({ url });
@@ -91,7 +101,7 @@ export async function receiveSocialUrl(url: string): Promise<void> {
     return write(null);
   }
   try {
-    const profile = await client().socialPreview(ticket, p.secret);
+    const profile = await post<SocialProfile>('preview', { ticket, secret: p.secret });
     lastError = '';
     write({ ...p, ticket, profile });
   } catch (e) {
@@ -103,7 +113,7 @@ export async function receiveSocialUrl(url: string): Promise<void> {
 /**
  * The verified profile and its proof, for registering the verified paymail name. bWalletX keeps
  * that record itself (its paymail server checks the proof with the sign-in service); nothing is
- * stored with bit-sign.
+ * stored anywhere else.
  */
 export function socialProof(): { profile: SocialProfile; ticket: string; secret: string } | null {
   const p = read();

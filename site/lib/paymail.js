@@ -27,36 +27,17 @@ const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
  */
 const SOCIAL_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
 const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
-const BITSIGN_ORIGIN = 'https://www.bitcoinchat.online';
 /**
- * Social names are bWalletX's own record: bit-sign only runs the X / Google sign-in and, given the
- * sealed ticket plus the secret that stayed in the app, says which @name / Gmail address it proved.
- * We register `<name>.x` / `<name>.gmail` only when it matches. Aliases are unique here, so one X
- * name or Gmail address = one wallet. (Owner, 4 Oct 2026: bit-sign accounts play no part.)
+ * Social names are bWalletX's own record (lib/social.js): `<name>.x` / `<name>.gmail` registers only
+ * with a Continue with X / Google ticket + secret proving that name. Aliases are unique, so one X
+ * name or Gmail address = one wallet.
  */
-function socialAliasFor(provider, name) {
-  const n = String(name || '').trim().toLowerCase();
-  if (provider === 'x') return /^[a-z0-9_]{1,15}$/.test(n) ? `${n.replace(/_/g, '-')}.x` : null;
-  const m = n.match(/^([a-z0-9.+_-]+)@(gmail|googlemail)\.com$/);
-  if (!m) return null;
-  const local = m[1].split('+')[0].replace(/\./g, '');
-  return /^[a-z0-9_-]{1,30}$/.test(local) ? `${local.replace(/_/g, '-')}.gmail` : null;
-}
-async function bitsignSocialCheck(alias, social, env = process.env) {
-  if (!social || !social.ticket || !social.secret) return 'Continue with X or Google first';
-  const base = String(env.BITSIGN_ORIGIN || BITSIGN_ORIGIN).replace(/\/$/, '');
-  try {
-    const r = await fetch(`${base}/api/bitsign/wallet/social/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket: social.ticket, secret: social.secret, preview: true }),
-    });
-    if (!r.ok) return 'That sign-in has expired. Please sign in again.';
-    const p = await r.json();
-    return socialAliasFor(p.provider, p.name) === alias ? null : 'That name does not match your sign-in';
-  } catch {
-    return 'Could not confirm your sign-in right now. Try again.';
-  }
+const { openTicket, socialAliasFor } = require('./social');
+async function ticketSocialCheck(alias, proof, env = process.env) {
+  if (!proof || !proof.ticket || !proof.secret) return 'Continue with X or Google first';
+  const p = openTicket(proof.ticket, proof.secret, env);
+  if (!p) return 'That sign-in has expired. Please sign in again.';
+  return p.alias === alias ? null : 'That name does not match your sign-in';
 }
 const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 const RESERVED = new Set([
@@ -211,7 +192,7 @@ function matchOutputs(tx, expected) {
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
-function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now(), socialCheck = bitsignSocialCheck }) {
+function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now(), socialCheck = ticketSocialCheck }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   const publicAlias = async (handle) => {
