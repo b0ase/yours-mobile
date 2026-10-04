@@ -116,6 +116,17 @@ bwalletx agent run trader            # run that account's strategy unattended
 bwalletx log --account trader
 ```
 
+**Agent tokens (paired mode).** Pairing doesn't hand over keys. The wallet issues the CLI or MCP client a
+**scoped agent token**: signed by the wallet, naming the agent, the accounts and permissions (§2) it may
+use, and an expiry of **30 days at most**. The user can **revoke** a token at any time from Settings ›
+Agents, which invalidates it and anything renewed from it. Optional renewal keeps a long-running agent
+alive within the original grant. Treat a token like a password: whoever holds it can act within its scope.
+(Compare Metanet.page's MCP tokens, Oct 2026.)
+
+**Rate limits.** Every agent has action limits as well as the money limit, so a buggy agent can't flood
+the network or a room. Starting defaults, adjustable per agent: 120 reads/min, 30 writes/min,
+20 posts or messages/hour, 60 trades/day. Hitting a limit refuses the action and logs it.
+
 Two ways to hold keys:
 
 - **Paired (default).** The CLI pairs with the user's wallet like a website, using the existing pairing
@@ -282,5 +293,8 @@ Each step ships on its own and is useful by itself.
 - **Price data.** Strategies need prices; the Market indexer has them. What rate limits apply?
 - **Strategy updates.** When an author ships v1.3, do owners of v1.2 get it free?
 - **Paid AI.** Agents in "paid" b agent mode spend from which account?
+- **BRC-181.** A proposed wallet-level standard for bounded spending by unattended agents. Read it and,
+  if it fits agent accounts, implement it rather than our own format, so other agents and apps can use
+  bWalletX agent accounts the same way.
 - **Key service trust.** Should keys be split across several services (threshold), so no single
   operator, including us, can open content alone?
