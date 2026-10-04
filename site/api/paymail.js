@@ -20,6 +20,7 @@ const ROUTES = {
   'receive-beef': ['POST', 'receive'],
   register: ['POST', 'register'],
   lookup: ['GET', 'lookup'],
+  social: ['GET', 'social'],
   inbox: ['POST', 'inbox'],
   ack: ['POST', 'ack'],
   delete: ['POST', 'delete'],

@@ -5,7 +5,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, SOCIAL_ALIAS_RE, toAlias } from './paymail';
-import { claimSocial } from '../social/socialLogin';
+import { clearSocial, socialProof } from '../social/socialLogin';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
   PERSONAL_FEE_ESTIMATE_SATS,
@@ -65,24 +65,12 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
-  // Continue with X / Google on Create Account: record the verified name now that the wallet
-  // exists, and offer its verified handle (b0asex.x / theirname.gmail).
-  const [socialAlias, setSocialAlias] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    claimSocial(apiContext)
-      .then((p) => {
-        if (live && p?.alias) {
-          setSocialAlias(p.alias);
-          setAlias(p.alias);
-        }
-      })
-      .catch((e) => live && setMsg(e instanceof Error ? e.message : 'Could not confirm your sign-in'));
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Continue with X / Google on Create Account: offer its verified handle (b0asex.x / theirname.gmail).
+  const [socialAlias] = useState<string | null>(() => {
+    const a = socialProof()?.profile.alias ?? null;
+    if (a) setTimeout(() => setAlias(a), 0);
+    return a;
+  });
   // The token is named after the claimed handle (paymail alias, else OpNS name), else what's typed.
   const claimed = (paymail ? paymail.split('@')[0] : '') || getMyName(identityAddress);
   const tokenName = claimed || alias;
@@ -147,11 +135,14 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
     setBusy(true);
     setMsg('');
     try {
+      const proof = alias === socialAlias ? socialProof() : null;
       const pm = await claimPaymail(f, apiContext.wallet, alias, {
         ordAddress,
-        name: profileName,
+        name: proof?.profile.provider === 'x' ? proof.profile.name : profileName,
         avatar: paymailAvatar(account?.settings?.socialProfile?.avatar),
+        ...(proof ? { social: { ticket: proof.ticket, secret: proof.secret } } : {}),
       });
+      if (proof) clearSocial();
       setPaymail(identityAddress, pm);
       setPm(pm);
       // bChat handle = paymail name, before any token room is opened under it.

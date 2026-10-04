@@ -99,19 +99,26 @@ describe('register', () => {
   test('social names (b0asex.x, theirname.gmail) need bit-sign to confirm the key', async () => {
     const store = memStore();
     const allowed = new Map(); // alias → key bit-sign would confirm
-    const socialCheck = async (alias, key) => (allowed.get(alias) === key ? null : 'Sign in with that account first');
+    // Stands in for bit-sign's ticket check: the ticket names the X account it proved.
+    const socialCheck = async (alias, social) => (social && allowed.get(alias) === social.ticket ? null : 'no');
     const h = pm.makeHandlers({ store, env: ENV, socialCheck });
     const u = user();
     const v = user();
     expect((await h.register({}, await u.sign('register', { alias: 'b0asex.x' })))[0]).toBe(403);
-    allowed.set('b0asex.x', u.identityKey);
-    expect((await h.register({}, await v.sign('register', { alias: 'b0asex.x' })))[0]).toBe(403);
-    const [s, r] = await h.register({}, await u.sign('register', { alias: 'b0asex.x' }));
+    allowed.set('b0asex.x', 'ticket-b0asex');
+    const social = { ticket: 'ticket-b0asex', secret: 's' };
+    expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social: { ticket: 'other', secret: 's' } }))[0]).toBe(403);
+    const [s, r] = await h.register({}, { ...(await u.sign('register', { alias: 'b0asex.x' })), social });
     expect(s).toBe(200);
     expect(r.paymail).toBe('b0asex.x@pay.test');
     expect((await h.pki({ handle: 'B0aseX.X@pay.test' }))[1].pubkey).toBe(u.identityKey);
     // Plain names never call bit-sign; a lookalike plain name stays separate.
     expect((await h.register({}, await v.sign('register', { alias: 'b0asex' })))[0]).toBe(200);
+    // Once taken, the same X name can't be registered to a second wallet.
+    expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
+    expect(pm.socialAliasFor('x', 'B0ase_X')).toBe('b0ase-x.x');
+    expect(pm.socialAliasFor('google', 'their.name+t@gmail.com')).toBe('theirname.gmail');
+    expect(pm.socialAliasFor('google', 'a@corp.com')).toBeNull();
     expect((await h.register({}, await v.sign('register', { alias: 'evil.com' })))[0]).toBe(400);
   });
 

@@ -1,21 +1,23 @@
 import { Capacitor } from '@capacitor/core';
-import { BCHAT_ORIGIN, BchatClient, defaultHttp } from '../chat/api';
+import { BchatClient, defaultHttp } from '../chat/api';
+import { BWALLET_PAYMAIL_API } from '../names/config';
 import { lookupPersonal } from '../names/claimPersonal';
 import { cached, parseRoom, roomMeta, type HotRoom } from './indexer';
 
 /**
  * Market › Tokens › X Accounts: personal tokens of people who proved their X account with
- * "Continue with X" (bit-sign /wallet/social/verified), e.g. x.com/b0asex → b0asex.x → $B0ASEX.
+ * "Continue with X" (registered as <name>.x on bWalletX's paymail server), e.g. x.com/b0asex → $B0ASEX.
  */
-export type XAccount = { handle: string; name: string | null; alias: string; tokenId: string | null };
+export type XAccount = { name: string | null; alias: string; tokenId: string | null };
 
 export const xAccounts = (): Promise<XAccount[]> =>
   cached(
     'x-accounts',
     async () => {
-      const r = await fetch(`${BCHAT_ORIGIN}/api/bitsign/wallet/social/verified?provider=x`);
+      // bWalletX's own record: paymail names registered with Continue with X (pay server).
+      const r = await fetch(`${BWALLET_PAYMAIL_API}/api/paymail/social?provider=x`);
       if (!r.ok) return [];
-      const { accounts } = (await r.json()) as { accounts: { handle: string; name: string | null; alias: string }[] };
+      const { accounts } = (await r.json()) as { accounts: { name: string | null; alias: string }[] };
       const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()));
       const out: XAccount[] = [];
       for (let i = 0; i < accounts.length; i += 6) {

@@ -28,16 +28,34 @@ const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
 const SOCIAL_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
 const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
 const BITSIGN_ORIGIN = 'https://www.bitcoinchat.online';
-/** Ask bit-sign whether `identityKey` may use the social alias. */
-async function bitsignSocialCheck(alias, identityKey, env = process.env) {
+/**
+ * Social names are bWalletX's own record: bit-sign only runs the X / Google sign-in and, given the
+ * sealed ticket plus the secret that stayed in the app, says which @name / Gmail address it proved.
+ * We register `<name>.x` / `<name>.gmail` only when it matches. Aliases are unique here, so one X
+ * name or Gmail address = one wallet. (Owner, 4 Oct 2026: bit-sign accounts play no part.)
+ */
+function socialAliasFor(provider, name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (provider === 'x') return /^[a-z0-9_]{1,15}$/.test(n) ? `${n.replace(/_/g, '-')}.x` : null;
+  const m = n.match(/^([a-z0-9.+_-]+)@(gmail|googlemail)\.com$/);
+  if (!m) return null;
+  const local = m[1].split('+')[0].replace(/\./g, '');
+  return /^[a-z0-9_-]{1,30}$/.test(local) ? `${local.replace(/_/g, '-')}.gmail` : null;
+}
+async function bitsignSocialCheck(alias, social, env = process.env) {
+  if (!social || !social.ticket || !social.secret) return 'Continue with X or Google first';
   const base = String(env.BITSIGN_ORIGIN || BITSIGN_ORIGIN).replace(/\/$/, '');
   try {
-    const r = await fetch(
-      `${base}/api/bitsign/wallet/social/alias?alias=${encodeURIComponent(alias)}&key=${encodeURIComponent(identityKey)}`,
-    );
-    return r.ok ? null : r.status === 403 ? 'That name belongs to a different wallet' : 'Sign in with that account first';
+    const r = await fetch(`${base}/api/bitsign/wallet/social/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket: social.ticket, secret: social.secret, preview: true }),
+    });
+    if (!r.ok) return 'That sign-in has expired. Please sign in again.';
+    const p = await r.json();
+    return socialAliasFor(p.provider, p.name) === alias ? null : 'That name does not match your sign-in';
   } catch {
-    return 'Could not confirm that name right now. Try again.';
+    return 'Could not confirm your sign-in right now. Try again.';
   }
 }
 const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
@@ -311,7 +329,7 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
       if (SOCIAL_RE.test(alias)) {
-        const refused = await socialCheck(alias, identityKey, env);
+        const refused = await socialCheck(alias, body.social, env);
         if (refused) return [403, { error: refused }];
       }
       const taken = await store.getAlias(alias);
@@ -326,6 +344,12 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
         avatar: String(f.avatar || '').slice(0, 512) || null,
       });
       return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
+    },
+
+    social: async (q) => {
+      const suffix = q.provider === 'google' ? 'gmail' : 'x';
+      const rows = store.listSocial ? await store.listSocial(suffix) : [];
+      return [200, { accounts: rows.map((r) => ({ alias: r.alias, name: r.display_name || null })) }];
     },
 
     lookup: async (q) => {
@@ -396,6 +420,7 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
 }
 
 module.exports = {
+  socialAliasFor,
   ANYONE_PUB,
   BRC29,
   SIGN_PROTOCOL,

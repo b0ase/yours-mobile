@@ -1,9 +1,7 @@
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import type { OneSatContext } from '@1sat/actions';
 import { BchatClient, defaultHttp, type SocialProfile } from '../chat/api';
 import { IS_EXTENSION } from '../extension';
-import { signedInClient } from '../kyc/kycWallet';
 
 /**
  * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bit-sign proves the X @name or
@@ -14,8 +12,9 @@ import { signedInClient } from '../kyc/kycWallet';
  *    opened in the system browser (Google refuses embedded web views).
  * 2. return: bit-sign → www.bwallet.space/social#t=<ticket> → the app (universal link, or the
  *    bwalletx:// scheme from that page; the extension reads the tab). preview() fills name + photo.
- * 3. claim (Choose your handle, after the wallet exists): the ticket + secret with the wallet's
- *    bit-sign session. See bit-sign src/lib/wallet-social.ts.
+ * 3. Choose your handle: the paymail server registers <name>.x / <name>.gmail with the ticket +
+ *    secret (it asks the sign-in service what they prove). bWalletX keeps the record; bit-sign
+ *    stores nothing (owner, 4 Oct 2026).
  */
 
 export type SocialProvider = 'x' | 'google';
@@ -102,17 +101,13 @@ export async function receiveSocialUrl(url: string): Promise<void> {
 }
 
 /**
- * After the wallet exists: record the verified name on its bit-sign account. Returns the alias it
- * may now claim as paymail, or null when there's nothing pending.
+ * The verified profile and its proof, for registering the verified paymail name. bWalletX keeps
+ * that record itself (its paymail server checks the proof with the sign-in service); nothing is
+ * stored with bit-sign.
  */
-export async function claimSocial(ctx: OneSatContext): Promise<SocialProfile | null> {
+export function socialProof(): { profile: SocialProfile; ticket: string; secret: string } | null {
   const p = read();
-  if (!p?.ticket || !p.profile) return null;
-  if (p.claimed) return p.profile;
-  const signed = await signedInClient(ctx);
-  const r = await signed.socialClaim(p.ticket, p.secret);
-  write({ ...p, claimed: true, profile: { ...p.profile, alias: r.alias } });
-  return { ...p.profile, alias: r.alias };
+  return p?.ticket && p.profile ? { profile: p.profile, ticket: p.ticket, secret: p.secret } : null;
 }
 
 if (Capacitor.isNativePlatform()) {
