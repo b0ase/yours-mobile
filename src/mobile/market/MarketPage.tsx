@@ -9,7 +9,7 @@ import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personal
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, ShieldCheck, Tag, X } from 'lucide-react';
+import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, Search, ShieldCheck, Tag, X } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { PageLoader } from '../../components/PageLoader';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -514,6 +514,7 @@ const MarketPage = () => {
   // Tokens view: trending first, then every active overlay token, paged on scroll.
   const PAGE = 40;
   const [shown, setShown] = useState(PAGE);
+  const [q, setQ] = useState('');
   const [floors, setFloors] = useState<Record<string, { floor: string | null; listings: number }>>({});
   const tokenRows = useMemo(
     () => mergeTokenBoard(rooms ?? [], directory ?? []).filter(roomSafe),
@@ -533,8 +534,26 @@ const MarketPage = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenFilter, tokenRows.length]);
-  const filteredTokens =
-    tokenFilter === 'bapps'
+  // Search (owner, 5 Oct 2026): ticker or token id, across every token whatever the filter.
+  const query = q.trim().replace(/^\$/, '').toLowerCase();
+  const searched = useMemo(() => {
+    if (!query) return null;
+    const all = new Map<string, HotRoom>();
+    for (const r of [...tokenRows, ...(xRows ?? [])]) all.set(r.ref.key, r);
+    const hits = [...all.values()].filter((r) => r.title.replace(/^\$/, '').toLowerCase().includes(query) || r.ref.id.toLowerCase() === query);
+    const rank = (r: HotRoom) => {
+      const t = r.title.replace(/^\$/, '').toLowerCase();
+      return t === query ? 0 : t.startsWith(query) ? 1 : 2;
+    };
+    hits.sort((a, b) => rank(a) - rank(b));
+    // A pasted token id the lists don't know yet still opens.
+    const ref = hits.length ? null : parseRoom('bsv21', q.trim());
+    if (ref) hits.push({ ref, title: 'Token', subtitle: 'BSV-21 token', icon: null, trades: 0, newListings: 0, floorLabel: null, heat: 0 });
+    return hits;
+  }, [query, q, tokenRows, xRows]);
+  const filteredTokens = searched
+    ? searched
+    : tokenFilter === 'bapps'
       ? tokenRows.filter((r) => isBappToken(r.ref.id))
       : tokenFilter === 'social'
         ? (xRows ?? [])
@@ -614,7 +633,8 @@ const MarketPage = () => {
           No personal tokens yet. Claim your name and mint your $NAME token to be the first.
         </p>
       )}
-      {tokenFilter !== 'bapps' && tokenFilter !== 'social' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
+      {searched?.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-8">No token matches “{q.trim()}”.</p>}
+      {!searched && tokenFilter !== 'bapps' && tokenFilter !== 'social' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
         <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
       )}
       {visibleTokens.map((r, i) => {
@@ -655,7 +675,8 @@ const MarketPage = () => {
       })}
       {shown < filteredTokens.length && <div ref={sentinel} className="h-8" />}
       {/* bApps with no token yet: what they are, nothing for sale. */}
-      {tokenFilter === 'bapps' &&
+      {!searched &&
+        tokenFilter === 'bapps' &&
         unlaunchedBapps(BAPPS).map((a) => (
           <button
             key={a.name}
@@ -965,7 +986,36 @@ const MarketPage = () => {
               }
             />
           ) : (
-            tokenList
+            <>
+              {tokenList}
+              <div className="h-16" />
+              <div
+                className="fixed left-0 right-0 z-[60] px-4 py-2"
+                style={{ bottom: '3.75rem', background: 'linear-gradient(transparent, #010101 35%)' }}
+              >
+                <label className="flex items-center gap-2 rounded-full bg-[#17191E] px-4 py-2.5 border border-[#2b2f36]">
+                  <Search size={16} color="#98A2B3" />
+                  <input
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setShown(PAGE);
+                    }}
+                    placeholder="Search tokens: $TICKER or token id"
+                    enterKeyHint="search"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="flex-1 min-w-0 bg-transparent text-sm text-white outline-none border-0"
+                  />
+                  {q && (
+                    <button type="button" aria-label="Clear search" onClick={() => setQ('')} className="p-0 bg-transparent border-0">
+                      <X size={16} color="#98A2B3" />
+                    </button>
+                  )}
+                </label>
+              </div>
+            </>
           )
         ) : view === 'collections' ? (
           trending
