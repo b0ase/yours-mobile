@@ -386,7 +386,13 @@ const MarketPage = () => {
     ...(TOKEN_FILTERS.some(([f]) => f === 'tickets')
       ? [{ id: 'tickets', label: 'Tickets', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
       : []),
-    ...(TRADING ? [{ id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind, soon: true }] : []),
+    ...(TRADING
+      ? [
+          { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind, soon: true },
+          { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind, soon: true },
+          { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind, soon: true },
+        ]
+      : []),
   ];
   const activeCat = kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
   // The usual grey / yellow filter pills, bigger and wrapping so every category shows at once.
