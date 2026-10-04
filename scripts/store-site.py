@@ -55,6 +55,12 @@ NOOP = ('<span class="mini">1Sat Market</span>', '')
 s = re.sub(r'href="/download/bwalletx-android-[^"]*"\s*download', 'href="https://bwalletx.com/android"', s)
 s = s.replace('href="/extension"', 'href="https://bwalletx.com/extension"')
 
+# Direct downloads are bWalletX: say so (the store app itself comes from the stores).
+s = re.sub(r'<span>Android · Download APK \(beta\)</span><small>[^<]*</small>',
+           '<span>bWalletX for Android</span><small>Full edition · APK download</small>', s)
+s = re.sub(r'<span>Chrome · Download extension</span><small>[^<]*</small>',
+           '<span>bWalletX for Chrome</span><small>Full edition · extension</small>', s)
+
 # Branding: bWalletX → bWallet (but keep links that name bWalletX on purpose).
 s = s.replace('bWallet<span class="gold">X</span>', 'bWallet')
 s = re.sub(r'bWalletX(?![^<]*</a>)', 'bWallet', s)
