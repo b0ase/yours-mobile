@@ -36,3 +36,12 @@ const buildResponseCallback = (messageId: string) => {
     self.dispatchEvent(responseEvent);
   };
 };
+
+// bWalletX: tell the page whether to be the wallet websites connect to (window.CWI over another
+// wallet such as Yours). Default on; Settings › Websites turns it off (src/brand/cwi.ts).
+chrome.storage?.local.get('bwalletxTakeCwi', (r) => {
+  const take = r?.bwalletxTakeCwi !== false;
+  const send = () => self.dispatchEvent(new CustomEvent('bwalletx:cwi-pref', { detail: { take } }));
+  send();
+  setTimeout(send, 300); // the MAIN-world script may not be listening yet at document_start
+});

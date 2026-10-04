@@ -6,8 +6,11 @@
  * instead:
  *  - sends its own `bWalletXRequest` event (only our content script listens: content.ts swap);
  *  - announces itself (brc100:announceWallet) so sites can offer it by name;
- *  - sets window.CWI only if it's empty, and answers legacy `YoursRequest` calls only while it holds
- *    window.CWI (a site that bundles upstream's event transport and has no other wallet).
+ *  - takes window.CWI by default, even over another wallet (owner, 4 Oct 2026: sites like foxespixel
+ *    use window.CWI with no picker, so with Yours installed bWalletX was unreachable). Settings ›
+ *    "Be the wallet websites connect to" off → hands window.CWI back to the other wallet. The content
+ *    script tells the page the setting via the `bwalletx:cwi-pref` event;
+ *  - answers legacy `YoursRequest` calls only while it holds window.CWI.
  */
 import type { WalletInterface } from '@bsv/sdk';
 import { createCWI, CWIEventName } from '@1sat/wallet-browser';
@@ -40,7 +43,22 @@ const transport = (action: string, params: unknown) =>
 export const CWI: WalletInterface = createCWI(transport as Parameters<typeof createCWI>[0]);
 
 if (typeof window !== 'undefined') {
+  const w = window as unknown as { CWI?: WalletInterface };
+  let take = true; // until the content script says otherwise
+  let other: WalletInterface | undefined; // another wallet's window.CWI, kept to hand back
+  const assert = () => {
+    if (w.CWI && w.CWI !== CWI) other = w.CWI;
+    if (take) w.CWI = CWI;
+    else if (w.CWI === CWI && other) w.CWI = other;
+  };
   claimWindowCwi(CWI);
+  assert();
+  // Another wallet may inject after us: check again shortly.
+  for (const ms of [250, 1000, 3000]) setTimeout(assert, ms);
+  self.addEventListener('bwalletx:cwi-pref', (e) => {
+    take = (e as CustomEvent<{ take?: boolean }>).detail?.take !== false;
+    assert();
+  });
   // Legacy pages: answer upstream's event only while window.CWI is ours (checked per request, since
   // another wallet may inject after us).
   self.addEventListener(LEGACY_REQUEST, (e) => {

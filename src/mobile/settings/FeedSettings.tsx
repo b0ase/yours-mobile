@@ -348,6 +348,15 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
     'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | 'social' | null
   >(null);
   const rate = useBsvUsd();
+  // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
+  const [takeCwi, setTakeCwiState] = useState(true);
+  useEffect(() => {
+    if (IS_EXTENSION) chrome.storage?.local.get('bwalletxTakeCwi', (r) => setTakeCwiState(r?.bwalletxTakeCwi !== false));
+  }, []);
+  const setTakeCwi = (v: boolean) => {
+    setTakeCwiState(v);
+    void chrome.storage?.local.set({ bwalletxTakeCwi: v });
+  };
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
   return (
@@ -432,6 +441,22 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
             label="Connect X or Google"
             description="Get a verified name like yourname.x, alongside your current one"
             onClick={() => setScreen('social')}
+            isFirst
+            isLast
+          />
+        </Section>
+      )}
+      {IS_EXTENSION && (
+        <Section title="Websites">
+          <Row
+            icon={<Globe size={16} />}
+            label="Be the wallet websites connect to"
+            description={
+              takeCwi
+                ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
+                : 'Another wallet (e.g. Yours) answers sites without a picker'
+            }
+            right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}
             isFirst
             isLast
           />

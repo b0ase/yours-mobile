@@ -77,6 +77,7 @@ import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay } from '../mobile/wallet/payNav';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
+import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
 import {
   BALANCE_TIMEOUT_MS,
@@ -1195,6 +1196,7 @@ export const BsvWallet = () => {
           </div>
         </div>
       )}
+      <OrdinalsAddress />
     </motion.div>
   );
 
