@@ -76,7 +76,7 @@ let ok = false;
 for (const h of iconHrefs) {
   try {
     const r = await get(new URL(h, url).href);
-    if (!r.ok) continue;
+    if (!r.ok || !/^image\//.test(r.headers.get('content-type') || '')) continue; // dead links often answer JSON/HTML
     const file = join(tmp, 'icon');
     writeFileSync(file, Buffer.from(await r.arrayBuffer()));
     // First frame of .ico, flattened onto black, 96px square.
