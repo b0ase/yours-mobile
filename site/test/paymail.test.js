@@ -11,7 +11,12 @@ const memStore = () => {
     aliases,
     pays,
     getAlias: async (a) => aliases.get(a) ?? null,
-    getAliasByKey: async (k) => [...aliases.values()].find((r) => r.identity_key === k) ?? null,
+    getAliasByKey: async (k) =>
+      [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === 'plain') ??
+      [...aliases.values()].find((r) => r.identity_key === k) ??
+      null,
+    getAliasByKeyKind: async (k, kind) =>
+      [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
     upsertAlias: async (r) => (aliases.set(r.alias, { ...r }), r),
     renameAlias: async (from, to) => {
       const r = aliases.get(from);
@@ -114,6 +119,14 @@ describe('register', () => {
     expect((await h.pki({ handle: 'B0aseX.X@pay.test' }))[1].pubkey).toBe(u.identityKey);
     // Plain names never call bit-sign; a lookalike plain name stays separate.
     expect((await h.register({}, await v.sign('register', { alias: 'b0asex' })))[0]).toBe(200);
+    // A wallet with a plain name keeps it when it adds its verified X name.
+    const w = user();
+    expect((await h.register({}, await w.sign('register', { alias: 'wplain' })))[0]).toBe(200);
+    allowed.set('w-x.x', 'ticket-w');
+    expect((await h.register({}, { ...(await w.sign('register', { alias: 'w-x.x' })), social: { ticket: 'ticket-w', secret: 's' } }))[0]).toBe(200);
+    expect(store.aliases.has('wplain')).toBe(true);
+    expect(store.aliases.get('w-x.x').kind).toBe('x');
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
     // Once taken, the same X name can't be registered to a second wallet.
     expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
     expect(pm.socialAliasFor('x', 'B0ase_X')).toBe('b0ase-x.x');

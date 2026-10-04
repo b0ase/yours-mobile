@@ -16,8 +16,11 @@ import {
   Trash2,
   Zap,
   LockKeyhole,
+  BadgeCheck,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
+import { ConnectSocial } from './ConnectSocial';
+import { socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -342,7 +345,7 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
-    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | null
+    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | 'social' | null
   >(null);
   const rate = useBsvUsd();
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
@@ -422,6 +425,18 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           </>
         )}
       </Section>
+      {socialLoginEnabled() && (
+        <Section title="Identity">
+          <Row
+            icon={<BadgeCheck size={16} />}
+            label="Connect X or Google"
+            description="Get a verified name like yourname.x, alongside your current one"
+            onClick={() => setScreen('social')}
+            isFirst
+            isLast
+          />
+        </Section>
+      )}
       <Section title="Security">
         <Row
           icon={<LockKeyhole size={16} />}
@@ -570,6 +585,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
+      {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />

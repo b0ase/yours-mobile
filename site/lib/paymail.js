@@ -315,9 +315,13 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       }
       const taken = await store.getAlias(alias);
       if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
-      const mine = await store.getAliasByKey(identityKey);
-      if (mine && mine.alias !== alias) await store.renameAlias(mine.alias, alias); // one paymail per identity: rename keeps the inbox
+      // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
+      // added, boase stays. A plain name still renames, keeping the inbox.
+      const kind = SOCIAL_RE.test(alias) ? (alias.endsWith('.x') ? 'x' : 'gmail') : 'plain';
+      const mine = kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
+      if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) await store.renameAlias(mine.alias, alias);
       const row = await store.upsertAlias({
+        kind,
         alias,
         identity_key: identityKey,
         ord_address: f.ordAddress || null,

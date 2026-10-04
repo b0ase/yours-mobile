@@ -22,15 +22,20 @@ function supabaseStore(env = process.env, f = fetch) {
   const one = async (path) => (await req(path))?.[0] ?? null;
   return {
     getAlias: (alias) => one(`bwallet_paymail_aliases?alias=eq.${q(alias)}&limit=1`),
-    getAliasByKey: (k) => one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&limit=1`),
+    // A wallet's plain name first; a verified social name (kind x / gmail) only if it has no plain one.
+    getAliasByKey: async (k) =>
+      (await one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.plain&limit=1`)) ??
+      one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&limit=1`),
+    getAliasByKeyKind: (k, kind) => one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.${q(kind)}&limit=1`),
     // Verified social names (alias ends .x / .gmail), for the bWalletX Market "X Accounts" filter.
     listSocial: async (suffix) =>
-      (await req(`bwallet_paymail_aliases?alias=like.*.${q(suffix)}&select=alias,display_name&limit=5000`)) || [],
+      (await req(`bwallet_paymail_aliases?kind=eq.${q(suffix)}&select=alias,display_name&limit=5000`)) || [],
     upsertAlias: async (row) =>
       (
         await req('bwallet_paymail_aliases?on_conflict=alias', {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          // kind: 'plain' | 'x' | 'gmail' (migrations/20261004_bwallet_paymail_social_names.sql)
           body: JSON.stringify({ ...row, updated_at: new Date().toISOString() }),
         })
       )[0],
