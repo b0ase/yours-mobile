@@ -143,7 +143,21 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     [
       '      setStep(2);\n    } catch',
       "      markHandlePrompt(keys.identityAddress, 'create');\n      setStep(2);\n    } catch",
-    ],    // Continue with X / Google above the form (src/mobile/social): fills name + photo.
+    ],    // Password: generate a strong one, eye toggle, autocomplete hints so the phone / browser saves it
+    // (src/mobile/names/PasswordFields.tsx; iOS webcredentials:www.bwallet.space).
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { PasswordFields, saveWalletPassword } from '../../mobile/names/PasswordFields';",
+    ],
+    [
+      '        <Input\n          theme={theme}\n          placeholder="Password"\n          type="password"\n          value={password}\n          onChange={(e) => setPassword(e.target.value)}\n        />\n        <Show when={newWallet}>\n          <Input\n            theme={theme}\n            placeholder="Confirm password"\n            type="password"\n            value={passwordConfirm}\n            onChange={(e) => setPasswordConfirm(e.target.value)}\n          />\n        </Show>',
+      '        <PasswordFields newWallet={newWallet} username={accountName} password={password} confirm={passwordConfirm} setPassword={setPassword} setConfirm={setPasswordConfirm} />',
+    ],
+    [
+      "      markHandlePrompt(keys.identityAddress, 'create');",
+      "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet) void saveWalletPassword(accountName, password);",
+    ],
+    // Continue with X / Google above the form (src/mobile/social): fills name + photo.
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { SocialSignIn } from '../../mobile/social/SocialSignIn';",
@@ -292,6 +306,13 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
   ],
   // UnlockWallet: bigger b mark above "Welcome back" (YoursIcon shows the b+x in bWalletX builds).
+  // Unlock: let the phone / browser fill the saved wallet password (PasswordFields saves it).
+  'src/components/UnlockWallet.tsx#autofill': [
+    [
+      '            placeholder="Password"\n            type="password"\n            value={password}',
+      '            placeholder="Password"\n            type="password"\n            name="password"\n            autoComplete="current-password"\n            value={password}',
+    ],
+  ],
   'src/components/UnlockWallet.tsx#logo': [['<YoursIcon width="4rem" />', '<YoursIcon width="7rem" />']],
   // Welcome, unlock and every other YoursIcon: the b+x tile in bWalletX builds (storeBuild.isBWalletX).
   'src/components/YoursIcon.tsx': [
