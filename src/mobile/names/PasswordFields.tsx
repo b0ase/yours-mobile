@@ -51,11 +51,13 @@ export const PasswordFields = ({
 }) => {
   const [show, setShow] = useState(false);
   const [copied, setCopied] = useState(false);
-  const generate = () => {
-    const p = strongPassword();
+  // Suggestion box under the empty field on focus, like a browser's own "Use strong password".
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const generate = (p = strongPassword()) => {
     setPassword(p);
     setConfirm(p);
     setShow(true);
+    setSuggestion(null);
   };
   const copy = async () => {
     await navigator.clipboard?.writeText(password).catch(() => undefined);
@@ -75,8 +77,29 @@ export const PasswordFields = ({
           autoComplete={newWallet ? 'new-password' : 'current-password'}
           placeholder="Password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setSuggestion(null);
+          }}
+          onFocus={() => newWallet && !password && setSuggestion(strongPassword())}
+          onBlur={() => setTimeout(() => setSuggestion(null), 200)}
         />
+        {suggestion && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => generate(suggestion)}
+            className="absolute left-0 right-0 top-full mt-1 z-10 flex flex-col items-start gap-0.5 rounded-xl px-3 py-2 text-left border-0"
+            style={{ background: '#22252B', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
+          >
+            <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#F5B800' }}>
+              <Wand2 size={13} /> Use a strong password
+            </span>
+            <span className="text-[11px] font-mono" style={{ color: '#D0D5DD' }}>
+              {suggestion}
+            </span>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShow((s) => !s)}
@@ -102,7 +125,7 @@ export const PasswordFields = ({
         <div className="flex items-center gap-3 text-xs">
           <button
             type="button"
-            onClick={generate}
+            onClick={() => generate()}
             className="flex items-center gap-1 bg-transparent border-0 p-0 font-semibold"
             style={{ color: '#F5B800' }}
           >
