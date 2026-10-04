@@ -53,6 +53,10 @@ function brandManifest() {
   // 1Sat overlay submit sends an x-topics header api.1sat.app's CORS rejects; host access skips CORS.
   manifest.host_permissions = [...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*'])];
   manifest.icons = iconSet;
+  // Fixed extension ID (owner, 4 Oct 2026): each build is loaded from its own versioned folder
+  // (dist/bwalletx-extension-<version>); without a key Chrome derives the ID from the folder path,
+  // so every new folder was a new extension with an empty wallet. This is a PUBLIC key only.
+  manifest.key = readFileSync(resolve(__dirname, 'extension-key.pub.txt'), 'utf-8').trim();
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
   const pwaPath = resolve(dist, 'pwa-manifest.json');
