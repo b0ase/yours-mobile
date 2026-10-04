@@ -1172,3 +1172,27 @@ a.btn-store {
 .topbar nav.section-nav {
   display: block;
 }
+
+/* Navbar call to action: Download (gold, prominent) beside Web (outlined). */
+.nav-cta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dl-btn {
+  text-decoration: none;
+  font: 700 0.95rem var(--hf);
+  color: #000;
+  background: linear-gradient(135deg, #ffe58a, #f5b800 55%, #c98f00);
+  padding: 6px 16px;
+  border-radius: 999px;
+  box-shadow: 0 0 18px rgba(245, 184, 0, 0.45);
+}
+.dl-btn:hover {
+  filter: brightness(1.08);
+}
+.nav-cta .web-btn {
+  background: transparent;
+  color: var(--gold-hi);
+  border: 1px solid rgba(245, 184, 0, 0.6);
+}
