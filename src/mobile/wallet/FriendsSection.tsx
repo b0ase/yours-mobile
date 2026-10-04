@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getBsv21Balances, type Bsv21Balance } from '@1sat/actions';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { FriendToken } from './FriendToken';
 import { UserPlus } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
@@ -18,6 +21,14 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
  */
 export const FriendsSection = () => {
   const contacts = useContacts();
+  const { apiContext } = useServiceContext();
+  const [held, setHeld] = useState<Bsv21Balance[]>([]);
+  useEffect(() => {
+    void getBsv21Balances
+      .execute(apiContext, {})
+      .then(setHeld)
+      .catch(() => undefined);
+  }, [apiContext]);
   const { handleSelect } = useBottomMenu();
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState('');
@@ -94,6 +105,7 @@ export const FriendsSection = () => {
               c={c}
               busy={false}
               onRemove={null}
+              extra={<FriendToken c={c} held={held} />}
               onMessage={(x) => {
                 if (!x.handle) return;
                 requestDm(x.handle);

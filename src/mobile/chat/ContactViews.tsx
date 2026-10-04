@@ -88,7 +88,10 @@ export const ContactRow = ({
   busy,
   fav,
   onLeave,
+  extra,
 }: {
+  /** Shown under the actions (Wallet › Friends: their personal token). */
+  extra?: ReactNode;
   c: Contact;
   onMessage: (c: Contact) => void;
   onRemove: ((c: Contact) => void) | null;
@@ -136,6 +139,7 @@ export const ContactRow = ({
             }}
           />
         </div>
+        {extra}
       </div>
       {fav && (
         <button onClick={fav.toggle} aria-label={fav.on ? 'Unfavourite' : 'Favourite'} className="p-2">
