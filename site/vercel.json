@@ -94,6 +94,21 @@
       "source": "/get",
       "destination": "https://bwalletx.com/get",
       "permanent": false
+    },
+    {
+      "source": "/agent",
+      "destination": "https://bwalletx.com/agent",
+      "permanent": false
+    },
+    {
+      "source": "/strategies",
+      "destination": "https://bwalletx.com/strategies",
+      "permanent": false
+    },
+    {
+      "source": "/adult",
+      "destination": "https://bwalletx.com/adult",
+      "permanent": false
     }
   ]
 }
