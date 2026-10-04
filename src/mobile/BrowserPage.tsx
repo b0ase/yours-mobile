@@ -162,6 +162,9 @@ const RADAR_SECTIONS = RADAR_GROUPS.map((g) => ({
     (a): Tile => ({ key: `r:${a.url}`, name: a.name, url: a.url, icon: a.icon, desc: a.desc }),
   ),
 })).filter((g) => g.tiles.length > 0);
+// Games get their own page (owner, 5 Oct 2026); Other apps shows the rest.
+const GAME_TILES = RADAR_SECTIONS.find((g) => g.label === 'Games')?.tiles ?? [];
+const OTHER_SECTIONS = RADAR_SECTIONS.filter((g) => g.label !== 'Games');
 
 const LONG_PRESS_MS = 450;
 /** Keep holding a Home tile this long and Home goes straight into arrange mode (like iPhone). */
@@ -399,7 +402,7 @@ const writeFavourites = (urls: string[]) => {
 };
 
 // Home-screen pages, swiped left/right (CSS scroll-snap); the switch tracks the page.
-const PAGES = ['Home', 'bApps', 'Other apps'] as const;
+const PAGES = ['Home', 'bApps', 'Other apps', 'Games'] as const;
 const PAGE_KEY = 'bwallet:apps-page';
 
 const readPage = () => {
@@ -644,10 +647,18 @@ const BrowserPage = () => {
         </>
       );
     }
+    if (i === 3) {
+      return (
+        <>
+          {grid(3, notHome(GAME_TILES))}
+          {note('Not made by The Bitcoin Corporation. Touch and hold a game for details.')}
+        </>
+      );
+    }
     return (
       <>
         {grid(2, notHome(OTHER_TILES))}
-        {RADAR_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
+        {OTHER_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
           <div key={g.label} className="flex flex-col gap-3">
             <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
             {grid(2, notHome(g.tiles))}
