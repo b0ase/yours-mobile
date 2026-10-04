@@ -25,7 +25,8 @@ import {
   type PriceInfo,
   type Quote,
 } from './paid';
-import { STORE_BUILD } from '../storeBuild';
+import { STORE_BUILD, marketTradingEnabled } from '../storeBuild';
+import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
 import { ReportSheet } from '../ugc/UgcSheets';
@@ -108,7 +109,11 @@ const AgentPage = () => {
   const navigate = useNavigate();
   const close = () => navigate(-1);
   useBackClose(true, close);
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  const accountId = account?.addresses.identityAddress;
+  // bWalletX only: in an agent account b may act, within the account's limits and loaded strategy (agents/agentTrade.ts).
+  const system = marketTradingEnabled() ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account') : BWALLET_GUIDE;
   const [prefs] = useAgentPrefs();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [input, setInput] = useState('');
@@ -175,10 +180,11 @@ const AgentPage = () => {
               reason: 'Paid messages are not available right now.',
             }),
         );
-      fetchExchangeRate('main')
-        .then((r) => live && setRate(r))
-        .catch(() => {});
     }
+    // Both modes: paid prices show in dollars, and agent-account actions are sized in dollars.
+    fetchExchangeRate('main')
+      .then((r) => live && setRate(r))
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -189,7 +195,7 @@ const AgentPage = () => {
 
   const answerPaid = async (u: Unanswered) => {
     setUnanswered(u);
-    const text = await backend.turn(u.quote, u.txid, u.messages, BWALLET_GUIDE);
+    const text = await backend.turn(u.quote, u.txid, u.messages, system);
     setUnanswered(null);
     return text;
   };
@@ -214,7 +220,26 @@ const AgentPage = () => {
   const runOwn = async (sent: AgentMessage[]) => {
     const key = await loadKey(prefs.provider);
     if (!key) throw new Error(`Add your ${provider.label} API key in Settings › b agent.`);
-    return callProvider(prefs.provider, key, prefs.models[prefs.provider], BWALLET_GUIDE, sent);
+    return callProvider(prefs.provider, key, prefs.models[prefs.provider], system, sent);
+  };
+
+  /** Show a reply; in an agent account, run any actions it asked for and show each result. */
+  const answer = async (before: AgentMessage[], reply: string) => {
+    const { text, actions, bad } = system === BWALLET_GUIDE ? { text: reply, actions: [], bad: 0 } : parseActions(reply);
+    let shown: AgentMessage[] = [...before, { role: 'assistant', text: text || 'Working on it.' }];
+    setMessages(shown);
+    if (bad) shown = [...shown, { role: 'assistant', text: `⚙ Wallet: ignored ${bad} action${bad === 1 ? '' : 's'} it couldn't read.` }];
+    for (const a of actions) {
+      let r: { ok: boolean; text: string; txid?: string };
+      try {
+        r = apiContext && accountId ? await runAgentAction(apiContext, accountId, a, bsvUsd) : { ok: false, text: 'Wallet is locked.' };
+      } catch (e) {
+        r = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      }
+      shown = [...shown, { role: 'assistant', text: `⚙ Wallet: ${r.text}${r.txid ? ` (tx ${r.txid.slice(0, 10)}…)` : ''}` }];
+      setMessages(shown);
+    }
+    setMessages(shown);
   };
 
   const send = async () => {
@@ -245,7 +270,7 @@ const AgentPage = () => {
         // Cancelled at the confirm step: nothing paid, put the text back.
         setMessages(messages);
         setInput(text);
-      } else setMessages([...next, { role: 'assistant', text: reply }]);
+      } else await answer(next, reply);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -259,7 +284,7 @@ const AgentPage = () => {
     setError(null);
     try {
       const reply = await answerPaid(unanswered);
-      setMessages((m) => [...m, { role: 'assistant', text: reply }]);
+      await answer(messages, reply);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

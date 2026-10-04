@@ -116,3 +116,11 @@ describe('paper mode', () => {
     expect(checkAgentAction('1Z', { kind: 'buy', token: 'ABC', usd: 1 }, {}, NOW)).toMatchObject({ ok: false, reason: 'Not an agent account' });
   });
 });
+
+describe('tickers', () => {
+  test('a rule naming a ticker accepts that token by id', () => {
+    const id = 'a'.repeat(64) + '_0';
+    expect(checkRules(rules(), { kind: 'buy', token: id, ticker: 'B0ASEX', usd: 1 }, st()).ok).toBe(true);
+    expect(checkRules(rules(), { kind: 'buy', token: id, ticker: 'FAKE', usd: 1 }, st()).ok).toBe(false);
+  });
+});

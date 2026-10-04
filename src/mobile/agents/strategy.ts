@@ -121,6 +121,8 @@ export const parseStrategy = (input: string | unknown): Parsed => {
 export type ActionRequest = {
   kind: StrategyAction;
   token: string;
+  /** The token's ticker, when `token` is an id: rules may name either. */
+  ticker?: string;
   /** Dollars this action spends (buy: cost; send: value sent; sell/list: 0). */
   usd: number;
   /** Current price, USD per token (buy / sell / list). */
@@ -162,7 +164,7 @@ export const checkRules = (rules: StrategyRules, a: ActionRequest, st: RuleState
   const stopped = stopMet(rules, st);
   if (stopped) return no('stop', `Strategy finished: ${stopped}`);
   if (!rules.actions.includes(a.kind)) return no('actions', `"${a.kind}" isn't allowed by this strategy`);
-  if (!rules.tokens.some((t) => same(t, a.token))) return no('tokens', `${a.token} isn't one of this strategy's tokens`);
+  if (!rules.tokens.some((t) => same(t, a.token) || (a.ticker && same(t, a.ticker)))) return no('tokens', `${a.ticker ?? a.token} isn't one of this strategy's tokens`);
   if (!(a.usd >= 0) || !Number.isFinite(a.usd)) return no('maxPerTradeUsd', 'Invalid amount');
   if (a.usd > rules.maxPerTradeUsd + 1e-9) return no('maxPerTradeUsd', `$${a.usd.toFixed(2)} is over the $${rules.maxPerTradeUsd} per-trade limit`);
   if (rules.maxPerDayUsd !== undefined && st.spentTodayUsd + a.usd > rules.maxPerDayUsd + 1e-9)
