@@ -157,6 +157,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "      markHandlePrompt(keys.identityAddress, 'create');",
       "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet) void saveWalletPassword(accountName, password);",
     ],
+    // Recovery phrase "Next": don't wait on the background wallet switch (a new wallet's first
+    // storage connection can hang), so the button never silently does nothing.
+    [
+      '          await chromeStorageService.switchAccount(identityAddress);\n          setStep(3);',
+      "          await Promise.race([\n            chromeStorageService.switchAccount(identityAddress).catch((e) => console.error('[create] switchAccount', e)),\n            new Promise((r) => setTimeout(r, 4000)),\n          ]);\n          setStep(3);",
+    ],
     // Continue with X / Google above the form (src/mobile/social): fills name + photo.
     [
       "import { useNavigate } from 'react-router-dom';",
