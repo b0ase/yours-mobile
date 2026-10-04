@@ -1,5 +1,6 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { ChevronLeft, Maximize2, RotateCw, X } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
+import { BAPPS } from '../bapps';
 import { pushBackCloser } from '../backStack';
 import { handleSiteCall, lastUrlFor } from '../dappBrowser';
 import {
@@ -83,6 +84,9 @@ export const BappFrameHost = () => {
   }, [active]);
 
   const current = session ? (lastUrlFor(session.origin) ?? session.url) : '';
+  const wide = useWide();
+  const [layout, setLayout] = useAppLayout(session?.origin);
+  const phone = wide && layout === 'mobile';
 
   return (
     <>
@@ -115,6 +119,17 @@ export const BappFrameHost = () => {
               <ChevronLeft size={18} color="#F2F2F0" />
             </button>
             <span className="flex-1 truncate text-[13px] font-semibold text-[#F2F2F0]">{session.name}</span>
+            {wide && (
+              <button
+                type="button"
+                onClick={() => setLayout(phone ? 'desktop' : 'mobile')}
+                className="w-9 h-9 flex items-center justify-center"
+                aria-label={phone ? 'Show desktop size' : 'Show phone size'}
+                title={phone ? 'Desktop size' : 'Phone size'}
+              >
+                {phone ? <Monitor size={15} color="#98A2B3" /> : <Smartphone size={15} color="#98A2B3" />}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => reloadBapp(current)}
@@ -140,6 +155,7 @@ export const BappFrameHost = () => {
               <X size={18} color="#F2F2F0" />
             </button>
           </div>
+          <div className={phone ? 'flex-1 flex justify-center py-3 min-h-0' : 'contents'}>
           <iframe
             key={session.key}
             ref={frame}
@@ -151,9 +167,59 @@ export const BappFrameHost = () => {
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
             allow="camera; microphone; clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media"
             referrerPolicy="strict-origin-when-cross-origin"
+            style={phone ? { width: 430, maxWidth: '100%', flex: 'none', borderRadius: 18, border: '1px solid #2b2f36' } : undefined}
           />
+          </div>
         </div>
       )}
     </>
   );
+};
+
+/** Wide screen (web, extension tab): apps can be phone-sized or desktop-sized. */
+const useWide = () => {
+  const q = '(min-width: 768px)';
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia?.(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia?.(q);
+    if (!m) return;
+    const on = () => setWide(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  return !!wide;
+};
+
+const LAYOUT_KEY = (origin: string) => `bwallet.appLayout.${origin}`;
+
+/** The app's size on wide screens: the person's choice for this site, else its catalogue default (desktop). */
+const useAppLayout = (origin?: string): ['mobile' | 'desktop', (l: 'mobile' | 'desktop') => void] => {
+  const fallback = (): 'mobile' | 'desktop' => {
+    if (!origin) return 'desktop';
+    try {
+      const saved = localStorage.getItem(LAYOUT_KEY(origin));
+      if (saved === 'mobile' || saved === 'desktop') return saved;
+    } catch {
+      /* storage unavailable */
+    }
+    const app = BAPPS.find((a) => {
+      try {
+        return new URL(a.url).origin === origin;
+      } catch {
+        return false;
+      }
+    });
+    return app?.layout ?? 'desktop';
+  };
+  const [layout, set] = useState(fallback);
+  useEffect(() => set(fallback()), [origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = (l: 'mobile' | 'desktop') => {
+    set(l);
+    try {
+      if (origin) localStorage.setItem(LAYOUT_KEY(origin), l);
+    } catch {
+      /* storage unavailable */
+    }
+  };
+  return [layout, choose];
 };

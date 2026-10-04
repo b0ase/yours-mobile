@@ -51,6 +51,11 @@ export type BApp = {
    * Sites without this flag are still probed at open time and fall back automatically.
    */
   noFrame?: boolean;
+  /**
+   * How the app is shown inside the wallet on a wide screen: 'mobile' = phone-width column,
+   * 'desktop' (default) = the full width. The person can switch per app (BappFrameHost).
+   */
+  layout?: 'mobile' | 'desktop';
 };
 
 const suite = (repo: string) => `https://github.com/bitcoin-apps-suite/${repo}`;

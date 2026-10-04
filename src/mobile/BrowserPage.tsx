@@ -297,7 +297,7 @@ const ArrangeGrid = ({
   };
 
   return (
-    <div ref={gridRef} className="grid grid-cols-4 gap-x-3 gap-y-5">
+    <div ref={gridRef} className="bw-app-grid grid grid-cols-4 gap-x-3 gap-y-5">
       {order.map((t, slot) => {
         const dragging = t.key === dragKey;
         const s = drag.current;
@@ -539,7 +539,7 @@ const BrowserPage = () => {
     return (
       <motion.div
         key={replayed ? `r${replay.n}` : 'enter'}
-        className="grid grid-cols-4 gap-x-3 gap-y-5"
+        className="bw-app-grid grid grid-cols-4 gap-x-3 gap-y-5"
         style={{ transformOrigin: '50% 30%' }}
         initial={reduce ? { opacity: 0 } : { opacity: replayed ? 0.6 : 0, scale: replayed ? 1.06 : 1.2 }}
         animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}

@@ -51,7 +51,7 @@ function brandManifest() {
   manifest.side_panel = { default_path: 'index.html' };
   manifest.permissions = [...new Set([...manifest.permissions, 'sidePanel'])];
   // 1Sat overlay submit sends an x-topics header api.1sat.app's CORS rejects; host access skips CORS.
-  manifest.host_permissions = [...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*'])];
+  manifest.host_permissions = [...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*', ...BAPP_HOSTS])];
   manifest.icons = iconSet;
   // Fixed extension ID (owner, 4 Oct 2026): each build is loaded from its own versioned folder
   // (dist/bwalletx-extension-<version>); without a key Chrome derives the ID from the folder path,
@@ -73,6 +73,16 @@ function brandManifest() {
     writeFileSync(pwaPath, JSON.stringify(pwa, null, 2) + '\n');
   }
 }
+
+// bApp sites (src/mobile/bapps.ts): host permission lets the extension read their framing headers, so
+// it can open them inside the wallet (src/mobile/bappFrame). Read from source: bapps.ts imports images.
+const BAPP_HOSTS = [
+  ...new Set(
+    [...readFileSync(resolve(__dirname, '../src/mobile/bapps.ts'), 'utf-8').matchAll(/url: '(https:\/\/[^/']+)/g)].map(
+      (m) => `${m[1]}/*`,
+    ),
+  ),
+];
 
 // ─── Build pipeline ──────────────────────────────────────────
 const STEPS = [

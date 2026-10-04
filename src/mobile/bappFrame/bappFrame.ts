@@ -2,6 +2,7 @@ import { CapacitorHttp } from '@capacitor/core';
 import { BAPPS } from '../bapps';
 import { openDappBrowser } from '../dappBrowser';
 import { isNative } from '../native';
+import { IS_EXTENSION } from '../extension';
 import { frameAllowlist, frameOriginFor, framingAllowed } from './frameBridge';
 
 /**
@@ -49,6 +50,15 @@ const canFrame = async (url: string, origin: string): Promise<boolean> => {
   if (hit !== undefined) return hit;
   let ok = false;
   try {
+    if (IS_EXTENSION) {
+      // The extension has host permission for every bApp origin (scripts/build.ts), so CORS doesn't apply.
+      const r = await fetch(url, { method: 'GET', credentials: 'omit', signal: AbortSignal.timeout(6000) });
+      const headers: Record<string, string> = {};
+      r.headers.forEach((v, k) => (headers[k] = v));
+      ok = r.ok && framingAllowed(headers, window.location.origin);
+      probed.set(origin, ok);
+      return ok;
+    }
     const res = await CapacitorHttp.request({
       url,
       method: 'GET',
@@ -72,7 +82,8 @@ let seq = 0;
  */
 export const openBapp = async (name: string, url: string): Promise<void> => {
   const origin = frameOriginFor(url, BAPP_FRAME_ALLOWLIST);
-  if (!isNative || !origin) return openDappBrowser(url);
+  // Phone apps and the Chrome extension (desktop) run bApps in-frame; the web wallet opens them in a tab.
+  if (!(isNative || IS_EXTENSION) || !origin) return openDappBrowser(url);
   if (state.session?.origin === origin && state.session.url === url) return set({ visible: true });
   set({ opening: name });
   try {
