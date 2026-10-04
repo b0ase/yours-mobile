@@ -3,7 +3,7 @@
  * shown as the media library: music, video, images) | Tickets (tokens that open rooms) | Credits (prepaid bCredits). A tiny shared store so the bottom bar,
  * deep links (upstream 'ords') and the Wallet page agree on the view.
  */
-export type WalletKind = 'tokens' | 'nfts' | 'tickets' | 'credits';
+export type WalletKind = 'tokens' | 'nfts' | 'friends' | 'tickets' | 'credits';
 
 let kind: WalletKind = 'tokens';
 const listeners = new Set<() => void>();
