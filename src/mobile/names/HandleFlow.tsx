@@ -66,15 +66,16 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const [tokenMsg, setTokenMsg] = useState('');
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
   // A restored wallet already owns its name: show it instead of suggesting a new one. (The background
-  // name sync may not have finished when this opens.)
+  // name sync may not have finished when this opens.) The server answers with the wallet's identity,
+  // its verified X / Google name first, so a stale plain name stored here is replaced.
   useEffect(() => {
-    if (paymail || !enabled) return;
+    if (!enabled) return;
     let live = true;
     apiContext.wallet
       .getPublicKey({ identityKey: true })
       .then(({ publicKey }) => lookupPaymail(f, publicKey))
       .then((p) => {
-        if (!live || !p) return;
+        if (!live || !p || p === paymail) return;
         setPaymail(identityAddress, p);
         setPm(p);
         if (!socialProof()) setAlias(p.split('@')[0]);

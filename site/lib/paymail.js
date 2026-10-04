@@ -318,6 +318,12 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
       // added, boase stays. A plain name still renames, keeping the inbox.
       const kind = SOCIAL_RE.test(alias) ? (alias.endsWith('.x') ? 'x' : 'gmail') : 'plain';
+      // One identity per wallet (owner, 4 Oct 2026): a verified X / Google name always wins, so a
+      // wallet that has one can't also take a plain name. Plain-name identities are separate accounts.
+      if (kind === 'plain') {
+        const social = (await store.getAliasByKeyKind?.(identityKey, 'x')) || (await store.getAliasByKeyKind?.(identityKey, 'gmail'));
+        if (social) return [409, { error: `This wallet's name is ${handleOf(social.alias)}. Add another account for a different name.` }];
+      }
       const mine = kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
       if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) await store.renameAlias(mine.alias, alias);
       const row = await store.upsertAlias({
@@ -340,7 +346,9 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
     lookup: async (q) => {
       const key = String(q.key || '').toLowerCase();
       if (!PUBKEY_RE.test(key)) return [400, { error: 'invalid-key' }];
-      const row = await store.getAliasByKey(key);
+      // The wallet's identity: its verified social name wins over an older plain one.
+      const row =
+        (await store.getAliasByKeyKind?.(key, 'x')) || (await store.getAliasByKeyKind?.(key, 'gmail')) || (await store.getAliasByKey(key));
       return row ? [200, { paymail: handleOf(row.alias), alias: row.alias }] : [404, { error: 'not-found' }];
     },
 

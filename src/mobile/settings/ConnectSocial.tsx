@@ -8,7 +8,8 @@ import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { SocialSignIn } from '../social/SocialSignIn';
 import { clearSocial, onSocialChange, socialProof } from '../social/socialLogin';
 import { deployPersonalToken, openPersonalRoom, PERSONAL_FEE_ESTIMATE_SATS, PERSONAL_NETWORK_FEE_SATS } from '../names/claimPersonal';
-import { DEFAULT_SUPPLY, getPersonalLink, personalTicker, rememberPersonal, setPersonalLink } from '../names/personalToken';
+import { DEFAULT_SUPPLY, personalTicker, rememberPersonal } from '../names/personalToken';
+import { setPaymail } from '../names/accountName';
 import { showOnWallet } from '../tokens/indexFund';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
@@ -19,8 +20,8 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
 
 /**
  * Settings › Identity › Connect X / Google (owner, 4 Oct 2026): for wallets made before Continue with
- * X, or that skipped it. Signs in, then claims the verified name (b0asex.x@bwalletx.com) BESIDE the
- * wallet's plain name — the plain name stays (paymail server: one name per kind per wallet).
+ * X, or that skipped it. Signs in, then claims the verified name (b0asex.x@bwalletx.com), which becomes
+ * the wallet's identity (the paymail server answers lookups with it; an older plain name still receives).
  */
 export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   useBackClose(true, onClose);
@@ -39,15 +40,13 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const ticker = personalTicker(claimedAlias);
 
   /**
-   * $B0ASEX + its room for the verified name. The wallet keeps ONE "my personal token" link on this
-   * device (personalToken.ts); a wallet that already has one ($BOASE) keeps it — the new token is
-   * remembered as a known personal token and its room still opens.
+   * $B0ASEX + its room for the verified name. One identity per wallet (owner, 4 Oct 2026): the
+   * verified name wins, so its token becomes this wallet's personal token.
    */
   const mint = async () => {
     setConfirming(false);
     setMinting(true);
     setTokenMsg('');
-    const previous = getPersonalLink(identityAddress);
     try {
       const l = await deployPersonalToken(apiContext, {
         identityAddress,
@@ -55,7 +54,6 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         supply: DEFAULT_SUPPLY,
         payAddress: account?.addresses?.bsvAddress,
       });
-      if (previous && previous.tokenId !== l.tokenId) setPersonalLink(identityAddress, previous);
       rememberPersonal({ name: l.name, tokenId: l.tokenId });
       void showOnWallet(chromeStorageService, l.tokenId);
       setTokenMsg(`$${l.ticker} minted. Opening its room…`);
@@ -63,7 +61,6 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         .then(() => setTokenMsg(`$${l.ticker} minted and its room is open. Invite = send 1 $${l.ticker}.`))
         .catch(() => setTokenMsg(`$${l.ticker} minted. Set up its room from Settings › My tokens when you're ready.`));
     } catch (e) {
-      if (previous) setPersonalLink(identityAddress, previous);
       setTokenMsg(e instanceof Error ? e.message : 'Token mint failed');
     } finally {
       setMinting(false);
@@ -82,6 +79,7 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         avatar: proof.profile.avatar || undefined,
         social: { ticket: proof.ticket, secret: proof.secret },
       });
+      setPaymail(identityAddress, pm);
       setClaimed(pm);
       clearSocial();
     } catch (e) {
@@ -105,7 +103,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
             <Check size={36} color="#2ecc71" />
             <p className="mt-3 text-lg font-bold text-white">{claimed} is yours</p>
             <p className="mt-2 text-sm" style={{ color: '#98A2B3' }}>
-              Your other name stays as it is. People can pay either address.
+              This is now your wallet's name. Your token and chat room are named after it. For a different name,
+              add another account.
             </p>
             {paidFeaturesEnabled() && ticker && !tokenMsg.includes('minted') && (
               <button
@@ -150,7 +149,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
           <>
             <p className="text-sm text-center mt-4 mb-5" style={{ color: '#98A2B3' }}>
               Prove your X account or Gmail address to get a verified name like{' '}
-              <span className="text-white">yourname.x@{BWALLET_PAYMAIL_DOMAIN}</span>, alongside your current one.
+              <span className="text-white">yourname.x@{BWALLET_PAYMAIL_DOMAIN}</span>. It becomes this wallet's name, token
+              and chat room.
             </p>
             <SocialSignIn onProfile={() => setProof(socialProof())} />
             {proof?.profile.alias && (

@@ -126,7 +126,10 @@ describe('register', () => {
     expect((await h.register({}, { ...(await w.sign('register', { alias: 'w-x.x' })), social: { ticket: 'ticket-w', secret: 's' } }))[0]).toBe(200);
     expect(store.aliases.has('wplain')).toBe(true);
     expect(store.aliases.get('w-x.x').kind).toBe('x');
-    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
+    // The verified name is now the wallet's identity, and it can't take another plain name.
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('w-x.x');
+    expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(409);
+    expect(store.aliases.has('wother')).toBe(false);
     // Once taken, the same X name can't be registered to a second wallet.
     expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
     expect(pm.socialAliasFor('x', 'B0ase_X')).toBe('b0ase-x.x');
