@@ -85,7 +85,7 @@ export const useRoomSetup = (
       lineItems={
         quote
           ? [
-              { address: 'Indexing (1Sat)', amount: money(quote.indexSats, rate) },
+              { address: 'Deposit (1Sat)', amount: money(quote.indexSats, rate) },
               // SendConfirmation truncates labels over 16 characters: keep them short.
               ...(quote.feeSats > 0 ? [{ address: 'Setup (bCorp)', amount: money(quote.feeSats, rate) }] : []),
             ]

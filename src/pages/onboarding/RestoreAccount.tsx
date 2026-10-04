@@ -170,7 +170,9 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
   };
 
   const getRestoreDescription = () => {
-    return importWallet
+    return importWallet === 'yours'
+      ? 'Enter your 12 words. They are all you need; the Yours extension is not required.'
+      : importWallet
       ? 'Enter your seed phrase'
       : 'Enter a seed phrase and use custom derivation paths to import a wallet from anywhere!';
   };
