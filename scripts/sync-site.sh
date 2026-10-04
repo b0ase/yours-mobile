@@ -7,7 +7,8 @@
 #   - bWalletX-only pages (/features, /friends, /android, /extension, /developers) and /download/* redirect
 #     to bwalletx.com (site/vercel.json).
 # Never copied (bwallet.space-only): api/, lib/, test/, .well-known/, pair.html, social.html, vercel.json,
-# package files, privacy.html (the store app's privacy URL) and logo.svg (plain b, no X).
+# package files, privacy.html (the store app's privacy URL), and the plain-b logo, icons and share images
+# (logo.svg, favicon.*, icon-*.png, apple-touch-icon.png, og*.png).
 #   bash scripts/sync-site.sh   then deploy: (cd site && vercel --prod)
 set -euo pipefail
 SRC="${BWALLETX_SITE:-/Volumes/2026/Projects/bwalletx-site}"
@@ -16,7 +17,8 @@ DST="$ROOT/site"
 rsync -a \
   --exclude='.git' --exclude='.vercel' --exclude='node_modules' --exclude='.DS_Store' --exclude='download/' \
   --exclude='vercel.json' --exclude='privacy.html' --exclude='.gitignore' --exclude='logo.svg' --exclude='*.html' \
-  --exclude='connect.js' --exclude='og-*.png' \
+  --exclude='connect.js' --exclude='og-*.png' --exclude='og.png' --exclude='favicon.*' --exclude='icon-*.png' \
+  --exclude='apple-touch-icon.png' \
   --include='*.css' --include='*.js' --include='*.png' --include='*.svg' --include='*.ico' \
   --include='*.webmanifest' --include='*.jpg' --include='*.mp4' --include='*.webm' --include='*.webp' \
   --include='*/' --exclude='*' \

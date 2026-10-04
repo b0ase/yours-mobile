@@ -72,5 +72,11 @@ resub(r'<nav aria-label="Pages">.*?</nav>',
 s = s.replace('href="https://web.bwalletx.com" target="_blank" rel="noopener">Web &rarr;</a>',
               'href="https://bwalletx.com">bWalletX &rarr;</a>')
 
+# Share preview + canonical address: this site's own (plain b) image and URL.
+s = s.replace('https://bwalletx.com/og-v2.png', 'https://www.bwallet.space/og-v2.png')
+s = s.replace('<meta property="og:url" content="https://bwalletx.com/" />', '<meta property="og:url" content="https://www.bwallet.space/" />')
+s = s.replace('a gold b with an X', 'a gold b')
+s = s.replace('<link rel="canonical" href="https://bwalletx.com/" />', '<link rel="canonical" href="https://www.bwallet.space/" />')
+
 open(dst, 'w', encoding='utf-8').write(s)
 print(f'store-site: wrote {dst}')
