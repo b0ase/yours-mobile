@@ -53,6 +53,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { openDappBrowser } from '../dappBrowser';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
+import { StrategiesMarket } from '../strategies/StrategiesMarket';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -167,6 +168,7 @@ const MarketPage = () => {
   const [error, setError] = useState('');
   const [room, setRoom] = useState<HotRoom | null>(null);
   const [market, setMarket] = useState<RoomMarket | null>(null);
+  const [strategiesOpen, setStrategiesOpen] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
@@ -388,13 +390,13 @@ const MarketPage = () => {
       : []),
     ...(TRADING
       ? [
-          { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind, soon: true },
+          { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind },
           { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind, soon: true },
           { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind, soon: true },
         ]
       : []),
   ];
-  const activeCat = kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
+  const activeCat = strategiesOpen ? 'strategies' : kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
   // The usual grey / yellow filter pills, bigger and wrapping so every category shows at once.
   const categoryTiles = (
     <div className="flex flex-wrap gap-2" role="tablist" aria-label="What's for sale">
@@ -408,6 +410,7 @@ const MarketPage = () => {
             disabled={c.soon}
             onClick={() => {
               if (c.soon) return;
+              setStrategiesOpen(c.id === 'strategies');
               setKind(c.kind);
               if (c.token) setTokenFilter(c.token);
               if (c.view) setView(c.view);
@@ -963,6 +966,8 @@ const MarketPage = () => {
         {segment}
         {section === 'mine' ? (
           mineView
+        ) : strategiesOpen && !room ? (
+          <StrategiesMarket />
         ) : room ? (
           roomView
         ) : kind === 'tokens' ? (

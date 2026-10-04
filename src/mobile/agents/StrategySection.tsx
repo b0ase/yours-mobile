@@ -12,6 +12,10 @@ import {
   type StrategyRules,
 } from './strategy';
 import { saveTextFile } from './saveText';
+import { PublishStrategy } from '../strategies/PublishStrategy';
+import { myStrategies } from '../strategies/myStrategies';
+import { marketTradingEnabled } from '../storeBuild';
+import { useServiceContext } from '../../hooks/useServiceContext';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -46,6 +50,9 @@ export const StrategySection = ({ id }: { id: string }) => {
   const [errors, setErrors] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   const [confirmLive, setConfirmLive] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const { chromeStorageService } = useServiceContext();
+  const isCurrent = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress === id;
   const file = useRef<HTMLInputElement>(null);
 
   const load = (src: string) => {
@@ -59,6 +66,13 @@ export const StrategySection = ({ id }: { id: string }) => {
 
   const section = 'rounded-2xl p-3 flex flex-col gap-2';
   const btn = 'rounded-lg px-3 py-2 text-sm font-bold border-0';
+
+  if (loaded && !editing && publishing)
+    return (
+      <div className="rounded-2xl p-3" style={{ background: CARD }}>
+        <PublishStrategy strategy={loaded.strategy} onClose={() => setPublishing(false)} />
+      </div>
+    );
 
   if (loaded && !editing) {
     const s = loaded.strategy;
@@ -119,6 +133,11 @@ export const StrategySection = ({ id }: { id: string }) => {
           <button type="button" onClick={() => void download(loaded)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
             Save file
           </button>
+          {marketTradingEnabled() && isCurrent && (
+            <button type="button" onClick={() => setPublishing(true)} className={`${btn} flex-1`} style={{ background: '#F5B80022', color: GOLD }}>
+              Sell
+            </button>
+          )}
           <button type="button" onClick={() => unloadStrategy(id)} className={`${btn} flex-1`} style={{ background: LINE, color: '#FDA29B' }}>
             Unload
           </button>
@@ -163,6 +182,16 @@ export const StrategySection = ({ id }: { id: string }) => {
           Start from example
         </button>
       </div>
+      {Object.keys(myStrategies()).length > 0 && (
+        <div className="text-xs flex flex-col gap-1" style={{ color: MUTED }}>
+          Your strategies (bought or published):
+          {Object.entries(myStrategies()).map(([op, m]) => (
+            <button key={op} type="button" onClick={() => (loadStrategy(id, m.strategy, 'paper'), setEditing(false))} className="text-left text-sm font-bold border-0 bg-transparent p-0" style={{ color: GOLD }}>
+              {m.strategy.name} v{m.strategy.version} → Load on paper
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

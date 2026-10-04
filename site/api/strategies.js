@@ -82,7 +82,8 @@ async function publish(b, res) {
   const at = await K.envelopeAt(outpoint);
   if (!at) return send(res, 400, { error: 'That output isn’t a strategy inscription' });
   const { env } = at;
-  if (env.author.address !== proof.address) return send(res, 403, { error: 'Only the author’s own copy can publish' });
+  // Authorship = holding the content key (sha256 must match keyHash below) + owning this fresh copy.
+  if (outpoint !== ((await K.chain.origin(outpoint)) || outpoint)) return send(res, 400, { error: 'Publish from the newly minted copy' });
   const keyB64 = String(b.key || '');
   const hash = crypto.createHash('sha256').update(Buffer.from(keyB64, 'base64')).digest('hex');
   if (hash !== env.keyHash) return send(res, 400, { error: 'The key doesn’t match this strategy' });
