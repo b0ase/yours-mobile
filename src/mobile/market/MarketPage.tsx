@@ -106,13 +106,6 @@ type Pending = { room: Pick<HotRoom, 'ref' | 'title'>; listing: Listing };
 type Kind = 'tokens' | 'nfts';
 /** NFTs side: trending collections, or the listing feed by media type. */
 type View = 'collections' | NftCategory;
-const VIEWS: [View, string][] = [
-  ['collections', 'Collections'],
-  ['music', 'Music'],
-  ['video', 'Video'],
-  ['images', 'Images'],
-  ['documents', 'Documents'],
-];
 /**
  * Tokens side sub-filters. bApps = the bApps' own tokens (bappTokens.ts), listed like any other token.
  * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
@@ -378,25 +371,68 @@ const MarketPage = () => {
     }
   };
 
-  const kindSwitch = (
-    <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="Market type">
-      {(
-        [
-          ['tokens', 'Tokens'],
-          ['nfts', 'NFTs'],
-        ] as const
-      ).map(([id, label]) => (
-        <button
-          key={id}
-          role="tab"
-          aria-selected={kind === id}
-          onClick={() => setKind(id)}
-          className="flex-1 rounded-lg py-2 text-sm font-bold"
-          style={{ background: kind === id ? '#A1FF8B' : 'transparent', color: kind === id ? '#010101' : '#98A2B3' }}
-        >
-          {label}
-        </button>
-      ))}
+  // Big category tiles (owner, 4 Oct 2026): everything that's for sale, visible at a glance instead of
+  // hidden in a Tokens/NFTs switch and small chips. Tokens stays the default view.
+  type Cat = { id: string; label: string; icon: string; kind: Kind; token?: TokenFilter; view?: View; soon?: boolean };
+  const CATS: Cat[] = [
+    { id: 'tokens', label: 'Tokens', icon: '🪙', kind: 'tokens', token: 'all' },
+    { id: 'social', label: 'Social', icon: '👥', kind: 'tokens', token: 'social' },
+    { id: 'music', label: 'Music', icon: '🎵', kind: 'nfts', view: 'music' },
+    { id: 'video', label: 'Video', icon: '🎬', kind: 'nfts', view: 'video' },
+    { id: 'images', label: 'Images', icon: '🖼️', kind: 'nfts', view: 'images' },
+    { id: 'documents', label: 'Documents', icon: '📄', kind: 'nfts', view: 'documents' },
+    { id: 'collections', label: 'Collections', icon: '🗂️', kind: 'nfts', view: 'collections' },
+    { id: 'bapps', label: 'bApps', icon: '🧩', kind: 'tokens', token: 'bapps' },
+    ...(TOKEN_FILTERS.some(([f]) => f === 'tickets')
+      ? [{ id: 'tickets', label: 'Tickets', icon: '🎟️', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
+      : []),
+    ...(TRADING ? [{ id: 'strategies', label: 'Strategies', icon: '🤖', kind: 'tokens' as Kind, soon: true }] : []),
+  ];
+  const activeCat = kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
+  const categoryTiles = (
+    <div className="grid grid-cols-5 gap-2" role="tablist" aria-label="What's for sale">
+      {CATS.map((c) => {
+        const on = !c.soon && activeCat === c.id;
+        return (
+          <button
+            key={c.id}
+            role="tab"
+            aria-selected={on}
+            disabled={c.soon}
+            onClick={() => {
+              if (c.soon) return;
+              setKind(c.kind);
+              if (c.token) setTokenFilter(c.token);
+              if (c.view) setView(c.view);
+              setRoom(null);
+            }}
+            className="relative flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 px-1 border text-center"
+            style={{
+              background: on ? 'linear-gradient(160deg, #F5B80033, #17191E)' : '#17191E',
+              borderColor: on ? '#F5B800' : '#2b2f36',
+              opacity: c.soon ? 0.55 : 1,
+            }}
+          >
+            <span className="text-[20px] leading-none" aria-hidden="true">
+              {c.icon}
+            </span>
+            <span
+              className="text-[11px] font-bold w-full overflow-hidden text-ellipsis whitespace-nowrap"
+              style={{ color: on ? '#FFD24D' : '#D0D5DD' }}
+            >
+              {c.label}
+            </span>
+            {c.soon && (
+              <span
+                className="absolute -top-1.5 right-1 text-[8px] font-bold uppercase rounded px-1"
+                style={{ background: '#2b2f36', color: '#98A2B3' }}
+              >
+                soon
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -415,47 +451,6 @@ const MarketPage = () => {
           style={{ background: section === id ? '#2b2f36' : 'transparent', color: section === id ? '#fff' : '#98A2B3' }}
         >
           {label}
-        </button>
-      ))}
-    </div>
-  );
-
-  const tokenChips = (
-    <div className="flex gap-1.5 overflow-x-auto">
-      {TOKEN_FILTERS.map(([id, label, enabled]) => (
-        <button
-          key={id}
-          disabled={!enabled}
-          aria-disabled={!enabled}
-          onClick={() => setTokenFilter(id)}
-          className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
-          style={{
-            background: enabled && tokenFilter === id ? '#F5B800' : '#17191E',
-            color: enabled ? (tokenFilter === id ? '#010101' : '#98A2B3') : '#667085',
-            opacity: enabled ? 1 : 0.7,
-          }}
-        >
-          {label}
-          {!enabled && <span className="ml-1 text-[9px] font-medium uppercase tracking-wide">soon</span>}
-        </button>
-      ))}
-    </div>
-  );
-
-  const chips = (
-    <div className="flex gap-1.5 overflow-x-auto">
-      {VIEWS.map(([id, label]) => (
-        <button
-          key={id}
-          onClick={() => {
-            setView(id);
-            setRoom(null);
-          }}
-          className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
-          style={{ background: view === id ? '#A1FF8B' : '#17191E', color: view === id ? '#010101' : '#98A2B3' }}
-        >
-          {label}
-          {feed && id !== 'collections' ? ` ${feed.items.filter((n) => n.category === id && nftSafe(n)).length}` : ''}
         </button>
       ))}
     </div>
@@ -947,14 +942,13 @@ const MarketPage = () => {
       <TopNav />
       {busy && <PageLoader theme={theme} message={busy} />}
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
-        {kindSwitch}
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-white flex items-center gap-1.5">
             <Flame size={18} style={{ color: '#A1FF8B' }} /> Market
           </h1>
         </div>
+        {section === 'trending' && !room && categoryTiles}
         {segment}
-        {section === 'trending' && !room && (kind === 'tokens' ? tokenChips : chips)}
         {section === 'mine' ? (
           mineView
         ) : room ? (
