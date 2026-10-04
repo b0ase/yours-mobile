@@ -19,6 +19,7 @@ import { FinishIndexing } from '../tokens/FinishIndexing';
 import { AvatarPicker } from './AvatarPicker';
 import { paidFeaturesEnabled } from '../storeBuild';
 import { paymailAvatar } from './avatar';
+import { adoptSocialAvatar } from './socialAvatar';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
 import { getMyName } from './myName';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -115,6 +116,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
         name,
         supply,
         payAddress: account?.addresses?.bsvAddress,
+        avatar: account?.settings?.socialProfile?.avatar ?? account?.icon,
       });
       // Its balance is local: show it on the Wallet tab now, not when an indexer catches up.
       void showOnWallet(chromeStorageService, l.tokenId);
@@ -170,10 +172,13 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       const pm = await claimPaymail(f, apiContext.wallet, alias, {
         ordAddress,
         name: proof?.profile.provider === 'x' ? proof.profile.name : profileName,
-        avatar: paymailAvatar(account?.settings?.socialProfile?.avatar),
+        avatar: paymailAvatar(proof?.profile.avatar || account?.settings?.socialProfile?.avatar),
         ...(proof ? { social: { ticket: proof.ticket, secret: proof.secret } } : {}),
       });
-      if (proof) clearSocial();
+      if (proof) {
+        await adoptSocialAvatar(chromeStorageService, proof.profile.avatar);
+        clearSocial();
+      }
       setPaymail(identityAddress, pm);
       setPm(pm);
       // bChat handle = paymail name, before any token room is opened under it.

@@ -1,4 +1,6 @@
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
+import { useOwnPersonalTokenId, useTokenIcon } from '../mobile/tokens/tokenIcon';
+import { normId } from '../mobile/names/personalToken';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -30,12 +32,45 @@ export type Bsv21TokensListProps = {
 
 const getTokenName = (b: Bsv21Balance): string => b.sym || 'Null';
 
+/** Your own personal token: pinned under BSV and MNEE, marked YOURS (owner, 4 Oct 2026). */
+const YoursChip = () => (
+  <span
+    className="text-[9px] font-bold rounded px-1.5 py-0.5 mr-1.5"
+    style={{ background: '#F5B80022', color: '#F5B800', letterSpacing: '0.04em' }}
+  >
+    YOURS
+  </span>
+);
+
+/** Token icon: a personal token shows its creator's profile picture (mobile/tokens/tokenIcon). */
+const TokenAssetRow = ({ t, usdBalance }: { t: Bsv21Balance; usdBalance: number }) => {
+  const icon = useTokenIcon(t.id, getTokenName(t), t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON);
+  return (
+    <AssetRow
+      animate
+      balance={Number(showAmount(t.all.confirmed, t.dec))}
+      decimals={t.dec}
+      showPointer={true}
+      icon={icon.url}
+      ticker={truncate(getTokenName(t), 10, 0)}
+      subline={
+        <span className="inline-flex items-center">
+          {icon.own && <YoursChip />}
+          <IssuerBadge tokenId={t.id} compact />
+        </span>
+      }
+      usdBalance={usdBalance}
+    />
+  );
+};
+
 export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
   const { tokens: tokensProp, theme, onTokenClick, hideStatusLabels = false } = props;
   const { chromeStorageService, apiContext } = useServiceContext();
   const [priceData, setPriceData] = useState<PriceData[]>([]);
   const [tokens, setTokens] = useState<Bsv21Balance[]>([]);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
+  const ownId = useOwnPersonalTokenId();
 
   useEffect(() => {
     const loadExchangeRate = async () => {
@@ -63,14 +98,17 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
       const data: PriceData[] = [];
       // Favourites first, then every other held token (new ones, e.g. a fresh $NAME, must show too).
       const rest = tokensProp.filter((t) => !orderedTokens.includes(t));
-      setTokens([...orderedTokens, ...rest]);
+      // Your own personal token always first, under BSV and MNEE.
+      const all = [...orderedTokens, ...rest];
+      const mine = all.filter((t) => ownId && normId(t.id) === ownId);
+      setTokens([...mine, ...all.filter((t) => !mine.includes(t))]);
       setPriceData(data);
     };
 
     // Re-run when the parent's list changes (e.g. favorites edited in Manage Tokens).
     loadSavedTokens();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokensProp]);
+  }, [tokensProp, ownId]);
 
   const handleOnDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
@@ -166,14 +204,8 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                                 }}
                                 onClick={() => onTokenClick(t)}
                               >
-                                <AssetRow
-                                  animate
-                                  balance={Number(showAmount(t.all.confirmed, t.dec))}
-                                  decimals={t.dec}
-                                  showPointer={true}
-                                  icon={t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON}
-                                  ticker={truncate(getTokenName(t), 10, 0)}
-                                  subline={<IssuerBadge tokenId={t.id} compact />}
+                                <TokenAssetRow
+                                  t={t}
                                   usdBalance={
                                     (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
                                     (exchangeRate / BSV_DECIMAL_CONVERSION) *

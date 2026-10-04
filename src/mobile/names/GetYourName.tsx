@@ -142,6 +142,7 @@ export const GetYourName = ({
       name,
       supply,
       payAddress: account?.addresses?.bsvAddress,
+        avatar: account?.settings?.socialProfile?.avatar ?? account?.icon,
     });
     void showOnWallet(chromeStorageService, l.tokenId);
     void askNotifyPermissionOnce();

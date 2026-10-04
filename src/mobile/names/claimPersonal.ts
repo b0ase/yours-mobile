@@ -1,6 +1,9 @@
 import { bsv21FieldsFromOutput, deployBsv21Mint, syncAddresses, type OneSatContext } from '@1sat/actions';
 import { BSV21_BASKET } from '@1sat/types';
 import { isNative } from '../native';
+import { inscribeIcon } from '../tickets/mintTicket';
+import { iconFile } from '../mint/mint';
+import { getLocalAvatar, isDefaultAvatar } from './avatar';
 import { withIssuerSignature } from '../issuer/issuerSign';
 import { registerIssuer } from '../issuer/issuerVerify';
 import { rememberOwnToken } from '../tokens/indexFund';
@@ -56,6 +59,10 @@ export async function deployPersonalToken(
     name: string;
     supply: string;
     icon?: string;
+    /** An image for the icon. Without one (and no `icon`), the profile picture is used (owner, 4 Oct 2026). */
+    iconImage?: File | null;
+    /** The account's avatar (1sat://, https or data URI) when it isn't a photo picked on this device. */
+    avatar?: string | null;
     /**
      * The wallet's own BSV address. With it, an empty wallet asks bCorp to sponsor the mint fee
      * (bit-sign /api/bitsign/sponsor/mint), waits for the gift to sync, then mints.
@@ -68,12 +75,14 @@ export async function deployPersonalToken(
   const bad = validateSupply(input.supply);
   if (bad) throw new Error(bad);
   const supply = cleanSupply(input.supply);
+  // Never mint with our logo when the person has a picture: inscribe it as the token's icon.
+  const icon = input.icon || (await personalIcon(ctx, ticker, input).catch(() => undefined));
   const deploy = () =>
     deployBsv21Mint.execute(withIssuerSignature(withPersonalMap(ctx, input.name, ticker), 'bsv21'), {
       symbol: ticker,
       amount: supply,
       decimals: PERSONAL_DECIMALS,
-      icon: input.icon || BWALLET_MARK_ICON,
+      icon: icon || BWALLET_MARK_ICON,
     });
   let res = await deploy();
   if (isFundsError(res.error) && input.payAddress) {
@@ -183,4 +192,21 @@ export async function recoverPersonalLink(
   };
   setPersonalLink(identityAddress, link);
   return link;
+}
+
+/** The icon outpoint for a personal token: the chosen image, else the profile picture; undefined = our mark. */
+async function personalIcon(
+  ctx: OneSatContext,
+  ticker: string,
+  input: { identityAddress: string; iconImage?: File | null; avatar?: string | null },
+): Promise<string | undefined> {
+  if (input.iconImage) return inscribeIcon(ctx, await iconFile(input.iconImage), ticker, 'token');
+  const raw = getLocalAvatar(input.identityAddress) || input.avatar || '';
+  if (!raw || isDefaultAvatar(raw)) return undefined;
+  // Already on chain: point at it, no new inscription.
+  const m = raw.match(/^1sat:\/\/([0-9a-f]{64})[._](\d+)$/i);
+  if (m) return `${m[1].toLowerCase()}_${m[2]}`;
+  const blob = await (await fetch(raw)).blob();
+  if (!blob.type.startsWith('image/')) return undefined;
+  return inscribeIcon(ctx, await iconFile(new File([blob], 'icon', { type: blob.type })), ticker, 'token');
 }

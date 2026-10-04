@@ -309,11 +309,13 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       const sigErr = await verifySigned(body, 'register', now());
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
-      if (SOCIAL_RE.test(alias)) {
+      const taken = await store.getAlias(alias);
+      // A verified name needs proof only to claim it; its owner can update the profile without signing in again.
+      const ownsIt = taken && String(taken.identity_key).toLowerCase() === identityKey;
+      if (SOCIAL_RE.test(alias) && !ownsIt) {
         const refused = await socialCheck(alias, body.social, env);
         if (refused) return [403, { error: refused }];
       }
-      const taken = await store.getAlias(alias);
       if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
       // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
       // added, boase stays. A plain name still renames, keeping the inbox.
@@ -331,8 +333,9 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
         alias,
         identity_key: identityKey,
         ord_address: f.ordAddress || null,
-        display_name: String(f.name || '').slice(0, 64) || null,
-        avatar: String(f.avatar || '').slice(0, 512) || null,
+        // Keep what's there when an update leaves a field out.
+        display_name: String(f.name || '').slice(0, 64) || (ownsIt ? taken.display_name : null) || null,
+        avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
       });
       return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
     },

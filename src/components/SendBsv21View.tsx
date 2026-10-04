@@ -21,6 +21,7 @@ import { SellSheet } from '../mobile/sell/SellSheet';
 import { SELL_ENABLED } from '../mobile/sell/sell';
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
 import { PriceChart } from '../mobile/wallet/PriceChart';
+import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
 
 export interface Token {
   isConfirmed: boolean;
@@ -364,6 +365,11 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
             </span>
           </div>
 
+          <TokenIconHeader
+            tokenId={token.info.id}
+            ticker={tokenName}
+            onchain={token.info.icon ? (isUri(token.info.icon) ? token.info.icon : `${baseUrl}/${token.info.icon}`) : ''}
+          />
           {/* Balance chip — matches the BSV / MNEE send views */}
           <div className="flex flex-col items-center w-full mb-5 gap-1.5">
             <div className="flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: row }}>

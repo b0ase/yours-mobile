@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, BadgeCheck, Check, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -10,6 +10,7 @@ import { clearSocial, onSocialChange, socialProof } from '../social/socialLogin'
 import { deployPersonalToken, openPersonalRoom, PERSONAL_FEE_ESTIMATE_SATS, PERSONAL_NETWORK_FEE_SATS } from '../names/claimPersonal';
 import { DEFAULT_SUPPLY, personalTicker, rememberPersonal } from '../names/personalToken';
 import { setPaymail } from '../names/accountName';
+import { adoptSocialAvatar } from '../names/socialAvatar';
 import { showOnWallet } from '../tokens/indexFund';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
@@ -35,6 +36,11 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const [confirming, setConfirming] = useState(false);
   const [minting, setMinting] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
+  // Token icon: the X / Google photo by default; "Choose a different image" overrides it.
+  const [socialAvatar, setSocialAvatar] = useState('');
+  const [iconImage, setIconImage] = useState<File | null>(null);
+  const iconInput = useRef<HTMLInputElement>(null);
+  const iconPreview = iconImage ? URL.createObjectURL(iconImage) : socialAvatar;
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const claimedAlias = claimed.split('@')[0];
   const ticker = personalTicker(claimedAlias);
@@ -53,6 +59,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         name: claimedAlias,
         supply: DEFAULT_SUPPLY,
         payAddress: account?.addresses?.bsvAddress,
+        avatar: socialAvatar || account?.settings?.socialProfile?.avatar || account?.icon,
+        iconImage,
       });
       rememberPersonal({ name: l.name, tokenId: l.tokenId });
       void showOnWallet(chromeStorageService, l.tokenId);
@@ -80,6 +88,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         social: { ticket: proof.ticket, secret: proof.secret },
       });
       setPaymail(identityAddress, pm);
+      setSocialAvatar(proof.profile.avatar || '');
+      await adoptSocialAvatar(chromeStorageService, proof.profile.avatar);
       setClaimed(pm);
       clearSocial();
     } catch (e) {
@@ -107,10 +117,39 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
               add another account.
             </p>
             {paidFeaturesEnabled() && ticker && !tokenMsg.includes('minted') && (
+              <div className="mt-6 flex items-center gap-3">
+                {iconPreview ? (
+                  <img src={iconPreview} alt="" className="w-12 h-12 rounded-full object-cover" />
+                ) : (
+                  <div className="w-12 h-12 rounded-full" style={{ background: '#17191E' }} />
+                )}
+                <div className="flex flex-col items-start text-left">
+                  <span className="text-xs" style={{ color: '#98A2B3' }}>
+                    ${ticker}'s icon (permanent once minted)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => iconInput.current?.click()}
+                    className="text-xs font-semibold bg-transparent border-0 p-0"
+                    style={{ color: '#F5B800' }}
+                  >
+                    Choose a different image
+                  </button>
+                  <input
+                    ref={iconInput}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(e) => setIconImage(e.target.files?.[0] ?? null)}
+                  />
+                </div>
+              </div>
+            )}
+            {paidFeaturesEnabled() && ticker && !tokenMsg.includes('minted') && (
               <button
                 onClick={() => setConfirming(true)}
                 disabled={minting}
-                className="mt-8 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-bold border-0"
+                className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-bold border-0"
                 style={{ background: '#F5B800', color: '#000', opacity: minting ? 0.6 : 1 }}
               >
                 {minting && <Loader2 size={16} className="animate-spin" />}

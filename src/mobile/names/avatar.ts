@@ -92,6 +92,14 @@ export const setLocalAvatar = (id: string, dataUrl: string) => {
   }
 };
 
+export const notifyAvatarChange = () => {
+  try {
+    window.dispatchEvent(new Event(EVENT));
+  } catch {
+    /* no window (tests) */
+  }
+};
+
 export const onAvatarChange = (cb: () => void) => {
   window.addEventListener(EVENT, cb);
   return () => window.removeEventListener(EVENT, cb);

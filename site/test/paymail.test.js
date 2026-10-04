@@ -132,6 +132,11 @@ describe('register', () => {
     expect((await h.register({}, { ...(await w.sign('register', { alias: 'w-x.x' })), social: { ticket: 'ticket-w', secret: 's' } }))[0]).toBe(200);
     expect(store.aliases.has('wplain')).toBe(true);
     expect(store.aliases.get('w-x.x').kind).toBe('x');
+    // Its owner can update the profile (e.g. publish a photo) without a fresh X sign-in; the name is kept.
+    expect((await h.register({}, await w.sign('register', { alias: 'w-x.x', avatar: 'https://img.test/a.png' })))[0]).toBe(200);
+    expect(store.aliases.get('w-x.x').avatar).toBe('https://img.test/a.png');
+    // Nobody else can, without proof.
+    expect((await h.register({}, await v.sign('register', { alias: 'w-x.x' })))[0]).toBe(403);
     // The verified name is now the wallet's identity, and it can't take another plain name.
     expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('w-x.x');
     // Both names are listed, so the older plain one never receives invisibly.
