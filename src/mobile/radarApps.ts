@@ -126,6 +126,8 @@ import m_theme_token from './brand/apps/radar/mna-theme-token.png';
 import m_uhrp_storage from './brand/apps/radar/mna-uhrp-storage.png';
 import m_giftchain from './brand/apps/radar/mna-giftchain.png';
 import m_bitgenius from './brand/apps/radar/mna-bitgenius.png';
+import { OWNER_APPS } from './ownerApps';
+
 /**
  * Third-party BSV apps for Apps › Other apps, discovered via the BSVRadar
  * directory (bsvradar.com, 2026-10-01). Only the apps' names, URLs and short
@@ -152,7 +154,7 @@ export const RADAR_GROUPS: { id: RadarGroup; label: string }[] = [
 ];
 
 /** Where an app was discovered: BSVRadar (bsvradar.com) or the Metanet Apps overlay (metanetapps.com). */
-export type AppSource = 'bsvradar' | 'metanet';
+export type AppSource = 'bsvradar' | 'metanet' | 'owner';
 
 export type RadarApp = { name: string; url: string; desc: string; group: RadarGroup; icon: string; source: AppSource };
 
@@ -1028,6 +1030,7 @@ const METANET_APPS: RadarApp[] = [
 ];
 
 export const RADAR_APPS: RadarApp[] = [
+  ...OWNER_APPS,
   ...BSVRADAR_APPS.map((a): RadarApp => ({ ...a, source: 'bsvradar' })),
   ...METANET_APPS,
 ];

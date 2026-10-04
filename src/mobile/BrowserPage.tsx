@@ -5,6 +5,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
+import { AddAppSheet } from './apps/AddAppSheet';
+import { appIconFor, useUserApps } from './apps/userApps';
 import { useBackClose } from './backStack';
 import { moveItem } from './reorder';
 import { TopNav } from '../components/TopNav';
@@ -423,6 +425,10 @@ const BrowserPage = () => {
   const [favourites, setFavourites] = useState(readFavourites);
   const [info, setInfo] = useState<Tile | null>(null);
   const [page, setPage] = useState(readPage);
+  // Apps › Add app: the user's own sites, saved to the wallet (apps/userApps.ts).
+  const userApps = useUserApps();
+  const [addingApp, setAddingApp] = useState(false);
+  const userTiles: Tile[] = userApps.apps.map((a) => ({ key: `u:${a.url}`, name: a.name, url: a.url, icon: appIconFor(a.url) }));
   // Bumped when the switch moves to a page, so that page's grid replays a gentle zoom.
   const [replay, setReplay] = useState<{ page: number; n: number }>({ page: -1, n: 0 });
   const pager = useRef<HTMLDivElement>(null);
@@ -592,6 +598,24 @@ const BrowserPage = () => {
               Nothing on Home yet. Touch and hold any app, then Add to Home.
             </p>
           )}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Your apps</h2>
+              <button
+                type="button"
+                onClick={() => setAddingApp(true)}
+                className="rounded-full px-3 py-1 text-[12px] font-bold border-0"
+                style={{ background: '#F5B800', color: '#010101' }}
+              >
+                + Add app
+              </button>
+            </div>
+            {userTiles.length > 0 ? (
+              grid(0, userTiles)
+            ) : (
+              <p className="text-[12px] text-[#98A2B3] m-0">Add any website, like zanaadu.com. Saved to your wallet.</p>
+            )}
+          </div>
           {recent.length > 0 && (
             <div className="flex flex-col gap-2">
               <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recent</h2>
@@ -636,6 +660,7 @@ const BrowserPage = () => {
 
   return (
     <div className="relative w-full overflow-hidden" style={{ height: '100%', background: '#010101' }}>
+      {addingApp && <AddAppSheet store={userApps} onClose={() => setAddingApp(false)} />}
       <VideoBackground src={bgVideo} poster={bgPoster} />
       <TopNav />
       <div className="relative flex h-full w-full flex-col pt-14">

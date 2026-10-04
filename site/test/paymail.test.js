@@ -20,6 +20,9 @@ const memStore = () => {
       for (const [r, p] of pays) if (p.alias === a) pays.delete(r);
       aliases.delete(a);
     },
+    appsStore: new Map(),
+    getApps: async function (k) { return this.appsStore.get(k) ?? []; },
+    setApps: async function (k, a) { this.appsStore.set(k, a); },
     listSocial: async (kind) =>
       [...aliases.values()].filter((r) => (r.kind ?? 'plain') === kind).map((r) => ({ alias: r.alias, display_name: r.display_name ?? null })),
     listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
@@ -153,6 +156,11 @@ describe('register', () => {
     ]);
     expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(409);
     expect(store.aliases.has('wother')).toBe(false);
+    // Apps › Add app: signed save and load, https only.
+    const apps = JSON.stringify([{ url: 'https://zanaadu.com', name: 'Zanaadu' }]);
+    expect((await h.appsPut({}, await w.sign('apps-put', { apps })))[0]).toBe(200);
+    expect((await h.appsGet({}, await w.sign('apps-get', {})))[1].apps).toEqual([{ url: 'https://zanaadu.com/', name: 'Zanaadu' }]);
+    expect((await h.appsPut({}, await w.sign('apps-put', { apps: JSON.stringify([{ url: 'http://x.com' }]) })))[0]).toBe(400);
     // Unlink: only the owner can, and the next name becomes main.
     expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(404);
     expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(200);

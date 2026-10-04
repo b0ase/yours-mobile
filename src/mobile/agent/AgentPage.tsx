@@ -293,15 +293,16 @@ const AgentPage = () => {
         </button>
         <img src={bGlyph} alt="" width={22} height={22} />
         <h1 className="text-lg font-bold text-white shrink-0">b agent</h1>
-        <button
-          type="button"
-          onClick={() => navigate('/m/settings')}
-          className="ml-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-right text-[11px] pr-2"
-          style={{ color: MUTED }}
-        >
-          {status}
-        </button>
       </div>
+      {/* Price / key status: a small yellow banner under the title row (owner, 5 Oct 2026). Tap for Settings. */}
+      <button
+        type="button"
+        onClick={() => navigate('/m/settings')}
+        className="shrink-0 w-full px-4 py-1.5 text-[11px] font-semibold text-left border-0 overflow-hidden text-ellipsis whitespace-nowrap"
+        style={{ background: '#F5B800', color: '#1a1300' }}
+      >
+        {status}
+      </button>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && (

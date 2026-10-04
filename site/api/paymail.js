@@ -25,6 +25,8 @@ const ROUTES = {
   ack: ['POST', 'ack'],
   delete: ['POST', 'delete'],
   unlink: ['POST', 'unlink'],
+  'apps-get': ['POST', 'appsGet'],
+  'apps-put': ['POST', 'appsPut'],
 };
 
 const hits = new Map();

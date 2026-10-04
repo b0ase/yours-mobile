@@ -65,6 +65,14 @@ function supabaseStore(env = process.env, f = fetch) {
       (await req(
         `bwallet_paymail_payments?identity_key=eq.${q(k)}&status=eq.received&order=received_at.asc&limit=50`,
       )) ?? [],
+    // Apps › Add app: the wallet's own app list (one row per identity key).
+    getApps: async (k) => (await one(`bwallet_user_apps?identity_key=eq.${q(k)}&select=apps&limit=1`))?.apps ?? [],
+    setApps: async (k, apps) =>
+      req('bwallet_user_apps?on_conflict=identity_key', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ identity_key: k, apps, updated_at: new Date().toISOString() }),
+      }),
     // Unlink one name: its payment records go too (FK on alias). Callers refuse while any is uncollected.
     countUncollected: async (alias) =>
       ((await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&status=eq.received&select=reference`)) ?? []).length,

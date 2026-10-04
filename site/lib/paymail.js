@@ -409,6 +409,38 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
     // Account deletion (Apple 5.1.1(v), Google Play): removes the alias and every inbox row for
     // this identity key. The wallet collects the inbox first, so no uncollected payment's
     // derivation data is lost. On-chain payments themselves are unaffected.
+    // Apps › Add app (owner, 5 Oct 2026): the wallet's own list, so a 12-word restore brings it back.
+    // Signed by the identity key both ways; the list is private to that wallet.
+    appsGet: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'apps-get', now());
+      if (sigErr) return [401, { error: sigErr }];
+      return [200, { apps: (await store.getApps?.(String(body.identityKey).toLowerCase())) ?? [] }];
+    },
+    appsPut: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'apps-put', now());
+      if (sigErr) return [401, { error: sigErr }];
+      let apps;
+      try {
+        apps = JSON.parse(String(body.fields?.apps || '[]'));
+      } catch {
+        return [400, { error: 'apps must be JSON' }];
+      }
+      if (!Array.isArray(apps) || apps.length > 200) return [400, { error: 'Up to 200 apps' }];
+      const clean = [];
+      for (const a of apps) {
+        let u;
+        try {
+          u = new URL(String(a?.url || ''));
+        } catch {
+          return [400, { error: 'Each app needs a valid https link' }];
+        }
+        if (u.protocol !== 'https:') return [400, { error: 'Apps must use https' }];
+        clean.push({ url: u.href.slice(0, 300), name: String(a?.name || u.hostname).slice(0, 40) });
+      }
+      await store.setApps(String(body.identityKey).toLowerCase(), clean);
+      return [200, { apps: clean }];
+    },
+
     // Unlink one of this wallet's names (Settings › Identity). The name becomes free for anyone.
     unlink: async (_q, body) => {
       const sigErr = await verifySigned(body || {}, 'unlink', now());

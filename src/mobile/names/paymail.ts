@@ -132,6 +132,19 @@ export const unlinkPaymail = async (
   await postJson(f, api('unlink'), await signRequest(wallet, 'unlink', { alias: paymail.split('@')[0] }));
 };
 
+/** Apps › Add app: this wallet's own app list, kept on the paymail server so a restore brings it back. */
+export type SavedApp = { url: string; name: string };
+type Signer = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
+export const loadUserApps = async (f: Fetch, wallet: Signer): Promise<SavedApp[]> => {
+  if (!paymailEnabled()) return [];
+  const j = await postJson(f, api('apps-get'), await signRequest(wallet, 'apps-get', {}));
+  return Array.isArray(j?.apps) ? (j.apps as SavedApp[]) : [];
+};
+export const saveUserApps = async (f: Fetch, wallet: Signer, apps: SavedApp[]): Promise<void> => {
+  if (!paymailEnabled()) return;
+  await postJson(f, api('apps-put'), await signRequest(wallet, 'apps-put', { apps: JSON.stringify(apps) }));
+};
+
 /** Is `alias@domain` free? (pki 404 = free) */
 export const paymailAvailable = async (f: Fetch, alias: string): Promise<boolean> => {
   const r = await f(api(`id/${alias}@${BWALLET_PAYMAIL_DOMAIN}`));

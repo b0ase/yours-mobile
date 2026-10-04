@@ -1,6 +1,6 @@
 {
   "name": "yours-wallet",
-  "version": "5.1.34",
+  "version": "5.1.35",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -91,7 +91,8 @@
     "release:ios-private": "bash scripts/channel-build.sh ios-private",
     "release:android-play": "bash scripts/channel-build.sh android-play",
     "release:android-direct": "bash scripts/channel-build.sh android-direct",
-    "pin:upstream": "tsx scripts/pin-from-bun-lock.ts && pnpm install"
+    "pin:upstream": "tsx scripts/pin-from-bun-lock.ts && pnpm install",
+    "add-app": "node scripts/add-app.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
