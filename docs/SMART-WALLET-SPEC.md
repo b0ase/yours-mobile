@@ -17,7 +17,8 @@ other AI agents.
 5. The bWalletX CLI
 6. MCP (Claude and other agents)
 7. Market › Strategies
-8. Encrypted NFTs (strategies, paid and adult media)
+8. Exchange › Contracts and Exchange › Bonds
+8a. Encrypted NFTs (strategies, paid and adult media)
 9. Rules we follow
 10. Build order
 11. Open questions
@@ -182,7 +183,33 @@ version, price, copies, date. Every strategy page carries:
 
 > Strategies are programs written and sold by users. bWalletX doesn't review, rate or recommend them.
 
-## 8. Encrypted NFTs (strategies, paid and adult media)
+## 8. Exchange › Contracts and Exchange › Bonds
+
+Owner decision, 5 Oct 2026: smart contracts get their own place on the Exchange, separate from
+Strategies. **A strategy is a program your agent follows; a contract is an on-chain agreement that holds
+money by its own rules.** Bonds get a section of their own.
+
+### Contracts
+
+- **What's listed:** contract templates people can open from their wallet. Examples: a **bond vault**
+  (lock BSV, mint $1 bonds, see DOLLAR-BOND.md), escrow, time-locked savings, recurring payments, a
+  shared treasury needing 2 of 3 signatures.
+- **Opening one** creates a new on-chain contract owned by you, from the template. The wallet shows its
+  state and the actions it allows (top up, close, claim…).
+- **Templates are listed by their authors** with a required **contract spec**: what it holds, who can
+  spend and when, fees, the seller's risk rating, and whether the script has been independently
+  reviewed (stated by the seller). As with strategies, bWalletX doesn't review, rate or recommend.
+- **Your contracts** appear in the wallet beside tokens and NFTs, and agents can be given permission to
+  act on them (top up a vault, claim from an escrow).
+
+### Bonds
+
+- **A Bonds section** for dollar-denominated bond tokens backed by on-chain collateral, starting with the
+  BSV-backed **$1 bond** (DOLLAR-BOND.md).
+- Buy and sell bonds; open, top up and close your own vaults; see every vault's collateral ratio.
+- Agents can run "keep my vault safe" and "keeper" strategies from agent accounts.
+
+## 8a. Encrypted NFTs (strategies, paid and adult media)
 
 An **encrypted NFT** is an inscription whose content is locked: anyone can see it exists and read its
 public description, but only its current owner can open it. The same mechanism serves strategies (§7),
@@ -280,6 +307,7 @@ bought or opened in bWalletX.
 5. **MCP server**: `bwalletx mcp`.
 6. **Encrypted NFTs**: encrypt on publish, key service, unlock for owners (also enables paid media).
 7. **Market › Strategies**: spec form, Publish & sell, listings, buy and load.
+7a. **Exchange › Contracts / Bonds**: the $1 bond vault on testnet first (DOLLAR-BOND.md), then contract templates.
 8. **Adult category** (bWalletX only): 18+ gate, Adult flag, preview, report and key refusal.
 
 Each step ships on its own and is useful by itself.
