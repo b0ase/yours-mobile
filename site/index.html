@@ -3,29 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>bWallet — Just b</title>
+    <title>bWalletX — Just b</title>
     <meta
       name="description"
-      content="bWallet: the BSV wallet for tokens, media and apps. BSV, MNEE and BSV-21 tokens, a 1Sat market, the bApps store, an ordinals media player and bChat. Non-custodial, by The Bitcoin Corporation Ltd."
+      content="bWalletX: the BSV wallet for tokens, media and apps. BSV, MNEE and BSV-21 tokens, a 1Sat market, the bApps store, an ordinals media player and bChat. Non-custodial, by The Bitcoin Corporation Ltd."
     />
     <meta name="theme-color" content="#000000" />
-    <link rel="canonical" href="https://bwallet-nine.vercel.app/" />
+    <link rel="canonical" href="https://bwalletx.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://bwallet-nine.vercel.app/" />
-    <meta property="og:site_name" content="bWallet" />
-    <meta property="og:title" content="bWallet — Just b. The BSV wallet for tokens, media and apps" />
+    <meta property="og:url" content="https://bwalletx.com/" />
+    <meta property="og:site_name" content="bWalletX" />
+    <meta property="og:title" content="bWalletX — Just b. The BSV wallet for tokens, media and apps" />
     <meta
       property="og:description"
       content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd. Tokens, market, bApps, media and chat in one app."
     />
-    <meta property="og:image" content="https://bwallet-nine.vercel.app/og.png" />
+    <meta property="og:image" content="https://bwalletx.com/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="bWallet logo: a gold ring around a rounded b" />
+    <meta property="og:image:alt" content="bWalletX logo: a gold ring around a rounded b" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="bWallet: the BSV wallet for tokens, media and apps" />
+    <meta name="twitter:title" content="bWalletX: the BSV wallet for tokens, media and apps" />
     <meta name="twitter:description" content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd." />
-    <meta name="twitter:image" content="https://bwallet-nine.vercel.app/og.png" />
+    <meta name="twitter:image" content="https://bwalletx.com/og.png" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -41,14 +41,21 @@
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
+    <div class="beta-banner">bWalletX is in <strong>beta</strong>: test with small amounts.</div>
     <header class="topbar">
       <div class="wrap topbar-in">
-        <a class="brand" href="/"><img src="/logo.svg" alt="" width="30" height="30" /><span>bWallet</span></a>
-        <nav aria-label="Sections">
+        <a class="brand" href="/"><img src="/logo.svg" alt="" width="34" height="30" /><span>bWallet<span class="gold">X</span></span></a>
+        <nav aria-label="Pages">
+          <a href="/features">Features</a><a href="/friends">Friends</a><a href="/android">Android</a><a href="/extension">Chrome</a><a href="/developers">Developers</a>
+        </nav>
+        <a class="web-btn" href="https://web.bwalletx.com" target="_blank" rel="noopener">Web &rarr;</a>
+      </div>
+      <nav class="section-nav" aria-label="On this page">
+        <div class="wrap">
           <a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Media</a
           ><a href="#chat">Chat</a><a href="#identity">Identity</a><a href="#security">Security</a>
-        </nav>
-      </div>
+        </div>
+      </nav>
     </header>
     <main id="main">
       <section class="hero">
@@ -67,9 +74,8 @@
         </video>
         <div class="hero-shade" aria-hidden="true"></div>
         <div class="wrap hero-in">
-          <img class="hero-logo" src="/logo.svg" alt="bWallet logo" width="96" height="96" />
-          <span class="pill">Beta</span>
-          <p class="motto">Just <span class="gold">b.</span></p>
+          <img class="hero-logo" src="/logo.svg" alt="bWalletX logo" width="109" height="96" />
+          <p class="wordmark">bWallet<span class="gold">X</span></p>
           <h1>The BSV wallet for <span class="gold">tokens, media and apps.</span></h1>
           <p class="lede">
             Mint, trade and chat in one non-custodial app. Send to names, browse 180+ BSV-21 tokens, open the bApps
@@ -78,13 +84,13 @@
           <div class="cta-row">
             <a
               class="btn btn-store"
-              href="https://github.com/b0ase/yours-mobile/releases/download/bwallet-v0.1.0-beta.2/bwallet-0.1.0-beta.2.apk"
+              href="/download/bwalletx-android-5.1.24.apk"
               download
-              ><span>Android · Download APK (beta)</span><small>v0.1.0 beta 2 · sideload</small></a
+              ><span>Android · Download APK (beta)</span><small>v5.1.24 beta · sideload</small></a
             ><a class="btn btn-store btn-ghost" href="#waitlist"
               ><span>iPhone</span><small>Coming soon — join the waitlist</small></a
-            ><a class="btn btn-store btn-ghost" href="#waitlist"
-              ><span>Google Play</span><small>Coming soon — join the waitlist</small></a
+            ><a class="btn btn-store btn-ghost" href="/extension"
+              ><span>Chrome · Download extension</span><small>v5.1.24 beta · zip + install steps</small></a
             >
           </div>
           <details class="sideload">
@@ -94,10 +100,10 @@
                 Tap <strong>Download APK (beta)</strong>. If Android asks, allow your browser to install unknown apps
                 (Settings &rsaquo; Apps &rsaquo; your browser &rsaquo; Install unknown apps).
               </li>
-              <li>Open the downloaded <code>bwallet-0.1.0-beta.2.apk</code> and tap Install.</li>
+              <li>Open the downloaded <code>bwalletx-android-5.1.24.apk</code> and tap Install.</li>
               <li>
                 Optional but recommended: check the SHA-256 checksum matches<br /><code class="sha"
-                  >30fdac9814438e788416639166f2411c893eead6ee68fa530286eb6e96246baf</code
+                  >36563ca7dc1aa3b1909b78d56fec726836a976f6d0d834fce4587a7a7847fe99</code
                 >
               </li>
             </ol>
@@ -115,7 +121,7 @@
         <div class="wrap showcase-grid">
           <div class="showcase-copy reveal">
             <p class="eyebrow">One app</p>
-            <h2>Meet bWallet. Five tabs, everything on-chain.</h2>
+            <h2>Meet bWalletX. Five tabs, everything on-chain.</h2>
             <p class="lede">
               Wallet, Market, Apps, Media and Chat, with Settings tucked into the account drawer. A wallet that does
               more than hold a balance.
@@ -141,7 +147,7 @@
               <div class="phone-screen">
                 <div class="notch" aria-hidden="true"></div>
                 <div class="ph-top">
-                  <img src="/logo.svg" alt="" width="22" height="22" /><span>bWallet</span
+                  <img src="/logo.svg" alt="" width="22" height="22" /><span>bWalletX</span
                   ><span class="ph-dot" aria-hidden="true"></span>
                 </div>
                 <p class="ph-label">Total balance</p>
@@ -786,42 +792,9 @@
 
       <section class="waitlist" id="waitlist" aria-labelledby="wl-h">
         <div class="wrap">
-          <div class="section-head reveal">
-            <p class="eyebrow">Testing</p>
-            <h2 id="wl-h">Join the testing waitlist</h2>
-            <p class="lede">Be first to test bWallet on iPhone, and get new Android builds as they land.</p>
-          </div>
-          <form class="wl-form card" id="wl-form" action="/api/waitlist" method="post" novalidate>
-            <label for="wl-email">Email address</label>
-            <input
-              id="wl-email"
-              name="email"
-              type="email"
-              autocomplete="email"
-              maxlength="254"
-              required
-              placeholder="you@example.com"
-            />
-            <fieldset>
-              <legend>Which phone?</legend>
-              <div class="wl-opts">
-                <label><input type="radio" name="platform" value="ios" /> iPhone</label
-                ><label><input type="radio" name="platform" value="android" /> Android</label
-                ><label><input type="radio" name="platform" value="either" checked /> Either</label>
-              </div>
-            </fieldset>
-            <div class="hp" aria-hidden="true">
-              <label for="wl-company">Company</label
-              ><input id="wl-company" name="company" type="text" tabindex="-1" autocomplete="off" />
-            </div>
-            <input type="hidden" name="source" value="site" />
-            <p class="wl-consent">
-              We'll only email you about bWallet testing. Unsubscribe any time. See our
-              <a href="/privacy.html#waitlist">privacy policy</a>.
-            </p>
-            <button class="btn btn-gold wl-submit" type="submit">Join the waitlist</button>
-            <p class="wl-status" id="wl-status" role="status" aria-live="polite"></p>
-          </form>
+          <h2 id="wl-h">Join the testing waitlist</h2>
+          <p class="lede">Sign up on bwallet.space to test bWalletX on iPhone and get new Android builds as they land.</p>
+          <p><a class="btn btn-store" href="https://bwallet.space/#waitlist">Join the waitlist &rarr;</a></p>
         </div>
       </section>
 
@@ -840,18 +813,18 @@
         <div class="liquid-shade" aria-hidden="true"></div>
         <div class="wrap final-in reveal">
           <img src="/logo.svg" alt="" width="64" height="64" />
-          <h2>bWallet is coming to iPhone and Android.</h2>
+          <h2>bWalletX is coming to iPhone and Android.</h2>
           <p class="lede">Currently in beta.</p>
           <div class="cta-row center">
             <a
               class="btn btn-store"
-              href="https://github.com/b0ase/yours-mobile/releases/download/bwallet-v0.1.0-beta.2/bwallet-0.1.0-beta.2.apk"
+              href="/download/bwalletx-android-5.1.24.apk"
               download
-              ><span>Android · Download APK (beta)</span><small>v0.1.0 beta 2 · sideload</small></a
+              ><span>Android · Download APK (beta)</span><small>v5.1.24 beta · sideload</small></a
             ><a class="btn btn-store btn-ghost" href="#waitlist"
               ><span>iPhone</span><small>Coming soon — join the waitlist</small></a
-            ><a class="btn btn-store btn-ghost" href="#waitlist"
-              ><span>Google Play</span><small>Coming soon — join the waitlist</small></a
+            ><a class="btn btn-store btn-ghost" href="/extension"
+              ><span>Chrome · Download extension</span><small>v5.1.24 beta · zip + install steps</small></a
             >
           </div>
         </div>
@@ -859,7 +832,7 @@
     </main>
     <footer class="foot">
       <div class="wrap foot-in">
-        <a class="brand" href="/"><img src="/logo.svg" alt="" width="24" height="24" /><span>bWallet</span></a>
+        <a class="brand" href="/"><img src="/logo.svg" alt="" width="27" height="24" /><span>bWallet<span class="gold">X</span></span></a>
         <p>
           By The Bitcoin Corporation Ltd. Based on the open-source
           <a href="https://github.com/yours-org/yours-wallet" rel="noopener">Yours Wallet</a> (MIT); not affiliated with

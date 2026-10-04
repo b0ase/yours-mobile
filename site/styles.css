@@ -231,7 +231,7 @@ h3 {
   position: relative;
 }
 .hero-logo {
-  width: clamp(64px, 9vw, 96px);
+  width: clamp(80px, 11vw, 120px);
   height: auto;
   margin-bottom: 24px;
   filter: drop-shadow(0 0 24px rgba(245, 184, 0, 0.5));
@@ -1069,4 +1069,98 @@ a.btn-store {
   letter-spacing: 0.02em;
   font-size: clamp(1rem, 2vw, 1.25rem);
   color: #f2f2f0;
+}
+
+/* bWalletX: big wordmark under the hero logo. */
+.wordmark {
+  margin: 0 0 1.4rem;
+  font: 800 clamp(3rem, 11vw, 6.5rem) / 1 'Space Grotesk', sans-serif;
+  letter-spacing: -0.03em;
+  color: #f2f2f0;
+}
+.brand { font-size: 1.35rem; }
+
+.beta-banner {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 30px;
+  box-sizing: border-box;
+  z-index: 60;
+  padding: 6px 16px;
+  text-align: center;
+  font: 600 0.8rem/1.4 'Space Grotesk', sans-serif;
+  letter-spacing: 0.02em;
+  color: #000;
+  background: #f5b800;
+}
+.topbar { top: 30px; }
+.hero { padding-top: calc(30px + var(--hero-pad, 0px)); }
+.web-btn {
+  text-decoration: none;
+  font: 700 0.95rem var(--hf);
+  color: #000;
+  background: #f5b800;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+/* Sub-page navbar (features, friends, android, extension, developers): always shown; on phones it
+   drops to its own scrollable row under the logo. */
+.topbar nav[aria-label='Pages'] {
+  display: flex;
+}
+.topbar nav a[aria-current='page'] {
+  color: var(--gold-hi);
+}
+@media (max-width: 859px) {
+  .topbar-in:has(nav[aria-label='Pages']) {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    height: auto;
+    padding-top: 10px;
+  }
+  .topbar nav[aria-label='Pages'] {
+    min-width: 0;
+  }
+  .topbar nav[aria-label='Pages'] {
+    order: 3;
+    width: 100%;
+    gap: 18px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+  }
+  .topbar nav[aria-label='Pages'] a {
+    white-space: nowrap;
+    font-size: 0.9rem;
+  }
+}
+
+/* Home only: a second, quieter row of in-page section links, distinct from the page links above. */
+.section-nav {
+  border-top: 1px solid #ffffff14;
+  background: rgba(0, 0, 0, 0.55);
+}
+.section-nav .wrap {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.section-nav a {
+  color: #8a8a86;
+  text-decoration: none;
+  font: 500 0.8rem var(--hf);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.section-nav a:hover {
+  color: var(--gold-hi);
+}
+.topbar nav.section-nav {
+  display: block;
 }
