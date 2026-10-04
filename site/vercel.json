@@ -114,6 +114,16 @@
       "source": "/exchange",
       "destination": "https://bwalletx.com/exchange",
       "permanent": false
+    },
+    {
+      "source": "/cli",
+      "destination": "https://bwalletx.com/cli",
+      "permanent": false
+    },
+    {
+      "source": "/mcp",
+      "destination": "https://bwalletx.com/mcp",
+      "permanent": false
     }
   ]
 }
