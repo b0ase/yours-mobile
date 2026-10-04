@@ -365,6 +365,7 @@ const FAV_KEY = 'bwallet:favourite-apps';
 const DEFAULT_FAVOURITES = [
   'bChat',
   'bMovies',
+  'TokenBlaster',
   'bMusic',
   'bMint',
   'bWriter',
@@ -384,10 +385,22 @@ const DEFAULT_FAVOURITES = [
   .map((name) => ALL_TILES.find((t) => t.name === name)?.url)
   .filter((u): u is string => !!u);
 
+// Apps added to Home once for people who already arranged it (they can still remove them).
+const HOME_ADDITIONS: { flag: string; name: string }[] = [{ flag: 'bwallet:home-add:tokenblaster', name: 'TokenBlaster' }];
+
 const readFavourites = (): string[] => {
   try {
     const raw = localStorage.getItem(FAV_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : DEFAULT_FAVOURITES;
+    if (!raw) return DEFAULT_FAVOURITES;
+    let favs = JSON.parse(raw) as string[];
+    for (const a of HOME_ADDITIONS) {
+      if (localStorage.getItem(a.flag)) continue;
+      localStorage.setItem(a.flag, '1');
+      const url = ALL_TILES.find((t) => t.name === a.name)?.url;
+      if (url && !favs.includes(url)) favs = [...favs.slice(0, 2), url, ...favs.slice(2)];
+      localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+    }
+    return favs;
   } catch {
     return DEFAULT_FAVOURITES;
   }
