@@ -238,15 +238,12 @@ bought or opened in bWalletX.
 
 - **bWalletX only.** Never in the store bWallet; the store build hides the category and won't open adult
   content.
-- **18+ for buyers** to view, buy or open, with strong age checks where the law requires them (UK
-  Online Safety Act).
+- **18+ for buyers** to view, buy or open, with stronger age checks added as the market grows.
 - **Sellers** tag listings Adult and confirm they own the content and that everyone in it is a consenting
   adult. The safety filter keeps adult listings out of every other category.
 - **Reports.** A Report button on every listing. On a valid report: delist, stop releasing keys, ban the
   seller, report to the authorities.
 - **We don't keep the files** we scan, beyond what the law requires for reports.
-- **Legal sign-off** (UK Online Safety Act duties, US reporting duties, record-keeping) before the
-  category is switched on.
 
 ## 9. Rules we follow
 
@@ -287,4 +284,3 @@ Each step ships on its own and is useful by itself.
 - **Paid AI.** Agents in "paid" b agent mode spend from which account?
 - **Key service trust.** Should keys be split across several services (threshold), so no single
   operator, including us, can open content alone?
-- **Adult market rules.** Which countries, which age checks, and what record-keeping we need before launch.
