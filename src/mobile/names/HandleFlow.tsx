@@ -6,7 +6,7 @@ import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import { claimPaymail, lookupPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, SOCIAL_ALIAS_RE, toAlias } from './paymail';
 import { clearSocial, socialProof } from '../social/socialLogin';
-import { BWALLET_PAYMAIL_DOMAIN } from './config';
+import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
   PERSONAL_FEE_ESTIMATE_SATS,
   PERSONAL_NETWORK_FEE_SATS,
@@ -42,7 +42,7 @@ const BORDER = '#2b2f36';
 const GRAY = '#98A2B3';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
-type AliasState = 'idle' | 'checking' | 'free' | 'taken' | 'invalid' | 'error';
+type AliasState = 'idle' | 'checking' | 'free' | 'mine' | 'taken' | 'invalid' | 'error';
 
 export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose: () => void; title?: string }) => {
   useBackClose(true, onClose);
@@ -137,12 +137,22 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
     if (!enabled) return;
     if (!alias) return setState('idle');
     if (!PAYMAIL_ALIAS_RE.test(alias) && !(SOCIAL_ALIAS_RE.test(alias) && alias === socialAlias)) return setState('invalid');
-    if (paymail === `${alias}@${BWALLET_PAYMAIL_DOMAIN}`) return setState('free');
+    if (paymail && paymail.split('@')[0] === alias) return setState('free');
     setState('checking');
     let live = true;
     const t = setTimeout(() => {
       paymailAvailable(f, alias)
-        .then((free) => live && setState(free ? 'free' : 'taken'))
+        .then(async (free) => {
+          if (free) return live && setState('free');
+          // Taken — by this wallet? Then it's ours (e.g. claimed a moment ago, or a restored wallet).
+          const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
+          const mine = (await lookupPaymail(f, publicKey).catch(() => undefined))?.split('@')[0] === alias ||
+            (await fetch(`${BWALLET_PAYMAIL_API}/api/paymail/id/${alias}@${BWALLET_PAYMAIL_DOMAIN}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((j: { pubkey?: string } | null) => j?.pubkey === publicKey)
+              .catch(() => false));
+          if (live) setState(mine ? 'mine' : 'taken');
+        })
         .catch(() => live && setState('error'));
     }, 400);
     return () => {
@@ -167,9 +177,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       setPm(pm);
       // bChat handle = paymail name, before any token room is opened under it.
       await syncBchatHandle(apiContext, pm, { signIn: true });
-      // Token + room is part of the flow: go straight to its fee confirmation.
-      if (withToken && !getPersonalLink(identityAddress) && personalTicker(pm.split('@')[0]) && !supplyError)
-        setConfirming(true);
+      // The token + room is an explicit choice (its own button below), never started automatically.
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
     } finally {
@@ -177,11 +185,12 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
     }
   };
 
-  const owned = !!paymail && paymail === `${alias}@${BWALLET_PAYMAIL_DOMAIN}`;
+  const owned = (!!paymail && paymail.split('@')[0] === alias) || state === 'mine';
   const stateText: Record<AliasState, string> = {
     idle: '',
     checking: 'Checking…',
-    free: owned ? 'Yours' : 'Available',
+    free: owned ? 'Yours ✓' : 'Available',
+    mine: 'Yours ✓',
     taken: 'Taken. Try another.',
     invalid: 'Use a-z, 0-9, - or _',
     error: "Couldn't check. Check your connection.",
@@ -250,7 +259,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
             <span
               className="text-[11px] min-h-[16px]"
               style={{
-                color: state === 'free' ? '#2ecc71' : state === 'checking' || state === 'idle' ? GRAY : '#ff4444',
+                color: state === 'free' || state === 'mine' ? '#2ecc71' : state === 'checking' || state === 'idle' ? GRAY : '#ff4444',
               }}
             >
               {stateText[state]}
