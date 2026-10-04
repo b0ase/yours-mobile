@@ -11,7 +11,7 @@ import { Check, Download, Loader2, Menu, Phone, Play, Plus, ScanLine, Settings, 
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
-import { initPairing } from '../pair/sessions';
+import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
@@ -48,7 +48,7 @@ const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}
 
 export const TopNav = () => {
   const { theme } = useTheme();
-  const { chromeStorageService, wallet, setIsSwitchingAccount } = useServiceContext();
+  const { chromeStorageService, wallet, setIsSwitchingAccount, apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
@@ -81,6 +81,10 @@ export const TopNav = () => {
   useBackClose(drawer && !switchingTo, () => setDrawer(false));
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
+  // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
+  useEffect(() => {
+    if (!IS_EXTENSION) setAgentPairDeps({ ctx: apiContext, currentId: current });
+  }, [apiContext, current]);
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
   const names = useAccountNames(
     current,

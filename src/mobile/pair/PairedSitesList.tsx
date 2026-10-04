@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { Globe } from 'lucide-react';
+import { Globe, Terminal } from 'lucide-react';
 import { forget, pairedSites, subscribePairs, type StoredSession } from './sessions';
 
 const MUTED = '#98A2B3';
@@ -23,18 +23,20 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
     <div>
       {sites.length === 0 && (
         <p className="text-sm" style={{ color: MUTED }}>
-          No websites paired. Use Scan to connect on a site that shows a bWallet QR code.
+          Nothing paired. Use Scan to connect on a site that shows a bWallet QR code, or to pair the bWalletX CLI (bwalletx login).
         </p>
       )}
       {sites.map((s) => (
         <div key={s.c} className="mb-2 flex items-center gap-3 rounded-xl p-3" style={{ background: '#17191E' }}>
-          <Globe size={18} color={MUTED} />
+          {s.agent ? <Terminal size={18} color="#BDB4FE" /> : <Globe size={18} color={MUTED} />}
           <div className="min-w-0 flex-1">
             <div className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-white">
-              {new URL(s.origin).host}
+              {s.agent ? `bWalletX CLI · ${s.agent.name}` : new URL(s.origin).host}
             </div>
             <div className="text-xs" style={{ color: MUTED }}>
-              Last used {new Date(s.lastUsed).toLocaleString()}
+              {s.agent
+                ? `${s.agent.scopes.join(', ')} · until ${new Date(s.agent.expiresAt).toLocaleDateString()}`
+                : `Last used ${new Date(s.lastUsed).toLocaleString()}`}
             </div>
           </div>
           <button

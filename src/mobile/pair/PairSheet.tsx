@@ -4,6 +4,8 @@ import jsQR from 'jsqr';
 import { ArrowLeft, Check, Link2, Loader2, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { beginPairing, type PendingPair } from './sessions';
+import { CliPairConfirm } from './CliPairConfirm';
+import { CLI_ORIGIN } from './agentPairing';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -85,7 +87,18 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
           </div>
         )}
 
-        {stage.k === 'confirm' && (
+        {stage.k === 'confirm' && stage.p.cli && (
+          <CliPairConfirm
+            code={stage.p.code}
+            onCancel={close}
+            onConnect={(g) => {
+              stage.p.confirm(g);
+              setStage({ k: 'done', origin: stage.p.origin });
+            }}
+          />
+        )}
+
+        {stage.k === 'confirm' && !stage.p.cli && (
           <div className="mt-8 flex flex-col items-center text-center">
             <span
               className="grid h-14 w-14 place-items-center rounded-2xl"
@@ -137,7 +150,7 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
             >
               <Check size={28} color="#2ecc71" />
             </span>
-            <p className="mt-4 text-lg font-bold text-white">Connected to {new URL(stage.origin).host}</p>
+            <p className="mt-4 text-lg font-bold text-white">{stage.origin === CLI_ORIGIN ? 'Paired with the bWalletX CLI' : `Connected to ${new URL(stage.origin).host}`}</p>
             <p className="mt-2 text-sm" style={{ color: MUTED }}>
               Keep bWallet open while you use the site. Disconnect any time in Settings › Paired websites.
             </p>

@@ -20,6 +20,20 @@ import {
 } from '../../pair/protocol';
 import { handleSiteCall } from '../dappBrowser';
 import { appNameFor } from '../storeBuild';
+import type { OneSatContext } from '@1sat/actions';
+import { fetchExchangeRate } from '../../utils/wallet';
+import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
+
+/** What paired-CLI calls need from the app; TopNav keeps it current (wallet context + open account). */
+let agentDeps: { ctx: OneSatContext | undefined; currentId: string | undefined } = { ctx: undefined, currentId: undefined };
+export const setAgentPairDeps = (d: typeof agentDeps) => {
+  agentDeps = d;
+};
+let rateCache = { at: 0, rate: 0 };
+const bsvUsd = async () => {
+  if (Date.now() - rateCache.at > 60_000 || !rateCache.rate) rateCache = { at: Date.now(), rate: await fetchExchangeRate('main').catch(() => rateCache.rate) };
+  return rateCache.rate;
+};
 
 const KEY = 'bwallet.pair.sessions';
 const IDLE_MS = 24 * 60 * 60 * 1000;
@@ -34,10 +48,12 @@ export type StoredSession = {
   lastSeen: number;
   createdAt: number;
   lastUsed: number;
+  /** Set for a bWalletX CLI / MCP pairing (origin CLI_ORIGIN): the agent account, scopes and expiry. */
+  agent?: AgentGrant;
 };
 
-/** What the UI shows while a scan is being confirmed. */
-export type PendingPair = { origin: string; code: string; confirm: () => void; cancel: () => void };
+/** What the UI shows while a scan is being confirmed. A CLI pairing passes its grant to confirm. */
+export type PendingPair = { origin: string; code: string; cli: boolean; confirm: (agent?: AgentGrant) => void; cancel: () => void };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -47,7 +63,7 @@ export const subscribePairs = (l: Listener) => (listeners.add(l), () => void lis
 const load = (): StoredSession[] => {
   try {
     const all = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
-    return all.filter((s) => Date.now() - s.lastUsed < IDLE_MS);
+    return all.filter((s) => (s.agent ? Date.now() < s.agent.expiresAt : Date.now() - s.lastUsed < IDLE_MS));
   } catch {
     return [];
   }
@@ -74,7 +90,19 @@ async function reply(l: Live, msg: PairMessage) {
   update(l.stored.c, { ...l.sealer.counters });
 }
 
+async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
+  try {
+    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', 'bWalletX is locked. Unlock it on your phone.');
+    const result = await handleAgentCall(grant, action, params, { ctx: agentDeps.ctx, currentId: agentDeps.currentId, bsvUsd });
+    await reply(l, { t: 'res', id, result });
+  } catch (e) {
+    const code = e instanceof AgentCallError ? e.code : 'ERROR';
+    await reply(l, { t: 'res', id, error: { code, message: e instanceof Error ? e.message : String(e) } });
+  }
+}
+
 async function onRequest(l: Live, id: string, action: string, params: unknown) {
+  if (l.stored.agent) return onAgentRequest(l, l.stored.agent, id, action, params);
   try {
     const r = (await handleSiteCall(l.stored.origin, l.stored.origin + '/', action, params)) as {
       success?: boolean;
@@ -189,7 +217,9 @@ export function beginPairing(scanned: string): Promise<PendingPair> {
       resolve({
         origin: f.verifiedOrigin,
         code,
-        confirm: () => {
+        cli: f.verifiedOrigin === CLI_ORIGIN,
+        confirm: (agent?: AgentGrant) => {
+          if (f.verifiedOrigin === CLI_ORIGIN && !agent) return ws.close(); // a CLI must be bound to an agent account
           const stored: StoredSession = {
             c: link.c,
             r: link.r,
@@ -200,6 +230,7 @@ export function beginPairing(scanned: string): Promise<PendingPair> {
             lastSeen: 0,
             createdAt: Date.now(),
             lastUsed: Date.now(),
+            ...(agent && { agent }),
           };
           save([...load().filter((s) => s.c !== link.c), stored]);
           const l: Live = { ws, sealer: new Sealer(key, 'wallet'), stored };
