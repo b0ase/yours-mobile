@@ -59,6 +59,36 @@
       "source": "/download/:file*",
       "destination": "https://bwalletx.com/download/:file*",
       "permanent": false
+    },
+    {
+      "source": "/features",
+      "destination": "https://bwalletx.com/features",
+      "permanent": false
+    },
+    {
+      "source": "/friends",
+      "destination": "https://bwalletx.com/friends",
+      "permanent": false
+    },
+    {
+      "source": "/android",
+      "destination": "https://bwalletx.com/android",
+      "permanent": false
+    },
+    {
+      "source": "/extension",
+      "destination": "https://bwalletx.com/extension",
+      "permanent": false
+    },
+    {
+      "source": "/developers",
+      "destination": "https://bwalletx.com/developers",
+      "permanent": false
+    },
+    {
+      "source": "/connect.js",
+      "destination": "https://bwalletx.com/connect.js",
+      "permanent": false
     }
   ]
 }
