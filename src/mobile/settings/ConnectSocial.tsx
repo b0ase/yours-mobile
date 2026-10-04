@@ -7,6 +7,13 @@ import { claimPaymail } from '../names/paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { SocialSignIn } from '../social/SocialSignIn';
 import { clearSocial, onSocialChange, socialProof } from '../social/socialLogin';
+import { deployPersonalToken, openPersonalRoom, PERSONAL_FEE_ESTIMATE_SATS, PERSONAL_NETWORK_FEE_SATS } from '../names/claimPersonal';
+import { DEFAULT_SUPPLY, getPersonalLink, personalTicker, rememberPersonal, setPersonalLink } from '../names/personalToken';
+import { showOnWallet } from '../tokens/indexFund';
+import { SendConfirmation } from '../../components/SendConfirmation';
+import { useTheme } from '../../hooks/useTheme';
+import { moneyNow } from '../money/money';
+import { paidFeaturesEnabled } from '../storeBuild';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -23,6 +30,45 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [claimed, setClaimed] = useState('');
+  const { theme } = useTheme();
+  const [confirming, setConfirming] = useState(false);
+  const [minting, setMinting] = useState(false);
+  const [tokenMsg, setTokenMsg] = useState('');
+  const identityAddress = account?.addresses?.identityAddress ?? '';
+  const claimedAlias = claimed.split('@')[0];
+  const ticker = personalTicker(claimedAlias);
+
+  /**
+   * $B0ASEX + its room for the verified name. The wallet keeps ONE "my personal token" link on this
+   * device (personalToken.ts); a wallet that already has one ($BOASE) keeps it — the new token is
+   * remembered as a known personal token and its room still opens.
+   */
+  const mint = async () => {
+    setConfirming(false);
+    setMinting(true);
+    setTokenMsg('');
+    const previous = getPersonalLink(identityAddress);
+    try {
+      const l = await deployPersonalToken(apiContext, {
+        identityAddress,
+        name: claimedAlias,
+        supply: DEFAULT_SUPPLY,
+        payAddress: account?.addresses?.bsvAddress,
+      });
+      if (previous && previous.tokenId !== l.tokenId) setPersonalLink(identityAddress, previous);
+      rememberPersonal({ name: l.name, tokenId: l.tokenId });
+      void showOnWallet(chromeStorageService, l.tokenId);
+      setTokenMsg(`$${l.ticker} minted. Opening its room…`);
+      openPersonalRoom(apiContext, identityAddress, l)
+        .then(() => setTokenMsg(`$${l.ticker} minted and its room is open. Invite = send 1 $${l.ticker}.`))
+        .catch(() => setTokenMsg(`$${l.ticker} minted. Set up its room from Settings › My tokens when you're ready.`));
+    } catch (e) {
+      if (previous) setPersonalLink(identityAddress, previous);
+      setTokenMsg(e instanceof Error ? e.message : 'Token mint failed');
+    } finally {
+      setMinting(false);
+    }
+  };
   useEffect(() => onSocialChange(() => setProof(socialProof())), []);
 
   const claim = async () => {
@@ -61,13 +107,44 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
             <p className="mt-2 text-sm" style={{ color: '#98A2B3' }}>
               Your other name stays as it is. People can pay either address.
             </p>
+            {paidFeaturesEnabled() && ticker && !tokenMsg.includes('minted') && (
+              <button
+                onClick={() => setConfirming(true)}
+                disabled={minting}
+                className="mt-8 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-bold border-0"
+                style={{ background: '#F5B800', color: '#000', opacity: minting ? 0.6 : 1 }}
+              >
+                {minting && <Loader2 size={16} className="animate-spin" />}
+                Create ${ticker} token and room
+              </button>
+            )}
+            {tokenMsg && (
+              <p className="mt-3 text-sm" style={{ color: tokenMsg.includes('minted') ? '#D0D5DD' : '#FDA29B' }}>
+                {tokenMsg}
+              </p>
+            )}
             <button
               onClick={onClose}
-              className="mt-8 w-full rounded-xl py-3 font-bold border-0"
-              style={{ background: '#F5B800', color: '#000' }}
+              className="mt-4 w-full rounded-xl py-3 font-bold"
+              style={{ background: 'transparent', color: '#98A2B3', border: '1px solid #2b2f36' }}
             >
               Done
             </button>
+            <SendConfirmation
+              show={confirming}
+              theme={theme}
+              lineItems={[
+                {
+                  address: `$${ticker ?? 'NAME'} + room`.slice(0, 16),
+                  amount: `${Number(DEFAULT_SUPPLY).toLocaleString()} tokens`,
+                },
+                { address: 'Network fee', amount: `~${moneyNow(PERSONAL_NETWORK_FEE_SATS)}` },
+              ]}
+              total={`~${moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}`}
+              isProcessing={minting}
+              onConfirm={() => void mint()}
+              onCancel={() => setConfirming(false)}
+            />
           </div>
         ) : (
           <>
