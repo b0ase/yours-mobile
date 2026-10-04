@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Back to bWalletX</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      body {
+        margin: 0;
+        background: #000;
+        color: #e4e7ec;
+        font: 16px/1.6 system-ui, -apple-system, sans-serif;
+      }
+      main {
+        max-width: 440px;
+        margin: 0 auto;
+        padding: max(48px, env(safe-area-inset-top)) 20px 48px;
+        text-align: center;
+      }
+      h1 {
+        font-size: 22px;
+        color: #fff;
+        margin: 24px 0 8px;
+      }
+      p {
+        color: #98a2b3;
+      }
+      .err {
+        color: #fda29b;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- Where bit-sign returns "Continue with X / Google" (bWalletX Create Account). On a phone this
+           URL opens bWalletX directly (universal link); the Chrome extension reads it from the tab.
+           The sign-in ticket is in the #fragment, which browsers never send to a server, and it only
+           works with a secret that stayed in the app. -->
+      <h1 id="h">You're signed in</h1>
+      <p id="m">Go back to bWalletX to finish creating your wallet. You can close this page.</p>
+      <p><a id="open" href="#" style="display:none;color:#f5b800;font-weight:600">Open bWalletX</a></p>
+    </main>
+    <script>
+      var q = new URLSearchParams(location.hash.slice(1));
+      // Phones: hand the ticket to the app (bwalletx:// scheme) in case the universal link didn't open it.
+      if (/iPhone|iPad|Android/i.test(navigator.userAgent) && location.hash.length > 1) {
+        var app = 'bwalletx://social' + location.hash;
+        var a = document.getElementById('open');
+        a.href = app;
+        a.style.display = 'inline';
+        setTimeout(function () {
+          location.href = app;
+        }, 50);
+      }
+      if (q.get('error')) {
+        document.getElementById('h').textContent = 'Sign-in did not finish';
+        var m = document.getElementById('m');
+        m.className = 'err';
+        m.textContent = q.get('error') === 'cancelled' ? 'You cancelled. Go back to bWalletX to try again.' : q.get('error');
+      }
+    </script>
+  </body>
+</html>

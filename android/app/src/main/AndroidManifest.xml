@@ -29,6 +29,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="www.bwallet.space" android:path="/pair" />
+                <data android:scheme="https" android:host="www.bwallet.space" android:path="/social" />
+            </intent-filter>
+            <!-- Continue with X / Google returns here (site/social.html → bwalletx://social#…) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bwalletx" android:host="social" />
             </intent-filter>
 
         </activity>

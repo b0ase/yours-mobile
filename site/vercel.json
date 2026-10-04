@@ -5,6 +5,10 @@
       "destination": "/pair.html"
     },
     {
+      "source": "/social",
+      "destination": "/social.html"
+    },
+    {
       "source": "/.well-known/bsvalias",
       "destination": "/api/paymail?op=caps"
     },

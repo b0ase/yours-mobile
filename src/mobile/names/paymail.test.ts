@@ -65,3 +65,19 @@ describe('account names', () => {
     expect(payableLabel('Account 1', '', '')).toBe('Account 1');
   });
 });
+
+describe('verified social names', () => {
+  test('only *.x and *.gmail', async () => {
+    const { SOCIAL_ALIAS_RE } = await import('./paymail');
+    expect(SOCIAL_ALIAS_RE.test('b0asex.x')).toBe(true);
+    expect(SOCIAL_ALIAS_RE.test('theirname.gmail')).toBe(true);
+    expect(SOCIAL_ALIAS_RE.test('evil.com')).toBe(false);
+    expect(SOCIAL_ALIAS_RE.test('.x')).toBe(false);
+  });
+  test('the token keeps the plain ticker', async () => {
+    const { personalTicker } = await import('./personalToken');
+    expect(personalTicker('b0asex.x')).toBe('B0ASEX');
+    expect(personalTicker('theirname.gmail@bwalletx.com')).toBe('THEIRNAME');
+    expect(personalTicker('boase')).toBe('BOASE');
+  });
+});

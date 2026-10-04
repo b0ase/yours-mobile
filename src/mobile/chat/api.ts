@@ -90,6 +90,15 @@ const errorOf = (data: unknown, fallback: string) =>
     ? (data as { error: string }).error
     : '') || fallback;
 
+export interface SocialProfile {
+  provider: 'x' | 'google';
+  name: string;
+  display?: string | null;
+  avatar?: string | null;
+  /** The paymail alias it may claim: `b0asex.x`, `theirname.gmail` (null if the name can't be one). */
+  alias: string | null;
+}
+
 export class BchatClient {
   constructor(
     private readonly http: Http,
@@ -191,6 +200,28 @@ export class BchatClient {
     if (!this.session || !r.handle) throw new ChatApiError('bChat handle update failed', 500);
     this.session = { ...this.session, handle: r.handle, token: r.token || this.session.token };
     return this.session;
+  }
+
+  /** bWalletX Continue with X / Google: start (no session) → the provider's sign-in URL. */
+  async socialStart(provider: 'x' | 'google', verifierHash: string): Promise<string> {
+    const r = await this.call<{ authorizeUrl?: string }>(
+      'POST',
+      '/api/bitsign/wallet/social/start',
+      { provider, verifier_hash: verifierHash },
+      false,
+    );
+    if (!r.authorizeUrl) throw new ChatApiError('Sign-in is unavailable', 500);
+    return r.authorizeUrl;
+  }
+
+  /** What a returned ticket proves (name, photo, alias), without binding anything. */
+  async socialPreview(ticket: string, secret: string): Promise<SocialProfile> {
+    return this.call<SocialProfile>('POST', '/api/bitsign/wallet/social/claim', { ticket, secret, preview: true }, false);
+  }
+
+  /** Record the verified X / Google name on this wallet's account; returns the alias it may now use. */
+  async socialClaim(ticket: string, secret: string): Promise<SocialProfile> {
+    return this.call<SocialProfile>('POST', '/api/bitsign/wallet/social/claim', { ticket, secret });
   }
 
   signOut() {

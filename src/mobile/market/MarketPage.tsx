@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { withBeefHint } from '../../brand/walletError';
 import { useTabHome } from '../tabs/useTabHome';
+import { xAccountRows } from './xAccounts';
 import { useBackClose } from '../backStack';
 import { IssuerBadge, SharedTickerNote } from '../issuer/IssuerBadge';
 import { duplicateTickers, sharedTickerWarning } from '../issuer/issuerVerify';
@@ -116,11 +117,12 @@ const VIEWS: [View, string][] = [
  * Tokens side sub-filters. bApps = the bApps' own tokens (bappTokens.ts), listed like any other token.
  * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
-type TokenFilter = 'all' | 'bapps' | 'tickets';
+type TokenFilter = 'all' | 'bapps' | 'x' | 'tickets';
 // Store build: no Tickets (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
   ['bapps', 'bApps', true],
+  ['x', 'X Accounts', true],
   ['tickets', 'Tickets', true],
 ]);
 const TRADING = marketTradingEnabled();
@@ -532,7 +534,25 @@ const MarketPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rooms, directory, safetyRev],
   );
-  const filteredTokens = tokenFilter === 'bapps' ? tokenRows.filter((r) => isBappToken(r.ref.id)) : tokenRows;
+  // X Accounts: personal tokens of X-verified handles (xAccounts.ts), loaded when the filter opens.
+  const [xRows, setXRows] = useState<HotRoom[] | null>(null);
+  useEffect(() => {
+    if (tokenFilter !== 'x') return;
+    let live = true;
+    xAccountRows(tokenRows)
+      .then((r) => live && setXRows(r))
+      .catch(() => live && setXRows([]));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenFilter, tokenRows.length]);
+  const filteredTokens =
+    tokenFilter === 'bapps'
+      ? tokenRows.filter((r) => isBappToken(r.ref.id))
+      : tokenFilter === 'x'
+        ? (xRows ?? [])
+        : tokenRows;
   const visibleTokens = filteredTokens.slice(0, shown);
   // Tickers are not unique: flag every ticker more than one token id uses (issuer check on those rows).
   const dupTickers = useMemo(
@@ -602,7 +622,13 @@ const MarketPage = () => {
       )}
       {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && <p className="text-xs text-[#F97066]">{error}</p>}
-      {tokenFilter !== 'bapps' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
+      {tokenFilter === 'x' && xRows === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading X accounts…</p>}
+      {tokenFilter === 'x' && xRows !== null && xRows.length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">
+          No X accounts yet. Create a wallet with Continue with X to be the first.
+        </p>
+      )}
+      {tokenFilter !== 'bapps' && tokenFilter !== 'x' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
         <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
       )}
       {visibleTokens.map((r, i) => {

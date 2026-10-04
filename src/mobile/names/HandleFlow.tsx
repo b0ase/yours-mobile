@@ -4,7 +4,8 @@ import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
-import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAlias } from './paymail';
+import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, SOCIAL_ALIAS_RE, toAlias } from './paymail';
+import { claimSocial } from '../social/socialLogin';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
   PERSONAL_FEE_ESTIMATE_SATS,
@@ -64,6 +65,24 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
+  // Continue with X / Google on Create Account: record the verified name now that the wallet
+  // exists, and offer its verified handle (b0asex.x / theirname.gmail).
+  const [socialAlias, setSocialAlias] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    claimSocial(apiContext)
+      .then((p) => {
+        if (live && p?.alias) {
+          setSocialAlias(p.alias);
+          setAlias(p.alias);
+        }
+      })
+      .catch((e) => live && setMsg(e instanceof Error ? e.message : 'Could not confirm your sign-in'));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The token is named after the claimed handle (paymail alias, else OpNS name), else what's typed.
   const claimed = (paymail ? paymail.split('@')[0] : '') || getMyName(identityAddress);
   const tokenName = claimed || alias;
@@ -109,7 +128,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   useEffect(() => {
     if (!enabled) return;
     if (!alias) return setState('idle');
-    if (!PAYMAIL_ALIAS_RE.test(alias)) return setState('invalid');
+    if (!PAYMAIL_ALIAS_RE.test(alias) && !(SOCIAL_ALIAS_RE.test(alias) && alias === socialAlias)) return setState('invalid');
     if (paymail === `${alias}@${BWALLET_PAYMAIL_DOMAIN}`) return setState('free');
     setState('checking');
     let live = true;
@@ -122,7 +141,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       live = false;
       clearTimeout(t);
     };
-  }, [alias, enabled, paymail]);
+  }, [alias, enabled, paymail, socialAlias]);
 
   const claim = async () => {
     setBusy(true);

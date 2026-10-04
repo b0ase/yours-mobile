@@ -23,7 +23,8 @@ export const MAP_PREFIX = '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5';
 
 /** "$boase", "boase@handcash.io", "Boase" → "BOASE"; null if it can't be a ticker. */
 export function personalTicker(name: string): string | null {
-  const s = (name || '').trim().replace(/^\$/, '').split('@')[0].toUpperCase();
+  // Verified social names keep the plain ticker: b0asex.x → $B0ASEX (marked X ✓ by its link).
+  const s = (name || '').trim().replace(/^\$/, '').split('@')[0].replace(/\.(x|gmail)$/i, '').toUpperCase();
   return /^[A-Z0-9_-]{1,32}$/.test(s) ? s : null;
 }
 

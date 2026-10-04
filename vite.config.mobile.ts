@@ -143,6 +143,14 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     [
       '      setStep(2);\n    } catch',
       "      markHandlePrompt(keys.identityAddress, 'create');\n      setStep(2);\n    } catch",
+    ],    // Continue with X / Google above the form (src/mobile/social): fills name + photo.
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { SocialSignIn } from '../../mobile/social/SocialSignIn';",
+    ],
+    [
+      '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
+      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} />\n      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
     ],
   ],
   // WIF / JSON import and master (zip) restore: same step for the imported account, after the name sync.

@@ -20,6 +20,26 @@ const ANYONE_PUB = new PrivateKey(1).toPublicKey().toString();
 const SIG_WINDOW_MS = 5 * 60 * 1000;
 const MAX_SATS = 21e14;
 const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
+/**
+ * Verified social names (bWalletX "Continue with X / Google", owner 4 Oct 2026): `b0asex.x`,
+ * `theirname.gmail`. Registering one needs bit-sign to confirm the caller's key belongs to the
+ * account that proved that X username / Gmail address (socialCheck), so nobody else can take it.
+ */
+const SOCIAL_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
+const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
+const BITSIGN_ORIGIN = 'https://www.bitcoinchat.online';
+/** Ask bit-sign whether `identityKey` may use the social alias. */
+async function bitsignSocialCheck(alias, identityKey, env = process.env) {
+  const base = String(env.BITSIGN_ORIGIN || BITSIGN_ORIGIN).replace(/\/$/, '');
+  try {
+    const r = await fetch(
+      `${base}/api/bitsign/wallet/social/alias?alias=${encodeURIComponent(alias)}&key=${encodeURIComponent(identityKey)}`,
+    );
+    return r.ok ? null : r.status === 403 ? 'That name belongs to a different wallet' : 'Sign in with that account first';
+  } catch {
+    return 'Could not confirm that name right now. Try again.';
+  }
+}
 const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 const RESERVED = new Set([
   'admin',
@@ -79,7 +99,7 @@ function parseHandleParts(handle, env = process.env) {
   if (at < 1) return null;
   const alias = s.slice(0, at);
   const d = s.slice(at + 1);
-  if (!domains(env).includes(d) || !ALIAS_RE.test(alias)) return null;
+  if (!domains(env).includes(d) || !aliasOk(alias)) return null;
   return { alias, domain: d };
 }
 
@@ -90,7 +110,7 @@ function parseHandle(handle, env = process.env) {
 }
 
 function validAlias(alias) {
-  if (!ALIAS_RE.test(alias)) return 'Alias must be 1-32 chars: a-z, 0-9, - or _ (not at the ends)';
+  if (!aliasOk(alias)) return 'Alias must be 1-32 chars: a-z, 0-9, - or _ (not at the ends)';
   if (RESERVED.has(alias)) return 'That alias is reserved';
   return null;
 }
@@ -173,7 +193,7 @@ function matchOutputs(tx, expected) {
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
-function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now() }) {
+function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now(), socialCheck = bitsignSocialCheck }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   const publicAlias = async (handle) => {
@@ -290,6 +310,10 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       const sigErr = await verifySigned(body, 'register', now());
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
+      if (SOCIAL_RE.test(alias)) {
+        const refused = await socialCheck(alias, identityKey, env);
+        if (refused) return [403, { error: refused }];
+      }
       const taken = await store.getAlias(alias);
       if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
       const mine = await store.getAliasByKey(identityKey);

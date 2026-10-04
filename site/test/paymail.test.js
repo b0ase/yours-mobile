@@ -96,6 +96,25 @@ describe('register', () => {
     expect((await h.register({}, await v.sign('register', { alias: 'admin' })))[0]).toBe(400);
   });
 
+  test('social names (b0asex.x, theirname.gmail) need bit-sign to confirm the key', async () => {
+    const store = memStore();
+    const allowed = new Map(); // alias → key bit-sign would confirm
+    const socialCheck = async (alias, key) => (allowed.get(alias) === key ? null : 'Sign in with that account first');
+    const h = pm.makeHandlers({ store, env: ENV, socialCheck });
+    const u = user();
+    const v = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'b0asex.x' })))[0]).toBe(403);
+    allowed.set('b0asex.x', u.identityKey);
+    expect((await h.register({}, await v.sign('register', { alias: 'b0asex.x' })))[0]).toBe(403);
+    const [s, r] = await h.register({}, await u.sign('register', { alias: 'b0asex.x' }));
+    expect(s).toBe(200);
+    expect(r.paymail).toBe('b0asex.x@pay.test');
+    expect((await h.pki({ handle: 'B0aseX.X@pay.test' }))[1].pubkey).toBe(u.identityKey);
+    // Plain names never call bit-sign; a lookalike plain name stays separate.
+    expect((await h.register({}, await v.sign('register', { alias: 'b0asex' })))[0]).toBe(200);
+    expect((await h.register({}, await v.sign('register', { alias: 'evil.com' })))[0]).toBe(400);
+  });
+
   test('one alias per identity: re-registering renames', async () => {
     const store = memStore();
     const h = pm.makeHandlers({ store, env: ENV });

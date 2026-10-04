@@ -24,6 +24,8 @@ export const paymailFor = (alias: string) => (paymailEnabled() ? `${alias}@${BWA
 
 /** Same alias rule as the server. */
 export const PAYMAIL_ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
+/** Verified social names (b0asex.x, theirname.gmail): only claimable after Continue with X / Google. */
+export const SOCIAL_ALIAS_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
 export const toAlias = (s: string) =>
   s
     .trim()
@@ -75,7 +77,7 @@ export const claimPaymail = async (
   extra: { ordAddress?: string; name?: string; avatar?: string } = {},
 ): Promise<string> => {
   if (!paymailEnabled()) throw new Error('Paymail is not configured');
-  if (!PAYMAIL_ALIAS_RE.test(alias)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
+  if (!PAYMAIL_ALIAS_RE.test(alias) && !SOCIAL_ALIAS_RE.test(alias)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
   const fields: Record<string, string> = { alias };
   if (extra.ordAddress) fields.ordAddress = extra.ordAddress;
   if (extra.name) fields.name = extra.name.slice(0, 64);

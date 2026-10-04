@@ -64,3 +64,9 @@ export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;
 /** bWalletX = every non-store build (private channels, web, dev); the store app is plain bWallet. */
 export const isBWalletX = (store = STORE_BUILD) => !store;
 export const appNameFor = (store = STORE_BUILD) => (store ? 'bWallet' : 'bWalletX');
+
+/**
+ * "Continue with X / Google" on Create Account: bWalletX only for now. App Review guideline 4.8
+ * (offer Sign in with Apple beside a third-party login) may apply; switch on once that's settled.
+ */
+export const socialLoginEnabled = (store = STORE_BUILD) => !store;
