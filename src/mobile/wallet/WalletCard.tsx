@@ -1,6 +1,6 @@
 import * as qr from 'qrcode';
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { Check, Copy, Loader2 } from 'lucide-react';
+import { Check, Copy, Loader2, RefreshCw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
@@ -24,7 +24,12 @@ export type WalletCardProps = {
   failed: boolean;
   onRetry: () => void;
   receiveAddress: string;
+  /** Manual refresh (icon on the card); also run quietly every minute and when the wallet comes back into view. */
+  onRefresh?: (manual: boolean) => void;
+  refreshing?: boolean;
 };
+
+const AUTO_REFRESH_MS = 60_000;
 
 /**
  * Wallet home balance as a premium membership card (not a payment card: no card number, chip, date
@@ -32,7 +37,31 @@ export type WalletCardProps = {
  * would go. Tap to flip: receive QR, and a signature strip with the identity key fingerprint.
  * Replaces WalletIdentity + the "Total balance" header. Styles in src/mobile/mobile.css (.bw-wcard*).
  */
-export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveAddress }: WalletCardProps) => {
+export const WalletCard = ({
+  usd,
+  sats,
+  view,
+  syncing,
+  failed,
+  onRetry,
+  receiveAddress,
+  onRefresh,
+  refreshing = false,
+}: WalletCardProps) => {
+  // Balances otherwise only load once (owner, 4 Oct 2026: 1 BSV arrived but the card never moved).
+  useEffect(() => {
+    if (!onRefresh) return;
+    const quiet = () => document.visibilityState === 'visible' && onRefresh(false);
+    const t = setInterval(quiet, AUTO_REFRESH_MS);
+    document.addEventListener('visibilitychange', quiet);
+    window.addEventListener('focus', quiet);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', quiet);
+      window.removeEventListener('focus', quiet);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!onRefresh]);
   const { chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
@@ -165,6 +194,22 @@ export const WalletCard = ({ usd, sats, view, syncing, failed, onRetry, receiveA
                 >
                   {unit === 'usd' ? formatUSD(usd) : cardBsv(sats)}
                   {syncing && <Loader2 size={16} className="animate-spin bw-wcard-sync" color="#8e8e89" />}
+                  {onRefresh && !syncing && (
+                    <button
+                      type="button"
+                      aria-label="Refresh balance"
+                      title="Refresh balance"
+                      disabled={refreshing}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRefresh(true);
+                      }}
+                      className="bw-wcard-sync bg-transparent border-0 p-1 cursor-pointer"
+                      style={{ color: '#8e8e89', lineHeight: 0 }}
+                    >
+                      <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+                    </button>
+                  )}
                 </span>
                 <span className="bw-wcard-sats">{unit === 'usd' ? cardSats(sats) : formatUSD(usd)}</span>
               </>

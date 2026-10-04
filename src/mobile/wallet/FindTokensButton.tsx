@@ -13,9 +13,11 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
 
   const run = async () => {
     setBusy(true);
+    let found = false;
     try {
       const r = await recoverPurchases(apiContext.wallet);
       if (r.found.length) {
+        found = true;
         addSnackbar(`Updated: ${r.found.map((f) => f.sym).join(', ')}.`, 'success');
         onFound?.();
       } else if (r.failed.length) addSnackbar(`Couldn't add: ${r.failed[0]}`, 'error');
@@ -25,6 +27,8 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
     } catch (e) {
       addSnackbar(`Couldn't refresh: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
+      // Refresh BSV and every token balance too, whatever the purchase check found.
+      if (!found) onFound?.();
       setBusy(false);
     }
   };

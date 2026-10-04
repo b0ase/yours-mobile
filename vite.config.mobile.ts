@@ -54,15 +54,24 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '{!usbEnabled && <QuickUnlock theme={theme} onUnlock={onUnlock} />}\n<ForgotPassword theme={theme} />',
     ],
   ],
-  // Token page: "Room" opens that token's chatroom in the Chat tab (src/mobile/chat, docs/TOKEN-ROOMS.md).
+  // Token page actions, in order Buy · Sell · Send · Chat (owner, 4 Oct 2026). Buy opens the token in
+  // our own Market tab (replacing the external 1Sat "Trade" link); Chat opens its room (docs/TOKEN-ROOMS.md).
   'src/components/SendBsv21View.tsx': [
     [
       "import { CoinHistory } from './CoinHistory';",
-      "import { CoinHistory } from './CoinHistory';\nimport { OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';",
+      "import { CoinHistory } from './CoinHistory';\nimport { BuyTokenButton, OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';",
     ],
     [
       '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">',
-      '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">\n<OpenTokenRoomButton id={token.info.id} />',
+      '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">\n<BuyTokenButton id={token.info.id} />',
+    ],
+    [
+      "onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, '_blank')}\n                className=\"flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer\"",
+      "onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, '_blank')}\n                className=\"hidden\"",
+    ],
+    [
+      "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>",
+      "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />",
     ],
   ],
   // Wallet tab: gold "Mint" beside Receive / Send (src/mobile/mint).
@@ -271,7 +280,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Balance as a membership card (src/mobile/wallet/WalletCard); the old balance block below it is hidden.
     [
       '        {/* ── USD balance ── */}',
-      '<SectionBoundary name="Card"><WalletCard usd={bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0)} sats={Math.round(bsvBalance * 100_000_000)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={balanceFailed} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} /></SectionBoundary>\n        {/* ── USD balance ── */}',
+      '<SectionBoundary name="Card"><WalletCard usd={bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0)} sats={Math.round(bsvBalance * 100_000_000)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={balanceFailed} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual })} refreshing={isRefreshing} /></SectionBoundary>\n        {/* ── USD balance ── */}',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',

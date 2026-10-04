@@ -1,12 +1,12 @@
 import { tokenRoomsEnabled } from '../storeBuild';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, ShoppingCart } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
-import { requestChatRoom } from './nav';
+import { requestChatRoom, requestMarketToken } from './nav';
 import { tokenKey } from './tokenRooms';
 
 /**
- * "Room" — opens (or starts) this token's chatroom in the Chat tab. Mounted on the Wallet's
+ * "Chat" — opens (or starts) this token's chatroom in the Chat tab. Mounted on the Wallet's
  * token page by a build-time insert (vite.config.mobile.ts → SendBsv21View) and on Market token
  * pages.
  */
@@ -39,7 +39,27 @@ export const OpenTokenRoomButton = ({
       style={style ?? { background: '#17191E', borderColor: '#3a2f0c', color: '#FFD24D' }}
     >
       <MessageCircle size={14} />
-      Room
+      Chat
+    </button>
+  );
+};
+
+/** Token page "Buy": that token's page in bWalletX's own Market tab (not the external 1Sat site). */
+export const BuyTokenButton = ({ kind = 'bsv21', id }: { kind?: 'bsv21' | 'coll'; id: string | undefined }) => {
+  const { handleSelect } = useBottomMenu();
+  if (!id) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        requestMarketToken({ kind, id });
+        handleSelect(asMenuItem('market'));
+      }}
+      className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
+      style={{ background: '#17191E', borderColor: '#3a2f0c', color: '#FFD24D' }}
+    >
+      <ShoppingCart size={14} />
+      Buy
     </button>
   );
 };

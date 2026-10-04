@@ -1471,7 +1471,7 @@ export const BsvWallet = () => {
                 Manage Tokens List
               </span>
             </motion.button>
-            <FindTokensButton style={listItemStyle} onFound={() => void getAndSetAccountAndBsv21s().then(() => setRandomKey(Math.random()))} />
+            <FindTokensButton style={listItemStyle} onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))} />
           </motion.div>
         </Show>
 
