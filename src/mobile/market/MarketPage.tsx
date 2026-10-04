@@ -373,24 +373,25 @@ const MarketPage = () => {
 
   // Big category tiles (owner, 4 Oct 2026): everything that's for sale, visible at a glance instead of
   // hidden in a Tokens/NFTs switch and small chips. Tokens stays the default view.
-  type Cat = { id: string; label: string; icon: string; kind: Kind; token?: TokenFilter; view?: View; soon?: boolean };
+  type Cat = { id: string; label: string; kind: Kind; token?: TokenFilter; view?: View; soon?: boolean };
   const CATS: Cat[] = [
-    { id: 'tokens', label: 'Tokens', icon: '🪙', kind: 'tokens', token: 'all' },
-    { id: 'social', label: 'Social', icon: '👥', kind: 'tokens', token: 'social' },
-    { id: 'music', label: 'Music', icon: '🎵', kind: 'nfts', view: 'music' },
-    { id: 'video', label: 'Video', icon: '🎬', kind: 'nfts', view: 'video' },
-    { id: 'images', label: 'Images', icon: '🖼️', kind: 'nfts', view: 'images' },
-    { id: 'documents', label: 'Documents', icon: '📄', kind: 'nfts', view: 'documents' },
-    { id: 'collections', label: 'Collections', icon: '🗂️', kind: 'nfts', view: 'collections' },
-    { id: 'bapps', label: 'bApps', icon: '🧩', kind: 'tokens', token: 'bapps' },
+    { id: 'tokens', label: 'Tokens', kind: 'tokens', token: 'all' },
+    { id: 'social', label: 'Social', kind: 'tokens', token: 'social' },
+    { id: 'music', label: 'Music', kind: 'nfts', view: 'music' },
+    { id: 'video', label: 'Video', kind: 'nfts', view: 'video' },
+    { id: 'images', label: 'Images', kind: 'nfts', view: 'images' },
+    { id: 'documents', label: 'Documents', kind: 'nfts', view: 'documents' },
+    { id: 'collections', label: 'Collections', kind: 'nfts', view: 'collections' },
+    { id: 'bapps', label: 'bApps', kind: 'tokens', token: 'bapps' },
     ...(TOKEN_FILTERS.some(([f]) => f === 'tickets')
-      ? [{ id: 'tickets', label: 'Tickets', icon: '🎟️', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
+      ? [{ id: 'tickets', label: 'Tickets', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
       : []),
-    ...(TRADING ? [{ id: 'strategies', label: 'Strategies', icon: '🤖', kind: 'tokens' as Kind, soon: true }] : []),
+    ...(TRADING ? [{ id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind, soon: true }] : []),
   ];
   const activeCat = kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
+  // The usual grey / yellow filter pills, bigger and wrapping so every category shows at once.
   const categoryTiles = (
-    <div className="grid grid-cols-5 gap-2" role="tablist" aria-label="What's for sale">
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="What's for sale">
       {CATS.map((c) => {
         const on = !c.soon && activeCat === c.id;
         return (
@@ -406,30 +407,14 @@ const MarketPage = () => {
               if (c.view) setView(c.view);
               setRoom(null);
             }}
-            className="relative flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 px-1 border text-center"
+            className="rounded-full px-4 py-2 text-sm font-semibold"
             style={{
-              background: on ? 'linear-gradient(160deg, #F5B80033, #17191E)' : '#17191E',
-              borderColor: on ? '#F5B800' : '#2b2f36',
-              opacity: c.soon ? 0.55 : 1,
+              background: on ? '#F5B800' : '#17191E',
+              color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
             }}
           >
-            <span className="text-[20px] leading-none" aria-hidden="true">
-              {c.icon}
-            </span>
-            <span
-              className="text-[11px] font-bold w-full overflow-hidden text-ellipsis whitespace-nowrap"
-              style={{ color: on ? '#FFD24D' : '#D0D5DD' }}
-            >
-              {c.label}
-            </span>
-            {c.soon && (
-              <span
-                className="absolute -top-1.5 right-1 text-[8px] font-bold uppercase rounded px-1"
-                style={{ background: '#2b2f36', color: '#98A2B3' }}
-              >
-                soon
-              </span>
-            )}
+            {c.label}
+            {c.soon && <span className="ml-1 text-[9px] font-medium uppercase tracking-wide">soon</span>}
           </button>
         );
       })}
