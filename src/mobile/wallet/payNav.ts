@@ -15,9 +15,28 @@ export const requestPay = (to: string) => {
   }
 };
 
+const PERSIST = 'bwallet.pendingPay';
+
+/** Like requestPay, but survives the reload an account switch does (Agents › Fund from another account). */
+export const requestPayAfterSwitch = (to: string) => {
+  try {
+    localStorage.setItem(PERSIST, to.trim());
+  } catch {
+    /* storage unavailable */
+  }
+};
+
 export const takePay = (): string | null => {
-  const p = pending;
+  let p = pending;
   pending = null;
+  if (!p) {
+    try {
+      p = localStorage.getItem(PERSIST);
+      localStorage.removeItem(PERSIST);
+    } catch {
+      p = null;
+    }
+  }
   return p;
 };
 

@@ -181,6 +181,19 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
       '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} />\n      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
     ],
+    // Agent account switch on Add account (src/mobile/agents, docs/SMART-WALLET-SPEC.md §1).
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { AgentAccountToggle, consumeAgentCreate } from '../../mobile/agents/AgentAccountToggle';",
+    ],
+    [
+      "        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",
+      "        {!newWallet && <AgentAccountToggle />}\n        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",
+    ],
+    [
+      "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet)",
+      "      markHandlePrompt(keys.identityAddress, 'create');\n      if (!newWallet) consumeAgentCreate(keys.identityAddress);\n      if (newWallet)",
+    ],
   ],
   // WIF / JSON import and master (zip) restore: same step for the imported account, after the name sync.
   'src/pages/onboarding/ImportAccount.tsx': [

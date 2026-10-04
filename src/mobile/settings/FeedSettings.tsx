@@ -17,11 +17,13 @@ import {
   Zap,
   LockKeyhole,
   BadgeCheck,
+  Bot,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
-import { socialLoginEnabled } from '../storeBuild';
+import { isBWalletX, socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -346,7 +348,7 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
 export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
-    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | 'social' | null
+    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | 'social' | 'agents' | null
   >(null);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
@@ -443,6 +445,18 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
             label="Connect X or Google"
             description="Get a verified name like yourname.x; it becomes the main name"
             onClick={() => setScreen('social')}
+            isFirst
+            isLast
+          />
+        </Section>
+      )}
+      {isBWalletX() && (
+        <Section title="Agents">
+          <Row
+            icon={<Bot size={16} />}
+            label="Agent accounts"
+            description="Accounts your AI agents can use, with their own budget. Stop, fund, sweep back."
+            onClick={() => setScreen('agents')}
             isFirst
             isLast
           />
@@ -613,6 +627,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
+      {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />

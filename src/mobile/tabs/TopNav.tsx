@@ -1,4 +1,6 @@
 import { routeFor } from './tabs';
+import { allAgentsStopped, getAgentAccount, isAgentAccount } from '../agents/agentAccounts';
+import { AgentBadge } from '../agents/AgentsScreen';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
@@ -261,6 +263,7 @@ export const TopNav = () => {
                         <div className={`flex items-center gap-1 text-sm font-semibold text-white ${ELLIPSIS}`}>
                           {rowNames.displayName || rowNames.label}
                           {id === current && verified && <Check size={13} strokeWidth={3} color="#2ecc71" />}
+                          {isAgentAccount(id) && <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} />}
                         </div>
                         {(() => {
                           // Always show the $handle: the personal token ticker, else the paymail/OpNS name.
