@@ -213,20 +213,40 @@ keeps opened content in its own storage rather than exporting it by default.
 
 ### 8.5 Adult images and video (bWalletX only)
 
-Encrypted NFTs suit an adult market: nothing explicit is public on chain or in the Market. Listings show
-only what the seller chooses as a preview, and the content opens only for its owner.
+Owner decision, 4 Oct 2026: **we filter what is bought and sold in our market. We don't police the
+blockchain.** Anyone can inscribe anything on BSV; that isn't ours to stop. Only content that has passed
+our checks can be listed, bought or opened in bWalletX.
 
-- **bWalletX only.** Never in the store bWallet (App Store and Google Play sexual-content policies). The
-  store build hides the category and refuses to open adult content.
-- **18+ gate.** Viewing the category, buying and opening require the owner to confirm they're 18 or over;
-  stronger age checks (bit-sign KYC) where the law requires them.
-- **Labelled by the seller.** An **Adult** flag in the public metadata is required to list in the
-  category. The existing safety filter keeps adult listings out of every other category.
-- **Report and refuse.** Reported content is reviewed. Because an inscription can't be deleted, the
-  enforcement tool is the key service: it **stops releasing keys** for content that's illegal or
-  non-consensual, so it can no longer be opened in bWalletX, and the listing is removed.
-- **Seller responsibility.** Sellers confirm they own the content and that everyone in it is an adult who
-  consented. Check the legal requirements (record-keeping, age verification by country) before launch.
+**Show us before you list.** To list an image or video, the seller's wallet sends us the unencrypted file
+first, and our automated scanning checks it:
+
+- matching against known-CSAM hash lists (PhotoDNA, NCMEC, IWF);
+- a detection model for new material, and age estimation.
+
+Anything flagged is **blocked, and reported** to the authorities (NCMEC CyberTipline / IWF / NCA), with
+the evidence kept as the law requires. A clean file gets a **scan certificate**: its hash, signed by us.
+
+**Then encrypt and publish.** The wallet encrypts the scanned file and publishes it. Sellers may inscribe
+it on chain; if it ever turns out to be illegal, the inscription is a permanent evidence trail.
+
+**Bind the listing to what we scanned.** The key service holds the content key, so before a listing goes
+live it decrypts the published content and checks its hash matches the scan certificate. That stops a
+seller scanning one file and publishing another. No certificate, or no match, means it can't be listed,
+bought or opened in bWalletX.
+
+**Other rules:**
+
+- **bWalletX only.** Never in the store bWallet; the store build hides the category and won't open adult
+  content.
+- **18+ for buyers** to view, buy or open, with strong age checks where the law requires them (UK
+  Online Safety Act).
+- **Sellers** tag listings Adult and confirm they own the content and that everyone in it is a consenting
+  adult. The safety filter keeps adult listings out of every other category.
+- **Reports.** A Report button on every listing. On a valid report: delist, stop releasing keys, ban the
+  seller, report to the authorities.
+- **We don't keep the files** we scan, beyond what the law requires for reports.
+- **Legal sign-off** (UK Online Safety Act duties, US reporting duties, record-keeping) before the
+  category is switched on.
 
 ## 9. Rules we follow
 
@@ -234,8 +254,8 @@ only what the seller chooses as a preview, and the content opens only for its ow
   returns or featured picks on the Market or the website. Users publish and sell, and users buy.
 - **Risk labels are the seller's**, from the spec.
 - **The b agent may suggest** strategies to its user. It's the user's assistant acting on their goals.
-- **Adult content is bWalletX only**, behind an 18+ gate, flagged by sellers, and blocked via the key
-  service when reported content is illegal or non-consensual.
+- **Adult content is bWalletX only.** Every image and video is scanned before it can be listed; flagged
+  content is blocked and reported. We filter our market; we don't police the blockchain.
 - **Strategies are software.** Buyers run them in their own accounts with their own money. bWalletX
   never runs strategies with other people's money or takes a share of their profits; if a future
   feature would, check the rules first.
