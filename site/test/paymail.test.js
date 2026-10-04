@@ -20,6 +20,8 @@ const memStore = () => {
       for (const [r, p] of pays) if (p.alias === a) pays.delete(r);
       aliases.delete(a);
     },
+    listSocial: async (kind) =>
+      [...aliases.values()].filter((r) => (r.kind ?? 'plain') === kind).map((r) => ({ alias: r.alias, display_name: r.display_name ?? null })),
     listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
@@ -139,6 +141,11 @@ describe('register', () => {
     expect((await h.register({}, await v.sign('register', { alias: 'w-x.x' })))[0]).toBe(403);
     // The verified name is now the wallet's identity, and it can't take another plain name.
     expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('w-x.x');
+    // Market › Social: every kind of name, tagged with its kind.
+    const people = (await h.social({ provider: 'all' }))[1].accounts;
+    expect(people.find((a) => a.alias === 'w-x.x')?.kind).toBe('x');
+    expect(people.find((a) => a.alias === 'wplain')?.kind).toBe('plain');
+    expect((await h.social({ provider: 'x' }))[1].accounts.every((a) => a.kind === 'x')).toBe(true);
     // Both names are listed, so the older plain one never receives invisibly.
     expect((await h.lookup({ key: w.identityKey }))[1].names).toEqual([
       { paymail: 'wplain@pay.test', kind: 'plain', main: false },

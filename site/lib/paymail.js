@@ -340,10 +340,12 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
     },
 
+    // Market › Social: names whose owners may have a personal token. provider=all → every kind.
     social: async (q) => {
-      const suffix = q.provider === 'google' ? 'gmail' : 'x';
-      const rows = store.listSocial ? await store.listSocial(suffix) : [];
-      return [200, { accounts: rows.map((r) => ({ alias: r.alias, name: r.display_name || null })) }];
+      const kinds = q.provider === 'all' ? ['x', 'gmail', 'plain'] : [q.provider === 'google' ? 'gmail' : 'x'];
+      const rows = [];
+      for (const k of kinds) for (const r of store.listSocial ? await store.listSocial(k) : []) rows.push({ ...r, kind: k });
+      return [200, { accounts: rows.map((r) => ({ alias: r.alias, name: r.display_name || null, kind: r.kind })) }];
     },
 
     lookup: async (q) => {

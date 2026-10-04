@@ -5,19 +5,20 @@ import { lookupPersonal } from '../names/claimPersonal';
 import { cached, parseRoom, roomMeta, type HotRoom } from './indexer';
 
 /**
- * Market › Tokens › X Accounts: personal tokens of people who proved their X account with
- * "Continue with X" (registered as <name>.x on bWalletX's paymail server), e.g. x.com/b0asex → $B0ASEX.
+ * Market › Tokens › Social (owner, 4 Oct 2026; replaces "X Accounts"): people's personal tokens. Every
+ * bWalletX name (X-verified b0asex.x, Google-verified name.gmail, or a plain name) whose owner minted
+ * their $NAME token, e.g. b0asex.x → $B0ASEX.
  */
-export type XAccount = { name: string | null; alias: string; tokenId: string | null };
+export type XAccount = { name: string | null; alias: string; kind?: 'x' | 'gmail' | 'plain'; tokenId: string | null };
 
 export const xAccounts = (): Promise<XAccount[]> =>
   cached(
-    'x-accounts',
+    'social-accounts',
     async () => {
       // bWalletX's own record: paymail names registered with Continue with X (pay server).
-      const r = await fetch(`${BWALLET_PAYMAIL_API}/api/paymail/social?provider=x`);
+      const r = await fetch(`${BWALLET_PAYMAIL_API}/api/paymail/social?provider=all`);
       if (!r.ok) return [];
-      const { accounts } = (await r.json()) as { accounts: { name: string | null; alias: string }[] };
+      const { accounts } = (await r.json()) as { accounts: { name: string | null; alias: string; kind?: XAccount['kind'] }[] };
       const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()));
       const out: XAccount[] = [];
       for (let i = 0; i < accounts.length; i += 6) {
@@ -30,7 +31,7 @@ export const xAccounts = (): Promise<XAccount[]> =>
     5 * 60_000,
   );
 
-/** Rows for the board: the X accounts' tokens, using board data when the token is already listed there. */
+/** Rows for the board: people's personal tokens, using board data when the token is already listed there. */
 export async function xAccountRows(board: HotRoom[]): Promise<HotRoom[]> {
   const byId = new Map(board.map((r) => [r.ref.id, r]));
   const rows = await Promise.all(
@@ -44,8 +45,13 @@ export async function xAccountRows(board: HotRoom[]): Promise<HotRoom[]> {
         const meta = await roomMeta('bsv21', ref.id).catch(() => null);
         return {
           ref,
-          title: meta?.title ?? `$${a.alias.replace(/\.x$/, '').toUpperCase()}`,
-          subtitle: `x.com/${a.name ?? a.alias.replace(/\.x$/, '')}`,
+          title: meta?.title ?? `$${a.alias.replace(/\.(x|gmail)$/, '').toUpperCase()}`,
+          subtitle:
+            a.kind === 'x' || a.alias.endsWith('.x')
+              ? `x.com/${a.name ?? a.alias.replace(/\.x$/, '')} ✓`
+              : a.kind === 'gmail' || a.alias.endsWith('.gmail')
+                ? `${a.alias} · Google ✓`
+                : `${a.alias}@bwalletx.com`,
           icon: meta?.icon ?? null,
           trades: 0,
           newListings: 0,
