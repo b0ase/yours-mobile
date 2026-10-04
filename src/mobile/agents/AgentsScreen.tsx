@@ -22,6 +22,7 @@ import {
   unmarkAgentAccount,
 } from './agentAccounts';
 import { sweepBack } from './sweepBack';
+import { StrategySection } from './StrategySection';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -233,6 +234,8 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
             <Switch on={agent.stopped} onChange={(v) => setAgentStopped(id, v)} label="Stop this agent" />
           </div>
         </div>
+
+        <StrategySection id={id} />
 
         <div className={section} style={{ background: CARD }}>
           <div className="text-sm font-bold text-white">Fund</div>
