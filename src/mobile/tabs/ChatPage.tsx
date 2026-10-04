@@ -56,6 +56,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
+import { useRoomIcon } from '../chat/roomIcon';
 import { ChatTabs, SegmentRow, SegmentTitle, useChatDisplayName } from '../feed/ChatSegments';
 import {
   avatarHue,
@@ -152,8 +153,21 @@ const usePoll = (fn: () => void, ms: number, enabled: boolean) => {
   }, [ms, enabled]);
 };
 
-const Avatar = ({ title, size = 48 }: { title: string; size?: number }) => {
+const Avatar = ({ title, size = 48, roomKey }: { title: string; size?: number; roomKey?: string | null }) => {
   const hue = avatarHue(title);
+  // Token / collection rooms show the token's icon; letter tile when there is none or it fails.
+  const icon = useRoomIcon(roomKey);
+  const [broken, setBroken] = useState<string | null>(null);
+  if (icon && broken !== icon)
+    return (
+      <img
+        src={icon}
+        alt=""
+        onError={() => setBroken(icon)}
+        className="rounded-full object-cover shrink-0"
+        style={{ width: size, height: size, background: '#16181c' }}
+      />
+    );
   return (
     <div
       className="rounded-full flex items-center justify-center shrink-0 font-bold"
@@ -365,7 +379,7 @@ const Conversation = ({
         <button onClick={onBack} className="p-2 rounded-full active:opacity-60" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
         </button>
-        <Avatar title={title} size={38} />
+        <Avatar title={title} size={38} roomKey={entry?.key} />
         <div className="flex-1 min-w-0">
           <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</div>
           <div className="text-[11px]" style={{ color: MUTED }}>
@@ -1215,7 +1229,7 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
   const title = `$${token.ticker}`;
   return (
     <li className="flex items-center gap-3 px-4 py-[10px]">
-      <Avatar title={title} />
+      <Avatar title={title} roomKey={`bsv21:${token.tokenId}`} />
       <div className="flex-1 min-w-0">
         <div className={`flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
           <span className={ELLIPSIS}>{title}</span>
@@ -1552,7 +1566,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     if (invite === 'invite' && personal && ROOMS) {
       return (
         <li key={e.key} className="flex items-center gap-3 px-4 py-[10px]">
-          <Avatar title={e.gate.symbol} />
+          <Avatar title={e.gate.symbol} roomKey={e.key} />
           <div className="flex-1 min-w-0">
             <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{inviteLine(personal)}</div>
             <div className={`text-[12px] ${ELLIPSIS}`} style={{ color: MUTED }}>
@@ -1594,7 +1608,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           disabled={!!opening || !ROOMS}
           className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
         >
-          <Avatar title={e.gate.symbol} />
+          <Avatar title={e.gate.symbol} roomKey={e.key} />
           <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
             <div className="flex items-baseline gap-2">
               <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
