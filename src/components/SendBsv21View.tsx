@@ -377,9 +377,7 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
           <TokenIconHeader
             tokenId={token.info.id}
             ticker={tokenName}
-            onchain={
-              token.info.icon ? (isUri(token.info.icon) ? token.info.icon : `${baseUrl}/${token.info.icon}`) : ''
-            }
+            onchain={token.info.icon ? (isUri(token.info.icon) ? token.info.icon : `${baseUrl}/${token.info.icon}`) : ''}
           />
           {/* Balance chip — matches the BSV / MNEE send views */}
           <div className="flex flex-col items-center w-full mb-5 gap-1.5">
@@ -453,113 +451,112 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
 
           {/* Send form */}
           <form noValidate onSubmit={(e) => handleSendBSV21(e)} className="flex flex-col w-full px-4 gap-3">
-            {composing && (
-              <>
-                {/* Recipient cards */}
-                <AnimatePresence>
-                  {recipients.map((recipient, idx) => (
-                    <motion.div
-                      key={recipient.id}
-                      initial={{ opacity: 0, y: 12, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                      transition={{ duration: 0.22, ease: 'easeOut' }}
-                      className="w-full rounded-2xl p-4 flex flex-col gap-3"
-                      style={{ background: row }}
-                    >
-                      {/* Card header */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: gray }}>
-                          {recipients.length > 1 ? `Recipient ${idx + 1}` : 'Recipient'}
-                        </span>
-                        {recipients.length > 1 && (
-                          <motion.button
-                            whileHover={{ scale: 1.1 }}
-                            whileTap={{ scale: 0.9 }}
-                            type="button"
-                            onClick={() => removeRecipient(recipient.id)}
-                            className="flex items-center justify-center w-6 h-6 rounded-full border-0 outline-none cursor-pointer"
-                            style={{ background: '#ff444415', color: '#ff4444' }}
-                          >
-                            <Trash2 size={12} />
-                          </motion.button>
-                        )}
-                      </div>
-
-                      {/* Address input */}
-                      <Input
-                        theme={theme}
-                        placeholder="Enter address..."
-                        type="text"
-                        onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
-                        value={recipient.address}
-                        style={{ width: '100%', margin: 0 }}
-                      />
-
-                      {/* Amount + MAX */}
-                      <div
-                        className="flex items-center w-full rounded-xl border"
-                        style={{ backgroundColor: row, borderColor: gray + '40' }}
-                      >
-                        <input
-                          placeholder="0"
-                          type="text"
-                          inputMode="decimal"
-                          className="flex-1 bg-transparent h-9 px-4 text-sm outline-none border-none"
-                          style={{
-                            color: contrast,
-                            fontFamily: "'Inter', Arial, Helvetica, sans-serif",
-                          }}
-                          value={recipient.amountInput}
-                          onChange={(e) => updateRecipient(recipient.id, 'amountInput', e.target.value)}
-                        />
-                        {recipients.length === 1 && (
-                          <motion.button
-                            type="button"
-                            whileTap={{ scale: 0.93 }}
-                            onClick={() => handleSetMax(recipient.id)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 mr-1.5 rounded-lg border-0 outline-none cursor-pointer shrink-0"
-                            style={{ background: `${accent}18` }}
-                            title="Fill with remaining available amount"
-                          >
-                            <span className="text-[11px] font-bold" style={{ color: accent }}>
-                              MAX
-                            </span>
-                          </motion.button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-
-                <GroupSendBar
-                  recipients={recipients}
-                  setRecipients={setRecipients}
-                  total={groupTotal}
-                  max={maxAmount}
-                  fmt={(a) => showAmount(a, token.info.dec)}
-                  ticker={tokenName}
-                  newRecipient={newRecipient}
-                />
-                {/* Add recipient */}
-                <motion.button
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
-                  onClick={addRecipient}
-                  className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl border-0 outline-none cursor-pointer"
-                  style={{
-                    background: `${accent}10`,
-                    border: `1px dashed ${accent}40`,
-                  }}
+            {composing && (<>
+            {/* Recipient cards */}
+            <AnimatePresence>
+              {recipients.map((recipient, idx) => (
+                <motion.div
+                  key={recipient.id}
+                  initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="w-full rounded-2xl p-4 flex flex-col gap-3"
+                  style={{ background: row }}
                 >
-                  <Plus size={14} style={{ color: accent }} />
-                  <span className="text-sm font-semibold" style={{ color: accent }}>
-                    Add Recipient
-                  </span>
-                </motion.button>
-              </>
-            )}
+                  {/* Card header */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: gray }}>
+                      {recipients.length > 1 ? `Recipient ${idx + 1}` : 'Recipient'}
+                    </span>
+                    {recipients.length > 1 && (
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        type="button"
+                        onClick={() => removeRecipient(recipient.id)}
+                        className="flex items-center justify-center w-6 h-6 rounded-full border-0 outline-none cursor-pointer"
+                        style={{ background: '#ff444415', color: '#ff4444' }}
+                      >
+                        <Trash2 size={12} />
+                      </motion.button>
+                    )}
+                  </div>
+
+                  {/* Address input */}
+                  <Input
+                    theme={theme}
+                    placeholder="Enter address..."
+                    type="text"
+                    onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
+                    value={recipient.address}
+                    style={{ width: '100%', margin: 0 }}
+                  />
+
+                  {/* Amount + MAX */}
+                  <div
+                    className="flex items-center w-full rounded-xl border"
+                    style={{ backgroundColor: row, borderColor: gray + '40' }}
+                  >
+                    <input
+                      placeholder="0"
+                      type="text"
+                      inputMode="decimal"
+                      className="flex-1 bg-transparent h-9 px-4 text-sm outline-none border-none"
+                      style={{
+                        color: contrast,
+                        fontFamily: "'Inter', Arial, Helvetica, sans-serif",
+                      }}
+                      value={recipient.amountInput}
+                      onChange={(e) => updateRecipient(recipient.id, 'amountInput', e.target.value)}
+                    />
+                    {recipients.length === 1 && (
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.93 }}
+                        onClick={() => handleSetMax(recipient.id)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 mr-1.5 rounded-lg border-0 outline-none cursor-pointer shrink-0"
+                        style={{ background: `${accent}18` }}
+                        title="Fill with remaining available amount"
+                      >
+                        <span className="text-[11px] font-bold" style={{ color: accent }}>
+                          MAX
+                        </span>
+                      </motion.button>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            <GroupSendBar
+              recipients={recipients}
+              setRecipients={setRecipients}
+              total={groupTotal}
+              max={maxAmount}
+              fmt={(a) => showAmount(a, token.info.dec)}
+              ticker={tokenName}
+              newRecipient={newRecipient}
+            />
+            {/* Add recipient */}
+            <motion.button
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={addRecipient}
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl border-0 outline-none cursor-pointer"
+              style={{
+                background: `${accent}10`,
+                border: `1px dashed ${accent}40`,
+              }}
+            >
+              <Plus size={14} style={{ color: accent }} />
+              <span className="text-sm font-semibold" style={{ color: accent }}>
+                Add Recipient
+              </span>
+            </motion.button>
+
+            </>)}
 
             {/* Action buttons */}
             <div className="flex gap-2 mt-1">
