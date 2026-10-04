@@ -1203,3 +1203,10 @@ main.ext { padding-top: 150px !important; }
 @media (max-width: 859px) {
   main.ext { padding-top: 172px !important; }
 }
+
+/* Home hero: start below the banner + topbar + section tabs, and never let the content spill up under
+   them when it's taller than the screen (safe alignment), so the big b always shows (owner, 5 Oct 2026). */
+.hero { padding-top: 176px; align-items: safe flex-end; }
+@media (max-width: 859px) {
+  .hero { padding-top: 196px; }
+}
