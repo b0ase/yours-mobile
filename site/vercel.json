@@ -109,6 +109,11 @@
       "source": "/adult",
       "destination": "https://bwalletx.com/adult",
       "permanent": false
+    },
+    {
+      "source": "/exchange",
+      "destination": "https://bwalletx.com/exchange",
+      "permanent": false
     }
   ]
 }

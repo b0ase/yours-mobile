@@ -20,16 +20,19 @@ L=$B/bcorp
 X=assets/bwallet-ext
 T=$(mktemp -d)
 
-# Native masters (consumed by gen-native-assets.sh)
-rsvg-convert -w 1024 -h 1024 "$TILE" -o "$A/icon-only.png"
-cp "$TILE" "$A/icon.svg"
-magick -size 1024x1024 xc:black "$A/icon-background.png"
+# Native masters (consumed by gen-native-assets.sh). The store app (plain bWallet) flips the colours
+# (owner, 4 Oct 2026): black b on yellow, where bWalletX is gold b on black. In-app logos stay gold.
+STILE=$B/bwallet-store-mark.svg
+SGLYPH=$B/bwallet-store-glyph.svg
+rsvg-convert -w 1024 -h 1024 "$STILE" -o "$A/icon-only.png"
+cp "$STILE" "$A/icon.svg"
+magick -size 1024x1024 xc:'#F5B800' "$A/icon-background.png"
 # Adaptive foreground: same letter size as the tile once Android masks to the 72dp view.
-rsvg-convert -w 506 -h 506 "$GLYPH" -o "$T/fg.png"
+rsvg-convert -w 506 -h 506 "$SGLYPH" -o "$T/fg.png"
 magick -size 1024x1024 xc:none "$T/fg.png" -gravity center -composite "$A/icon-foreground.png"
-# Splash: bare b centred on black (same in light and dark)
-rsvg-convert -w 760 -h 760 "$GLYPH" -o "$T/splash.png"
-magick -size 2732x2732 xc:black "$T/splash.png" -gravity center -composite "$A/splash.png"
+# Splash: bare black b centred on yellow (same in light and dark)
+rsvg-convert -w 760 -h 760 "$SGLYPH" -o "$T/splash.png"
+magick -size 2732x2732 xc:'#F5B800' "$T/splash.png" -gravity center -composite "$A/splash.png"
 cp "$A/splash.png" "$A/splash-dark.png"
 
 # In-app logos (swapped in by vite.brand.ts; icon.png is also the default avatar)

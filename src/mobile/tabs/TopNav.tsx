@@ -36,7 +36,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
  * Switching reuses upstream TopNav's sequence verbatim.
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
+// Logo (owner, 4 Oct 2026): no x in any logo. bWalletX = gold b on black; the store bWallet flips it:
+// a yellow bar with a black b and black icons. The tab (Exchange / Market) and titles say which app it is.
 const X_MARK = isBWalletX();
+const FLIP = !X_MARK;
+const BAR_BG = FLIP ? '#F5B800' : undefined;
+const ICON = FLIP ? '#010101' : '#F2F2F0';
+const ACCENT = FLIP ? '#010101' : '#F5B800';
+const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
 const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 export const TopNav = () => {
@@ -127,7 +134,7 @@ export const TopNav = () => {
       {/* Five equal slots: Accounts · Calls · b agent · Media · Settings. */}
       <div
         className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
-        style={{ backgroundColor: theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
+        style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
       >
         <button
           type="button"
@@ -135,16 +142,16 @@ export const TopNav = () => {
           className="w-9 h-9 flex items-center justify-center bg-transparent"
           aria-label="Accounts menu"
         >
-          <Menu size={22} color="#F2F2F0" />
+          <Menu size={22} color={ICON} />
         </button>
         <button
           type="button"
           aria-label="Calls"
           onClick={() => setCallsOpen(true)}
           className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-          style={{ border: '1px solid #2A2A2C' }}
+          style={{ border: RING }}
         >
-          <Phone size={16} color="#F5B800" />
+          <Phone size={16} color={ACCENT} />
         </button>
         {/* The b opens the b agent. */}
         <button
@@ -155,19 +162,19 @@ export const TopNav = () => {
           aria-pressed={onAgent}
           className="relative w-10 h-10 flex items-center justify-center bg-transparent"
         >
-          <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
-          {/* bWalletX builds wear a sharp x beside the b, so anyone can see which app is running (store app: plain b). */}
-          {X_MARK && (
-            <svg
-              aria-hidden
-              data-testid="bx-mark"
-              viewBox="0 0 12 12"
-              width={9}
-              height={9}
-              className="absolute top-[7px] right-[5px]"
-            >
-              <path d="M2 2L10 10M10 2L2 10" stroke="#F5B800" strokeWidth={2.6} strokeLinecap="square" />
+          {FLIP ? (
+            <svg viewBox="23 8 74 100" width={20} height={26} aria-hidden>
+              <mask id="bnav">
+                <rect x="0" y="0" width="140" height="140" fill="#fff" />
+                <circle cx="60" cy="72" r="15" fill="#000" />
+              </mask>
+              <g fill="#010101" mask="url(#bnav)">
+                <polygon points="45,12 45,76 27,76 27,30" />
+                <circle cx="60" cy="72" r="33" />
+              </g>
             </svg>
+          ) : (
+            <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
           )}
         </button>
         <button
@@ -176,18 +183,18 @@ export const TopNav = () => {
           onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
           aria-pressed={onMedia}
           className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-          style={{ border: '1px solid #2A2A2C' }}
+          style={{ border: RING }}
         >
-          <Play size={16} color="#F5B800" fill="#F5B800" />
+          <Play size={16} color={ACCENT} fill={ACCENT} />
         </button>
         <button
           type="button"
           aria-label="Settings"
           onClick={() => go()}
           className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-          style={{ border: '1px solid #2A2A2C' }}
+          style={{ border: RING }}
         >
-          <Settings size={16} color="#F2F2F0" />
+          <Settings size={16} color={ICON} />
         </button>
       </div>
 

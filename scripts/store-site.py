@@ -75,16 +75,28 @@ s = re.sub(r'bWalletX(?![^<]*</a>)', 'bWallet', s)
 
 # Page links in the top bar point to bwalletx.com, plus a clear bWalletX button.
 resub(r'<nav aria-label="Pages">.*?</nav>',
-      '<nav aria-label="Pages"><a href="https://bwalletx.com/features">bWalletX features</a>'
+      '<nav aria-label="Pages"><a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a>'
       '<a href="https://bwalletx.com/friends">Rooms &amp; tokens</a><a href="https://bwalletx.com">Get bWalletX &rarr;</a></nav>')
 s = s.replace('href="https://web.bwalletx.com" target="_blank" rel="noopener">Web &rarr;</a>',
               'href="https://bwalletx.com">bWalletX &rarr;</a>')
 
 # Share preview + canonical address: this site's own (plain b) image and URL.
-s = s.replace('https://bwalletx.com/og-v2.png', 'https://www.bwallet.space/og-v2.png')
+s = s.replace('https://bwalletx.com/og-home.png', 'https://www.bwallet.space/og-home.png')
 s = s.replace('<meta property="og:url" content="https://bwalletx.com/" />', '<meta property="og:url" content="https://www.bwallet.space/" />')
 s = s.replace('a gold b with an X', 'a gold b')
 s = s.replace('<link rel="canonical" href="https://bwalletx.com/" />', '<link rel="canonical" href="https://www.bwallet.space/" />')
+
+# The store app's colours are flipped (owner, 4 Oct 2026): black on yellow navbar.
+s = s.replace('</head>', '''    <style>
+      .topbar { background: #F5B800 !important; backdrop-filter: none; }
+      .topbar .brand span, .topbar nav a { color: #010101 !important; }
+      .topbar nav a:hover, .topbar nav a[aria-current='page'] { color: #000 !important; text-decoration: underline; }
+      .topbar .dl-btn { background: #010101 !important; color: #F5B800 !important; box-shadow: none !important; }
+      .topbar .nav-cta .web-btn { color: #010101 !important; border-color: #010101 !important; }
+      .section-nav { background: #F5B800; }
+      .section-nav a { background: rgba(0,0,0,0.08) !important; color: #010101 !important; border-color: rgba(0,0,0,0.15) !important; }
+    </style>
+  </head>''', 1)
 
 open(dst, 'w', encoding='utf-8').write(s)
 print(f'store-site: wrote {dst}')
