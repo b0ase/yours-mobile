@@ -15,6 +15,12 @@ const memStore = () => {
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === 'plain') ??
       [...aliases.values()].find((r) => r.identity_key === k) ??
       null,
+    countUncollected: async (a) => [...pays.values()].filter((p) => p.alias === a && p.status === 'received').length,
+    deleteAlias: async (a) => {
+      for (const [r, p] of pays) if (p.alias === a) pays.delete(r);
+      aliases.delete(a);
+    },
+    listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
     upsertAlias: async (r) => (aliases.set(r.alias, { ...r }), r),
@@ -128,8 +134,18 @@ describe('register', () => {
     expect(store.aliases.get('w-x.x').kind).toBe('x');
     // The verified name is now the wallet's identity, and it can't take another plain name.
     expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('w-x.x');
+    // Both names are listed, so the older plain one never receives invisibly.
+    expect((await h.lookup({ key: w.identityKey }))[1].names).toEqual([
+      { paymail: 'wplain@pay.test', kind: 'plain', main: false },
+      { paymail: 'w-x.x@pay.test', kind: 'x', main: true },
+    ]);
     expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(409);
     expect(store.aliases.has('wother')).toBe(false);
+    // Unlink: only the owner can, and the next name becomes main.
+    expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(404);
+    expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(200);
+    expect(store.aliases.has('w-x.x')).toBe(false);
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
     // Once taken, the same X name can't be registered to a second wallet.
     expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
     expect(pm.socialAliasFor('x', 'B0ase_X')).toBe('b0ase-x.x');

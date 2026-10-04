@@ -24,6 +24,7 @@ const ROUTES = {
   inbox: ['POST', 'inbox'],
   ack: ['POST', 'ack'],
   delete: ['POST', 'delete'],
+  unlink: ['POST', 'unlink'],
 };
 
 const hits = new Map();

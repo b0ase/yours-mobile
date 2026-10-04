@@ -111,6 +111,27 @@ export const lookupPaymail = async (f: Fetch, identityKey: string): Promise<stri
   return typeof j?.paymail === 'string' ? j.paymail : undefined;
 };
 
+export type WalletName = { paymail: string; kind: 'plain' | 'x' | 'gmail'; main: boolean };
+
+/** Every paymail that receives for this identity key, main one flagged (public lookup). */
+export const listPaymails = async (f: Fetch, identityKey: string): Promise<WalletName[]> => {
+  if (!paymailEnabled()) return [];
+  const r = await f(`${api('lookup')}?key=${identityKey}`);
+  if (!r.ok) return [];
+  const j = await r.json().catch(() => null);
+  if (Array.isArray(j?.names)) return j.names as WalletName[];
+  return typeof j?.paymail === 'string' ? [{ paymail: j.paymail, kind: 'plain', main: true }] : [];
+};
+
+/** Unlink one of this wallet's names; it becomes free for anyone. */
+export const unlinkPaymail = async (
+  f: Fetch,
+  wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
+  paymail: string,
+): Promise<void> => {
+  await postJson(f, api('unlink'), await signRequest(wallet, 'unlink', { alias: paymail.split('@')[0] }));
+};
+
 /** Is `alias@domain` free? (pki 404 = free) */
 export const paymailAvailable = async (f: Fetch, alias: string): Promise<boolean> => {
   const r = await f(api(`id/${alias}@${BWALLET_PAYMAIL_DOMAIN}`));

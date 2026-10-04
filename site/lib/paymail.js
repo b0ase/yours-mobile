@@ -349,7 +349,11 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       // The wallet's identity: its verified social name wins over an older plain one.
       const row =
         (await store.getAliasByKeyKind?.(key, 'x')) || (await store.getAliasByKeyKind?.(key, 'gmail')) || (await store.getAliasByKey(key));
-      return row ? [200, { paymail: handleOf(row.alias), alias: row.alias }] : [404, { error: 'not-found' }];
+      if (!row) return [404, { error: 'not-found' }];
+      // All names that receive for this wallet, so none is invisible (owner, 4 Oct 2026).
+      const all = store.listByKey ? await store.listByKey(key) : [row];
+      const names = all.map((r) => ({ paymail: handleOf(r.alias), kind: r.kind || 'plain', main: r.alias === row.alias }));
+      return [200, { paymail: handleOf(row.alias), alias: row.alias, names }];
     },
 
     inbox: async (_q, body) => {
@@ -400,6 +404,20 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
     // Account deletion (Apple 5.1.1(v), Google Play): removes the alias and every inbox row for
     // this identity key. The wallet collects the inbox first, so no uncollected payment's
     // derivation data is lost. On-chain payments themselves are unaffected.
+    // Unlink one of this wallet's names (Settings › Identity). The name becomes free for anyone.
+    unlink: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'unlink', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const key = String(body.identityKey).toLowerCase();
+      const row = alias ? await store.getAlias(alias) : null;
+      if (!row || String(row.identity_key).toLowerCase() !== key) return [404, { error: 'That name is not on this wallet' }];
+      if (store.countUncollected && (await store.countUncollected(alias)) > 0)
+        return [409, { error: 'A payment to this name is still arriving. Open the wallet to collect it, then try again.' }];
+      await store.deleteAlias(alias);
+      return [200, { unlinked: handleOf(alias) }];
+    },
+
     delete: async (_q, body) => {
       const sigErr = await verifySigned(body || {}, 'delete', now());
       if (sigErr) return [401, { error: sigErr }];

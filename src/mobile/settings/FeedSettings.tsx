@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { WalletNames } from './WalletNames';
 import { socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
@@ -436,10 +437,11 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       </Section>
       {socialLoginEnabled() && (
         <Section title="Identity">
+          <WalletNames />
           <Row
             icon={<BadgeCheck size={16} />}
             label="Connect X or Google"
-            description="Get a verified name like yourname.x, alongside your current one"
+            description="Get a verified name like yourname.x; it becomes the main name"
             onClick={() => setScreen('social')}
             isFirst
             isLast

@@ -26,6 +26,9 @@ function supabaseStore(env = process.env, f = fetch) {
     getAliasByKey: async (k) =>
       (await one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.plain&limit=1`)) ??
       one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&limit=1`),
+    // Every name that receives for this wallet (Settings › Identity shows them all).
+    listByKey: async (k) =>
+      (await req(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&select=alias,kind&order=created_at.asc&limit=50`)) || [],
     getAliasByKeyKind: (k, kind) => one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.${q(kind)}&limit=1`),
     // Verified social names (alias ends .x / .gmail), for the bWalletX Market "X Accounts" filter.
     listSocial: async (suffix) =>
@@ -62,6 +65,13 @@ function supabaseStore(env = process.env, f = fetch) {
       (await req(
         `bwallet_paymail_payments?identity_key=eq.${q(k)}&status=eq.received&order=received_at.asc&limit=50`,
       )) ?? [],
+    // Unlink one name: its payment records go too (FK on alias). Callers refuse while any is uncollected.
+    countUncollected: async (alias) =>
+      ((await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&status=eq.received&select=reference`)) ?? []).length,
+    deleteAlias: async (alias) => {
+      await req(`bwallet_paymail_payments?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+    },
     deleteByKey: async (k) => {
       const del = async (table) =>
         (await req(`${table}?identity_key=eq.${q(k)}`, {
