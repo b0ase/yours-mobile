@@ -5,6 +5,7 @@ import {
   bcorpFeeAddress,
   marketFiltersFor,
   marketTradingEnabled,
+  marketLabel,
   isBWalletX,
   appNameFor,
   mintChoicesFor,
@@ -70,5 +71,9 @@ describe('storeBuild', () => {
     expect(isBWalletX(false)).toBe(true);
     expect(appNameFor(true)).toBe('bWallet');
     expect(appNameFor(false)).toBe('bWalletX');
+  });
+  test('marketLabel: Exchange in bWalletX, Market in the store app', () => {
+    expect(marketLabel(false)).toBe('Exchange');
+    expect(marketLabel(true)).toBe('Market');
   });
 });

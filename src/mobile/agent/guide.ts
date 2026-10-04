@@ -23,7 +23,7 @@ Market: buy NFTs (music, video, images, documents) and BSV-21 tokens and tickets
 Wallet: a switch at the top picks the view.
 - Tokens: BSV, MNEE, locked BSV and BSV-21 tokens with balances.
 - NFTs: your 1Sat ordinals shown as a media library (music, video, images).
-- Tickets: tokens that get you into a room. Send one ticket to invite someone. Sell tickets you hold from the ticket's menu (Sell); the listing appears on the Market and can be cancelled.
+- Tickets: tokens that get you into a room. Send one ticket to invite someone. Sell tickets you hold from the ticket's menu (Sell); the listing appears on the Exchange (called Market in the App Store version) and can be cancelled.
 - Send: tap Send, enter an address, a paymail (name@domain) or a bWallet name, the amount, then review and confirm.
 - Receive: tap Receive to show your address/QR code and your paymail.
 - Mint: the Mint button creates an NFT from a photo, video, song or document, or "Start a room" mints a ticket token (name, supply, optional event date and price). The cost (network fee, plus any clearly labelled mint fee) is shown before confirming.

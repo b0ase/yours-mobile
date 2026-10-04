@@ -27,7 +27,7 @@ import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
-import { STORE_ROOM_NOTE, tokenRoomsEnabled } from '../storeBuild';
+import { STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -1836,7 +1836,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                       className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
                       style={{ background: GOLD, color: '#1a1300' }}
                     >
-                      <ShoppingCart size={15} /> Market
+                      <ShoppingCart size={15} /> {marketLabel()}
                     </button>
                   </div>
                 )}

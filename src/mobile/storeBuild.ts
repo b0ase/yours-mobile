@@ -65,6 +65,9 @@ export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;
 export const isBWalletX = (store = STORE_BUILD) => !store;
 export const appNameFor = (store = STORE_BUILD) => (store ? 'bWallet' : 'bWalletX');
 
+/** The trading tab: "Exchange" in bWalletX (it trades, hence the X), "Market" in the store app (browse only). */
+export const marketLabel = (store = STORE_BUILD) => (store ? 'Market' : 'Exchange');
+
 /**
  * "Continue with X / Google" on Create Account: bWalletX only for now. App Review guideline 4.8
  * (offer Sign in with Apple beside a third-party login) may apply; switch on once that's settled.

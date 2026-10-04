@@ -3,7 +3,7 @@ import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { BappFrameHost } from '../bappFrame/BappFrameHost';
-import { indexingEnabled } from '../storeBuild';
+import { indexingEnabled, marketLabel } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
 /**
@@ -12,7 +12,7 @@ import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
  */
 const TAB_INFO: Record<string, { label: string; icon: typeof Wallet }> = {
   bsv: { label: 'Wallet', icon: Wallet },
-  market: { label: 'Market', icon: Store },
+  market: { label: marketLabel(), icon: Store },
   browser: { label: 'Apps', icon: LayoutGrid },
   feed: { label: 'Feed', icon: Newspaper },
   chat: { label: 'Chat', icon: MessageCircle },

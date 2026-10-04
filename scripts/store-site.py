@@ -29,6 +29,14 @@ def resub(pat, new, flags=re.S):
 
 X_LINK = '<a href="https://bwalletx.com" class="gold">bWalletX</a>'
 
+# bWalletX calls it the Exchange (it trades); the store app's tab is Market (browse only).
+for a, b in [('an exchange for tokens and NFTs, the bApps store', 'a market to browse tokens and NFTs, the bApps store'),
+             ('<a href="#market">Exchange</a>', '<a href="#market">Market</a>'),
+             ('Wallet, Exchange, Apps, Media and Chat', 'Wallet, Market, Apps, Media and Chat'),
+             ('<span>Exchange</span><span>Apps</span>', '<span>Market</span><span>Apps</span>'),
+             ('<p class="eyebrow">Exchange</p>', '<p class="eyebrow">Market</p>')]:
+    sub(a, b)
+
 # Market: browse only.
 sub('then buy or\n              list from your wallet.', 'and view\n              them in your wallet.')
 sub('<h2>Tokens and NFTs, filtered for safety.</h2>', '<h2>Browse tokens and NFTs, filtered for safety.</h2>')

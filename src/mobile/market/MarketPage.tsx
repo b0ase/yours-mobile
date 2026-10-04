@@ -44,7 +44,7 @@ import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
 import { BAPPS } from '../bapps';
-import { marketFiltersFor, marketTradingEnabled } from '../storeBuild';
+import { marketFiltersFor, marketLabel, marketTradingEnabled } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel, openTicketRoomInChat } from '../tickets/TicketsPanel';
@@ -929,7 +929,7 @@ const MarketPage = () => {
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-white flex items-center gap-1.5">
-            <Flame size={18} style={{ color: '#A1FF8B' }} /> Market
+            <Flame size={18} style={{ color: '#A1FF8B' }} /> {marketLabel()}
           </h1>
         </div>
         {section === 'trending' && !room && categoryTiles}
