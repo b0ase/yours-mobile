@@ -157,7 +157,11 @@ const BCORP_TEXT: Swaps = {
     ['Official storage partner of Yours Wallet.', 'Default wallet storage provider.'],
   ],
   'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bWallet"']],
-  'src/components/YoursIcon.tsx': [['alt="Yours Head"', 'alt="bWallet"']],
+  // Alt text follows the app (it shows in copied text and screen readers): bWalletX, or bWallet in store builds.
+  'src/components/YoursIcon.tsx': [
+    ["import { useState, useRef, useEffect } from 'react';", "import { useState, useRef, useEffect } from 'react';\nimport { appNameFor } from '../mobile/storeBuild';"],
+    ['alt="Yours Head"', 'alt={appNameFor()}'],
+  ],
   'src/pages/requests/UsbCheckRequest.tsx': [['is asking Yours to', 'is asking bWallet to']],
   'src/pages/onboarding/RestoreAccount.tsx': [
     ['alt="Yours"', 'alt="bWallet"'],
