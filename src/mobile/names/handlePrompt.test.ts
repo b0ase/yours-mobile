@@ -6,6 +6,7 @@ import {
   shouldShowCard,
   shouldShowOnboarding,
   suggestHandle,
+  isPlaceholderName,
 } from './handlePrompt';
 
 describe('handle prompt', () => {
@@ -43,6 +44,11 @@ describe('handle prompt', () => {
     expect(shouldShowCard(true, false, false)).toBe(false);
     expect(shouldShowCard(false, true, false)).toBe(false);
     expect(shouldShowCard(false, false, true)).toBe(false);
+  });
+
+  test('isPlaceholderName: defaults nobody chose are never shown as a name', () => {
+    for (const n of ['Anonymous', 'anon', 'Account 1', 'account', '', '  ', 'bWalletX', 'Yours']) expect(isPlaceholderName(n)).toBe(true);
+    for (const n of ['Richard', 'b0asex', 'Anon Ymous']) expect(isPlaceholderName(n)).toBe(false);
   });
 
   test('suggestHandle prefers the profile name and skips default account names', () => {

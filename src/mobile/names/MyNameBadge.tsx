@@ -3,6 +3,7 @@ import { Copy } from 'lucide-react';
 import { bareName } from './names';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getMyName } from './myName';
+import { isPlaceholderName } from './handlePrompt';
 import { getCachedProfileName, getPaymail, onAccountNamesChange, payableLabel, syncAccountNames } from './accountName';
 
 export type AccountNames = {
@@ -20,10 +21,15 @@ export type AccountNames = {
 
 /** Names for an account from the cache (no network). Also used for the drawer rows of other accounts. */
 export const accountNamesFor = (identityAddress?: string, accountName = '', profileName = ''): AccountNames => {
-  const displayName = getCachedProfileName(identityAddress) || profileName || accountName;
   const handle = getMyName(identityAddress);
   const paymail = getPaymail(identityAddress);
   const short = bareName(paymail);
+  // A placeholder ("Anonymous", "Account 1") is never shown as the name: the paymail name wins over it.
+  const displayName =
+    [getCachedProfileName(identityAddress), profileName, accountName].find((n) => n && !isPlaceholderName(n)) ||
+    short ||
+    handle ||
+    accountName;
   return { displayName, handle, paymail, payable: short || handle, label: payableLabel(displayName, handle, short) };
 };
 
