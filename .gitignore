@@ -48,3 +48,10 @@ scripts/.build-meta.json
 smoke-screens/
 /dist
 /build-web
+
+# Screenshots never go in git (open-source repo; owner rule)
+screenshots/
+Screenshot*.png
+Screen Shot*.png
+/s[0-9]*.png
+*.screenshot.png
