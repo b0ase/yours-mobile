@@ -1196,3 +1196,10 @@ a.btn-store {
   color: var(--gold-hi);
   border: 1px solid rgba(245, 184, 0, 0.6);
 }
+
+/* Sub-pages: clear the fixed beta banner + topbar so the b logo isn't tucked under them (owner, 5 Oct 2026).
+   On phones the nav drops to its own row, so the header is taller there. */
+main.ext { padding-top: 150px !important; }
+@media (max-width: 859px) {
+  main.ext { padding-top: 172px !important; }
+}
