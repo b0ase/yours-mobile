@@ -61,7 +61,7 @@ export const handleFromLabel = (label: string | null | undefined): string | null
   const s = (label || '').trim().toLowerCase();
   const h = s.match(/^\$([a-z0-9_.-]{1,50})$/);
   if (h) return h[1];
-  const p = s.match(/^([a-z0-9_.-]{1,64})@bwallet\.space$/);
+  const p = s.match(/^([a-z0-9_.-]{1,64})@(?:bwalletx\.com|bwallet\.space)$/);
   return p ? p[1] : null;
 };
 
@@ -188,7 +188,7 @@ export type DmTarget = { kind: 'handle'; handle: string } | { kind: 'invalid'; r
  */
 export const parseDmTarget = (raw: string): DmTarget => {
   const s = raw.trim().toLowerCase();
-  if (!s) return { kind: 'invalid', reason: 'Type a $handle or name@bwallet.space' };
+  if (!s) return { kind: 'invalid', reason: 'Type a $handle or name@bwalletx.com' };
   const h = handleFromLabel(s) ?? (/^[a-z0-9_.-]{1,50}$/.test(s) ? s : null);
   if (h) return { kind: 'handle', handle: h };
   if (s.includes('@')) return { kind: 'invalid', reason: 'Only bWallet / bChat names can be messaged for now' };

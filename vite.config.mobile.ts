@@ -483,9 +483,10 @@ export const MOBILE_DEFINES = {
   __MARKET_REPORT_URL__: JSON.stringify(
     process.env.BWALLET_MARKET_REPORT_URL ?? 'https://www.bitcoinchat.online/api/bitsign/report',
   ),
-  // bWallet paymail (src/mobile/names/config.ts): name@bwallet.space, served by pay.bwallet.space.
+  // bWallet paymail (src/mobile/names/config.ts): name@bwalletx.com (owner, 4 Oct 2026; bwallet.space stays an
+  // alias for every name), both served by pay.bwallet.space (PAYMAIL_DOMAINS).
   // Set BWALLET_PAYMAIL_DOMAIN='' to build with paymail off.
-  __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'bwallet.space'),
+  __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'bwalletx.com'),
   __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.bwallet.space'),
 };
 

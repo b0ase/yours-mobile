@@ -312,7 +312,7 @@ export const DmsPage = ({
           <div className="px-8 pt-14 text-center">
             <p className="text-sm text-white font-semibold">No messages yet</p>
             <p className="text-xs mt-1" style={{ color: MUTED }}>
-              Message a contact, a $handle or a name@bwallet.space.
+              Message a contact, a $handle or a name@bwalletx.com.
             </p>
             <button
               onClick={() => setSheet('new')}
@@ -377,7 +377,7 @@ export const DmsPage = ({
                 setProblem('');
               }}
               onKeyDown={(e) => e.key === 'Enter' && messageTyped()}
-              placeholder="$handle, name@bwallet.space or a contact"
+              placeholder="$handle, name@bwalletx.com or a contact"
               autoCapitalize="none"
               autoCorrect="off"
               className="flex-1 bg-transparent py-2 text-sm text-white outline-none"

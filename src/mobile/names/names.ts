@@ -1,6 +1,6 @@
 import validate from 'bitcoin-address-validation';
 import { Utils } from '@bsv/sdk';
-import { BWALLET_PAYMAIL_DOMAIN } from './config';
+import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -304,8 +304,12 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
  */
 export const bareName = (name: string, domain: string = BWALLET_PAYMAIL_DOMAIN) => {
   if (!name || !domain) return name;
-  const suffix = `@${domain.toLowerCase()}`;
-  return name.toLowerCase().endsWith(suffix) && name.length > suffix.length ? name.slice(0, -suffix.length) : name;
+  // bwallet.space is the earlier domain; every name answers there too.
+  for (const d of new Set([domain.toLowerCase(), ...LEGACY_PAYMAIL_DOMAINS])) {
+    const suffix = `@${d}`;
+    if (name.toLowerCase().endsWith(suffix) && name.length > suffix.length) return name.slice(0, -suffix.length);
+  }
+  return name;
 };
 
 /** bWallet-hosted paymail (name@BWALLET_PAYMAIL_DOMAIN), or undefined when paymail is off (docs/NAMES.md). */

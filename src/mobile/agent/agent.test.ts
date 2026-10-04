@@ -35,7 +35,7 @@ describe('guide', () => {
       'Apps · Market · Wallet · Feed · Chat',
       'Tickets',
       'Sweep from another wallet',
-      'bwallet.space',
+      'bwalletx.com',
       'One-click',
       'seed phrase',
     ])

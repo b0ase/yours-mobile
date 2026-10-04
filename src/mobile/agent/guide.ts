@@ -28,7 +28,7 @@ Wallet: a switch at the top picks the view.
 - Receive: tap Receive to show your address/QR code and your paymail.
 - Mint: the Mint button creates an NFT from a photo, video, song or document, or "Start a room" mints a ticket token (name, supply, optional event date and price). The cost (network fee, plus any clearly labelled mint fee) is shown before confirming.
 
-Names and handles: claim a free name from the Wallet "Get your $name" card. You get the paymail name@bwallet.space (inside bWallet it shows just as "name"; other wallets need the full address) and a personal token $NAME that opens your personal room in Chat. Hold the $NAME token to enter that room; send someone one $NAME token to invite them. Personal tokens are social/access only. Only the token linked to the name shows a check mark (✓); others with the same ticker are not the real one.
+Names and handles: claim a free name from the Wallet "Get your $name" card. You get the paymail name@bwalletx.com (inside bWallet it shows just as "name"; other wallets need the full address) and a personal token $NAME that opens your personal room in Chat. Hold the $NAME token to enter that room; send someone one $NAME token to invite them. Personal tokens are social/access only. Only the token linked to the name shows a check mark (✓); others with the same ticker are not the real one.
 
 Feed: posts from BSV social apps (bChat, Twetch, Treechat and others), with tabs Following, For you and Latest. You can post, reply, quote, like, tip (send sats to the author), lock BSV behind a post (it stays yours and unlocks at the shown date), bookmark, mute, block and report. Bookmarks and Blocked & muted are in Settings › Privacy.
 

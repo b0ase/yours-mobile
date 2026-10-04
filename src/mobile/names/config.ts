@@ -13,3 +13,6 @@ export const BWALLET_PAYMAIL_DOMAIN = clean(typeof __PAYMAIL_DOMAIN__ === 'undef
 export const BWALLET_PAYMAIL_API =
   clean(typeof __PAYMAIL_API__ === 'undefined' ? '' : __PAYMAIL_API__) ||
   (BWALLET_PAYMAIL_DOMAIN ? `https://${BWALLET_PAYMAIL_DOMAIN}` : '');
+
+/** Earlier bWallet paymail domains: every name still answers there (pay.bwallet.space PAYMAIL_DOMAINS). */
+export const LEGACY_PAYMAIL_DOMAINS = ['bwallet.space'];

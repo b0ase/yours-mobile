@@ -21,7 +21,7 @@ const MUTED = '#98A2B3';
 const RED = '#ff6b6b';
 
 const DELETED = [
-  'Your name@bwallet.space paymail and $handle registration',
+  'Your name@bwalletx.com paymail and $handle registration',
   'Your bChat profile, contacts, blocks and chat settings',
   'Your direct messages, and your messages in ordinary chat rooms',
   'Notification tokens, b agent payment quotes, call history and other records tied to your identity key',
