@@ -37,6 +37,7 @@ import { formatNumberWithCommasAndDecimals, formatUSD } from '../utils/format';
 import { sleep } from '../utils/sleep';
 import { isUri } from '../utils/uri';
 import { AssetRow } from '../components/AssetRow';
+import { DefaultTokenCards } from '../mobile/wallet/DefaultTokenCards';
 import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -1420,6 +1421,7 @@ export const BsvWallet = () => {
               }}
             />
           </Show>
+          <DefaultTokenCards />
           {lockData && (
             <Show when={services.locks && lockData.totalLocked > 0}>
               <AssetRow
