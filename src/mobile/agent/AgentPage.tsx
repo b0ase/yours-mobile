@@ -15,6 +15,7 @@ import { MAX_INPUT, SECRET_WARNING, looksLikeSecret, transcript, type AgentMessa
 import { BWALLET_GUIDE } from './guide';
 import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
+import { KeyScreen } from '../settings/AgentSettings';
 import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
 import {
   bitsignPaidBackend,
@@ -133,7 +134,8 @@ const AgentPage = () => {
   const accountId = account?.addresses.identityAddress;
   // bWalletX only: in an agent account b may act, within the account's limits and loaded strategy (agents/agentTrade.ts).
   const system = marketTradingEnabled() ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account') : BWALLET_GUIDE;
-  const [prefs] = useAgentPrefs();
+  const [prefs, setPrefs] = useAgentPrefs();
+  const [keyScreen, setKeyScreen] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -347,6 +349,32 @@ const AgentPage = () => {
       >
         {status}
       </button>
+
+      {/* Own-key nudge (owner, 5 Oct 2026): most people never find Settings › b agent. With their own key, messages
+          go from this device straight to their AI provider instead of through bCorp's paid service. */}
+      {(prefs.mode !== 'own' || keyReady === false) && (
+        <button
+          type="button"
+          onClick={() => setKeyScreen(true)}
+          className="shrink-0 w-full px-4 py-1.5 text-[11px] font-semibold text-left border-0"
+          style={{ background: PANEL, color: GOLD, borderBottom: `1px solid ${LINE}` }}
+        >
+          More private: use your own AI key (Claude, OpenAI or OpenRouter). Messages go straight to them, not through us. Add it here ›
+        </button>
+      )}
+      {keyScreen && (
+        <KeyScreen
+          onBack={() => {
+            setKeyScreen(false);
+            void loadKey(prefs.provider).then((k) => {
+              if (k) {
+                setPrefs({ mode: 'own' });
+                setKeyReady(true);
+              }
+            });
+          }}
+        />
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && (

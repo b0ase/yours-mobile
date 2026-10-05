@@ -80,7 +80,7 @@ const Heading = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-const KeyScreen = ({ onBack }: { onBack: () => void }) => {
+export const KeyScreen = ({ onBack }: { onBack: () => void }) => {
   useBackClose(true, onBack);
   const [prefs, setPrefs] = useAgentPrefs();
   const provider = PROVIDERS[prefs.provider];
