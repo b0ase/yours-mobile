@@ -3185,3 +3185,37 @@ if (isInServiceWorker) {
     }
   });
 }
+
+// ─── bWalletX pairing links ──────────────────────────────────
+// `bwalletx login` prints https://www.bwallet.space/pair?… ; opening it in Chrome hands it to the side
+// panel (src/mobile/pair/links.ts reads PAIR_LINK_KEY), which runs the usual confirm flow. Only the
+// link is passed: the relay session itself runs in the panel, where the wallet keys are.
+const PAIR_LINK_KEY = 'bwalletxPendingPairLink';
+const isPairUrl = (url?: string) => {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return (u.host === 'www.bwallet.space' || u.host === 'bwallet.space') && u.pathname === '/pair' && u.searchParams.has('c');
+  } catch {
+    return false;
+  }
+};
+const seenPairLinks = new Set<string>();
+chrome.tabs?.onUpdated.addListener((tabId, info, tab) => {
+  const url = info.url ?? (info.status === 'loading' ? tab.url : undefined);
+  if (!isPairUrl(url) || seenPairLinks.has(url!)) return;
+  seenPairLinks.add(url!);
+  void chrome.storage.local.set({ [PAIR_LINK_KEY]: url });
+  // sidePanel.open wants a user gesture; a link click usually counts, else the link waits until the panel opens.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sp = (chrome as any).sidePanel;
+  const nudge = () =>
+    chrome.notifications?.create('bwalletx-pair', {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Pairing link received',
+      message: 'Open bWalletX (toolbar icon) to check the code and pair.',
+    });
+  if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
+  else nudge();
+});

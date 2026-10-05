@@ -356,13 +356,25 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   const wal = part !== 'account';
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
-    'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | 'social' | 'agents' | null
+    | 'bookmarks'
+    | 'hidden'
+    | 'terms'
+    | 'delete'
+    | 'sweep'
+    | 'tokens'
+    | 'paired'
+    | 'scan'
+    | 'password'
+    | 'social'
+    | 'agents'
+    | null
   >(null);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
   const [takeCwi, setTakeCwiState] = useState(true);
   useEffect(() => {
-    if (IS_EXTENSION) chrome.storage?.local.get('bwalletxTakeCwi', (r) => setTakeCwiState(r?.bwalletxTakeCwi !== false));
+    if (IS_EXTENSION)
+      chrome.storage?.local.get('bwalletxTakeCwi', (r) => setTakeCwiState(r?.bwalletxTakeCwi !== false));
   }, []);
   const setTakeCwi = (v: boolean) => {
     setTakeCwiState(v);
@@ -417,236 +429,242 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           />
         </Section>
       )}
-      {wal && (<>
-      <Section title="Feed">
-        <Row icon={<Newspaper size={16} />} label="Default feed" description="What the Feed opens to" isFirst />
-        <div className="px-4 pb-3 pl-12">
-          <Pills
-            label="Default feed"
-            options={FEEDS}
-            value={prefs.defaultFeed}
-            onChange={(v) => setPrefs({ defaultFeed: v })}
-          />
-        </div>
-        <Divider />
-        <Row
-          icon={<PlayCircle size={16} />}
-          label="Video autoplay"
-          description={prefs.autoplay ? 'Videos play muted as you scroll' : 'Videos wait for a tap'}
-          right={<Toggle label="Video autoplay" on={prefs.autoplay} onChange={(v) => setPrefs({ autoplay: v })} />}
-        />
-        <Divider />
-        <Row
-          icon={<Sparkles size={16} />}
-          label="Animated backgrounds"
-          description={
-            prefs.animatedBackgrounds
-              ? 'Gold motion behind Wallet, Apps and Feed'
-              : 'Still images behind Wallet, Apps and Feed'
-          }
-          right={
-            <Toggle
-              label="Animated backgrounds"
-              on={prefs.animatedBackgrounds}
-              onChange={(v) => setPrefs({ animatedBackgrounds: v })}
-            />
-          }
-          isLast
-        />
-      </Section>
-      <Section title="Payments">
-        <Row
-          icon={<Zap size={16} />}
-          label="One-click pay"
-          description={
-            prefs.oneClick
-              ? `Tips and locks up to ${money(prefs.oneClickLimit, rate)}${hasRate(rate) ? ` (${prefs.oneClickLimit.toLocaleString()} sats)` : ''} skip the confirm (max ${MAX_PER_MINUTE} a minute)`
-              : 'Always confirm tips and locks'
-          }
-          right={<Toggle label="One-click pay" on={prefs.oneClick} onChange={(v) => setPrefs({ oneClick: v })} />}
-          isFirst
-          isLast={!prefs.oneClick}
-        />
-        {prefs.oneClick && (
-          <>
+      {wal && (
+        <>
+          <Section title="Feed">
+            <Row icon={<Newspaper size={16} />} label="Default feed" description="What the Feed opens to" isFirst />
+            <div className="px-4 pb-3 pl-12">
+              <Pills
+                label="Default feed"
+                options={FEEDS}
+                value={prefs.defaultFeed}
+                onChange={(v) => setPrefs({ defaultFeed: v })}
+              />
+            </div>
             <Divider />
             <Row
-              icon={<Zap size={16} />}
-              label="Limit per action"
+              icon={<PlayCircle size={16} />}
+              label="Video autoplay"
+              description={prefs.autoplay ? 'Videos play muted as you scroll' : 'Videos wait for a tap'}
+              right={<Toggle label="Video autoplay" on={prefs.autoplay} onChange={(v) => setPrefs({ autoplay: v })} />}
+            />
+            <Divider />
+            <Row
+              icon={<Sparkles size={16} />}
+              label="Animated backgrounds"
               description={
-                hasRate(rate)
-                  ? 'Anything above this asks first (USD at today’s BSV price)'
-                  : 'Anything above this asks first (sats; USD price unavailable)'
+                prefs.animatedBackgrounds
+                  ? 'Gold motion behind Wallet, Apps and Feed'
+                  : 'Still images behind Wallet, Apps and Feed'
+              }
+              right={
+                <Toggle
+                  label="Animated backgrounds"
+                  on={prefs.animatedBackgrounds}
+                  onChange={(v) => setPrefs({ animatedBackgrounds: v })}
+                />
+              }
+              isLast
+            />
+          </Section>
+          <Section title="Payments">
+            <Row
+              icon={<Zap size={16} />}
+              label="One-click pay"
+              description={
+                prefs.oneClick
+                  ? `Tips and locks up to ${money(prefs.oneClickLimit, rate)}${hasRate(rate) ? ` (${prefs.oneClickLimit.toLocaleString()} sats)` : ''} skip the confirm (max ${MAX_PER_MINUTE} a minute)`
+                  : 'Always confirm tips and locks'
+              }
+              right={<Toggle label="One-click pay" on={prefs.oneClick} onChange={(v) => setPrefs({ oneClick: v })} />}
+              isFirst
+              isLast={!prefs.oneClick}
+            />
+            {prefs.oneClick && (
+              <>
+                <Divider />
+                <Row
+                  icon={<Zap size={16} />}
+                  label="Limit per action"
+                  description={
+                    hasRate(rate)
+                      ? 'Anything above this asks first (USD at today’s BSV price)'
+                      : 'Anything above this asks first (sats; USD price unavailable)'
+                  }
+                  isLast
+                />
+                <div className="px-4 pb-3 pl-12">
+                  <Pills
+                    label="One-click limit"
+                    options={limits}
+                    value={prefs.oneClickLimit}
+                    onChange={(v) => setPrefs({ oneClickLimit: v })}
+                  />
+                </div>
+              </>
+            )}
+          </Section>
+          {isBWalletX() && (
+            <Section title="Agents">
+              <Row
+                icon={<Bot size={16} />}
+                label="Agent accounts"
+                description="Accounts your AI agents can use, with their own budget. Stop, fund, sweep back."
+                onClick={() => setScreen('agents')}
+                isFirst
+                isLast
+              />
+            </Section>
+          )}
+          {IS_EXTENSION && (
+            <Section title="Websites">
+              <Row
+                icon={<Globe size={16} />}
+                label="Be the wallet websites connect to"
+                description={
+                  takeCwi
+                    ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
+                    : 'Another wallet (e.g. Yours) answers sites without a picker'
+                }
+                right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}
+                isFirst
+                isLast
+              />
+            </Section>
+          )}
+          <Section title="Security">
+            <Row
+              icon={<LockKeyhole size={16} />}
+              label="Change password"
+              description="One password unlocks every account (no old password needed while unlocked)"
+              onClick={() => setScreen('password')}
+              isFirst
+              isLast
+            />
+          </Section>
+          <Section title="Token indexing">
+            <Row
+              icon={<Zap size={16} />}
+              label="One-tap indexing fee"
+              isFirst
+              description={
+                prefs.indexAutoPayUsd
+                  ? `Your own tokens' indexing fee pays on one tap when under $${prefs.indexAutoPayUsd.toFixed(2)}`
+                  : "Always confirm your tokens' indexing fee"
               }
               isLast
             />
             <div className="px-4 pb-3 pl-12">
               <Pills
-                label="One-click limit"
-                options={limits}
-                value={prefs.oneClickLimit}
-                onChange={(v) => setPrefs({ oneClickLimit: v })}
+                label="One-tap indexing limit"
+                options={INDEX_AUTOPAY_USD.map((v) => ({ id: v, label: v ? `$${v.toFixed(2)}` : 'Off' }))}
+                value={prefs.indexAutoPayUsd}
+                onChange={(v) => setPrefs({ indexAutoPayUsd: v })}
               />
             </div>
-          </>
-        )}
-      </Section>
-      {isBWalletX() && (
-        <Section title="Agents">
-          <Row
-            icon={<Bot size={16} />}
-            label="Agent accounts"
-            description="Accounts your AI agents can use, with their own budget. Stop, fund, sweep back."
-            onClick={() => setScreen('agents')}
-            isFirst
-            isLast
-          />
-        </Section>
-      )}
-      {IS_EXTENSION && (
-        <Section title="Websites">
-          <Row
-            icon={<Globe size={16} />}
-            label="Be the wallet websites connect to"
-            description={
-              takeCwi
-                ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
-                : 'Another wallet (e.g. Yours) answers sites without a picker'
-            }
-            right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}
-            isFirst
-            isLast
-          />
-        </Section>
-      )}
-      <Section title="Security">
-        <Row
-          icon={<LockKeyhole size={16} />}
-          label="Change password"
-          description="One password unlocks every account (no old password needed while unlocked)"
-          onClick={() => setScreen('password')}
-          isFirst
-          isLast
-        />
-      </Section>
-      <Section title="Token indexing">
-        <Row
-          icon={<Zap size={16} />}
-          label="One-tap indexing fee"
-          isFirst
-          description={
-            prefs.indexAutoPayUsd
-              ? `Your own tokens' indexing fee pays on one tap when under $${prefs.indexAutoPayUsd.toFixed(2)}`
-              : "Always confirm your tokens' indexing fee"
-          }
-          isLast
-        />
-        <div className="px-4 pb-3 pl-12">
-          <Pills
-            label="One-tap indexing limit"
-            options={INDEX_AUTOPAY_USD.map((v) => ({ id: v, label: v ? `$${v.toFixed(2)}` : 'Off' }))}
-            value={prefs.indexAutoPayUsd}
-            onChange={(v) => setPrefs({ indexAutoPayUsd: v })}
-          />
-        </div>
-      </Section>
-      <Section title="Notifications">
-        {CATEGORIES.map((c, i) => (
-          <div key={c}>
-            {i > 0 && <Divider />}
+          </Section>
+          <Section title="Notifications">
+            {CATEGORIES.map((c, i) => (
+              <div key={c}>
+                {i > 0 && <Divider />}
+                <Row
+                  icon={<Bell size={16} />}
+                  label={CATEGORY_LABELS[c].label}
+                  description={CATEGORY_LABELS[c].description}
+                  right={
+                    <Toggle
+                      label={CATEGORY_LABELS[c].label}
+                      on={prefs.notify[c]}
+                      onChange={(v) => {
+                        setPrefs({ notify: { ...prefs.notify, [c]: v } });
+                        if (v) void askNotifyPermissionOnce();
+                      }}
+                    />
+                  }
+                  isFirst={i === 0}
+                />
+              </div>
+            ))}
+            <Divider />
             <Row
               icon={<Bell size={16} />}
-              label={CATEGORY_LABELS[c].label}
-              description={CATEGORY_LABELS[c].description}
+              label="Your Twetch user number"
+              description="From twetch.com/u/<number>: lets replies and likes on your Twetch posts reach you"
               right={
-                <Toggle
-                  label={CATEGORY_LABELS[c].label}
-                  on={prefs.notify[c]}
-                  onChange={(v) => {
-                    setPrefs({ notify: { ...prefs.notify, [c]: v } });
-                    if (v) void askNotifyPermissionOnce();
-                  }}
+                <input
+                  inputMode="numeric"
+                  aria-label="Twetch user number"
+                  placeholder="e.g. 13"
+                  defaultValue={prefs.twetchUserId}
+                  onBlur={(e) => setPrefs({ twetchUserId: e.target.value.replace(/\D/g, '') })}
+                  className="w-20 rounded-lg px-2 py-1 text-sm text-white text-right outline-none"
+                  style={{ background: PANEL, border: `1px solid ${LINE}` }}
                 />
               }
-              isFirst={i === 0}
+              isLast
             />
-          </div>
-        ))}
-        <Divider />
-        <Row
-          icon={<Bell size={16} />}
-          label="Your Twetch user number"
-          description="From twetch.com/u/<number>: lets replies and likes on your Twetch posts reach you"
-          right={
-            <input
-              inputMode="numeric"
-              aria-label="Twetch user number"
-              placeholder="e.g. 13"
-              defaultValue={prefs.twetchUserId}
-              onBlur={(e) => setPrefs({ twetchUserId: e.target.value.replace(/\D/g, '') })}
-              className="w-20 rounded-lg px-2 py-1 text-sm text-white text-right outline-none"
-              style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          </Section>
+          <AgentSettings Section={Section} Row={Row} Divider={Divider} />
+          <Section title="Privacy">
+            <Row
+              icon={<Bookmark size={16} />}
+              label="Bookmarks"
+              description="Posts you saved on this device"
+              onClick={() => setScreen('bookmarks')}
+              isFirst
             />
+            <Divider />
+            <Row
+              icon={<Ban size={16} />}
+              label="Blocked & muted"
+              description="Unblock or unmute accounts"
+              onClick={() => setScreen('hidden')}
+              isLast
+            />
+          </Section>
+          {
+            <Section title="Connections">
+              {/* One tap to the camera (owner, 6 Oct 2026: couldn't find how to link the CLI to an agent account). */}
+              <Row
+                icon={<ScanLine size={16} />}
+                label={IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect'}
+                description={
+                  IS_EXTENSION
+                    ? 'Pair the bWalletX CLI or an AI assistant (MCP): paste the link from bwalletx login'
+                    : 'Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code'
+                }
+                onClick={() => setScreen('scan')}
+                isFirst
+              />
+              <Divider />
+              <Row
+                icon={<Globe size={16} />}
+                label="Paired computers & websites"
+                description="What's connected to this account, and what each may do"
+                onClick={() => setScreen('paired')}
+                isLast
+              />
+            </Section>
           }
-          isLast
-        />
-      </Section>
-      <AgentSettings Section={Section} Row={Row} Divider={Divider} />
-      <Section title="Privacy">
-        <Row
-          icon={<Bookmark size={16} />}
-          label="Bookmarks"
-          description="Posts you saved on this device"
-          onClick={() => setScreen('bookmarks')}
-          isFirst
-        />
-        <Divider />
-        <Row
-          icon={<Ban size={16} />}
-          label="Blocked & muted"
-          description="Unblock or unmute accounts"
-          onClick={() => setScreen('hidden')}
-          isLast
-        />
-      </Section>
-      {!IS_EXTENSION && (
-        <Section title="Connections">
-          {/* One tap to the camera (owner, 6 Oct 2026: couldn't find how to link the CLI to an agent account). */}
-          <Row
-            icon={<ScanLine size={16} />}
-            label="Scan to connect"
-            description="Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code"
-            onClick={() => setScreen('scan')}
-            isFirst
-          />
-          <Divider />
-          <Row
-            icon={<Globe size={16} />}
-            label="Paired computers & websites"
-            description="What's connected to this account, and what each may do"
-            onClick={() => setScreen('paired')}
-            isLast
-          />
-        </Section>
+          <Section title="Help & safety">
+            <Row
+              icon={<FileText size={16} />}
+              label="Terms of use"
+              isFirst
+              description="Zero tolerance for objectionable content and abusive users"
+              onClick={() => setScreen('terms')}
+            />
+            <Divider />
+            <Row
+              icon={<Mail size={16} />}
+              label="Contact and reports"
+              description={SUPPORT_EMAIL}
+              onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
+              isLast
+            />
+          </Section>
+        </>
       )}
-      <Section title="Help & safety">
-        <Row
-          icon={<FileText size={16} />}
-          label="Terms of use"
-          isFirst
-          description="Zero tolerance for objectionable content and abusive users"
-          onClick={() => setScreen('terms')}
-        />
-        <Divider />
-        <Row
-          icon={<Mail size={16} />}
-          label="Contact and reports"
-          description={SUPPORT_EMAIL}
-          onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
-          isLast
-        />
-      </Section>
-      </>)}
       {screen === 'terms' && <TermsScreen onBack={() => setScreen(null)} />}
       {screen === 'delete' && <DeleteAccountScreen onBack={() => setScreen(null)} />}
       {screen === 'sweep' && <HdSweepScreen onBack={() => setScreen(null)} />}

@@ -57,7 +57,6 @@ export const TopNav = () => {
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
   useEffect(() => {
-    if (IS_EXTENSION) return;
     const show = () => {
       const url = takePairLink();
       if (url) {
@@ -68,9 +67,10 @@ export const TopNav = () => {
     show();
     return onPairLink(show);
   }, []);
-  // Phone pairing (QR from a desktop site): reconnect paired sites. The extension is itself on the desktop.
+  // Reconnect paired sites / CLIs. In the extension the sessions live in this page (side panel), since the
+  // wallet keys and context only exist here; the background worker only hands over pair links (links.ts).
   useEffect(() => {
-    if (!IS_EXTENSION) initPairing();
+    initPairing();
   }, []);
   // Same as upstream TopNav.handleSwitchAccount (shared with the account strip and Settings).
   const { switchingTo, switchAccount: handleSwitchAccount } = useAccountSwitch(() => setDrawer(false));
@@ -80,7 +80,7 @@ export const TopNav = () => {
   const current = accountObj.account?.addresses.identityAddress;
   // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
   useEffect(() => {
-    if (!IS_EXTENSION) setAgentPairDeps({ ctx: apiContext, currentId: current, feeRate: () => chromeStorageService.getCustomFeeRate() });
+    setAgentPairDeps({ ctx: apiContext, currentId: current, feeRate: () => chromeStorageService.getCustomFeeRate() });
   }, [apiContext, current, chromeStorageService]);
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
   const names = useAccountNames(
@@ -235,11 +235,14 @@ export const TopNav = () => {
                     setToolsOpen(true);
                   })}
                 {action(<Download size={16} color="#fff" />, 'Import account', () => go('restore-account'))}
-                {!IS_EXTENSION &&
-                  action(<ScanLine size={16} color="#fff" />, 'Scan to connect a website', () => {
+                {action(
+                  <ScanLine size={16} color="#fff" />,
+                  IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website',
+                  () => {
                     setDrawer(false);
                     setPairOpen(true);
-                  })}
+                  },
+                )}
                 {action(<Settings size={16} color="#fff" />, 'Settings', () => go())}
               </div>
             </motion.div>

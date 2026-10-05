@@ -6,6 +6,7 @@ import { useBackClose } from '../backStack';
 import { beginPairing, type PendingPair } from './sessions';
 import { CliPairConfirm } from './CliPairConfirm';
 import { CLI_ORIGIN } from './agentPairing';
+import { IS_EXTENSION } from '../extension';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -25,6 +26,8 @@ type Stage =
 export default function PairSheet({ onClose, initial }: { onClose: () => void; initial?: string }) {
   const [stage, setStage] = useState<Stage>(initial ? { k: 'joining' } : { k: 'scan' });
   const [paste, setPaste] = useState('');
+  // Extension: a desktop can't scan its own screen, so paste comes first; the webcam is opt-in.
+  const [camera, setCamera] = useState(!IS_EXTENSION);
 
   const close = () => {
     if (stage.k === 'confirm') stage.p.cancel();
@@ -49,21 +52,44 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
         <button onClick={close} aria-label="Back" className="p-2">
           <ArrowLeft size={20} color="white" />
         </button>
-        <span className="text-[16px] font-bold text-white">Connect to a website</span>
+        <span className="text-[16px] font-bold text-white">
+          {IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Connect to a website'}
+        </span>
       </div>
       <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-10">
         {stage.k === 'scan' && (
           <>
-            <Scanner onCode={start} />
-            <p className="mt-4 text-center text-sm" style={{ color: MUTED }}>
-              On your computer, choose <b className="text-white">Use bWallet on your phone</b> and point the camera at
-              the code.
-            </p>
+            {IS_EXTENSION && (
+              <p className="mt-4 text-sm" style={{ color: MUTED }}>
+                On this computer run <span className="font-mono text-white">bwalletx login</span> (or open a site&apos;s
+                pairing link) and paste the link it prints below. Opening a pairing link in Chrome also lands here.
+              </p>
+            )}
+            {camera ? (
+              <Scanner onCode={start} />
+            ) : (
+              <button
+                onClick={() => setCamera(true)}
+                className="mt-4 rounded-xl py-2.5 text-sm font-semibold text-white"
+                style={{ background: PANEL }}
+              >
+                Use webcam to scan a QR code
+              </button>
+            )}
+            {!IS_EXTENSION && (
+              <p className="mt-4 text-center text-sm" style={{ color: MUTED }}>
+                On your computer, choose <b className="text-white">Use bWallet on your phone</b> and point the camera at
+                the code.
+              </p>
+            )}
             <div className="mt-6 flex gap-2">
               <input
                 value={paste}
                 onChange={(e) => setPaste(e.target.value)}
-                placeholder="Or paste a pairing link"
+                placeholder={
+                  IS_EXTENSION ? 'Paste pairing link (https://www.bwallet.space/pair?…)' : 'Or paste a pairing link'
+                }
+                aria-label="Pairing link"
                 className="flex-1 rounded-xl px-3 py-2.5 text-sm text-white outline-none"
                 style={{ background: PANEL, border: '1px solid #2A2A2C' }}
               />
@@ -150,9 +176,16 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
             >
               <Check size={28} color="#2ecc71" />
             </span>
-            <p className="mt-4 text-lg font-bold text-white">{stage.origin === CLI_ORIGIN ? 'Paired with the bWalletX CLI' : `Connected to ${new URL(stage.origin).host}`}</p>
+            <p className="mt-4 text-lg font-bold text-white">
+              {stage.origin === CLI_ORIGIN
+                ? 'Paired with the bWalletX CLI'
+                : `Connected to ${new URL(stage.origin).host}`}
+            </p>
             <p className="mt-2 text-sm" style={{ color: MUTED }}>
-              Keep bWallet open while you use the site. Disconnect any time in Settings › Paired websites.
+              {IS_EXTENSION
+                ? 'Requests are answered while the bWalletX side panel (or tab) is open; with it closed, CLI requests fail until you open it again.'
+                : 'Keep bWallet open while you use the site.'}{' '}
+              Disconnect any time in Settings › Paired websites.
             </p>
             <button
               onClick={onClose}
@@ -175,7 +208,7 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
               className="mt-8 w-full rounded-xl py-3 font-bold"
               style={{ background: GOLD, color: '#000' }}
             >
-              Scan again
+              {IS_EXTENSION ? 'Try again' : 'Scan again'}
             </button>
           </div>
         )}
