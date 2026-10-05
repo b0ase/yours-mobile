@@ -338,7 +338,7 @@ export const BsvWallet = () => {
 
     if (maxKeyIndex > knownMaxKeyIndex) {
       const { account } = chromeStorageService.getCurrentAccountObject();
-      if (account) {
+      if (account && account.addresses?.identityAddress === identityAddress) {
         await chromeStorageService.updateNested('accounts', {
           [identityAddress]: { settings: { ...account.settings, maxKeyIndex } } as unknown as Account,
         });
@@ -376,7 +376,9 @@ export const BsvWallet = () => {
 
       // Update MNEE balance in Chrome storage
       const { account } = chromeStorageService.getCurrentAccountObject();
-      if (!account) return totalDecimal;
+      // `identityAddress` is from this render; after Add account / a switch / during the master backup's account
+      // walk the current account can be another one. Never merge one account's object under another's id.
+      if (!account || account.addresses?.identityAddress !== identityAddress) return totalDecimal;
 
       const key: keyof ChromeStorageObject = 'accounts';
       const update: Partial<ChromeStorageObject['accounts']> = {
