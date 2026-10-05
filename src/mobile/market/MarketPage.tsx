@@ -252,14 +252,16 @@ const MarketPage = () => {
 
   const [loadingBoard, setLoadingBoard] = useState(false);
   const [directory, setDirectory] = useState<DirectoryToken[] | null>(null);
+  const [directoryFailed, setDirectoryFailed] = useState(false);
   const loadBoard = useCallback(async () => {
     setError('');
     setRooms(null);
     setLoadingBoard(true);
     // The full active-token list is one fast request: show it while trending ranks.
+    setDirectoryFailed(false);
     void tokenDirectory()
       .then(setDirectory)
-      .catch(() => setDirectory([]));
+      .catch(() => (setDirectory([]), setDirectoryFailed(true)));
     try {
       setRooms(await hotBoard((partial) => setRooms(partial)));
     } catch (e) {
@@ -397,9 +399,14 @@ const MarketPage = () => {
       : []),
   ];
   const activeCat = strategiesOpen ? 'strategies' : kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
-  // The usual grey / yellow filter pills, bigger and wrapping so every category shows at once.
+  // One flush row of compact filter chips, scrolling sideways (owner, 5 Oct 2026: tidier than wrapped pills).
   const categoryTiles = (
-    <div className="flex flex-wrap gap-2" role="tablist" aria-label="What's for sale">
+    <div
+      className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1"
+      style={{ scrollbarWidth: 'none' }}
+      role="tablist"
+      aria-label="What's for sale"
+    >
       {CATS.map((c) => {
         const on = !c.soon && activeCat === c.id;
         return (
@@ -416,7 +423,7 @@ const MarketPage = () => {
               if (c.view) setView(c.view);
               setRoom(null);
             }}
-            className="rounded-full px-4 py-2 text-sm font-semibold"
+            className="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold"
             style={{
               background: on ? '#F5B800' : '#17191E',
               color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
@@ -637,7 +644,23 @@ const MarketPage = () => {
         </p>
       )}
       {searched?.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-8">No token matches “{q.trim()}”.</p>}
-      {!searched && tokenFilter !== 'bapps' && tokenFilter !== 'social' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
+      {!searched && directoryFailed && filteredTokens.length === 0 && (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <p className="text-xs text-[#98A2B3] text-center m-0">Couldn’t reach the token index (1Sat / GorillaPool). It’s usually back in a minute.</p>
+          <button
+            type="button"
+            onClick={() => {
+              clearMarketCache();
+              void loadBoard();
+            }}
+            className="rounded-full px-4 py-2 text-sm font-semibold"
+            style={{ background: '#F5B800', color: '#010101' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!searched && !directoryFailed && tokenFilter !== 'bapps' && tokenFilter !== 'social' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
         <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
       )}
       {visibleTokens.map((r, i) => {
@@ -996,7 +1019,7 @@ const MarketPage = () => {
               <div className="h-16" />
               <div
                 className="fixed left-0 right-0 z-[60] px-4 py-2"
-                style={{ bottom: '3.75rem', background: 'linear-gradient(transparent, #010101 35%)' }}
+                style={{ bottom: 'calc(3.75rem + env(safe-area-inset-bottom))', background: 'linear-gradient(transparent, #010101 35%)' }}
               >
                 <label className="flex items-center gap-2 rounded-full bg-[#17191E] px-4 py-2.5 border border-[#2b2f36]">
                   <Search size={16} color="#98A2B3" />

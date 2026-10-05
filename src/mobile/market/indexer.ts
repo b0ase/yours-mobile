@@ -278,11 +278,45 @@ type OverlayToken = {
 
 export type DirectoryToken = { id: string; sym: string; icon: string | null; outputs: number };
 
+/** api.1sat.app answers 502 now and then (5 Oct 2026): one quick retry before giving up. */
+async function getJsonRetry<T>(url: string, timeoutMs: number): Promise<T> {
+  try {
+    return await getJson<T>(url, timeoutMs);
+  } catch {
+    await new Promise((r) => setTimeout(r, 800));
+    return getJson<T>(url, timeoutMs);
+  }
+}
+
+type GpMarketRow = { id?: string; sym?: string; tick?: string; icon?: string | null };
+/** Fallback when the 1Sat overlay is down: every token with a live GorillaPool listing. */
+async function gorillaDirectory(): Promise<DirectoryToken[]> {
+  const rows = await getJson<GpMarketRow[]>('https://ordinals.gorillapool.io/api/bsv20/market?limit=300&dir=desc', 12_000);
+  const out = new Map<string, DirectoryToken>();
+  for (const r of rows ?? []) {
+    if (!r.id || out.has(r.id) || !parseRoom('bsv21', r.id)) continue;
+    const icon = r.icon && isOutpoint(r.icon) ? r.icon : null;
+    out.set(r.id, { id: r.id, sym: (r.sym || r.tick || r.id.slice(0, 8)).replace(/^\$/, ''), icon, outputs: 0 });
+  }
+  return [...out.values()];
+}
+
 const overlayTokens = () =>
   cached(
     'tokens:all',
     async () => {
-      const rows = (await getJson<OverlayToken[] | null>(`${ONESAT}/bsv21/tokens`, 20_000)) ?? [];
+      let rows: OverlayToken[] = [];
+      try {
+        rows = (await getJsonRetry<OverlayToken[] | null>(`${ONESAT}/bsv21/tokens`, 20_000)) ?? [];
+      } catch {
+        /* fall through to GorillaPool */
+      }
+      if (!rows.length) {
+        const fallback = await gorillaDirectory();
+        // Throwing keeps an empty answer out of the cache, so the next open tries again.
+        if (!fallback.length) throw new Error('The token index is unreachable right now.');
+        return fallback;
+      }
       return rows
         .filter((t) => t.token_id && t.is_active && !t.is_blacklisted && parseRoom('bsv21', t.token_id))
         .sort((a, b) => (b.output_count ?? 0) - (a.output_count ?? 0))
