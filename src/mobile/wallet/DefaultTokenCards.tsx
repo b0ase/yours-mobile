@@ -7,6 +7,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
 import { getPersonalLink, onPersonalChange } from '../names/personalToken';
 import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
+import { BackPneeSheet } from '../notes/BackPneeSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
 
 type Bal = { id: string; amount: number; icon: string | null };
@@ -22,6 +23,7 @@ export const DefaultTokenCards = () => {
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   const [link, setLink] = useState(() => getPersonalLink(id));
   const [bals, setBals] = useState<Bal[]>([]);
+  const [backing, setBacking] = useState(false);
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(id))), [id]);
   useEffect(() => {
     if (!apiContext) return;
@@ -57,6 +59,7 @@ export const DefaultTokenCards = () => {
 
   return (
     <>
+      {backing && <BackPneeSheet onClose={() => setBacking(false)} />}
       <AssetRow
         icon={PNEE_ICON}
         ticker="PNEE · Penny Notes"
@@ -64,7 +67,20 @@ export const DefaultTokenCards = () => {
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
         showPointer={false}
-        subline={sub(PNEE_TOKEN_ID ? 'Pennies backed by BSV' : 'Coming soon · pennies backed by BSV')}
+        subline={
+          // "Back PNEE" on the left (stake BSV to back new notes), "Buy PNEE" on the right (owner, 5 Oct 2026).
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setBacking(true);
+            }}
+            className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border cursor-pointer bg-transparent"
+            style={{ borderColor: '#F5B80088', color: '#F5B800' }}
+          >
+            Back PNEE
+          </button>
+        }
         // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
         action={PNEE_TOKEN_ID ? { label: 'Buy PNEE', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
       />
