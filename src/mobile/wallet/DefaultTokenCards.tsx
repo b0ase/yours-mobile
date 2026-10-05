@@ -12,8 +12,8 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 type Bal = { id: string; amount: number; icon: string | null };
 
 /**
- * Wallet › default balances under BSV and MNEE (owner, 5 Oct 2026): Penny Notes ($PNEE, shown in dollars) and the
- * account's own $HANDLE token, so the cards people care about are always there, even at zero.
+ * Wallet › default balances under BSV and MNEE (owner, 5 Oct 2026): Penny Notes ($PNEE, shown in dollars) and, while
+ * you hold none of it, the account's own $HANDLE token, so the cards people care about are always there.
  */
 export const DefaultTokenCards = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -64,11 +64,12 @@ export const DefaultTokenCards = () => {
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
         showPointer={false}
-        subline={sub(PNEE_TOKEN_ID ? 'Dollars backed by BSV' : 'Coming soon · dollars backed by BSV')}
+        subline={sub(PNEE_TOKEN_ID ? 'Pennies backed by BSV' : 'Coming soon · pennies backed by BSV')}
         // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
         action={PNEE_TOKEN_ID ? { label: 'Buy PNEE', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
       />
-      {link && (
+      {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
+      {link && !(mine && mine.amount > 0) && (
         <AssetRow
           icon={mine?.icon ?? bGlyph}
           ticker={`$${link.ticker.replace(/^\$/, '')}`}
