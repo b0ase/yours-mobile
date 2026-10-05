@@ -5,19 +5,34 @@ import { formatLargeNumber, formatUSD } from '../utils/format';
 import { Show } from './Show';
 import { BSV_DECIMAL_CONVERSION } from '../utils/constants';
 
-const GradientButton = ({ onClick, theme }: { onClick?: () => void; theme: ReturnType<typeof useTheme>['theme'] }) => (
+type Action = { label: string; onClick: () => void };
+
+// Yours' "Get MNEE" button: same size, inset and centring (owner, 6 Oct 2026). Outlined for the secondary action.
+const GradientButton = ({
+  action,
+  theme,
+  outlined = false,
+}: {
+  action: Action;
+  theme: ReturnType<typeof useTheme>['theme'];
+  outlined?: boolean;
+}) => (
   <motion.button
+    type="button"
     whileHover={{ scale: 1.03 }}
     whileTap={{ scale: 0.97 }}
-    onClick={onClick}
-    className="text-xs font-bold px-4 py-2 rounded-xl mr-3 cursor-pointer border-0 outline-none"
-    style={{
-      background: 'linear-gradient(135deg, #de973f, #f9dd63)',
-      color: theme.color.global.row,
-      minWidth: '7rem',
+    onClick={(e) => {
+      e.stopPropagation();
+      action.onClick();
     }}
+    className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer outline-none ${outlined ? 'border bg-transparent' : 'border-0'}`}
+    style={
+      outlined
+        ? { borderColor: '#F5B80088', color: '#F5B800' }
+        : { background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: theme.color.global.row, minWidth: '7rem' }
+    }
   >
-    Buy MNEE
+    {action.label}
   </motion.button>
 );
 
@@ -37,10 +52,10 @@ export type AssetRowProps = {
   onClick?: () => void;
   /** Extra line under "Balance" (e.g. the token's issuer badge). */
   subline?: ReactNode;
-  /** A button on the right, under the balance, in place of the dollar line (Buy MNEE, Buy PNEE). */
-  action?: { label: string; onClick: () => void };
-  /** An outlined button beside `action`, on its left (Back PNEEs next to Buy PNEEs). */
-  secondaryAction?: { label: string; onClick: () => void };
+  /** Gold button on the right (Get MNEE, Get PNEEs): in place of the balance at zero, under it otherwise. */
+  action?: Action;
+  /** An outlined button beside `action`, on its left (Back PNEEs next to Get PNEEs). */
+  secondaryAction?: Action;
 };
 
 export const AssetRow = (props: AssetRowProps) => {
@@ -61,13 +76,13 @@ export const AssetRow = (props: AssetRowProps) => {
     action,
     secondaryAction,
   } = props;
-  // bWallet: "Buy MNEE" sits on the right under the balance (MNEE is dollars, so the $ line repeated it). Owner, 5 Oct 2026.
-  const button = action ?? (isMNEE && onGetMneeClick ? { label: 'Buy MNEE', onClick: onGetMneeClick } : undefined);
+  // "Get MNEE", worded and placed as in Yours (owner, 6 Oct 2026).
+  const button = action ?? (isMNEE && onGetMneeClick ? { label: 'Get MNEE', onClick: onGetMneeClick } : undefined);
   const { theme } = useTheme();
   const isDisplaySat = isLock && balance < 0.0001;
   const displayDecimals = decimals ?? (isDisplaySat ? 0 : 3);
-  // bWallet: no "Get MNEE" button (owner, 3 Oct 2026); a zero MNEE balance shows like any other.
-  const isMneeBalanceZero = false && !!isMNEE && usdBalance === 0;
+  // At zero the buttons replace the balance, centred like Yours' Get MNEE.
+  const showButtonsOnly = !!button && balance === 0;
 
   return (
     <motion.div
@@ -102,7 +117,7 @@ export const AssetRow = (props: AssetRowProps) => {
 
       {/* Right: balance */}
       <Show
-        when={isMneeBalanceZero}
+        when={showButtonsOnly}
         whenFalseContent={
           <div className="flex flex-col items-end mr-3 min-w-0 max-w-[45%]">
             <span
@@ -149,7 +164,10 @@ export const AssetRow = (props: AssetRowProps) => {
           </div>
         }
       >
-        <GradientButton theme={theme} onClick={onGetMneeClick} />
+        <div className="flex items-center gap-2 mr-3">
+          {secondaryAction && <GradientButton action={secondaryAction} theme={theme} outlined />}
+          {button && <GradientButton action={button} theme={theme} />}
+        </div>
       </Show>
     </motion.div>
   );

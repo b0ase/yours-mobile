@@ -74,15 +74,15 @@ export const DefaultTokenCards = () => {
       {backing && <BackPneeSheet onClose={() => setBacking(false)} />}
       <AssetRow
         icon={PNEE_ICON}
-        ticker="PNEEs · Penny Stablecoins"
+        ticker="PNEEs · Pennies"
         balance={pnee}
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
         showPointer={false}
         subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
-        // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
-        action={PNEE_TOKEN_ID ? { label: 'Buy PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
-        // Back PNEEs sits on the right next to Buy PNEEs (owner, 5 Oct 2026).
+        // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
+        action={PNEE_TOKEN_ID ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
+        // Back PNEEs sits left of Get PNEEs, same size and line (owner, 6 Oct 2026).
         secondaryAction={{ label: 'Back PNEEs', onClick: () => setBacking(true) }}
       />
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
