@@ -44,7 +44,7 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
   }, []);
 
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: '#010101' }}>
       <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <button onClick={close} aria-label="Back" className="p-2">
           <ArrowLeft size={20} color="white" />
