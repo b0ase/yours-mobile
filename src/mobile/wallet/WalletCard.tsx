@@ -11,6 +11,8 @@ import { HandleFlow } from '../names/HandleFlow';
 import { useAccountNames } from '../names/MyNameBadge';
 import { identityRowText } from '../names/identityText';
 import type { BalanceView } from './balanceLoad';
+import { useBackedUp } from '../backup/BackupGate';
+import { requestBackupThen } from '../backup/backupState';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -104,12 +106,15 @@ export const WalletCard = ({
   };
   const [turning, setTurning] = useState(false);
   // Swap faces at the midpoint of the 2D turn (CSS .is-turning).
-  const flip = () => {
+  const backedUp = useBackedUp();
+  const turn = () => {
     if (turning) return;
     setTurning(true);
     setTimeout(() => setFlipped((f) => !f), 220);
     setTimeout(() => setTurning(false), 440);
   };
+  // The back is the receive QR: not backed up → the Backup step first (src/mobile/backup).
+  const flip = () => (flipped ? turn() : requestBackupThen(chromeStorageService, turn));
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -228,7 +233,12 @@ export const WalletCard = ({
             )}
           </div>
           <div className="bw-wcard-bottom">
-            {receiveAddress && (
+            {receiveAddress && !backedUp && (
+              <div className="bw-wcard-addrrow">
+                <span className="bw-wcard-addr">Back up to show your address</span>
+              </div>
+            )}
+            {receiveAddress && backedUp && (
               <div className="bw-wcard-addrrow">
                 <span className="bw-wcard-addr" aria-label="Your BSV address">
                   {receiveAddress}

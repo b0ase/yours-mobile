@@ -386,6 +386,20 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '          className="w-full"\n        >\n          {/* Section header */}\n          <div className="hidden">',
     ],
   ],
+  // "Back up your wallet" (src/mobile/backup): red banner + step on the Wallet tab, Receive gated until backed
+  // up. Replaces upstream's BackupPromo (its plain-JSON key download) in our builds.
+  'src/pages/BsvWallet.tsx#backup': [
+    [
+      "import { getPlatform } from '../platform';",
+      "import { getPlatform } from '../platform';\nimport { BackupGate } from '../mobile/backup/BackupGate';\nimport { requestBackupThen } from '../mobile/backup/backupState';",
+    ],
+    [
+      '<SectionBoundary name="Card">',
+      '<SectionBoundary name="Backup"><BackupGate sats={Math.round(bsvBalance * 100_000_000)} /></SectionBoundary>\n<SectionBoundary name="Card">',
+    ],
+    ["onClick={() => setPageState('receive')}", "onClick={() => requestBackupThen(chromeStorageService, () => setPageState('receive'))}"],
+    ['      setShowBackupPromo(!dismissed && !hasRemotes);', '      setShowBackupPromo(false && !dismissed && !hasRemotes);'],
+  ],
   // Tokens list: tickets stay listed (sending one is an invite) but carry a "· Ticket" mark.
   'src/components/Bsv21TokensList.tsx': [
     [
