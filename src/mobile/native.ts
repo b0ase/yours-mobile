@@ -42,6 +42,9 @@ export interface YoursNativePlugin {
   /** bWallet calls: route call audio to the loudspeaker (true) or the earpiece (false). */
   audioSetSpeaker(opts: { on: boolean }): Promise<void>;
 
+  /** iOS: ASWebAuthenticationSession; resolves with the `<scheme>://…` URL it ended on, rejects 'cancelled'. */
+  authSession(opts: { url: string; scheme: string }): Promise<{ url: string }>;
+
   addListener(event: 'browserRequest', fn: (req: BrowserRequest) => void): Promise<PluginListenerHandle>;
   addListener(event: 'browserClosed', fn: () => void): Promise<PluginListenerHandle>;
 }
