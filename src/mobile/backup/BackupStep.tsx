@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, ArrowLeft, Check, FileLock2, PenLine, ShieldCheck } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import { createBackupFile, saveBackupFile, saveRoute, WrongPasswordError, type SaveRoute } from './backupFile';
+import { backupDownloadUrl, createBackupFile, saveBackupFile, saveRoute, WrongPasswordError, type SaveRoute } from './backupFile';
 import { markBackedUp, pickQuizPositions, quizCorrect, type BackupExit, type BackupMethod } from './backupState';
 
 type Props = {
@@ -36,6 +36,8 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
   const [page, setPage] = useState<Page>('choose');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  // Share sheet failed: offer a plain download link (web only) and the recovery phrase.
+  const [shareFailed, setShareFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [route, setRoute] = useState<SaveRoute>('none');
@@ -92,8 +94,10 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     try {
       const ok = await saveBackupFile(file, route);
       if (ok) setSavedOnce(true);
-    } catch {
-      setError('Could not open the share sheet. Try again.');
+    } catch (e) {
+      const why = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e);
+      setError(`The share sheet didn't open (${why.slice(0, 120)}).`);
+      setShareFailed(true);
     }
   };
 
@@ -291,6 +295,28 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
                 <p className="text-xs mt-2" style={{ color: RED }}>
                   {error}
                 </p>
+              )}
+              {shareFailed && file && (
+                <div className="flex flex-col gap-2 mt-3">
+                  {!isNative && (
+                    <a
+                      href={backupDownloadUrl(file)}
+                      download={file.name}
+                      onClick={() => setSavedOnce(true)}
+                      className="w-full rounded-xl py-3 font-bold text-center"
+                      style={{ background: '#2A2E36', color: 'white' }}
+                    >
+                      Download the file instead
+                    </a>
+                  )}
+                  <button
+                    onClick={() => go('phrase-password')}
+                    className="w-full rounded-xl py-3 font-bold border-0"
+                    style={{ background: 'transparent', color: GOLD, border: `1px solid ${GOLD}88` }}
+                  >
+                    Write down the recovery phrase instead
+                  </button>
+                </div>
               )}
               {savedOnce && (
                 <button

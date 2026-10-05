@@ -45,13 +45,23 @@ export const saveRoute = (file: File, native: boolean): SaveRoute => {
 /** Must run inside a tap (iOS needs a user gesture for navigator.share). Resolves false if cancelled. */
 export const saveBackupFile = async (file: File, route: SaveRoute): Promise<boolean> => {
   if (route === 'share') {
-    try {
-      await navigator.share({ files: [file], title: 'bWallet backup' });
-      return true;
-    } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') return false;
-      throw e;
+    // Some iOS builds reject a share that has a title, or a zip MIME type: retry with the file alone, then as
+    // a generic binary, before giving up (the caller then offers a plain download link and the phrase).
+    const tries: (() => ShareData)[] = [
+      () => ({ files: [file] }),
+      () => ({ files: [new File([file], file.name, { type: 'application/octet-stream' })] }),
+    ];
+    let last: unknown;
+    for (const t of tries) {
+      try {
+        await navigator.share(t());
+        return true;
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return false;
+        last = e;
+      }
     }
+    throw last;
   }
   if (route === 'download') {
     const url = URL.createObjectURL(file);
@@ -66,3 +76,6 @@ export const saveBackupFile = async (file: File, route: SaveRoute): Promise<bool
   }
   return false;
 };
+
+/** A blob URL for a plain "Download file" link the user taps themselves (a fresh tap, outside the share sheet). */
+export const backupDownloadUrl = (file: File) => URL.createObjectURL(file);
