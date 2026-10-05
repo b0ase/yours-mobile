@@ -8,7 +8,7 @@
 export const CONTRACT_CONTENT_TYPE = 'application/vnd.bwalletx.contract+json';
 export const CONTRACT_ENVELOPE_FORMAT = 'bwalletx.contract-nft/1';
 export const CONTRACT_DISCLAIMER =
-  'Contracts are programs. Read what each one does before you use it; bWalletX doesn’t review, rate or recommend them. Testnet contracts use test coins with no value.';
+  'Contracts are programs. Read what each one does before you use it; bWalletX doesn’t review, rate or recommend them.';
 
 export type ContractDescriptor = {
   format: 'bwalletx.contract/1';

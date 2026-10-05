@@ -402,14 +402,10 @@ const MarketPage = () => {
       : []),
   ];
   const activeCat = panel ?? (strategiesOpen ? 'strategies' : null) ?? (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
-  // One flush row of compact filter chips, scrolling sideways (owner, 5 Oct 2026: tidier than wrapped pills).
+  // A grid of square filter buttons, all visible at once: no sideways scrolling, so nothing (e.g. Bonds) is
+  // hidden (owner, 5 Oct 2026). Four across: 12 categories = 3 rows.
   const categoryTiles = (
-    <div
-      className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1"
-      style={{ scrollbarWidth: 'none' }}
-      role="tablist"
-      aria-label="What's for sale"
-    >
+    <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
       {CATS.map((c) => {
         const on = !c.soon && activeCat === c.id;
         return (
@@ -427,7 +423,7 @@ const MarketPage = () => {
               if (c.view) setView(c.view);
               setRoom(null);
             }}
-            className="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            className="flex min-h-[44px] items-center justify-center rounded-xl px-1 py-2 text-center text-[12px] font-semibold leading-tight"
             style={{
               background: on ? '#F5B800' : '#17191E',
               color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
