@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import type { SocialProfile } from '../chat/api';
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import { IS_EXTENSION } from '../extension';
+import { YoursNative } from '../native';
 
 /**
  * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bWalletX's own sign-in service
@@ -79,7 +80,20 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
     chrome.tabs.onUpdated.addListener(done);
     return;
   }
-  // System browser on phones (Capacitor opens _blank outside the app); a new tab on the web.
+  // iOS: an in-app Safari sign-in session (owner, 6 Oct 2026). Opening x.com with window.open let the
+  // X app take it by universal link: its in-app browser turned X's "Sign in with Google" white, and its
+  // "Open bWalletX" link did nothing. The session returns the bwalletx:// URL the return page navigates to.
+  if (Capacitor.getPlatform() === 'ios') {
+    try {
+      const { url: back } = await YoursNative.authSession({ url, scheme: 'bwalletx' });
+      await receiveSocialUrl(back);
+    } catch (e) {
+      lastError = (e as { code?: string })?.code === 'cancelled' ? '' : e instanceof Error ? e.message : 'Sign-in failed';
+      write(null);
+    }
+    return;
+  }
+  // Android: the system browser (Capacitor opens _blank outside the app); a new tab on the web.
   window.open(url, '_blank');
 }
 

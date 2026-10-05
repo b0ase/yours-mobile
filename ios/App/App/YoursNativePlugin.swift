@@ -1,3 +1,4 @@
+import AuthenticationServices
 import AVFoundation
 import Capacitor
 import LocalAuthentication
@@ -36,7 +37,8 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "browserSetHidden", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserRespond", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "audioSetSpeaker", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "audioSetSpeaker", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise)
     ]
 
     private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
@@ -486,5 +488,44 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
             if let url = URL(string: text), ["https", "http"].contains(url.scheme?.lowercased() ?? "") { self.load(url) }
         })
         present(alert, animated: true)
+    }
+}
+
+// MARK: - Sign-in session (Continue with X / Google, src/mobile/social)
+
+/// ASWebAuthenticationSession: the sign-in runs in Safari's own engine, inside the app, so
+/// - x.com is not handed to the X app by its universal link (whose in-app browser shows Google's
+///   sign-in as a white page and won't open bwalletx:// links), and Google accepts it (not a web view);
+/// - it ends by itself when the return page navigates to `<scheme>://…`, handing back that URL.
+extension YoursNativePlugin: ASWebAuthenticationPresentationContextProviding {
+    private static var authSession: ASWebAuthenticationSession?
+
+    @objc func authSession(_ call: CAPPluginCall) {
+        guard let s = call.getString("url"), let url = URL(string: s), let scheme = call.getString("scheme") else {
+            return call.reject("url and scheme are required")
+        }
+        DispatchQueue.main.async {
+            YoursNativePlugin.authSession?.cancel()
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { callback, error in
+                YoursNativePlugin.authSession = nil
+                if let callback = callback { return call.resolve(["url": callback.absoluteString]) }
+                if let e = error as? ASWebAuthenticationSessionError, e.code == .canceledLogin {
+                    return call.reject("Sign-in cancelled.", "cancelled")
+                }
+                call.reject(error?.localizedDescription ?? "Sign-in failed")
+            }
+            session.presentationContextProvider = self
+            // Share Safari's cookies, so someone already signed in to X or Google needn't sign in again.
+            session.prefersEphemeralWebBrowserSession = false
+            YoursNativePlugin.authSession = session
+            if !session.start() {
+                YoursNativePlugin.authSession = nil
+                call.reject("Could not open the sign-in page")
+            }
+        }
+    }
+
+    public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        bridge?.webView?.window ?? ASPresentationAnchor()
     }
 }
