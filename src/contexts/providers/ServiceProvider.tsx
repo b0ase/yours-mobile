@@ -74,8 +74,9 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         if (account) {
-          // Pre-fetch exchange rate to cache it
-          await fetchExchangeRate(apiContext.chain, apiContext.wocApiKey);
+          // Pre-fetch exchange rate to cache it. In the background: awaiting it held the whole UI blank while
+          // WhatsOnChain was slow or rate-limited (owner, 6 Oct 2026: a 40 s blank side panel). Prices fill in after.
+          void fetchExchangeRate(apiContext.chain, apiContext.wocApiKey).catch(() => undefined);
         }
 
         setServices({ ...initializedServices, isLocked, isReady, lockWallet });
