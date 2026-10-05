@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Loader2 } from 'lucide-react';
 import { socialLoginEnabled } from '../storeBuild';
+import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
+import { CAP, fill, getCapabilities } from '../names/names';
+
+/** True when name@<our domain> already has an identity key (public lookup; nothing of this wallet is sent). */
+const nameHasWallet = async (alias: string): Promise<boolean> => {
+  try {
+    const f = (u: string, i?: RequestInit) => fetch(u, i);
+    const pki = (await getCapabilities(f, BWALLET_PAYMAIL_DOMAIN))[CAP.pki];
+    if (typeof pki !== 'string') return false;
+    const r = await f(fill(pki, alias, BWALLET_PAYMAIL_DOMAIN));
+    return r.ok && !!((await r.json()) as { pubkey?: string }).pubkey;
+  } catch {
+    return false;
+  }
+};
 import { isAgentCreatePending } from '../agents/AgentAccountToggle';
 import {
   clearSocial,
@@ -42,8 +57,16 @@ const GoogleLogo = () => (
  * photo from the verified profile; the verified handle is claimed after the wallet exists
  * (Choose your handle). Off in the store build until App Review is settled (storeBuild.ts).
  */
-export const SocialSignIn = ({ onProfile }: { onProfile: (p: { name: string; avatar: string }) => void }) => {
+export const SocialSignIn = ({
+  onProfile,
+  onRestore,
+}: {
+  onProfile: (p: { name: string; avatar: string }) => void;
+  /** Create Account only: offered when the verified name already belongs to a wallet. */
+  onRestore?: () => void;
+}) => {
   const [profile, setProfile] = useState(socialProfile);
+  const [taken, setTaken] = useState('');
   const [error, setError] = useState(socialError);
   const [busy, setBusy] = useState<SocialProvider | null>(null);
 
@@ -74,6 +97,19 @@ export const SocialSignIn = ({ onProfile }: { onProfile: (p: { name: string; ava
       else filled.current = '';
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // New Account makes new keys, so it can't bring back a wallet that already has this name (owner, 6 Oct 2026:
+  // tried to get b0asex.x onto a phone that way and got an error). Say so and offer Restore (12 words).
+  const alias = profile?.alias || '';
+  const offerRestore = !!onRestore;
+  useEffect(() => {
+    setTaken('');
+    if (!offerRestore || !alias || !BWALLET_PAYMAIL_DOMAIN) return;
+    let live = true;
+    void nameHasWallet(alias).then((yes) => live && yes && setTaken(alias));
+    return () => {
+      live = false;
+    };
+  }, [alias, offerRestore]);
   // Not for agent accounts: an agent posting as someone's X account needs its own careful design (owner, 6 Oct 2026).
   if (!socialLoginEnabled() || isAgentCreatePending()) return null;
 
@@ -90,7 +126,8 @@ export const SocialSignIn = ({ onProfile }: { onProfile: (p: { name: string; ava
 
   if (profile)
     return (
-      <div className="w-[92%] mb-4 flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: '#17191E' }}>
+      <div className="w-[92%] mb-4">
+        <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: '#17191E' }}>
         {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
         <div className="flex-1 min-w-0 text-left">
           <div className="text-sm font-semibold text-white flex items-center gap-1">
@@ -109,6 +146,22 @@ export const SocialSignIn = ({ onProfile }: { onProfile: (p: { name: string; ava
         >
           Remove
         </button>
+        </div>
+        {taken && onRestore ? (
+          <div className="mt-2 rounded-xl px-3 py-2.5 text-left text-xs" style={{ background: '#2B2F36', color: '#E7E7E7' }}>
+            <b>{taken}</b> is already linked to a wallet with its own 12-word recovery phrase. If you have it, enter it next:
+            a new account would get new keys and couldn't use this name. The words stay on this phone, encrypted with your
+            wallet password.
+            <button
+              type="button"
+              onClick={onRestore}
+              className="block mt-2 h-9 w-full rounded-lg text-sm font-semibold border-0"
+              style={{ background: '#FFD24D', color: '#15202B' }}
+            >
+              Enter the 12 words for {taken}
+            </button>
+          </div>
+        ) : null}
       </div>
     );
 

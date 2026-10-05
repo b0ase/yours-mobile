@@ -136,6 +136,16 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
+    // Password asked twice for every new account (owner, 6 Oct 2026).
+    [
+      '      if (newWallet && password !== passwordConfirm) {',
+      '      if (password !== passwordConfirm) {',
+    ],
+    // Restore offer from SocialSignIn needs the bottom menu's page switch.
+    [
+      '  const { hideMenu, showMenu } = useBottomMenu();',
+      '  const { hideMenu, showMenu, handleSelect } = useBottomMenu();',
+    ],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
@@ -169,7 +179,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        <Input\n          theme={theme}\n          placeholder="Password"\n          type="password"\n          value={password}\n          onChange={(e) => setPassword(e.target.value)}\n        />\n        <Show when={newWallet}>\n          <Input\n            theme={theme}\n            placeholder="Confirm password"\n            type="password"\n            value={passwordConfirm}\n            onChange={(e) => setPasswordConfirm(e.target.value)}\n          />\n        </Show>',
-      '        <PasswordFields askSaved newWallet={newWallet} username={accountName} password={password} confirm={passwordConfirm} setPassword={setPassword} setConfirm={setPasswordConfirm} />',
+      '        <PasswordFields askSaved confirmAlways newWallet={newWallet} username={accountName} password={password} confirm={passwordConfirm} setPassword={setPassword} setConfirm={setPasswordConfirm} />',
     ],
     [
       "      markHandlePrompt(keys.identityAddress, 'create');",
@@ -188,7 +198,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
-      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} />\n      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
+      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onRestore={() => (newWallet ? navigate(\'/restore-wallet\') : handleSelect(\'settings\', \'restore-account\'))} />\n      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
@@ -259,6 +269,25 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
   'src/pages/onboarding/RestoreAccount.tsx': [
+    // Continue with X / Google: the 12 words must be the wallet that owns the verified name (src/mobile/social/restoreGuard.ts).
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { checkRestoreMatchesName } from '../../mobile/social/restoreGuard';",
+    ],
+    [
+      '      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,',
+      "      const nameMismatch = await checkRestoreMatchesName(seedWords, walletDerivation, ordDerivation, identityDerivation, importWallet);\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,",
+    ],
+    // Confirm field also when adding to an existing wallet.
+    [
+      '        <Show when={newWallet}>\n          <Input\n            theme={theme}\n            placeholder="Confirm Password"',
+      '        <Show when={true}>\n          <Input\n            theme={theme}\n            placeholder={newWallet ? "Confirm Password" : "Your wallet password again"}',
+    ],
+    // Password asked twice for every restore (owner, 6 Oct 2026).
+    [
+      '      if (newWallet && password !== passwordConfirm) {',
+      '      if (password !== passwordConfirm) {',
+    ],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",

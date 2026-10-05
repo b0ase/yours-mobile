@@ -42,7 +42,10 @@ export const PasswordFields = ({
   setPassword,
   setConfirm,
   askSaved = false,
+  confirmAlways = false,
 }: {
+  /** Ask twice also when adding an account to an existing wallet (owner, 6 Oct 2026). */
+  confirmAlways?: boolean;
   /** Create Account: a required "I've saved it" tick, so nobody moves on without a copy. */
   askSaved?: boolean;
   newWallet: boolean;
@@ -113,13 +116,13 @@ export const PasswordFields = ({
           {show ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
       </div>
-      {newWallet && (
+      {(newWallet || confirmAlways) && (
         <input
           className={field}
           type={type}
           name="confirm-password"
           autoComplete="new-password"
-          placeholder="Confirm password"
+          placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
         />
