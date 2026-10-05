@@ -10,6 +10,7 @@
     full: [
       { label: 'Features', href: '/features' },
       { label: 'Mint', href: '/mint' },
+      { label: 'Buy', href: '/buy' },
       { label: 'Exchange', href: '/exchange', pages: ['/exchange', '/exchange/strategies', '/pnees', '/pnee'],
         sub: [
           { label: 'Exchange', href: '/exchange' },
@@ -45,6 +46,7 @@
           { label: 'Market', href: '/market' },
           { label: 'Strategies', href: '/market/strategies' }
         ] },
+      { label: 'Buy BSV', href: X + '/buy' },
       { label: 'bWalletX features', href: X + '/features' },
       { label: 'Rooms &amp; tokens', href: X + '/friends' },
       { label: 'Get bWalletX &rarr;', href: X }

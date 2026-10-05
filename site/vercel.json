@@ -129,6 +129,11 @@
       "source": "/mint",
       "destination": "https://bwalletx.com/mint",
       "permanent": false
+    },
+    {
+      "source": "/buy",
+      "destination": "https://bwalletx.com/buy",
+      "permanent": false
     }
   ]
 }
