@@ -10,7 +10,15 @@ import { gateWalletOnUsb } from '../../services/usbPresence';
 
 const initializeServices = async (onUsbRemoved: () => void) => {
   const chromeStorageService = new ChromeStorageService();
-  await chromeStorageService.getAndSetStorage();
+  // Startup timing (owner, 6 Oct 2026: 40 s blank side panel). Logged so a slow start can be diagnosed from the console.
+  const t0 = performance.now();
+  const all = await chromeStorageService.getAndSetStorage();
+  try {
+    const bytes = JSON.stringify(all ?? {}).length;
+    console.info(`[startup] storage read ${Math.round(performance.now() - t0)} ms, ${Object.keys(all ?? {}).length} keys, ~${Math.round(bytes / 1024)} KB`);
+  } catch {
+    /* size is diagnostics only */
+  }
 
   const keysService = new KeysService(chromeStorageService);
 
