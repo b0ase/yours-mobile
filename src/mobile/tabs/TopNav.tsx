@@ -66,7 +66,6 @@ export const TopNav = () => {
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
   useEffect(() => {
-    if (IS_EXTENSION) return;
     const show = () => {
       const url = takePairLink();
       if (url) {
@@ -77,16 +76,17 @@ export const TopNav = () => {
     show();
     return onPairLink(show);
   }, []);
-  // Phone pairing (QR from a desktop site): reconnect paired sites. The extension is itself on the desktop.
+  // Reconnect paired sites / CLIs. In the extension the sessions live in this page (side panel), since the
+  // wallet keys and context only exist here; the background worker only hands over pair links (links.ts).
   useEffect(() => {
-    if (!IS_EXTENSION) initPairing();
+    initPairing();
   }, []);
   useBackClose(drawer && !switchingTo, () => setDrawer(false));
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
   // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
   useEffect(() => {
-    if (!IS_EXTENSION) setAgentPairDeps({ ctx: apiContext, currentId: current, feeRate: () => chromeStorageService.getCustomFeeRate() });
+    setAgentPairDeps({ ctx: apiContext, currentId: current, feeRate: () => chromeStorageService.getCustomFeeRate() });
   }, [apiContext, current, chromeStorageService]);
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
   const names = useAccountNames(
@@ -277,7 +277,9 @@ export const TopNav = () => {
                         <div className={`flex items-center gap-1 text-sm font-semibold text-white ${ELLIPSIS}`}>
                           {rowNames.displayName || rowNames.label}
                           {id === current && verified && <Check size={13} strokeWidth={3} color="#2ecc71" />}
-                          {isAgentAccount(id) && <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} />}
+                          {isAgentAccount(id) && (
+                            <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} />
+                          )}
                         </div>
                         {(() => {
                           // Always show the $handle: the personal token ticker, else the paymail/OpNS name.
@@ -314,11 +316,14 @@ export const TopNav = () => {
                     setToolsOpen(true);
                   })}
                 {action(<Download size={16} color="#fff" />, 'Import account', () => go('restore-account'))}
-                {!IS_EXTENSION &&
-                  action(<ScanLine size={16} color="#fff" />, 'Scan to connect a website', () => {
+                {action(
+                  <ScanLine size={16} color="#fff" />,
+                  IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website',
+                  () => {
                     setDrawer(false);
                     setPairOpen(true);
-                  })}
+                  },
+                )}
                 {action(<Settings size={16} color="#fff" />, 'Settings', () => go())}
               </div>
             </motion.div>

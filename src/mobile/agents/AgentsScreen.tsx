@@ -68,7 +68,11 @@ const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
 export const AgentBadge = ({ stopped = false }: { stopped?: boolean }) => (
   <span
     className="text-[9px] font-bold rounded px-1.5 py-0.5"
-    style={{ background: stopped ? '#F0443822' : '#7A5AF822', color: stopped ? '#FDA29B' : '#BDB4FE', letterSpacing: '0.05em' }}
+    style={{
+      background: stopped ? '#F0443822' : '#7A5AF822',
+      color: stopped ? '#FDA29B' : '#BDB4FE',
+      letterSpacing: '0.05em',
+    }}
   >
     {stopped ? 'AGENT · STOPPED' : 'AGENT'}
   </span>
@@ -202,11 +206,17 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
         ordAddress: dest.addresses.ordAddress,
         label: dest.name || 'your account',
       });
-      const moved = [r.tokens && `${r.tokens} token${r.tokens === 1 ? '' : 's'}`, r.nfts && `${r.nfts} NFTs`, r.bsvTxid && 'all BSV']
+      const moved = [
+        r.tokens && `${r.tokens} token${r.tokens === 1 ? '' : 's'}`,
+        r.nfts && `${r.nfts} NFTs`,
+        r.bsvTxid && 'all BSV',
+      ]
         .filter(Boolean)
         .join(', ');
       addSnackbar(
-        r.errors.length ? `Moved ${moved || 'nothing'}. Problems: ${r.errors.join('; ')}` : `Moved ${moved || 'nothing (empty)'}.`,
+        r.errors.length
+          ? `Moved ${moved || 'nothing'}. Problems: ${r.errors.join('; ')}`
+          : `Moved ${moved || 'nothing (empty)'}.`,
         r.errors.length ? 'error' : 'success',
       );
     } finally {
@@ -319,12 +329,21 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
         </div>
 
         {/* Pair the CLI or an AI assistant with THIS agent account (owner, 6 Oct 2026: no scan button here). */}
-        {!IS_EXTENSION && (
+        {
           <div className={section} style={{ background: CARD }}>
             <div className="text-sm font-bold text-white">Connect the CLI or an AI assistant</div>
             <div className="text-xs" style={{ color: '#98A2B3' }}>
-              On your computer run <span className="font-mono text-white">bwalletx login</span>, then scan the QR code it
-              shows. Keys stay on this phone; you choose what the computer may do.
+              {IS_EXTENSION ? (
+                <>
+                  Run <span className="font-mono text-white">bwalletx login</span>, then paste the link it prints (or
+                  open it in Chrome). Keys stay in this extension; you choose what the CLI may do.
+                </>
+              ) : (
+                <>
+                  On your computer run <span className="font-mono text-white">bwalletx login</span>, then scan the QR
+                  code it shows. Keys stay on this phone; you choose what the computer may do.
+                </>
+              )}
             </div>
             {isCurrent ? (
               <button
@@ -333,7 +352,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
                 className="rounded-lg px-3 py-2 text-sm font-bold border-0"
                 style={{ background: GOLD, color: '#010101' }}
               >
-                Scan to connect
+                {IS_EXTENSION ? 'Paste pairing link' : 'Scan to connect'}
               </button>
             ) : (
               <button
@@ -347,7 +366,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
               </button>
             )}
           </div>
-        )}
+        }
         {scanning && (
           <Suspense fallback={null}>
             <PairSheet onClose={() => setScanning(false)} />
@@ -396,7 +415,12 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
           {log.slice(0, 100).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex gap-2 text-xs">
               <span className="shrink-0 font-mono" style={{ color: '#667085' }}>
-                {new Date(e.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                {new Date(e.at).toLocaleString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
               </span>
               <span className="flex-1" style={{ color: '#D0D5DD' }}>
                 {e.detail}
