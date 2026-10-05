@@ -102,7 +102,7 @@ const Row = ({ icon, title, sub, onClick }: { icon: React.ReactNode; title: stri
   </button>
 );
 
-const BuyBsvSheet = ({ onClose, onReceive }: { onClose: () => void; onReceive: () => void }) => {
+export const BuyBsvSheet = ({ onClose, onReceive }: { onClose: () => void; onReceive: () => void }) => {
   useBackClose(true, onClose);
   return createPortal(
     <div className="fixed inset-0 z-[300] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>

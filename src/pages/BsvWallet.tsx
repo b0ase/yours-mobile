@@ -1,5 +1,5 @@
 import { validate } from 'bitcoin-address-validation';
-import { BsvPriceBar } from '../mobile/wallet/BuyBsv';
+import { BsvPriceBar, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -615,6 +615,7 @@ export const BsvWallet = () => {
   };
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [getBsvOpen, setGetBsvOpen] = useState(false);
 
   /**
    * Re-sync addresses, then reload BSV, MNEE, and BSV-21 balances.
@@ -1379,7 +1380,18 @@ export const BsvWallet = () => {
               setSendSource('main');
               setPageState('send');
             }}
+            // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
+            action={bsvBalance === 0 ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) } : undefined}
           />
+          {getBsvOpen && (
+            <BuyBsvSheet
+              onClose={() => setGetBsvOpen(false)}
+              onReceive={() => {
+                setGetBsvOpen(false);
+                void gateReceive(chromeStorageService, () => setPageState('receive'));
+              }}
+            />
+          )}
           <Show when={services.mnee}>
             <AssetRow
               balance={mneeBalance}
