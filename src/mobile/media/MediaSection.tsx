@@ -1,10 +1,11 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileQuestion, Music, Play, Send } from 'lucide-react';
+import { FileQuestion, Music, Play, RefreshCw, Send } from 'lucide-react';
 import type { MediaKind } from './media';
 import { pauseAudio } from './player';
 import { Blurred } from '../market/NftCard';
-import { MediaViewer } from './MediaViewer';
+import { NftDetail } from './NftDetail';
+import { refreshMessage } from './nftActions';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { getTagValue } from '../../utils/format';
 import { loadIssued, loadWeapons, normOutpoint, type Weapon } from '../three3d/ordnance';
@@ -13,7 +14,8 @@ import { LazyCabinet, WeaponTile } from '../three3d/OrdnanceGrid';
 /**
  * Wallet › NFTs: the wallet's non-fungible inscriptions as a media library, filtered by kind,
  * with an audio queue player (MiniPlayer) and a video player, streamed from ORDFS.
- * Send / list / cancel stay in upstream's Ordinals manager (/ord-wallet).
+ * Tapping an image / video / document opens NftDetail (viewer, set as avatar, send); Refresh syncs
+ * the addresses and reloads. Bulk send / cancel listings stay in upstream's Ordinals manager (/ord-wallet).
  */
 type Filter = 'all' | MediaKind | '3d';
 const FILTERS: { id: Filter; label: string }[] = [
@@ -28,7 +30,22 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 export const MediaSection = () => {
   const navigate = useNavigate();
-  const { items, hasMore, loading, error, loadMore, reload } = useWalletMedia();
+  const { items, hasMore, loading, error, loadMore, reload, refresh } = useWalletMedia();
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState('');
+  const doRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshNote('');
+    try {
+      const { added, synced } = await refresh();
+      setRefreshNote(refreshMessage(added, synced));
+    } catch {
+      setRefreshNote('');
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<MediaItem | null>(null);
 
@@ -127,12 +144,23 @@ export const MediaSection = () => {
       <div className="w-full px-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-widest text-[#98A2B3]">Media</span>
-          <button
-            onClick={() => navigate('/ord-wallet')}
-            className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
-          >
-            <Send size={12} /> Send / List
-          </button>
+          <div className="flex items-center gap-2">
+            {refreshNote && <span className="text-[11px] text-[#98A2B3]">{refreshNote}</span>}
+            <button
+              aria-label="Refresh NFTs"
+              onClick={() => void doRefresh()}
+              disabled={refreshing}
+              className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> Refresh
+            </button>
+            <button
+              onClick={() => navigate('/ord-wallet')}
+              className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              <Send size={12} /> Send / List
+            </button>
+          </div>
         </div>
         <div className="flex gap-1.5 overflow-x-auto">
           {FILTERS.filter((f) => f.id !== '3d' || guns.size > 0).map((f) => (
@@ -174,7 +202,7 @@ export const MediaSection = () => {
         )}
       </div>
 
-      {open && <MediaViewer item={open} onClose={() => setOpen(null)} />}
+      {open && <NftDetail item={open} onClose={() => setOpen(null)} onSent={reload} />}
       {cabinet && (
         <Suspense fallback={null}>
           <LazyCabinet weapon={cabinet} owned onClose={() => setCabinet(null)} />
