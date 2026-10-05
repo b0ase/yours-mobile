@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WalletOutput } from '@bsv/sdk';
-import { listOrdinals } from '@1sat/actions';
+import { listOrdinals, syncAddresses } from '@1sat/actions';
 import { onMinted } from '../mint/mint';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getOutputName, getTagValue } from '../../utils/format';
@@ -8,6 +8,7 @@ import { isMediaOutput, kindOf, type MediaKind } from './media';
 import { playQueue } from './player';
 import { safety } from '../market/safety';
 import { cachedMeta, resolveMeta } from './resolveMeta';
+import { countNew } from './nftActions';
 
 /** One of the wallet's non-fungible inscriptions, streamed from ORDFS. */
 export type MediaItem = {
@@ -15,6 +16,8 @@ export type MediaItem = {
   name: string;
   type?: string;
   kind: MediaKind;
+  /** Inscription origin (`<txid>_<n>` or `.n`); the outpoint when unknown. */
+  origin: string;
   url: string;
   flagged: boolean;
 };
@@ -44,7 +47,7 @@ export const mediaErrorText = (e: unknown) => {
  * and the Media page (MediaPage). A new mint restarts the list from the top.
  */
 export const useWalletMedia = () => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const [items, setItems] = useState<MediaItem[]>([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -63,6 +66,7 @@ export const useWalletMedia = () => {
         name: tagged || meta?.name || 'Inscription',
         type,
         kind: kindOf(type),
+        origin,
         // Your own items are never hidden; ones the Market filter would block are blurred (tap to reveal).
         flagged: safety().check({ ids: [o.outpoint, origin], texts: [getOutputName(o, '')] }).blocked,
         url: `${apiContext.services!.ordfs.getContentUrl(origin)}?outpoint=${o.outpoint}`,
@@ -128,7 +132,49 @@ export const useWalletMedia = () => {
   /** Re-reads the first page (pull to refresh). */
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  return { items, hasMore, loading, error, loadMore, reload };
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  /**
+   * Refresh button: the wallet's real address sync (as BsvWallet refreshUtxos), then the list from
+   * the top; the repair effect above re-runs for anything still missing metadata. Resolves to how
+   * many NFTs are new and whether the sync itself worked.
+   */
+  const refresh = useCallback(async (): Promise<{ added: number; synced: boolean }> => {
+    let synced = true;
+    try {
+      const { account } = chromeStorageService.getCurrentAccountObject();
+      const count = (account?.settings?.maxKeyIndex ?? 4) + 1;
+      await syncAddresses.execute(apiContext, { count });
+    } catch (e) {
+      synced = false;
+      console.warn('[media] syncAddresses failed:', e);
+    }
+    const before = itemsRef.current.map((i) => i.output.outpoint);
+    setLoading(true);
+    try {
+      const { outputs } = await listWithRetry(apiContext, PAGE, 0);
+      const next = outputs.filter(isMediaOutput).map(toItem);
+      setError('');
+      setItems(next);
+      setOffset(outputs.length);
+      setHasMore(outputs.length === PAGE);
+      return {
+        added: countNew(
+          before,
+          next.map((i) => i.output.outpoint),
+        ),
+        synced,
+      };
+    } catch (e) {
+      setError(mediaErrorText(e));
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, [apiContext, chromeStorageService, toItem]);
+
+  return { items, hasMore, loading, error, loadMore, reload, refresh };
 };
 
 /** Queues every music item in `list` and starts at `item`. */
