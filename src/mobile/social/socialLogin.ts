@@ -85,7 +85,7 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
   // "Open bWalletX" link did nothing. The session returns the bwalletx:// URL the return page navigates to.
   if (Capacitor.getPlatform() === 'ios') {
     try {
-      const { url: back } = await YoursNative.authSession({ url, scheme: 'bwalletx' });
+      const { url: back } = await YoursNative.authSession({ url, scheme: 'bwalletx', httpsHost: 'www.bwallet.space', httpsPath: '/social' });
       await receiveSocialUrl(back);
     } catch (e) {
       lastError = (e as { code?: string })?.code === 'cancelled' ? '' : e instanceof Error ? e.message : 'Sign-in failed';

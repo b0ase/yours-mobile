@@ -136,6 +136,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
+    ],
+    // Say why it failed (src/mobile/onboardingError.ts) instead of always blaming the password.
+    [
+      "      console.log(error);\n      addSnackbar('An error occurred while creating the account! Make sure your password is correct.', 'error');",
+      "      console.log(error);\n      addSnackbar(onboardingError('create', error), 'error');",
+    ],
     // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -211,6 +220,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // WIF / JSON import and master (zip) restore: same step for the imported account, after the name sync.
   'src/pages/onboarding/ImportAccount.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
+    ],
+    // Say why it failed (src/mobile/onboardingError.ts) instead of always blaming the password.
+    [
+      "      console.log(error);\n      addSnackbar('An error occurred while importing the account!', 'error');",
+      "      console.log(error);\n      addSnackbar(onboardingError('import', error), 'error');",
+    ],
     // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -241,6 +259,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
   'src/pages/onboarding/RestoreAccount.tsx': [
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
+    ],
+    // Say why it failed (src/mobile/onboardingError.ts) instead of always blaming the password.
+    [
+      "      console.log(error);\n      addSnackbar('An error occurred while restoring the account!', 'error');",
+      "      console.log(error);\n      addSnackbar(onboardingError('restore', error), 'error');",
+    ],
     // Colour on the RelayX tile (white mark on its #2669FF blue) and Twetch's real icon (its brand is monochrome).
     [
       "import relayXLogo from '../../assets/relayx.svg';",

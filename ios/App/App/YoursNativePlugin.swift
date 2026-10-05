@@ -506,13 +506,21 @@ extension YoursNativePlugin: ASWebAuthenticationPresentationContextProviding {
         }
         DispatchQueue.main.async {
             YoursNativePlugin.authSession?.cancel()
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { callback, error in
+            let done: ASWebAuthenticationSession.CompletionHandler = { callback, error in
                 YoursNativePlugin.authSession = nil
                 if let callback = callback { return call.resolve(["url": callback.absoluteString]) }
                 if let e = error as? ASWebAuthenticationSessionError, e.code == .canceledLogin {
                     return call.reject("Sign-in cancelled.", "cancelled")
                 }
                 call.reject(error?.localizedDescription ?? "Sign-in failed")
+            }
+            // iOS 17.4+: finish on the https return page itself (owner, 6 Oct 2026: the page's bwalletx://
+            // hand-off and its "Open bWalletX" link never closed the sheet, so the X sign-in was lost).
+            let session: ASWebAuthenticationSession
+            if #available(iOS 17.4, *), let host = call.getString("httpsHost"), let path = call.getString("httpsPath") {
+                session = ASWebAuthenticationSession(url: url, callback: .https(host: host, path: path), completionHandler: done)
+            } else {
+                session = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme, completionHandler: done)
             }
             session.presentationContextProvider = self
             // Share Safari's cookies, so someone already signed in to X or Google needn't sign in again.
