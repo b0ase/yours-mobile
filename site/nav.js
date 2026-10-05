@@ -88,7 +88,8 @@
 
   // Follow on X (bWalletX only): an icon before the Download / Web buttons, on every page.
   var cta = main.closest('.topbar') && main.closest('.topbar').querySelector('.nav-cta');
-  if (!store && cta && !cta.querySelector('.x-link')) {
+  // Both editions (owner, 6 Oct 2026: bwallet.space needs X and GitHub too).
+  if (cta && !cta.querySelector('.x-link')) {
     var x = document.createElement('a');
     x.className = 'x-link';
     x.href = 'https://x.com/bWalletX';
