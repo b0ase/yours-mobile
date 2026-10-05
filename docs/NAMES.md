@@ -156,7 +156,7 @@ label a caller asserts is the full paymail, so callee verification is unambiguou
    `PAYMAIL_BASE_URL=https://pay.bwallet.space`. The domain `pay.bwallet.space` is on the project. Optional: `ARC_URL`, `ARC_API_KEY`. `SUPABASE_URL` +
    `SUPABASE_SERVICE_ROLE_KEY` exist for Production; add them for Preview to test there.
 4. **Run the migration** (not run by the agent):
-   `ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1" < /Volumes/2026/Projects/yours-mobile-bcorp/migrations/20261001_bwallet_paymail.sql`
+   `ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1" < /Volumes/2026/Projects/bwalletX/migrations/20261001_bwallet_paymail.sql`
 5. Deploy production (after 1-4), then check `https://pay.bwallet.space/.well-known/bsvalias` and a paymail tester
    (e.g. `alice@bwallet.space` once claimed).
 6. **Expiry cron.** Unpaid `pending` references should expire after 24 h. On the Hetzner host, `crontab -e` and add:
