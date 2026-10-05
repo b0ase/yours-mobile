@@ -135,6 +135,26 @@ From memory; to be checked against the current guidelines before we build on the
   - bWalletX (direct download, extension, web) is the fully open one.
   - Both share the same chat.
 
+## Watching: Light's bstack (checked 5 Oct 2026)
+
+Lightweb Inc. (github.com/lightwebinc, papers at 1bsv.net) describes "publish once, prove everything": small state
+updates mined, data in unmined carrier transactions, delivered to every subscribed host with proofs, over unicast now
+and multicast later.
+
+- **Usable today:** only `bfinger` (name lookup, Go, v0.4.x) is public and live. `bcommon` has a browser-safe
+  TypeScript package, pre-1.0 and not on npm.
+- **Not usable yet:** the message box (`bbox`), logs, organisations and secrets are private repos, papers only. No
+  latency, user or host-count figures are published. The bstack docs are all rights reserved; the "ratified BRC"
+  claim leans partly on the author's own recent BRCs.
+- **Fit:** not a hot-path chat transport. Every message carries miner fees and on-chain construction, hosts see who
+  talks to whom and when, and we would still need our own push to the phone. It may suit a later open-protocol layer
+  for signed, replicable room records.
+- **Decision:** watch. Keep phases 1–3 as planned. When writing the open protocol (phase 4), compare BRC-178
+  ("Message Boxes"), the BSV Association Message Box client in ts-stack, and bbox if it goes public.
+- **Ask the authors:** is bbox going public and under what licence; end-to-end latency and the network carrying it;
+  how many independent hosts; any push/WebSocket to clients; sats per message; can token-gated rooms be expressed;
+  will bcommon reach npm with a stable API.
+
 ## Phases
 
 | Phase | What | Size |
