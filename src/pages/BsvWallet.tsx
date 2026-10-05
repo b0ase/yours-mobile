@@ -1386,6 +1386,12 @@ export const BsvWallet = () => {
             ticker="BSV"
             decimals={8}
             usdBalance={bsvBalance * exchangeRate}
+            subline={
+              // bWallet: the BSV price, so a moving dollar balance can be read against it (owner, 5 Oct 2026).
+              <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
+                {exchangeRate > 0 ? `1 BSV = ${formatUSD(exchangeRate)}` : 'Balance'}
+              </span>
+            }
             showPointer={true}
             onClick={() => {
               setSendSource('main');

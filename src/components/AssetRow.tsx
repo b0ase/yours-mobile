@@ -17,7 +17,7 @@ const GradientButton = ({ onClick, theme }: { onClick?: () => void; theme: Retur
       minWidth: '7rem',
     }}
   >
-    Get MNEE
+    Buy MNEE
   </motion.button>
 );
 
@@ -84,11 +84,25 @@ export const AssetRow = (props: AssetRowProps) => {
             {ticker}
           </span>
           {/* One line under the name on every card (issuer badge replaces "Balance"), so cards match in height. */}
-          {subline ?? (
-            <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
-              {isLock ? 'Next unlock' : 'Balance'}
-            </span>
-          )}
+          {subline ??
+            (isMNEE && onGetMneeClick ? (
+              // bWallet: "Buy MNEE" is back on the MNEE card (owner, 5 Oct 2026), beside the balance.
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGetMneeClick();
+                }}
+                className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
+                style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+              >
+                Buy MNEE
+              </button>
+            ) : (
+              <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
+                {isLock ? 'Next unlock' : 'Balance'}
+              </span>
+            ))}
         </div>
       </div>
 
