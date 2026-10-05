@@ -18,6 +18,7 @@ import {
   LockKeyhole,
   BadgeCheck,
   Bot,
+  ScanLine,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
@@ -577,12 +578,20 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
       </Section>
       {!IS_EXTENSION && (
         <Section title="Connections">
+          {/* One tap to the camera (owner, 6 Oct 2026: couldn't find how to link the CLI to an agent account). */}
+          <Row
+            icon={<ScanLine size={16} />}
+            label="Scan to connect"
+            description="Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code"
+            onClick={() => setScreen('scan')}
+            isFirst
+          />
+          <Divider />
           <Row
             icon={<Globe size={16} />}
-            label="Paired websites"
-            description="Sites on your computer connected with Scan to connect"
+            label="Paired computers & websites"
+            description="What's connected to this account, and what each may do"
             onClick={() => setScreen('paired')}
-            isFirst
             isLast
           />
         </Section>

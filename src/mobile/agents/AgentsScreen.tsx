@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Bot, Check, ChevronRight, Copy, Plus } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -24,6 +24,9 @@ import {
 import { sweepBack } from './sweepBack';
 import { StrategySection } from './StrategySection';
 import { ExportForCli } from './ExportForCli';
+import { IS_EXTENSION } from '../extension';
+
+const PairSheet = lazy(() => import('../pair/PairSheet'));
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -171,6 +174,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
   const others = accounts.filter((x) => x.addresses.identityAddress !== id);
   const current = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   const isCurrent = current === id;
+  const [scanning, setScanning] = useState(false);
   const log = getAgentLog(id);
   const [labels, setLabels] = useState(agent?.labels.join(', ') ?? '');
   const [cap, setCap] = useState(agent?.dailyCapUsd?.toString() ?? '');
@@ -313,6 +317,42 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
             </button>
           )}
         </div>
+
+        {/* Pair the CLI or an AI assistant with THIS agent account (owner, 6 Oct 2026: no scan button here). */}
+        {!IS_EXTENSION && (
+          <div className={section} style={{ background: CARD }}>
+            <div className="text-sm font-bold text-white">Connect the CLI or an AI assistant</div>
+            <div className="text-xs" style={{ color: '#98A2B3' }}>
+              On your computer run <span className="font-mono text-white">bwalletx login</span>, then scan the QR code it
+              shows. Keys stay on this phone; you choose what the computer may do.
+            </div>
+            {isCurrent ? (
+              <button
+                type="button"
+                onClick={() => setScanning(true)}
+                className="rounded-lg px-3 py-2 text-sm font-bold border-0"
+                style={{ background: GOLD, color: '#010101' }}
+              >
+                Scan to connect
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => void switchTo(id)}
+                className="rounded-lg px-3 py-2 text-sm font-bold border-0"
+                style={{ background: '#F5B80022', color: GOLD }}
+              >
+                {busy || 'Switch to this account to connect'}
+              </button>
+            )}
+          </div>
+        )}
+        {scanning && (
+          <Suspense fallback={null}>
+            <PairSheet onClose={() => setScanning(false)} />
+          </Suspense>
+        )}
 
         {isCurrent && <ExportForCli id={id} name={acct.name || 'agent'} />}
 
