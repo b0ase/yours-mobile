@@ -52,6 +52,7 @@ import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { openDappBrowser } from '../dappBrowser';
+import { OrdnanceGrid } from '../three3d/OrdnanceGrid';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
 import { StrategiesMarket } from '../strategies/StrategiesMarket';
 import { ContractsMarket } from '../contracts/ContractsMarket';
@@ -171,7 +172,7 @@ const MarketPage = () => {
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [strategiesOpen, setStrategiesOpen] = useState(false);
   // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
-  const [panel, setPanel] = useState<'contracts' | 'bonds' | null>(null);
+  const [panel, setPanel] = useState<'contracts' | 'bonds' | '3d' | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
@@ -398,12 +399,18 @@ const MarketPage = () => {
           { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind },
           { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind },
           { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind },
+          // 3D NFTs: 1Sat Ordnance game guns from tokenblaster.lol as spinning models (owner, 6 Oct 2026).
+          // bWalletX only: buying sends you to an outside store, which the app stores reject.
+          { id: '3d', label: '3D', kind: 'nfts' as Kind },
         ]
       : []),
   ];
-  const activeCat = panel ?? (strategiesOpen ? 'strategies' : null) ?? (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
+  const activeCat =
+    panel ??
+    (strategiesOpen ? 'strategies' : null) ??
+    (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
   // A grid of square filter buttons, all visible at once: no sideways scrolling, so nothing (e.g. Bonds) is
-  // hidden (owner, 5 Oct 2026). Four across: 12 categories = 3 rows.
+  // hidden (owner, 5 Oct 2026). Four across, wrapping onto more rows as categories are added.
   const categoryTiles = (
     <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
       {CATS.map((c) => {
@@ -417,7 +424,7 @@ const MarketPage = () => {
             onClick={() => {
               if (c.soon) return;
               setStrategiesOpen(c.id === 'strategies');
-              setPanel(c.id === 'contracts' || c.id === 'bonds' ? c.id : null);
+              setPanel(c.id === 'contracts' || c.id === 'bonds' || c.id === '3d' ? c.id : null);
               setKind(c.kind);
               if (c.token) setTokenFilter(c.token);
               if (c.view) setView(c.view);
@@ -550,7 +557,9 @@ const MarketPage = () => {
     if (!query) return null;
     const all = new Map<string, HotRoom>();
     for (const r of [...tokenRows, ...(xRows ?? [])]) all.set(r.ref.key, r);
-    const hits = [...all.values()].filter((r) => r.title.replace(/^\$/, '').toLowerCase().includes(query) || r.ref.id.toLowerCase() === query);
+    const hits = [...all.values()].filter(
+      (r) => r.title.replace(/^\$/, '').toLowerCase().includes(query) || r.ref.id.toLowerCase() === query,
+    );
     const rank = (r: HotRoom) => {
       const t = r.title.replace(/^\$/, '').toLowerCase();
       return t === query ? 0 : t.startsWith(query) ? 1 : 2;
@@ -558,7 +567,17 @@ const MarketPage = () => {
     hits.sort((a, b) => rank(a) - rank(b));
     // A pasted token id the lists don't know yet still opens.
     const ref = hits.length ? null : parseRoom('bsv21', q.trim());
-    if (ref) hits.push({ ref, title: 'Token', subtitle: 'BSV-21 token', icon: null, trades: 0, newListings: 0, floorLabel: null, heat: 0 });
+    if (ref)
+      hits.push({
+        ref,
+        title: 'Token',
+        subtitle: 'BSV-21 token',
+        icon: null,
+        trades: 0,
+        newListings: 0,
+        floorLabel: null,
+        heat: 0,
+      });
     return hits;
   }, [query, q, tokenRows, xRows]);
   const filteredTokens = searched
@@ -637,16 +656,22 @@ const MarketPage = () => {
       )}
       {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && <p className="text-xs text-[#F97066]">{error}</p>}
-      {tokenFilter === 'social' && xRows === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading people's tokens…</p>}
+      {tokenFilter === 'social' && xRows === null && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">Loading people's tokens…</p>
+      )}
       {tokenFilter === 'social' && xRows !== null && xRows.length === 0 && (
         <p className="text-xs text-[#98A2B3] text-center py-8">
           No personal tokens yet. Claim your name and mint your $NAME token to be the first.
         </p>
       )}
-      {searched?.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-8">No token matches “{q.trim()}”.</p>}
+      {searched?.length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-8">No token matches “{q.trim()}”.</p>
+      )}
       {!searched && directoryFailed && filteredTokens.length === 0 && (
         <div className="flex flex-col items-center gap-3 py-8">
-          <p className="text-xs text-[#98A2B3] text-center m-0">Couldn’t reach the token index (1Sat / GorillaPool). It’s usually back in a minute.</p>
+          <p className="text-xs text-[#98A2B3] text-center m-0">
+            Couldn’t reach the token index (1Sat / GorillaPool). It’s usually back in a minute.
+          </p>
           <button
             type="button"
             onClick={() => {
@@ -660,9 +685,14 @@ const MarketPage = () => {
           </button>
         </div>
       )}
-      {!searched && !directoryFailed && tokenFilter !== 'bapps' && tokenFilter !== 'social' && filteredTokens.length === 0 && rooms !== null && directory !== null && !error && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>
-      )}
+      {!searched &&
+        !directoryFailed &&
+        tokenFilter !== 'bapps' &&
+        tokenFilter !== 'social' &&
+        filteredTokens.length === 0 &&
+        rooms !== null &&
+        directory !== null &&
+        !error && <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>}
       {visibleTokens.map((r, i) => {
         // Personal tokens ($BOASE): social / access only. Badge, no floor, no price talk.
         if (isPersonalTokenId(r.ref.id, personalLinks)) return personalRow(r, i);
@@ -991,6 +1021,8 @@ const MarketPage = () => {
           mineView
         ) : strategiesOpen && !room ? (
           <StrategiesMarket />
+        ) : panel === '3d' && !room ? (
+          <OrdnanceGrid />
         ) : panel && !room ? (
           <ContractsMarket filter={panel === 'bonds' ? 'bond' : undefined} />
         ) : room ? (
@@ -1021,7 +1053,10 @@ const MarketPage = () => {
               <div className="h-16" />
               <div
                 className="fixed left-0 right-0 z-[60] px-4 py-2"
-                style={{ bottom: 'calc(3.75rem + env(safe-area-inset-bottom))', background: 'linear-gradient(transparent, #010101 35%)' }}
+                style={{
+                  bottom: 'calc(3.75rem + env(safe-area-inset-bottom))',
+                  background: 'linear-gradient(transparent, #010101 35%)',
+                }}
               >
                 <label className="flex items-center gap-2 rounded-full bg-[#17191E] px-4 py-2.5 border border-[#2b2f36]">
                   <Search size={16} color="#98A2B3" />
@@ -1039,7 +1074,12 @@ const MarketPage = () => {
                     className="flex-1 min-w-0 bg-transparent text-sm text-white outline-none border-0"
                   />
                   {q && (
-                    <button type="button" aria-label="Clear search" onClick={() => setQ('')} className="p-0 bg-transparent border-0">
+                    <button
+                      type="button"
+                      aria-label="Clear search"
+                      onClick={() => setQ('')}
+                      className="p-0 bg-transparent border-0"
+                    >
                       <X size={16} color="#98A2B3" />
                     </button>
                   )}
