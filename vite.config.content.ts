@@ -17,9 +17,15 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: {
-      path: 'path-browserify',
-    },
+    alias: [
+      { find: 'path', replacement: 'path-browserify' },
+      // Only the CWI event bridge is needed here: the package root pulls in the whole wallet (~0.9 MB in a
+      // script that runs on every page). Its cwi/ folder is self-contained (no imports outside it).
+      {
+        find: /^@1sat\/wallet-browser$/,
+        replacement: resolve(__dirname, 'node_modules/@1sat/wallet/dist/cwi/index.js'),
+      },
+    ],
     preserveSymlinks: true,
   },
   logLevel: 'error',
