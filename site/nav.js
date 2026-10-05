@@ -27,13 +27,14 @@
       { label: 'Android', href: '/android' },
       { label: 'iPhone', href: '/iphone' },
       { label: 'Extension', href: '/extension' },
-      { label: 'Developers', href: '/developers', pages: ['/developers', '/cli', '/mcp', '/apps/add'],
+      { label: 'Developers', href: '/developers', pages: ['/developers', '/cli', '/mcp', '/apps/add', '/blog'],
         sub: [
           { label: 'Developers', href: '/developers' },
           { label: 'CLI', href: '/cli' },
           { label: 'MCP', href: '/mcp' },
           { label: 'Strategy spec', href: '/strategies/spec' },
-          { label: 'Add your app', href: '/apps/add' }
+          { label: 'Add your app', href: '/apps/add' },
+          { label: 'Blog', href: '/blog' }
         ] }
     ],
     // Store edition (bWallet): browse-only Market, no trading, everything else lives on bWalletX.
@@ -58,6 +59,7 @@
     return p || '/';
   }
   var path = norm(location.pathname);
+  if (/^\/blog\//.test(path)) path = '/blog'; // every post sits under Developers › Blog
   function link(it, active) {
     return '<a href="' + it.href + '"' + (active ? ' aria-current="page"' : '') + '>' + it.label + '</a>';
   }
