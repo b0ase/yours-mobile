@@ -10,7 +10,7 @@
  */
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 
-export type BackupMethod = 'file' | 'phrase';
+export type BackupMethod = 'file' | 'phrase' | 'imported';
 export type BackupSettings = { backedUpAt?: number; backupMethod?: BackupMethod; backupCheckedAt?: number };
 
 /** Why the Backup step is open. */
@@ -82,10 +82,13 @@ export const onBackupChange = (cb: () => void) => {
 export const currentBackupSettings = (cs: ChromeStorageService): BackupSettings & { id?: string } => {
   const { account } = cs.getCurrentAccountObject();
   const s = (account?.settings ?? {}) as BackupSettings;
+  const id = account?.addresses?.identityAddress;
+  // Restored from a phrase, key or backup file the user already holds: that counts as backed up (owner, 5 Oct 2026).
+  const imported = !s.backedUpAt ? importedAt(id) : 0;
   return {
-    id: account?.addresses?.identityAddress,
-    backedUpAt: s.backedUpAt,
-    backupMethod: s.backupMethod,
+    id,
+    backedUpAt: s.backedUpAt ?? (imported || undefined),
+    backupMethod: s.backupMethod ?? (imported ? 'imported' : undefined),
     backupCheckedAt: s.backupCheckedAt,
   };
 };
@@ -119,7 +122,14 @@ const safe = (kind: 'local' | 'session'): Storage | null => {
   }
 };
 
-/** Set by the create / restore flows (via markHandlePrompt) for the new account. */
+const IMPORTED = (id: string) => `bwallet.backup.imported.${id}`;
+/** A restored account: the user already has its phrase, key or backup file. */
+export const markImported = (id: string | undefined, now = Date.now()) => {
+  if (id) safe('local')?.setItem(IMPORTED(id), String(now));
+};
+export const importedAt = (id: string | undefined): number => (id ? Number(safe('local')?.getItem(IMPORTED(id))) || 0 : 0);
+
+/** Set by the create flows (via markHandlePrompt) for the new account. */
 export const markBackupPrompt = (id: string | undefined) => {
   if (!id) return;
   safe('local')?.setItem(PENDING, id);

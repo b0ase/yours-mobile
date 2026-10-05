@@ -214,6 +214,13 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
               </span>
             </span>
           </button>
+          <button
+            onClick={() => void finish('imported')}
+            className="mt-4 text-sm underline bg-transparent border-0 self-center"
+            style={{ color: MUTED }}
+          >
+            I restored this wallet from my own phrase or backup
+          </button>
           {exit !== 'none' && !confirmSkip && (
             <button
               onClick={() => (exit === 'skip' ? setConfirmSkip(true) : onExit())}
@@ -425,7 +432,9 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
         <p className="mt-2 text-sm" style={{ color: MUTED }}>
           {method === 'file'
             ? 'Keep the file and your wallet password. Together they restore this wallet on any device.'
-            : 'Keep the paper safe and private. Those words restore this wallet on any device.'}
+            : method === 'imported'
+              ? 'Keep the phrase or backup you restored from safe and private. It restores this wallet on any device.'
+              : 'Keep the paper safe and private. Those words restore this wallet on any device.'}
         </p>
         <button onClick={() => onComplete(method)} className="mt-8 w-full rounded-xl py-3 font-bold border-0" style={primary()}>
           <Check size={16} className="inline mr-1" /> Continue

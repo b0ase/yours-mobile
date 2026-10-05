@@ -4,7 +4,7 @@
  * signs, claims or broadcasts (claims go through paymail.ts / GetYourName).
  */
 import { toAlias } from './paymail';
-import { markBackupPrompt } from '../backup/backupState';
+import { markBackupPrompt, markImported } from '../backup/backupState';
 
 export type PromptReason = 'create' | 'restore';
 export type PendingPrompt = { id: string; reason: PromptReason };
@@ -44,8 +44,10 @@ export const parsePending = (raw: string | null | undefined): PendingPrompt | nu
 export const markHandlePrompt = (id: string | undefined, reason: PromptReason) => {
   if (!id) return;
   store()?.setItem(PENDING, JSON.stringify({ id, reason }));
-  // Every create / restore path calls this, so it also queues the "Back up your wallet" step.
-  markBackupPrompt(id);
+  // Every create / restore path calls this. A new wallet gets the "Back up your wallet" step; a restored one is
+  // already backed up (the user typed in or loaded its phrase, key or file).
+  if (reason === 'restore') markImported(id);
+  else markBackupPrompt(id);
   fire();
 };
 export const getPendingPrompt = (): PendingPrompt | null => parsePending(store()?.getItem(PENDING));
