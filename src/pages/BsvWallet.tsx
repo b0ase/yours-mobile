@@ -1,4 +1,5 @@
 import { validate } from 'bitcoin-address-validation';
+import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -655,6 +656,8 @@ export const BsvWallet = () => {
       if (notifyIfUnchanged && synced && unchanged) {
         addSnackbar('Balances are up to date. Incoming transactions can take one confirmation to appear.', 'info');
       }
+      // NFTs: reload the list on a manual refresh or when anything moved, so purchases appear without reopening.
+      if (notifyIfUnchanged || !unchanged) notifyMinted();
     } finally {
       showLoad && setIsProcessing(false);
       setIsRefreshing(false);

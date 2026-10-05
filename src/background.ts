@@ -1,4 +1,5 @@
 /* global chrome */
+import { mirrorToMiner } from './mobile/minerMirror';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { CWIEventName } from './cwi';
 import type {
@@ -84,6 +85,10 @@ chrome.runtime.onConnect.addListener((port) => {
     activePopupPorts.add(port);
     port.onDisconnect.addListener(() => {
       activePopupPorts.delete(port);
+      if (promptInPanel && activePopupPorts.size === 0) {
+        promptInPanel = false;
+        denyAllPendingPrompts();
+      }
     });
   }
 });
@@ -275,10 +280,13 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   };
 
   const startedUnder = lockGeneration;
+  let mirrorServices: Parameters<typeof mirrorToMiner>[0];
   const ctx = await initWallet(chromeStorageService, {
     onTransactionBroadcasted: (txid: string) => {
       console.log('[background] Transaction broadcasted:', txid);
       notifyBalanceUpdate();
+      // Also hand it straight to a miner (mobile/minerMirror.ts).
+      void mirrorToMiner(mirrorServices, txid);
     },
     onTransactionProven: (txid: string) => {
       console.log('[background] Transaction proven:', txid);
@@ -295,6 +303,7 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     return null;
   }
   accountContext = ctx;
+  mirrorServices = ctx.syncContext.services as unknown as Parameters<typeof mirrorToMiner>[0];
   console.log('[background] initializeWallet: initWallet returned, accountContext:', !!accountContext);
 
   if (accountContext) {
@@ -520,6 +529,25 @@ const pendingCounterpartyPermissionRequests = new Map<
 >();
 
 let popupWindowId: number | undefined;
+let denyAllPendingPrompts: () => void = () => undefined;
+
+// bWalletX: when the wallet's side panel is open, approval prompts render inside it (an overlay of
+// prompt.html) instead of a separate popup window (owner, 6 Oct 2026). activePopupPorts are the open
+// panels (App.tsx connects 'extension-popup'); the window remains the fallback when no panel is open.
+let promptInPanel = false;
+const postToPanels = (msg: unknown) =>
+  activePopupPorts.forEach((p) => {
+    try {
+      p.postMessage(msg);
+    } catch {
+      /* panel closing */
+    }
+  });
+const hidePanelPrompt = () => {
+  if (!promptInPanel) return;
+  promptInPanel = false;
+  postToPanels({ action: 'HIDE_PROMPT_PANEL' });
+};
 
 // In-flight dApp CWI requests that may have opened (or reused) the floating popup.
 let inFlightDappRequests = 0;
@@ -537,6 +565,7 @@ const hasQueuedDappUi = (): boolean =>
   getPendingOneSatPrompt() !== undefined;
 
 const closeDappPopup = (): void => {
+  hidePanelPrompt();
   if (!popupWindowId) return;
   selfClosedWindowIds.add(popupWindowId);
   removeWindow(popupWindowId);
@@ -551,7 +580,7 @@ const closeDappPopup = (): void => {
  * Never touches the browser-action popup (activePopupPorts).
  */
 const closeDappPopupIfNoUi = (): void => {
-  if (!popupWindowId) return;
+  if (!popupWindowId && !promptInPanel) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
   closeDappPopup();
@@ -562,7 +591,7 @@ const closeDappPopupIfNoUi = (): void => {
  * unlock waiters, and no in-flight dApp CWI requests.
  */
 const closeDappPopupIfIdle = (): void => {
-  if (!popupWindowId) return;
+  if (!popupWindowId && !promptInPanel) return;
   if (inFlightDappRequests > 0) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
@@ -778,6 +807,14 @@ if (isInServiceWorker) {
 
   showPromptUi = (kind, requestID) => {
     console.log('[background] showPromptUi called', kind, requestID);
+
+    // Side panel open: show the prompt inside it (the panel's own unlock screen covers 'unlock').
+    if (activePopupPorts.size > 0 && kind !== 'unlock') {
+      promptInPanel = true;
+      postToPanels({ action: 'SHOW_PROMPT_PANEL', kind, requestID });
+      notifyPromptWindow(kind, requestID); // an overlay that is already up loads the next prompt
+      return;
+    }
 
     // Check if any popup window with our extension URL is already open
     chrome.windows.getAll({ populate: true }, (windows) => {
@@ -1007,6 +1044,13 @@ if (isInServiceWorker) {
         // back the next prompt to render. This removes the race where a prompt
         // queued between "nothing pending" and the actual close was denied as a
         // user dismissal by windows.onRemoved.
+        case 'DISMISS_PROMPT_PANEL': {
+          promptInPanel = false;
+          postToPanels({ action: 'HIDE_PROMPT_PANEL' });
+          denyAllPendingPrompts();
+          sendResponse({ type: 'DISMISS_PROMPT_PANEL', success: true });
+          return true;
+        }
         case 'CLOSE_PROMPT_WINDOW': {
           const next = getNextPendingPrompt();
           if (next) {
@@ -1015,6 +1059,11 @@ if (isInServiceWorker) {
           }
           if (pendingWalletWaiters.length > 0) {
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: false, data: { prompt: { kind: 'unlock' } } });
+            return true;
+          }
+          if (promptInPanel) {
+            hidePanelPrompt();
+            sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: true });
             return true;
           }
           const windowId = popupWindowId ?? sender.tab?.windowId;
@@ -3080,25 +3129,9 @@ if (isInServiceWorker) {
     return true;
   };
 
-  // HANDLE WINDOW CLOSE *****************************************
-  chrome.windows.onRemoved.addListener((closedWindowId) => {
-    console.log('Window closed: ', closedWindowId);
-
-    if (selfClosedWindowIds.delete(closedWindowId)) {
-      // Background closed it after checking nothing was pending. If a prompt was
-      // queued in the meantime, it was sent to a dying window: reopen for it.
-      if (closedWindowId === popupWindowId) {
-        popupWindowId = undefined;
-        chromeStorageService.remove('popupWindowId');
-      }
-      const next = getNextPendingPrompt();
-      if (next) showPromptUi(next.kind, next.requestID);
-      else if (pendingWalletWaiters.length > 0) showUnlockUi();
-      return;
-    }
-
-    if (closedWindowId === popupWindowId) {
-      // Deny any pending permission requests when popup is closed
+  // Deny every pending prompt: the user closed the prompt window, dismissed the side-panel prompt, or
+  // closed the side panel while a prompt was showing in it.
+  denyAllPendingPrompts = () => {
       for (const [requestID, pending] of pendingPermissionRequests) {
         accountContext?.wallet.denyPermission(requestID).catch(console.error);
         pending.reject(new Error('User dismissed the request'));
@@ -3126,6 +3159,27 @@ if (isInServiceWorker) {
         waiter.reject(new Error('User dismissed the unlock request'));
       }
 
+  };
+
+  // HANDLE WINDOW CLOSE *****************************************
+  chrome.windows.onRemoved.addListener((closedWindowId) => {
+    console.log('Window closed: ', closedWindowId);
+
+    if (selfClosedWindowIds.delete(closedWindowId)) {
+      // Background closed it after checking nothing was pending. If a prompt was
+      // queued in the meantime, it was sent to a dying window: reopen for it.
+      if (closedWindowId === popupWindowId) {
+        popupWindowId = undefined;
+        chromeStorageService.remove('popupWindowId');
+      }
+      const next = getNextPendingPrompt();
+      if (next) showPromptUi(next.kind, next.requestID);
+      else if (pendingWalletWaiters.length > 0) showUnlockUi();
+      return;
+    }
+
+    if (closedWindowId === popupWindowId) {
+      denyAllPendingPrompts();
       popupWindowId = undefined;
       chromeStorageService.remove('popupWindowId');
     }

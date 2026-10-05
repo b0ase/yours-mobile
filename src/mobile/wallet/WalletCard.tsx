@@ -31,7 +31,8 @@ export type WalletCardProps = {
   refreshing?: boolean;
 };
 
-const AUTO_REFRESH_MS = 60_000;
+// Every 20 s while the wallet is on screen, so purchases and incoming coins appear quickly (owner, 6 Oct 2026).
+const AUTO_REFRESH_MS = 20_000;
 
 /**
  * Wallet home balance as a premium membership card (not a payment card: no card number, chip, date
