@@ -6,7 +6,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
 import { getPersonalLink, onPersonalChange } from '../names/personalToken';
-import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
+import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID, unindexedPnee } from '../notes/pnee';
 import { BackPneeSheet } from '../notes/BackPneeSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
 
@@ -20,7 +20,10 @@ export const DefaultTokenCards = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const navigate = useNavigate();
-  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  const addrs = chromeStorageService.getCurrentAccountObject().account?.addresses;
+  const id = addrs?.identityAddress;
+  // While the 1Sat overlay misses PNEE transfers, fall back to GorillaPool's count, labelled as indexing.
+  const [pending, setPending] = useState(0);
   const [link, setLink] = useState(() => getPersonalLink(id));
   const [bals, setBals] = useState<Bal[]>([]);
   const [backing, setBacking] = useState(false);
@@ -49,7 +52,16 @@ export const DefaultTokenCards = () => {
   }, [apiContext, link?.tokenId]);
 
   const of = (tokenId: string) => bals.find((b) => b.id === tokenId);
-  const pnee = PNEE_TOKEN_ID ? (of(PNEE_TOKEN_ID)?.amount ?? 0) : 0;
+  const indexed = PNEE_TOKEN_ID ? (of(PNEE_TOKEN_ID)?.amount ?? 0) : 0;
+  useEffect(() => {
+    if (indexed > 0 || !addrs) return;
+    let live = true;
+    void unindexedPnee([addrs.bsvAddress, addrs.ordAddress, addrs.identityAddress]).then((n) => live && setPending(n));
+    return () => {
+      live = false;
+    };
+  }, [indexed, addrs?.bsvAddress, addrs?.ordAddress, addrs?.identityAddress]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pnee = indexed > 0 ? indexed : pending;
   const mine = link ? of(link.tokenId) : undefined;
   const sub = (text: string) => (
     <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
@@ -67,6 +79,7 @@ export const DefaultTokenCards = () => {
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
         showPointer={false}
+        subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
         // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
         action={PNEE_TOKEN_ID ? { label: 'Buy PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
         // Back PNEEs sits on the right next to Buy PNEEs (owner, 5 Oct 2026).
