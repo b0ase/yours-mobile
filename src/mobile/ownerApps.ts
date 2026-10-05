@@ -20,6 +20,7 @@ import owner_ninjapunkgirls_online from './brand/apps/radar/owner-ninjapunkgirls
 import owner_tankscope_pro from './brand/apps/radar/owner-tankscope-pro.png';
 import owner_bmusic_space from './brand/apps/radar/owner-bmusic-space.png';
 import owner_tokenblaster from './brand/apps/tokenblaster.png';
+import owner_vexvoid_com from './brand/apps/radar/owner-vexvoid-com.png';
 // ADD-APP:IMPORTS
 
 export const OWNER_APPS: RadarApp[] = [
@@ -38,5 +39,6 @@ export const OWNER_APPS: RadarApp[] = [
   { name: 'TankScope', url: 'https://tankscope.pro', desc: 'Field capture and customer reporting for route-based aquarium service businesses. Per-tank', group: 'tools', icon: owner_tankscope_pro, source: 'owner' },
   { name: 'bMusic', url: 'https://bmusic.space', desc: 'MINT · RECORD · REEL · RELEASE. Pump.fun for music. Mint an AI artist for $0.99, record a ', group: 'media', icon: owner_bmusic_space, source: 'owner' },
   { name: 'TokenBlaster', url: 'https://www.tokenblaster.lol/blast', desc: 'Load your token into the gun and blast it at the chain', group: 'tools', icon: owner_tokenblaster, source: 'owner' },
+  { name: 'VexVoid', url: 'https://www.vexvoid.com/', desc: 'VexVoid — music and audio-visual releases. Listen, watch and collect', group: 'media', icon: owner_vexvoid_com, source: 'owner' },
   // ADD-APP:ENTRIES
 ];
