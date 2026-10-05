@@ -86,10 +86,26 @@
     document.documentElement.classList.add('has-subnav');
   }
 
+  // Follow on X (bWalletX only): an icon before the Download / Web buttons, on every page.
+  var cta = main.closest('.topbar') && main.closest('.topbar').querySelector('.nav-cta');
+  if (!store && cta && !cta.querySelector('.x-link')) {
+    var x = document.createElement('a');
+    x.className = 'x-link';
+    x.href = 'https://x.com/bWalletX';
+    x.target = '_blank';
+    x.rel = 'noopener';
+    x.setAttribute('aria-label', 'bWalletX on X');
+    x.title = '@bWalletX on X';
+    x.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+    cta.insertBefore(x, cta.firstChild);
+  }
+
   var css = document.createElement('style');
   css.textContent =
     '.topbar .sub-nav a[aria-current="page"]{color:#000!important;background:#F5B800;border-color:#F5B800}' +
     '.sub-nav{padding-top:0}' +
+    '.nav-cta .x-link{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:1px solid #ffffff33;color:#fff;margin-right:8px;vertical-align:middle}' +
+    '.nav-cta .x-link:hover{border-color:#F5B800;color:#F5B800}' +
     'html.has-subnav main.ext{padding-top:190px!important}' +
     '@media (max-width:859px){html.has-subnav main.ext{padding-top:212px!important}}' +
     (store ? '.topbar .sub-nav a[aria-current="page"]{color:#F5B800!important;background:#010101!important;border-color:#010101!important}' : '');

@@ -1217,3 +1217,10 @@ main.ext { padding-top: 150px !important; }
   margin: 0 auto;
   padding: 120px 20px 80px;
 }
+
+/* No sideways scroll on phones: decorative glows/pseudo-elements on the home page reached 11px past the edge at 375px.
+   clip (not hidden) doesn't create a scroll container, so the sticky header keeps working. */
+html,
+body {
+  overflow-x: clip;
+}
