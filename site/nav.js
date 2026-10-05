@@ -119,6 +119,7 @@
     '.nav-cta .x-link:hover{border-color:#F5B800;color:#F5B800}' +
     'html.has-subnav main.ext{padding-top:190px!important}' +
     '@media (max-width:859px){html.has-subnav main.ext{padding-top:212px!important}}' +
-    (store ? '.topbar .sub-nav a[aria-current="page"]{color:#F5B800!important;background:#010101!important;border-color:#010101!important}' : '');
+    (store ? '.topbar .sub-nav a[aria-current="page"]{color:#F5B800!important;background:#010101!important;border-color:#010101!important}' +
+      '.nav-cta .x-link{color:#010101!important;border-color:rgba(0,0,0,.35)!important}.nav-cta .x-link:hover{background:#010101;color:#F5B800!important}' : '');
   document.head.appendChild(css);
 })();
