@@ -37,6 +37,8 @@ export type AssetRowProps = {
   onClick?: () => void;
   /** Extra line under "Balance" (e.g. the token's issuer badge). */
   subline?: ReactNode;
+  /** A button on the right, under the balance, in place of the dollar line (Buy MNEE, Buy PNEE). */
+  action?: { label: string; onClick: () => void };
 };
 
 export const AssetRow = (props: AssetRowProps) => {
@@ -54,7 +56,10 @@ export const AssetRow = (props: AssetRowProps) => {
     animate = false,
     decimals,
     subline,
+    action,
   } = props;
+  // bWallet: "Buy MNEE" sits on the right under the balance (MNEE is dollars, so the $ line repeated it). Owner, 5 Oct 2026.
+  const button = action ?? (isMNEE && onGetMneeClick ? { label: 'Buy MNEE', onClick: onGetMneeClick } : undefined);
   const { theme } = useTheme();
   const isDisplaySat = isLock && balance < 0.0001;
   const displayDecimals = decimals ?? (isDisplaySat ? 0 : 3);
@@ -84,25 +89,11 @@ export const AssetRow = (props: AssetRowProps) => {
             {ticker}
           </span>
           {/* One line under the name on every card (issuer badge replaces "Balance"), so cards match in height. */}
-          {subline ??
-            (isMNEE && onGetMneeClick ? (
-              // bWallet: "Buy MNEE" is back on the MNEE card (owner, 5 Oct 2026), beside the balance.
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onGetMneeClick();
-                }}
-                className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
-                style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
-              >
-                Buy MNEE
-              </button>
-            ) : (
-              <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
-                {isLock ? 'Next unlock' : 'Balance'}
-              </span>
-            ))}
+          {subline ?? (
+            <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
+              {isLock ? 'Next unlock' : 'Balance'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -120,9 +111,23 @@ export const AssetRow = (props: AssetRowProps) => {
                 displayDecimals,
               )}${isLock ? (isDisplaySat ? `${balance === 0.00000001 ? ' SAT' : ' SATS'}` : ' BSV') : ''}`}
             </span>
-            <span className="text-xs mt-0.5 text-right" style={{ color: theme.color.global.gray }}>
-              {isLock ? `Block ${nextUnlock}` : formatUSD(usdBalance)}
-            </span>
+            {button ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  button.onClick();
+                }}
+                className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
+                style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+              >
+                {button.label}
+              </button>
+            ) : (
+              <span className="text-xs mt-0.5 text-right" style={{ color: theme.color.global.gray }}>
+                {isLock ? `Block ${nextUnlock}` : formatUSD(usdBalance)}
+              </span>
+            )}
           </div>
         }
       >

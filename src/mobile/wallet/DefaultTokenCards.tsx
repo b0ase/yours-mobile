@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { routeFor } from '../tabs/tabs';
 import { getBsv21Balances } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -16,6 +18,7 @@ type Bal = { id: string; amount: number; icon: string | null };
 export const DefaultTokenCards = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
+  const navigate = useNavigate();
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   const [link, setLink] = useState(() => getPersonalLink(id));
   const [bals, setBals] = useState<Bal[]>([]);
@@ -62,6 +65,8 @@ export const DefaultTokenCards = () => {
         usdBalance={pnee}
         showPointer={false}
         subline={sub(PNEE_TOKEN_ID ? 'Dollars backed by BSV' : 'Coming soon · dollars backed by BSV')}
+        // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
+        action={PNEE_TOKEN_ID ? { label: 'Buy PNEE', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
       />
       {link && (
         <AssetRow
