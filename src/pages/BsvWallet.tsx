@@ -1,5 +1,5 @@
 import { validate } from 'bitcoin-address-validation';
-import { BsvPriceBar, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
+import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -1849,6 +1849,11 @@ export const BsvWallet = () => {
       <div className="w-full mb-5 rounded-2xl p-4" style={{ background: theme.color.global.row }}>
         <BsvPriceChart />
       </div>
+      {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
+      <BuyBsvButton
+        className="w-full mb-5"
+        onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+      />
 
       {/* Balance chip — MAX is single-recipient only */}
       {recipients.length > 1 ? (

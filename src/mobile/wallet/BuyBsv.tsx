@@ -27,6 +27,41 @@ const useLivePrice = () => {
   return rate;
 };
 
+/** The whole card is the button: gold, "Buy BSV" with today's price (owner, 6 Oct 2026). */
+export const BuyBsvCard = ({ rate, onClick, className = '' }: { rate: number; onClick: () => void; className?: string }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer ${className}`}
+    style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+  >
+    <span className="text-base font-extrabold">Buy BSV</span>
+    <span className="text-sm font-bold">
+      {rate > 0 ? `$${rate.toFixed(2)}` : '…'} <span className="font-semibold opacity-70">per BSV</span>
+    </span>
+  </button>
+);
+
+/** Buy BSV card + its sheet, for screens that don't manage the sheet themselves (e.g. Send BSV with the chart). */
+export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; className?: string }) => {
+  const rate = useLivePrice();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <BuyBsvCard rate={rate} onClick={() => setOpen(true)} className={className} />
+      {open && (
+        <BuyBsvSheet
+          onClose={() => setOpen(false)}
+          onReceive={() => {
+            setOpen(false);
+            onReceive();
+          }}
+        />
+      )}
+    </>
+  );
+};
+
 /**
  * Wallet: BSV price feed + Buy BSV, where the "Missing assets?" banner was (owner, 6 Oct 2026: a Buy button on the BSV
  * card would cover the balance; getting BSV is the biggest onboarding problem).
@@ -36,25 +71,7 @@ export const BsvPriceBar = ({ onReceive }: { onReceive: () => void }) => {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div
-        className="flex items-center justify-between gap-2 w-[92%] mb-4 px-4 py-2 rounded-xl"
-        style={{ background: '#17191E', border: '1px solid #ffffff10' }}
-      >
-        <span className="text-xs" style={{ color: MUTED }}>
-          BSV{' '}
-          <b className="text-sm" style={{ color: '#fff' }}>
-            {rate > 0 ? `$${rate.toFixed(2)}` : '…'}
-          </b>
-        </span>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="rounded-lg px-3 py-1.5 text-xs font-bold border-0 cursor-pointer"
-          style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
-        >
-          Buy BSV
-        </button>
-      </div>
+      <BuyBsvCard rate={rate} onClick={() => setOpen(true)} className="w-[92%] mb-4" />
       {open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
