@@ -48,7 +48,9 @@ const FLIPPED = new Set([
   'p2pkh-pistolero',
 ]);
 const usesBase = (w: Weapon) => BASE_MODELS.some((b) => w.model.endsWith(`/${b}.glb`));
-const tintFor = (w: Weapon) => (usesBase(w) || FULL_TINT.has(w.id) ? 0.65 : 0.22);
+// The manifest's own hints win; the tables above are the fallback for an older manifest.
+const tintFor = (w: Weapon) => w.tintAmount ?? (usesBase(w) || FULL_TINT.has(w.id) ? 0.65 : 0.22);
+const flipFor = (w: Weapon) => w.flip ?? (!usesBase(w) && FLIPPED.has(w.id));
 
 /** Spinning, draggable model. One WebGL context, only while the cabinet is open; everything is disposed on close. */
 const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void }) => {
@@ -104,7 +106,8 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
         tintGun(gun, weapon.tint, tintFor(weapon));
         const isMinigun = weapon.model.endsWith('/minigun.glb');
         if (isMinigun) gun.rotation.y += Math.PI / 2; // modelled barrel-first
-        if (!usesBase(weapon) && FLIPPED.has(weapon.id)) gun.rotation.y += Math.PI;
+        if (flipFor(weapon)) gun.rotation.y += Math.PI;
+        if (weapon.roll) gun.rotation.z += weapon.roll;
         gun.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(gun);
         const radius = box.getBoundingSphere(new THREE.Sphere()).radius;
@@ -120,7 +123,8 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
         controls.maxDistance = dist * 2;
         controls.target.set(0, 0, 0);
         // The barrel spin belongs to the shared minigun model only.
-        const spin = isMinigun ? gltf.animations.find((a) => /rotation/i.test(a.name)) : undefined;
+        const clip = weapon.spin !== undefined ? weapon.spin : isMinigun ? 'Minigun_Rig|Rotation' : null;
+        const spin = clip ? gltf.animations.find((a) => a.name === clip) : undefined;
         if (spin) {
           mixer = new THREE.AnimationMixer(gun);
           mixer.clipAction(spin).play();

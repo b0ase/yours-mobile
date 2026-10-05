@@ -21,6 +21,11 @@ export type Weapon = {
   modelBase: string;
   tint: string;
   image: string;
+  /** Per-model display hints from the manifest (tokenblaster.lol 47e1089); older manifests omit them. */
+  tintAmount?: number;
+  flip?: boolean;
+  roll?: number;
+  spin?: string | null;
 };
 
 /** Rim light / glow per rarity, as in the games. */
