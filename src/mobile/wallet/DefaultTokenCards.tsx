@@ -67,22 +67,10 @@ export const DefaultTokenCards = () => {
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
         showPointer={false}
-        subline={
-          // "Back PNEE" on the left (stake BSV to back new notes), "Buy PNEE" on the right (owner, 5 Oct 2026).
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setBacking(true);
-            }}
-            className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border cursor-pointer bg-transparent"
-            style={{ borderColor: '#F5B80088', color: '#F5B800' }}
-          >
-            Back PNEEs
-          </button>
-        }
         // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
         action={PNEE_TOKEN_ID ? { label: 'Buy PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
+        // Back PNEEs sits on the right next to Buy PNEEs (owner, 5 Oct 2026).
+        secondaryAction={{ label: 'Back PNEEs', onClick: () => setBacking(true) }}
       />
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (

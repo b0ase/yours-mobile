@@ -39,6 +39,8 @@ export type AssetRowProps = {
   subline?: ReactNode;
   /** A button on the right, under the balance, in place of the dollar line (Buy MNEE, Buy PNEE). */
   action?: { label: string; onClick: () => void };
+  /** An outlined button beside `action`, on its left (Back PNEEs next to Buy PNEEs). */
+  secondaryAction?: { label: string; onClick: () => void };
 };
 
 export const AssetRow = (props: AssetRowProps) => {
@@ -57,6 +59,7 @@ export const AssetRow = (props: AssetRowProps) => {
     decimals,
     subline,
     action,
+    secondaryAction,
   } = props;
   // bWallet: "Buy MNEE" sits on the right under the balance (MNEE is dollars, so the $ line repeated it). Owner, 5 Oct 2026.
   const button = action ?? (isMNEE && onGetMneeClick ? { label: 'Buy MNEE', onClick: onGetMneeClick } : undefined);
@@ -112,17 +115,32 @@ export const AssetRow = (props: AssetRowProps) => {
               )}${isLock ? (isDisplaySat ? `${balance === 0.00000001 ? ' SAT' : ' SATS'}` : ' BSV') : ''}`}
             </span>
             {button ? (
+              <div className="flex items-center gap-1.5 mt-1">
+                {secondaryAction && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      secondaryAction.onClick();
+                    }}
+                    className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border cursor-pointer bg-transparent"
+                    style={{ borderColor: '#F5B80088', color: '#F5B800' }}
+                  >
+                    {secondaryAction.label}
+                  </button>
+                )}
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   button.onClick();
                 }}
-                className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
+                className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
                 style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
               >
                 {button.label}
               </button>
+              </div>
             ) : (
               <span className="text-xs mt-0.5 text-right" style={{ color: theme.color.global.gray }}>
                 {isLock ? `Block ${nextUnlock}` : formatUSD(usdBalance)}
