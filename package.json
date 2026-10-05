@@ -1,6 +1,6 @@
 {
   "name": "yours-wallet",
-  "version": "5.1.63",
+  "version": "5.1.64",
   "private": true,
   "type": "module",
   "dependencies": {
