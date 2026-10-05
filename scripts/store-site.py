@@ -77,10 +77,13 @@ s = re.sub(r'<span>Chrome · Download extension</span><small>[^<]*</small>',
 s = s.replace('bWallet<span class="gold">X</span>', 'bWallet')
 s = re.sub(r'bWalletX(?![^<]*</a>)', 'bWallet', s)
 
-# Page links in the top bar point to bwalletx.com, plus a clear bWalletX button.
-resub(r'<nav aria-label="Pages">.*?</nav>',
-      '<nav aria-label="Pages"><a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a>'
-      '<a href="https://bwalletx.com/friends">Rooms &amp; tokens</a><a href="https://bwalletx.com">Get bWalletX &rarr;</a></nav>')
+# Page links in the top bar: the shared /nav.js (copied from bwalletx.com) renders them from one config;
+# data-edition="store" picks the bWallet set (Market, browse-only, plus links to bWalletX). The links
+# inside the nav are only the no-JS / crawler fallback.
+STORE_NAV = ('<nav aria-label="Pages"><a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a>'
+             '<a href="https://bwalletx.com/friends">Rooms &amp; tokens</a><a href="https://bwalletx.com">Get bWalletX &rarr;</a></nav>')
+resub(r'<nav aria-label="Pages">.*?</nav>', STORE_NAV)
+sub('<script src="/nav.js"></script>', '<script src="/nav.js" data-edition="store"></script>')
 s = s.replace('href="https://web.bwalletx.com" target="_blank" rel="noopener">Web &rarr;</a>',
               'href="https://bwalletx.com">bWalletX &rarr;</a>')
 
