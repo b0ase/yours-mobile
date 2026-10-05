@@ -105,6 +105,25 @@ const ConfirmSheet = ({
   );
 };
 
+/**
+ * Quick starts above the composer (bWalletX only, owner 5 Oct 2026): each fills in a prompt the user can edit
+ * before sending, so nothing is paid for until they tap Send.
+ */
+const QUICK_STARTS: { label: string; prompt: string }[] = [
+  {
+    label: 'Make a strategy',
+    prompt: 'Help me make a strategy. Ask me what I want it to do, which tokens, my budget and when it should stop.',
+  },
+  {
+    label: 'Sell a strategy',
+    prompt: 'Help me sell a strategy on Exchange › Strategies: check it, fill in the listing spec with me and suggest a price.',
+  },
+  {
+    label: 'Check my agent',
+    prompt: "Check my agent: what has it spent today, what has it done recently, and is it within its strategy's limits?",
+  },
+];
+
 const AgentPage = () => {
   const navigate = useNavigate();
   const close = () => navigate(-1);
@@ -392,6 +411,21 @@ const AgentPage = () => {
           void send();
         }}
       >
+        {marketTradingEnabled() && !input && !busy && (
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {QUICK_STARTS.map((q) => (
+              <button
+                key={q.label}
+                type="button"
+                onClick={() => setInput(q.prompt)}
+                className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+                style={{ border: `1px solid ${GOLD}88`, color: GOLD, background: 'transparent' }}
+              >
+                {q.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             value={input}
