@@ -46,6 +46,22 @@ try {
   // Not in an extension context (tests).
 }
 
+/**
+ * bWallet (owner, 6 Oct 2026): an account object merged under ANOTHER account's id (a stale snapshot taken
+ * before a switch / Add account / the master backup's account walk) overwrote that account's addresses and
+ * name, so two accounts showed the same name. Refuse such a write instead of corrupting the wallet.
+ */
+export const assertAccountKeys = (update: Record<string, unknown>) => {
+  for (const [id, acct] of Object.entries(update ?? {})) {
+    const own = (acct as { addresses?: { identityAddress?: string } } | undefined)?.addresses?.identityAddress;
+    if (own && own !== id) {
+      const err = new Error(`Refused: account ${own} written under ${id}`);
+      console.error('[ChromeStorage]', err.message, err.stack);
+      throw err;
+    }
+  }
+};
+
 export class ChromeStorageService {
   storage: Partial<ChromeStorageObject> | undefined;
 
@@ -389,6 +405,7 @@ export class ChromeStorageService {
     key: K,
     update: Partial<ChromeStorageObject[K]>,
   ): Promise<void> => {
+    if (key === 'accounts') assertAccountKeys(update as Record<string, unknown>);
     try {
       const result = await this.get(key === 'accounts' ? [key, 'keyRekey'] : [key]);
       if (key === 'accounts' && result.keyRekey) {

@@ -475,7 +475,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/Settings.tsx': [
     [
       "import { ToggleSwitch } from '../components/ToggleSwitch';",
-      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';\nimport { IdentityVerification } from '../mobile/kyc/IdentityVerification';\nimport { FeedSettings } from '../mobile/settings/FeedSettings';",
+      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';\nimport { IdentityVerification } from '../mobile/kyc/IdentityVerification';\nimport { FeedSettings } from '../mobile/settings/FeedSettings';\nimport { SettingsAccountHeader, SettingsGroup } from '../mobile/settings/SettingsAccountHeader';",
     ],
     // One flow: profile name (upstream) → "Make your name payable" (paymail / OpNS, defaulting to the profile name).
     [
@@ -486,7 +486,36 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Settings → Feed / Payments / Privacy (default feed, autoplay, one-click pay, bookmarks, blocked & muted).
     [
       '      {/* Preferences section */}',
-      '      <FeedSettings Section={Section} Row={SettingRow} Divider={Divider} />\n      {/* Preferences section */}',
+      '      <FeedSettings part="wallet" Section={Section} Row={SettingRow} Divider={Divider} />\n      {/* Preferences section */}',
+    ],
+    // Settings main page: "Settings for: <account> ▾", then "This account" (identity, backup, permissions, names, tokens) and "All accounts (wallet)" (Manage accounts, password, USB key, preferences). Owner, 6 Oct 2026.
+    [
+      "      {/* Account section */}\n      <Section title=\"Account\">\n        <SettingRow\n          icon={<Users size={16} />}\n          label=\"Manage Accounts\"\n          description=\"Create, restore, or edit accounts\"\n          onClick={() => setPage('manage-accounts')}\n          isFirst\n        />\n        <Divider />\n",
+      "      <SettingsAccountHeader />\n      <SettingsGroup title=\"This account\" note=\"Each account has its own 12 words, keys, names and tokens.\" />\n      <Section title=\"Account\">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label=\"Identity\"\n          description=\"This account's on-chain BAP identity and profile\"\n          onClick={() => setPage('identity')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Key size={16} />}\n          label=\"Wallet Backup\"\n          description=\"This account's recovery phrase and keys; the encrypted file holds every account\"\n          onClick={() => setPage('export-keys-options')}\n        />\n        <Divider />\n",
+    ],
+    [
+      "          description=\"Review and revoke connected apps and permissions\"",
+      "          description=\"Apps connected to this account and their permissions\"",
+    ],
+    [
+      "      <Section title=\"Security\">\n        <SettingRow\n          icon={<Key size={16} />}\n          label=\"Wallet Backup\"\n          description=\"Backup seed, download JSON, or QR code\"\n          onClick={() => setPage('export-keys-options')}\n          isFirst\n          isLast={!usbSupported}\n        />",
+      "      <FeedSettings part=\"account\" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title=\"All accounts (wallet)\" note=\"One password and these preferences for every account on this device.\" />\n      <Section title=\"Wallet\">\n        <SettingRow\n          icon={<Users size={16} />}\n          label=\"Manage Accounts\"\n          description=\"Create, restore, or edit accounts\"\n          onClick={() => setPage('manage-accounts')}\n          isFirst\n          isLast={!usbSupported}\n        />",
+    ],
+    [
+      "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label=\"Identity\"\n          description=\"On-chain BAP identity and profile\"\n          onClick={() => setPage('identity')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          description=\"Default: 100 sat/kb\"",
+      "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          isFirst\n          description=\"All accounts \u00b7 default 100 sat/kb\"",
+    ],
+    [
+      "          description=\"Lock wallet after inactivity\"",
+      "          description=\"Lock every account after inactivity\"",
+    ],
+    [
+      "    const update: Partial<ChromeStorageObject['accounts']> = {\n      [selectedAccount]: {\n        ...account,\n        settings: { ...account.settings, customFeeRate: rate },\n      },\n    };",
+      "    const update: Partial<ChromeStorageObject['accounts']> = Object.fromEntries(\n      chromeStorageService.getAllAccounts().map(({ address: _a, ...a }) => [a.addresses.identityAddress, { ...a, settings: { ...a.settings, customFeeRate: rate } }]),\n    );\n    void account;",
+    ],
+    [
+      "    const update: Partial<ChromeStorageObject['accounts']> = {\n      [selectedAccount]: {\n        ...account,\n        settings: { ...account.settings, lockTimeout: minutes },\n      },\n    };",
+      "    const update: Partial<ChromeStorageObject['accounts']> = Object.fromEntries(\n      chromeStorageService.getAllAccounts().map(({ address: _a, ...a }) => [a.addresses.identityAddress, { ...a, settings: { ...a.settings, lockTimeout: minutes } }]),\n    );\n    void account;",
     ],
     // Deep links to Settings → Identity ("Get verified" / "Qualify as an investor" from Market → Shares).
     [

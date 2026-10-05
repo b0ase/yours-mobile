@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, ArrowLeft, Check, FileLock2, PenLine, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Eye, EyeOff, FileLock2, PenLine, ShieldCheck } from 'lucide-react';
+import { accountNamesFor } from '../names/MyNameBadge';
+import { isAgentAccount } from '../agents/agentAccounts';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { backupDownloadUrl, createBackupFile, saveBackupFile, saveRoute, WrongPasswordError, type SaveRoute } from './backupFile';
-import { markBackedUp, pickQuizPositions, quizCorrect, type BackupExit, type BackupMethod } from './backupState';
+import { backupCovers, markBackedUp, pickQuizPositions, quizCorrect, type BackupExit, type BackupMethod } from './backupState';
 
 type Props = {
   /** How the user may leave without backing up (backupState.backupExit). */
@@ -48,6 +50,21 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
   const [method, setMethod] = useState<BackupMethod>('file');
   const [confirmSkip, setConfirmSkip] = useState(false);
   const where = web ? 'this browser' : 'this device';
+  const [show, setShow] = useState(false);
+  // The account this step backs up, fixed when it opens: the master backup walks every account and a switch
+  // could happen meanwhile, so nothing below reads "the current account" again (owner, 6 Oct 2026).
+  const [target] = useState(() => {
+    const { account } = chromeStorageService.getCurrentAccountObject();
+    const id = account?.addresses?.identityAddress ?? '';
+    const names = accountNamesFor(id, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '');
+    return { id, name: names.displayName || account?.name || 'this account', agent: isAgentAccount(id) };
+  });
+  // Every account in the wallet (the encrypted file holds them all). Read per render: storage can refresh later.
+  const allIds = chromeStorageService
+    .getAllAccounts()
+    .map((a) => a.addresses?.identityAddress ?? (a as { address?: string }).address ?? '')
+    .filter(Boolean);
+  const others = allIds.filter((a) => a !== target.id).length;
 
   // Forget the phrase and file as soon as the sheet goes away.
   useEffect(
@@ -60,15 +77,23 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
 
   const go = (p: Page) => {
     setError('');
+    setShow(false);
     setPassword('');
     setPage(p);
   };
 
   const finish = async (m: BackupMethod) => {
+    setError('');
+    try {
+      await markBackedUp(chromeStorageService, m, Date.now(), backupCovers(m, target.id, allIds));
+    } catch (e) {
+      // Never a silent failure: say so and stay on this page.
+      setError(`Couldn't mark ${target.name} as backed up (${e instanceof Error ? e.message : String(e)}). Try again.`);
+      return;
+    }
     setMethod(m);
     setWords([]);
     setFile(null);
-    await markBackedUp(chromeStorageService, m);
     setPage('done');
   };
 
@@ -106,6 +131,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     setError('');
     try {
       const keys = await keysService.retrieveKeys(password);
+      if (keys.identityAddress && target.id && keys.identityAddress !== target.id) {
+        setPassword('');
+        setError('The open account changed. Close this and start the backup again.');
+        return;
+      }
       const list = (keys.mnemonic ?? '').trim().split(/\s+/).filter(Boolean);
       setPassword('');
       if (!list.length) {
@@ -147,16 +177,29 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
         if (password && !busy) onSubmit();
       }}
     >
-      <input
-        type="password"
-        autoComplete="current-password"
-        placeholder="Wallet password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        className="w-full rounded-xl px-4 py-3 text-white outline-none"
-        style={{ background: '#16181D', border: '1px solid #2A2E36' }}
-        autoFocus
-      />
+      <input type="text" name="username" autoComplete="username" value="bWalletX" readOnly hidden />
+      <div className="relative w-full">
+        <input
+          type={show ? 'text' : 'password'}
+          name="password"
+          autoComplete="current-password"
+          placeholder="Your wallet password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full rounded-xl pl-4 pr-11 py-3 text-white outline-none"
+          style={{ background: '#16181D', border: '1px solid #2A2E36' }}
+          autoFocus
+        />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-transparent border-0"
+          style={{ color: MUTED }}
+        >
+          {show ? <EyeOff size={18} /> : <Eye size={18} />}
+        </button>
+      </div>
       {error && (
         <p className="text-xs mt-2 self-start" style={{ color: RED }}>
           {error}
@@ -173,11 +216,32 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     </form>
   );
 
+  const accountChip = (
+    <div className="mx-5 mb-1 flex items-center gap-2 text-xs" style={{ color: MUTED }}>
+      <span>Account:</span>
+      <span className="font-bold text-white truncate" data-testid="backup-account" data-accounts={allIds.length}>
+        {target.name}
+      </span>
+      {target.agent && (
+        <span className="rounded px-1.5 py-[1px] text-[10px] font-bold" style={{ background: '#7A5AF833', color: '#BDB4FE' }}>
+          AGENT
+        </span>
+      )}
+    </div>
+  );
+  const passwordNote = (
+    <p className="text-xs mt-0 mb-4" style={{ color: MUTED }}>
+      This is your existing wallet password, the one you unlock bWalletX with. It's the same for every account; you
+      don't make a new one here.
+    </p>
+  );
+
   let body: JSX.Element;
   if (page === 'choose') {
     body = (
       <>
-        {header('Back up your wallet')}
+        {header(`Back up ${target.name}`)}
+        {accountChip}
         <div className="flex flex-col px-5 pb-10 overflow-y-auto">
           <div className="flex items-start gap-3 rounded-xl p-3 mt-2" style={{ background: '#2A1215' }}>
             <AlertTriangle size={20} color={RED} className="shrink-0 mt-0.5" />
@@ -195,8 +259,12 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
             <span>
               <span className="block font-bold text-white">Save an encrypted backup</span>
               <span className="block text-sm mt-1" style={{ color: MUTED }}>
-                A file locked with your wallet password. Save it to Files, email it to yourself or AirDrop it. Keep
-                the password too: the file can't be opened without it.
+                A file locked with your wallet password (the one you unlock with).{' '}
+                {others > 0
+                  ? `It holds all ${others + 1} accounts in this wallet, including ${target.name}. `
+                  : ''}
+                Save it to Files, email it to yourself or AirDrop it. Keep the password too: the file can't be opened
+                without it.
               </span>
             </span>
           </button>
@@ -209,7 +277,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
             <span>
               <span className="block font-bold text-white">Write down the recovery phrase</span>
               <span className="block text-sm mt-1" style={{ color: MUTED }}>
-                12 words on paper restore this wallet anywhere, no password needed. Anyone with them can take the
+                {others > 0 ? `${target.name}'s own 12 words` : '12 words'} on paper restore{others > 0 ? ' this account' : ' this wallet'} anywhere, no password needed. Anyone with them can take the
                 money, so keep them private.
               </span>
             </span>
@@ -221,6 +289,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
           >
             I restored this wallet from my own phrase or backup
           </button>
+          {error && (
+            <p className="text-xs mt-2 text-center" style={{ color: RED }}>
+              {error}
+            </p>
+          )}
           {exit !== 'none' && !confirmSkip && (
             <button
               onClick={() => (exit === 'skip' ? setConfirmSkip(true) : onExit())}
@@ -266,11 +339,13 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     body = (
       <>
         {header('Encrypted backup', () => go('choose'))}
+        {accountChip}
         <div className="flex flex-col px-5 pb-10">
-          <p className="text-sm mt-2 mb-5" style={{ color: MUTED }}>
+          <p className="text-sm mt-2 mb-2" style={{ color: MUTED }}>
             Enter your wallet password. The backup file is locked with it, so you'll need the same password to restore
-            from the file. Keep the password somewhere safe too.
+            from the file.{others > 0 ? ` The file holds all ${others + 1} accounts.` : ''}
           </p>
+          {passwordNote}
           {passwordForm('Make backup file', () => void makeFile())}
         </div>
       </>
@@ -343,10 +418,12 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     body = (
       <>
         {header('Recovery phrase', () => go('choose'))}
+        {accountChip}
         <div className="flex flex-col px-5 pb-10">
-          <p className="text-sm mt-2 mb-5" style={{ color: MUTED }}>
-            Make sure no one can see your screen. Enter your wallet password to show the phrase.
+          <p className="text-sm mt-2 mb-2" style={{ color: MUTED }}>
+            Make sure no one can see your screen. Enter your wallet password to show {target.name}'s phrase.
           </p>
+          {passwordNote}
           {passwordForm('Show recovery phrase', () => void revealPhrase())}
         </div>
       </>
@@ -354,7 +431,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
   } else if (page === 'phrase-show') {
     body = (
       <>
-        {header('Write these words down', () => go('choose'))}
+        {header(`${target.name}: write these words down`, () => go('choose'))}
         <div className="flex flex-col px-5 pb-10 overflow-y-auto">
           <p className="text-sm mt-2" style={{ color: MUTED }}>
             On paper, in order. Don't screenshot them or store them in notes or email.
@@ -428,7 +505,14 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     body = (
       <div className="flex flex-col items-center text-center px-6" style={{ paddingTop: '20vh' }}>
         <ShieldCheck size={44} color="#2ecc71" />
-        <p className="mt-3 text-lg font-bold text-white">Wallet backed up</p>
+        <p className="mt-3 text-lg font-bold text-white" data-testid="backup-done">
+          Backed up ✓ {target.name}
+        </p>
+        {method === 'file' && others > 0 && (
+          <p className="mt-1 text-sm" style={{ color: '#2ecc71' }}>
+            The file also covers your other {others} account{others === 1 ? '' : 's'}.
+          </p>
+        )}
         <p className="mt-2 text-sm" style={{ color: MUTED }}>
           {method === 'file'
             ? 'Keep the file and your wallet password. Together they restore this wallet on any device.'

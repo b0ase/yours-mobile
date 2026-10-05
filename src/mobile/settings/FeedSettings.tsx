@@ -81,6 +81,11 @@ type Props = {
   Section: ComponentType<{ title: string; children: ReactNode }>;
   Row: ComponentType<RowProps>;
   Divider: ComponentType;
+  /**
+   * Settings is split into "This account" (keys, names, tokens: differ per account) and "All accounts (wallet)"
+   * (device / app preferences). Unset renders both.
+   */
+  part?: 'account' | 'wallet';
 };
 
 const FEEDS: { id: DefaultFeed; label: string }[] = [
@@ -346,7 +351,9 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-export const FeedSettings = ({ Section, Row, Divider }: Props) => {
+export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
+  const acct = part !== 'wallet';
+  const wal = part !== 'account';
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
     'bookmarks' | 'hidden' | 'terms' | 'delete' | 'sweep' | 'tokens' | 'paired' | 'scan' | 'password' | 'social' | 'agents' | null
@@ -365,6 +372,52 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
   return (
     <>
+      {acct && socialLoginEnabled() && (
+        <Section title="Identity">
+          <WalletNames />
+          <Row
+            icon={<BadgeCheck size={16} />}
+            label="Connect X or Google"
+            description="Get a verified name like yourname.x; it becomes the main name"
+            onClick={() => setScreen('social')}
+            isFirst
+            isLast
+          />
+        </Section>
+      )}
+      {acct && (
+        <Section title="Tokens">
+          <Row
+            icon={<Coins size={16} />}
+            label="My tokens"
+            description="This account's tokens and their rooms: set up the ones that aren't listed yet"
+            onClick={() => setScreen('tokens')}
+            isFirst
+            isLast
+          />
+        </Section>
+      )}
+      {acct && (
+        <Section title="Account data">
+          <Row
+            icon={<Download size={16} />}
+            label="Sweep into this account"
+            description="Move coins, NFTs and tokens from bWalletX, Yours, SimplyCash or any wallet: paste its phrase or private key"
+            onClick={() => setScreen('sweep')}
+            isFirst
+          />
+          <Divider />
+          <Row
+            icon={<Trash2 size={16} />}
+            label="Delete account data"
+            description="Delete this account's paymail, $handle, bChat profile and messages"
+            onClick={() => setScreen('delete')}
+            isLast
+            danger
+          />
+        </Section>
+      )}
+      {wal && (<>
       <Section title="Feed">
         <Row icon={<Newspaper size={16} />} label="Default feed" description="What the Feed opens to" isFirst />
         <div className="px-4 pb-3 pl-12">
@@ -438,19 +491,6 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           </>
         )}
       </Section>
-      {socialLoginEnabled() && (
-        <Section title="Identity">
-          <WalletNames />
-          <Row
-            icon={<BadgeCheck size={16} />}
-            label="Connect X or Google"
-            description="Get a verified name like yourname.x; it becomes the main name"
-            onClick={() => setScreen('social')}
-            isFirst
-            isLast
-          />
-        </Section>
-      )}
       {isBWalletX() && (
         <Section title="Agents">
           <Row
@@ -483,24 +523,17 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
         <Row
           icon={<LockKeyhole size={16} />}
           label="Change password"
-          description="Set a new unlock password (no old password needed while unlocked)"
+          description="One password unlocks every account (no old password needed while unlocked)"
           onClick={() => setScreen('password')}
           isFirst
           isLast
         />
       </Section>
-      <Section title="Tokens">
-        <Row
-          icon={<Coins size={16} />}
-          label="My tokens"
-          description="Your tokens and their rooms: set up the ones that aren't listed yet"
-          onClick={() => setScreen('tokens')}
-          isFirst
-        />
-        <Divider />
+      <Section title="Token indexing">
         <Row
           icon={<Zap size={16} />}
           label="One-tap indexing fee"
+          isFirst
           description={
             prefs.indexAutoPayUsd
               ? `Your own tokens' indexing fee pays on one tap when under $${prefs.indexAutoPayUsd.toFixed(2)}`
@@ -596,18 +629,11 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           />
         </Section>
       )}
-      <Section title="Account & safety">
-        <Row
-          icon={<Download size={16} />}
-          label="Sweep from another wallet"
-          description="Move coins, NFTs and tokens from bWalletX, Yours, SimplyCash or any wallet: paste its phrase or private key"
-          onClick={() => setScreen('sweep')}
-          isFirst
-        />
-        <Divider />
+      <Section title="Help & safety">
         <Row
           icon={<FileText size={16} />}
           label="Terms of use"
+          isFirst
           description="Zero tolerance for objectionable content and abusive users"
           onClick={() => setScreen('terms')}
         />
@@ -617,17 +643,10 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
           label="Contact and reports"
           description={SUPPORT_EMAIL}
           onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
-        />
-        <Divider />
-        <Row
-          icon={<Trash2 size={16} />}
-          label="Delete account"
-          description="Delete your paymail, $handle, bChat profile and messages"
-          onClick={() => setScreen('delete')}
           isLast
-          danger
         />
       </Section>
+      </>)}
       {screen === 'terms' && <TermsScreen onBack={() => setScreen(null)} />}
       {screen === 'delete' && <DeleteAccountScreen onBack={() => setScreen(null)} />}
       {screen === 'sweep' && <HdSweepScreen onBack={() => setScreen(null)} />}

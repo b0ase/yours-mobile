@@ -1,5 +1,5 @@
 import { getProfile, listOpns, resolveBapId, type OneSatContext } from '@1sat/actions';
-import type { WalletOutput } from '@bsv/sdk';
+import { PublicKey, type WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
 import { collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
 import { syncBchatHandle } from './bchatHandle';
@@ -98,6 +98,21 @@ export const payableLabel = (displayName: string, handle: string, paymail: strin
 
 const lastSync = new Map<string, number>();
 
+/**
+ * The identity address the wallet context actually signs as. Right after Add account / a switch, the
+ * top bar already shows the new account while `apiContext` can still be the previous account's wallet;
+ * syncing then cached the OTHER account's profile name / paymail / OpNS names under the new id
+ * (owner, 6 Oct 2026: a new agent account showed the first account's name). Null if unknown.
+ */
+export const ctxIdentityAddress = async (ctx: OneSatContext): Promise<string | null> => {
+  try {
+    const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
+    return PublicKey.fromString(publicKey).toAddress();
+  } catch {
+    return null;
+  }
+};
+
 /** Refresh profile name, OpNS names and paymail for the current account; collect paymail inbox. */
 export const syncAccountNames = async (
   ctx: OneSatContext,
@@ -107,12 +122,15 @@ export const syncAccountNames = async (
   if (!identityAddress) return;
   const now = Date.now();
   if (!opts.force && now - (lastSync.get(identityAddress) ?? 0) < (opts.minIntervalMs ?? 120_000)) return;
+  // Only write this account's caches from this account's own wallet (see ctxIdentityAddress).
+  if ((await ctxIdentityAddress(ctx)) !== identityAddress) return;
   lastSync.set(identityAddress, now);
   const f = (u: string, i?: RequestInit) => fetch(u, i);
 
   await Promise.allSettled([
     (async () => {
-      if ((await resolveBapId(ctx)) === null) return;
+      // Unpublished: no profile name (also clears a name cached here by mistake for another account).
+      if ((await resolveBapId(ctx)) === null) return setCachedProfileName(identityAddress, '');
       const res = await getProfile.execute(ctx, {});
       const name = typeof res.profile?.name === 'string' ? res.profile.name.trim() : '';
       if (name) setCachedProfileName(identityAddress, name);
