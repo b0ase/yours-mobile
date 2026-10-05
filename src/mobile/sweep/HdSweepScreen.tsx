@@ -1,25 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, Loader2, X } from 'lucide-react';
-import { PrivateKey } from '@bsv/sdk';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
+import { HD, Mnemonic, PrivateKey } from '@bsv/sdk';
 import { prepareSweepInputs, sweepBsv, sweepBsv21, sweepOrdinals } from '@1sat/actions';
 import type { IndexedOutput } from '@1sat/types';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { scanAddress, type ScannedAssets, type TokenBalance } from '../../sweep/scanner';
 import { moneyNow } from '../money/money';
-import { HD } from '@bsv/sdk';
 import {
-  FALLBACK_PATHS,
-  PRESETS,
+  HD_ACCOUNTS,
   accountKey,
   accountKeyNonCompliant,
   addressAt,
+  detectInput,
+  fixedKeys,
   normalizePath,
-  parseRecovery,
-  phraseProblem,
   scanAccount,
-  type HdAddress,
+  tokenAmount,
+  wifKey,
+  type SingleKey,
 } from './hd';
 
 const GOLD = '#FFD24D';
@@ -48,8 +48,9 @@ const woCUsed = async (address: string): Promise<boolean> => {
 };
 
 type Found = {
-  path: string;
-  addresses: HdAddress[];
+  /** Which wallet types / paths had history, e.g. "Yours / bWalletX payment (m/44'/236'/0'/1/0)". */
+  matches: string[];
+  addresses: number;
   assets: ScannedAssets;
   /** outpoint → private key of the address holding it */
   keyFor: Map<string, string>;
@@ -82,19 +83,29 @@ const mergeTokens = (all: TokenBalance[]): TokenBalance[] => {
 };
 
 /**
- * Settings › Sweep from another wallet: move everything from an HD wallet (SimplyCash, other BIP44
- * wallets) into the current bWallet account. Phrase → scan the receive and change chains → review →
- * one sweep per asset kind, each input signed by the key of the address it sits at.
- *
- * The phrase and passphrase live only in this screen's state; they are cleared on leaving.
+ * Newer Yours (5.x, BRC-100) and bWalletX keep change and incoming payments (paymail, BRC-29) at keys
+ * derived per payment from the identity key with a random prefix/suffix that only the wallet's own
+ * database records (see initWallet.ts: the wallet-toolbox wallet is rooted at identityWif, and
+ * names/paymail.ts internalizes payments by derivationPrefix/Suffix). A phrase scan can't enumerate
+ * those, so we say so instead of implying the sweep found everything (6 Oct 2026).
  */
-export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; initialPreset?: string }) => {
+const BRC100_NOTE =
+  'Coins received through newer wallet features (Yours 5 / bWalletX change and paymail payments) sit at one-off keys that can’t be found from the phrase alone. To move those, restore the phrase as an account here (Add account › Restore) and send from it.';
+
+/**
+ * Settings › Sweep from another wallet: move everything from another wallet into the current bWallet
+ * account. One box takes a recovery phrase, a WIF private key or an xprv; every known wallet layout is
+ * tried (Yours / bWalletX / RelayX / Twetch single keys, SimplyCash and BIP44 HD walks), so nobody has
+ * to know which wallet their phrase came from (owner, 6 Oct 2026). Review in dollars, then one sweep
+ * per asset kind, each input signed by the key of the address it sits at.
+ *
+ * The phrase, key and passphrase live only in this screen's state; they are cleared on leaving.
+ */
+export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const { apiContext } = useServiceContext();
   const [phrase, setPhrase] = useState('');
   const [passphrase, setPassphrase] = useState('');
-  const [presetId, setPresetId] = useState(
-    PRESETS.some((p) => p.id === initialPreset) ? initialPreset! : PRESETS[0].id,
-  );
+  const [advanced, setAdvanced] = useState(false);
   const [customPath, setCustomPath] = useState('');
   const [step, setStep] = useState<'enter' | 'scanning' | 'review' | 'sweeping' | 'done'>('enter');
   const [progress, setProgress] = useState('');
@@ -118,66 +129,105 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
     [],
   );
 
-  const preset = PRESETS.find((p) => p.id === presetId)!;
-  const chosenPath = preset.id === 'custom' ? normalizePath(customPath) : preset.path;
+  const detected = detectInput(phrase);
+  const kindLabel = {
+    phrase: 'Recovery phrase',
+    wif: 'Private key (WIF)',
+    xprv: 'Extended private key (xprv)',
+    unknown: '',
+  }[detected.kind];
 
   const scan = async () => {
-    // SimplyCash recovery strings carry their own path and passphrase: `words:path:passphrase`.
-    const rec = parseRecovery(phrase);
-    const problem = rec.xprv ? null : phraseProblem(rec.phrase);
-    if (problem) return setError(problem);
-    const pass = rec.passphrase ?? passphrase;
-    const firstPath = rec.path ?? chosenPath;
-    if (!firstPath && !rec.xprv) return setError("That path doesn't look right. Example: m/44'/145'/0'");
+    const input = detectInput(phrase);
+    if (input.kind === 'unknown') return setError(input.problem);
+    const custom = customPath.trim() ? normalizePath(customPath) : null;
+    if (customPath.trim() && !custom) return setError("That path doesn't look right. Example: m/44'/145'/0'");
     if (!apiContext.services) return setError('Wallet services are not ready yet. Try again in a moment.');
     setError('');
     setStep('scanning');
     try {
-      // The chosen path first, then the common alternatives. Each path is also tried with the old
-      // (non-compliant) derivation early SimplyCash wallets used, when that gives different keys.
-      const paths = [firstPath!, ...FALLBACK_PATHS.filter((p) => p !== firstPath)];
-      const accounts: { label: string; path: string; key: HD }[] = rec.xprv
-        ? [{ label: 'xprv', path: 'xprv', key: HD.fromString(rec.xprv) }]
-        : paths.flatMap((path) => {
-            const key = accountKey(rec.phrase, pass, path);
-            const old = accountKeyNonCompliant(rec.phrase, pass, path);
-            const differs = old && addressAt(old, path, 0, 0).address !== addressAt(key, path, 0, 0).address;
-            return [
-              { label: path, path, key },
-              ...(differs ? [{ label: `${path} (older SimplyCash)`, path, key: old! }] : []),
-            ];
-          });
-      for (const { label, path, key: account } of accounts) {
+      // 1. What to try. A SimplyCash recovery string carries its own path and passphrase.
+      const rec = input.kind === 'phrase' ? input.recovery : null;
+      const pass = rec?.passphrase ?? passphrase;
+      let singles: SingleKey[] = [];
+      let accounts: { label: string; path: string; key: HD }[] = [];
+      if (input.kind === 'wif') singles = [wifKey(input.wif)];
+      if (input.kind === 'xprv') accounts = [{ label: 'xprv', path: 'xprv', key: HD.fromString(input.xprv) }];
+      if (rec) {
+        singles = fixedKeys(rec.phrase, pass);
+        if (custom) {
+          // A full key path is checked as a single key, and also walked as an account.
+          const k = HD.fromSeed(Mnemonic.fromString(rec.phrase).toSeed(pass)).derive(custom).privKey;
+          singles.push({ wallet: 'Custom', label: 'key', path: custom, address: k.toAddress(), wif: k.toWif() });
+        }
+        const paths = [
+          ...(rec.path ? [{ wallet: 'SimplyCash', path: rec.path }] : []),
+          ...(custom ? [{ wallet: 'Custom', path: custom }] : []),
+          ...HD_ACCOUNTS.filter((a) => a.path !== rec.path && a.path !== custom),
+        ];
+        // Each HD path is also tried with the old (non-compliant) derivation early SimplyCash wallets
+        // used, when that gives different keys.
+        accounts = paths.flatMap(({ wallet, path }) => {
+          const key = accountKey(rec.phrase, pass, path);
+          const old = accountKeyNonCompliant(rec.phrase, pass, path);
+          const differs = old && addressAt(old, path, 0, 0).address !== addressAt(key, path, 0, 0).address;
+          return [
+            { label: `${wallet} (${path})`, path, key },
+            ...(differs ? [{ label: `older SimplyCash (${path})`, path, key: old! }] : []),
+          ];
+        });
+      }
+
+      // 2. Which of those addresses were ever used, across every layout (one wallet can match several).
+      const used = new Map<string, string>(); // address → wif
+      const matches: string[] = [];
+      for (const [i, k] of singles.entries()) {
         if (cancelled.current) return;
-        const used = await scanAccount(account, path, woCUsed, (checked, n) =>
+        setProgress(`Checking ${k.wallet} ${k.label} key (${i + 1} of ${singles.length})`);
+        if (input.kind === 'wif' || (await woCUsed(k.address))) {
+          if (!used.has(k.address)) used.set(k.address, k.wif);
+          matches.push(input.kind === 'wif' ? `Private key (${k.address})` : `${k.wallet} ${k.label} (${k.path})`);
+        }
+      }
+      for (const { label, path, key } of accounts) {
+        if (cancelled.current) return;
+        const hits = await scanAccount(key, path, woCUsed, (checked, n) =>
           setProgress(`${label}: checked ${checked} addresses, ${n} used`),
         );
-        if (!used.length) continue;
-        const assets = emptyAssets();
-        const keyFor = new Map<string, string>();
-        const tokens: TokenBalance[] = [];
-        for (const [i, a] of used.entries()) {
-          if (cancelled.current) return;
-          setProgress(`Looking for coins and tokens: address ${i + 1} of ${used.length}`);
-          const r = await scanAddress(apiContext.services, a.address);
-          const own = (o: IndexedOutput) => keyFor.set(o.outpoint, a.wif);
-          [...r.funding, ...r.ordinals, ...r.opnsNames, ...r.bsv20Tokens, ...r.locked].forEach(own);
-          r.bsv21Tokens.forEach((t) => t.outputs.forEach(own));
-          assets.funding.push(...r.funding);
-          assets.ordinals.push(...r.ordinals);
-          assets.opnsNames.push(...r.opnsNames);
-          assets.bsv20Tokens.push(...r.bsv20Tokens);
-          assets.locked.push(...r.locked);
-          assets.totalBsv += r.totalBsv;
-          tokens.push(...r.bsv21Tokens);
-        }
-        assets.bsv21Tokens = mergeTokens(tokens);
-        setFound({ path: label, addresses: used, assets, keyFor });
-        setStep('review');
+        if (!hits.length) continue;
+        matches.push(`${label}: ${hits.length} address${hits.length === 1 ? '' : 'es'}`);
+        for (const h of hits) if (!used.has(h.address)) used.set(h.address, h.wif);
+      }
+      if (!used.size) {
+        setError(
+          'Nothing found on any known wallet layout. Check the phrase and passphrase, or try a custom path under Advanced.',
+        );
+        setStep('enter');
         return;
       }
-      setError('No used addresses on any of the usual paths. Check the phrase and passphrase, or try a custom path.');
-      setStep('enter');
+
+      // 3. What each used address holds now.
+      const assets = emptyAssets();
+      const keyFor = new Map<string, string>();
+      const tokens: TokenBalance[] = [];
+      for (const [i, [address, wif]] of [...used.entries()].entries()) {
+        if (cancelled.current) return;
+        setProgress(`Looking for coins and tokens: address ${i + 1} of ${used.size}`);
+        const r = await scanAddress(apiContext.services, address);
+        const own = (o: IndexedOutput) => keyFor.set(o.outpoint, wif);
+        [...r.funding, ...r.ordinals, ...r.opnsNames, ...r.bsv20Tokens, ...r.locked].forEach(own);
+        r.bsv21Tokens.forEach((t) => t.outputs.forEach(own));
+        assets.funding.push(...r.funding);
+        assets.ordinals.push(...r.ordinals);
+        assets.opnsNames.push(...r.opnsNames);
+        assets.bsv20Tokens.push(...r.bsv20Tokens);
+        assets.locked.push(...r.locked);
+        assets.totalBsv += r.totalBsv;
+        tokens.push(...r.bsv21Tokens);
+      }
+      assets.bsv21Tokens = mergeTokens(tokens);
+      setFound({ matches, addresses: used.size, assets, keyFor });
+      setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The scan failed. Try again.');
       setStep('enter');
@@ -204,13 +254,13 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
       }
     }
     if (assets.ordinals.length) {
-      setProgress('Sweeping ordinals…');
+      setProgress('Sweeping NFTs…');
       try {
         const inputs = await prepareSweepInputs(apiContext, toInputs(assets.ordinals));
         const r = await sweepOrdinals.execute(apiContext, { inputs, keys: keysFor(inputs) });
-        out.push({ label: `Ordinals (${assets.ordinals.length})`, txid: r.txid, error: r.error });
+        out.push({ label: `NFTs (${assets.ordinals.length})`, txid: r.txid, error: r.error });
       } catch (e) {
-        out.push({ label: 'Ordinals', error: String(e) });
+        out.push({ label: 'NFTs', error: String(e) });
       }
     }
     for (const t of assets.bsv21Tokens) {
@@ -222,7 +272,7 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
           inputs: inputs.map((i) => ({ ...i, tokenId: t.tokenId, amount: t.totalAmount.toString() })),
           keys: keysFor(inputs),
         });
-        out.push({ label: `${label} (${t.totalAmount})`, txid: r.txid, error: r.error });
+        out.push({ label: `${label} (${tokenAmount(t.totalAmount, t.decimals)})`, txid: r.txid, error: r.error });
       } catch (e) {
         out.push({ label, error: String(e) });
       }
@@ -252,11 +302,12 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
         {step === 'enter' && (
           <>
             <p className="text-xs" style={{ color: MUTED }}>
-              Move everything from an old wallet (SimplyCash and other 12 or 24-word wallets) into this bWallet account.
-              The phrase stays on this phone and is forgotten when you leave this screen.
+              Move everything from another wallet (bWalletX, Yours, RelayX, Twetch, SimplyCash and other 12 or 24-word
+              wallets) into this account. We try every known wallet layout for you. What you paste stays on this phone
+              and is forgotten when you leave this screen.
             </p>
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-white">Recovery phrase</span>
+              <span className="text-xs font-semibold text-white">Recovery phrase, private key or xprv</span>
               <textarea
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
@@ -265,53 +316,53 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
                 autoCorrect="off"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="12 or 24 words (a SimplyCash recovery string with :path:passphrase also works)"
+                placeholder="12 or 24 words, a WIF private key (starts with K, L or 5), or an xprv"
                 className="rounded-xl px-3 py-2 text-sm text-white outline-none"
                 style={{ background: PANEL, border: `1px solid ${LINE}` }}
               />
-            </label>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-white">Wallet it came from</span>
-              <div className="flex flex-col gap-1.5">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPresetId(p.id)}
-                    className="flex items-center justify-between rounded-xl px-3 py-2 text-left"
-                    style={{ background: PANEL, border: `1px solid ${presetId === p.id ? GOLD : LINE}` }}
-                  >
-                    <span className="text-sm text-white">{p.label}</span>
-                    <span className="text-[11px]" style={{ color: MUTED }}>
-                      {p.path || p.note}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {presetId === 'custom' && (
-                <input
-                  value={customPath}
-                  onChange={(e) => setCustomPath(e.target.value)}
-                  placeholder="m/44'/145'/0'"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  className="rounded-xl px-3 py-2 text-sm text-white outline-none"
-                  style={{ background: PANEL, border: `1px solid ${LINE}` }}
-                />
+              {kindLabel && (
+                <span className="text-[11px]" style={{ color: GOLD }}>
+                  {kindLabel}
+                </span>
               )}
-            </div>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-white">Passphrase (only if the old wallet had one)</span>
-              <input
-                type="password"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-                autoCapitalize="off"
-                autoCorrect="off"
-                autoComplete="off"
-                className="rounded-xl px-3 py-2 text-sm text-white outline-none"
-                style={{ background: PANEL, border: `1px solid ${LINE}` }}
-              />
             </label>
+            <button
+              onClick={() => setAdvanced((v) => !v)}
+              className="flex items-center gap-1 text-xs"
+              style={{ color: MUTED }}
+            >
+              {advanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              Advanced: passphrase, custom path
+            </button>
+            {advanced && (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-white">Passphrase (only if the old wallet had one)</span>
+                  <input
+                    type="password"
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    className="rounded-xl px-3 py-2 text-sm text-white outline-none"
+                    style={{ background: PANEL, border: `1px solid ${LINE}` }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-white">Custom path (tried as well as the usual ones)</span>
+                  <input
+                    value={customPath}
+                    onChange={(e) => setCustomPath(e.target.value)}
+                    placeholder="m/44'/145'/0'"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    className="rounded-xl px-3 py-2 text-sm text-white outline-none"
+                    style={{ background: PANEL, border: `1px solid ${LINE}` }}
+                  />
+                </label>
+              </>
+            )}
             {error && (
               <p className="text-xs" style={{ color: RED }}>
                 {error}
@@ -326,7 +377,7 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
               Find my coins
             </button>
             <p className="text-[11px]" style={{ color: MUTED }}>
-              Never type this phrase into a website, and never give it to anyone offering to recover funds.
+              Never type a phrase or key into a website, and never give it to anyone offering to recover funds.
             </p>
           </>
         )}
@@ -344,17 +395,17 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
         {step === 'review' && found && a && (
           <>
             <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: PANEL }}>
-              <p className="text-xs" style={{ color: MUTED }}>
-                Found on {found.path}: {found.addresses.length} used address{found.addresses.length === 1 ? '' : 'es'}
-              </p>
               <p className="text-2xl font-bold text-white">{moneyNow(a.totalBsv)}</p>
               <p className="text-xs" style={{ color: MUTED }}>
-                {a.totalBsv.toLocaleString()} sats in {a.funding.length} coin{a.funding.length === 1 ? '' : 's'}
+                {a.totalBsv.toLocaleString()} sats in {a.funding.length} coin{a.funding.length === 1 ? '' : 's'}, from{' '}
+                {found.addresses} address{found.addresses === 1 ? '' : 'es'}
               </p>
-              {!!a.ordinals.length && <p className="text-sm text-white">{a.ordinals.length} ordinals</p>}
+              <p className="text-sm text-white">
+                {a.ordinals.length} NFT{a.ordinals.length === 1 ? '' : 's'}
+              </p>
               {a.bsv21Tokens.map((t) => (
                 <p key={t.tokenId} className="text-sm text-white">
-                  {t.symbol || t.tokenId.slice(0, 8)}: {t.totalAmount.toString()}
+                  {t.symbol || t.tokenId.slice(0, 8)}: {tokenAmount(t.totalAmount, t.decimals)}
                 </p>
               ))}
               {!!skipped && (
@@ -362,6 +413,14 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
                   Not swept here: {skipped} other item{skipped === 1 ? '' : 's'} (names, BSV-20 tokens or locked coins).
                 </p>
               )}
+            </div>
+            <div className="rounded-2xl p-4 flex flex-col gap-1" style={{ background: PANEL }}>
+              <p className="text-xs font-semibold text-white">Matched</p>
+              {found.matches.map((m) => (
+                <p key={m} className="text-[11px] break-all" style={{ color: MUTED }}>
+                  {m}
+                </p>
+              ))}
             </div>
             {nothing ? (
               <p className="text-sm text-white">This wallet was used, but there is nothing left in it to sweep.</p>
@@ -371,11 +430,14 @@ export const HdSweepScreen = ({ onBack, initialPreset }: { onBack: () => void; i
                 className="rounded-xl py-3 text-sm font-bold"
                 style={{ background: GOLD, color: '#1a1300' }}
               >
-                Sweep into this account
+                Sweep all to this account
               </button>
             )}
+            <p className="text-[11px]" style={{ color: MUTED }}>
+              {BRC100_NOTE}
+            </p>
             <button onClick={() => setStep('enter')} className="text-xs underline" style={{ color: MUTED }}>
-              Try a different path
+              Back
             </button>
           </>
         )}

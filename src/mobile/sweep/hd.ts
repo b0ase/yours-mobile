@@ -1,4 +1,12 @@
 import { BigNumber, Hash, HD, Mnemonic, PrivateKey } from '@bsv/sdk';
+import {
+  DEFAULT_IDENTITY_PATH,
+  DEFAULT_ORD_PATH,
+  DEFAULT_RELAYX_ORD_PATH,
+  DEFAULT_TWETCH_WALLET_PATH,
+  DEFAULT_WALLET_PATH,
+  SWEEP_PATH,
+} from '../../utils/constants';
 
 /**
  * Sweep from another wallet: the HD (BIP39 + BIP32/44) side. Turns a 12/24-word phrase (plus optional
@@ -22,6 +30,87 @@ export const PRESETS: Preset[] = [
 
 /** Paths tried after the chosen one comes back empty. */
 export const FALLBACK_PATHS = PRESETS.filter((p) => p.path).map((p) => p.path);
+
+/**
+ * Single keys (not HD walks) that wallets derive straight from the phrase. Owner, 6 Oct 2026: "easily
+ * sweep one bWalletX or Yours wallet (or other wallets) into my account", so the sweep tries every one
+ * of these with no picking. The paths are the ones Yours itself uses (utils/constants.ts and the
+ * RelayX/Twetch switch in Keys.service.ts), imported rather than copied so they can't drift.
+ */
+export type FixedKey = { wallet: string; label: string; path: string };
+export const FIXED_KEYS: FixedKey[] = [
+  { wallet: 'Yours / bWalletX', label: 'payment', path: DEFAULT_WALLET_PATH },
+  { wallet: 'Yours / bWalletX', label: 'ordinals', path: DEFAULT_ORD_PATH },
+  { wallet: 'Yours / bWalletX', label: 'identity', path: DEFAULT_IDENTITY_PATH },
+  // Yours' old default payment key; also RelayX's payment key (Yours restores RelayX with this
+  // wallet path and only swaps the ordinals path).
+  { wallet: 'Yours (older) / RelayX', label: 'payment', path: SWEEP_PATH },
+  { wallet: 'RelayX', label: 'ordinals', path: DEFAULT_RELAYX_ORD_PATH },
+  { wallet: 'Twetch', label: 'payment', path: DEFAULT_TWETCH_WALLET_PATH },
+];
+
+/** The HD accounts walked with the gap limit (SimplyCash, BIP44 BSV, BIP44 Bitcoin). */
+export const HD_ACCOUNTS: { wallet: string; path: string }[] = PRESETS.filter((p) => p.path).map((p) => ({
+  wallet: p.label,
+  path: p.path,
+}));
+
+/** What was pasted into the one box. */
+export type InputKind =
+  | { kind: 'phrase'; recovery: Recovery }
+  | { kind: 'wif'; wif: string }
+  | { kind: 'xprv'; xprv: string }
+  | { kind: 'unknown'; problem: string };
+
+const WIF_RE = /^[5KLc9][1-9A-HJ-NP-Za-km-z]{50,51}$/;
+
+/** Recovery phrase (or SimplyCash `words:path:passphrase`), WIF private key, or xprv? */
+export function detectInput(input: string): InputKind {
+  const v = input.trim();
+  if (!v) return { kind: 'unknown', problem: 'Paste a recovery phrase, a private key (WIF) or an xprv.' };
+  if (/^xprv[1-9A-HJ-NP-Za-km-z]+$/.test(v)) {
+    try {
+      HD.fromString(v);
+      return { kind: 'xprv', xprv: v };
+    } catch {
+      return { kind: 'unknown', problem: 'That xprv doesn’t check out. Copy it again.' };
+    }
+  }
+  if (WIF_RE.test(v)) {
+    try {
+      PrivateKey.fromWif(v);
+      return { kind: 'wif', wif: v };
+    } catch {
+      return { kind: 'unknown', problem: 'That private key doesn’t check out. Copy it again.' };
+    }
+  }
+  const recovery = parseRecovery(v);
+  const problem = phraseProblem(recovery.phrase);
+  return problem ? { kind: 'unknown', problem } : { kind: 'phrase', recovery };
+}
+
+export type SingleKey = { wallet: string; label: string; path: string; address: string; wif: string };
+
+/** Every fixed single key for a phrase, deduped by address (two wallets can share a key). */
+export function fixedKeys(phrase: string, passphrase: string): SingleKey[] {
+  const master = HD.fromSeed(Mnemonic.fromString(normalizePhrase(phrase)).toSeed(passphrase));
+  const seen = new Set<string>();
+  const out: SingleKey[] = [];
+  for (const f of FIXED_KEYS) {
+    const k = master.derive(f.path).privKey;
+    const address = k.toAddress();
+    if (seen.has(address)) continue;
+    seen.add(address);
+    out.push({ ...f, address, wif: k.toWif() });
+  }
+  return out;
+}
+
+/** The single key behind a pasted WIF. */
+export function wifKey(wif: string): SingleKey {
+  const k = PrivateKey.fromWif(wif);
+  return { wallet: 'Private key', label: 'WIF', path: 'WIF', address: k.toAddress(), wif };
+}
 
 export type HdAddress = { path: string; address: string; wif: string };
 
@@ -129,4 +218,13 @@ export async function scanAccount(
     }
   }
   return used;
+}
+
+/** A raw token amount with its decimals applied, e.g. 150000n with 5 decimals → "1.5". */
+export function tokenAmount(total: bigint, decimals: number): string {
+  if (!decimals) return total.toLocaleString('en-US');
+  const s = total.toString().padStart(decimals + 1, '0');
+  const whole = BigInt(s.slice(0, -decimals)).toLocaleString('en-US');
+  const frac = s.slice(-decimals).replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole;
 }
