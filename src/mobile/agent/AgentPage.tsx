@@ -116,7 +116,7 @@ const QUICK_STARTS: { label: string; prompt: string }[] = [
     prompt: 'Help me create a strategy. Ask me what I want it to do, which tokens, my budget and when it should stop.',
   },
   {
-    label: 'Trade with a strategy',
+    label: 'Trade a Strategy',
     prompt: 'Help me trade with a strategy: load one into an agent account, check its limits, and run it.',
   },
   {
