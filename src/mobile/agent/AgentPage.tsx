@@ -25,12 +25,12 @@ import {
   refuseText,
   type PaidBackend,
   type PriceInfo,
-  type Quote,
 } from './paid';
 import { STORE_BUILD, marketTradingEnabled } from '../storeBuild';
 import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
+import { FINAL_CODES, clearPending, errorCode, finalText, loadPending, savePending, type PendingPaid } from './pending';
 import { ReportSheet } from '../ugc/UgcSheets';
 
 /** Store build: no paid endpoints are ever called (own key only, storeBuild.ts). */
@@ -52,8 +52,11 @@ const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 
-/** A paid message whose payment went out but whose answer did not come back: retried, never re-paid. */
-type Unanswered = { quote: Quote; txid: string; messages: AgentMessage[] };
+/**
+ * A paid message whose payment went out but whose answer did not come back: retried, never re-paid.
+ * Also saved on the device (pending.ts) so a reload or app restart resumes it (owner, 6 Oct 2026).
+ */
+type Unanswered = PendingPaid & { txid: string };
 
 const ConfirmSheet = ({
   sats,
@@ -147,6 +150,8 @@ const AgentPage = () => {
   const [keyReady, setKeyReady] = useState<boolean | null>(null);
   const [confirm, setConfirm] = useState<{ sats: number; resolve: (ok: boolean) => void } | null>(null);
   const [unanswered, setUnanswered] = useState<Unanswered | null>(null);
+  /** Shown while a saved paid answer is fetched after a reload, then "ready". */
+  const [notice, setNotice] = useState<string | null>(null);
   // Third-party AI consent (agent/consent.ts): asked before the first message to each provider.
   const [consentAsk, setConsentAsk] = useState<((ok: boolean) => void) | null>(null);
   const [reportingReply, setReportingReply] = useState<{ text: string; index: number } | null>(null);
@@ -216,14 +221,27 @@ const AgentPage = () => {
   const bsvUsd = price?.bsvUsd || rate;
   const askConfirm = (sats: number) => new Promise<boolean>((resolve) => setConfirm({ sats, resolve }));
 
+  /** Ask for the answer with the quote + txid already paid. A failure that can never succeed clears the slot. */
   const answerPaid = async (u: Unanswered) => {
     setUnanswered(u);
-    const text = await backend.turn(u.quote, u.txid, u.messages, system);
-    setUnanswered(null);
-    return text;
+    savePending(u);
+    try {
+      const text = await backend.turn(u.quote, u.txid, u.messages, system);
+      clearPending();
+      setUnanswered(null);
+      return text;
+    } catch (e) {
+      const code = errorCode(e);
+      if (code && FINAL_CODES.has(code)) {
+        clearPending();
+        setUnanswered(null);
+        throw new Error(finalText(code));
+      }
+      throw e;
+    }
   };
 
-  const runPaid = async (sent: AgentMessage[]): Promise<string | null> => {
+  const runPaid = async (sent: AgentMessage[], shown: AgentMessage[]): Promise<string | null> => {
     if (!apiContext) throw new Error('Wallet is locked.');
     const quote = await backend.quote(sent);
     const decision = payDecision(
@@ -234,11 +252,56 @@ const AgentPage = () => {
     );
     if (decision.kind === 'refuse') throw new Error(refuseText(decision.reason, limitSats(prefs.dailyLimitCents, bsvUsd), bsvUsd));
     if (decision.kind === 'confirm' && !(await askConfirm(quote.sats))) return null;
-    const res = await sendBsv.execute(apiContext, { requests: [{ address: quote.payTo, satoshis: quote.sats }] });
-    if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+    if (!accountId) throw new Error('Wallet is locked.');
+    // Saved BEFORE paying, so a reload mid-payment is never silent (pending.ts).
+    const pending: PendingPaid = { account: accountId, quote, txid: null, messages: sent, shown, at: Date.now() };
+    savePending(pending);
+    let res: Awaited<ReturnType<typeof sendBsv.execute>>;
+    try {
+      res = await sendBsv.execute(apiContext, { requests: [{ address: quote.payTo, satoshis: quote.sats }] });
+    } catch (e) {
+      clearPending();
+      throw e;
+    }
+    if (!res.txid || res.error) {
+      clearPending();
+      throw new Error(getErrorMessage(res.error));
+    }
     recordSpend(quote.sats);
-    return answerPaid({ quote, txid: res.txid, messages: sent });
+    return answerPaid({ ...pending, txid: res.txid });
   };
+
+  // On open: resume a paid message whose answer had not arrived (reload / app restart). Same quote + txid: never re-paid.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumed.current || !accountId || !apiContext || STORE_BUILD) return;
+    resumed.current = true;
+    const p = loadPending(accountId);
+    if (!p) return;
+    setMessages(p.shown);
+    if (!p.txid) {
+      clearPending();
+      setError(
+        'The app closed while paying for your last message. If a payment shows in Activity and no answer came, contact bCorp support for a refund.',
+      );
+      return;
+    }
+    const u: Unanswered = { ...p, txid: p.txid };
+    setUnanswered(u);
+    setBusy(true);
+    setNotice('Getting your paid answer…');
+    answerPaid(u)
+      .then(async (reply) => {
+        await answer(p.shown, reply);
+        setNotice('Your paid answer is ready.');
+      })
+      .catch((e) => {
+        setNotice(null);
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setBusy(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, apiContext]);
 
   const runOwn = async (sent: AgentMessage[]) => {
     const key = await loadKey(prefs.provider);
@@ -285,10 +348,11 @@ const AgentPage = () => {
     setMessages(next);
     setInput('');
     setError(null);
+    setNotice(null);
     setBusy(true);
     try {
       const sent = transcript(next);
-      const reply = prefs.mode === 'own' ? await runOwn(sent) : await runPaid(sent);
+      const reply = prefs.mode === 'own' ? await runOwn(sent) : await runPaid(sent, next);
       if (reply === null) {
         // Cancelled at the confirm step: nothing paid, put the text back.
         setMessages(messages);
@@ -307,7 +371,7 @@ const AgentPage = () => {
     setError(null);
     try {
       const reply = await answerPaid(unanswered);
-      await answer(messages, reply);
+      await answer(unanswered.shown, reply);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -413,8 +477,13 @@ const AgentPage = () => {
         ))}
         {busy && (
           <div className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
-            <Loader2 size={14} className="animate-spin" /> b is thinking…
+            <Loader2 size={14} className="animate-spin" /> {notice ?? 'b is thinking…'}
           </div>
+        )}
+        {notice && !busy && (
+          <p className="text-xs" style={{ color: GOLD }}>
+            {notice}
+          </p>
         )}
         {error && (
           <p className="text-xs" style={{ color: '#ff6b6b' }}>
