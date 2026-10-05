@@ -68,6 +68,21 @@ export class ChatApiError extends Error {
 }
 
 /** What signing needs from the wallet: its identity address and a BSM signer. */
+export type SpendPer = 'message' | 'minute' | 'hour' | 'day';
+export interface RoomSpendRule {
+  amountRaw: string;
+  per: SpendPer;
+  to: 'issuer' | 'burn';
+}
+export interface IssuerChallenge {
+  roomKey: string;
+  kind: string | null;
+  issuerAddress: string | null;
+  claimedBy: string | null;
+  youAreIssuer: boolean;
+  message: string | null;
+}
+
 export interface ChatSigner {
   address: () => Promise<string>;
   sign: (message: string) => Promise<{ address: string; pubKey: string; sig: string }>;
@@ -344,6 +359,47 @@ export class BchatClient {
   /** Room admin: change the membership minimum (whole tokens). */
   async setTokenRoomMinimum(ticker: string, min: string): Promise<void> {
     await this.call('PATCH', '/api/bitsign/rooms/token-gated', { ticker, min });
+  }
+
+  /**
+   * Token room issuer: the chain-resolved issuer address and a fresh challenge to sign with
+   * its key (only the token's issuer configures a token room).
+   */
+  async issuerChallenge(ticker: string): Promise<IssuerChallenge> {
+    const r = await this.call<{
+      room_key?: string;
+      kind?: string | null;
+      issuer_address?: string | null;
+      claimed_by?: string | null;
+      you_are_issuer?: boolean;
+      message?: string | null;
+    }>('GET', `${BchatClient.path(ticker)}/claim-issuer`);
+    return {
+      roomKey: r.room_key ?? '',
+      kind: r.kind ?? null,
+      issuerAddress: r.issuer_address ?? null,
+      claimedBy: r.claimed_by ?? null,
+      youAreIssuer: r.you_are_issuer === true,
+      message: r.message ?? null,
+    };
+  }
+
+  /** Prove the issuer address (compact BSM, base64) → become the room's admin. */
+  async claimIssuer(ticker: string, message: string, signature: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/claim-issuer`, { message, signature });
+  }
+
+  /** Issuer only: minimum (whole tokens), spend rule (raw units; null clears), title. */
+  async updateRoomSettings(
+    ticker: string,
+    s: { min?: string; spend?: RoomSpendRule | null; name?: string },
+  ): Promise<void> {
+    await this.call('PATCH', '/api/bitsign/rooms/token-gated', { ticker, ...s });
+  }
+
+  /** Issuer only (token rooms): set or clear (null) the cover image, an image data URL. */
+  async setRoomCover(ticker: string, dataUrl: string | null): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/cover`, { dataUrl });
   }
 
   /** Link wallet keys to the account: each proof is a DER signature over `message` by that key. */

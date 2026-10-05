@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
   ArrowUp,
-  Ban,
   Coins,
   Info,
   Lock,
@@ -13,6 +12,7 @@ import {
   ShieldCheck,
   MessageCircle,
   Search,
+  Settings,
   ShoppingCart,
   Trophy,
   UserPlus,
@@ -102,6 +102,7 @@ import {
   type PublicRoom,
 } from '../chat/openRooms';
 import { longPress, MessageMenu, NewRoomSheet, OpenRoomSheet, useRoomCard } from '../chat/OpenRoomSheets';
+import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -400,8 +401,8 @@ const Conversation = ({
           </button>
         )}
         {onBans && (
-          <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Bans">
-            <Ban size={18} color={MUTED} />
+          <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Room settings">
+            <Settings size={18} color={MUTED} />
           </button>
         )}
         {onBounties && (
@@ -1167,12 +1168,6 @@ const entryTitle = (entry: TokenRoomEntry | null, room: ChatRoom | null): string
 
 const LOOKUP_TTL_MS = 5 * 60_000;
 
-const isAdmin = (room: ChatRoom, me: string) => {
-  const n = (h: string | null | undefined) => (h || '').replace(/^\$/, '').toLowerCase();
-  const by = room.created_by_handle ?? personalOfRoom(room)?.by;
-  return !!by && n(by) === n(me);
-};
-
 const ListLabel = ({ children }: { children: React.ReactNode }) => (
   <div className="px-4 pt-4 pb-1 text-[11px] font-bold uppercase tracking-wider" style={{ color: MUTED }}>
     {children}
@@ -1279,6 +1274,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   );
   const [inviting, setInviting] = useState(false);
   const [banning, setBanning] = useState(false);
+  // Token room settings / rules: only the token's issuer can change them (RoomSettingsSheet).
+  const [roomSettings, setRoomSettings] = useState(false);
   const [showBounties, setShowBounties] = useState(false);
   const [opening, setOpening] = useState('');
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
@@ -1870,7 +1867,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           online={online}
           onAuthLost={authLost}
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
-          onBans={!openTicker && isAdmin(open.room, handle) ? () => setBanning(true) : null}
+          onBans={!openTicker && open.entry ? () => setRoomSettings(true) : null}
           onBounties={openTicker ? null : () => setShowBounties(true)}
           openRoom={
             openTicker
@@ -1929,6 +1926,19 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           onDeleted={() => setHidden((cur) => new Set(cur).add(msgMenu.id))}
           onBlock={blockUser}
           onClose={() => setMsgMenu(null)}
+        />
+      )}
+      {roomSettings && open?.entry && (
+        <RoomSettingsSheet
+          client={client}
+          ctx={apiContext}
+          ticker={open.room.ticker}
+          entry={open.entry}
+          onBans={() => {
+            setRoomSettings(false);
+            setBanning(true);
+          }}
+          onClose={() => setRoomSettings(false)}
         />
       )}
       {banning && open && <BansSheet client={client} ticker={open.room.ticker} onClose={() => setBanning(false)} />}

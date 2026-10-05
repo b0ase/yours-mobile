@@ -10,6 +10,7 @@
  */
 import { getBsv21Balances, type OneSatContext } from '@1sat/actions';
 import { BSV21_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
+import { baseDerivations, rememberDeployKey, rememberedDeployKeys } from './issuerKey';
 import { Utils } from '@bsv/sdk';
 import { roomMeta } from '../market/indexer';
 import type { BchatClient } from './api';
@@ -144,4 +145,30 @@ export async function proveHoldings(ctx: OneSatContext, client: BchatClient, key
       .catch(() => 0);
   }
   return accepted.length;
+}
+
+/**
+ * Every key this wallet could have issued a token from: the fixed account keys, deploy keys
+ * remembered at mint, and the derivations of token / 1Sat outputs it still holds.
+ */
+export async function issuerCandidates(ctx: OneSatContext): Promise<Derivation[]> {
+  const [tokenOuts, itemOuts] = await Promise.all([basket(ctx, BSV21_BASKET), basket(ctx, ONESAT_BASKET)]);
+  return uniqueDerivations(
+    [
+      ...baseDerivations(),
+      ...rememberedDeployKeys(),
+      ...tokenOuts.map((o) => derivationOf(o.customInstructions)),
+      ...itemOuts.map((o) => derivationOf(o.customInstructions)),
+    ],
+    200,
+  );
+}
+
+/** After a deploy: remember the derivation that locks the token's genesis output. */
+export async function rememberDeployOutput(ctx: OneSatContext, tokenId: string): Promise<void> {
+  const want = normOutpoint(tokenId);
+  const outs = await basket(ctx, BSV21_BASKET);
+  const hit = outs.find((o) => normOutpoint(o.outpoint) === want);
+  const d = hit ? derivationOf(hit.customInstructions) : null;
+  if (want && d) rememberDeployKey(want, d);
 }

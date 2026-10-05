@@ -41,7 +41,36 @@ export interface TokenRoomLookup {
   member?: boolean;
   /** Present when the room is someone's personal-token room. */
   personal?: { name: string; by: string; tokenId: string | null } | null;
+  /** Issuer-set spend rule (stated; bit-sign does not enforce it on chain). */
+  spend?: RoomSpendRule | null;
+  /** Who administers the room: the token's issuer, once claimed. */
+  issuer?: { address: string | null; handle: string | null; claimed: boolean } | null;
+  youAreIssuer?: boolean;
 }
+
+export interface RoomSpendRule {
+  amountRaw: string;
+  per: 'message' | 'minute' | 'hour' | 'day';
+  to: 'issuer' | 'burn';
+}
+
+const PERS = ['message', 'minute', 'hour', 'day'] as const;
+
+export const parseSpend = (v: unknown): RoomSpendRule | null => {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as { amountRaw?: unknown; per?: unknown; to?: unknown };
+  if (typeof o.amountRaw !== 'string' || !/^\d+$/.test(o.amountRaw) || /^0+$/.test(o.amountRaw)) return null;
+  if (!PERS.includes(o.per as RoomSpendRule['per'])) return null;
+  if (o.to !== 'issuer' && o.to !== 'burn') return null;
+  return { amountRaw: o.amountRaw, per: o.per as RoomSpendRule['per'], to: o.to };
+};
+
+/** "Spend 5 $ACME per message, burned" — a member-facing summary of the rule. */
+export const spendLabel = (s: RoomSpendRule | null | undefined, symbol: string, dec: number): string => {
+  if (!s) return 'No spend to chat';
+  const where = s.to === 'burn' ? 'burned' : 'to the issuer';
+  return `Spend ${formatRaw(s.amountRaw, dec)} $${symbol} per ${s.per}, ${where}`;
+};
 
 export type EntryStatus =
   /** You're in: open the conversation. */
@@ -104,6 +133,16 @@ export function formatRaw(raw: string, dec: number): string {
   const s = n.toString().padStart(dec + 1, '0');
   const frac = s.slice(-dec).replace(/0+$/, '');
   return frac ? `${s.slice(0, -dec)}.${frac}` : s.slice(0, -dec);
+}
+
+/** "1.5" at 2 decimals → "150"; null if not a positive amount with at most `dec` decimals. */
+export function toRawAmount(human: string, dec: number): string | null {
+  const m = (human || '').trim().match(/^(\d+)(?:\.(\d+))?$/);
+  if (!m) return null;
+  const frac = m[2] ?? '';
+  if (frac.length > Math.max(0, dec)) return null;
+  const raw = BigInt(m[1] + frac.padEnd(Math.max(0, dec), '0'));
+  return raw > BigInt(0) ? raw.toString() : null;
 }
 
 /** "1 $FILM" / "2 items" */
@@ -174,6 +213,9 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
     held_raw?: unknown;
     member?: unknown;
     personal?: unknown;
+    spend?: unknown;
+    issuer?: { address?: unknown; handle?: unknown; claimed?: unknown } | null;
+    you_are_issuer?: unknown;
   };
   if (typeof d.key !== 'string') return null;
   const r = d.room as { ticker?: unknown; name?: unknown; members?: unknown } | null | undefined;
@@ -187,6 +229,15 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
     heldRaw: typeof d.held_raw === 'string' ? d.held_raw : null,
     member: d.member === true,
     personal: asPersonal(d.personal),
+    spend: parseSpend(d.spend),
+    issuer: d.issuer
+      ? {
+          address: typeof d.issuer.address === 'string' ? d.issuer.address : null,
+          handle: typeof d.issuer.handle === 'string' ? d.issuer.handle : null,
+          claimed: d.issuer.claimed === true,
+        }
+      : null,
+    youAreIssuer: d.you_are_issuer === true,
   };
 };
 

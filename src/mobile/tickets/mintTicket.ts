@@ -1,4 +1,5 @@
 import { deployBsv21Mint, inscribe, type OneSatContext } from '@1sat/actions';
+import { rememberDeployOutput } from '../chat/holdings';
 import type { CreateActionArgs, LockingScript, WalletInterface } from '@bsv/sdk';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
@@ -96,6 +97,8 @@ export async function deployBsv21(
   if (res.error || !res.tokenId) throw new Error(res.error || 'Mint failed');
   const tokenId = res.tokenId.replace('.', '_');
   void registerIssuer(tokenId);
+  // The deploy output's key is the issuer key a token room's admin claim must sign with.
+  void rememberDeployOutput(ctx, tokenId).catch(() => undefined);
   // Minting no longer pays indexing; remembered as own so "Set up $X's room" can offer it later.
   rememberOwnToken({ tokenId, ticker: opts.symbol });
   return tokenId;
