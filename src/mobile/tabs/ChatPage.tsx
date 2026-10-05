@@ -364,7 +364,7 @@ const Conversation = ({
     <div
       className="fixed left-0 right-0 z-[110] flex flex-col"
       style={{
-        top: 'calc(env(safe-area-inset-top) + 3.5rem)',
+        top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
         bottom: 'calc(env(safe-area-inset-bottom) + 3.75rem)',
         background: BG,
       }}
