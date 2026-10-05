@@ -10,12 +10,12 @@
     full: [
       { label: 'Features', href: '/features' },
       { label: 'Mint', href: '/mint' },
-      { label: 'Buy', href: '/buy' },
-      { label: 'Exchange', href: '/exchange', pages: ['/exchange', '/exchange/strategies', '/pnees', '/pnee'],
+      { label: 'Exchange', href: '/exchange', pages: ['/exchange', '/exchange/strategies', '/pnees', '/pnee', '/buy'],
         sub: [
           { label: 'Exchange', href: '/exchange' },
           { label: 'Strategies', href: '/exchange/strategies' },
-          { label: 'PNEEs', href: '/pnees', also: ['/pnee'] }
+          { label: 'PNEEs', href: '/pnees', also: ['/pnee'] },
+          { label: 'Buy BSV', href: '/buy' }
         ] },
       { label: 'Social', href: '/social', pages: ['/social', '/friends'] },
       { label: 'Agents', href: '/agent', pages: ['/agent', '/strategies', '/strategies/spec'],
@@ -46,7 +46,6 @@
           { label: 'Market', href: '/market' },
           { label: 'Strategies', href: '/market/strategies' }
         ] },
-      { label: 'Buy BSV', href: X + '/buy' },
       { label: 'bWalletX features', href: X + '/features' },
       { label: 'Rooms &amp; tokens', href: X + '/friends' },
       { label: 'Get bWalletX &rarr;', href: X }
