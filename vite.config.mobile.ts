@@ -181,6 +181,20 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
       '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} />\n      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
     ],
+    // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
+    // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
+    [
+      "{newWallet ? 'Create password' : 'New Account'}",
+      "{newWallet ? 'Create password' : isAgentCreatePending() ? 'New agent account' : 'New account'}",
+    ],
+    [
+      "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}",
+      "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter the password you unlock bWalletX with (one password for all your accounts). Next you will get this account\\'s own 12-word recovery phrase.'}",
+    ],
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { isAgentCreatePending } from '../../mobile/agents/AgentAccountToggle';",
+    ],
     // Agent account switch on Add account (src/mobile/agents, docs/SMART-WALLET-SPEC.md §1).
     [
       "import { useNavigate } from 'react-router-dom';",

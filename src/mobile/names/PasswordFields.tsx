@@ -78,7 +78,7 @@ export const PasswordFields = ({
           type={type}
           name="new-password"
           autoComplete={newWallet ? 'new-password' : 'current-password'}
-          placeholder="Password"
+          placeholder={newWallet ? 'Password' : 'Your wallet password'}
           value={password}
           onChange={(e) => {
             setPassword(e.target.value);

@@ -56,3 +56,6 @@ export const AgentAccountToggle = () => {
 
 /** Account menu › Add agent account: Add account opens with the Agent switch already on (owner, 6 Oct 2026). */
 export const startAgentCreate = () => writeFlag(true);
+
+/** True while Add account is creating an agent account (hides X / Google sign-in there). */
+export const isAgentCreatePending = () => readFlag();

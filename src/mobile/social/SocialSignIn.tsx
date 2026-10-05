@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Loader2 } from 'lucide-react';
 import { socialLoginEnabled } from '../storeBuild';
+import { isAgentCreatePending } from '../agents/AgentAccountToggle';
 import {
   clearSocial,
   onSocialChange,
@@ -73,7 +74,8 @@ export const SocialSignIn = ({ onProfile }: { onProfile: (p: { name: string; ava
       else filled.current = '';
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!socialLoginEnabled()) return null;
+  // Not for agent accounts: an agent posting as someone's X account needs its own careful design (owner, 6 Oct 2026).
+  if (!socialLoginEnabled() || isAgentCreatePending()) return null;
 
   const go = async (provider: SocialProvider) => {
     setBusy(provider);
