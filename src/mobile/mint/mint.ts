@@ -28,7 +28,10 @@ export const ACCEPT = 'image/*,video/*,audio/*';
 const configured = bcorpFeeAddress(typeof __MINT_FEE_ADDRESS__ === 'string' ? __MINT_FEE_ADDRESS__.trim() : '');
 export const mintFeeAddress = (address = configured): string => (address && validate(address) ? address : '');
 
-export const isMintableType = (t: string) => /^(image|video|audio)\//i.test(t);
+// Media plus documents (books, PDFs, text) and single-page websites (owner, 6 Oct 2026: mint more than pictures).
+export const isMintableType = (t: string) =>
+  /^(image|video|audio)\//i.test(t) ||
+  /^(application\/pdf|application\/epub\+zip|text\/plain|text\/markdown|text\/html)$/i.test(t);
 
 export type SizeCheck = { ok: true } | { ok: false; message: string };
 export const checkSize = (bytes: number, max = MAX_MINT_BYTES): SizeCheck => {

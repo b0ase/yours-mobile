@@ -44,7 +44,8 @@ describe('size limits', () => {
     expect(m.isMintableType('image/png')).toBe(true);
     expect(m.isMintableType('video/mp4')).toBe(true);
     expect(m.isMintableType('audio/mpeg')).toBe(true);
-    expect(m.isMintableType('application/pdf')).toBe(false);
+    expect(m.isMintableType('application/pdf')).toBe(true);
+    expect(m.isMintableType('application/zip')).toBe(false);
   });
 });
 

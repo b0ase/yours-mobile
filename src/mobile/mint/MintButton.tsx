@@ -2,7 +2,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { inscribe, listOrdinals, mintCollection, mintCollectionItem } from '@1sat/actions';
-import { Coins, ExternalLink, Image as ImageIcon, Sparkles, Ticket, X } from 'lucide-react';
+import {
+  AppWindow,
+  BookOpen,
+  Clapperboard,
+  Coins,
+  ExternalLink,
+  FileSignature,
+  FileText,
+  Globe,
+  Image as ImageIcon,
+  LineChart,
+  Music,
+  Sparkles,
+  Ticket,
+  X,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { setAgentDraft } from '../agent/handoff';
+import { isBWalletX } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -93,6 +111,12 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const [step, setStep] = useState<Step>('choose');
+  const navigate = useNavigate();
+  // What the media step accepts and calls itself, set by the tile that opened it.
+  const [media, setMedia] = useState<{ accept: string; label: string }>({
+    accept: ACCEPT,
+    label: 'photo, video or audio',
+  });
   const [picked, setPicked] = useState<Picked | null>(null);
   const [fileError, setFileError] = useState('');
   const [title, setTitle] = useState('');
@@ -139,7 +163,8 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   const pick = (file: File | undefined) => {
     setFileError('');
     if (!file) return;
-    if (!isMintableType(file.type)) return setFileError('Pick a photo, image, video or audio file.');
+    if (!isMintableType(file.type))
+      return setFileError('Pick a photo, video, audio file, PDF, ebook, text or HTML page.');
     const size = checkSize(file.size);
     if (!size.ok && !file.type.startsWith('image/')) return setFileError(size.message);
     if (!size.ok) setFileError(size.message);
@@ -254,14 +279,14 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         <div className="flex items-center justify-between mb-3">
           <span className="font-bold text-lg" style={{ color: GOLD }}>
             {step === 'ticket'
-              ? 'Mint a chatroom'
+              ? 'Mint tickets'
               : step === 'token'
                 ? 'Mint a token'
                 : step === 'choose'
                   ? 'Mint'
                   : step === 'done'
                     ? 'Minted'
-                    : 'Mint media'}
+                    : 'Mint'}
           </span>
           <button type="button" onClick={onClose} className="bg-transparent border-0 cursor-pointer" aria-label="Close">
             <X size={20} color="#aaa" />
@@ -269,29 +294,32 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         </div>
 
         {step === 'choose' && (
-          <div className="flex flex-col gap-3">
-            {CHOICES.has('ticket') && (
-              <Choice
-                icon={<Ticket size={18} />}
-                title="Mint a chatroom"
-                sub="Mint tickets that grant entry to your new chatrooms."
-                onClick={() => setStep('ticket')}
-              />
-            )}
-            {CHOICES.has('token') && (
-              <Choice
-                icon={<Coins size={18} />}
-                title="Mint a token"
-                sub={TOKEN_COPY}
-                onClick={() => setStep('token')}
-              />
-            )}
-            <Choice
-              icon={<ImageIcon size={18} />}
-              title="Mint media (NFT)"
-              sub="Photo, image, drawing, video or audio"
-              onClick={() => setStep('media')}
-            />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs m-0 mb-1" style={{ color: '#999' }}>
+              What do you want to make? Everything you mint is yours on chain: sell it, send it, or let people collect
+              it.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {MINT_TILES.filter((t) => t.when()).map((t) => (
+                <Tile
+                  key={t.id}
+                  icon={t.icon}
+                  title={t.title}
+                  sub={t.sub}
+                  onClick={() => {
+                    if (t.media) {
+                      setMedia(t.media);
+                      setStep('media');
+                    } else if (t.step) setStep(t.step);
+                    else if (t.agent) {
+                      setAgentDraft(t.agent);
+                      onClose();
+                      navigate('/m/agent');
+                    }
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -308,7 +336,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             <input
               ref={inputRef}
               type="file"
-              accept={ACCEPT}
+              accept={media.accept}
               className="hidden"
               onChange={(e) => pick(e.target.files?.[0])}
             />
@@ -318,7 +346,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
               className="rounded-xl border border-dashed py-4 cursor-pointer bg-transparent"
               style={{ borderColor: GOLD, color: GOLD }}
             >
-              {picked ? 'Choose a different file' : 'Choose photo, video or audio'}
+              {picked ? 'Choose a different file' : `Choose ${media.label}`}
             </button>
             <p className="text-xs" style={{ color: '#999' }}>
               Don't mint anything you don't own or that's illegal — inscriptions are permanent.
@@ -332,6 +360,11 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
                   <video src={picked.url} controls playsInline className="w-full max-h-64 bg-black" />
                 )}
                 {kind === 'audio' && <audio src={picked.url} controls className="w-full" />}
+                {(kind === 'application' || kind === 'text') && (
+                  <div className="flex items-center gap-2 px-3 py-4 text-sm" style={{ color: '#ddd' }}>
+                    <FileText size={20} color={GOLD} /> {picked.file.name}
+                  </div>
+                )}
                 <div className="px-3 py-2 text-xs" style={{ color: '#bbb' }}>
                   {picked.file.type} · {formatBytes(picked.file.size)}
                   {kind === 'image' && picked.file.size > DOWNSCALE_SUGGEST_BYTES && (
@@ -464,7 +497,111 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   );
 };
 
-const Choice = ({
+type MintTile = {
+  id: string;
+  icon: React.ReactNode;
+  title: string;
+  sub: string;
+  when: () => boolean;
+  media?: { accept: string; label: string };
+  step?: Step;
+  agent?: string;
+};
+
+/**
+ * Mint › what to make (owner, 6 Oct 2026): "tokens and NFTs" doesn't sell it; show the things people actually make.
+ * Media-like ones open the file mint with the right picker; contracts, strategies and apps open b with the request typed.
+ */
+const MINT_TILES: MintTile[] = [
+  {
+    id: 'art',
+    icon: <ImageIcon size={18} />,
+    title: 'Art & photos',
+    sub: 'One of a kind, or a numbered collection',
+    when: () => true,
+    media: { accept: 'image/*', label: 'an image' },
+  },
+  {
+    id: 'music',
+    icon: <Music size={18} />,
+    title: 'Music',
+    sub: 'Tracks fans own and play in their wallet',
+    when: () => true,
+    media: { accept: 'audio/*', label: 'an audio file' },
+  },
+  {
+    id: 'video',
+    icon: <Clapperboard size={18} />,
+    title: 'Videos & films',
+    sub: 'Clips, shorts or a whole film',
+    when: () => true,
+    media: { accept: 'video/*', label: 'a video' },
+  },
+  {
+    id: 'books',
+    icon: <BookOpen size={18} />,
+    title: 'Books & PDFs',
+    sub: 'Ebooks, zines, guides, reports',
+    when: () => true,
+    media: {
+      accept: 'application/pdf,application/epub+zip,text/plain,text/markdown',
+      label: 'a PDF, ebook or text file',
+    },
+  },
+  {
+    id: 'website',
+    icon: <Globe size={18} />,
+    title: 'A website',
+    sub: 'A one-page site, on chain for good',
+    when: () => true,
+    media: { accept: 'text/html', label: 'an HTML page' },
+  },
+  {
+    id: 'tickets',
+    icon: <Ticket size={18} />,
+    title: 'Tickets & passes',
+    sub: 'Entry to your chatroom, event or site',
+    when: () => CHOICES.has('ticket'),
+    step: 'ticket',
+  },
+  {
+    id: 'coin',
+    icon: <Coins size={18} />,
+    title: 'A coin or memecoin',
+    sub: 'Your own token, fixed supply',
+    when: () => CHOICES.has('token'),
+    step: 'token',
+  },
+  {
+    id: 'contract',
+    icon: <FileSignature size={18} />,
+    title: 'Contracts',
+    sub: 'Agreements both sides sign; b drafts it',
+    when: () => isBWalletX(),
+    agent:
+      'Help me create a contract to mint. Ask me who it is between, what each side agrees to, the price and the dates.',
+  },
+  {
+    id: 'strategy',
+    icon: <LineChart size={18} />,
+    title: 'Trading strategies',
+    sub: 'Package a strategy others can buy; b helps',
+    when: () => isBWalletX(),
+    agent:
+      'Help me create a strategy to mint and sell. Ask me what it should do, which tokens, the budget, when it stops and the price.',
+  },
+  {
+    id: 'app',
+    icon: <AppWindow size={18} />,
+    title: 'An app',
+    sub: 'List your bApp with its own token',
+    when: () => isBWalletX(),
+    agent:
+      'Help me list my app as a bApp with its own token. Ask me for the app name, its website and what the token should do.',
+  },
+];
+
+const Tile = ({
   icon,
   title,
   sub,
@@ -478,15 +615,14 @@ const Choice = ({
   <button
     type="button"
     onClick={onClick}
-    className="flex items-center gap-3 p-4 rounded-xl border text-left cursor-pointer bg-transparent"
+    className="flex flex-col items-start gap-1 p-3 rounded-xl border text-left cursor-pointer bg-transparent"
     style={{ borderColor: BORDER, color: '#fff' }}
   >
     <span style={{ color: GOLD }}>{icon}</span>
-    <span className="flex flex-col">
-      <span className="font-bold">{title}</span>
-      <span className="text-xs" style={{ color: '#999' }}>
-        {sub}
-      </span>
+    <span className="font-bold text-sm leading-tight">{title}</span>
+    <span className="text-[11px] leading-snug" style={{ color: '#999' }}>
+      {sub}
     </span>
   </button>
 );
+

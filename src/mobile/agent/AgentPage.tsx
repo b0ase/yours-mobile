@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { takeAgentDraft } from './handoff';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowUp, Flag, Loader2 } from 'lucide-react';
@@ -137,7 +138,8 @@ const AgentPage = () => {
   const [prefs, setPrefs] = useAgentPrefs();
   const [keyScreen, setKeyScreen] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [input, setInput] = useState('');
+  // A request handed over from elsewhere (e.g. Mint › Contracts) arrives typed in, ready to send.
+  const [input, setInput] = useState(takeAgentDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [price, setPrice] = useState<PriceInfo | null>(null);
