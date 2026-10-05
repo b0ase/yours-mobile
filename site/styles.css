@@ -1250,3 +1250,37 @@ body {
 .phone-screen.phone-real .notch {
   z-index: 2;
 }
+/* App Store / Google Play badges (bWallet, the store edition). Greyed until the listings are live. */
+.store-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0 6px;
+}
+.cta-row.center + .store-badges,
+.store-badges.center {
+  justify-content: center;
+}
+.store-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+.store-badge svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.store-badge small {
+  font: 500 0.75rem var(--bf);
+  color: #a7adb8;
+}
+.store-badge.soon svg {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.store-badge.soon:hover svg {
+  opacity: 0.8;
+}

@@ -134,6 +134,11 @@
       "source": "/buy",
       "destination": "https://bwalletx.com/buy",
       "permanent": false
+    },
+    {
+      "source": "/download",
+      "destination": "https://bwalletx.com/get",
+      "permanent": false
     }
   ]
 }

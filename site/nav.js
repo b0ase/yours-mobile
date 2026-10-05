@@ -26,8 +26,6 @@
           { label: 'CLI', href: '/cli' },
           { label: 'MCP', href: '/mcp' }
         ] },
-      { label: 'Android', href: '/android' },
-      { label: 'iPhone', href: '/iphone' },
       { label: 'Extension', href: '/extension' },
       { label: 'Developers', href: '/developers', pages: ['/developers', '/cli', '/mcp', '/apps/add', '/blog'],
         sub: [
