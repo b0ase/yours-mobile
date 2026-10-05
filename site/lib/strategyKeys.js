@@ -151,7 +151,7 @@ async function envelopeAt(origin, c = chain, type = CONTENT_TYPE, parse = parseE
   const ins = out && inscriptionOf(out.lockingScript);
   if (!ins || ins.type !== type) return null;
   const env = parse(ins.body);
-  return env ? { env, tx, bodyHash: require('node:crypto').createHash('sha256').update(ins.body).digest('hex') } : null;
+  return env ? { env, tx, body: ins.body, bodyHash: require('node:crypto').createHash('sha256').update(ins.body).digest('hex') } : null;
 }
 
 /** Sats the origin transaction paid to `address`. */

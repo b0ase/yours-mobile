@@ -54,6 +54,7 @@ import { PullToRefresh } from '../ui/PullToRefresh';
 import { openDappBrowser } from '../dappBrowser';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
 import { StrategiesMarket } from '../strategies/StrategiesMarket';
+import { ContractsMarket } from '../contracts/ContractsMarket';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -169,6 +170,8 @@ const MarketPage = () => {
   const [room, setRoom] = useState<HotRoom | null>(null);
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [strategiesOpen, setStrategiesOpen] = useState(false);
+  // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
+  const [panel, setPanel] = useState<'contracts' | 'bonds' | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
@@ -393,12 +396,12 @@ const MarketPage = () => {
     ...(TRADING
       ? [
           { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind },
-          { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind, soon: true },
-          { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind, soon: true },
+          { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind },
+          { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind },
         ]
       : []),
   ];
-  const activeCat = strategiesOpen ? 'strategies' : kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view;
+  const activeCat = panel ?? (strategiesOpen ? 'strategies' : null) ?? (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
   // One flush row of compact filter chips, scrolling sideways (owner, 5 Oct 2026: tidier than wrapped pills).
   const categoryTiles = (
     <div
@@ -418,6 +421,7 @@ const MarketPage = () => {
             onClick={() => {
               if (c.soon) return;
               setStrategiesOpen(c.id === 'strategies');
+              setPanel(c.id === 'contracts' || c.id === 'bonds' ? c.id : null);
               setKind(c.kind);
               if (c.token) setTokenFilter(c.token);
               if (c.view) setView(c.view);
@@ -991,6 +995,8 @@ const MarketPage = () => {
           mineView
         ) : strategiesOpen && !room ? (
           <StrategiesMarket />
+        ) : panel && !room ? (
+          <ContractsMarket filter={panel === 'bonds' ? 'bond' : undefined} />
         ) : room ? (
           roomView
         ) : kind === 'tokens' ? (

@@ -39,7 +39,7 @@ export const ownedStrategyOutpoints = async (ctx: OneSatContext) =>
   (await outputs(ctx)).filter((o) => o.tags?.includes(`type:${STRATEGY_CONTENT_TYPE}`)).map((o) => norm(o.outpoint));
 
 /** Sign the key service's proof with the exact key that locks `outpoint`. */
-const prove = async (ctx: OneSatContext, action: 'publish' | 'unlock', outpoint: string) => {
+export const prove = async (ctx: OneSatContext, action: 'publish' | 'unlock', outpoint: string) => {
   let o: Out | undefined;
   for (let i = 0; i < 5 && !o; i++) {
     o = (await outputs(ctx)).find((x) => norm(x.outpoint) === outpoint);
@@ -54,17 +54,17 @@ const prove = async (ctx: OneSatContext, action: 'publish' | 'unlock', outpoint:
   return { message, pubkey_hex: publicKey, signature: Utils.toHex(signature) };
 };
 
-const mintEnvelope = async (ctx: OneSatContext, env: Envelope) => {
-  const base64Content = btoa(unescape(encodeURIComponent(JSON.stringify(env))));
-  const res = await inscribe.execute(ctx, {
-    base64Content,
-    contentType: STRATEGY_CONTENT_TYPE,
-    map: { app: 'bwalletx', type: 'strategy', name: env.name },
-  });
+const mintEnvelope = (ctx: OneSatContext, env: Envelope) => mintJson(ctx, env, STRATEGY_CONTENT_TYPE, { app: 'bwalletx', type: 'strategy', name: env.name });
+
+/** Inscribe a JSON envelope to this wallet and return the new copy's outpoint. Exact bytes = JSON.stringify(obj). */
+export const mintJson = async (ctx: OneSatContext, obj: unknown, contentType: string, map: Record<string, string>) => {
+  // A string is inscribed exactly as given (a copy must match the original byte for byte).
+  const base64Content = btoa(unescape(encodeURIComponent(typeof obj === 'string' ? obj : JSON.stringify(obj))));
+  const res = await inscribe.execute(ctx, { base64Content, contentType, map });
   if (!res.txid || res.error) throw new Error(res.error || 'Mint failed');
   // The copy is this tx's 1-sat output with our content type (don't assume its index).
   for (let i = 0; i < 5; i++) {
-    const o = (await outputs(ctx)).find((x) => norm(x.outpoint).startsWith(`${res.txid}_`) && x.tags?.includes(`type:${STRATEGY_CONTENT_TYPE}`));
+    const o = (await outputs(ctx)).find((x) => norm(x.outpoint).startsWith(`${res.txid}_`) && x.tags?.includes(`type:${contentType}`));
     if (o) return norm(o.outpoint);
     await new Promise((r) => setTimeout(r, 1500));
   }
