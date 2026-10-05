@@ -53,3 +53,6 @@ export const AgentAccountToggle = () => {
     </button>
   );
 };
+
+/** Account menu › Add agent account: Add account opens with the Agent switch already on (owner, 6 Oct 2026). */
+export const startAgentCreate = () => writeFlag(true);

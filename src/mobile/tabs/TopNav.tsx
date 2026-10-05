@@ -7,7 +7,9 @@ import { accountNamesFor, useAccountNames } from '../names/MyNameBadge';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Download, Loader2, Menu, Phone, Play, Plus, ScanLine, Settings, X } from 'lucide-react';
+import { Bot, Check, Download, Loader2, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, X } from 'lucide-react';
+import { startAgentCreate } from '../agents/AgentAccountToggle';
+import { AgentToolsSheet } from '../agents/AgentToolsSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
@@ -59,6 +61,7 @@ export const TopNav = () => {
   const [handleOpen, setHandleOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [callsOpen, setCallsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
@@ -299,6 +302,17 @@ export const TopNav = () => {
               </div>
               <div className="border-t border-white/5 px-2 py-2">
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
+                {/* bWalletX: agent accounts and the tools that drive them (owner, 6 Oct 2026). */}
+                {X_MARK &&
+                  action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
+                    startAgentCreate();
+                    go('create-account');
+                  })}
+                {X_MARK &&
+                  action(<Terminal size={16} color="#fff" />, 'CLI & MCP for agents', () => {
+                    setDrawer(false);
+                    setToolsOpen(true);
+                  })}
                 {action(<Download size={16} color="#fff" />, 'Import account', () => go('restore-account'))}
                 {!IS_EXTENSION &&
                   action(<ScanLine size={16} color="#fff" />, 'Scan to connect a website', () => {
@@ -312,6 +326,7 @@ export const TopNav = () => {
         )}
       </AnimatePresence>
       <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} />
+      {toolsOpen && <AgentToolsSheet onClose={() => setToolsOpen(false)} />}
       {pairOpen && (
         <Suspense fallback={null}>
           <PairSheet
