@@ -473,6 +473,16 @@ section {
   color: #0a0a0a;
   background: radial-gradient(circle at 35% 30%, #fff8, transparent 50%), var(--c);
 }
+.coin-img {
+  background: #0d0d0d;
+  overflow: hidden;
+}
+.coin-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
 .row-main {
   display: flex;
   flex-direction: column;
@@ -1223,4 +1233,20 @@ main.ext { padding-top: 150px !important; }
 html,
 body {
   overflow-x: clip;
+}
+
+/* Real app screenshot inside the phone frame (home page). */
+.phone-screen.phone-real {
+  padding: 0;
+  background: #000;
+}
+.phone-screen.phone-real img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+.phone-screen.phone-real .notch {
+  z-index: 2;
 }

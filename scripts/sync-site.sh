@@ -15,7 +15,7 @@ SRC="${BWALLETX_SITE:-/Volumes/2026/Projects/bwalletx-site}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$ROOT/site"
 rsync -a \
-  --exclude='.git' --exclude='.vercel' --exclude='node_modules' --exclude='.DS_Store' --exclude='download/' \
+  --exclude='.git' --exclude='.vercel' --exclude='node_modules' --exclude='.DS_Store' --exclude='media-src/' --exclude='download/' \
   --exclude='vercel.json' --exclude='privacy.html' --exclude='.gitignore' --exclude='logo.svg' --exclude='*.html' \
   --exclude='connect.js' --exclude='og-*.png' --exclude='og.png' --exclude='favicon.*' --exclude='icon-*.png' \
   --exclude='apple-touch-icon.png' \

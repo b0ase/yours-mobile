@@ -32,10 +32,12 @@ X_LINK = '<a href="https://bwalletx.com" class="gold">bWalletX</a>'
 # bWalletX calls it the Exchange (it trades); the store app's tab is Market (browse only).
 for a, b in [('an exchange for tokens and NFTs, the bApps store', 'a market to browse tokens and NFTs, the bApps store'),
              ('<a href="#market">Exchange</a>', '<a href="#market">Market</a>'),
-             ('Wallet, Exchange, Apps, Media and Chat', 'Wallet, Market, Apps, Media and Chat'),
-             ('<span>Exchange</span><span>Apps</span>', '<span>Market</span><span>Apps</span>'),
+             ('Wallet, Exchange, Apps, Feed and Chat', 'Wallet, Market, Apps, Feed and Chat'),
              ('<p class="eyebrow">Exchange</p>', '<p class="eyebrow">Market</p>')]:
     sub(a, b)
+
+# The home phone is a real screenshot now (5 Oct 2026); the old mock tab bar only if it comes back.
+s = s.replace('<span>Exchange</span><span>Apps</span>', '<span>Market</span><span>Apps</span>')
 
 # Market: browse only.
 sub('then buy or\n              list from your wallet.', 'and view\n              them in your wallet.')

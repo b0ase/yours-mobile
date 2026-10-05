@@ -18,7 +18,7 @@
       property="og:description"
       content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd. Tokens, market, bApps, media and chat in one app."
     />
-    <meta property="og:image" content="https://bwalletx.com/og-home-v2.png" />
+    <meta property="og:image" content="https://bwalletx.com/og-home-v3.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="bWallet logo: a gold b" />
@@ -26,7 +26,7 @@
     <meta name="twitter:site" content="@bWallet" />
     <meta name="twitter:title" content="bWallet: the BSV wallet for tokens, media and apps" />
     <meta name="twitter:description" content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd." />
-    <meta name="twitter:image" content="https://bwalletx.com/og-home-v2.png" />
+    <meta name="twitter:image" content="https://bwalletx.com/og-home-v3.png" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -108,10 +108,10 @@
                 Tap <strong>Download APK (beta)</strong>. If Android asks, allow your browser to install unknown apps
                 (Settings &rsaquo; Apps &rsaquo; your browser &rsaquo; Install unknown apps).
               </li>
-              <li>Open the downloaded <code>bwalletx-android-5.1.54.apk</code> and tap Install.</li>
+              <li>Open the downloaded <code>bwalletx-android-5.1.55.apk</code> and tap Install.</li>
               <li>
                 Optional but recommended: check the SHA-256 checksum matches<br /><code class="sha"
-                  >cf8fa6f46e09fd81bd623df2beb68ca806d035de6c42fdd66436069ecb4a41dd</code
+                  >ce25426f6e4c41bab49785f78b82b36bf4e808cda10122b9dabecf93f6c9590a</code
                 >
               </li>
             </ol>
@@ -131,7 +131,7 @@
             <p class="eyebrow">One app</p>
             <h2>Meet bWallet. Five tabs, everything on-chain.</h2>
             <p class="lede">
-              Wallet, Market, Apps, Media and Chat, with Settings tucked into the account drawer. A wallet that does
+              Wallet, Market, Apps, Feed and Chat, with Settings tucked into the account drawer. A wallet that does
               more than hold a balance.
             </p>
             <div class="film">
@@ -152,41 +152,12 @@
           </div>
           <div class="phone-stage reveal">
             <div class="phone" id="phone">
-              <div class="phone-screen">
+              <div class="phone-screen phone-real">
                 <div class="notch" aria-hidden="true"></div>
-                <div class="ph-top">
-                  <img src="/logo.svg" alt="" width="22" height="22" /><span>bWallet</span
-                  ><span class="ph-dot" aria-hidden="true"></span>
-                </div>
-                <p class="ph-label">Total balance</p>
-                <p class="ph-bal">0.0000 <span>BSV</span></p>
-                <p class="ph-usd">$0.00</p>
-                <div class="ph-actions">
-                  <span class="btn-gold sm">Receive</span><span class="btn-gold sm">Send</span>
-                </div>
-                <div class="ph-list">
-                  <div class="row">
-                    <span class="coin" style="--c: #f5b800">B</span
-                    ><span class="row-main"><b>BSV</b><small>Bitcoin SV</small></span
-                    ><span class="row-amt">0.0000</span>
-                  </div>
-                  <div class="row">
-                    <span class="coin" style="--c: #3ddc97">M</span
-                    ><span class="row-main"><b>MNEE</b><small>Stablecoin</small></span
-                    ><span class="row-amt">0.00</span>
-                  </div>
-                  <div class="row">
-                    <span class="coin" style="--c: #8a7cff">21</span
-                    ><span class="row-main"><b>BSV-21</b><small>Tokens</small></span
-                    ><span class="row-amt">—</span>
-                  </div>
-                </div>
-                <nav class="ph-tabs" aria-hidden="true">
-                  <span class="on">Wallet</span><span>Market</span><span>Apps</span><span>Media</span><span>Chat</span>
-                </nav>
+                <img src="/media/app-home.webp" alt="The bWallet wallet home screen: balance in dollars, Send, Receive and Mint, and BSV, MNEE and PNEEs cards" width="390" height="844" loading="eager" />
               </div>
             </div>
-            <p class="phone-cap">Illustration of the home screen. Built in HTML, not a screenshot.</p>
+            <p class="phone-cap">The real wallet home screen (web app, test wallet).</p>
           </div>
         </div>
       </section>
@@ -210,7 +181,7 @@
             <p class="eyebrow">Wallet</p>
             <h2>Hold, mint and send to names.</h2>
             <p class="lede">
-              Hold BSV, MNEE and BSV-21 tokens side by side. Mint your photos, art, video and music as NFTs. Send to a
+              Hold BSV, MNEE, PNEEs and BSV-21 tokens side by side. Mint your photos, art, video and music as NFTs. Send to a
               $handle, a paymail or an OpNS name instead of a long address, and get a name of your own.
             </p>
           </div>
@@ -233,27 +204,32 @@
             </div>
             <div class="card stack">
               <div class="row">
-                <span class="coin" style="--c: #f5b800">B</span
+                <span class="coin coin-img"><img src="/icons/bsv.svg" alt="BSV" width="34" height="34" /></span
                 ><span class="row-main"><b>BSV</b><small>Bitcoin SV</small></span
                 ><span class="row-amt">0.0000</span>
               </div>
               <div class="row">
-                <span class="coin" style="--c: #3ddc97">M</span
+                <span class="coin coin-img"><img src="/icons/mnee.svg" alt="MNEE" width="34" height="34" /></span
                 ><span class="row-main"><b>MNEE</b><small>USD stablecoin</small></span
                 ><span class="row-amt">0.00</span>
               </div>
               <div class="row">
-                <span class="coin" style="--c: #8a7cff">21</span
+                <span class="coin coin-img"><img src="/icons/pnee.svg" alt="PNEEs" width="34" height="34" /></span
+                ><span class="row-main"><b>PNEEs</b><small>Pennies, backed by BSV</small></span
+                ><span class="row-amt">0.00</span>
+              </div>
+              <div class="row">
+                <span class="coin coin-img"><img src="/icons/tokens.svg" alt="BSV-21" width="34" height="34" /></span
                 ><span class="row-main"><b>BSV-21</b><small>Your fungible tokens</small></span
                 ><span class="row-amt">—</span>
               </div>
               <div class="row">
-                <span class="coin" style="--c: #f5b800">+</span
+                <span class="coin coin-img"><img src="/icons/nft.svg" alt="Mint" width="34" height="34" /></span
                 ><span class="row-main"><b>Mint</b><small>Photos, art, video, music</small></span
                 ><span class="row-amt">NFT</span>
               </div>
               <div class="row">
-                <span class="coin" style="--c: #f5b800">$</span
+                <span class="coin coin-img"><img src="/icons/handle.svg" alt="Names" width="34" height="34" /></span
                 ><span class="row-main"><b>Send to $handle</b><small>Paymail and OpNS names too</small></span
                 ><span class="row-amt">Get your name</span>
               </div>
