@@ -62,6 +62,10 @@ NOOP = ('<span class="mini">1Sat Market</span>', '')
 # Downloads: the store app comes from the stores; direct downloads are bWalletX.
 s = re.sub(r'href="/download/bwalletx-android-[^"]*"\s*download', 'href="https://bwalletx.com/android"', s)
 s = s.replace('href="/extension"', 'href="https://bwalletx.com/extension"')
+# The store app isn't on iPhone yet: keep its waitlist button (bwalletx.com points iPhone users at its web app).
+s = re.sub(r'href="/iphone"(\s*)><span>iPhone · Web app</span><small>[^<]*</small>',
+           r'href="#waitlist"\1><span>iPhone</span><small>Coming soon — join the waitlist</small>', s)
+s = s.replace('<h2>bWalletX on Android, iPhone and Chrome.</h2>', '<h2>bWalletX is coming to iPhone and Android.</h2>')
 
 # Direct downloads are bWalletX: say so (the store app itself comes from the stores).
 s = re.sub(r'<span>Android · Download APK \(beta\)</span><small>[^<]*</small>',
