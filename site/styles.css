@@ -1210,3 +1210,10 @@ main.ext { padding-top: 150px !important; }
 @media (max-width: 859px) {
   .hero { padding-top: 196px; }
 }
+
+/* One content width for every page (owner, 5 Oct 2026). Pages must not override it. */
+.ext {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 120px 20px 80px;
+}
