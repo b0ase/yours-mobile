@@ -143,15 +143,15 @@ async function owns(outpoint, address, c = chain) {
   return { ok: true, tx, out };
 }
 
-/** The envelope inscribed at an origin. */
-async function envelopeAt(origin, c = chain) {
+/** The envelope inscribed at an origin (strategies by default; contracts pass their own type + parser). */
+async function envelopeAt(origin, c = chain, type = CONTENT_TYPE, parse = parseEnvelope) {
   const [txid, vout] = origin.split('_');
   const tx = await c.tx(txid);
   const out = tx?.outputs[Number(vout)];
   const ins = out && inscriptionOf(out.lockingScript);
-  if (!ins || ins.type !== CONTENT_TYPE) return null;
-  const env = parseEnvelope(ins.body);
-  return env ? { env, tx } : null;
+  if (!ins || ins.type !== type) return null;
+  const env = parse(ins.body);
+  return env ? { env, tx, bodyHash: require('node:crypto').createHash('sha256').update(ins.body).digest('hex') } : null;
 }
 
 /** Sats the origin transaction paid to `address`. */

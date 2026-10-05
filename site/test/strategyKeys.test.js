@@ -49,3 +49,15 @@ describe('strategy key service', () => {
     expect(K.openKey(sealed)).toBe(k);
   });
 });
+
+describe('contract envelopes', () => {
+  const { parseContractEnvelope } = require('../lib/contracts');
+  const ok = { format: 'bwalletx.contract-nft/1', author: { name: 'b', address: '1x' }, sale: { priceUsd: 0, copies: 10, payTo: '1x' },
+    contract: { format: 'bwalletx.contract/1', name: '$1 Bond Vault', network: 'testnet' } };
+  test('valid contract envelopes parse; bad ones do not', () => {
+    expect(parseContractEnvelope(JSON.stringify(ok))?.contract.name).toBe('$1 Bond Vault');
+    expect(parseContractEnvelope(JSON.stringify({ ...ok, contract: { ...ok.contract, network: 'moon' } }))).toBeNull();
+    expect(parseContractEnvelope(JSON.stringify({ ...ok, sale: { ...ok.sale, copies: 0 } }))).toBeNull();
+    expect(parseContractEnvelope('nope')).toBeNull();
+  });
+});

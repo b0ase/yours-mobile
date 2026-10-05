@@ -113,6 +113,13 @@ const platform: PlatformHooks = { welcomeNotice: UNOFFICIAL_NOTICE, ...(await in
 setOverlayCountHandler(onOverlayCountChanged);
 initDappBrowser((id, origin, url) => attachContext(id, window, { id: MOBILE_EXTENSION_ID, url, origin }));
 
+// Web app (web.bwalletx.com, the iPhone route): the wallet's encrypted keys live in this site's storage. Ask the
+// browser to keep it persistent so it isn't cleared under storage pressure (Safari grants this to Home Screen apps;
+// Chrome to installed or engaged sites). The recovery phrase is still the only real backup.
+if (!Capacitor.isNativePlatform()) {
+  void navigator.storage?.persist?.().catch(() => false);
+}
+
 if (Capacitor.isNativePlatform()) {
   StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
   CapApp.addListener('backButton', () => {
