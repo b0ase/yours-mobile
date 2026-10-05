@@ -71,6 +71,20 @@ Legal: depositors are paid for doing a job (absorbing bad vaults), not promised 
 savings bond. It still needs legal review before it opens to the public, and store editions stay browse-only.
 Not offered: interest on minting and fixed-rate PNEE savings bonds (options 2 and 3); they are closer to a security.
 
+## Watching: Shieldpool (removing the co-signer)
+
+[Shieldpool](https://shieldpool.net) (Werkswinkel / twostack, MIT + Apache, testnet pre-release 0.2.0 as of Oct 2026) is
+a shielded payment pool for BSV. It verifies a STARK proof in script, in the same transaction that moves the money
+(a 1.78 MB verifier in its own slot tx), so its coordinator can stall the pool but can't take funds.
+
+Why it matters here: it shows a BSV script can check a proof about other transactions. That is a possible route to
+the vault's and the stability pool's missing check (were the burned PNEEs real?) without the issuer co-signing.
+
+Not ready for us: testnet only, a handful of transfers, CLI only (Dart/Rust, no JS SDK), ~94k sats per round, and a
+private-payments product would draw regulator and app-store attention (never in the store edition).
+Next: watch for a mainnet pool and a usable library; ask the developers whether their verifier could check our
+vault and pool rules. Unverified until we read their code (tstokenlib, twostack/pool-coordinator).
+
 ## Steps
 
 1. Note token: deploy `$PENNY` (BSV-21, 2 decimals), supply held by the vault issuer key; release on mint, burn on close.
