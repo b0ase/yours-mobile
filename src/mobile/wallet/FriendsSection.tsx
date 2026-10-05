@@ -11,6 +11,9 @@ import { ContactRow } from '../chat/ContactViews';
 import { filterContacts } from '../chat/contacts';
 import { resolveCallee } from '../calls/peer';
 import { addFriend } from '../calls/friends';
+import { getPersonalLink, normId } from '../names/personalToken';
+import { requestChatRoom } from '../chat/nav';
+import { tokenKey } from '../chat/tokenRooms';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -21,7 +24,7 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
  */
 export const FriendsSection = () => {
   const contacts = useContacts();
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const [held, setHeld] = useState<Bsv21Balance[]>([]);
   useEffect(() => {
     void getBsv21Balances
@@ -30,6 +33,10 @@ export const FriendsSection = () => {
       .catch(() => undefined);
   }, [apiContext]);
   const { handleSelect } = useBottomMenu();
+  // Your own $NAME token, pinned at the top of Social (owner, 5 Oct 2026).
+  const me = getPersonalLink(chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress);
+  const mine = me ? held.find((b) => b.id && normId(b.id) === normId(me.tokenId)) : undefined;
+  const mineAmount = mine ? Number(mine.all.confirmed) / 10 ** (mine.dec ?? 0) : 0;
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState('');
   const [busy, setBusy] = useState(false);
@@ -55,6 +62,28 @@ export const FriendsSection = () => {
   const shown = filterContacts(contacts, query);
   return (
     <div className="w-[92%] mx-auto flex flex-col gap-3 pb-6">
+      {me && (
+        <div className="flex items-center gap-3 rounded-xl px-3 py-3" style={{ background: '#17191E', border: '1px solid #F5B80044' }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold text-white">${me.ticker.replace(/^\$/, '')}</div>
+            <div className="text-xs" style={{ color: '#98A2B3' }}>
+              Your token · you hold {mineAmount.toLocaleString()}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const key = tokenKey('bsv21', me.tokenId);
+              if (key) requestChatRoom(key);
+              handleSelect(asMenuItem('chat'));
+            }}
+            className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold border-0"
+            style={{ background: '#F5B80022', color: '#F5B800' }}
+          >
+            Your room
+          </button>
+        </div>
+      )}
       <form
         className="flex gap-2"
         onSubmit={(e) => {

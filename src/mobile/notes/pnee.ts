@@ -2,7 +2,7 @@
  * Penny Notes ($PNEE): a dollar stablecoin on BSV backed only by BSV locked in public vaults (docs/PENNY-NOTES.md).
  * A BSV-21 token with 2 decimals: 1 unit = 1¢, shown as dollars. Empty until the token is deployed (mainnet pilot).
  */
-export const PNEE_TOKEN_ID = '';
+export const PNEE_TOKEN_ID = '1599c4e49a28c7791295f50613e1545aa9246dd592ae8b8f696b81916a475ae4_0';
 export const PNEE_DECIMALS = 2;
 
 /** A cheeky nod to MNEE's coin (navy disc, open gold ring) with a cent sign. Inline: no network fetch. */
