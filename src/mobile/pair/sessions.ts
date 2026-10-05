@@ -25,13 +25,17 @@ import { fetchExchangeRate } from '../../utils/wallet';
 import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
 
 /** What paired-CLI calls need from the app; TopNav keeps it current (wallet context + open account). */
-let agentDeps: { ctx: OneSatContext | undefined; currentId: string | undefined } = { ctx: undefined, currentId: undefined };
+let agentDeps: { ctx: OneSatContext | undefined; currentId: string | undefined; feeRate?: () => number } = {
+  ctx: undefined,
+  currentId: undefined,
+};
 export const setAgentPairDeps = (d: typeof agentDeps) => {
   agentDeps = d;
 };
 let rateCache = { at: 0, rate: 0 };
 const bsvUsd = async () => {
-  if (Date.now() - rateCache.at > 60_000 || !rateCache.rate) rateCache = { at: Date.now(), rate: await fetchExchangeRate('main').catch(() => rateCache.rate) };
+  if (Date.now() - rateCache.at > 60_000 || !rateCache.rate)
+    rateCache = { at: Date.now(), rate: await fetchExchangeRate('main').catch(() => rateCache.rate) };
   return rateCache.rate;
 };
 
@@ -53,7 +57,13 @@ export type StoredSession = {
 };
 
 /** What the UI shows while a scan is being confirmed. A CLI pairing passes its grant to confirm. */
-export type PendingPair = { origin: string; code: string; cli: boolean; confirm: (agent?: AgentGrant) => void; cancel: () => void };
+export type PendingPair = {
+  origin: string;
+  code: string;
+  cli: boolean;
+  confirm: (agent?: AgentGrant) => void;
+  cancel: () => void;
+};
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -93,7 +103,16 @@ async function reply(l: Live, msg: PairMessage) {
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
     if (!agentDeps.ctx) throw new AgentCallError('LOCKED', 'bWalletX is locked. Unlock it on your phone.');
-    const result = await handleAgentCall(grant, action, params, { ctx: agentDeps.ctx, currentId: agentDeps.currentId, bsvUsd });
+    const result = await handleAgentCall(grant, action, params, {
+      ctx: agentDeps.ctx,
+      currentId: agentDeps.currentId,
+      bsvUsd,
+      feeRate: agentDeps.feeRate,
+      saveGrant: (g) => {
+        l.stored = { ...l.stored, agent: g };
+        update(l.stored.c, { agent: g });
+      },
+    });
     await reply(l, { t: 'res', id, result });
   } catch (e) {
     const code = e instanceof AgentCallError ? e.code : 'ERROR';

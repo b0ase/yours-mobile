@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
-import { inscribe, listOrdinals, mintCollection, mintCollectionItem } from '@1sat/actions';
+import { listOrdinals } from '@1sat/actions';
+import { mintMedia } from './mintMedia';
 import {
   AppWindow,
   BookOpen,
@@ -32,24 +33,18 @@ import { mintChoicesFor } from '../storeBuild';
 /** Store build: media (NFT) only (storeBuild.ts). */
 const CHOICES = new Set(mintChoicesFor());
 import { TOKEN_COPY } from '../tokens/token';
-import { withIssuerSignature } from '../issuer/issuerSign';
-import { registerIssuer } from '../issuer/issuerVerify';
 import {
   ACCEPT,
   BLOCKED_MESSAGE,
   blockedText,
-  buildMap,
   checkSize,
-  collectionIdFrom,
   DOWNSCALE_SUGGEST_BYTES,
   estimateCost,
   fileToBase64,
   formatBytes,
   isMintableType,
-  MINT_APP,
   notifyMinted,
   validateForm,
-  withFeeOutput,
   wocTxUrl,
   type Collection,
 } from './mint';
@@ -203,51 +198,14 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
     }
     setBusy(true);
     try {
-      const base64Content = fileToBase64(await picked.file.arrayBuffer());
-      const contentType = picked.file.type;
-      const name = title.trim();
-      let res: { txid?: string; error?: string };
-      // Issuer signature in the same tx; register each signed mint with bit-sign after broadcast.
-      let signedAt: number | null = null;
-      const signed = (ctx: typeof apiContext) =>
-        withIssuerSignature(ctx, 'ordinal', (r) => {
-          signedAt = r.index;
-        });
-      const register = (txid?: string) => {
-        if (txid && signedAt !== null) void registerIssuer(`${txid}_${signedAt}`);
-        signedAt = null;
-      };
-      if (collection.kind === 'none') {
-        res = await inscribe.execute(signed(withFeeOutput(apiContext, cost.feeSats)), {
-          base64Content,
-          contentType,
-          map: buildMap({ title, description, collection }),
-        });
-      } else {
-        let collectionId = collection.kind === 'existing' ? collection.id : '';
-        if (collection.kind === 'new') {
-          const c = await mintCollection.execute(signed(apiContext), {
-            base64Content,
-            contentType,
-            name: collection.name.trim(),
-            description: description.trim(),
-            quantity: 1000,
-            app: MINT_APP,
-          });
-          if (!c.txid || c.error) throw new Error(c.error || 'Collection mint failed');
-          register(c.txid);
-          collectionId = collectionIdFrom(c.txid, c.collectionId);
-        }
-        res = await mintCollectionItem.execute(signed(withFeeOutput(apiContext, cost.feeSats)), {
-          base64Content,
-          contentType,
-          name,
-          collectionId,
-          app: MINT_APP,
-        });
-      }
-      if (!res.txid || res.error) throw new Error(res.error || 'Mint failed');
-      register(res.txid);
+      const res = await mintMedia(apiContext, {
+        base64Content: fileToBase64(await picked.file.arrayBuffer()),
+        contentType: picked.file.type,
+        title,
+        description,
+        collection,
+        feeSats: cost.feeSats,
+      });
       setTxid(res.txid);
       setConfirming(false);
       setStep('done');

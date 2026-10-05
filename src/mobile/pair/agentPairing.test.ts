@@ -36,7 +36,8 @@ describe('CLI pairing grants', () => {
     expect(code(() => checkGrant(g, 'send', '1A', NOW))).toBe('SCOPE');
     expect(code(() => checkGrant(g, 'balance', '1B', NOW))).toBe('NOT_OPEN');
     expect(code(() => checkGrant(g, 'balance', '1A', NOW + 8 * 86_400_000))).toBe('EXPIRED');
-    expect(code(() => checkGrant(g, 'mint', '1A', NOW))).toBe('UNKNOWN');
+    expect(code(() => checkGrant(g, 'mint', '1A', NOW))).toBe('SCOPE');
+    expect(code(() => checkGrant(g, 'nope', '1A', NOW))).toBe('UNKNOWN');
     expect(code(() => checkGrant(makeGrant('1Z', 'x', [], 1, NOW), 'info', '1Z', NOW))).toBe('NOT_AGENT');
   });
 });

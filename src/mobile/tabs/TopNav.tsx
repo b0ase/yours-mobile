@@ -86,8 +86,8 @@ export const TopNav = () => {
   const current = accountObj.account?.addresses.identityAddress;
   // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
   useEffect(() => {
-    if (!IS_EXTENSION) setAgentPairDeps({ ctx: apiContext, currentId: current });
-  }, [apiContext, current]);
+    if (!IS_EXTENSION) setAgentPairDeps({ ctx: apiContext, currentId: current, feeRate: () => chromeStorageService.getCustomFeeRate() });
+  }, [apiContext, current, chromeStorageService]);
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
   const names = useAccountNames(
     current,
