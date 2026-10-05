@@ -16,7 +16,7 @@ import { BWALLET_GUIDE } from './guide';
 import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
 import { KeyScreen } from '../settings/AgentSettings';
-import { loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
+import { limitSats, loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
 import {
   bitsignPaidBackend,
   formatPrice,
@@ -226,11 +226,11 @@ const AgentPage = () => {
     const quote = await backend.quote(sent);
     const decision = payDecision(
       quote.sats,
-      prefs.dailyLimitSats,
+      limitSats(prefs.dailyLimitCents, bsvUsd),
       spentToday(loadSpend(), Date.now()),
       () => oneClick.take(quote.sats).ok,
     );
-    if (decision.kind === 'refuse') throw new Error(refuseText(decision.reason, prefs.dailyLimitSats, bsvUsd));
+    if (decision.kind === 'refuse') throw new Error(refuseText(decision.reason, limitSats(prefs.dailyLimitCents, bsvUsd), bsvUsd));
     if (decision.kind === 'confirm' && !(await askConfirm(quote.sats))) return null;
     const res = await sendBsv.execute(apiContext, { requests: [{ address: quote.payTo, satoshis: quote.sats }] });
     if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
@@ -322,7 +322,7 @@ const AgentPage = () => {
       : price === null
         ? 'Checking the price…'
         : price.enabled
-          ? `${formatPrice(price.sats, bsvUsd, price.usd)} per message · today ${money(today, bsvUsd)} / ${money(prefs.dailyLimitSats, bsvUsd)}`
+          ? `${formatPrice(price.sats, bsvUsd, price.usd)} per message · today ${money(today, bsvUsd)} / $${(prefs.dailyLimitCents / 100).toFixed(2)}`
           : (price.reason ?? 'Paid messages are not available yet.');
   const canSend = prefs.mode === 'own' ? keyReady !== false : !!price?.enabled;
 

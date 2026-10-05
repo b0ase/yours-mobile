@@ -279,9 +279,9 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
           <div className="px-4 pb-3 pl-12">
             <Pills
               label="Daily limit"
-              options={DAILY_LIMITS.map((v) => ({ id: v, label: v ? money(v, rate) : 'Off' }))}
-              value={prefs.dailyLimitSats}
-              onChange={(v) => setPrefs({ dailyLimitSats: v })}
+              options={DAILY_LIMITS.map((v) => ({ id: v, label: v ? `$${(v / 100).toFixed(2)}` : 'Off' }))}
+              value={prefs.dailyLimitCents}
+              onChange={(v) => setPrefs({ dailyLimitCents: v })}
             />
           </div>
         ) : (

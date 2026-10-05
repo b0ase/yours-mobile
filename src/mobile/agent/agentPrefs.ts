@@ -7,7 +7,10 @@ import { agentModeFor } from '../storeBuild';
  * here; they live in secure storage (keyStore.ts).
  */
 export type AgentMode = 'paid' | 'own';
-export const DAILY_LIMITS = [0, 10_000, 50_000, 200_000, 1_000_000] as const;
+// In US cents: we charge in dollars (owner, 6 Oct 2026: the old 50,000-sat default was about 1¢, one message a day).
+export const DAILY_LIMITS = [0, 25, 100, 500, 2_000] as const;
+/** Cents → sats at today's BSV price (0 if the price is unknown, which refuses paid messages). */
+export const limitSats = (cents: number, bsvUsd: number) => (bsvUsd > 0 ? Math.floor((cents / 100 / bsvUsd) * 1e8) : 0);
 export type DailyLimit = (typeof DAILY_LIMITS)[number];
 
 export type AgentPrefs = {
@@ -15,8 +18,8 @@ export type AgentPrefs = {
   provider: ProviderId;
   /** Chosen model per provider. */
   models: Record<ProviderId, string>;
-  /** Pay mode: most sats the agent may spend per calendar day (0 = off, every message refused). */
-  dailyLimitSats: DailyLimit;
+  /** Pay mode: most US cents the agent may spend per calendar day (0 = off, every message refused). */
+  dailyLimitCents: DailyLimit;
 };
 
 const defaultModels = () =>
@@ -26,7 +29,7 @@ export const DEFAULT_AGENT_PREFS: AgentPrefs = {
   mode: 'paid',
   provider: 'anthropic',
   models: defaultModels(),
-  dailyLimitSats: 50_000,
+  dailyLimitCents: 100,
 };
 
 export const parseAgentPrefs = (raw: unknown): AgentPrefs => {
@@ -37,9 +40,10 @@ export const parseAgentPrefs = (raw: unknown): AgentPrefs => {
     mode: agentModeFor(r.mode === 'own' || r.mode === 'paid' ? r.mode : DEFAULT_AGENT_PREFS.mode),
     provider: isProviderId(r.provider) ? r.provider : DEFAULT_AGENT_PREFS.provider,
     models: Object.fromEntries(PROVIDER_IDS.map((p) => [p, cleanModel(p, models[p])])) as Record<ProviderId, string>,
-    dailyLimitSats: (DAILY_LIMITS as readonly unknown[]).includes(r.dailyLimitSats)
-      ? (r.dailyLimitSats as DailyLimit)
-      : DEFAULT_AGENT_PREFS.dailyLimitSats,
+    // Older prefs stored sats (dailyLimitSats): they fall back to the default.
+    dailyLimitCents: (DAILY_LIMITS as readonly unknown[]).includes(r.dailyLimitCents)
+      ? (r.dailyLimitCents as DailyLimit)
+      : DEFAULT_AGENT_PREFS.dailyLimitCents,
   };
 };
 

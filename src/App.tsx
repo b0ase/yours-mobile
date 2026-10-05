@@ -27,6 +27,8 @@ import { SyncProvider } from './contexts/providers/SyncProvider';
 import { BottomMenuProvider } from './contexts/providers/BottomMenuProvider';
 import { SnackbarProvider } from './contexts/providers/SnackbarProvider';
 import { SweepMigration } from './pages/SweepMigration';
+import { PANEL_PROMPT_EVENT, PanelPrompt } from './mobile/PanelPrompt';
+import { IS_EXTENSION } from './mobile/extension';
 
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
@@ -50,6 +52,8 @@ export const App = () => {
   // Port disconnects automatically when the popup closes — no timers needed.
   useEffect(() => {
     const port = chrome.runtime.connect({ name: 'extension-popup' });
+    // bWalletX: approval prompts arrive here when the side panel is open (mobile/PanelPrompt.tsx).
+    port.onMessage?.addListener((msg: unknown) => window.dispatchEvent(new CustomEvent(PANEL_PROMPT_EVENT, { detail: msg })));
     return () => port.disconnect();
   }, []);
 
@@ -92,6 +96,7 @@ export const App = () => {
               <SnackbarProvider>
                 <SyncingBlocks />
                 <StorageRepairOverlay />
+                {IS_EXTENSION && <PanelPrompt />}
                 <Show when={!isLocked} whenFalseContent={<UnlockWallet onUnlock={handleUnlock} />}>
                   <UsbGate>
                     <UsbBackupRunner />

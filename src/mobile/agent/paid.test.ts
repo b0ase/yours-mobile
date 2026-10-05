@@ -85,10 +85,10 @@ describe('paid backend', () => {
 
 describe('agent prefs', () => {
   test('bad stored values fall back to defaults', () => {
-    const p = parseAgentPrefs({ mode: 'free', provider: 'x', dailyLimitSats: 7, models: { openai: 'bad model!' } });
+    const p = parseAgentPrefs({ mode: 'free', provider: 'x', dailyLimitCents: 7, models: { openai: 'bad model!' } });
     expect(p.mode).toBe('paid');
     expect(p.provider).toBe('anthropic');
-    expect(p.dailyLimitSats).toBe(50_000);
+    expect(p.dailyLimitCents).toBe(100);
     expect(p.models.openai).toBe('gpt-5-mini');
   });
 });
