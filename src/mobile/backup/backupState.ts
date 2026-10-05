@@ -93,17 +93,34 @@ export const currentBackupSettings = (cs: ChromeStorageService): BackupSettings 
   };
 };
 
-const saveSettings = async (cs: ChromeStorageService, patch: BackupSettings) => {
-  const { account } = cs.getCurrentAccountObject();
-  if (!account) return;
-  await cs.updateNested('accounts', {
-    [account.addresses.identityAddress]: { ...account, settings: { ...account.settings, ...patch } },
-  });
+/**
+ * Patch the backup settings of specific accounts (by identity address), else the current one. Takes the ids
+ * captured when the Backup step opened, so a switch (or the master backup's own account walk) in between can't
+ * mark the wrong account.
+ */
+const saveSettings = async (cs: ChromeStorageService, patch: BackupSettings, ids?: string[]) => {
+  const current = cs.getCurrentAccountObject().account;
+  const targets = ids?.length ? ids : current ? [current.addresses.identityAddress] : [];
+  const all = cs.getAllAccounts();
+  const update: Record<string, unknown> = {};
+  for (const id of targets) {
+    const found = all.find((a) => (a.addresses?.identityAddress ?? (a as { address?: string }).address) === id);
+    if (!found) continue;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { address: _drop, ...account } = found as typeof found & { address?: string };
+    update[id] = { ...account, settings: { ...account.settings, ...patch } };
+  }
+  if (!Object.keys(update).length) return;
+  await cs.updateNested('accounts', update as Parameters<typeof cs.updateNested<'accounts'>>[1]);
   fire();
 };
 
-export const markBackedUp = (cs: ChromeStorageService, method: BackupMethod, now = Date.now()) =>
-  saveSettings(cs, { backedUpAt: now, backupMethod: method, backupCheckedAt: now });
+/** Which accounts a completed backup covers: the encrypted file holds every account; a phrase only its own. */
+export const backupCovers = (method: BackupMethod, currentId: string, allIds: string[]) =>
+  method === 'file' ? [...new Set([currentId, ...allIds].filter(Boolean))] : currentId ? [currentId] : [];
+
+export const markBackedUp = (cs: ChromeStorageService, method: BackupMethod, now = Date.now(), ids?: string[]) =>
+  saveSettings(cs, { backedUpAt: now, backupMethod: method, backupCheckedAt: now }, ids);
 
 export const markBackupChecked = (cs: ChromeStorageService, now = Date.now()) =>
   saveSettings(cs, { backupCheckedAt: now });

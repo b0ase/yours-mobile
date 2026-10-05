@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  backupCovers,
   backupExit,
   backupFileName,
   isBackedUp,
@@ -91,5 +92,13 @@ describe('web app detection', () => {
     expect(detectIos({ userAgent: IPAD_DESKTOP, platform: 'MacIntel', maxTouchPoints: 5 })).toBe(true);
     expect(detectIos({ userAgent: IPAD_DESKTOP, platform: 'MacIntel', maxTouchPoints: 0 })).toBe(false);
     expect(detectIos({ userAgent: ANDROID, platform: 'Linux armv8l', maxTouchPoints: 5 })).toBe(false);
+  });
+});
+
+describe('backup coverage', () => {
+  test('the encrypted file covers every account; a phrase only its own', () => {
+    expect(backupCovers('file', 'b', ['a', 'b', 'c'])).toEqual(['b', 'a', 'c']);
+    expect(backupCovers('phrase', 'b', ['a', 'b', 'c'])).toEqual(['b']);
+    expect(backupCovers('imported', 'b', ['a', 'b'])).toEqual(['b']);
   });
 });
