@@ -111,16 +111,16 @@ const ConfirmSheet = ({
  */
 const QUICK_STARTS: { label: string; prompt: string }[] = [
   {
-    label: 'Make a strategy',
-    prompt: 'Help me make a strategy. Ask me what I want it to do, which tokens, my budget and when it should stop.',
+    label: 'Create a strategy',
+    prompt: 'Help me create a strategy. Ask me what I want it to do, which tokens, my budget and when it should stop.',
   },
   {
-    label: 'Sell a strategy',
-    prompt: 'Help me sell a strategy on Exchange › Strategies: check it, fill in the listing spec with me and suggest a price.',
+    label: 'Trade with a strategy',
+    prompt: 'Help me trade with a strategy: load one into an agent account, check its limits, and run it.',
   },
   {
-    label: 'Check my agent',
-    prompt: "Check my agent: what has it spent today, what has it done recently, and is it within its strategy's limits?",
+    label: 'Buy / sell a strategy',
+    prompt: 'Help me buy or sell a strategy on Exchange › Strategies: compare listings, or fill in the listing spec for mine and suggest a price.',
   },
 ];
 
