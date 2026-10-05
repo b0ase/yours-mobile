@@ -4,7 +4,7 @@
  * signs, claims or broadcasts (claims go through paymail.ts / GetYourName).
  */
 import { toAlias } from './paymail';
-import { markBackupPrompt, markImported } from '../backup/backupState';
+import { markBackupPrompt, markCreatedHere, markImported } from '../backup/backupState';
 
 export type PromptReason = 'create' | 'restore';
 export type PendingPrompt = { id: string; reason: PromptReason };
@@ -47,7 +47,10 @@ export const markHandlePrompt = (id: string | undefined, reason: PromptReason) =
   // Every create / restore path calls this. A new wallet gets the "Back up your wallet" step; a restored one is
   // already backed up (the user typed in or loaded its phrase, key or file).
   if (reason === 'restore') markImported(id);
-  else markBackupPrompt(id);
+  else {
+    markBackupPrompt(id);
+    markCreatedHere(id);
+  }
   fire();
 };
 export const getPendingPrompt = (): PendingPrompt | null => parsePending(store()?.getItem(PENDING));

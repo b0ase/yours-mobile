@@ -129,6 +129,13 @@ export const markImported = (id: string | undefined, now = Date.now()) => {
 };
 export const importedAt = (id: string | undefined): number => (id ? Number(safe('local')?.getItem(IMPORTED(id))) || 0 : 0);
 
+const CREATED = (id: string) => `bwallet.created.${id}`;
+/** A wallet created in this app (not restored): it has no legacy Yours assets to migrate. */
+export const markCreatedHere = (id: string | undefined) => {
+  if (id) safe('local')?.setItem(CREATED(id), '1');
+};
+export const createdHere = (id: string | undefined) => !!id && safe('local')?.getItem(CREATED(id)) === '1';
+
 /** Set by the create flows (via markHandlePrompt) for the new account. */
 export const markBackupPrompt = (id: string | undefined) => {
   if (!id) return;

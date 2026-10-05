@@ -399,6 +399,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     ["onClick={() => setPageState('receive')}", "onClick={() => requestBackupThen(chromeStorageService, () => setPageState('receive'))}"],
     ['      setShowBackupPromo(!dismissed && !hasRemotes);', '      setShowBackupPromo(false && !dismissed && !hasRemotes);'],
+    // "Missing assets? Open migration tool": only for wallets that could hold legacy Yours assets, not ones made here.
+    [
+      "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { requestBackupThen } from '../mobile/backup/backupState';",
+      "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { createdHere, requestBackupThen } from '../mobile/backup/backupState';",
+    ],
+    [
+      '      setShowMigrationBanner(!acct?.settings?.sweepStarted && !acct?.settings?.sweepCompleted);',
+      '      setShowMigrationBanner(!acct?.settings?.sweepStarted && !acct?.settings?.sweepCompleted && !createdHere(acct?.addresses?.identityAddress));',
+    ],
   ],
   // Tokens list: tickets stay listed (sending one is an invite) but carry a "· Ticket" mark.
   'src/components/Bsv21TokensList.tsx': [
