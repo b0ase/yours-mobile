@@ -62,7 +62,7 @@ export const DefaultTokenCards = () => {
       {backing && <BackPneeSheet onClose={() => setBacking(false)} />}
       <AssetRow
         icon={PNEE_ICON}
-        ticker="PNEE · Penny Notes"
+        ticker="PNEEs · Penny Notes"
         balance={pnee}
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
@@ -78,11 +78,11 @@ export const DefaultTokenCards = () => {
             className="text-[11px] font-bold mt-1 px-2.5 py-0.5 rounded-full border cursor-pointer bg-transparent"
             style={{ borderColor: '#F5B80088', color: '#F5B800' }}
           >
-            Back PNEE
+            Back PNEEs
           </button>
         }
         // Buy PNEE on the right, like Buy MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
-        action={PNEE_TOKEN_ID ? { label: 'Buy PNEE', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
+        action={PNEE_TOKEN_ID ? { label: 'Buy PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') } : undefined}
       />
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (

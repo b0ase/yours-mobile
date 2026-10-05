@@ -31,7 +31,7 @@ export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
       >
         <div className="flex items-center gap-2">
           <img src={PNEE_ICON} alt="" className="w-8 h-8" />
-          <span className="flex-1 text-base font-bold text-white">Back PNEE with your BSV</span>
+          <span className="flex-1 text-base font-bold text-white">Back PNEEs with your BSV</span>
           <button type="button" aria-label="Close" onClick={onClose} className="p-1 border-0 bg-transparent">
             <X size={18} color={MUTED} />
           </button>
