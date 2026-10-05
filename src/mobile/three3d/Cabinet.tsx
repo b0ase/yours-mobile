@@ -32,6 +32,24 @@ const tintGun = (group: THREE.Object3D, color: string | undefined, amount = 0.68
   });
 };
 
+// From tokenblaster.lol src/lib/ordnance.ts (6 Oct 2026): 18 guns now have their own textured model, which wants only a
+// light tint; the 4 shared base models (and 2 untextured ones) keep the full finish. Some own models face backwards.
+const BASE_MODELS = ['minigun', 'plasmarifle', 'quadplasma', 'sawedoff'];
+const FULL_TINT = new Set(['utxo-thumper', 'hashpower-howitzer']);
+const FLIPPED = new Set([
+  'pnee-shotgun',
+  'big-block',
+  'satoshi-sidearm',
+  'fee-spike',
+  'block-reward',
+  'bitcoin-schema-sniper',
+  'teranode-cannon',
+  'nlocktime',
+  'p2pkh-pistolero',
+]);
+const usesBase = (w: Weapon) => BASE_MODELS.some((b) => w.model.endsWith(`/${b}.glb`));
+const tintFor = (w: Weapon) => (usesBase(w) || FULL_TINT.has(w.id) ? 0.65 : 0.22);
+
 /** Spinning, draggable model. One WebGL context, only while the cabinet is open; everything is disposed on close. */
 const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void }) => {
   const host = useRef<HTMLDivElement>(null);
@@ -83,8 +101,10 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
         if (dead) return;
         // The minigun is skinned: SkeletonUtils.clone, or the copy keeps following the original's bones.
         const gun = skeletonClone(gltf.scene);
-        tintGun(gun, weapon.tint);
-        if (weapon.modelBase === 'minigun') gun.rotation.y += Math.PI / 2; // modelled barrel-first
+        tintGun(gun, weapon.tint, tintFor(weapon));
+        const isMinigun = weapon.model.endsWith('/minigun.glb');
+        if (isMinigun) gun.rotation.y += Math.PI / 2; // modelled barrel-first
+        if (!usesBase(weapon) && FLIPPED.has(weapon.id)) gun.rotation.y += Math.PI;
         gun.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(gun);
         const radius = box.getBoundingSphere(new THREE.Sphere()).radius;
@@ -99,7 +119,8 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
         controls.minDistance = dist * 0.4;
         controls.maxDistance = dist * 2;
         controls.target.set(0, 0, 0);
-        const spin = gltf.animations.find((a) => /rotation/i.test(a.name)) ?? gltf.animations[0];
+        // The barrel spin belongs to the shared minigun model only.
+        const spin = isMinigun ? gltf.animations.find((a) => /rotation/i.test(a.name)) : undefined;
         if (spin) {
           mixer = new THREE.AnimationMixer(gun);
           mixer.clipAction(spin).play();
