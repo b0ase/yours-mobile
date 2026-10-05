@@ -9,6 +9,7 @@
   var NAV = {
     full: [
       { label: 'Features', href: '/features' },
+      { label: 'Mint', href: '/mint' },
       { label: 'Exchange', href: '/exchange', pages: ['/exchange', '/exchange/strategies', '/pnees', '/pnee'],
         sub: [
           { label: 'Exchange', href: '/exchange' },

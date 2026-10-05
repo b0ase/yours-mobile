@@ -124,6 +124,11 @@
       "source": "/mcp",
       "destination": "https://bwalletx.com/mcp",
       "permanent": false
+    },
+    {
+      "source": "/mint",
+      "destination": "https://bwalletx.com/mint",
+      "permanent": false
     }
   ]
 }
