@@ -55,7 +55,7 @@ import {
   type Bsv21Balance,
   type LockData,
 } from '@1sat/actions';
-import { getWalletBalance, fetchExchangeRate } from '../utils/wallet';
+import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
@@ -502,14 +502,31 @@ export const BsvWallet = () => {
       return null;
     }
     applyBalance(satoshis);
+    await loadRate();
+    return satoshis;
+  };
+
+  const loadRate = async () => {
     const rate = await withTimeout(
       fetchExchangeRate(apiContext.chain, apiContext.wocApiKey),
       RATE_TIMEOUT_MS,
       'Exchange rate',
     ).catch(() => null);
     if (rate) setExchangeRate(rate);
-    return satoshis;
   };
+
+  // The price on its own, retried every 15 s until it arrives (owner, 6 Oct 2026: the balance showed 35M sats
+  // but $0.00 for good). It used to be fetched only after a balance that answered in time, so a slow balance
+  // or one slow price request left the dollar value at zero until the next refresh.
+  useEffect(() => {
+    if (exchangeRate > 0) return;
+    const known = cachedExchangeRate();
+    if (known > 0) return setExchangeRate(known);
+    void loadRate();
+    const t = setInterval(() => void loadRate(), 15_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exchangeRate]);
 
   useEffect(() => {
     if (updateBalance) {
@@ -639,17 +656,25 @@ export const BsvWallet = () => {
       const { account: acct } = chromeStorageService.getCurrentAccountObject();
       const count = (acct?.settings?.maxKeyIndex ?? 4) + 1;
       if (apiContext) {
-        await syncAddresses.execute(apiContext, { count });
+        // Bounded: a hung sync held the whole refresh (and the balance after it) indefinitely (owner, 6 Oct 2026).
+        await withTimeout(syncAddresses.execute(apiContext, { count }), BALANCE_TIMEOUT_MS, 'Address sync');
       }
     } catch (err) {
       synced = false;
       console.error('[refreshUtxos] syncAddresses failed:', err);
     }
     try {
+      // MNEE and token lookups bounded too: either one hanging kept the card's refresh icon spinning for good
+      // (owner, 6 Oct 2026). A late answer still updates the screen; it just isn't waited for.
+      const bounded = <T,>(p: Promise<T>, what: string) =>
+        withTimeout(p, BALANCE_TIMEOUT_MS, what).catch((err) => {
+          console.warn('[refreshUtxos]', err instanceof Error ? err.message : err);
+          return undefined;
+        });
       const [sats, mnee, tokens] = await Promise.all([
         getAndSetBsvBalance(),
-        updateMneeBalance(),
-        getAndSetAccountAndBsv21s(),
+        bounded(updateMneeBalance(), 'MNEE balance'),
+        bounded(getAndSetAccountAndBsv21s(), 'Tokens'),
       ]);
       loadLocks && loadLocks();
       const unchanged =
@@ -657,6 +682,7 @@ export const BsvWallet = () => {
         sats === before.sats &&
         mnee !== undefined &&
         mnee === before.mnee &&
+        tokens !== undefined &&
         bsv21Signature(tokens) === before.tokens;
       if (notifyIfUnchanged && synced && unchanged) {
         addSnackbar('Balances are up to date. Incoming transactions can take one confirmation to appear.', 'info');

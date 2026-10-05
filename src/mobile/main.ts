@@ -94,7 +94,12 @@ hub.register('background', { post: (json) => worker.postMessage(json), sender: s
 worker.addEventListener('message', (e) => {
   if (typeof e.data === 'string') void hub.handle('background', JSON.parse(e.data));
   else if (e.data?.t === 'ready') hub.markBackgroundReady();
-  else if (e.data?.t === 'error') console.error('[background worker] failed to start:', e.data.message);
+  else if (e.data?.t === 'error') {
+    // Release held messages anyway: listeners registered before the throw still answer, and without this every
+    // runtime.sendMessage waited forever (owner, 6 Oct 2026: balance, tokens and sync all timing out).
+    console.error('[background worker] failed to start:', e.data.message);
+    hub.markBackgroundReady();
+  }
   else if (e.data?.t === 'console') console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));

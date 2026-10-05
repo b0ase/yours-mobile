@@ -3201,7 +3201,9 @@ const isPairUrl = (url?: string) => {
   }
 };
 const seenPairLinks = new Set<string>();
-chrome.tabs?.onUpdated.addListener((tabId, info, tab) => {
+// Phones have chrome.tabs without onUpdated: an unguarded call threw here and stopped the whole background worker
+// (owner, 6 Oct 2026: nothing answered, balance stuck refreshing).
+chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
   const url = info.url ?? (info.status === 'loading' ? tab.url : undefined);
   if (!isPairUrl(url) || seenPairLinks.has(url!)) return;
   seenPairLinks.add(url!);
