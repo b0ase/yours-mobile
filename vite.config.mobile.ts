@@ -243,7 +243,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
-      '      <SocialSignIn onProfile={() => undefined} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
+      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
     ],
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     [
