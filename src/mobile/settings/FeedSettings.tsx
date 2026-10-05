@@ -591,7 +591,7 @@ export const FeedSettings = ({ Section, Row, Divider }: Props) => {
         <Row
           icon={<Download size={16} />}
           label="Sweep from another wallet"
-          description="Move coins and tokens from SimplyCash or another 12/24-word wallet"
+          description="Move coins, NFTs and tokens from bWalletX, Yours, SimplyCash or any wallet: paste its phrase or private key"
           onClick={() => setScreen('sweep')}
           isFirst
         />
