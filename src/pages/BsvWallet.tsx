@@ -1,4 +1,6 @@
 import { validate } from 'bitcoin-address-validation';
+import { BsvPriceBar } from '../mobile/wallet/BuyBsv';
+import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1220,33 +1222,9 @@ export const BsvWallet = () => {
         className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"
         style={{ minHeight: '100%' }}
       >
-        {/* ── Legacy migration banner ── */}
-        <AnimatePresence>
-          {showMigrationBanner && (
-            <motion.button
-              key="migration-banner"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-              type="button"
-              onClick={handleMigrationBannerClick}
-              className="flex items-center justify-between gap-2 w-[92%] mb-4 px-4 py-2.5 rounded-xl border-0 outline-none cursor-pointer text-left"
-              style={{
-                background: 'rgba(253,176,34,0.08)',
-                border: '1px solid rgba(253,176,34,0.2)',
-              }}
-            >
-              <span
-                className="text-xs leading-snug min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ color: '#FDB022' }}
-              >
-                <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
-              </span>
-              <ArrowRight size={14} style={{ color: '#FDB022' }} className="shrink-0" />
-            </motion.button>
-          )}
-        </AnimatePresence>
+        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
+        <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
+
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>
@@ -1485,6 +1463,35 @@ export const BsvWallet = () => {
             <FindTokensButton style={listItemStyle} onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))} />
           </motion.div>
         </Show>
+
+        {/* ── Legacy migration banner ── */}
+        <AnimatePresence>
+          {showMigrationBanner && (
+            <motion.button
+              key="migration-banner"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              type="button"
+              onClick={handleMigrationBannerClick}
+              className="flex items-center justify-between gap-2 w-[92%] mt-3 mb-4 px-4 py-2.5 rounded-xl border-0 outline-none cursor-pointer text-left"
+              style={{
+                background: 'rgba(253,176,34,0.08)',
+                border: '1px solid rgba(253,176,34,0.2)',
+              }}
+            >
+              <span
+                className="text-xs leading-snug min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+                style={{ color: '#FDB022' }}
+              >
+                <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
+              </span>
+              <ArrowRight size={14} style={{ color: '#FDB022' }} className="shrink-0" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+
 
         {/* Bottom breathing room */}
         <div className="h-4" />
