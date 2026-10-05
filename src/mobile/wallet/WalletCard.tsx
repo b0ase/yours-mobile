@@ -11,7 +11,7 @@ import { HandleFlow } from '../names/HandleFlow';
 import { useAccountNames } from '../names/MyNameBadge';
 import { identityRowText } from '../names/identityText';
 import type { BalanceView } from './balanceLoad';
-import { useBackedUp } from '../backup/BackupGate';
+import { useBackedUp } from '../backup/useBackedUp';
 import { requestBackupThen } from '../backup/backupState';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 

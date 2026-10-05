@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Bot, KeyRound, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
-import { hasRate, money, useBsvUsd } from '../money/money';
+import { money, useBsvUsd } from '../money/money';
 import { DAILY_LIMITS, useAgentPrefs, type AgentMode } from '../agent/agentPrefs';
 import { PROVIDERS, PROVIDER_IDS, callProvider, cleanModel, type ProviderId } from '../agent/providers';
 import { deleteKey, loadKey, maskKey, saveKey } from '../agent/keyStore';
