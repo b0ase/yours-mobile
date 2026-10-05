@@ -6,7 +6,9 @@
 
 html:root {
   --web-banner-height: 34px;
-  --wallet-height: calc(100dvh - var(--web-banner-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  --wallet-height: calc(
+    100dvh - var(--web-banner-height) - env(safe-area-inset-top) - var(--account-strip-height) - env(safe-area-inset-bottom)
+  );
 }
 
 .bwallet-web-banner {
@@ -30,7 +32,8 @@ html:root {
 }
 
 html body #root {
-  padding-top: 0;
+  /* The banner already clears the notch; leave room for the account strip only. */
+  padding-top: var(--account-strip-height);
   height: calc(100dvh - var(--web-banner-height) - env(safe-area-inset-top));
   min-height: 0;
   overflow-y: auto;
@@ -57,7 +60,7 @@ html body #root {
   html:root {
     --wallet-width: 420px;
     --wallet-unlock-width: 420px;
-    --wallet-height: calc(100dvh - var(--web-banner-height) - 48px);
+    --wallet-height: calc(100dvh - var(--web-banner-height) - 48px - var(--account-strip-height));
   }
 
   .bwallet-web-banner {

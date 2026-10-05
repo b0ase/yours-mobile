@@ -39,7 +39,7 @@ body,
 }
 
 #root {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--wallet-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   box-sizing: border-box;
 }
@@ -48,9 +48,23 @@ body,
    html:root outranks index.css's :root defaults whatever the load order. */
 html:root {
   --wallet-width: 100%;
-  --wallet-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  --wallet-height: calc(100dvh - var(--wallet-inset-top) - env(safe-area-inset-bottom));
   --wallet-unlock-width: 100%;
-  --wallet-inset-top: env(safe-area-inset-top);
+  /* Account strip above TopNav (account/AccountStrip.tsx): 0 until it mounts. --wallet-inset-top is the one
+     offset everything fixed under it uses (TopNav, Settings, bApp frames), so the strip shifts them all. */
+  --account-strip-height: 0px;
+  --wallet-inset-top: calc(env(safe-area-inset-top) + var(--account-strip-height));
+}
+html.has-account-strip:root {
+  --account-strip-height: 28px;
+}
+
+.bw-account-strip {
+  top: calc(var(--wallet-inset-top) - var(--account-strip-height));
+  height: var(--account-strip-height);
+  background: #010101;
+  border-bottom: 1px solid #1d1f24;
+  box-sizing: border-box;
 }
 
 /* Keep inputs at 16px so iOS doesn't zoom on focus. */
