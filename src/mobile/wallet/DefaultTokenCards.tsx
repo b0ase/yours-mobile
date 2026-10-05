@@ -62,7 +62,7 @@ export const DefaultTokenCards = () => {
       {backing && <BackPneeSheet onClose={() => setBacking(false)} />}
       <AssetRow
         icon={PNEE_ICON}
-        ticker="PNEEs · Penny Notes"
+        ticker="PNEEs · Penny Stablecoins"
         balance={pnee}
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}

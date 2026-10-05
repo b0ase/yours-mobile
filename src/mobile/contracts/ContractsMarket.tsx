@@ -87,7 +87,7 @@ export const ContractsMarket = ({ filter }: { filter?: string }) => {
       {error && <p className="text-xs m-0" style={{ color: '#F97066' }}>{error}</p>}
       {items !== null && shown.length === 0 && (
         <p className="text-xs text-center py-8 m-0" style={{ color: MUTED }}>
-          {filter === 'bond' ? 'No bonds or notes listed yet. Penny Notes, digital cents backed by locked BSV, are being built and will appear here.' : 'No contracts published yet.'}
+          {filter === 'bond' ? 'No bonds or notes listed yet. PNEEs, penny stablecoins backed by locked BSV, are being built and will appear here.' : 'No contracts published yet.'}
         </p>
       )}
       {shown.map((c) => {

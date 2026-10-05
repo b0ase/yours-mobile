@@ -51,7 +51,7 @@ export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
         </Box>
         <Box title="What it costs and risks">
           No interest and no yearly fee. If BSV falls so far that your vault drops below 150% (an 85% fall from 10x), anyone can
-          repay its PNEE and take your BSV at a 10% discount: you keep what&apos;s left. Penny Notes are new and in a small
+          repay its PNEE and take your BSV at a 10% discount: you keep what&apos;s left. PNEEs are new and in a small
           mainnet pilot; back only what you can afford to lose.
         </Box>
         <div className="rounded-xl p-3 text-xs" style={{ background: '#F5B80014', color: GOLD }}>
