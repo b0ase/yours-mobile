@@ -7,6 +7,7 @@ import { getOutputName, getTagValue } from '../../utils/format';
 import { isMediaOutput, kindOf, type MediaKind } from './media';
 import { playQueue } from './player';
 import { safety } from '../market/safety';
+import { cachedMeta, resolveMeta } from './resolveMeta';
 
 /** One of the wallet's non-fungible inscriptions, streamed from ORDFS. */
 export type MediaItem = {
@@ -52,11 +53,14 @@ export const useWalletMedia = () => {
 
   const toItem = useCallback(
     (o: WalletOutput): MediaItem => {
-      const type = getTagValue(o.tags, 'type');
-      const origin = getTagValue(o.tags, 'origin') || o.outpoint;
+      // NFTs from other sites/markets can lack these tags: fall back to the indexer (resolveMeta.ts).
+      const meta = cachedMeta(o.outpoint);
+      const type = getTagValue(o.tags, 'type') || meta?.type;
+      const origin = getTagValue(o.tags, 'origin') || meta?.origin || o.outpoint;
+      const tagged = getOutputName(o, '');
       return {
         output: o,
-        name: getOutputName(o, 'Inscription'),
+        name: tagged || meta?.name || 'Inscription',
         type,
         kind: kindOf(type),
         // Your own items are never hidden; ones the Market filter would block are blurred (tap to reveal).
@@ -66,6 +70,22 @@ export const useWalletMedia = () => {
     },
     [apiContext],
   );
+
+  // Repair: look up NFTs missing their type or origin, then redraw them with their real image.
+  useEffect(() => {
+    const missing = items
+      .filter((i) => !getTagValue(i.output.tags, 'type') || !getTagValue(i.output.tags, 'origin'))
+      .filter((i) => !cachedMeta(i.output.outpoint))
+      .map((i) => i.output.outpoint);
+    if (!missing.length) return;
+    let live = true;
+    void resolveMeta(missing).then((n) => {
+      if (live && n) setItems((prev) => prev.map((i) => toItem(i.output)));
+    });
+    return () => {
+      live = false;
+    };
+  }, [items, toItem]);
 
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return;
