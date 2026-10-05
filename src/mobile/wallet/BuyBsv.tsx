@@ -74,6 +74,10 @@ export const BsvPriceBar = ({ onReceive }: { onReceive: () => void }) => {
  * one integrated provider (as HandCash does) is the next step and needs a provider agreement.
  */
 const PROVIDERS: { name: string; url: string; desc: string }[] = [
+  // Ramp lists BSV (BSV_BSV) with Apple Pay / Google Pay / card / bank (docs/BUY-BSV-ONRAMP.md, 6 Oct 2026). A partner
+  // key (owner to apply) lets us embed it with the address prefilled; until then, its hosted page.
+  { name: 'Ramp', url: 'https://app.ramp.network/?swapAsset=BSV_BSV&hostAppName=bWalletX', desc: 'Apple Pay, Google Pay, card or bank' },
+  { name: 'BSV Association', url: 'https://ramp.bsvblockchain.tech/', desc: 'Buy page run by the BSV Association' },
   { name: 'Guardarian', url: 'https://guardarian.com/buy-bsv', desc: 'Card or bank transfer' },
   { name: 'ChangeNOW', url: 'https://changenow.io/currencies/bitcoin-sv?from=eur&to=bsv&fiatMode=true&amount=100', desc: 'Card, many currencies' },
   { name: 'Alchemy Pay', url: 'https://ramp.alchemypay.org/?crypto=BCHSV&fiat=EUR&network=BCHSV#/index', desc: 'Card, Apple Pay, Google Pay' },
