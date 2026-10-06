@@ -28,6 +28,21 @@ declare const __FEED_API__: string | undefined;
 export const FEED_API =
   (typeof __FEED_API__ === 'string' && __FEED_API__.trim()) || 'https://bmap-api-production.up.railway.app';
 
+/**
+ * bWalletX's own indexer (bitcoin-corp/bwalletx-indexer): bChat posts (MAP app=bChat and the
+ * legacy ids) in the bmap response shape, since bmap stopped indexing in April 2026.
+ */
+declare const __BCHAT_FEED_API__: string | undefined;
+export const BCHAT_FEED_API =
+  (typeof __BCHAT_FEED_API__ === 'string' && __BCHAT_FEED_API__.trim()) || 'https://push.bwalletx.com/feed';
+
+/** Recent bChat posts from bWalletX's own indexer. */
+export async function fetchBchatRecent(page = 1, limit = 30): Promise<FeedPost[]> {
+  const res = await fetch(`${BCHAT_FEED_API}/social/feed?page=${page}&limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`bChat feed error (${res.status})`);
+  return parseBmapFeed(await res.json());
+}
+
 const get = async (path: string): Promise<unknown> => {
   const res = await fetch(`${FEED_API}${path}`, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`Feed server error (${res.status})`);
@@ -105,11 +120,18 @@ const fetchParent = (ref: ParentRef): Promise<FeedPost | null> =>
  */
 export const fetchAncestors = (post: FeedPost): Promise<FeedPost[]> => ancestorChain(post, fetchParent);
 
-/** For you: network-wide recent posts plus a slice of Twetch. Twetch failing never blanks the feed. */
+/**
+ * For you: network-wide recent posts plus bChat's own indexer and a slice of Twetch (deduped by
+ * txid, newest first). Twetch or the bChat indexer failing never blanks the feed.
+ */
 export async function fetchForYou(): Promise<FeedPost[]> {
-  const [recent, twetch] = await Promise.allSettled([fetchRecent(), fetchTwetch()]);
-  if (recent.status === 'rejected') throw recent.reason;
-  return mergePosts(recent.value, twetch.status === 'fulfilled' ? twetch.value : []);
+  const [recent, bchat, twetch] = await Promise.allSettled([fetchRecent(), fetchBchatRecent(), fetchTwetch()]);
+  const extra = (r: PromiseSettledResult<FeedPost[]>) => (r.status === 'fulfilled' ? r.value : []);
+  if (recent.status === 'rejected') {
+    if (bchat.status === 'fulfilled' && bchat.value.length) return mergePosts(bchat.value, extra(twetch));
+    throw recent.reason;
+  }
+  return mergePosts(recent.value, extra(bchat), extra(twetch));
 }
 
 /**
@@ -191,12 +213,17 @@ async function ingest(tx: number[]) {
     } catch {
       rawTx = Utils.toHex(tx);
     }
-    await fetch(`${FEED_API}/ingest`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rawTx }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const body = JSON.stringify({ rawTx });
+    await Promise.allSettled(
+      [FEED_API, BCHAT_FEED_API].map((base) =>
+        fetch(`${base}/ingest`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+          signal: AbortSignal.timeout(10_000),
+        }),
+      ),
+    );
   } catch {
     // best effort: the indexer also picks it up from the chain
   }
