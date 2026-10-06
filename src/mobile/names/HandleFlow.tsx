@@ -4,7 +4,15 @@ import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
-import { claimPaymail, lookupPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, SOCIAL_ALIAS_RE, toAlias } from './paymail';
+import {
+  claimPaymail,
+  lookupPaymail,
+  paymailAvailable,
+  paymailEnabled,
+  PAYMAIL_ALIAS_RE,
+  SOCIAL_ALIAS_RE,
+  toAlias,
+} from './paymail';
 import { clearSocial, socialProof } from '../social/socialLogin';
 import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN } from './config';
 import {
@@ -139,7 +147,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   useEffect(() => {
     if (!enabled) return;
     if (!alias) return setState('idle');
-    if (!PAYMAIL_ALIAS_RE.test(alias) && !(SOCIAL_ALIAS_RE.test(alias) && alias === socialAlias)) return setState('invalid');
+    if (!PAYMAIL_ALIAS_RE.test(alias) && !(SOCIAL_ALIAS_RE.test(alias) && alias === socialAlias))
+      return setState('invalid');
     if (paymail && paymail.split('@')[0] === alias) return setState('free');
     setState('checking');
     let live = true;
@@ -149,7 +158,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           if (free) return live && setState('free');
           // Taken — by this wallet? Then it's ours (e.g. claimed a moment ago, or a restored wallet).
           const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
-          const mine = (await lookupPaymail(f, publicKey).catch(() => undefined))?.split('@')[0] === alias ||
+          const mine =
+            (await lookupPaymail(f, publicKey).catch(() => undefined))?.split('@')[0] === alias ||
             (await fetch(`${BWALLET_PAYMAIL_API}/api/paymail/id/${alias}@${BWALLET_PAYMAIL_DOMAIN}`)
               .then((r) => (r.ok ? r.json() : null))
               .then((j: { pubkey?: string } | null) => j?.pubkey === publicKey)
@@ -265,7 +275,12 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
             <span
               className="text-[11px] min-h-[16px]"
               style={{
-                color: state === 'free' || state === 'mine' ? '#2ecc71' : state === 'checking' || state === 'idle' ? GRAY : '#ff4444',
+                color:
+                  state === 'free' || state === 'mine'
+                    ? '#2ecc71'
+                    : state === 'checking' || state === 'idle'
+                      ? GRAY
+                      : '#ff4444',
               }}
             >
               {stateText[state]}
@@ -298,75 +313,78 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           </p>
         )}
 
-        <div
-          className="flex flex-col gap-2 rounded-2xl p-4"
-          style={{ background: PANEL, border: `1px solid ${BORDER}` }}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-widest" style={{ color: GRAY }}>
-              Your token + room
-            </span>
-            <span className="text-[10px] font-semibold" style={{ color: GOLD }}>
-              ~{moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}
-            </span>
-          </div>
-          {link ? (
-            <p className="text-xs text-white">
-              <b style={{ color: GOLD }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
-              {link.roomTicker ? 'room open' : 'room not set up yet'}.
-            </p>
-          ) : null}
-          {link && !busy && !getFundRecord(link.tokenId) ? (
-            <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} compact />
-          ) : null}
-          {link || !paidFeaturesEnabled() ? null : (
-            <>
-              <p className="text-[11px]" style={{ color: GRAY }}>
-                A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat room
-                only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not trading.
-                About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. Your room can be set up later (it lists the
-                token in other wallets and opens its chat). You confirm it before anything is sent.
+        {/* Personal token + room is bWalletX-only: the store build shows no panel (or price) at all. */}
+        {paidFeaturesEnabled() || link ? (
+          <div
+            className="flex flex-col gap-2 rounded-2xl p-4"
+            style={{ background: PANEL, border: `1px solid ${BORDER}` }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-widest" style={{ color: GRAY }}>
+                Your token + room
+              </span>
+              <span className="text-[10px] font-semibold" style={{ color: GOLD }}>
+                ~{moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}
+              </span>
+            </div>
+            {link ? (
+              <p className="text-xs text-white">
+                <b style={{ color: GOLD }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
+                {link.roomTicker ? 'room open' : 'room not set up yet'}.
               </p>
-              <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
-                <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
-                Create my token and room with my handle
-              </label>
-              {withToken && (
+            ) : null}
+            {link && !busy && !getFundRecord(link.tokenId) ? (
+              <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} compact />
+            ) : null}
+            {link || !paidFeaturesEnabled() ? null : (
+              <>
+                <p className="text-[11px]" style={{ color: GRAY }}>
+                  A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat
+                  room only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not
+                  trading. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. Your room can be set up later (it
+                  lists the token in other wallets and opens its chat). You confirm it before anything is sent.
+                </p>
                 <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
-                  Supply
-                  <input
-                    value={supply}
-                    inputMode="numeric"
-                    onChange={(e) => setSupply(e.target.value)}
-                    className="flex-1 rounded-lg px-2 py-1 text-xs bg-transparent outline-none text-white"
-                    style={{ border: `1px solid ${supplyError ? '#ff4444' : BORDER}` }}
-                  />
+                  <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
+                  Create my token and room with my handle
                 </label>
-              )}
-              {withToken && supplyError && (
-                <span className="text-[11px]" style={{ color: '#ff4444' }}>
-                  {supplyError}
-                </span>
-              )}
-              {withToken && claimed && (
-                <button
-                  type="button"
-                  disabled={busy || !ticker || !!supplyError}
-                  onClick={() => setConfirming(true)}
-                  className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-                  style={{ background: GOLD, color: '#000' }}
-                >
-                  Create ${ticker ?? 'NAME'} token + room
-                </button>
-              )}
-            </>
-          )}
-          {tokenMsg && (
-            <p className="text-xs" style={{ color: GRAY }}>
-              {tokenMsg}
-            </p>
-          )}
-        </div>
+                {withToken && (
+                  <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
+                    Supply
+                    <input
+                      value={supply}
+                      inputMode="numeric"
+                      onChange={(e) => setSupply(e.target.value)}
+                      className="flex-1 rounded-lg px-2 py-1 text-xs bg-transparent outline-none text-white"
+                      style={{ border: `1px solid ${supplyError ? '#ff4444' : BORDER}` }}
+                    />
+                  </label>
+                )}
+                {withToken && supplyError && (
+                  <span className="text-[11px]" style={{ color: '#ff4444' }}>
+                    {supplyError}
+                  </span>
+                )}
+                {withToken && claimed && (
+                  <button
+                    type="button"
+                    disabled={busy || !ticker || !!supplyError}
+                    onClick={() => setConfirming(true)}
+                    className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
+                    style={{ background: GOLD, color: '#000' }}
+                  >
+                    Create ${ticker ?? 'NAME'} token + room
+                  </button>
+                )}
+              </>
+            )}
+            {tokenMsg && (
+              <p className="text-xs" style={{ color: GRAY }}>
+                {tokenMsg}
+              </p>
+            )}
+          </div>
+        ) : null}
 
         <button
           type="button"
