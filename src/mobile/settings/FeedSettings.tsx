@@ -8,6 +8,7 @@ import {
   Bookmark,
   Coins,
   Download,
+  Heart,
   FileText,
   Globe,
   Mail,
@@ -29,7 +30,7 @@ import { isBWalletX, socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
-import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
+import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, PAID_LIKE_OPTIONS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
@@ -385,6 +386,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   };
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
+  const paidLikes = PAID_LIKE_OPTIONS.map((v) => ({ id: v as number, label: money(v, rate) }));
   return (
     <>
       {acct && socialLoginEnabled() && (
@@ -481,7 +483,6 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               }
               right={<Toggle label="One-click pay" on={prefs.oneClick} onChange={(v) => setPrefs({ oneClick: v })} />}
               isFirst
-              isLast={!prefs.oneClick}
             />
             {prefs.oneClick && (
               <>
@@ -506,6 +507,21 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                 </div>
               </>
             )}
+            <Divider />
+            <Row
+              icon={<Heart size={16} />}
+              label="Paid like"
+              description={`Like + ${money(prefs.paidLikeSats, rate)}${hasRate(rate) ? ` (${prefs.paidLikeSats.toLocaleString()} sats)` : ''} to the author, from a post's Tip sheet`}
+              isLast
+            />
+            <div className="px-4 pb-3 pl-12">
+              <Pills
+                label="Paid like amount"
+                options={paidLikes}
+                value={prefs.paidLikeSats}
+                onChange={(v) => setPrefs({ paidLikeSats: v })}
+              />
+            </div>
           </Section>
           {isBWalletX() && (
             <Section title="Agents">

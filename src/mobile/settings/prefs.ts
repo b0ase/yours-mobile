@@ -13,6 +13,8 @@ export type DefaultFeed = 'foryou' | 'latest' | 'following';
 export const ONE_CLICK_LIMITS = [100, 1_000, 10_000] as const;
 export type OneClickLimit = (typeof ONE_CLICK_LIMITS)[number];
 export const INDEX_AUTOPAY_USD = [0, 0.05, 0.1, 0.25] as const;
+/** Paid-like amounts offered in Settings → Payments (sats; ≥ 546 dust, BCHAT-PROTOCOL-v2 §5). */
+export const PAID_LIKE_OPTIONS = [1_000, 5_000, 10_000, 50_000] as const;
 export type IndexAutoPayUsd = (typeof INDEX_AUTOPAY_USD)[number];
 
 export type Prefs = {
@@ -24,6 +26,8 @@ export type Prefs = {
   oneClickLimit: OneClickLimit;
   /** Amount a one-click tip sends (the last amount you tipped from the tip sheet). */
   quickTip: number;
+  /** Sats a paid like sends to the post's author (default 1,000; free likes stay free). */
+  paidLikeSats: number;
   /**
    * Indexing fees for your own tokens under this many USD pay on one tap (no confirm sheet).
    * 0 = always confirm. Guarded like one-click pay (src/mobile/tokens/indexAutoPay.ts).
@@ -45,6 +49,7 @@ export const DEFAULT_PREFS: Prefs = {
   oneClick: false,
   oneClickLimit: 1_000,
   quickTip: 1_000,
+  paidLikeSats: 1_000,
   animatedBackgrounds: true,
   indexAutoPayUsd: 0.1,
   notify: ALL_ON,
@@ -76,6 +81,10 @@ export const parsePrefs = (raw: unknown): Prefs => {
       ? (limit as OneClickLimit)
       : DEFAULT_PREFS.oneClickLimit,
     quickTip: typeof tip === 'number' && Number.isFinite(tip) && tip >= 1 ? Math.floor(tip) : DEFAULT_PREFS.quickTip,
+    paidLikeSats:
+      typeof r.paidLikeSats === 'number' && Number.isSafeInteger(r.paidLikeSats) && r.paidLikeSats >= 546
+        ? r.paidLikeSats
+        : DEFAULT_PREFS.paidLikeSats,
     indexAutoPayUsd: (INDEX_AUTOPAY_USD as readonly unknown[]).includes(r.indexAutoPayUsd)
       ? (r.indexAutoPayUsd as IndexAutoPayUsd)
       : DEFAULT_PREFS.indexAutoPayUsd,
