@@ -93,7 +93,7 @@ export const Start = () => {
         </div>
 
         {/* Bottom section — actions */}
-        <div className="flex flex-col items-center gap-3 w-full mb-2 px-1 overflow-visible">
+        <div className="flex flex-col items-center gap-3 w-full max-w-[420px] mx-auto mb-2 px-1 overflow-visible">
           {/* Primary: Create */}
           <motion.button
             variants={fadeUp}
