@@ -161,6 +161,9 @@ const CoinSheet = ({
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [done, setDone] = useState<{ txid: string; graduated: boolean } | null>(null);
+  // Real money: the first tap only asks; nothing is signed until Confirm.
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => setConfirming(false), [amount, side, slip]);
   useBackClose(!busy, onClose);
 
   const id = coin.token_id;
@@ -195,6 +198,7 @@ const CoinSheet = ({
 
   const go = async () => {
     if (!ready) return;
+    setConfirming(false);
     setBusy(true);
     setError('');
     setDone(null);
@@ -370,15 +374,49 @@ const CoinSheet = ({
           </div>
         )}
 
-        <button
-          type="button"
-          disabled={!ready}
-          onClick={() => void go()}
-          className="h-12 rounded-xl text-sm font-bold disabled:opacity-40"
-          style={{ background: GOLD, color: '#010101' }}
-        >
-          {busy ? status || 'Working…' : side === 'buy' ? 'BUY' : 'SELL'}
-        </button>
+        {confirming && q ? (
+          <div
+            className="flex flex-col gap-2 rounded-xl p-3 border"
+            style={{ background: '#0F1013', borderColor: GOLD }}
+          >
+            <p className="text-sm text-white m-0 leading-snug">
+              {side === 'buy'
+                ? `Buy about ${fmtTokens(q.tokens)} $${coin.sym} for ${fmtSats(q.userSats)} BSV (${money(Number(q.userSats), rate)}), fees included?`
+                : `Sell ${fmtTokens(q.tokens)} $${coin.sym} for about ${fmtSats(q.userSats)} BSV (${money(Number(q.userSats), rate)}) after fees?`}
+            </p>
+            <p className="text-[11px] text-[#98A2B3] m-0">
+              One real BSV transaction from this account, plus a few hundred sats network fee. Max slippage {slip / 100}
+              %: if the price moves further, it is refused and nothing is spent. Trades are final.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="flex-1 h-11 rounded-xl text-sm font-semibold bg-[#2b2f36] text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void go()}
+                className="flex-1 h-11 rounded-xl text-sm font-bold"
+                style={{ background: GOLD, color: '#010101' }}
+              >
+                Confirm {side === 'buy' ? 'buy' : 'sell'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={!ready}
+            onClick={() => setConfirming(true)}
+            className="h-12 rounded-xl text-sm font-bold disabled:opacity-40"
+            style={{ background: GOLD, color: '#010101' }}
+          >
+            {busy ? status || 'Working…' : side === 'buy' ? 'BUY' : 'SELL'}
+          </button>
+        )}
         <button
           className="text-xs font-semibold self-center"
           style={{ color: GOLD }}
