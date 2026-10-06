@@ -97,6 +97,10 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
     try {
       event.preventDefault();
       setLoading(true);
+      // Stage timings (owner, 6 Oct 2026: a restore took ~50 s).
+      const t0 = Date.now();
+      const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+
       if (password.length < 8) {
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');
         return;
@@ -108,8 +112,6 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
       }
 
       await sleep(50);
-      const t0 = Date.now();
-      const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
       const keys = await keysService.generateSeedAndStoreEncrypted(
         password,
         newWallet,

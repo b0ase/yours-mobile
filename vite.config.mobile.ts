@@ -276,7 +276,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,',
-      "      const nameMismatch = await checkRestoreMatchesName(seedWords, walletDerivation, ordDerivation, identityDerivation, importWallet);\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,",
+      "      const nameMismatch = await checkRestoreMatchesName(seedWords, walletDerivation, ordDerivation, identityDerivation, importWallet);\n      console.log('[restore] name check at', at());\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,",
     ],
     // Confirm field also when adding to an existing wallet.
     [
