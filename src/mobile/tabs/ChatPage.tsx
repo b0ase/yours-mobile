@@ -618,8 +618,11 @@ const Conversation = ({
               className="px-4 pt-2 text-[12px] shrink-0"
               style={{ background: '#0b0b0b', color: MUTED, borderTop: `1px solid ${LINE}` }}
             >
-              Questions? Tap <b style={{ color: GOLD }}>/b</b> and ask $b, the {APP_NAME} assistant. Just /b shows what
-              it can do.
+              {/* Two lines (owner, 6 Oct 2026). */}
+              <div>
+                Questions? Tap <b style={{ color: GOLD }}>/b</b> and ask $b, the {APP_NAME} assistant.
+              </div>
+              <div>Just /b shows what it can do.</div>
             </div>
           )}
           <form
