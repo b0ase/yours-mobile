@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Ban,
   Bell,
+  BellRing,
   Bookmark,
   Coins,
   Download,
@@ -32,6 +33,7 @@ import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
+import { PushSettings } from '../push/PushSettings';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
 
@@ -367,6 +369,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'password'
     | 'social'
     | 'agents'
+    | 'push'
     | null
   >(null);
   const rate = useBsvUsd();
@@ -564,9 +567,16 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             </div>
           </Section>
           <Section title="Notifications">
-            {CATEGORIES.map((c, i) => (
+            <Row
+              icon={<BellRing size={16} />}
+              label="Push notifications"
+              description="Rooms and DMs while the app is closed, previews, quiet hours"
+              onClick={() => setScreen('push')}
+              isFirst
+            />
+            {CATEGORIES.map((c) => (
               <div key={c}>
-                {i > 0 && <Divider />}
+                <Divider />
                 <Row
                   icon={<Bell size={16} />}
                   label={CATEGORY_LABELS[c].label}
@@ -581,7 +591,6 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                       }}
                     />
                   }
-                  isFirst={i === 0}
                 />
               </div>
             ))}
@@ -674,6 +683,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
+      {screen === 'push' && (
+        <Screen title="Push notifications" onBack={() => setScreen(null)}>
+          <PushSettings Toggle={Toggle} />
+        </Screen>
+      )}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />
