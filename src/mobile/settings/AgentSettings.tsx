@@ -2,7 +2,6 @@ import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Bot, KeyRound, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
-import { money, useBsvUsd } from '../money/money';
 import { DAILY_LIMITS, useAgentPrefs, type AgentMode } from '../agent/agentPrefs';
 import { PROVIDERS, PROVIDER_IDS, callProvider, cleanModel, type ProviderId } from '../agent/providers';
 import { deleteKey, loadKey, maskKey, saveKey } from '../agent/keyStore';
@@ -241,7 +240,6 @@ export const KeyScreen = ({ onBack }: { onBack: () => void }) => {
 
 export const AgentSettings = ({ Section, Row, Divider }: Props) => {
   const [prefs, setPrefs] = useAgentPrefs();
-  const rate = useBsvUsd();
   const [keyScreen, setKeyScreen] = useState(false);
   const target = consentTarget(prefs.mode, prefs.provider);
   const [allowed, setAllowed] = useState(() => hasConsent(target));

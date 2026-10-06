@@ -49,6 +49,9 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
   const busy = useRef(false);
   const off = useRef(disabled);
   off.current = disabled;
+  // Read by the long-lived gesture handlers below (registered once on mount).
+  const reduceRef = useRef(reduce);
+  reduceRef.current = reduce;
 
   useEffect(() => {
     const el = anchor.current?.parentElement;
@@ -67,7 +70,7 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
     // so the Receive / Send / Mint row stayed put while the rest moved (owner, 6 Oct 2026).
     const moveContent = (y: number, animate: boolean) => {
       for (const k of moving) {
-        k.style.transition = animate && !reduce ? 'translate 260ms ease-out' : 'none';
+        k.style.transition = animate && !reduceRef.current ? 'translate 260ms ease-out' : 'none';
         k.style.translate = y ? `0 ${y}px` : '';
       }
     };

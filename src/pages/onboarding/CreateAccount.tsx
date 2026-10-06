@@ -44,7 +44,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    newWallet && hideMenu();
+    if (newWallet) hideMenu();
     return () => {
       showMenu();
     };
@@ -52,7 +52,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
 
   const handleKeyGeneration = async (event?: React.FormEvent<HTMLFormElement>) => {
     try {
-      event && event.preventDefault();
+      event?.preventDefault();
       setLoading(true);
       if (password.length < 8) {
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');
@@ -334,7 +334,8 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
                   if (seedWords.length > 0 && newWallet) {
                     await chromeStorageService.clear();
                   }
-                  newWallet ? navigate('/') : onNavigateBack();
+                  if (newWallet) navigate('/');
+                  else onNavigateBack();
                 } else {
                   setStep(step - 1);
                 }

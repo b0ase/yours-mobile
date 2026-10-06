@@ -33,7 +33,7 @@ const filterKey = (filter: CoinHistoryFilter): string => {
 };
 
 export const CoinHistory = ({ filter, pageSize = 25, refreshKey }: CoinHistoryProps) => {
-  const { apiContext, chromeStorageService } = useServiceContext();
+  const { apiContext } = useServiceContext();
   const { theme } = useTheme();
   const [items, setItems] = useState<CoinTxSummary[]>([]);
   const [loading, setLoading] = useState(true);

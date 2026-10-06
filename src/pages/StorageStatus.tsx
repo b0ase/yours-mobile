@@ -11,7 +11,6 @@ import {
   Plus,
   RefreshCw,
   Server,
-  Trash2,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -130,10 +129,11 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   const [localUsage, setLocalUsage] = useState<{ used: number; quota: number } | null>(null);
   const remotes = info?.storageConfig?.remotes ?? [];
   const remotesKey = remotes.join(',');
-  const stableRemotes = useMemo(() => remotes, [remotesKey]);
+  // Same list, but only a new array when its contents change (remotes is rebuilt every render).
+  const stableRemotes = useMemo(() => (remotesKey ? remotesKey.split(',') : []), [remotesKey]);
   const knownAccountUrls = useMemo(() => Object.fromEntries(KNOWN_PROVIDERS.map((p) => [p.url, p.accountUrl])), []);
   const { statusMap, loading: statusLoading } = useRemoteStatus(
-    apiContext.wallet as any,
+    apiContext.wallet,
     stableRemotes,
     knownAccountUrls,
   );
@@ -916,7 +916,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
       {showProviderPicker && (
         <ProviderPicker
           theme={theme}
-          wallet={apiContext.wallet as any}
+          wallet={apiContext.wallet}
           existingRemotes={remotes}
           exchangeRate={exchangeRate}
           onSelectProvider={handleAddRemote}

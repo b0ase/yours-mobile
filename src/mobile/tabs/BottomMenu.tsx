@@ -3,7 +3,7 @@ import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled, marketLabel } from '../storeBuild';
-import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
+import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:

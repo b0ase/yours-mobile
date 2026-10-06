@@ -27,6 +27,12 @@ export default tseslint.config(
       '@typescript-eslint/no-require-imports': 'off', // successor of no-var-requires (was off)
       '@typescript-eslint/no-var-requires': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
+      // `_name` marks a deliberately unused binding; rest-sibling destructuring is
+      // used to omit fields (e.g. `const { keyEpoch: _e, ...rest } = account`).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
     },
   },
 );

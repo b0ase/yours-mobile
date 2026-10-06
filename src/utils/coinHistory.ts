@@ -143,7 +143,7 @@ const sumOwnBsv21Outputs = (action: WalletAction, tokenId: string): bigint => {
 
 /** Sum `amt:` tags on inputs that reference a bsv21 output of this tokenId. */
 const sumOwnBsv21Inputs = (action: WalletAction, tokenId: string): bigint => {
-  let total = 0n;
+  const total = 0n;
   for (const input of action.inputs ?? []) {
     // WalletActionInput doesn't expose tags, but we can often infer via the source
     // locking script when `includeInputSourceLockingScripts: true`. Fallback below

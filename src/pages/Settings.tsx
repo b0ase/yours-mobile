@@ -574,16 +574,6 @@ export const Settings = () => {
     }
   };
 
-  const handleSaveProfileIntent = () => {
-    setDecisionType('save-profile');
-    setSpeedBumpMessage(
-      identity.isPublished
-        ? 'Updating your profile will broadcast a transaction. A small fee will be deducted from your wallet.'
-        : 'This will create your posting profile on-chain. A small fee will be deducted from your wallet.',
-    );
-    setShowSpeedBump(true);
-  };
-
   const handleSaveProfile = async () => {
     const res = await identity.saveProfile({
       name: enteredName,

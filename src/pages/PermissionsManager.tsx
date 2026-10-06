@@ -148,7 +148,6 @@ export interface PermissionsManagerProps {
 }
 
 // onBack is consumed by the parent (Settings) header — kept for API stability
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const PermissionsManager = ({ onBack: _onBack }: PermissionsManagerProps) => {
   const { theme } = useTheme();
   const { addSnackbar } = useSnackbar();

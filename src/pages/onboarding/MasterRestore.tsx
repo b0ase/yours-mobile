@@ -107,7 +107,6 @@ export const MasterRestore = () => {
   const contrast = theme.color.global.contrast;
   const gray = theme.color.global.gray;
   const row = theme.color.global.row;
-  const bg = theme.color.global.walletBackground;
 
   return (
     <Show

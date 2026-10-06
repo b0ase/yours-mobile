@@ -29,6 +29,8 @@ const asStr = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 
 
 /** Response text → JSON, tolerating raw control characters (they become spaces). */
 export function parsePeckBody(text: string): unknown {
+  // Matching raw control characters is the point of this regex.
+  // eslint-disable-next-line no-control-regex
   return JSON.parse(text.replace(/[\u0000-\u001f]/g, ' '));
 }
 

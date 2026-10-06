@@ -28,7 +28,6 @@ export const useContacts = () => {
   }, [session?.handle]);
   return useMemo(
     () => mergeContacts(bchat, friends, loadFollows(), session?.handle),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [bchat, friends, session?.handle],
   );
 };

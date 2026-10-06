@@ -106,7 +106,6 @@ const saveSettings = async (cs: ChromeStorageService, patch: BackupSettings, ids
   for (const id of targets) {
     const found = all.find((a) => (a.addresses?.identityAddress ?? (a as { address?: string }).address) === id);
     if (!found) continue;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { address: _drop, ...account } = found as typeof found & { address?: string };
     update[id] = { ...account, settings: { ...account.settings, ...patch } };
   }

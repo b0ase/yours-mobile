@@ -32,7 +32,6 @@ import { mintChoicesFor } from '../storeBuild';
 
 /** Store build: media (NFT) only (storeBuild.ts). */
 const CHOICES = new Set(mintChoicesFor());
-import { TOKEN_COPY } from '../tokens/token';
 import {
   ACCEPT,
   BLOCKED_MESSAGE,

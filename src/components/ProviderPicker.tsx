@@ -79,7 +79,6 @@ export const ProviderPicker = ({
   const [customUrl, setCustomUrl] = useState('');
   const [customError, setCustomError] = useState('');
   const [customChecking, setCustomChecking] = useState(false);
-  const [customLive, setCustomLive] = useState<boolean | null>(null);
   const [statusMap, setStatusMap] = useState<Record<string, RemoteStatusResult>>({});
   const [fetching, setFetching] = useState(true);
 
@@ -130,11 +129,9 @@ export const ProviderPicker = ({
     }
     setCustomError('');
     setCustomChecking(true);
-    setCustomLive(null);
 
     const live = await checkLiveness(url);
     setCustomChecking(false);
-    setCustomLive(live);
 
     if (live) {
       onSelectProvider(url);

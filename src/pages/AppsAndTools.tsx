@@ -175,7 +175,7 @@ export const AppsAndTools = () => {
   const navigate = useNavigate();
   const menuContext = useBottomMenu();
   const { query } = menuContext;
-  const { keysService, chromeStorageService, apiContext } = useServiceContext();
+  const { keysService, apiContext } = useServiceContext();
   const { bsvAddress, ordAddress, identityAddress } = keysService;
   const [isProcessing, setIsProcessing] = useState(false);
   const [page, setPage] = useState<AppsPage>(query === 'pending-locks' ? 'unlock' : 'main');

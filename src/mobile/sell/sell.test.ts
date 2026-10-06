@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { BSV21, OrdLock, OrdLockV2 } from '@1sat/templates';
+import { BSV21, OrdLockV2 } from '@1sat/templates';
 import { BigNumber, LockingScript, P2PKH, PrivateKey, Script, Utils } from '@bsv/sdk';
 import { ORD_LOCK_PREFIX, ORD_LOCK_SUFFIX } from '@1sat/types';
 

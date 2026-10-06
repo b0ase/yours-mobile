@@ -322,7 +322,6 @@ const MarketPage = () => {
     };
     take();
     return onTokenNav(take);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const buy = async ({ room: r, listing }: Pending) => {

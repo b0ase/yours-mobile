@@ -34,7 +34,7 @@ import {
   Trophy,
   EyeOff,
 } from 'lucide-react';
-import { inscribe, sendBsv } from '@1sat/actions';
+import { inscribe } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { TopNav } from '../../components/TopNav';
 import { useTheme } from '../../hooks/useTheme';
@@ -1927,9 +1927,11 @@ const ProfileView = ({
       setPosts([]);
     });
   }, [author.bapId, author.address]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const shown = useMemo(
     () => (posts ? visiblePosts(posts, isMe ? [] : mutes) : null),
+    // safetyTick isn't read here: it bumps when the hide/block lists (module state that
+    // visiblePosts reads) change, and is what makes this recompute. Removing it would break that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [posts, mutes, isMe, safetyTick],
   );
   return (

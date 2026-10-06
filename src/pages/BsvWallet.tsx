@@ -556,7 +556,7 @@ export const BsvWallet = () => {
   };
 
   useEffect(() => {
-    loadLocks && loadLocks();
+    if (loadLocks) loadLocks();
     getAndSetBsvBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -654,7 +654,7 @@ export const BsvWallet = () => {
   const refreshUtxos = async ({ showLoad = false, notifyIfUnchanged = false } = {}) => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    showLoad && setIsProcessing(true);
+    if (showLoad) setIsProcessing(true);
     // Snapshot before: BSV in satoshis (not USD, so a rate tick is not "a change").
     const before = {
       sats: Math.round(bsvBalance * 100_000_000),
@@ -686,7 +686,7 @@ export const BsvWallet = () => {
         bounded(updateMneeBalance(), 'MNEE balance'),
         bounded(getAndSetAccountAndBsv21s(), 'Tokens'),
       ]);
-      loadLocks && loadLocks();
+      if (loadLocks) loadLocks();
       const unchanged =
         sats !== null &&
         sats === before.sats &&
@@ -700,7 +700,7 @@ export const BsvWallet = () => {
       // NFTs: reload the list on a manual refresh or when anything moved, so purchases appear without reopening.
       if (notifyIfUnchanged || !unchanged) notifyMinted();
     } finally {
-      showLoad && setIsProcessing(false);
+      if (showLoad) setIsProcessing(false);
       setIsRefreshing(false);
     }
   };
@@ -1082,7 +1082,7 @@ export const BsvWallet = () => {
         }
       });
     }
-  }, [pageState]);
+  }, [pageState, chromeStorageService]);
 
   const receive = (
     <motion.div

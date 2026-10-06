@@ -172,7 +172,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       live = false;
       clearTimeout(t);
     };
-  }, [alias, enabled, paymail, socialAlias]);
+  }, [alias, enabled, paymail, socialAlias, apiContext.wallet]);
 
   const claim = async () => {
     setBusy(true);
