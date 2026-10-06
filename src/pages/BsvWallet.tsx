@@ -1,5 +1,6 @@
 import { validate } from 'bitcoin-address-validation';
 import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
+import { buyCryptoEnabled } from '../mobile/storeBuild';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -1261,8 +1262,9 @@ export const BsvWallet = () => {
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
-        <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
-
+        {buyCryptoEnabled() && (
+          <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
+        )}
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>
@@ -1418,7 +1420,11 @@ export const BsvWallet = () => {
               setPageState('send');
             }}
             // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
-            action={bsvBalance === 0 ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) } : undefined}
+            action={
+              bsvBalance === 0 && buyCryptoEnabled()
+                ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) }
+                : undefined
+            }
           />
           {getBsvOpen && (
             <BuyBsvSheet
@@ -1438,7 +1444,7 @@ export const BsvWallet = () => {
               usdBalance={mneeBalance}
               showPointer={mneeBalance > 0 || legacyMneeBalance > 0}
               isMNEE
-              onGetMneeClick={() => setPageState('getMNEE')}
+              onGetMneeClick={buyCryptoEnabled() ? () => setPageState('getMNEE') : undefined}
               onClick={() => {
                 if (legacyMneeBalance > 0) {
                   setShowLegacyMneePrompt(true);
@@ -1509,7 +1515,10 @@ export const BsvWallet = () => {
                 Manage Tokens List
               </span>
             </motion.button>
-            <FindTokensButton style={listItemStyle} onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))} />
+            <FindTokensButton
+              style={listItemStyle}
+              onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))}
+            />
           </motion.div>
         </Show>
 
@@ -1540,7 +1549,6 @@ export const BsvWallet = () => {
             </motion.button>
           )}
         </AnimatePresence>
-
 
         {/* Bottom breathing room */}
         <div className="h-4" />
@@ -1885,10 +1893,12 @@ export const BsvWallet = () => {
         <BsvPriceChart />
       </div>
       {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
-      <BuyBsvButton
-        className="w-full mb-5"
-        onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
-      />
+      {buyCryptoEnabled() && (
+        <BuyBsvButton
+          className="w-full mb-5"
+          onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+        />
+      )}
 
       {/* Balance chip — MAX is single-recipient only */}
       {recipients.length > 1 ? (
