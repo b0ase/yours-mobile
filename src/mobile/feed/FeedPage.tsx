@@ -102,6 +102,15 @@ import {
   type PostLock,
 } from './locks';
 import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
+import {
+  payDestination,
+  planPayment,
+  TIP_MIN_SATS,
+  TIP_PRESETS_SATS,
+  TIP_PRESETS_USD,
+  validateAmount,
+  type PayKind,
+} from './tip';
 import { oneClick } from '../settings/oneClick';
 import { isMe, rankPeople, rankPosts, TIMEFRAMES, cutoff, type LeaderboardData, type Timeframe } from './leaderboard';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -130,7 +139,7 @@ import { PullToRefresh } from '../ui/PullToRefresh';
 import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
-import { fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
+import { fmtSats, fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -144,7 +153,6 @@ const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 const RED = '#F97066';
-const TIP_PRESETS = [1_000, 10_000, 100_000];
 // AIP adds prefix + algorithm + address + 65-byte signature.
 const AIP_BYTES = 140;
 
@@ -518,10 +526,11 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
                   key={act}
                   onClick={() => a.onTip(post)}
                   className={cls}
-                  style={{ color: MUTED }}
+                  style={{ color: post.tipped ? GOLD : MUTED, opacity: payDestination(post).ok ? 1 : 0.4 }}
                   aria-label="Tip"
+                  title={payDestination(post).ok ? undefined : 'Tips unavailable on Treechat posts'}
                 >
-                  <Coins size={16} /> Tip
+                  <Coins size={16} /> {post.tipped ? moneyNow(post.tipped) : 'Tip'}
                 </button>
               );
             if (act === 'lock')
@@ -897,28 +906,62 @@ const Composer = ({
 };
 
 type ApiCtx = ReturnType<typeof useServiceContext>['apiContext'];
-const sendTip = async (apiContext: ApiCtx, post: FeedPost, sats: number) => {
-  const res = await sendBsv.execute(apiContext, { requests: [{ address: post.author.address, satoshis: sats }] });
-  if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+/**
+ * Tip or paid like (BCHAT-PROTOCOL-v2 §5): MAP `type tip` / `type like … paid 1`, signed by the
+ * posting identity, and the payment to the author in the SAME transaction. planPayment refuses
+ * Treechat (shared relay signer) and anything without a payable author address.
+ */
+const sendPayment = async (apiContext: ApiCtx, post: FeedPost, sats: number, kind: PayKind = 'tip') => {
+  const plan = planPayment(kind, post, sats);
+  await publish(
+    apiContext,
+    plan.script,
+    kind === 'tip' ? 'bChat tip' : 'bChat paid like',
+    ['app:bWallet', `type:${kind}`, `tx:${post.txid}`],
+    plan.payment,
+  );
 };
 
-const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) => {
+/** Tip presets in sats: $0.05 / $0.25 / $1 at today's rate (never under dust), sats when unknown. */
+const tipPresets = (rate: number) =>
+  TIP_PRESETS_USD.map((u, i) => Math.max(TIP_MIN_SATS, usdToSats(u, rate) ?? TIP_PRESETS_SATS[i]));
+
+const TipSheet = ({
+  post,
+  onClose,
+  onLiked,
+}: {
+  post: FeedPost;
+  onClose: () => void;
+  onLiked: (p: FeedPost) => void;
+}) => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
-  const [sats, setSats] = useState<number>(TIP_PRESETS[1]);
+  const rate = useBsvUsd();
+  const presets = tipPresets(rate);
+  const [picked, setPicked] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // USD-first: the custom amount is typed in dollars when the rate is known (sent as sats).
-  const rate = useBsvUsd();
   const [usdText, setUsdText] = useState('');
-  const tip = async () => {
+  const dest = payDestination(post);
+  const sats = picked ?? presets[1];
+  const likeSats = loadPrefs().paidLikeSats;
+  const pay = async (kind: PayKind, n: number) => {
+    const bad = validateAmount(n);
+    if (bad) return setError(bad);
     setBusy(true);
     setError('');
     try {
-      await sendTip(apiContext, post, sats);
-      // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
-      savePrefs({ quickTip: sats });
-      addSnackbar(`Tipped ${post.author.name} ${money(sats, rate)}`, 'success');
+      await sendPayment(apiContext, post, n, kind);
+      if (kind === 'tip') {
+        // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
+        savePrefs({ quickTip: n });
+        addSnackbar(`Tipped ${post.author.name} ${money(n, rate)}`, 'success');
+      } else {
+        onLiked(post);
+        addSnackbar(`Liked and paid ${post.author.name} ${money(n, rate)}`, 'success');
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -926,17 +969,27 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
       setBusy(false);
     }
   };
+  if (!dest.ok)
+    return (
+      <Sheet title={`Tip ${post.author.name}`} onClose={onClose}>
+        <p className="text-sm" style={{ color: MUTED }}>
+          Tips are not available on this post. {dest.reason}
+        </p>
+      </Sheet>
+    );
   return (
     <Sheet title={`Tip ${post.author.name}`} onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Sent in BSV to the address that signed this post ({shortAddress(post.author.address)}).
+        Sent in BSV to{' '}
+        {post.source === 'twetch' ? "the author's Twetch signing key" : 'the address that signed this post'} (
+        {shortAddress(dest.address)}), in the same transaction as the tip. No bChat fee.
       </p>
       <div className="flex gap-2">
-        {TIP_PRESETS.map((v) => (
+        {presets.map((v) => (
           <button
             key={v}
             onClick={() => {
-              setSats(v);
+              setPicked(v);
               setUsdText('');
             }}
             className="flex-1 rounded-xl py-2 text-sm font-bold"
@@ -951,51 +1004,61 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
         ))}
       </div>
       {hasRate(rate) ? (
-        <>
-          <input
-            inputMode="decimal"
-            placeholder={`Other amount, e.g. ${fmtUsd(0.05)}`}
-            value={usdText}
-            onChange={(e) => {
-              const v = e.target.value.replace(/^\$/, '');
-              if (!/^\d*(\.\d{0,2})?$/.test(v)) return;
-              setUsdText(v);
-              const n = usdToSats(Number(v), rate);
-              if (n) setSats(n);
-            }}
-            className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
-            aria-label="Amount in US dollars"
-          />
-          <p className="text-[11px] mt-1" style={{ color: MUTED }}>
-            {satsNote(sats, rate)}
-          </p>
-        </>
+        <input
+          inputMode="decimal"
+          placeholder={`Other amount, e.g. ${fmtUsd(0.1)}`}
+          value={usdText}
+          onChange={(e) => {
+            const v = e.target.value.replace(/^\$/, '');
+            if (!/^\d*(\.\d{0,2})?$/.test(v)) return;
+            setUsdText(v);
+            const n = usdToSats(Number(v), rate);
+            if (n) setPicked(n);
+          }}
+          className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          aria-label="Amount in US dollars"
+        />
       ) : (
         <input
           type="number"
           inputMode="numeric"
-          min={1}
+          min={TIP_MIN_SATS}
           value={sats}
-          onChange={(e) => setSats(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
+          onChange={(e) => setPicked(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
           className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
           style={{ background: PANEL, border: `1px solid ${LINE}` }}
           aria-label="Satoshis"
         />
       )}
+      <p className="text-[11px] mt-1" style={{ color: MUTED }}>
+        {satsNote(sats, rate) || `Minimum ${fmtSats(TIP_MIN_SATS)}`}
+      </p>
       {error && (
         <p className="text-xs mt-2" style={{ color: RED }}>
           {error}
         </p>
       )}
       <button
-        onClick={() => void tip()}
-        disabled={busy || !post.author.address || sats < 1}
+        onClick={() => void pay('tip', sats)}
+        disabled={busy}
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy ? 'Sending…' : `Send ${money(sats, rate)}`}
+        {busy ? 'Sending…' : `Tip ${money(sats, rate)}`}
       </button>
+      <button
+        onClick={() => void pay('like', likeSats)}
+        disabled={busy}
+        className="mt-2 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
+        style={{ background: PANEL, color: 'white', border: `1px solid ${LINE}` }}
+      >
+        <Heart size={16} fill={GOLD} color={GOLD} /> Paid like · {money(likeSats, rate)}
+        {hasRate(rate) ? ` (${fmtSats(likeSats)})` : ''}
+      </button>
+      <p className="text-[11px] mt-1 text-center" style={{ color: MUTED }}>
+        Paid like amount: Settings → Payments
+      </p>
     </Sheet>
   );
 };
@@ -1398,9 +1461,10 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const tip = async (p: FeedPost) => {
     const sats = loadPrefs().quickTip;
     // One-click pay: send the last tip amount without the sheet, if within the limit and the rate guard.
-    if (!p.author.address || !oneClick.take(sats).ok) return setTipping(p);
+    // Unpayable posts (Treechat) open the sheet, which says why.
+    if (!payDestination(p).ok || validateAmount(sats) || !oneClick.take(sats).ok) return setTipping(p);
     try {
-      await sendTip(apiContext, p, sats);
+      await sendPayment(apiContext, p, sats);
       addSnackbar(`Tipped ${p.author.name} ${moneyNow(sats)} (one-click)`, 'success');
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
@@ -1598,7 +1662,13 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           }}
         />
       )}
-      {tipping && <TipSheet post={tipping} onClose={() => setTipping(null)} />}
+      {tipping && (
+        <TipSheet
+          post={tipping}
+          onClose={() => setTipping(null)}
+          onLiked={(p) => setLiked((l) => addLiked(l, p.txid))}
+        />
+      )}
       {settingUp && (
         <IdentitySetupSheet
           initialName={identity.profile.name || chromeStorageService.getCurrentAccountObject().account?.name || ''}

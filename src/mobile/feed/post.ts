@@ -282,6 +282,8 @@ export type FeedPost = {
   quoteId?: number;
   /** Twetch only: the author's Twetch user id. */
   twetchUserId?: string;
+  /** Verified sats tipped / paid-liked to the author (bChat indexer meta `tipped`, BCHAT-PROTOCOL-v2 §5). */
+  tipped?: number;
 };
 
 type Rec = Record<string, unknown>;
@@ -415,6 +417,7 @@ export function parseBmapPost(
     at: ts > 1e12 ? ts : ts * 1000,
     likes: Number(m.likes) || 0,
     replies: Number(m.replies) || 0,
+    ...(Number(m.tipped) > 0 ? { tipped: Number(m.tipped) } : {}),
     ...(isTxid(quote) ? { quoteTxid: quote.toLowerCase() } : {}),
   };
 }
@@ -433,6 +436,7 @@ export function parseBmapFeed(body: unknown): FeedPost[] {
     if (m) {
       p.likes = Number(m.likes) || 0;
       p.replies = Number(m.replies) || 0;
+      if (Number(m.tipped) > 0) p.tipped = Number(m.tipped);
     }
     seen.add(p.txid);
     out.push(p);
