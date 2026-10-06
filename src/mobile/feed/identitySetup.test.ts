@@ -30,7 +30,7 @@ describe('signWithIdentity (inline posting-identity setup)', () => {
   test('no setup screen: a plain error, no jargon', async () => {
     const err = await signWithIdentity(noId, null).catch((e) => e);
     expect(err).toBeInstanceOf(NoPostingIdentityError);
-    expect(err.message).not.toMatch(/BAP|AIP|Settings/);
+    expect(err.message).not.toMatch(/BAP|AIP|Settings|identity/i);
   });
 
   test('other errors pass through untouched', async () => {

@@ -875,7 +875,7 @@ const Composer = ({
         </span>
       </div>
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
-        Posts are permanent and public on the BSV chain, signed by your identity key.
+        Posts are permanent and public on the BSV chain, signed by your posting profile.
         {inscribed.length > 0 &&
           ` Large video / audio is inscribed first as a 1Sat ordinal you own (${inscribed.length + 1} approvals).`}
       </p>
@@ -1184,10 +1184,10 @@ const IdentitySetupSheet = ({
     else onDone(true);
   };
   return (
-    <Sheet title="Set up your posting identity" onClose={() => !busy && onDone(false)}>
+    <Sheet title="Set up your posting profile" onClose={() => !busy && onDone(false)}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        A one-time on-chain profile (name + photo) that signs your posts, so every BSV app knows they're yours. Costs a
-        fraction of a cent.
+        A name and photo that sign your posts on-chain, so every BSV app knows they're yours. Costs a fraction of a
+        cent.
       </p>
       <div className="flex items-center gap-3">
         {image && <img src={image} alt="" className="h-10 w-10 rounded-full object-cover" />}
@@ -1791,7 +1791,7 @@ const ProfileView = ({
         </p>
         {isMe && !author.bapId && (
           <p className="text-xs mt-2" style={{ color: MUTED }}>
-            Your first post sets up your posting identity.
+            Your first post sets up your posting profile.
           </p>
         )}
         {!isMe && (

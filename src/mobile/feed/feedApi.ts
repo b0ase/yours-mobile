@@ -182,7 +182,7 @@ export async function fetchFollowing(follows: { bapId: string | null; address: s
 /** The wallet has no posting identity yet (no published BAP ID to sign with). */
 export class NoPostingIdentityError extends Error {
   constructor() {
-    super('Set up your posting identity first.');
+    super('Set up your posting profile first.');
     this.name = 'NoPostingIdentityError';
   }
 }
