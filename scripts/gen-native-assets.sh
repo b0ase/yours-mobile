@@ -9,7 +9,7 @@ BRAND=${1:-bcorp}
 ICON=assets/$BRAND/icon-only.png            # 1024x1024, opaque (iOS + legacy Android)
 FG=assets/$BRAND/icon-foreground.png        # 1024x1024, transparent, mark inside centre 66%
 SPLASH=assets/$BRAND/splash.png             # 2732x2732, logo centred on #010101
-case "$BRAND" in bwallet) BG_COLOR='#62E596' ;; bcorp) BG_COLOR='#000000' ;; *) BG_COLOR='#010101' ;; esac   # adaptive icon background
+case "$BRAND" in bwallet) BG_COLOR='#62E596' ;; bcorp) BG_COLOR='#F5B800' ;; *) BG_COLOR='#010101' ;; esac   # adaptive icon background
 RES=android/app/src/main/res
 
 # iOS
