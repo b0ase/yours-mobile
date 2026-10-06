@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bWalletX Agents</title>
+    <meta name="description" content="Give each AI agent its own bWalletX account, its own budget and its own ghost. Run them from the app, the bWalletX CLI or any MCP agent like Claude." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://web.bwalletx.com/agents" />
+    <meta property="og:site_name" content="bWalletX" />
+    <meta property="og:title" content="bWalletX Agents: one account, one budget, one ghost per agent" />
+    <meta property="og:description" content="Give each AI agent its own bWalletX account and budget. Run them from the app, the CLI or Claude over MCP. Stop them any time." />
+    <meta property="og:image" content="https://web.bwalletx.com/og-agents.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Pixel ghosts in red, pink, cyan and orange: bWalletX agent accounts" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@bWalletX" />
+    <meta name="twitter:title" content="bWalletX Agents: one account, one budget, one ghost per agent" />
+    <meta name="twitter:description" content="Give each AI agent its own bWalletX account and budget. Run them from the app, the CLI or Claude over MCP." />
+    <meta name="twitter:image" content="https://web.bwalletx.com/og-agents.png" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #050505; --panel: #101114; --line: #ffffff14; --fg: #f2f2f2; --muted: #a7adb8;
+        --gold: #f5b800; --gold-hi: #ffd24d;
+        --red: #ff0000; --pink: #ffb8ff; --cyan: #00ffff; --orange: #ffb852; --green: #2ecc71; --purple: #a06bff;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 'IBM Plex Sans', system-ui, sans-serif; }
+      body { background: radial-gradient(ellipse 80% 50% at 50% 0%, #2a1e00 0%, transparent 60%), var(--bg); }
+      a { color: var(--gold-hi); }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+      header.bar { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; }
+      .brand { display: flex; align-items: center; gap: 10px; font: 700 20px 'Space Grotesk', sans-serif; color: var(--fg); text-decoration: none; }
+      .brand b { color: var(--gold); }
+      .cta { display: inline-block; background: linear-gradient(135deg, #ffd24d, #e9b21a); color: #1a1300; font-weight: 700; padding: 10px 18px; border-radius: 999px; text-decoration: none; }
+      h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; line-height: 1.1; margin: 0; text-wrap: balance; }
+      h1 { font-size: clamp(2.4rem, 6vw, 4rem); letter-spacing: -1.5px; }
+      h1 em { font-style: normal; color: var(--gold-hi); }
+      h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); margin-bottom: 14px; }
+      h3 { font-size: 1.1rem; margin-bottom: 6px; }
+      p { margin: 0 0 12px; }
+      .muted { color: var(--muted); }
+      .hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; padding: 40px 0 64px; }
+      .hero .lede { font-size: 1.15rem; color: var(--muted); margin: 18px 0 26px; max-width: 34rem; }
+      .parade { display: flex; gap: 14px; align-items: flex-end; margin-top: 8px; }
+      .parade .g { animation: float 2.4s ease-in-out infinite; }
+      .parade .g:nth-child(2) { animation-delay: .3s; } .parade .g:nth-child(3) { animation-delay: .6s; } .parade .g:nth-child(4) { animation-delay: .9s; }
+      @keyframes float { 50% { transform: translateY(-6px); } }
+
+      /* Mock account menu */
+      .menu { background: #0b0b0c; border: 1px solid var(--line); border-radius: 18px; padding: 10px; box-shadow: 0 30px 80px #000a; }
+      .menu-h { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 10px 10px; }
+      .acct { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; padding: 10px; border-radius: 12px; }
+      .acct.on { background: #17191e; }
+      .acct .av { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #0b0b0b; border: 1.5px solid var(--c, var(--gold)); }
+      .acct .nm { font-weight: 600; } .acct .sub { font-size: 12px; color: var(--muted); }
+      .acct .bal { text-align: right; font: 600 14px 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+      .pill { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; margin-left: 6px; vertical-align: 1px; }
+      .run { color: #7ee2a8; } .stop { color: #f97066; } .read { color: var(--muted); }
+      .menu .add { display: flex; gap: 10px; align-items: center; padding: 12px 10px 6px; color: var(--gold-hi); font-weight: 600; border-top: 1px solid var(--line); margin-top: 6px; }
+
+      section { padding: 56px 0; border-top: 1px solid var(--line); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; min-width: 0; }
+      .card .ic { margin-bottom: 10px; }
+      pre { background: #0b0b0c; border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; font: 13.5px/1.6 'IBM Plex Mono', monospace; color: #e8e2cf; margin: 0; }
+      pre .c { color: #6f7682; }
+      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+      .tools code { background: #1a1608; color: var(--gold-hi); border: 1px solid #f5b80044; border-radius: 8px; padding: 4px 9px; font: 13px 'IBM Plex Mono', monospace; }
+      .colours { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 16px; }
+      .colours div { text-align: center; font-size: 12px; color: var(--muted); }
+      footer { padding: 40px 0 60px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+      .hero > *, .two > *, .grid > * { min-width: 0; }
+      @media (max-width: 820px) { .hero, .two { grid-template-columns: 1fr; } }
+      @media (prefers-reduced-motion: reduce) { .parade .g { animation: none; } .ga, .gl { animation: none !important; opacity: 1 !important; } .gb, .gr { animation: none !important; opacity: 0 !important; } }
+      .ga, .gl { animation: on .5s steps(1, end) infinite; } .gb, .gr { animation: off .5s steps(1, end) infinite; }
+      .gl, .gr { animation-duration: 1.6s; }
+      @keyframes on { 0% { opacity: 1 } 50% { opacity: 0 } } @keyframes off { 0% { opacity: 0 } 50% { opacity: 1 } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="bar">
+        <a class="brand" href="https://bwalletx.com"><img src="/icons/icon48.png" alt="" width="28" height="28" /><span>bWallet<b>X</b></span></a>
+        <a class="cta" href="/">Open web wallet</a>
+      </header>
+
+      <div class="hero">
+        <div>
+          <h1>Every agent gets <em>its own ghost.</em></h1>
+          <p class="lede">Give each AI agent its own bWalletX account, with its own keys and its own budget. It can only spend what you put in. You can see everything it does, and you can stop it with one tap.</p>
+          <div class="parade">
+            <span class="g" data-ghost="#FF0000" data-size="64"></span>
+            <span class="g" data-ghost="#FFB8FF" data-size="64"></span>
+            <span class="g" data-ghost="#00FFFF" data-size="64"></span>
+            <span class="g" data-ghost="#FFB852" data-size="64"></span>
+          </div>
+        </div>
+
+        <div class="menu" aria-label="Example account menu">
+          <div class="menu-h"><span>Accounts</span><span>Balance</span></div>
+          <div class="acct">
+            <span class="av"><img src="/icons/icon48.png" alt="" width="26" height="26" style="border-radius:50%" /></span>
+            <span><span class="nm">richard</span><div class="sub">richard@bwalletx.com · you</div></span>
+            <span class="bal">$812.40</span>
+          </div>
+          <div class="acct on">
+            <span class="av" style="--c:#FF0000"><span data-ghost="#FF0000" data-size="26"></span></span>
+            <span><span class="nm">Trader</span><span class="pill run">running</span><div class="sub">Slow accumulator · cap $20/day</div></span>
+            <span class="bal">$120.00</span>
+          </div>
+          <div class="acct">
+            <span class="av" style="--c:#00FFFF"><span data-ghost="#00FFFF" data-size="26"></span></span>
+            <span><span class="nm">Treasurer</span><span class="pill run">running</span><div class="sub">Tops up the other agents</div></span>
+            <span class="bal">$64.25</span>
+          </div>
+          <div class="acct">
+            <span class="av" style="--c:#FFB8FF"><span data-ghost="#FFB8FF" data-size="26"></span></span>
+            <span><span class="nm">Reporter</span><span class="pill read">read only</span><div class="sub">Daily summary to chat</div></span>
+            <span class="bal">$0.00</span>
+          </div>
+          <div class="acct">
+            <span class="av" style="--c:#FFB852"><span data-ghost="#FFB852" data-size="26"></span></span>
+            <span><span class="nm">Scout</span><span class="pill stop">stopped</span><div class="sub">$HANDLE fund · paused by you</div></span>
+            <span class="bal">$18.90</span>
+          </div>
+          <div class="add">＋ Add agent account</div>
+        </div>
+      </div>
+    </div>
+
+    <section>
+      <div class="wrap">
+        <h2>Your ghost is your agent's face</h2>
+        <p class="muted">Make an account an agent account and it gets a ghost in its own colour. It shows on the wallet card when that account is selected, and it's the account's avatar everywhere: the account menu, Settings and chat. One look tells you which agent you're in.</p>
+        <div class="colours">
+          <div><span data-ghost="#FF0000" data-size="48"></span><br />1st</div>
+          <div><span data-ghost="#FFB8FF" data-size="48"></span><br />2nd</div>
+          <div><span data-ghost="#00FFFF" data-size="48"></span><br />3rd</div>
+          <div><span data-ghost="#FFB852" data-size="48"></span><br />4th</div>
+          <div><span data-ghost="#2ECC71" data-size="48"></span><br />5th</div>
+          <div><span data-ghost="#A06BFF" data-size="48"></span><br />6th</div>
+          <div><span data-ghost="#FFE14D" data-size="48"></span><br />7th</div>
+          <div><span data-ghost="#4D7CFF" data-size="48"></span><br />8th</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>What an agent account can do</h2>
+        <div class="grid">
+          <div class="card"><div class="ic" data-ghost="#FF0000" data-size="28"></div><h3>Spend only its budget</h3><p class="muted">It has its own keys. Its balance is all it can ever spend; your other accounts are never touched.</p></div>
+          <div class="card"><div class="ic" data-ghost="#00FFFF" data-size="28"></div><h3>Follow a strategy</h3><p class="muted">Agree the rules in plain words with the b agent, or load a strategy file, and it trades by those rules and nothing else.</p></div>
+          <div class="card"><div class="ic" data-ghost="#FFB8FF" data-size="28"></div><h3>Show its work</h3><p class="muted">Every action goes in an activity log with links to the transactions. Add labels and a daily spending cap in dollars.</p></div>
+          <div class="card"><div class="ic" data-ghost="#FFB852" data-size="28"></div><h3>Stop on your word</h3><p class="muted">Stop one agent or Stop all agents. A stopped account refuses every spend until you resume it, and Sweep back moves everything home.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap two">
+        <div>
+          <h2>Run agents from the command line</h2>
+          <p class="muted">The bWalletX CLI runs your agent accounts on a laptop or a server. Pair it with your phone so the phone signs every request, or export an agent account's key file to run unattended. Only agent accounts can be exported, never your main wallet.</p>
+          <p class="muted">Every spend is checked first: the kill switch, the daily cap, at most 30 spends an hour, then the strategy's rules.</p>
+          <p><a href="https://bwalletx.com/cli">CLI guide →</a></p>
+        </div>
+        <pre><span class="c"># install (Node 20+)</span>
+npm i -g bwalletx
+bwalletx login --account phone   <span class="c"># scan the QR in your agent account</span>
+
+bwalletx accounts
+bwalletx balance --account trader
+bwalletx price &lt;tokenId&gt;
+bwalletx send 1 name@bwalletx.com --account trader
+bwalletx buy &lt;tokenId&gt; --max-usd 2 --account trader
+bwalletx strategy load ./slow-accumulator.json --account trader
+bwalletx agent run trader         <span class="c"># run its strategy</span>
+bwalletx log --account trader
+bwalletx stop                     <span class="c"># kill switch</span></pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap two">
+        <div>
+          <h2>Let Claude, ChatGPT or Cursor drive</h2>
+          <p class="muted">The same tools over MCP, so any AI agent can manage the agent accounts you give it, within the same limits as the app.</p>
+          <div class="tools"><code>accounts</code><code>balance</code><code>price</code><code>send</code><code>buy</code><code>strategy_show</code><code>strategy_load</code><code>log</code><code>stop_all</code></div>
+          <p class="muted">An AI can only load strategies on paper: going live is a step you take yourself. Leave the passphrase out and it can read and practise but never send.</p>
+          <p><a href="https://bwalletx.com/mcp">MCP guide →</a></p>
+        </div>
+        <pre><span class="c"># Claude Code, paired with your phone</span>
+claude mcp add bwalletx -- npx -y bwalletx mcp
+
+<span class="c"># Claude Desktop, Cursor and others</span>
+{
+  "mcpServers": {
+    "bwalletx": {
+      "command": "npx",
+      "args": ["-y", "bwalletx", "mcp"]
+    }
+  }
+}</pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Start in a minute</h2>
+        <p class="muted">In bWalletX, open the account menu and tap <b>Add agent account</b>, or go to Settings › Agents. Move in a small budget, give it a strategy, and its ghost appears on the card.</p>
+        <p><a class="cta" href="/">Open the web wallet</a> &nbsp; <a href="https://bwalletx.com/get">Get the app</a></p>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">Agent accounts spend real money: start with small amounts. The bWalletX CLI and MCP are open source: <a href="https://github.com/b0ase/bwalletx-cli">github.com/b0ase/bwalletx-cli</a>. Questions: <a href="mailto:support@bwalletx.com">support@bwalletx.com</a></div>
+    </footer>
+
+    <script>
+      // The app's pixel ghost (src/mobile/agents/PixelGhost.tsx), drawn as SVG from the same 14x14 map.
+      (function () {
+        var BODY = ['.....####.....', '...########...', '..##########..', '.############.', '.############.', '.############.',
+          '##############', '##############', '##############', '##############', '##############', '##############'];
+        var A = ['##.###..###.##', '#...##..##...#'], B = ['####.####.####', '.##...##...##.'];
+        var W = [[3,3,2,1],[2,4,4,2],[3,6,2,1],[9,3,2,1],[8,4,4,2],[9,6,2,1]];
+        function px(rows, y0) { var s = ''; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === '#') s += '<rect x="' + x + '" y="' + (y0 + y) + '" width="1.02" height="1.02"/>'; }); return s; }
+        function ghost(c, n) {
+          return '<svg width="' + n + '" height="' + n + '" viewBox="0 0 14 14" shape-rendering="crispEdges" aria-hidden="true">' +
+            '<g fill="' + c + '">' + px(BODY, 0) + '<g class="ga">' + px(A, 12) + '</g><g class="gb">' + px(B, 12) + '</g></g>' +
+            '<g fill="#fff">' + W.map(function (w) { return '<rect x="' + w[0] + '" y="' + w[1] + '" width="' + w[2] + '" height="' + w[3] + '"/>'; }).join('') + '</g>' +
+            '<g fill="#2121DE"><g class="gl"><rect x="2" y="5" width="2" height="2"/><rect x="8" y="5" width="2" height="2"/></g>' +
+            '<g class="gr"><rect x="4" y="5" width="2" height="2"/><rect x="10" y="5" width="2" height="2"/></g></g></svg>';
+        }
+        document.querySelectorAll('[data-ghost]').forEach(function (el) { el.innerHTML = ghost(el.getAttribute('data-ghost'), +el.getAttribute('data-size') || 28); });
+      })();
+    </script>
+  </body>
+</html>

@@ -43,6 +43,9 @@ const webShell = (): Plugin => ({
       this.emitFile({ type: 'asset', fileName: `icons/${f}`, source: readFileSync(resolve(ICONS, f)) });
     }
     this.emitFile({ type: 'asset', fileName: 'favicon.ico', source: readFileSync(resolve(ICONS, 'favicon.ico')) });
+    // web.bwalletx.com/agents: a static page about agent accounts, the CLI and MCP, and its share image.
+    this.emitFile({ type: 'asset', fileName: 'agents.html', source: readFileSync(resolve(__dirname, 'src/web/agents.html')) });
+    this.emitFile({ type: 'asset', fileName: 'og-agents.png', source: readFileSync(resolve(__dirname, 'src/web/og-agents.png')) });
     // Hosting headers (no framing, no referrer) for Vercel: web.bwalletx.com.
     this.emitFile({
       type: 'asset',
