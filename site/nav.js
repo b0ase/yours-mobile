@@ -4,6 +4,16 @@
    and crawlers; this script replaces them.
    Usage: <script src="/nav.js"></script> right after </header>
           <script src="/nav.js" data-edition="store"></script> on bwallet.space (also auto on that host). */
+// Vercel Web Analytics (owner, 6 Oct 2026): cookieless page views, on every page that loads nav.js.
+(function () {
+  if (document.querySelector('script[src="/_vercel/insights/script.js"]')) return;
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  var s = document.createElement('script');
+  s.defer = true;
+  s.src = '/_vercel/insights/script.js';
+  document.head.appendChild(s);
+})();
+
 (function () {
   var X = 'https://bwalletx.com';
   var NAV = {
