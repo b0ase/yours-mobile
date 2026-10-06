@@ -58,6 +58,14 @@ export const CURVE_COINS_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
 
+/**
+ * Owner apps left out of a store build: TokenBlaster sells guns and runs a coin launchpad, so a store
+ * app linking to it would point users at outside buying (Apple 3.1.1/3.1.5, Play Payments).
+ */
+export const STORE_HIDDEN_OWNER_APPS: readonly string[] = ['TokenBlaster'];
+export const ownerAppsFor = <T extends { name: string }>(apps: readonly T[], store = STORE_BUILD): T[] =>
+  store ? apps.filter((a) => !STORE_HIDDEN_OWNER_APPS.includes(a.name)) : [...apps];
+
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
 export const STORE_ROOM_NOTE = 'Token rooms aren’t available in this version of bWallet.';

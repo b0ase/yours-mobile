@@ -219,7 +219,7 @@ export const Cabinet = ({ weapon, owned, onClose }: { weapon: Weapon; owned?: bo
           {weapon.tagline}
         </p>
         <p className="m-0 text-xs leading-relaxed" style={{ color: MUTED }}>
-          {weapon.description} Unlocks this gun in Double-O Kweg and the Arena. Edition of {weapon.edition}.
+          {weapon.description} Unlocks this gun in Double-O Satoshi and the Arena. Edition of {weapon.edition}.
         </p>
         {owned ? (
           <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#3ddc97' }}>

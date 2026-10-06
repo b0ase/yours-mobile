@@ -13,6 +13,7 @@ import {
   isBWalletX,
   appNameFor,
   mintChoicesFor,
+  ownerAppsFor,
   paidFeaturesEnabled,
   tokenRoomsEnabled,
   walletKindsFor,
@@ -32,6 +33,11 @@ const FILTERS = [
 ] as const;
 
 describe('storeBuild', () => {
+  test('store build leaves out the TokenBlaster app tile', () => {
+    const apps = [{ name: 'TokenBlaster' }, { name: 'bMusic' }];
+    expect(ownerAppsFor(apps, true).map((a) => a.name)).toEqual(['bMusic']);
+    expect(ownerAppsFor(apps, false)).toHaveLength(2);
+  });
   test('default (test) build is not a store build', () => {
     expect(STORE_BUILD).toBe(false);
     // The live default leaves paid mode alone.
