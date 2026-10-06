@@ -1,5 +1,6 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { BAPPS } from '../bapps';
+import { STORE_BUILD } from '../storeBuild';
 import { openDappBrowser } from '../dappBrowser';
 import { isNative } from '../native';
 import { IS_EXTENSION } from '../extension';
@@ -13,7 +14,9 @@ import { frameAllowlist, frameOriginFor, framingAllowed } from './frameBridge';
 export type BappSession = { name: string; url: string; origin: string; key: number };
 
 /** Exact origins of every bApp tile: the only pages we will frame or answer. */
-export const BAPP_FRAME_ALLOWLIST = frameAllowlist(BAPPS.filter((a) => !a.noFrame).map((a) => a.url));
+export const BAPP_FRAME_ALLOWLIST = frameAllowlist(
+  BAPPS.filter((a) => !a.noFrame && !(STORE_BUILD && a.privateOnly)).map((a) => a.url),
+);
 
 /** Every curated app tile may run in-frame too (headers permitting); typed URLs stay full screen. */
 export const allowFrameUrls = (urls: readonly string[]) => {

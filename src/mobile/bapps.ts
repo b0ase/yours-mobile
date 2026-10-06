@@ -24,6 +24,8 @@ import app_bexchangeIcon from './brand/apps/bexchange.png';
 import app_beduIcon from './brand/apps/bedu.png';
 import app_bsocialIcon from './brand/apps/bsocial.png';
 import app_bmapsIcon from './brand/apps/bmaps.png';
+import app_bagentsIcon from './brand/apps/bagents.png';
+import { STORE_BUILD } from './storeBuild';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
@@ -55,6 +57,8 @@ export type BApp = {
    * 'desktop' (default) = the full width. The person can switch per app (BappFrameHost).
    */
   layout?: 'mobile' | 'desktop';
+  /** bWalletX only: never listed in the store edition (bWallet). */
+  privateOnly?: boolean;
 };
 
 const suite = (repo: string) => `https://github.com/bitcoin-apps-suite/${repo}`;
@@ -271,6 +275,17 @@ export const BAPPS: BApp[] = [
   },
   // Social & money
   {
+    // bAgents (owner, 6 Oct 2026; docs/BAGENTS-PLAN.md): the home for agent accounts. The only origin the wallet's
+    // BWX agent bridge answers (bappFrame/bwxBridge.ts). Agent trading stays out of the store edition.
+    name: 'bAgents',
+    url: 'https://agents.bwalletx.com',
+    verb: 'Run your AI agents and their budgets',
+    group: 'featured',
+    status: 'live',
+    icon: app_bagentsIcon,
+    privateOnly: true,
+  },
+  {
     name: 'bSocial',
     url: 'https://bitcoin-social.vercel.app',
     verb: 'Post and follow on Bitcoin',
@@ -308,4 +323,4 @@ export const BAPPS: BApp[] = [
   },
 ];
 
-export const bappsIn = (group: BAppGroup) => BAPPS.filter((a) => a.group === group);
+export const bappsIn = (group: BAppGroup) => BAPPS.filter((a) => a.group === group && !(STORE_BUILD && a.privateOnly));
