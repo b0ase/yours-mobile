@@ -22,7 +22,7 @@ const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 
-export const useTermsAccepted = () => {
+const useTermsAccepted = () => {
   const [ok, setOk] = useState(termsAccepted);
   useEffect(() => onUgcChange(() => setOk(termsAccepted())), []);
   return ok;

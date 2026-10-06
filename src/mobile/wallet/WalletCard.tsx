@@ -6,9 +6,10 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
-import { AccountAvatar, useAvatar } from '../names/AccountAvatar';
+import { AccountAvatar } from '../names/AccountAvatar';
+import { useAvatar } from '../names/useAvatar';
 import { HandleFlow } from '../names/HandleFlow';
-import { useAccountNames } from '../names/MyNameBadge';
+import { useAccountNames } from '../names/accountNames';
 import { identityRowText } from '../names/identityText';
 import type { BalanceView } from './balanceLoad';
 import { useBackedUp } from '../backup/useBackedUp';
@@ -242,7 +243,8 @@ export const WalletCard = ({
                   onRetry();
                 }}
               >
-                Couldn't refresh. Tap to retry.
+                <RefreshCw size={12} aria-hidden="true" />
+                Still syncing. Tap to retry.
               </button>
             )}
           </div>

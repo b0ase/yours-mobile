@@ -31,12 +31,13 @@ const memStore = () => {
 
 describe('CallsClient session', () => {
   test('signs a proof the server can verify with the identity key as counterparty', async () => {
-    const seen: { url: string; body: any }[] = [];
+    type SessionBody = { identity_key: string; timestamp: number; nonce: string; signature: string };
+    const seen: { url: string; body: SessionBody }[] = [];
     const http: Http = async ({ url, body }) => {
-      seen.push({ url, body });
+      seen.push({ url, body: body as SessionBody });
       return {
         status: 200,
-        data: { token: 'wc1.a.b', identity_key: body.identity_key, expires_at: '2099-01-01T00:00:00Z' },
+        data: { token: 'wc1.a.b', identity_key: (body as SessionBody).identity_key, expires_at: '2099-01-01T00:00:00Z' },
       };
     };
     const store = memStore();

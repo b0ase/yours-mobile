@@ -24,7 +24,7 @@ export type PresentStick = Extract<StickProbe, { status: 'ok' }>;
 
 const RETRY_MS = 2000;
 
-export const useStickProbe = (usbSecurity: UsbSecurity, onOk: (probe: PresentStick) => void) => {
+const useStickProbe = (usbSecurity: UsbSecurity, onOk: (probe: PresentStick) => void) => {
   const [probe, setProbe] = useState<StickProbe | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);

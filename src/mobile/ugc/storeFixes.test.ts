@@ -32,7 +32,6 @@ import {
 } from '../account/deleteAccount';
 import { deletePaymail, signRequest } from '../names/paymail';
 import type { Http } from '../chat/api';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const server = require('../../../site/lib/paymail.js');
 
 class MemStorage {

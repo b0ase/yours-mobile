@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   Ban,
   Bell,
+  BellRing,
   Bookmark,
   Coins,
   Download,
+  Heart,
   FileText,
   Globe,
   Mail,
@@ -19,19 +21,21 @@ import {
   BadgeCheck,
   Bot,
   ScanLine,
+  EyeOff,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
-import { isBWalletX, socialLoginEnabled } from '../storeBuild';
+import { isBWalletX, languageSettingsEnabled, socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
-import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, type DefaultFeed } from './prefs';
+import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, PAID_LIKE_OPTIONS, type DefaultFeed } from './prefs';
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
+import { PushSettings } from '../push/PushSettings';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
 
@@ -52,6 +56,7 @@ import {
   type HiddenAccount,
 } from '../feed/store';
 import type { FeedPost } from '../feed/post';
+import { isSlur, safeName } from '../feed/language';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from '../feed/bookmarkSync';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
@@ -222,8 +227,8 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
           {items.map((p) => (
             <ListRow
               key={p.txid}
-              title={p.author.name}
-              sub={p.text || `${p.media?.length ?? 0} attachment(s)`}
+              title={safeName(p.author.name)}
+              sub={isSlur(p.text) ? 'Post hidden: offensive language' : p.text || `${p.media?.length ?? 0} attachment(s)`}
               action="Remove"
               onAction={() => {
                 setItems((b) => toggleSyncedBookmark(b, p));
@@ -367,6 +372,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'password'
     | 'social'
     | 'agents'
+    | 'push'
     | null
   >(null);
   const rate = useBsvUsd();
@@ -382,6 +388,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   };
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
+  const paidLikes = PAID_LIKE_OPTIONS.map((v) => ({ id: v as number, label: money(v, rate) }));
   return (
     <>
       {acct && socialLoginEnabled() && (
@@ -464,8 +471,49 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                   onChange={(v) => setPrefs({ animatedBackgrounds: v })}
                 />
               }
-              isLast
+              isLast={!languageSettingsEnabled()}
             />
+            {languageSettingsEnabled() && (
+              <>
+                <Divider />
+                <Row
+                  icon={<EyeOff size={16} />}
+                  label="Filter strong language"
+                  description={
+                    prefs.filterStrong ? 'Swearing is blurred until you tap Show anyway' : 'Swearing is shown as posted'
+                  }
+                  right={
+                    <Toggle
+                      label="Filter strong language"
+                      on={prefs.filterStrong}
+                      onChange={(v) => setPrefs({ filterStrong: v })}
+                    />
+                  }
+                />
+                <Divider />
+                <Row
+                  icon={<EyeOff size={16} />}
+                  label="Show anyway on hidden posts (18+)"
+                  description={
+                    prefs.allowLanguageReveal
+                      ? 'Posts hidden for slurs can be opened with Show anyway'
+                      : 'Posts with slurs stay hidden'
+                  }
+                  right={
+                    <Toggle
+                      label="Show anyway on hidden posts (18+)"
+                      on={prefs.allowLanguageReveal}
+                      onChange={(v) => {
+                        if (v && !window.confirm('Only for adults (18+). Allow Show anyway on posts hidden for offensive language?'))
+                          return;
+                        setPrefs({ allowLanguageReveal: v });
+                      }}
+                    />
+                  }
+                  isLast
+                />
+              </>
+            )}
           </Section>
           <Section title="Payments">
             <Row
@@ -478,7 +526,6 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               }
               right={<Toggle label="One-click pay" on={prefs.oneClick} onChange={(v) => setPrefs({ oneClick: v })} />}
               isFirst
-              isLast={!prefs.oneClick}
             />
             {prefs.oneClick && (
               <>
@@ -503,6 +550,21 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                 </div>
               </>
             )}
+            <Divider />
+            <Row
+              icon={<Heart size={16} />}
+              label="Paid like"
+              description={`Like + ${money(prefs.paidLikeSats, rate)}${hasRate(rate) ? ` (${prefs.paidLikeSats.toLocaleString()} sats)` : ''} to the author, from a post's Tip sheet`}
+              isLast
+            />
+            <div className="px-4 pb-3 pl-12">
+              <Pills
+                label="Paid like amount"
+                options={paidLikes}
+                value={prefs.paidLikeSats}
+                onChange={(v) => setPrefs({ paidLikeSats: v })}
+              />
+            </div>
           </Section>
           {isBWalletX() && (
             <Section title="Agents">
@@ -564,9 +626,16 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             </div>
           </Section>
           <Section title="Notifications">
-            {CATEGORIES.map((c, i) => (
+            <Row
+              icon={<BellRing size={16} />}
+              label="Push notifications"
+              description="Rooms and DMs while the app is closed, previews, quiet hours"
+              onClick={() => setScreen('push')}
+              isFirst
+            />
+            {CATEGORIES.map((c) => (
               <div key={c}>
-                {i > 0 && <Divider />}
+                <Divider />
                 <Row
                   icon={<Bell size={16} />}
                   label={CATEGORY_LABELS[c].label}
@@ -581,7 +650,6 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                       }}
                     />
                   }
-                  isFirst={i === 0}
                 />
               </div>
             ))}
@@ -674,6 +742,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
+      {screen === 'push' && (
+        <Screen title="Push notifications" onBack={() => setScreen(null)}>
+          <PushSettings Toggle={Toggle} />
+        </Screen>
+      )}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />

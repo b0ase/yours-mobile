@@ -152,8 +152,12 @@ const BCORP_TEXT: Swaps = {
     // blaming the provider ("may be temporarily down").
     [
       'Unable to reach this provider. It may be temporarily down.',
-      "{result?.status === 'error' && /wallet not (available|initialized)/i.test(result.error ?? '') ? 'Your wallet isn\\'t running: lock and unlock bWalletX, then try again.' : `Unable to reach this provider (${result?.status === 'error' ? result.error : ''}).`}",
+      "{result?.status === 'error' && /wallet not (available|initialized)/i.test(result.error ?? '') ? 'Your wallet isn\\'t running: lock and unlock " +
+        (STORE ? 'bWallet' : 'bWalletX') +
+        ", then try again.' : `Unable to reach this provider (${result?.status === 'error' ? result.error : ''}).`}",
     ],
+  ],
+  'src/components/storageProviders.ts': [
     ['Official storage partner of Yours Wallet.', 'Default wallet storage provider.'],
   ],
   'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bWallet"']],

@@ -6,7 +6,7 @@ import { cachedThumb, loadThumb, thumbUrl } from './thumbs';
 import { marketTradingEnabled } from '../storeBuild';
 
 /** True once the element has come within `margin` of the viewport (sticky). */
-export function useNearViewport<T extends Element>(margin = '400px') {
+function useNearViewport<T extends Element>(margin = '400px') {
   const ref = useRef<T>(null);
   const [near, setNear] = useState(false);
   useEffect(() => {

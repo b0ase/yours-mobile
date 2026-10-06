@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Push (src/mobile/push). Xcode writes "production" into exported App Store / Ad Hoc builds. -->
+	<key>aps-environment</key>
+	<string>development</string>
 	<!-- Universal links: www.bwallet.space/pair (phone pairing QR) opens the app. See site/.well-known. -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>

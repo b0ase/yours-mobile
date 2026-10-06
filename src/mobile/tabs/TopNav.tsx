@@ -1,14 +1,15 @@
 import { routeFor } from './tabs';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useBackClose } from '../backStack';
-import { useAccountNames } from '../names/MyNameBadge';
-import { AccountList, useAccountSwitch } from '../account/AccountSwitcher';
+import { useAccountNames } from '../names/accountNames';
+import { AccountList } from '../account/AccountSwitcher';
+import { useAccountSwitch } from '../account/accountSwitch';
 import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bot, Download, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, X } from 'lucide-react';
-import { startAgentCreate } from '../agents/AgentAccountToggle';
+import { startAgentCreate } from '../agents/agentCreate';
 import { AgentToolsSheet } from '../agents/AgentToolsSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { isBWalletX } from '../storeBuild';

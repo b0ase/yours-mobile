@@ -46,6 +46,8 @@ const webShell = (): Plugin => ({
     // web.bwalletx.com/agents: a static page about agent accounts, the CLI and MCP, and its share image.
     this.emitFile({ type: 'asset', fileName: 'agents.html', source: readFileSync(resolve(__dirname, 'src/web/agents.html')) });
     this.emitFile({ type: 'asset', fileName: 'og-agents.png', source: readFileSync(resolve(__dirname, 'src/web/og-agents.png')) });
+    // Web Push service worker (src/mobile/push/register.ts registers it from Settings › Notifications).
+    this.emitFile({ type: 'asset', fileName: 'push-sw.js', source: readFileSync(resolve(__dirname, 'src/web/push-sw.js')) });
     // Hosting headers (no framing, no referrer) for Vercel: web.bwalletx.com.
     this.emitFile({
       type: 'asset',

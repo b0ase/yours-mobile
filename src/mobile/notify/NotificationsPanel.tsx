@@ -26,7 +26,7 @@ const ICONS: Record<NotifyKind, typeof Bell> = {
   sale: Tag,
 };
 
-export const useNotifications = () => useSyncExternalStore(subscribeItems, getItems, getItems);
+const useNotifications = () => useSyncExternalStore(subscribeItems, getItems, getItems);
 
 /** Feed header bell: unread badge; opens the notifications list. */
 export const NotificationsBell = ({

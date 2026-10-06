@@ -28,7 +28,9 @@ import { avatarFor, B_AVATAR, pendingBQuestions, useAvatars } from '../chat/avat
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
-import { STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
+import { onRoomTicker, takeRoomTicker } from '../chat/segmentNav';
+import { RoomBell } from '../push/RoomBell';
+import { APP_NAME, STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -58,7 +60,8 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
 import { useRoomIcon } from '../chat/roomIcon';
-import { ChatTabs, SegmentRow, SegmentTitle, useChatDisplayName } from '../feed/ChatSegments';
+import { ChatTabs, SegmentRow, SegmentTitle } from '../feed/ChatSegments';
+import { useChatDisplayName } from '../feed/chatDisplayName';
 import {
   avatarHue,
   latestCursor,
@@ -90,7 +93,8 @@ import {
 } from '../chat/bounties';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { DmsPage, type DmConversationProps } from '../chat/DmsPage';
-import { setBlocked, syncBlocks, UserSafetyButton } from '../ugc/UserSafety';
+import { UserSafetyButton } from '../ugc/UserSafety';
+import { setBlocked, syncBlocks } from '../ugc/blocks';
 import { blockedHandles, onUgcChange } from '../ugc/ugc';
 import {
   browseList,
@@ -102,7 +106,8 @@ import {
   withoutBlocked,
   type PublicRoom,
 } from '../chat/openRooms';
-import { longPress, MessageMenu, NewRoomSheet, OpenRoomSheet, useRoomCard } from '../chat/OpenRoomSheets';
+import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
+import { longPress, useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 
 /**
@@ -228,6 +233,7 @@ const Conversation = ({
   openRoom = null,
   hidden,
   onMessageMenu = null,
+  bell = true,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -251,6 +257,8 @@ const Conversation = ({
   hidden?: ReadonlySet<string>;
   /** Long-press a message: report / block / delete. */
   onMessageMenu?: ((m: ChatMessage) => void) | null;
+  /** Push bell (All / Mentions / Off). Off for DMs, which always notify. */
+  bell?: boolean;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
@@ -381,7 +389,10 @@ const Conversation = ({
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
-  useAvatars(client, messages.map((m) => m.author_handle));
+  useAvatars(
+    client,
+    messages.map((m) => m.author_handle),
+  );
   const waitingForB = pendingBQuestions(messages);
   const composer = useRef<HTMLTextAreaElement>(null);
   const askB = () => {
@@ -425,6 +436,7 @@ const Conversation = ({
           {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
         </div>
         {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
+        {bell && <RoomBell ticker={room.ticker} />}
         {openRoom && (
           <button onClick={openRoom.onInfo} className="p-2 rounded-full active:opacity-60" aria-label="Room info">
             <Info size={20} color={GOLD} />
@@ -509,70 +521,79 @@ const Conversation = ({
             </div>
           ) : (
             <Fragment key={it.key}>
-            <div
-              className={`flex items-end gap-2 ${it.mine ? 'justify-end' : 'justify-start'} ${it.firstOfGroup ? 'mt-2' : 'mt-[3px]'}`}
-            >
-              {/* Avatars on other people's messages, on the first of a run; a spacer keeps the run aligned. */}
-              {!it.mine &&
-                (it.firstOfGroup ? (
-                  <Avatar
-                    title={it.message.author_handle || '?'}
-                    size={28}
-                    src={avatarFor(it.message.author_handle)}
-                  />
-                ) : (
-                  <div className="shrink-0" style={{ width: 28 }} />
-                ))}
               <div
-                {...(onMessageMenu && !it.message.pending ? longPress(() => onMessageMenu(it.message)) : {})}
-                className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug"
-                style={{
-                  borderRadius: 18,
-                  borderBottomRightRadius: it.mine ? 6 : 18,
-                  borderBottomLeftRadius: it.mine ? 18 : 6,
-                  background: it.mine ? 'linear-gradient(160deg, #FFD24D 0%, #E9B21A 100%)' : PANEL,
-                  color: it.mine ? '#1a1300' : '#f2f2f2',
-                  border: it.mine ? 'none' : `1px solid ${LINE}`,
-                  opacity: it.message.pending && !it.message.failed ? 0.75 : 1,
-                }}
+                className={`flex items-end gap-2 ${it.mine ? 'justify-end' : 'justify-start'} ${it.firstOfGroup ? 'mt-2' : 'mt-[3px]'}`}
               >
-                {!it.mine && !direct && it.firstOfGroup && it.message.author_handle && (
-                  <div
-                    className="text-[12px] font-semibold mb-[2px]"
-                    style={{ color: `hsl(${avatarHue(it.message.author_handle)} 70% 72%)` }}
-                  >
-                    ${it.message.author_handle}
-                  </div>
-                )}
-                <span className="whitespace-pre-wrap break-words">{it.message.body}</span>
-                <span className="text-[10px] ml-2 float-right mt-[6px]" style={{ color: it.mine ? '#5c4800' : MUTED }}>
-                  {it.message.edited ? 'edited · ' : ''}
-                  {it.message.failed ? (
-                    <button
-                      className="underline text-[#b42318]"
-                      onClick={() => send(it.message.body || '', it.message)}
-                    >
-                      failed · retry
-                    </button>
-                  ) : it.message.pending ? (
-                    'sending…'
+                {/* Avatars on other people's messages, on the first of a run; a spacer keeps the run aligned. */}
+                {!it.mine &&
+                  (it.firstOfGroup ? (
+                    <Avatar
+                      title={it.message.author_handle || '?'}
+                      size={28}
+                      src={avatarFor(it.message.author_handle)}
+                    />
                   ) : (
-                    timeLabel(it.message.created_at)
-                  )}
-                </span>
-              </div>
-            </div>
-            {waitingForB.has(it.message.id) && (
-              <div className="flex items-end gap-2 justify-start mt-2" aria-live="polite">
-                <Avatar title="b" size={28} src={B_AVATAR} />
+                    <div className="shrink-0" style={{ width: 28 }} />
+                  ))}
                 <div
-                  className="px-3 py-[7px] text-[14px] italic"
-                  style={{ borderRadius: 18, borderBottomLeftRadius: 6, background: PANEL, color: MUTED, border: `1px solid ${LINE}` }}
+                  {...(onMessageMenu && !it.message.pending ? longPress(() => onMessageMenu(it.message)) : {})}
+                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug"
+                  style={{
+                    borderRadius: 18,
+                    borderBottomRightRadius: it.mine ? 6 : 18,
+                    borderBottomLeftRadius: it.mine ? 18 : 6,
+                    background: it.mine ? 'linear-gradient(160deg, #FFD24D 0%, #E9B21A 100%)' : PANEL,
+                    color: it.mine ? '#1a1300' : '#f2f2f2',
+                    border: it.mine ? 'none' : `1px solid ${LINE}`,
+                    opacity: it.message.pending && !it.message.failed ? 0.75 : 1,
+                  }}
                 >
-                  $b is thinking…
+                  {!it.mine && !direct && it.firstOfGroup && it.message.author_handle && (
+                    <div
+                      className="text-[12px] font-semibold mb-[2px]"
+                      style={{ color: `hsl(${avatarHue(it.message.author_handle)} 70% 72%)` }}
+                    >
+                      ${it.message.author_handle}
+                    </div>
+                  )}
+                  <span className="whitespace-pre-wrap break-words">{it.message.body}</span>
+                  <span
+                    className="text-[10px] ml-2 float-right mt-[6px]"
+                    style={{ color: it.mine ? '#5c4800' : MUTED }}
+                  >
+                    {it.message.edited ? 'edited · ' : ''}
+                    {it.message.failed ? (
+                      <button
+                        className="underline text-[#b42318]"
+                        onClick={() => send(it.message.body || '', it.message)}
+                      >
+                        failed · retry
+                      </button>
+                    ) : it.message.pending ? (
+                      'sending…'
+                    ) : (
+                      timeLabel(it.message.created_at)
+                    )}
+                  </span>
                 </div>
               </div>
-            )}
+              {waitingForB.has(it.message.id) && (
+                <div className="flex items-end gap-2 justify-start mt-2" aria-live="polite">
+                  <Avatar title="b" size={28} src={B_AVATAR} />
+                  <div
+                    className="px-3 py-[7px] text-[14px] italic"
+                    style={{
+                      borderRadius: 18,
+                      borderBottomLeftRadius: 6,
+                      background: PANEL,
+                      color: MUTED,
+                      border: `1px solid ${LINE}`,
+                    }}
+                  >
+                    $b is thinking…
+                  </div>
+                </div>
+              )}
             </Fragment>
           ),
         )}
@@ -592,59 +613,66 @@ const Conversation = ({
         </div>
       ) : (
         <>
-        {isOfficialRoom(room) && (
-          <div className="px-4 pt-2 text-[12px] shrink-0" style={{ background: '#0b0b0b', color: MUTED, borderTop: `1px solid ${LINE}` }}>
-            Questions? Tap <b style={{ color: GOLD }}>/b</b> and ask $b, the bWalletX assistant. Just /b shows what it can do.
-          </div>
-        )}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            send(draft);
-          }}
-          className="flex items-end gap-2 px-3 pt-2 shrink-0"
-          style={{
-            paddingBottom: 8,
-            background: '#0b0b0b',
-            borderTop: `1px solid ${LINE}`,
-          }}
-        >
-          {/* v2 hook: attachment / voice note / video note buttons go here (rooms/[ticker]/media). */}
-          <button
-            type="button"
-            onClick={askB}
-            aria-label="Ask $b, the bWalletX assistant"
-            className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]"
-            style={{ background: '#1a1608', color: GOLD, border: `1px solid ${GOLD}55` }}
-          >
-            /b
-          </button>
-          <textarea
-            ref={composer}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !isNative) {
-                e.preventDefault();
-                send(draft);
-              }
+          {isOfficialRoom(room) && (
+            <div
+              className="px-4 pt-2 text-[12px] shrink-0"
+              style={{ background: '#0b0b0b', color: MUTED, borderTop: `1px solid ${LINE}` }}
+            >
+              {/* Two lines (owner, 6 Oct 2026). */}
+              <div>
+                Questions? Tap <b style={{ color: GOLD }}>/b</b> and ask $b, the {APP_NAME} assistant.
+              </div>
+              <div>Just /b shows what it can do.</div>
+            </div>
+          )}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              send(draft);
             }}
-            rows={1}
-            maxLength={4000}
-            placeholder={online ? 'Message' : 'Offline'}
-            className="flex-1 resize-none rounded-2xl px-4 py-[9px] text-[15px] text-white outline-none max-h-32"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
-          />
-          <button
-            type="submit"
-            disabled={!draft.trim()}
-            aria-label="Send"
-            className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-            style={{ background: GOLD }}
+            className="flex items-end gap-2 px-3 pt-2 shrink-0"
+            style={{
+              paddingBottom: 8,
+              background: '#0b0b0b',
+              borderTop: `1px solid ${LINE}`,
+            }}
           >
-            <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
-          </button>
-        </form>
+            {/* v2 hook: attachment / voice note / video note buttons go here (rooms/[ticker]/media). */}
+            <button
+              type="button"
+              onClick={askB}
+              aria-label={`Ask $b, the ${APP_NAME} assistant`}
+              className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]"
+              style={{ background: '#1a1608', color: GOLD, border: `1px solid ${GOLD}55` }}
+            >
+              /b
+            </button>
+            <textarea
+              ref={composer}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !isNative) {
+                  e.preventDefault();
+                  send(draft);
+                }
+              }}
+              rows={1}
+              maxLength={4000}
+              placeholder={online ? 'Message' : 'Offline'}
+              className="flex-1 resize-none rounded-2xl px-4 py-[9px] text-[15px] text-white outline-none max-h-32"
+              style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            />
+            <button
+              type="submit"
+              disabled={!draft.trim()}
+              aria-label="Send"
+              className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
+              style={{ background: GOLD }}
+            >
+              <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
+            </button>
+          </form>
         </>
       )}
     </div>,
@@ -1626,6 +1654,36 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
+  // A tapped push notification (src/mobile/push): open the room by ticker once the lists have loaded.
+  const [pushTicker, setPushTicker] = useState<string | null>(null);
+  useEffect(() => {
+    if (!handle) return;
+    const take = () => {
+      const t = takeRoomTicker(false);
+      if (t) setPushTicker(t);
+    };
+    take();
+    return onRoomTicker(take);
+  }, [handle]);
+  useEffect(() => {
+    if (!pushTicker || !rooms) return;
+    const room = rooms.find((r) => r.ticker.toUpperCase() === pushTicker);
+    if (!room) return setPushTicker(null);
+    if (isOpenRoom(room)) {
+      setPushTicker(null);
+      return openOpenRoom(room);
+    }
+    const e = entries?.find((x) => x.room?.ticker.toUpperCase() === pushTicker);
+    if (e) {
+      setPushTicker(null);
+      void openEntry(e);
+    } else if (entries) {
+      setPushTicker(null);
+      setOpen({ room, entry: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushTicker, rooms, entries]);
+
   /** One token room row (unchanged from the token-only list). */
   const renderTokenRow = ({ e, invite }: (typeof shown)[number]) => {
     const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
@@ -1662,7 +1720,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     const sub = !ROOMS
       ? STORE_ROOM_NOTE
       : e.status === 'start'
-        ? 'Tap to open the holders\' room'
+        ? "Tap to open the holders' room"
         : e.status === 'join'
           ? `${e.members ?? 0} holder${e.members === 1 ? '' : 's'} · tap to join`
           : e.room
@@ -2037,6 +2095,7 @@ const DmConversation = (p: DmConversationProps) => (
     onInvite={null}
     onBans={null}
     onBounties={null}
+    bell={false}
     peer={/↔/.test(p.room.name || '') ? roomTitle(p.room, p.me).replace(/^\$/, '') : null}
   />
 );

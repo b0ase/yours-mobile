@@ -1,3 +1,4 @@
+import { APP_NAME } from '../storeBuild';
 import { useState } from 'react';
 import { Check, Copy, Eye, EyeOff, Wand2 } from 'lucide-react';
 
@@ -9,7 +10,7 @@ import { Check, Copy, Eye, EyeOff, Wand2 } from 'lucide-react';
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_!@#%+=';
 
 /** 20 characters from a 64-symbol alphabet (~120 bits), no look-alikes (0/O, 1/l/I). */
-export const strongPassword = (len = 20): string => {
+const strongPassword = (len = 20): string => {
   const out: string[] = [];
   const buf = new Uint8Array(len * 2);
   while (out.length < len) {
@@ -19,20 +20,7 @@ export const strongPassword = (len = 20): string => {
   return out.join('');
 };
 
-/** Offer the new password to the browser's password manager, where it allows that (best effort). */
-export const saveWalletPassword = async (name: string, password: string) => {
-  const W = window as unknown as { PasswordCredential?: new (d: { id: string; password: string; name?: string }) => Credential };
-  try {
-    if (W.PasswordCredential && navigator.credentials?.store) {
-      await navigator.credentials.store(new W.PasswordCredential({ id: name || 'bWalletX', password, name: 'bWalletX' }));
-    }
-  } catch {
-    /* not offered here (e.g. extension pages); the user can copy it */
-  }
-};
-
-const field =
-  'w-full h-9 pl-4 pr-10 rounded-xl border text-sm outline-none bg-[#17191E] text-white border-[#98A2B340]';
+const field = 'w-full h-9 pl-4 pr-10 rounded-xl border text-sm outline-none bg-[#17191E] text-white border-[#98A2B340]';
 
 export const PasswordFields = ({
   newWallet,
@@ -74,7 +62,7 @@ export const PasswordFields = ({
   return (
     <div className="w-[85%] flex flex-col gap-2 my-1">
       {/* Username for password managers: they file the password under it. */}
-      <input type="text" name="username" autoComplete="username" value={username || 'bWalletX'} readOnly hidden />
+      <input type="text" name="username" autoComplete="username" value={username || APP_NAME} readOnly hidden />
       <div className="relative">
         <input
           className={field}
@@ -153,7 +141,7 @@ export const PasswordFields = ({
         <label className="flex items-start gap-2 mt-1 text-xs" style={{ color: '#D0D5DD' }}>
           <input type="checkbox" required className="mt-0.5" />
           <span>
-            I've saved this password somewhere safe. bWalletX can't show it again; only your recovery phrase can reset
+            I've saved this password somewhere safe. {APP_NAME} can't show it again; only your recovery phrase can reset
             it.
           </span>
         </label>

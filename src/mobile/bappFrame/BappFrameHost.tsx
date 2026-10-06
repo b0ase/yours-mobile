@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { APP_NAME } from '../storeBuild';
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
 import { BAPPS } from '../bapps';
 import { pushBackCloser } from '../backStack';
@@ -28,14 +28,13 @@ import {
   setAllAgentsStopped,
   spentToday,
 } from '../agents/agentAccounts';
-import { startAgentCreate } from '../agents/AgentAccountToggle';
-import { accountTag, useAccountSwitch } from '../account/AccountSwitcher';
-import { accountNamesFor } from '../names/MyNameBadge';
+import { startAgentCreate } from '../agents/agentCreate';
+import { accountTag, useAccountSwitch } from '../account/accountSwitch';
+import { accountNamesFor } from '../names/accountNames';
 import { loadLastBalance } from '../wallet/balanceLoad';
 import { cachedExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useBottomMenu } from '../../hooks/useBottomMenu';
-import { routeFor } from '../tabs/tabs';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 
 /**
  * The in-frame bApp: a slim header row and a cross-origin iframe filling the space between
@@ -214,19 +213,23 @@ export const BappFrameHost = () => {
             </button>
           </div>
           <div className={phone ? 'flex-1 flex justify-center py-3 min-h-0' : 'contents'}>
-          <iframe
-            key={session.key}
-            ref={frame}
-            src={session.url}
-            title={session.name}
-            onLoad={onLoad}
-            className="w-full flex-1 border-0 bg-white"
-            // Same rights as a top-level page in the full-screen browser, minus top navigation.
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
-            allow="camera; microphone; clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media"
-            referrerPolicy="strict-origin-when-cross-origin"
-            style={phone ? { width: 430, maxWidth: '100%', flex: 'none', borderRadius: 18, border: '1px solid #2b2f36' } : undefined}
-          />
+            <iframe
+              key={session.key}
+              ref={frame}
+              src={session.url}
+              title={session.name}
+              onLoad={onLoad}
+              className="w-full flex-1 border-0 bg-white"
+              // Same rights as a top-level page in the full-screen browser, minus top navigation.
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
+              allow="camera; microphone; clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media"
+              referrerPolicy="strict-origin-when-cross-origin"
+              style={
+                phone
+                  ? { width: 430, maxWidth: '100%', flex: 'none', borderRadius: 18, border: '1px solid #2b2f36' }
+                  : undefined
+              }
+            />
           </div>
         </div>
       )}
@@ -259,7 +262,9 @@ const BwxConfirmSheet = ({ text, from, onAnswer }: { text: string; from: string;
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="text-[12px] text-[#98A2B3] mb-1">bWalletX · asked by {from}</div>
+        <div className="text-[12px] text-[#98A2B3] mb-1">
+          {APP_NAME} · asked by {from}
+        </div>
         <div className="text-[15px] font-semibold text-[#F2F2F0] mb-5">{text}</div>
         <div className="flex gap-3">
           <button
@@ -289,8 +294,10 @@ const BwxConfirmSheet = ({ text, from, onAnswer }: { text: string; from: string;
  */
 const useBwxDeps = () => {
   const { chromeStorageService } = useServiceContext();
-  const { handleSelect } = useBottomMenu();
-  const navigate = useNavigate();
+  // The context, not useBottomMenu/useNavigate: the bApp frame host mounts above <Router>, where
+  // useNavigate throws; that blanked the wallet right after unlock (5.1.69). Selecting the tab is
+  // enough: the tab bar's useBottomMenu, inside the router, does the routing.
+  const handleSelect = useContext(BottomMenuContext)?.handleSelect ?? (() => {});
   const { switchAccount } = useAccountSwitch();
   const info = (id: string) => {
     const acct = chromeStorageService.getAllAccounts().find((a) => a.addresses.identityAddress === id);
@@ -322,8 +329,6 @@ const useBwxDeps = () => {
     createAgent: () => {
       startAgentCreate();
       handleSelect('settings', 'create-account');
-      const route = routeFor('settings');
-      if (route) navigate(route);
     },
   };
   const ref = useRef(deps);

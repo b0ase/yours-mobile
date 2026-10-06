@@ -45,7 +45,7 @@ export const ImportAccount = ({ onNavigateBack, newWallet = false }: ImportAccou
   const [iconURL, setIconURL] = useState('');
 
   useEffect(() => {
-    newWallet && hideMenu();
+    if (newWallet) hideMenu();
     return () => {
       showMenu();
     };
@@ -146,7 +146,6 @@ export const ImportAccount = ({ onNavigateBack, newWallet = false }: ImportAccou
   };
 
   const accentLeft = theme.color.component.primaryButtonLeftGradient;
-  const accentRight = theme.color.component.primaryButtonRightGradient;
   const contrast = theme.color.global.contrast;
   const gray = theme.color.global.gray;
   const row = theme.color.global.row;
@@ -328,7 +327,8 @@ export const ImportAccount = ({ onNavigateBack, newWallet = false }: ImportAccou
               whileTap={{ scale: 0.9 }}
               onClick={() => {
                 if (step === 1) {
-                  newWallet ? navigate('/restore-wallet') : onNavigateBack();
+                  if (newWallet) navigate('/restore-wallet');
+                  else onNavigateBack();
                 } else {
                   setStep(step - 1);
                 }

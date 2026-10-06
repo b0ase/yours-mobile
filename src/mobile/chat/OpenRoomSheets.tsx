@@ -3,7 +3,7 @@
  * the "+ New room" sheet (create, or join with an invite code), the room info / moderation
  * sheet, and the message menu (report, block, delete). Every build, store build included.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Ban, Copy, Flag, LogOut, Lock, ShieldCheck, Trash2, UserMinus, UserPlus, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -17,7 +17,6 @@ import {
   isStaff,
   memberRole,
   parseInviteCode,
-  parseRoomCard,
   roomNameProblem,
   type OpenRoomCard,
   type OpenVisibility,
@@ -60,24 +59,6 @@ const OSheet = ({ title, onClose, children }: { title: string; onClose: () => vo
 const inputCls = 'w-full rounded-xl px-3 py-2 text-sm text-white outline-none';
 const inputStyle = { background: PANEL, border: `1px solid ${LINE}` };
 const goldBtn = 'w-full rounded-xl py-2 text-sm font-bold disabled:opacity-50';
-
-/** Long-press (touch) or right-click (desktop) on a message bubble. */
-export const longPress = (fn: () => void) => {
-  let timer: number | undefined;
-  const clear = () => window.clearTimeout(timer);
-  return {
-    onTouchStart: () => {
-      clear();
-      timer = window.setTimeout(fn, 500);
-    },
-    onTouchEnd: clear,
-    onTouchMove: clear,
-    onContextMenu: (e: React.MouseEvent) => {
-      e.preventDefault();
-      fn();
-    },
-  };
-};
 
 // ───────────────────────────── + New room ─────────────────────────────
 
@@ -238,20 +219,6 @@ export const NewRoomSheet = ({
 };
 
 // ───────────────────────────── Room info / moderation ─────────────────────────────
-
-/** Fetch an open room's card (role, members, invite code). Null until loaded or on failure. */
-export const useRoomCard = (client: BchatClient, ticker: string | null) => {
-  const [card, setCard] = useState<OpenRoomCard | null>(null);
-  const reload = useCallback(() => {
-    if (!ticker) return setCard(null);
-    client
-      .openRoomCard(ticker)
-      .then((d) => setCard(parseRoomCard(d)))
-      .catch(() => setCard(null));
-  }, [client, ticker]);
-  useEffect(reload, [reload]);
-  return { card, reload };
-};
 
 export const OpenRoomSheet = ({
   client,

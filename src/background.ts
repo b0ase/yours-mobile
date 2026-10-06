@@ -150,6 +150,9 @@ const pendingImports = new Map<string, Promise<void>>();
 
 const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   console.log('[background] initializeWallet: starting, current accountContext:', !!accountContext);
+  // Stage timings (owner, 6 Oct 2026: a restore took ~50 s); read them in the service worker console.
+  const t0 = Date.now();
+  const stage = (name: string) => console.log(`[background] initializeWallet: ${name} at ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   if (accountContext) {
     dropWalletContext('before-init');
   }
@@ -280,20 +283,27 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   };
 
   const startedUnder = lockGeneration;
-  let mirrorServices: Parameters<typeof mirrorToMiner>[0];
+  // Filled in once initWallet returns; the broadcast callback reads it lazily.
+  const mirror: { services?: Parameters<typeof mirrorToMiner>[0] } = {};
   const ctx = await initWallet(chromeStorageService, {
     onTransactionBroadcasted: (txid: string) => {
       console.log('[background] Transaction broadcasted:', txid);
       notifyBalanceUpdate();
       // Also hand it straight to a miner (mobile/minerMirror.ts).
-      void mirrorToMiner(mirrorServices, txid);
+      void mirrorToMiner(mirror.services as Parameters<typeof mirrorToMiner>[0], txid);
     },
     onTransactionProven: (txid: string) => {
       console.log('[background] Transaction proven:', txid);
       notifyBalanceUpdate();
     },
-    beforeSync: importPendingRestore,
-    afterSync: reviewRestoredUtxos,
+    beforeSync: async (a) => {
+      stage('storage ready, before sync');
+      await importPendingRestore(a);
+    },
+    afterSync: async (a) => {
+      stage('address sync done');
+      await reviewRestoredUtxos(a);
+    },
   });
   if (lockGeneration !== startedUnder || !(await chromeStorageService.getPassKey())) {
     // Locked while we were initialising (a restore's detached init can run
@@ -302,8 +312,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     await ctx.close().catch((err) => console.error('[background] close after late lock:', err));
     return null;
   }
+  stage('initWallet done');
   accountContext = ctx;
-  mirrorServices = ctx.syncContext.services as unknown as Parameters<typeof mirrorToMiner>[0];
+  mirror.services = ctx.syncContext.services as unknown as Parameters<typeof mirrorToMiner>[0];
   console.log('[background] initializeWallet: initWallet returned, accountContext:', !!accountContext);
 
   if (accountContext) {
@@ -1218,7 +1229,9 @@ if (isInServiceWorker) {
             // Access the internal storage provider to update fee model at runtime.
             // This reaches into WalletStorageManager internals — if the SDK changes
             // its structure, the guard below will catch it and log a warning.
-            const active = (accountContext.storage as any)._active;
+            const active = (
+              accountContext.storage as unknown as { _active?: { storage?: { feeModel?: unknown } } }
+            )._active;
             if (active?.storage?.feeModel) {
               active.storage.feeModel = { model: 'sat/kb', value: rate };
             } else {
@@ -1260,7 +1273,7 @@ if (isInServiceWorker) {
           return true;
         }
         case 'GENERATE_NEW_ADDRESS': {
-          if ((globalThis as any).__generatingAddress) {
+          if ((globalThis as { __generatingAddress?: boolean }).__generatingAddress) {
             sendResponse({
               type: 'GENERATE_NEW_ADDRESS',
               success: false,
@@ -1268,7 +1281,7 @@ if (isInServiceWorker) {
             });
             return true;
           }
-          (globalThis as any).__generatingAddress = true;
+          (globalThis as { __generatingAddress?: boolean }).__generatingAddress = true;
           startupInitPromise.then(async () => {
             try {
               if (!accountContext) {
@@ -1304,7 +1317,7 @@ if (isInServiceWorker) {
                 error: error instanceof Error ? error.message : String(error),
               });
             } finally {
-              (globalThis as any).__generatingAddress = false;
+              (globalThis as { __generatingAddress?: boolean }).__generatingAddress = false;
             }
           });
           return true;
@@ -1759,8 +1772,11 @@ if (isInServiceWorker) {
 
   // PERMISSIONS MANAGEMENT HANDLERS ********************************
 
-  // biome-ignore lint/suspicious/noExplicitAny: WPM token shapes vary by type
-  type PermissionToken = any & { type: string; originator: string };
+  // WPM token shapes vary by kind; tag each with the kind it was listed under.
+  type PermissionToken = Parameters<LocalWalletPermissionsManager['revokePermission']>[0] & {
+    type?: string;
+    rawOriginator?: string;
+  };
 
   const processPermissionsListAll = async (sendResponse: CallbackResponse) => {
     try {

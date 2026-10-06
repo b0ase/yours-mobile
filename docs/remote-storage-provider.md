@@ -146,7 +146,7 @@ To make your server appear in the Yours Wallet "Add Provider" picker (so users c
 
 ### 1. Add your entry
 
-Open `src/components/ProviderPicker.tsx` and add to the `KNOWN_PROVIDERS` array:
+Open `src/components/storageProviders.ts` and add to the `KNOWN_PROVIDERS` array:
 
 ```ts
 {

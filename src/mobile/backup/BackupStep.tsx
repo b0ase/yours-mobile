@@ -1,12 +1,27 @@
+import { APP_NAME } from '../storeBuild';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ArrowLeft, Check, Eye, EyeOff, FileLock2, PenLine, ShieldCheck } from 'lucide-react';
-import { accountNamesFor } from '../names/MyNameBadge';
+import { accountNamesFor } from '../names/accountNames';
 import { isAgentAccount } from '../agents/agentAccounts';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import { backupDownloadUrl, createBackupFile, saveBackupFile, saveRoute, WrongPasswordError, type SaveRoute } from './backupFile';
-import { backupCovers, markBackedUp, pickQuizPositions, quizCorrect, type BackupExit, type BackupMethod } from './backupState';
+import {
+  backupDownloadUrl,
+  createBackupFile,
+  saveBackupFile,
+  saveRoute,
+  WrongPasswordError,
+  type SaveRoute,
+} from './backupFile';
+import {
+  backupCovers,
+  markBackedUp,
+  pickQuizPositions,
+  quizCorrect,
+  type BackupExit,
+  type BackupMethod,
+} from './backupState';
 
 type Props = {
   /** How the user may leave without backing up (backupState.backupExit). */
@@ -24,8 +39,7 @@ const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
 const RED = '#FDA29B';
 
-const primary = (enabled = true) =>
-  ({ background: GOLD, color: '#000', opacity: enabled ? 1 : 0.4 }) as const;
+const primary = (enabled = true) => ({ background: GOLD, color: '#000', opacity: enabled ? 1 : 0.4 }) as const;
 
 /**
  * "Back up your wallet" (after create / restore, before Receive, from the Wallet banner).
@@ -177,7 +191,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
         if (password && !busy) onSubmit();
       }}
     >
-      <input type="text" name="username" autoComplete="username" value="bWalletX" readOnly hidden />
+      <input type="text" name="username" autoComplete="username" value={APP_NAME} readOnly hidden />
       <div className="relative w-full">
         <input
           type={show ? 'text' : 'password'}
@@ -223,7 +237,10 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
         {target.name}
       </span>
       {target.agent && (
-        <span className="rounded px-1.5 py-[1px] text-[10px] font-bold" style={{ background: '#7A5AF833', color: '#BDB4FE' }}>
+        <span
+          className="rounded px-1.5 py-[1px] text-[10px] font-bold"
+          style={{ background: '#7A5AF833', color: '#BDB4FE' }}
+        >
           AGENT
         </span>
       )}
@@ -231,7 +248,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
   );
   const passwordNote = (
     <p className="text-xs mt-0 mb-4" style={{ color: MUTED }}>
-      This is your existing wallet password, the one you unlock bWalletX with. It's the same for every account; you
+      This is your existing wallet password, the one you unlock {APP_NAME} with. It's the same for every account; you
       don't make a new one here.
     </p>
   );
@@ -246,8 +263,8 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
           <div className="flex items-start gap-3 rounded-xl p-3 mt-2" style={{ background: '#2A1215' }}>
             <AlertTriangle size={20} color={RED} className="shrink-0 mt-0.5" />
             <p className="text-sm m-0" style={{ color: '#FECDCA' }}>
-              This wallet lives only in {where}. If {web ? 'the browser clears its data' : 'you lose this device'},
-              the money is gone unless you have a backup.{web ? ' You need one before you can receive money.' : ''}
+              This wallet lives only in {where}. If {web ? 'the browser clears its data' : 'you lose this device'}, the
+              money is gone unless you have a backup.{web ? ' You need one before you can receive money.' : ''}
             </p>
           </div>
           <button
@@ -260,9 +277,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
               <span className="block font-bold text-white">Save an encrypted backup</span>
               <span className="block text-sm mt-1" style={{ color: MUTED }}>
                 A file locked with your wallet password (the one you unlock with).{' '}
-                {others > 0
-                  ? `It holds all ${others + 1} accounts in this wallet, including ${target.name}. `
-                  : ''}
+                {others > 0 ? `It holds all ${others + 1} accounts in this wallet, including ${target.name}. ` : ''}
                 Save it to Files, email it to yourself or AirDrop it. Keep the password too: the file can't be opened
                 without it.
               </span>
@@ -277,8 +292,9 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
             <span>
               <span className="block font-bold text-white">Write down the recovery phrase</span>
               <span className="block text-sm mt-1" style={{ color: MUTED }}>
-                {others > 0 ? `${target.name}'s own 12 words` : '12 words'} on paper restore{others > 0 ? ' this account' : ' this wallet'} anywhere, no password needed. Anyone with them can take the
-                money, so keep them private.
+                {others > 0 ? `${target.name}'s own 12 words` : '12 words'} on paper restore
+                {others > 0 ? ' this account' : ' this wallet'} anywhere, no password needed. Anyone with them can take
+                the money, so keep them private.
               </span>
             </span>
           </button>
@@ -370,7 +386,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
                   ? 'Tap Save, then choose Save to Files, Mail (send it to yourself) or AirDrop. Somewhere off this phone is best.'
                   : 'Tap Save to download the file. Keep a copy somewhere other than this device.'}
               </p>
-              <button onClick={() => void saveFile()} className="mt-5 w-full rounded-xl py-3 font-bold border-0" style={primary()}>
+              <button
+                onClick={() => void saveFile()}
+                className="mt-5 w-full rounded-xl py-3 font-bold border-0"
+                style={primary()}
+              >
                 {savedOnce ? 'Save another copy' : 'Save backup file'}
               </button>
               {error && (
@@ -443,7 +463,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
               </li>
             ))}
           </ol>
-          <button onClick={() => setPage('quiz')} className="mt-6 w-full rounded-xl py-3 font-bold border-0" style={primary()}>
+          <button
+            onClick={() => setPage('quiz')}
+            className="mt-6 w-full rounded-xl py-3 font-bold border-0"
+            style={primary()}
+          >
             I've written them down
           </button>
         </div>
@@ -520,7 +544,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
               ? 'Keep the phrase or backup you restored from safe and private. It restores this wallet on any device.'
               : 'Keep the paper safe and private. Those words restore this wallet on any device.'}
         </p>
-        <button onClick={() => onComplete(method)} className="mt-8 w-full rounded-xl py-3 font-bold border-0" style={primary()}>
+        <button
+          onClick={() => onComplete(method)}
+          className="mt-8 w-full rounded-xl py-3 font-bold border-0"
+          style={primary()}
+        >
           <Check size={16} className="inline mr-1" /> Continue
         </button>
       </div>

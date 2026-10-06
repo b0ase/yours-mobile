@@ -15,13 +15,12 @@ import {
   OP,
   PrivateKey,
   PublicKey,
-  Script,
   Transaction,
   TransactionSignature,
   UnlockingScript,
   Utils,
 } from '@bsv/sdk';
-import type { MneeClient, MneeConfig, MneeUtxo } from '@1sat/client';
+import type { MneeClient, MneeConfig } from '@1sat/client';
 
 // ─── Cosign tx helpers (mirrored from @1sat/actions/mnee) ────
 

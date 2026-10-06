@@ -15,7 +15,7 @@ import { sleep } from '../utils/sleep';
 import { TopNav } from '../components/TopNav';
 import { getErrorMessage } from '../utils/tools';
 import { useIntersectionObserver } from '../hooks/useIntersectObserver';
-import { getTagValue, getOutputName, hasTag, resolveOriginOutpoint } from '../utils/format';
+import { getTagValue, getOutputName, resolveOriginOutpoint } from '../utils/format';
 import { cancelOwnedOrdLockListings, ORDLOCK_LISTING_DISABLED_MESSAGE } from '../utils/cancelOrdLockListings';
 
 type Addresses = Record<string, string>;
@@ -315,7 +315,6 @@ export const OrdWallet = () => {
     if (!successTxId) return;
     resetSendState();
     setPageState('main');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [successTxId, message]);
 
   useEffect(() => {

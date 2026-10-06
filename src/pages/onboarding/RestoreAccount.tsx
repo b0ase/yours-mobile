@@ -22,7 +22,6 @@ import { sleep } from '../../utils/sleep';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { SupportedWalletImports } from '../../services/types/keys.types';
 import { SettingsPage } from '../Settings';
-import { YoursIcon } from '../../components/YoursIcon';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 
 export type RestoreAccountProps = {
@@ -57,7 +56,7 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
   const hiddenYoursFileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    newWallet && hideMenu();
+    if (newWallet) hideMenu();
     return () => {
       showMenu();
     };
@@ -97,6 +96,10 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
     try {
       event.preventDefault();
       setLoading(true);
+      // Stage timings (owner, 6 Oct 2026: a restore took ~50 s).
+      const t0 = Date.now();
+      const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+
       if (password.length < 8) {
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');
         return;
@@ -122,12 +125,15 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
         return;
       }
 
+      console.log('[restore] keys stored at', at());
       const chromeObject = await chromeStorageService.getAndSetStorage();
       if (!chromeObject?.accounts) throw new Error('No accounts found!');
       const objKeys = Object.keys(chromeObject.accounts);
       if (!objKeys) throw new Error('Object identity address not found');
       await chromeStorageService.switchAccount(keys.identityAddress);
+      console.log('[restore] wallet started at', at());
       await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);
+      console.log('[restore] done at', at());
 
       setStep(4);
     } catch (error) {
@@ -141,7 +147,8 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
   const handleWalletSelection = (wallet?: SupportedWalletImports) => {
     setImportWallet(wallet);
     if (wallet === 'wif') {
-      newWallet ? navigate('/import-wallet') : onNavigateBack('import-wif');
+      if (newWallet) navigate('/import-wallet');
+      else onNavigateBack('import-wif');
       return;
     }
     if (newWallet && wallet === 'master') {
@@ -178,7 +185,6 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
   };
 
   const accentLeft = theme.color.component.primaryButtonLeftGradient;
-  const accentRight = theme.color.component.primaryButtonRightGradient;
   const contrast = theme.color.global.contrast;
   const gray = theme.color.global.gray;
   const row = theme.color.global.row;

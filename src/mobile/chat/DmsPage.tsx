@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ComponentType, type Rea
 import { createPortal } from 'react-dom';
 import { MessageCircle, Plus, Search, Users, WifiOff, X } from 'lucide-react';
 import { isBlocked, onUgcChange } from '../ugc/ugc';
-import { syncBlocks } from '../ugc/UserSafety';
+import { syncBlocks } from '../ugc/blocks';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
@@ -11,11 +11,12 @@ import { PullToRefresh } from '../ui/PullToRefresh';
 import { SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { loadFollows } from '../feed/store';
 import { getFriends, onFriends, refreshFriends } from '../calls/friends';
-import { onDmRequest, takeDmRequest } from './segmentNav';
+import { onDmRequest, onRoomTicker, takeDmRequest, takeRoomTicker } from './segmentNav';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from './api';
 import { walletSigner } from './signer';
 import { listTimeLabel, previewText, roomTitle, type ChatRoom } from './messages';
-import { Avatar, ContactRow, SOURCES_NOTE, SourceBadges } from './ContactViews';
+import { Avatar, ContactRow, SourceBadges } from './ContactViews';
+import { SOURCES_NOTE } from './contactSources';
 import {
   canMessage,
   contactLine,
@@ -238,6 +239,27 @@ export const DmsPage = ({
     };
     take();
     return onDmRequest(take);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle]);
+
+  // A tapped push notification (src/mobile/push): open this DM by its room ticker.
+  useEffect(() => {
+    if (!handle) return;
+    const take = () => {
+      const t = takeRoomTicker(true);
+      if (!t) return;
+      void client
+        .rooms()
+        .then((all) => {
+          setRooms(all);
+          setOpen(all.find((r) => r.ticker.toUpperCase() === t) ?? { id: t, ticker: t, name: null });
+        })
+        .catch((e) => {
+          if (e instanceof ChatApiError && e.status === 401) authLost();
+        });
+    };
+    take();
+    return onRoomTicker(take);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 

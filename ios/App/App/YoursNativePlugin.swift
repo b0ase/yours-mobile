@@ -38,7 +38,8 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "browserRespond", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "audioSetSpeaker", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pushEnv", returnType: CAPPluginReturnPromise)
     ]
 
     private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
@@ -127,6 +128,15 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
             if #available(iOS 17.0, *), context.biometryType == .opticID { return "opticId" }
             return "none"
         }
+    }
+
+    /// APNs gateway this build's token belongs to: Debug builds (Xcode Run, INSTALL=1) get sandbox tokens.
+    @objc func pushEnv(_ call: CAPPluginCall) {
+        #if DEBUG
+        call.resolve(["env": "sandbox"])
+        #else
+        call.resolve(["env": "production"])
+        #endif
     }
 
     @objc func biometricStatus(_ call: CAPPluginCall) {

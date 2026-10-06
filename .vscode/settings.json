@@ -2,15 +2,15 @@
   "editor.codeActionsOnSave": {
     "source.organizeImports": "never"
   },
-  "peacock.color": "#32CD32",
+  "peacock.color": "#F5B800",
   "workbench.colorCustomizations": {
-    "activityBar.background": "#5AF55A",
+    "activityBar.background": "#FFE028",
     "activityBar.foreground": "#15202b",
-    "activityBarBadge.background": "#CD3232",
-    "activityBarBadge.foreground": "#e7e7e7",
-    "statusBar.background": "#32CD32",
+    "activityBarBadge.background": "#00B8F5",
+    "activityBarBadge.foreground": "#15202b",
+    "statusBar.background": "#F5B800",
     "statusBar.foreground": "#15202b",
-    "titleBar.activeBackground": "#32CD32",
+    "titleBar.activeBackground": "#F5B800",
     "titleBar.activeForeground": "#15202b"
   }
 }

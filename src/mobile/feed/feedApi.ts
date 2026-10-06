@@ -2,11 +2,23 @@ import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, LOCK_BASKET, type On
 import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
+import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
+import {
+  parseOverlayAny,
+  parsePeckBody,
+  parsePeckFeed,
+  parseTreechatOverlayFeed,
+  PECK_OVERLAY,
+  PECK_READ_APPS,
+  TREECHAT_OVERLAY_APP,
+} from './peck';
+import { buildTreechatTree, treechatThreadIdFromRawTx } from './treechat';
 import { cutoff, readCache, writeCache, type LeaderboardData, type Timeframe } from './leaderboard';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
 import {
   ancestorChain,
   groupThread,
+  isTxid,
   mergePosts,
   parseBmapFeed,
   parseBmapPost,
@@ -27,6 +39,23 @@ import {
 declare const __FEED_API__: string | undefined;
 export const FEED_API =
   (typeof __FEED_API__ === 'string' && __FEED_API__.trim()) || 'https://bmap-api-production.up.railway.app';
+
+/**
+ * bWalletX's own indexer (bitcoin-corp/bwalletx-indexer): bChat posts (MAP app=bChat and the
+ * legacy ids) in the bmap response shape, since bmap stopped indexing in April 2026.
+ */
+declare const __BCHAT_FEED_API__: string | undefined;
+export const BCHAT_FEED_API =
+  (typeof __BCHAT_FEED_API__ === 'string' && __BCHAT_FEED_API__.trim()) || 'https://push.bwalletx.com/feed';
+
+/** Recent bChat posts from bWalletX's own indexer. */
+export async function fetchBchatRecent(page = 1, limit = 30): Promise<FeedPost[]> {
+  const res = await fetch(`${BCHAT_FEED_API}/social/feed?page=${page}&limit=${limit}`, {
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`bChat feed error (${res.status})`);
+  return parseBmapFeed(await res.json());
+}
 
 const get = async (path: string): Promise<unknown> => {
   const res = await fetch(`${FEED_API}${path}`, { signal: AbortSignal.timeout(15_000) });
@@ -59,6 +88,167 @@ export const fetchTwetch = async (limit = 60): Promise<FeedPost[]> => {
   if (!res.ok) throw new Error(`Twetch error (${res.status})`);
   return parseTwetchFeed(await res.json(), twetchAddress);
 };
+
+/** Recent Peck (peck.to) posts from its public overlay — current to the chain tip. */
+export const fetchPeck = async (limit = 40, offset = 0): Promise<FeedPost[]> =>
+  parsePeckFeed(await peckGet(`/v1/feed?app=${encodeURIComponent(PECK_READ_APPS[0])}&limit=${limit}&offset=${offset}`));
+
+const peckGet = async (path: string): Promise<unknown> => {
+  const res = await fetch(`${PECK_OVERLAY}${path}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Peck error (${res.status})`);
+  return parsePeckBody(await res.text());
+};
+
+/** One Peck or Treechat post by txid from the overlay (bmap stopped indexing in April 2026). */
+export const fetchPeckPost = async (txid: string): Promise<FeedPost | null> =>
+  !isTxid(txid) ? null : parseOverlayAny(((await peckGet(`/v1/post/${txid}`)) as { data?: unknown })?.data);
+
+/**
+ * Recent Treechat posts from the overlay (bmap, the old source, stopped at block ~944922), with
+ * thread ids filled in for the app.treechat.com link.
+ */
+export const fetchTreechat = async (limit = 40, offset = 0): Promise<FeedPost[]> =>
+  withTreechatThreadIds(
+    parseTreechatOverlayFeed(await peckGet(`/v1/feed?app=${TREECHAT_OVERLAY_APP}&limit=${limit}&offset=${offset}`)),
+  );
+
+const treechatOverlayReplies = async (txid: string): Promise<FeedPost[]> =>
+  !isTxid(txid)
+    ? []
+    : parseTreechatOverlayFeed({ data: ((await peckGet(`/v1/thread/${txid}`)) as { replies?: unknown })?.replies });
+
+// Treechat thread ids (MAP treechat_thread_id): the overlay omits them, so read the raw tx
+// (treechat.ts checks it hashes to the txid). A mined tx never changes; misses are retried.
+const treechatThreadIds = new Map<string, string | null>();
+
+async function fetchThreadIds(txids: string[]): Promise<void> {
+  const todo = [...new Set(txids)].filter((t) => isTxid(t) && !treechatThreadIds.has(t)).slice(0, 60);
+  if (!todo.length) return;
+  if (treechatThreadIds.size > 20_000) treechatThreadIds.clear();
+  const found = new Map<string, string>();
+  for (let i = 0; i < todo.length; i += 20) {
+    try {
+      const res = await fetch(`${WOC}/txs/hex`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ txids: todo.slice(i, i + 20) }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      const rows: unknown = res.ok ? await res.json() : [];
+      for (const r of Array.isArray(rows) ? rows : []) {
+        const { txid, hex } = (r ?? {}) as { txid?: unknown; hex?: unknown };
+        if (typeof txid === 'string' && typeof hex === 'string') found.set(txid.toLowerCase(), hex);
+      }
+    } catch {
+      /* singles below */
+    }
+  }
+  // Unconfirmed txs are not in the bulk endpoint: a few, one at a time.
+  await Promise.all(
+    todo
+      .filter((t) => !found.has(t))
+      .slice(0, 6)
+      .map(async (t) => {
+        try {
+          const res = await fetch(`${WOC}/tx/${t}/hex`, { signal: AbortSignal.timeout(6_000) });
+          const hex = res.ok ? (await res.text()).trim() : '';
+          if (hex) found.set(t, hex);
+        } catch {
+          /* next read */
+        }
+      }),
+  );
+  for (const [t, hex] of found) treechatThreadIds.set(t, treechatThreadIdFromRawTx(hex, t));
+}
+
+/** Fill `threadId` on Treechat posts that lack it. Best effort: a failure leaves it null. */
+export async function withTreechatThreadIds(posts: FeedPost[]): Promise<FeedPost[]> {
+  const need = posts.filter((p) => p.source === 'treechat' && !p.threadId).map((p) => p.txid);
+  if (!need.length) return posts;
+  await fetchThreadIds(need).catch(() => undefined);
+  return posts.map((p) => {
+    const id = p.source === 'treechat' && !p.threadId ? treechatThreadIds.get(p.txid) : null;
+    return id ? { ...p, threadId: id } : p;
+  });
+}
+
+// ── Fwetch (fwetch.lol): read from its API; tips only to signatures we verified ourselves ──
+const fwetchVerified = new Map<string, string | null>();
+
+const fwetchGet = async (path: string): Promise<unknown> => {
+  const res = await fetch(`${FWETCH_API}${path}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Fwetch error (${res.status})`);
+  return res.json();
+};
+
+/** txid → author address, from the post's own pub/sig in its raw tx (never the API's signer_addr). */
+async function fwetchVerify(items: unknown[]): Promise<Map<string, string>> {
+  const ids = items
+    .map((i) => (i && typeof i === 'object' ? (i as Record<string, unknown>) : {}))
+    .filter((i) => Number(i.anon) !== 1 && !i.hidden && typeof i.txid === 'string' && isTxid(i.txid))
+    .map((i) => (i.txid as string).toLowerCase());
+  // Fwetch's rawtx endpoint 404s under parallel load: a few at a time, WhatsOnChain as fallback,
+  // within a time budget. Trust is the same either way: the bytes must hash to the txid.
+  const todo = [...new Set(ids)].filter((t) => !fwetchVerified.has(t));
+  const one = async (txid: string) => {
+    const hex = await fwetchRawTx(txid);
+    if (hex === null) return; // unverified this time: shown, not payable
+    if (fwetchVerified.size > 2_000) fwetchVerified.clear();
+    fwetchVerified.set(txid, await verifyFwetchTx(hex, txid));
+  };
+  const deadline = Date.now() + 8_000;
+  for (let i = 0; i < todo.length && Date.now() < deadline; i += 4) await Promise.all(todo.slice(i, i + 4).map(one));
+  const out = new Map<string, string>();
+  for (const t of ids) {
+    const a = fwetchVerified.get(t);
+    if (a) out.set(t, a);
+  }
+  return out;
+}
+
+async function fwetchRawTx(txid: string): Promise<string | null> {
+  try {
+    const r = (await fwetchGet(`/api/rawtx/${txid}`)) as { hex?: unknown };
+    if (typeof r?.hex === 'string') return r.hex;
+  } catch {
+    /* fall back */
+  }
+  try {
+    const res = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    const hex = res.ok ? (await res.text()).trim() : '';
+    return /^[0-9a-f]+$/i.test(hex) ? hex : null;
+  } catch {
+    return null;
+  }
+}
+
+const listOf = (b: unknown, k: string): unknown[] => {
+  const v = b && typeof b === 'object' ? (b as Record<string, unknown>)[k] : null;
+  return Array.isArray(v) ? v : [];
+};
+
+/** Recent Fwetch posts (scope:'local' included; Fwetch-hidden posts dropped). */
+export const fetchFwetch = async (limit = 40, offset = 0): Promise<FeedPost[]> => {
+  const items = listOf(
+    await fwetchGet(`/api/feed?app=fwetch&board=all&sort=new&limit=${limit}&offset=${offset}`),
+    'posts',
+  );
+  return parseFwetchFeed({ posts: items }, await fwetchVerify(items));
+};
+
+async function fetchFwetchThread(txid: string): Promise<{ post: FeedPost | null; replies: FeedPost[] }> {
+  const b = await fwetchGet(`/api/post/${txid}`);
+  const post = (b as { post?: unknown })?.post;
+  const replies = listOf(b, 'replies');
+  const v = await fwetchVerify([post, ...replies]);
+  return { post: parseFwetchItem(post, v), replies: parseFwetchFeed({ posts: replies }, v) };
+}
+
+/** One Fwetch post by txid. */
+export const fetchFwetchPost = async (txid: string): Promise<FeedPost | null> =>
+  !isTxid(txid) ? null : (await fetchFwetchThread(txid)).post;
 
 function twetchAddress(pk: string): string {
   return PublicKey.fromString(pk).toAddress();
@@ -97,7 +287,14 @@ export const fetchBmapPost = async (txid: string): Promise<FeedPost | null> => {
 };
 
 const fetchParent = (ref: ParentRef): Promise<FeedPost | null> =>
-  ref.twetchId ? fetchTwetchPost(ref.twetchId) : ref.txid ? fetchBmapPost(ref.txid) : Promise.resolve(null);
+  ref.twetchId
+    ? fetchTwetchPost(ref.twetchId)
+    : ref.txid
+      ? fetchBmapPost(ref.txid)
+          .catch(() => null)
+          .then((p) => p ?? (isTxid(ref.txid) ? fetchPeckPost(ref.txid!).catch(() => null) : null))
+          .then((p) => p ?? (isTxid(ref.txid) ? fetchFwetchPost(ref.txid!).catch(() => null) : null))
+      : Promise.resolve(null);
 
 /**
  * The canonical chain above a post: what it replies to (or quotes / branches), up to the root,
@@ -105,21 +302,66 @@ const fetchParent = (ref: ParentRef): Promise<FeedPost | null> =>
  */
 export const fetchAncestors = (post: FeedPost): Promise<FeedPost[]> => ancestorChain(post, fetchParent);
 
-/** For you: network-wide recent posts plus a slice of Twetch. Twetch failing never blanks the feed. */
+/**
+ * For you: network-wide recent posts plus bChat's own indexer and a slice of Twetch (deduped by
+ * txid, newest first). Twetch or the bChat indexer failing never blanks the feed.
+ */
 export async function fetchForYou(): Promise<FeedPost[]> {
-  const [recent, twetch] = await Promise.allSettled([fetchRecent(), fetchTwetch()]);
-  if (recent.status === 'rejected') throw recent.reason;
-  return mergePosts(recent.value, twetch.status === 'fulfilled' ? twetch.value : []);
+  const [recent, bchat, twetch, peck, fwetch, treechat] = await Promise.allSettled([
+    fetchRecent(),
+    fetchBchatRecent(),
+    fetchTwetch(),
+    fetchPeck(),
+    fetchFwetch(),
+    fetchTreechat(),
+  ]);
+  const extra = (r: PromiseSettledResult<FeedPost[]>) => (r.status === 'fulfilled' ? r.value : []);
+  const tc = extra(treechat);
+  if (recent.status === 'rejected') {
+    if (bchat.status === 'fulfilled' && bchat.value.length)
+      return mergePosts(bchat.value, extra(twetch), extra(peck), extra(fwetch), tc);
+    if (tc.length) return mergePosts(tc, extra(twetch), extra(peck), extra(fwetch));
+    throw recent.reason;
+  }
+  // bmap's Treechat posts are months old (it stopped at block ~944922): the overlay replaces
+  // them while it answers.
+  const bmap = tc.length ? recent.value.filter((p) => p.source !== 'treechat') : recent.value;
+  return mergePosts(bmap, extra(bchat), extra(twetch), extra(peck), extra(fwetch), tc);
 }
 
 /**
- * A whole thread. Treechat: the root post + its replies (Treechat points every reply's MAP tx
- * at the root), plus a text search for the thread id (bmap has no index on
- * MAP.treechat_thread_id, so a direct query times out) filtered to exact matches.
- * Others: the post's direct replies. Each source is optional; whatever loads is shown.
+ * A whole thread. Treechat: the conversation tree from the overlay (treechat.ts — parent_txid
+ * chains walked up to the root and down through /v1/thread), with bmap's old threads (every
+ * reply pointed MAP tx at the root, plus a text search for the thread id) merged in; oldest
+ * first. Others: the post's direct replies. Each source is optional; whatever loads is shown.
  */
 export async function fetchThread(post: FeedPost): Promise<FeedPost[]> {
   if (post.source === 'twetch' && post.twetchId) return [post, ...(await fetchTwetchReplies(post.twetchId))];
+  if (post.source === 'treechat' && isTxid(post.txid)) {
+    const tree = await buildTreechatTree(post, {
+      post: async (t) => (await fetchPeckPost(t).catch(() => null)) ?? fetchBmapPost(t).catch(() => null),
+      replies: treechatOverlayReplies,
+      extra: async (t) => {
+        const jobs: Promise<FeedPost[]>[] = [fetchReplies(t)];
+        if (post.threadId && t === post.txid)
+          jobs.push(get(`/social/post/search?q=${encodeURIComponent(post.threadId)}&limit=100`).then(parseBmapFeed));
+        const got = await Promise.allSettled(jobs);
+        const all = got.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+        return post.threadId && t === post.txid ? groupThread(post, all) : all;
+      },
+    });
+    return (await withTreechatThreadIds(tree.posts)).sort((a, b) => a.at - b.at);
+  }
+  if (post.source === 'peck' && isTxid(post.txid)) {
+    const replies = await peckGet(`/v1/thread/${post.txid}`)
+      .then((b) => parsePeckFeed({ data: (b as { replies?: unknown })?.replies }))
+      .catch(() => [] as FeedPost[]);
+    return [post, ...replies.sort((a, b) => a.at - b.at)];
+  }
+  if (post.source === 'fwetch' && isTxid(post.txid)) {
+    const { replies } = await fetchFwetchThread(post.txid).catch(() => ({ replies: [] as FeedPost[] }));
+    return [post, ...replies.sort((a, b) => a.at - b.at)];
+  }
   const root = threadRoot(post);
   const jobs: Promise<FeedPost[]>[] = [fetchReplies(root)];
   if (root !== post.txid)
@@ -157,24 +399,102 @@ export async function fetchFollowing(follows: { bapId: string | null; address: s
  * OP_RETURN output through the wallet (normal approval rules apply). Hands the raw tx to the
  * indexer so the post shows up without waiting for a block.
  */
+/** The wallet has no posting identity yet (no published BAP ID to sign with). */
+export class NoPostingIdentityError extends Error {
+  constructor() {
+    super('Set up your posting profile first.');
+    this.name = 'NoPostingIdentityError';
+  }
+}
+
+export const isNoIdentityError = (e: unknown) => /No BAP identity/i.test(e instanceof Error ? e.message : String(e));
+
+/**
+ * Who sets up a missing posting identity inline. The feed screen registers one that shows the
+ * one-tap setup sheet and resolves true once it is published (false when the person cancels).
+ */
+let identitySetup: (() => Promise<boolean>) | null = null;
+export const setIdentitySetupHandler = (fn: (() => Promise<boolean>) | null) => {
+  identitySetup = fn;
+};
+
+/** Sign with the identity key; with none yet, ask the registered handler to set one up, then sign. */
+export async function signWithIdentity(
+  sign: () => Promise<Script>,
+  setup: (() => Promise<boolean>) | null = identitySetup,
+): Promise<Script | null> {
+  try {
+    return await sign();
+  } catch (e) {
+    if (!isNoIdentityError(e)) throw e;
+    if (!setup) throw new NoPostingIdentityError();
+    if (!(await setup())) return null;
+    return sign();
+  }
+}
+
+/** Thrown by publish() when the person declined to set up their identity: nothing was posted. */
+export class PostCancelledError extends Error {
+  constructor() {
+    super('Not posted.');
+    this.name = 'PostCancelledError';
+  }
+}
+
 export async function publish(
   ctx: OneSatContext,
   script: Script,
   description: string,
   tags: string[],
+  /**
+   * A tip / paid like's payment to the post's author (tip.ts planPayment): the output right after
+   * the OP_RETURN, in the same transaction (BCHAT-PROTOCOL-v2 §5).
+   */
+  payment?: {
+    address: string;
+    satoshis: number;
+    lockingScript: Script;
+    /** Optional client fee (spec §6.1): its own output right after the author's. */
+    fee?: { address: string; satoshis: number; lockingScript: Script };
+    /** Optional home app share (spec §6.2): its own output after the fee (if any). */
+    home?: { address: string; satoshis: number; lockingScript: Script; app?: string };
+  },
 ): Promise<string> {
-  let signed: Script;
-  try {
-    signed = await applyBapAip(ctx, script);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    if (/No BAP identity/i.test(m)) throw new Error('Publish your identity first (Settings → Identity), then post.');
-    throw e;
-  }
+  const signed = await signWithIdentity(() => applyBapAip(ctx, script));
+  if (!signed) throw new PostCancelledError();
   const res = await executeTrackedAction(ctx.wallet, {
     description,
     outputs: [
       { lockingScript: signed.toHex(), satoshis: 0, outputDescription: description, basket: BSOCIAL_BASKET, tags },
+      ...(payment
+        ? [
+            {
+              lockingScript: payment.lockingScript.toHex(),
+              satoshis: payment.satoshis,
+              // ≤ 50 bytes (BRC-100); shown on the spending approval.
+              outputDescription: `Pay author ${payment.address}`,
+            },
+          ]
+        : []),
+      ...(payment?.fee
+        ? [
+            {
+              lockingScript: payment.fee.lockingScript.toHex(),
+              satoshis: payment.fee.satoshis,
+              outputDescription: `App fee ${payment.fee.address}`,
+            },
+          ]
+        : []),
+      ...(payment?.home
+        ? [
+            {
+              lockingScript: payment.home.lockingScript.toHex(),
+              satoshis: payment.home.satoshis,
+              // ≤ 50 bytes (BRC-100); shown on the spending approval.
+              outputDescription: `Home app ${payment.home.address}`,
+            },
+          ]
+        : []),
     ],
     options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
   });
@@ -191,12 +511,17 @@ async function ingest(tx: number[]) {
     } catch {
       rawTx = Utils.toHex(tx);
     }
-    await fetch(`${FEED_API}/ingest`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rawTx }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const body = JSON.stringify({ rawTx });
+    await Promise.allSettled(
+      [FEED_API, BCHAT_FEED_API].map((base) =>
+        fetch(`${base}/ingest`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+          signal: AbortSignal.timeout(10_000),
+        }),
+      ),
+    );
   } catch {
     // best effort: the indexer also picks it up from the chain
   }

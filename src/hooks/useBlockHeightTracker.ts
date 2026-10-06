@@ -24,7 +24,6 @@ export const useBlockHeightTracker = () => {
 
     // Listen for messages from the background script
     chrome.runtime.onMessage.addListener(handleBlockHeightUpdate);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { percentCompleted, showSyncPage };

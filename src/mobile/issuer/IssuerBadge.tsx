@@ -1,23 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useIssuer } from './useIssuer';
 import { BadgeCheck, ShieldQuestion, TriangleAlert } from 'lucide-react';
-import { cachedIssuer, issuerLabel, verifyIssuer, type IssuerInfo } from './issuerVerify';
-
-/** The issuer of `tokenId` (cached; verifies in the background). */
-export function useIssuer(tokenId: string | null | undefined): IssuerInfo | null {
-  const [info, setInfo] = useState<IssuerInfo | null>(() => (tokenId ? cachedIssuer(tokenId) : null));
-  useEffect(() => {
-    if (!tokenId) return setInfo(null);
-    let live = true;
-    setInfo(cachedIssuer(tokenId));
-    verifyIssuer(tokenId)
-      .then((i) => live && setInfo(i))
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [tokenId]);
-  return info;
-}
+import { issuerLabel } from './issuerVerify';
 
 const GOLD = '#d4af37';
 const GREY = '#8a8a8a';

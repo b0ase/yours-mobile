@@ -1,3 +1,4 @@
+import { APP_NAME } from '../storeBuild';
 import { useState } from 'react';
 import { Terminal } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -130,7 +131,7 @@ export const CliPairConfirm = ({
               {describeMintLimits(limits)}
             </p>
             <p className="mt-1 mb-0 text-xs" style={{ color: MUTED }}>
-              Network fees plus the 1% bWalletX mint fee count toward it. Each mint is checked against what’s left
+              Network fees plus the 1% {APP_NAME} mint fee count toward it. Each mint is checked against what’s left
               before it is signed.
             </p>
           </div>
@@ -157,8 +158,8 @@ export const CliPairConfirm = ({
         ))}
       </div>
       <p className="mt-4 text-xs" style={{ color: MUTED }}>
-        Your keys stay on this phone: the computer asks, bWalletX checks and signs. Keep bWalletX open on this account
-        while it works. Disconnect any time in Settings › Paired websites.
+        Your keys stay on this phone: the computer asks, {APP_NAME} checks and signs. Keep {APP_NAME} open on this
+        account while it works. Disconnect any time in Settings › Paired websites.
       </p>
       <div className="mt-6 flex w-full gap-3">
         <button

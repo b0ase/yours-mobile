@@ -3,8 +3,6 @@ import { Phone } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { onTokenNav } from '../chat/nav';
 import { onChatSegment, takeChatSegment } from '../chat/segmentNav';
-import { useServiceContext } from '../../hooks/useServiceContext';
-import { useAccountNames } from '../names/MyNameBadge';
 
 /**
  * Chat tab top switch: Chatrooms | DMs | Calls (Feed is its own bottom-bar tab). Generic: add a
@@ -13,7 +11,7 @@ import { useAccountNames } from '../names/MyNameBadge';
  * we pass it.
  */
 export type ChatSegment = 'rooms' | 'dms' | 'calls';
-export const SEGMENTS: { id: ChatSegment; label: string }[] = [
+const SEGMENTS: { id: ChatSegment; label: string }[] = [
   { id: 'rooms', label: 'Chatrooms' },
   { id: 'dms', label: 'DMs' },
   { id: 'calls', label: 'Calls' },
@@ -78,21 +76,6 @@ export const SegmentTitle = ({ title, children }: { title: string; children?: Re
     <div className="flex items-center gap-1">{children}</div>
   </div>
 );
-
-/**
- * The current account's display name (BAP profile name, else account name), the same name the
- * top bar shows. Chat shows it first and the bChat $handle second, so one account has one name.
- */
-export const useChatDisplayName = () => {
-  const { chromeStorageService } = useServiceContext();
-  const acct = chromeStorageService.getCurrentAccountObject().account;
-  return useAccountNames(
-    acct?.addresses.identityAddress,
-    acct?.name ?? '',
-    acct?.settings?.socialProfile?.displayName ?? '',
-    false,
-  ).displayName;
-};
 
 /** The Calls segment: same top bar + switch, then its body. */
 const SegmentShell = ({ header, children }: { header: ReactNode; children: ReactNode }) => (

@@ -5,6 +5,12 @@ import { readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
 
+// The app's name in build-time text patches: bWallet in a store build, bWalletX otherwise (src/mobile/storeBuild.ts).
+const STORE_APP_NAME =
+  process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '')
+    ? 'bWallet'
+    : 'bWalletX';
+
 // BWALLET_* build settings (fee addresses etc.) may live in a gitignored .env.local; the shell wins.
 for (const [k, v] of Object.entries(loadEnv(process.env.NODE_ENV ?? 'production', __dirname, 'BWALLET_'))) {
   process.env[k] ??= v;
@@ -172,7 +178,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // (src/mobile/names/PasswordFields.tsx; iOS webcredentials:www.bwallet.space).
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { PasswordFields, saveWalletPassword } from '../../mobile/names/PasswordFields';",
+      "import { useNavigate } from 'react-router-dom';\nimport { PasswordFields } from '../../mobile/names/PasswordFields';\nimport { saveWalletPassword } from '../../mobile/names/walletPassword';",
     ],
     [
       '        <Input\n          theme={theme}\n          placeholder="Password"\n          type="password"\n          value={password}\n          onChange={(e) => setPassword(e.target.value)}\n        />\n        <Show when={newWallet}>\n          <Input\n            theme={theme}\n            placeholder="Confirm password"\n            type="password"\n            value={passwordConfirm}\n            onChange={(e) => setPasswordConfirm(e.target.value)}\n          />\n        </Show>',
@@ -205,16 +211,16 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}",
-      "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter the password you unlock bWalletX with (one password for all your accounts). Next you will get this account\\'s own 12-word recovery phrase.'}",
+      `{newWallet ? 'This will be used to unlock your wallet.' : 'Enter the password you unlock ${STORE_APP_NAME} with (one password for all your accounts). Next you will get this account\\'s own 12-word recovery phrase.'}`,
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { isAgentCreatePending } from '../../mobile/agents/AgentAccountToggle';",
+      "import { useNavigate } from 'react-router-dom';\nimport { isAgentCreatePending } from '../../mobile/agents/agentCreate';",
     ],
     // Agent account switch on Add account (src/mobile/agents, docs/SMART-WALLET-SPEC.md §1).
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { AgentAccountToggle, consumeAgentCreate } from '../../mobile/agents/AgentAccountToggle';",
+      "import { useNavigate } from 'react-router-dom';\nimport { AgentAccountToggle } from '../../mobile/agents/AgentAccountToggle';\nimport { consumeAgentCreate } from '../../mobile/agents/agentCreate';",
     ],
     [
       "        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",
@@ -273,7 +279,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,',
-      "      const nameMismatch = await checkRestoreMatchesName(seedWords, walletDerivation, ordDerivation, identityDerivation, importWallet);\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,",
+      "      const nameMismatch = await checkRestoreMatchesName(seedWords, walletDerivation, ordDerivation, identityDerivation, importWallet);\n      console.log('[restore] name check at', at());\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,",
     ],
     // Confirm field also when adding to an existing wallet.
     [
@@ -547,7 +553,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Settings main page: "Settings for: <account> ▾", then "This account" (identity, backup, permissions, names, tokens) and "All accounts (wallet)" (Manage accounts, password, USB key, preferences). Owner, 6 Oct 2026.
     [
       '      {/* Account section */}\n      <Section title="Account">\n        <SettingRow\n          icon={<Users size={16} />}\n          label="Manage Accounts"\n          description="Create, restore, or edit accounts"\n          onClick={() => setPage(\'manage-accounts\')}\n          isFirst\n        />\n        <Divider />\n',
-      '      <SettingsAccountHeader />\n      <SettingsGroup title="This account" note="Each account has its own 12 words, keys, names and tokens." />\n      <Section title="Account">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Identity"\n          description="This account\'s on-chain BAP identity and profile"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Key size={16} />}\n          label="Wallet Backup"\n          description="This account\'s recovery phrase and keys; the encrypted file holds every account"\n          onClick={() => setPage(\'export-keys-options\')}\n        />\n        <Divider />\n',
+      '      <SettingsAccountHeader />\n      <SettingsGroup title="This account" note="Each account has its own 12 words, keys, names and tokens." />\n      <Section title="Account">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Identity"\n          description="Your names, posting profile and verification"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Key size={16} />}\n          label="Wallet Backup"\n          description="This account\'s recovery phrase and keys; the encrypted file holds every account"\n          onClick={() => setPage(\'export-keys-options\')}\n        />\n        <Divider />\n',
     ],
     [
       '          description="Review and revoke connected apps and permissions"',
@@ -558,7 +564,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '      <FeedSettings part="account" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title="All accounts (wallet)" note="One password and these preferences for every account on this device." />\n      <Section title="Wallet">\n        <SettingRow\n          icon={<Users size={16} />}\n          label="Manage Accounts"\n          description="Create, restore, or edit accounts"\n          onClick={() => setPage(\'manage-accounts\')}\n          isFirst\n          isLast={!usbSupported}\n        />',
     ],
     [
-      '      <Section title="Preferences">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Identity"\n          description="On-chain BAP identity and profile"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          description="Default: 100 sat/kb"',
+      '      <Section title="Preferences">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Posting profile"\n          description="Your on-chain name and photo that sign your posts"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          description="Default: 100 sat/kb"',
       '      <Section title="Preferences">\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          isFirst\n          description="All accounts \u00b7 default 100 sat/kb"',
     ],
     [
@@ -594,7 +600,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',
@@ -602,9 +608,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // Media (Wallet › NFTs) now-playing bar, app-wide so audio controls follow every tab.
     // bWallet calls: incoming / in-call screens above every tab (mobile/calls/CallScreen).
+    // Push: device registration + notification taps (mobile/push/PushEngine).
     [
       '<UsbBackupPill />',
-      '<UsbBackupPill />\n<Suspense fallback={null}><ExtensionEdge /></Suspense>\n<Suspense fallback={null}><MiniPlayer /></Suspense>\n<Suspense fallback={null}><CallScreen /></Suspense>\n<Suspense fallback={null}><NotifyEngine /></Suspense>',
+      '<UsbBackupPill />\n<Suspense fallback={null}><ExtensionEdge /></Suspense>\n<Suspense fallback={null}><MiniPlayer /></Suspense>\n<Suspense fallback={null}><CallScreen /></Suspense>\n<Suspense fallback={null}><NotifyEngine /></Suspense>\n<Suspense fallback={null}><PushEngine /></Suspense>\n<Suspense fallback={null}><BappFrameHost /></Suspense>',
     ],
   ],
 };

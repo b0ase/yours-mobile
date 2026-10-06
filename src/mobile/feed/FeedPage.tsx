@@ -32,8 +32,9 @@ import {
   Check,
   Clock,
   Trophy,
+  EyeOff,
 } from 'lucide-react';
-import { inscribe, sendBsv } from '@1sat/actions';
+import { inscribe } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { TopNav } from '../../components/TopNav';
 import { useTheme } from '../../hooks/useTheme';
@@ -53,6 +54,7 @@ import { ReportSheet } from '../ugc/UgcSheets';
 import {
   buildFollowScript,
   buildBranchScript,
+  buildHideScript,
   buildLikeScript,
   buildPostScript,
   quoteText,
@@ -86,6 +88,8 @@ import {
   fetchThread,
   lockToPost,
   publish,
+  PostCancelledError,
+  setIdentitySetupHandler,
 } from './feedApi';
 import {
   BLOCKS_PER_DAY,
@@ -100,6 +104,16 @@ import {
   type PostLock,
 } from './locks';
 import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
+import {
+  homeShareFor,
+  payDestination,
+  planPayment,
+  TIP_MIN_SATS,
+  TIP_PRESETS_SATS,
+  TIP_PRESETS_USD,
+  validateAmount,
+  type PayKind,
+} from './tip';
 import { oneClick } from '../settings/oneClick';
 import { isMe, rankPeople, rankPosts, TIMEFRAMES, cutoff, type LeaderboardData, type Timeframe } from './leaderboard';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -125,10 +139,13 @@ import {
 } from './store';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from './bookmarkSync';
 import { PullToRefresh } from '../ui/PullToRefresh';
+import { isSlur, languageOf, languageView, safeName } from './language';
+import { usePrefs } from '../settings/usePrefs';
+import { languageOptsFor } from '../storeBuild';
 import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
-import { fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
+import { fmtSats, fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -142,7 +159,6 @@ const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 const RED = '#F97066';
-const TIP_PRESETS = [1_000, 10_000, 100_000];
 // AIP adds prefix + algorithm + address + 65-byte signature.
 const AIP_BYTES = 140;
 
@@ -350,7 +366,7 @@ const Avatar = ({
         border: ring,
       }}
     >
-      {(author.name || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
+      {(safeName(author.name) || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
     </div>
   );
 };
@@ -438,7 +454,54 @@ const ACTION_ICONS: Partial<Record<PostAction, typeof Heart>> = {
   mute: VolumeX,
 };
 
+/** The "Show anyway" veil over blurred strong language. */
+const ShowAnyway = ({ onShow }: { onShow: () => void }) => (
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      onShow();
+    }}
+    className="absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-lg text-[12px] text-white"
+    style={{ background: 'rgba(0,0,0,0.4)' }}
+  >
+    <span className="font-bold">Strong language</span>
+    <span className="underline">Show anyway</span>
+  </button>
+);
+
+/**
+ * Bad language (feed/language.ts): a slur post collapses to "Post hidden: offensive language" (a
+ * "Show anyway" only in bWalletX after the adult opt-in); swearing is blurred per post in the store
+ * edition, or in bWalletX with "Filter strong language" on.
+ */
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
+  const [prefs] = usePrefs();
+  const [revealed, setRevealed] = useState(false);
+  const view = languageView(
+    post.language !== undefined ? post.language : languageOf(post.text),
+    languageOptsFor(prefs),
+  );
+  if ((view === 'hide' || view === 'hide-final') && !revealed)
+    return (
+      <div
+        role="note"
+        className="flex items-center gap-3 px-4 py-3 text-[13px]"
+        style={{ borderBottom: `1px solid ${LINE}`, color: MUTED }}
+      >
+        <span>Post hidden: offensive language</span>
+        {view === 'hide' && (
+          <button onClick={() => setRevealed(true)} className="ml-auto underline text-white">
+            Show anyway
+          </button>
+        )}
+      </div>
+    );
+  return <PostCardBody post={post} a={a} blurText={view === 'blur'} />;
+};
+
+const PostCardBody = ({ post, a, blurText }: { post: FeedPost; a: PostActions; blurText: boolean }) => {
+  const [textShown, setTextShown] = useState(false);
+  const veiled = blurText && !textShown;
   const liked = a.liked.has(post.txid);
   const locked = a.locks[post.txid];
   return (
@@ -454,13 +517,13 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           e.stopPropagation();
           a.onAuthor(post.author);
         }}
-        aria-label={`${post.author.name} profile`}
+        aria-label={`${safeName(post.author.name)} profile`}
       >
         <Avatar author={post.author} source={post.source} />
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[14px] font-bold text-white truncate">{post.author.name}</span>
+          <span className="text-[14px] font-bold text-white truncate">{safeName(post.author.name)}</span>
           <Via post={post} />
           <span className="text-[12px] shrink-0 whitespace-nowrap" style={{ color: MUTED }}>
             · {feedTimeLabel(post.at)}
@@ -481,7 +544,17 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
             Replying to a post
           </div>
         )}
-        {post.text && <p className="text-[14px] text-white whitespace-pre-wrap break-words mt-[2px]">{post.text}</p>}
+        {post.text && (
+          <div className="relative">
+            {veiled && <ShowAnyway onShow={() => setTextShown(true)} />}
+            <p
+              aria-hidden={veiled}
+              className={`text-[14px] text-white whitespace-pre-wrap break-words mt-[2px] ${veiled ? 'select-none blur-sm' : ''}`}
+            >
+              {post.text}
+            </p>
+          </div>
+        )}
         <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bchat'} />
         <div className="flex items-center gap-5 mt-2" onClick={(e) => e.stopPropagation()}>
           {postActions(post).row.map((act) => {
@@ -516,10 +589,11 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
                   key={act}
                   onClick={() => a.onTip(post)}
                   className={cls}
-                  style={{ color: MUTED }}
+                  style={{ color: post.tipped ? GOLD : MUTED, opacity: payDestination(post).ok ? 1 : 0.4 }}
                   aria-label="Tip"
+                  title={payDestination(post).ok ? undefined : 'Tips unavailable on Treechat posts'}
                 >
-                  <Coins size={16} /> Tip
+                  <Coins size={16} /> {post.tipped ? moneyNow(post.tipped) : 'Tip'}
                 </button>
               );
             if (act === 'lock')
@@ -794,6 +868,7 @@ const Composer = ({
       );
       onPosted(txid);
     } catch (e) {
+      if (e instanceof PostCancelledError) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy('');
@@ -802,7 +877,13 @@ const Composer = ({
 
   return (
     <Sheet
-      title={replyTo ? `Reply to ${replyTo.author.name}` : quote ? `Quote ${quote.author.name}` : 'New post'}
+      title={
+        replyTo
+          ? `Reply to ${safeName(replyTo.author.name)}`
+          : quote
+            ? `Quote ${safeName(quote.author.name)}`
+            : 'New post'
+      }
       onClose={onClose}
     >
       {(replyTo ?? quote) && (
@@ -872,7 +953,7 @@ const Composer = ({
         </span>
       </div>
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
-        Posts are permanent and public on the BSV chain, signed by your identity key.
+        Posts are permanent and public on the BSV chain, signed by your posting profile.
         {inscribed.length > 0 &&
           ` Large video / audio is inscribed first as a 1Sat ordinal you own (${inscribed.length + 1} approvals).`}
       </p>
@@ -894,28 +975,62 @@ const Composer = ({
 };
 
 type ApiCtx = ReturnType<typeof useServiceContext>['apiContext'];
-const sendTip = async (apiContext: ApiCtx, post: FeedPost, sats: number) => {
-  const res = await sendBsv.execute(apiContext, { requests: [{ address: post.author.address, satoshis: sats }] });
-  if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+/**
+ * Tip or paid like (BCHAT-PROTOCOL-v2 §5): MAP `type tip` / `type like … paid 1`, signed by the
+ * posting identity, and the payment to the author in the SAME transaction. planPayment refuses
+ * Treechat (shared relay signer) and anything without a payable author address.
+ */
+const sendPayment = async (apiContext: ApiCtx, post: FeedPost, sats: number, kind: PayKind = 'tip') => {
+  const plan = planPayment(kind, post, sats);
+  await publish(
+    apiContext,
+    plan.script,
+    kind === 'tip' ? 'bChat tip' : 'bChat paid like',
+    ['app:bWallet', `type:${kind}`, `tx:${post.txid}`],
+    plan.payment,
+  );
 };
 
-const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) => {
+/** Tip presets in sats: $0.05 / $0.25 / $1 at today's rate (never under dust), sats when unknown. */
+const tipPresets = (rate: number) =>
+  TIP_PRESETS_USD.map((u, i) => Math.max(TIP_MIN_SATS, usdToSats(u, rate) ?? TIP_PRESETS_SATS[i]));
+
+const TipSheet = ({
+  post,
+  onClose,
+  onLiked,
+}: {
+  post: FeedPost;
+  onClose: () => void;
+  onLiked: (p: FeedPost) => void;
+}) => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
-  const [sats, setSats] = useState<number>(TIP_PRESETS[1]);
+  const rate = useBsvUsd();
+  const presets = tipPresets(rate);
+  const [picked, setPicked] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // USD-first: the custom amount is typed in dollars when the rate is known (sent as sats).
-  const rate = useBsvUsd();
   const [usdText, setUsdText] = useState('');
-  const tip = async () => {
+  const dest = payDestination(post);
+  const sats = picked ?? presets[1];
+  const likeSats = loadPrefs().paidLikeSats;
+  const pay = async (kind: PayKind, n: number) => {
+    const bad = validateAmount(n);
+    if (bad) return setError(bad);
     setBusy(true);
     setError('');
     try {
-      await sendTip(apiContext, post, sats);
-      // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
-      savePrefs({ quickTip: sats });
-      addSnackbar(`Tipped ${post.author.name} ${money(sats, rate)}`, 'success');
+      await sendPayment(apiContext, post, n, kind);
+      if (kind === 'tip') {
+        // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
+        savePrefs({ quickTip: n });
+        addSnackbar(`Tipped ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
+      } else {
+        onLiked(post);
+        addSnackbar(`Liked and paid ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -923,17 +1038,27 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
       setBusy(false);
     }
   };
+  if (!dest.ok)
+    return (
+      <Sheet title={`Tip ${safeName(post.author.name)}`} onClose={onClose}>
+        <p className="text-sm" style={{ color: MUTED }}>
+          Tips are not available on this post. {dest.reason}
+        </p>
+      </Sheet>
+    );
   return (
-    <Sheet title={`Tip ${post.author.name}`} onClose={onClose}>
+    <Sheet title={`Tip ${safeName(post.author.name)}`} onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Sent in BSV to the address that signed this post ({shortAddress(post.author.address)}).
+        Sent in BSV to{' '}
+        {post.source === 'twetch' ? "the author's Twetch signing key" : 'the address that signed this post'} (
+        {shortAddress(dest.address)}), in the same transaction as the tip. No bChat fee.
       </p>
       <div className="flex gap-2">
-        {TIP_PRESETS.map((v) => (
+        {presets.map((v) => (
           <button
             key={v}
             onClick={() => {
-              setSats(v);
+              setPicked(v);
               setUsdText('');
             }}
             className="flex-1 rounded-xl py-2 text-sm font-bold"
@@ -948,51 +1073,71 @@ const TipSheet = ({ post, onClose }: { post: FeedPost; onClose: () => void }) =>
         ))}
       </div>
       {hasRate(rate) ? (
-        <>
-          <input
-            inputMode="decimal"
-            placeholder={`Other amount, e.g. ${fmtUsd(0.05)}`}
-            value={usdText}
-            onChange={(e) => {
-              const v = e.target.value.replace(/^\$/, '');
-              if (!/^\d*(\.\d{0,2})?$/.test(v)) return;
-              setUsdText(v);
-              const n = usdToSats(Number(v), rate);
-              if (n) setSats(n);
-            }}
-            className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
-            aria-label="Amount in US dollars"
-          />
-          <p className="text-[11px] mt-1" style={{ color: MUTED }}>
-            {satsNote(sats, rate)}
-          </p>
-        </>
+        <input
+          inputMode="decimal"
+          placeholder={`Other amount, e.g. ${fmtUsd(0.1)}`}
+          value={usdText}
+          onChange={(e) => {
+            const v = e.target.value.replace(/^\$/, '');
+            if (!/^\d*(\.\d{0,2})?$/.test(v)) return;
+            setUsdText(v);
+            const n = usdToSats(Number(v), rate);
+            if (n) setPicked(n);
+          }}
+          className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          aria-label="Amount in US dollars"
+        />
       ) : (
         <input
           type="number"
           inputMode="numeric"
-          min={1}
+          min={TIP_MIN_SATS}
           value={sats}
-          onChange={(e) => setSats(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
+          onChange={(e) => setPicked(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
           className="mt-2 w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
           style={{ background: PANEL, border: `1px solid ${LINE}` }}
           aria-label="Satoshis"
         />
       )}
+      <p className="text-[11px] mt-1" style={{ color: MUTED }}>
+        {satsNote(sats, rate) || `Minimum ${fmtSats(TIP_MIN_SATS)}`}
+      </p>
+      {(() => {
+        // Spec §6.2: the post's home app gets 5% on top, as its own output, when it has published an address.
+        const home = homeShareFor(post.source, sats);
+        return home ? (
+          <p className="text-[11px] mt-1" style={{ color: MUTED }}>
+            {home.app} gets {money(home.satoshis, rate)} on top, for hosting this post. The author still gets the full
+            amount.
+          </p>
+        ) : null;
+      })()}
       {error && (
         <p className="text-xs mt-2" style={{ color: RED }}>
           {error}
         </p>
       )}
       <button
-        onClick={() => void tip()}
-        disabled={busy || !post.author.address || sats < 1}
+        onClick={() => void pay('tip', sats)}
+        disabled={busy}
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy ? 'Sending…' : `Send ${money(sats, rate)}`}
+        {busy ? 'Sending…' : `Tip ${money(sats, rate)}`}
       </button>
+      <button
+        onClick={() => void pay('like', likeSats)}
+        disabled={busy}
+        className="mt-2 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
+        style={{ background: PANEL, color: 'white', border: `1px solid ${LINE}` }}
+      >
+        <Heart size={16} fill={GOLD} color={GOLD} /> Paid like · {money(likeSats, rate)}
+        {hasRate(rate) ? ` (${fmtSats(likeSats)})` : ''}
+      </button>
+      <p className="text-[11px] mt-1 text-center" style={{ color: MUTED }}>
+        Paid like amount: Settings → Payments
+      </p>
     </Sheet>
   );
 };
@@ -1042,8 +1187,8 @@ const LockSheet = ({
   return (
     <Sheet title="Lock BSV to back this post" onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back {post.author.name}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet,
-        and the post shows how much is locked behind it.
+        Back {safeName(post.author.name)}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in
+        your wallet, and the post shows how much is locked behind it.
       </p>
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
       <div className="flex gap-2">
@@ -1154,6 +1299,67 @@ const LockSheet = ({
   );
 };
 
+/**
+ * One-tap posting identity, shown the first time someone posts (or likes, follows…) without one.
+ * The same on-chain profile Settings → Identity creates; here it is a single step in the flow.
+ */
+const IdentitySetupSheet = ({
+  initialName,
+  image,
+  onSave,
+  onDone,
+}: {
+  initialName: string;
+  image: string | null;
+  onSave: (name: string) => Promise<string | undefined>;
+  onDone: (ok: boolean) => void;
+}) => {
+  const [name, setName] = useState(initialName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    const err = await onSave(name.trim());
+    setBusy(false);
+    if (err) setError(err);
+    else onDone(true);
+  };
+  return (
+    <Sheet title="Set up your posting profile" onClose={() => !busy && onDone(false)}>
+      <p className="text-xs mb-3" style={{ color: MUTED }}>
+        A name and photo that sign your posts on-chain, so every BSV app knows they're yours. Costs a fraction of a
+        cent.
+      </p>
+      <div className="flex items-center gap-3">
+        {image && <img src={image} alt="" className="h-10 w-10 rounded-full object-cover" />}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={64}
+          placeholder="Your name"
+          aria-label="Your name"
+          className="flex-1 rounded-xl px-3 py-2 text-sm text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        />
+      </div>
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
+      <button
+        onClick={() => void save()}
+        disabled={busy || !name.trim()}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
+        style={{ background: GOLD, color: '#1a1300' }}
+      >
+        {busy ? 'Setting up…' : 'Set up and continue'}
+      </button>
+    </Sheet>
+  );
+};
+
 // ── page ────────────────────────────────────────────────────────────────────
 
 export const FeedPage = ({ header }: { header?: ReactNode }) => {
@@ -1172,6 +1378,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [safetyTick, setSafetyTick] = useState(0);
   const [composing, setComposing] = useState<{ replyTo: FeedPost | null; quote?: FeedPost } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
+  // The inline identity step: publish() waits on this when the wallet has no posting identity.
+  const [settingUp, setSettingUp] = useState<((ok: boolean) => void) | null>(null);
+  useEffect(() => {
+    setIdentitySetupHandler(() => new Promise<boolean>((resolve) => setSettingUp(() => resolve)));
+    return () => setIdentitySetupHandler(null);
+  }, []);
   const [locking, setLocking] = useState<FeedPost | null>(null);
   const [sort, setSort] = useState<FeedSort>(start.sort);
   const [blocks, setBlocks] = useState<HiddenAccount[]>(loadBlocks);
@@ -1308,15 +1520,15 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   };
 
   const mute = (p: FeedPost) => {
-    rememberMuteName(p.author.name, p.author.address, p.author.bapId);
+    rememberMuteName(safeName(p.author.name), p.author.address, p.author.bapId);
     setMutes((m) => addMute(m, p.author.address, p.author.bapId));
     setMore(null);
-    addSnackbar(`Muted ${p.author.name}`, 'info');
+    addSnackbar(`Muted ${safeName(p.author.name)}`, 'info');
   };
   const block = (p: FeedPost) => {
-    setBlocks((b) => addBlock(b, { address: p.author.address, bapId: p.author.bapId, name: p.author.name }));
+    setBlocks((b) => addBlock(b, { address: p.author.address, bapId: p.author.bapId, name: safeName(p.author.name) }));
     setMore(null);
-    addSnackbar(`Blocked ${p.author.name}. Unblock in Settings → Privacy.`, 'info');
+    addSnackbar(`Blocked ${safeName(p.author.name)}. Unblock in Settings → Privacy.`, 'info');
   };
   const bookmark = (p: FeedPost) => {
     const on = isBookmarked(bookmarks, p.txid);
@@ -1328,10 +1540,11 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const tip = async (p: FeedPost) => {
     const sats = loadPrefs().quickTip;
     // One-click pay: send the last tip amount without the sheet, if within the limit and the rate guard.
-    if (!p.author.address || !oneClick.take(sats).ok) return setTipping(p);
+    // Unpayable posts (Treechat) open the sheet, which says why.
+    if (!payDestination(p).ok || validateAmount(sats) || !oneClick.take(sats).ok) return setTipping(p);
     try {
-      await sendTip(apiContext, p, sats);
-      addSnackbar(`Tipped ${p.author.name} ${moneyNow(sats)} (one-click)`, 'success');
+      await sendPayment(apiContext, p, sats);
+      addSnackbar(`Tipped ${safeName(p.author.name)} ${moneyNow(sats)} (one-click)`, 'success');
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
     }
@@ -1353,8 +1566,27 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         'context:tx',
         `contextValue:${p.txid}`,
       ]);
-      addSnackbar(`Branched ${p.author.name}'s post`, 'success');
+      addSnackbar(`Branched ${safeName(p.author.name)}'s post`, 'success');
     } catch (e) {
+      addSnackbar(e instanceof Error ? e.message : String(e), 'error');
+    }
+  };
+
+  // "Hide my post" (spec §7.1): a signed hide with this wallet's posting key. Readers honour it only
+  // when that key signed the post, so it is offered on posts that look like ours.
+  const myKeys = {
+    bapId: identity.bapId,
+    addresses: Object.values(chromeStorageService.getCurrentAccountObject().account?.addresses ?? {}).filter(
+      (x): x is string => typeof x === 'string' && !!x,
+    ),
+  };
+  const hideMine = async (p: FeedPost) => {
+    setMore(null);
+    try {
+      await publish(apiContext, buildHideScript(p.txid), 'Hide my post', ['app:bWallet', 'type:hide', `tx:${p.txid}`]);
+      addSnackbar('Hidden. Open Feed apps drop it once they see your signed request.', 'success');
+    } catch (e) {
+      if (e instanceof PostCancelledError) return;
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
     }
   };
@@ -1528,7 +1760,32 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           }}
         />
       )}
-      {tipping && <TipSheet post={tipping} onClose={() => setTipping(null)} />}
+      {tipping && (
+        <TipSheet
+          post={tipping}
+          onClose={() => setTipping(null)}
+          onLiked={(p) => setLiked((l) => addLiked(l, p.txid))}
+        />
+      )}
+      {settingUp && (
+        <IdentitySetupSheet
+          initialName={identity.profile.name || chromeStorageService.getCurrentAccountObject().account?.name || ''}
+          image={identity.profile.image ? resolveImageUrl(identity.profile.image, apiContext) : null}
+          onSave={async (name) =>
+            (
+              await identity.saveProfile({
+                name,
+                image: identity.profile.image,
+                description: identity.profile.description,
+              })
+            ).error
+          }
+          onDone={(ok) => {
+            settingUp(ok);
+            setSettingUp(null);
+          }}
+        />
+      )}
       {locking && (
         <LockSheet
           post={locking}
@@ -1541,7 +1798,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         />
       )}
       {more && (
-        <Sheet title={more.author.name} onClose={() => setMore(null)}>
+        <Sheet title={safeName(more.author.name)} onClose={() => setMore(null)}>
           {postActions(more).more.map((act) => {
             const Icon = ACTION_ICONS[act] ?? MoreHorizontal;
             const danger = act === 'report';
@@ -1553,10 +1810,19 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 style={{ color: danger ? RED : '#fff' }}
               >
                 <Icon size={18} color={danger ? RED : MUTED} />
-                {act === 'mute' ? `Mute ${more.author.name}` : actionLabel(act, more.source)}
+                {act === 'mute' ? `Mute ${safeName(more.author.name)}` : actionLabel(act, more.source)}
               </button>
             );
           })}
+          {more.source !== 'treechat' && isMe(more.author, myKeys) && (
+            <button
+              onClick={() => void hideMine(more)}
+              className="w-full flex items-center gap-3 py-3 text-sm text-white"
+            >
+              <EyeOff size={18} color={MUTED} />
+              Hide my post
+            </button>
+          )}
           <button onClick={() => bookmark(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
             {isBookmarked(bookmarks, more.txid) ? (
               <BookmarkCheck size={18} color={GOLD} />
@@ -1572,7 +1838,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
               style={{ color: RED }}
             >
               <Ban size={18} color={RED} />
-              Block {more.author.name}
+              Block {safeName(more.author.name)}
             </button>
           )}
         </Sheet>
@@ -1684,25 +1950,27 @@ const ProfileView = ({
       setPosts([]);
     });
   }, [author.bapId, author.address]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const shown = useMemo(
     () => (posts ? visiblePosts(posts, isMe ? [] : mutes) : null),
+    // safetyTick isn't read here: it bumps when the hide/block lists (module state that
+    // visiblePosts reads) change, and is what makes this recompute. Removing it would break that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [posts, mutes, isMe, safetyTick],
   );
   return (
-    <Layer title={author.name} onBack={onBack}>
+    <Layer title={safeName(author.name)} onBack={onBack}>
       <div
         className="flex flex-col items-center px-6 pt-6 pb-4 text-center"
         style={{ borderBottom: `1px solid ${LINE}` }}
       >
         <Avatar author={author} size={80} />
-        <h2 className="mt-3 text-lg font-bold text-white">{author.name}</h2>
+        <h2 className="mt-3 text-lg font-bold text-white">{safeName(author.name)}</h2>
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
           {author.bapId ? `BAP ${author.bapId}` : author.address ? shortAddress(author.address) : ''}
         </p>
         {isMe && !author.bapId && (
           <p className="text-xs mt-2" style={{ color: MUTED }}>
-            Publish your identity in Settings to post.
+            Your first post sets up your posting profile.
           </p>
         )}
         {!isMe && (
@@ -1730,7 +1998,7 @@ const ProfileView = ({
       </div>
       {reporting && (
         <ReportSheet
-          title={`Report or block ${author.name}`}
+          title={`Report or block ${safeName(author.name)}`}
           report={{
             kind: 'user',
             target: author.bapId ? `bap:${author.bapId}` : author.address ? `address:${author.address}` : author.name,
@@ -1746,7 +2014,7 @@ const ProfileView = ({
               className="rounded-xl py-2.5 text-sm font-semibold"
               style={{ background: '#2b2f36', color: '#ff6b6b' }}
             >
-              Block {author.name}
+              Block {safeName(author.name)}
             </button>
           }
         />
@@ -2074,7 +2342,7 @@ const Leaderboard = ({
                   <Avatar author={r.author} source={r.source} size={36} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-semibold text-white">
-                      {r.author.name}
+                      {safeName(r.author.name)}
                       {mine && <span style={{ color: GOLD }}> · You</span>}
                     </div>
                     <div className="truncate text-[11px]" style={{ color: MUTED }}>
@@ -2100,13 +2368,13 @@ const Leaderboard = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate text-[13px] font-semibold text-white">
-                        {r.post.author.name}
+                        {safeName(r.post.author.name)}
                         {mine && <span style={{ color: GOLD }}> · You</span>}
                       </span>
                       <Via post={r.post} />
                     </div>
                     <div className="truncate text-[12px]" style={{ color: '#c9ccd2' }}>
-                      {r.post.text || 'Media post'}
+                      {isSlur(r.post.text) ? 'Post hidden: offensive language' : r.post.text || 'Media post'}
                     </div>
                     <div className="text-[11px]" style={{ color: MUTED }}>
                       {feedTimeLabel(r.post.at)} · {r.lockers} locker{r.lockers === 1 ? '' : 's'}

@@ -76,3 +76,35 @@ export const marketLabel = (store = STORE_BUILD) => (store ? 'Market' : 'Exchang
  * (offer Sign in with Apple beside a third-party login) may apply; switch on once that's settled.
  */
 export const socialLoginEnabled = (store = STORE_BUILD) => !store;
+
+/**
+ * Buying crypto: the Buy BSV card / sheet (ChangeNOW, Alchemy Pay, Ramp later), "Get BSV" on an empty wallet and
+ * "Get MNEE" (MNEE's referral sign-up). All lead to third-party on-ramps / exchanges, so bWalletX only: the store
+ * edition has no buying or exchange (Play financial features declaration: none).
+ */
+export const buyCryptoEnabled = (store = STORE_BUILD) => !store;
+
+/** The app's own name for user-visible text: "bWallet" in a store build, "bWalletX" otherwise. */
+export const APP_NAME = appNameFor();
+
+/**
+ * The same gates as plain constants, for JSX: Rollup folds `!STORE_BUILD` at build time, so the store bundle
+ * doesn't even contain the hidden screens' text (a function call isn't folded).
+ */
+export const BUY_CRYPTO_ENABLED: boolean = !STORE_BUILD;
+export const PAID_FEATURES_ENABLED: boolean = !STORE_BUILD;
+
+/**
+ * Feed bad language (feed/language.ts). Store edition: slurs hidden with no reveal and swearing always
+ * blurred behind "Show anyway"; the two Settings toggles are not shown. bWalletX: swearing shown unless
+ * "Filter strong language" is on; slur posts hidden, revealable only after the adult opt-in.
+ */
+export const languageSettingsEnabled = (store = STORE_BUILD) => !store;
+export const languageOptsFor = (
+  prefs: { filterStrong: boolean; allowLanguageReveal: boolean },
+  store = STORE_BUILD,
+): { store: boolean; filterStrong: boolean; allowReveal: boolean } => ({
+  store,
+  filterStrong: store || prefs.filterStrong,
+  allowReveal: !store && prefs.allowLanguageReveal,
+});

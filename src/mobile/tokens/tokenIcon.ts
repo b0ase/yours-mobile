@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useAvatar } from '../names/AccountAvatar';
+import { useAvatar } from '../names/useAvatar';
 import { getPersonalLink, normId, personalTicker } from '../names/personalToken';
 import { BWALLET_PAYMAIL_API } from '../names/config';
-import { useIssuer } from '../issuer/IssuerBadge';
+import { useIssuer } from '../issuer/useIssuer';
 
 /**
  * Personal-token icons (owner, 4 Oct 2026). A BSV-21 icon is fixed on chain at deploy, so inside

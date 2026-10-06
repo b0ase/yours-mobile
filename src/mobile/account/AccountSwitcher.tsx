@@ -1,55 +1,14 @@
-import { useState } from 'react';
+import { accountTag } from './accountSwitch';
 import { Check, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useSnackbar } from '../../hooks/useSnackbar';
 import { allAgentsStopped, getAgentAccount, isAgentAccount } from '../agents/agentAccounts';
 import { AgentBadge } from '../agents/AgentsScreen';
-import { accountNamesFor } from '../names/MyNameBadge';
+import { accountNamesFor } from '../names/accountNames';
 import { AccountAvatar } from '../names/AccountAvatar';
 import { getLocalAvatar, isDefaultAvatar, pickAvatar, resolveAvatarUrl } from '../names/avatar';
-import { getPersonalLink } from '../names/personalToken';
-import { identityRowText } from '../names/identityText';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
-
-/**
- * Account switching, shared by the account drawer (TopNav), the account strip above it and Settings.
- * Same sequence as upstream TopNav.handleSwitchAccount: close the wallet, switch, reload into the account.
- */
-export const useAccountSwitch = (onSame?: () => void) => {
-  const { chromeStorageService, wallet, setIsSwitchingAccount } = useServiceContext();
-  const { addSnackbar } = useSnackbar();
-  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
-  const current = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
-
-  const switchAccount = async (identityAddress: string) => {
-    if (switchingTo) return;
-    if (identityAddress === current) return onSame?.();
-    setSwitchingTo(identityAddress);
-    setIsSwitchingAccount(true);
-    wallet?.close?.();
-    try {
-      await chromeStorageService.switchAccount(identityAddress);
-    } catch (err) {
-      console.error('[accounts] account switch failed:', err);
-      setIsSwitchingAccount(false);
-      setSwitchingTo(null);
-      addSnackbar('Failed to switch account. Please try again.', 'error');
-      return;
-    }
-    window.location.reload();
-  };
-  return { current, switchingTo, switchAccount };
-};
-
-/** The $handle for an account row: personal token ticker, else the paymail alias / OpNS name. */
-export const accountTag = (id: string, displayName: string, paymail: string, handle: string) => {
-  const ticker = getPersonalLink(id)?.ticker;
-  return ticker
-    ? `$${ticker.replace(/^\$/, '').toUpperCase()}`
-    : identityRowText(displayName, paymail, handle).tag;
-};
 
 export const AgentMark = ({ id }: { id?: string }) =>
   id && isAgentAccount(id) ? <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} /> : null;

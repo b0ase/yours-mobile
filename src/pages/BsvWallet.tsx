@@ -1,5 +1,6 @@
 import { validate } from 'bitcoin-address-validation';
 import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
+import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -506,6 +507,15 @@ export const BsvWallet = () => {
     return satoshis;
   };
 
+  // While the balance is unknown or stale, keep asking every 10 s (owner, 6 Oct 2026: after a restore the
+  // wallet is busy syncing for a minute or more, and "Couldn't refresh" stayed until a manual tap).
+  useEffect(() => {
+    if (!balanceFailed) return;
+    const t = setInterval(() => void getAndSetBsvBalance(), 10_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balanceFailed]);
+
   const loadRate = async () => {
     const rate = await withTimeout(
       fetchExchangeRate(apiContext.chain, apiContext.wocApiKey),
@@ -546,7 +556,7 @@ export const BsvWallet = () => {
   };
 
   useEffect(() => {
-    loadLocks && loadLocks();
+    if (loadLocks) loadLocks();
     getAndSetBsvBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -644,7 +654,7 @@ export const BsvWallet = () => {
   const refreshUtxos = async ({ showLoad = false, notifyIfUnchanged = false } = {}) => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    showLoad && setIsProcessing(true);
+    if (showLoad) setIsProcessing(true);
     // Snapshot before: BSV in satoshis (not USD, so a rate tick is not "a change").
     const before = {
       sats: Math.round(bsvBalance * 100_000_000),
@@ -676,7 +686,7 @@ export const BsvWallet = () => {
         bounded(updateMneeBalance(), 'MNEE balance'),
         bounded(getAndSetAccountAndBsv21s(), 'Tokens'),
       ]);
-      loadLocks && loadLocks();
+      if (loadLocks) loadLocks();
       const unchanged =
         sats !== null &&
         sats === before.sats &&
@@ -690,7 +700,7 @@ export const BsvWallet = () => {
       // NFTs: reload the list on a manual refresh or when anything moved, so purchases appear without reopening.
       if (notifyIfUnchanged || !unchanged) notifyMinted();
     } finally {
-      showLoad && setIsProcessing(false);
+      if (showLoad) setIsProcessing(false);
       setIsRefreshing(false);
     }
   };
@@ -1072,7 +1082,7 @@ export const BsvWallet = () => {
         }
       });
     }
-  }, [pageState]);
+  }, [pageState, chromeStorageService]);
 
   const receive = (
     <motion.div
@@ -1252,8 +1262,9 @@ export const BsvWallet = () => {
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
-        <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
-
+        {BUY_CRYPTO_ENABLED && (
+          <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
+        )}
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>
@@ -1333,7 +1344,7 @@ export const BsvWallet = () => {
               className="mt-1 text-[11px] border-0 bg-transparent cursor-pointer p-0"
               style={{ color: theme.color.global.gray }}
             >
-              Couldn't refresh. Tap to retry.
+              Still syncing. Tap to retry.
             </button>
           )}
         </motion.div>
@@ -1409,9 +1420,13 @@ export const BsvWallet = () => {
               setPageState('send');
             }}
             // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
-            action={bsvBalance === 0 ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) } : undefined}
+            action={
+              bsvBalance === 0 && BUY_CRYPTO_ENABLED
+                ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) }
+                : undefined
+            }
           />
-          {getBsvOpen && (
+          {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
               onReceive={() => {
@@ -1429,7 +1444,7 @@ export const BsvWallet = () => {
               usdBalance={mneeBalance}
               showPointer={mneeBalance > 0 || legacyMneeBalance > 0}
               isMNEE
-              onGetMneeClick={() => setPageState('getMNEE')}
+              onGetMneeClick={BUY_CRYPTO_ENABLED ? () => setPageState('getMNEE') : undefined}
               onClick={() => {
                 if (legacyMneeBalance > 0) {
                   setShowLegacyMneePrompt(true);
@@ -1500,7 +1515,10 @@ export const BsvWallet = () => {
                 Manage Tokens List
               </span>
             </motion.button>
-            <FindTokensButton style={listItemStyle} onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))} />
+            <FindTokensButton
+              style={listItemStyle}
+              onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))}
+            />
           </motion.div>
         </Show>
 
@@ -1531,7 +1549,6 @@ export const BsvWallet = () => {
             </motion.button>
           )}
         </AnimatePresence>
-
 
         {/* Bottom breathing room */}
         <div className="h-4" />
@@ -1876,10 +1893,12 @@ export const BsvWallet = () => {
         <BsvPriceChart />
       </div>
       {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
-      <BuyBsvButton
-        className="w-full mb-5"
-        onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
-      />
+      {BUY_CRYPTO_ENABLED && (
+        <BuyBsvButton
+          className="w-full mb-5"
+          onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+        />
+      )}
 
       {/* Balance chip — MAX is single-recipient only */}
       {recipients.length > 1 ? (
@@ -2189,7 +2208,7 @@ export const BsvWallet = () => {
       <Show when={!isProcessing && pageState === 'asset-picker'}>{assetPickerView}</Show>
       <Show when={!isProcessing && pageState === 'send'}>{send}</Show>
       <Show when={!isProcessing && pageState === 'sendMNEE'}>{sendMNEE}</Show>
-      <Show when={!isProcessing && pageState === 'getMNEE'}>{getMnee}</Show>
+      {BUY_CRYPTO_ENABLED && <Show when={!isProcessing && pageState === 'getMNEE'}>{getMnee}</Show>}
       <SendConfirmation
         show={!!sendConfirmation}
         theme={theme}

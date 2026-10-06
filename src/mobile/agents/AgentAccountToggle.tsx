@@ -1,42 +1,17 @@
 import { useState } from 'react';
 import { Bot } from 'lucide-react';
 import { isBWalletX } from '../storeBuild';
-import { markAgentAccount } from './agentAccounts';
-
-/** Settings › Agents › New agent account sets this; Add account's toggle reads and writes it. */
-const FLAG = 'bwallet.createAgent';
-const readFlag = () => {
-  try {
-    return localStorage.getItem(FLAG) === '1';
-  } catch {
-    return false;
-  }
-};
-const writeFlag = (on: boolean) => {
-  try {
-    if (on) localStorage.setItem(FLAG, '1');
-    else localStorage.removeItem(FLAG);
-  } catch {
-    /* storage unavailable */
-  }
-};
-
-/** After Add account creates the keys: mark it as an agent account if the toggle was on, then clear it. */
-export const consumeAgentCreate = (identityAddress: string) => {
-  if (!readFlag()) return;
-  writeFlag(false);
-  markAgentAccount(identityAddress);
-};
+import { isAgentCreatePending, setAgentCreate } from './agentCreate';
 
 /** Add account (not first-time setup), bWalletX only: "Agent account" switch (docs/SMART-WALLET-SPEC.md §1). */
 export const AgentAccountToggle = () => {
-  const [on, setOn] = useState(readFlag);
+  const [on, setOn] = useState(isAgentCreatePending);
   if (!isBWalletX()) return null;
   return (
     <button
       type="button"
       onClick={() => {
-        writeFlag(!on);
+        setAgentCreate(!on);
         setOn(!on);
       }}
       className="w-[85%] flex items-start gap-3 rounded-xl p-3 my-2 border text-left cursor-pointer"
@@ -53,9 +28,3 @@ export const AgentAccountToggle = () => {
     </button>
   );
 };
-
-/** Account menu › Add agent account: Add account opens with the Agent switch already on (owner, 6 Oct 2026). */
-export const startAgentCreate = () => writeFlag(true);
-
-/** True while Add account is creating an agent account (hides X / Google sign-in there). */
-export const isAgentCreatePending = () => readFlag();

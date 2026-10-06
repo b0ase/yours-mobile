@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useAccountNames } from '../names/MyNameBadge';
-import { AccountAvatar, useAvatar } from '../names/AccountAvatar';
-import { AccountList, AgentMark, useAccountSwitch } from '../account/AccountSwitcher';
+import { useAccountNames } from '../names/accountNames';
+import { AccountAvatar } from '../names/AccountAvatar';
+import { useAvatar } from '../names/useAvatar';
+import { AccountList, AgentMark } from '../account/AccountSwitcher';
+import { useAccountSwitch } from '../account/accountSwitch';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';

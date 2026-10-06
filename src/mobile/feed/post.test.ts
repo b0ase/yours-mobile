@@ -187,6 +187,19 @@ test('visiblePosts applies the safety filter and mutes', () => {
 
 test('B prefix constant is the bitcom B address', () => expect(B_PREFIX).toBe('19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut'));
 
+describe('hide (spec §7.1)', () => {
+  test('exact pushes; unhide; bad txid refused', async () => {
+    const { buildHideScript, MAP_PREFIX: MP } = await import('./post');
+    const T = 'ab'.repeat(32);
+    const s = buildHideScript(T.toUpperCase());
+    expect(s.chunks.slice(2).map((c) => Utils.toUTF8(c.data ?? []))).toEqual([
+      MP, 'SET', 'app', 'bChat', 'type', 'hide', 'v', '2', 'context', 'tx', 'tx', T,
+    ]);
+    expect(Utils.toUTF8(buildHideScript(T, true).chunks[7].data ?? [])).toBe('unhide');
+    expect(() => buildHideScript('nope')).toThrow();
+  });
+});
+
 describe('branch and quote', () => {
   const TXID = 'cd'.repeat(32);
   test("branch is a Bitcoin Schema repost, app bWallet, sharing Twetch's tx key", () => {

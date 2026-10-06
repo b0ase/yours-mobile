@@ -74,7 +74,7 @@
     <main>
       <p><a href="/">← bWallet</a></p>
       <h1>Privacy Policy</h1>
-      <p class="meta">bWallet (Beta) · Effective 3 October 2026</p>
+      <p class="meta">bWallet (Beta) · Effective 6 October 2026</p>
 
       <p class="notice">
         bWallet is published by The Bitcoin Corporation Ltd and is based on the open-source Yours Wallet (MIT licence).
@@ -88,8 +88,10 @@
         bWallet is non-custodial: your private keys and recovery phrase never leave your device, and we can't move your
         money. To run chat, names, contacts and calls, our own service (bit-sign, operated by The Bitcoin Corporation
         Ltd) keeps the data listed under <a href="#service">What our service keeps</a>, linked to your wallet's identity
-        key. We use it only to run those features. We don't collect your email, phone number, location, advertising
-        identifiers, analytics or crash reports, and we don't track you, sell your data or use it for advertising.
+        key. If you use bChat on a phone, our push server also keeps your device's push token and notification settings
+        so it can notify you (see <a href="#push">Notifications</a>). We use all of this only to run those features. We
+        don't collect your email, phone number, location, advertising identifiers, analytics or crash reports, and we
+        don't track you, sell your data or use it for advertising.
       </p>
 
       <h2>What stays on your device</h2>
@@ -117,7 +119,9 @@
         </li>
         <li>
           <b>Blockchain services:</b> address, balance, transaction and token lookups, and transaction broadcasts, go to
-          BSV indexing services (1Sat APIs). Transaction links open on WhatsOnChain.
+          BSV indexing services (1Sat APIs). Some address-history lookups (when you move funds in from another wallet),
+          transaction checks and the BSV price history use the WhatsOnChain API, and transaction links open on
+          WhatsOnChain. The BSV price comes from public price feeds.
         </li>
         <li><b>Wallet messaging:</b> wallet-to-wallet messages use <code>messagebox.1sat.app</code>.</li>
         <li>
@@ -127,13 +131,26 @@
         </li>
         <li>
           <b>Names and payments to names:</b> when you send to a $handle, paymail or OpNS name, or look up your own
-          name, the app asks 1Sat indexers (including OpNS), bit-sign and HandCash paymail lookup services to resolve
-          that name to a payment destination. Those services see the name being looked up.
+          name, the app asks 1Sat indexers (including OpNS), bit-sign and the paymail service of the address's domain
+          (for example HandCash for <code>@handcash.io</code>) to resolve that name to a payment destination. Those
+          services see the name being looked up.
         </li>
         <li>
           <b>Market and Chat:</b> token and NFT listings, media and token rooms are loaded from 1Sat indexers. The
           Market's safety filter runs as part of that loading; if you use Report, the item is hidden on your device and,
           where a review service is configured, the item reference is sent to us for review.
+        </li>
+        <li>
+          <b>Feed:</b> public on-chain posts are loaded from a public bmap indexer and from our own bChat indexer
+          (<code>push.bwalletx.com/feed</code>). Posting puts your post on the public blockchain.
+        </li>
+        <li>
+          <b>$b assistant (optional):</b> nothing is sent until you allow it in the app. In bWallet from the App Store
+          and Google Play, $b uses your own AI provider key (Anthropic, OpenAI or OpenRouter) and your message and the
+          recent conversation go straight from your phone to that provider. In bWalletX's pay-per-message mode, they go
+          to our server (bitcoinchat.online), which passes them to Anthropic; our server also sees the payment's
+          transaction id and your bChat sign-in, and Anthropic does not. Your keys, balances, addresses, contacts, chats
+          and files are never sent. You can withdraw consent in Settings › b agent.
         </li>
         <li>
           <b>Websites you open</b> in the in-app browser receive the requests you make and the responses you approve.
@@ -179,10 +196,38 @@
         when you approve it.
       </p>
 
-      <h2>Notifications</h2>
+      <h2 id="push">Notifications</h2>
       <p>
-        If you allow notifications, the app shows local alerts about incoming transactions. They're generated on your
-        device; no push notification service is used.
+        <b>On-device alerts.</b> If you allow notifications, the app shows local alerts about incoming transactions.
+        They're generated on your device.
+      </p>
+      <p>
+        <b>Push notifications (bChat).</b> When you're signed in to bChat, the app registers your device with our push
+        server, <code>push.bwalletx.com</code>, run by The Bitcoin Corporation Ltd on a server we rent from Hetzner, so
+        you can be told about room mentions and direct messages while the app is closed. On a phone this is on by
+        default once you sign in to bChat, and your phone asks for permission first; in the web wallet and Chrome
+        extension it stays off until you turn it on. To do this the app sends:
+      </p>
+      <ul>
+        <li>the device push token issued by your phone (or, in a browser, the Web Push subscription);</li>
+        <li>the platform (iOS, Android, web or extension), the app (bWallet or bWalletX) and its bundle id;</li>
+        <li>the bChat handle the device belongs to (your bChat sign-in);</li>
+        <li>
+          your notification preferences: message previews, quiet hours and your time zone, which kinds of alerts you
+          want, and per-room settings (All, Mentions or Off).
+        </li>
+      </ul>
+      <p>
+        We use this only to send you those notifications. The notification itself is delivered through Google Firebase
+        Cloud Messaging (Android), Apple Push Notification service (iPhone) or your browser's push service, which
+        receive the push token and the notification. <b>Message previews are off by default</b>: a notification then
+        says only that you have something new, without the message text. If you turn previews on, the message text
+        passes through those services to show it on your screen.
+      </p>
+      <p>
+        Turn push off or change previews, quiet hours and alerts in Settings › Notifications › Push notifications, or in
+        your phone's notification settings. Turning push off, signing out of bChat or switching to another account
+        removes this device's registration from our push server; uninstalling the app makes its push token stop working.
       </p>
 
       <h2 id="waitlist">Testing waitlist (this website)</h2>
@@ -199,6 +244,11 @@
         <li>You can delete your account and the data our service keeps from Settings (Delete account).</li>
         <li>You can delete all app data on your device by signing out in Settings, or by uninstalling the app.</li>
         <li>You can turn biometric unlock off from the lock screen at any time.</li>
+        <li>
+          You can turn push notifications and message previews off in Settings › Notifications, and remove this device's
+          push registration by signing out of bChat.
+        </li>
+        <li>You can withdraw consent for the $b assistant in Settings › b agent.</li>
         <li>You can change the remote wallet storage provider in Settings → Wallet Backup.</li>
       </ul>
 
@@ -213,8 +263,8 @@
 
       <h2>Contact</h2>
       <p>
-        The Bitcoin Corporation Ltd: <a href="mailto:support@bwalletx.com">support@bwalletx.com</a>, or open an
-        issue at <a href="https://github.com/bitcoin-corp/bwallet/issues">github.com/bitcoin-corp/bwallet/issues</a>.
+        The Bitcoin Corporation Ltd: <a href="mailto:support@bwalletx.com">support@bwalletx.com</a>, or open an issue at
+        <a href="https://github.com/bitcoin-corp/bwallet/issues">github.com/bitcoin-corp/bwallet/issues</a>.
       </p>
     </main>
   </body>

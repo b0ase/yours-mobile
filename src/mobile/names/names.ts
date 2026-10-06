@@ -89,15 +89,28 @@ export const SERVICES = {
   inscriptionLatest: 'https://ordinals.gorillapool.io/api/inscriptions',
 };
 
-const getJson = async (f: Fetch, url: string, init?: RequestInit): Promise<any> => {
+// Response shapes we read (all fields optional: these are third-party servers).
+type DohResponse = { Answer?: { type: number; data?: unknown }[] };
+type BsvaliasDoc = { capabilities?: Capabilities };
+type Fields = Record<string, unknown>;
+type OpnsRecord = { owner?: unknown; map?: Fields };
+type Outpoint = { outpoint?: unknown };
+type Inscription = {
+  owner?: unknown;
+  outpoint?: unknown;
+  spend?: unknown;
+  data?: { map?: Fields; list?: { price?: unknown } };
+};
+
+const getJson = async <T>(f: Fetch, url: string, init?: RequestInit): Promise<T> => {
   const res = await f(url, init);
   if (!res.ok) throw new ResolveError(`HTTP ${res.status}`);
   return res.json();
 };
 
-const tryJson = async (f: Fetch, url: string, init?: RequestInit): Promise<any | undefined> => {
+const tryJson = async <T>(f: Fetch, url: string, init?: RequestInit): Promise<T | undefined> => {
   try {
-    return await getJson(f, url, init);
+    return await getJson<T>(f, url, init);
   } catch {
     return undefined;
   }
@@ -108,8 +121,8 @@ export const fill = (tpl: string, alias: string, domain: string) =>
 
 /** bsvalias host via SRV (handcash.io → cloud.handcash.io), else the domain itself. */
 export const discoverHost = async (f: Fetch, domain: string): Promise<string> => {
-  const dns = await tryJson(f, `${SERVICES.doh}?name=_bsvalias._tcp.${domain}&type=SRV`);
-  const ans = dns?.Answer?.find((a: { type: number }) => a.type === 33);
+  const dns = await tryJson<DohResponse>(f, `${SERVICES.doh}?name=_bsvalias._tcp.${domain}&type=SRV`);
+  const ans = dns?.Answer?.find((a) => a.type === 33);
   if (ans?.data) {
     const parts = String(ans.data).trim().split(/\s+/);
     const host = parts[3]?.replace(/\.$/, '');
@@ -123,8 +136,8 @@ export type Capabilities = Record<string, string | boolean>;
 
 export const getCapabilities = async (f: Fetch, domain: string): Promise<Capabilities> => {
   const host = await discoverHost(f, domain);
-  let doc = await tryJson(f, `https://${host}/.well-known/bsvalias`);
-  if (!doc?.capabilities && host !== domain) doc = await tryJson(f, `https://${domain}/.well-known/bsvalias`);
+  let doc = await tryJson<BsvaliasDoc>(f, `https://${host}/.well-known/bsvalias`);
+  if (!doc?.capabilities && host !== domain) doc = await tryJson<BsvaliasDoc>(f, `https://${domain}/.well-known/bsvalias`);
   if (!doc?.capabilities) throw new ResolveError(`${domain} doesn't host paymail`);
   return doc.capabilities as Capabilities;
 };
@@ -159,15 +172,15 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
 
   const prof = str(caps[CAP.publicProfile]);
   if (prof) {
-    const p = await tryJson(f, fill(prof, alias, domain));
+    const p = await tryJson<Fields>(f, fill(prof, alias, domain));
     r.displayName = str(p?.name);
     r.avatar = str(p?.avatar);
   }
   const pki = str(caps[CAP.pki]);
-  if (pki) r.pubkey = str((await tryJson(f, fill(pki, alias, domain)))?.pubkey);
+  if (pki) r.pubkey = str((await tryJson<Fields>(f, fill(pki, alias, domain)))?.pubkey);
 
   const ord = ordCapability(caps);
-  if (ord) r.ordAddress = str((await tryJson(f, fill(ord, alias, domain)))?.address);
+  if (ord) r.ordAddress = str((await tryJson<Fields>(f, fill(ord, alias, domain)))?.address);
 
   // Prefer P2P (BRC-29-style per-payment outputs) — upstream sendBsv handles it natively.
   const p2p = str(caps[CAP.p2pDestination]);
@@ -177,7 +190,7 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   // Fallback: basic address resolution (some servers require a signed request; try unsigned).
   const pd = str(caps[CAP.paymentDestination]);
   if (pd) {
-    const out = await tryJson(f, fill(pd, alias, domain), {
+    const out = await tryJson<{ output?: string }>(f, fill(pd, alias, domain), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ senderHandle: 'bwallet@bwallet', dt: new Date().toISOString(), purpose: 'payment' }),
@@ -191,15 +204,15 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
 
 export const resolveOpns = async (f: Fetch, name: string): Promise<Resolved> => {
   // Primary: GorillaPool OpNS index (owner + MAP, incl. opns.idKey).
-  const rec = await tryJson(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
+  const rec = await tryJson<OpnsRecord>(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
   let owner = str(rec?.owner);
   let pubkey = str(rec?.map?.['opns.idKey']);
   if (!owner) {
     // Fallback: 1sat-stack origin → latest inscription location.
-    const o = await tryJson(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
+    const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
     const origin = str(o?.outpoint);
     if (!origin) throw new ResolveError(`No one has the name "${name}"`);
-    const latest = await tryJson(f, `${SERVICES.inscriptionLatest}/${origin.replace('.', '_')}/latest?script=false`);
+    const latest = await tryJson<Inscription>(f, `${SERVICES.inscriptionLatest}/${origin.replace('.', '_')}/latest?script=false`);
     owner = str(latest?.owner);
     pubkey ??= str(latest?.data?.map?.['opns.idKey']);
     if (!owner) throw new ResolveError(`Couldn't locate the owner of "${name}"`);
@@ -273,28 +286,30 @@ export type Availability =
 export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Availability> => {
   const name = raw.trim().toLowerCase().replace(/^@/, '');
   if (!OPNS_RE.test(name)) return { status: 'invalid', name, reason: 'Letters, numbers and - only' };
-  const o = await tryJson(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
-  if (str(o?.outpoint)) {
-    const rec = await tryJson(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
+  const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
+  const originOutpoint = str(o?.outpoint);
+  if (originOutpoint) {
+    const rec = await tryJson<OpnsRecord>(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
     // For sale? The latest location carries an OrdLock listing (price in sats) while unspent.
-    const latest = await tryJson(
+    const latest = await tryJson<Inscription>(
       f,
-      `${SERVICES.inscriptionLatest}/${String(o.outpoint).replace('.', '_')}/latest?script=false`,
+      `${SERVICES.inscriptionLatest}/${originOutpoint.replace('.', '_')}/latest?script=false`,
     );
     const price = Number(latest?.data?.list?.price);
+    const latestOutpoint = str(latest?.outpoint);
     const listing =
-      price > 0 && !latest?.spend && str(latest?.outpoint)
-        ? { outpoint: String(latest.outpoint).replace('_', '.'), price }
+      price > 0 && !latest?.spend && latestOutpoint
+        ? { outpoint: latestOutpoint.replace('_', '.'), price }
         : undefined;
     return {
       status: 'taken',
       name,
-      origin: o.outpoint,
+      origin: originOutpoint,
       owner: str(rec?.owner ?? latest?.owner),
       ...(listing && { listing }),
     };
   }
-  const mine = await tryJson(f, `${SERVICES.opnsMine}/${encodeURIComponent(name)}`);
+  const mine = await tryJson<Outpoint>(f, `${SERVICES.opnsMine}/${encodeURIComponent(name)}`);
   return { status: 'available', name, mineFrom: str(mine?.outpoint) };
 };
 

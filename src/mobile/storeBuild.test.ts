@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'fs';
 import {
+  BUY_CRYPTO_ENABLED,
+  PAID_FEATURES_ENABLED,
+  buyCryptoEnabled,
   STORE_BUILD,
   agentModeFor,
   bcorpFeeAddress,
@@ -75,5 +79,49 @@ describe('storeBuild', () => {
   test('marketLabel: Exchange in bWalletX, Market in the store app', () => {
     expect(marketLabel(false)).toBe('Exchange');
     expect(marketLabel(true)).toBe('Market');
+  });
+});
+
+describe('store build: no buying, no personal token, no bWalletX text', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+
+  test('buying crypto (Buy BSV, Get BSV, Get MNEE) is bWalletX only', () => {
+    expect(buyCryptoEnabled(true)).toBe(false);
+    expect(buyCryptoEnabled(false)).toBe(true);
+    // The JSX constants match the functions for this build.
+    expect(BUY_CRYPTO_ENABLED).toBe(buyCryptoEnabled());
+    expect(PAID_FEATURES_ENABLED).toBe(paidFeaturesEnabled());
+    const wallet = src('../pages/BsvWallet.tsx');
+    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && \(\s*<BsvPriceBar/);
+    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && \(\s*<BuyBsvButton/);
+    expect(wallet).toContain('bsvBalance === 0 && BUY_CRYPTO_ENABLED');
+    expect(wallet).toContain('BUY_CRYPTO_ENABLED && getBsvOpen &&');
+    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && <Show when=\{!isProcessing && pageState === 'getMNEE'\}>/);
+    expect(wallet).toContain('onGetMneeClick={BUY_CRYPTO_ENABLED ?');
+  });
+
+  test('Choose your handle: the token + room panel needs paid features', () => {
+    expect(src('./names/HandleFlow.tsx')).toMatch(/PAID_FEATURES_ENABLED \? \(\s*<div[\s\S]*?Your token \+ room/);
+  });
+
+  test('store-reachable screens take the app name from APP_NAME, not a literal bWalletX', () => {
+    for (const f of [
+      './names/PasswordFields.tsx',
+      './onboardingError.ts',
+      './settings/ChangePassword.tsx',
+      './backup/BackupStep.tsx',
+      './bappFrame/BappFrameHost.tsx',
+      './tokens/TokenIconHeader.tsx',
+      './tabs/ChatPage.tsx',
+      './wallet/BuyBsv.tsx',
+      './strategies/strategyNft.ts',
+      './contracts/contractNft.ts',
+    ]) {
+      const code = src(f)
+        .split('\n')
+        .filter((l) => !/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(l))
+        .join('\n');
+      expect([f, /bWalletX/.test(code)]).toEqual([f, false]);
+    }
   });
 });

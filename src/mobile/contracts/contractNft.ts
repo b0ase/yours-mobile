@@ -5,10 +5,11 @@
  * source) plus sale terms. A buyer's copy is the same envelope inscribed again in the transaction that pays the
  * author; the catalogue (site/api/contracts.js) counts paid copies against the edition size.
  */
+import { APP_NAME } from '../storeBuild';
+
 export const CONTRACT_CONTENT_TYPE = 'application/vnd.bwalletx.contract+json';
 export const CONTRACT_ENVELOPE_FORMAT = 'bwalletx.contract-nft/1';
-export const CONTRACT_DISCLAIMER =
-  'Contracts are programs. Read what each one does before you use it; bWalletX doesn’t review, rate or recommend them.';
+export const CONTRACT_DISCLAIMER = `Contracts are programs. Read what each one does before you use it; ${APP_NAME} doesn’t review, rate or recommend them.`;
 
 export type ContractDescriptor = {
   format: 'bwalletx.contract/1';
@@ -34,7 +35,9 @@ export type ContractEnvelope = {
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
 /** Validate a contract descriptor (contract.json). Errors are listed, never defaulted. */
-export const parseDescriptor = (input: unknown): { ok: true; contract: ContractDescriptor } | { ok: false; errors: string[] } => {
+export const parseDescriptor = (
+  input: unknown,
+): { ok: true; contract: ContractDescriptor } | { ok: false; errors: string[] } => {
   let o: Record<string, unknown>;
   try {
     o = (typeof input === 'string' ? JSON.parse(input) : input) as Record<string, unknown>;
@@ -52,7 +55,9 @@ export const parseDescriptor = (input: unknown): { ok: true; contract: ContractD
   if (o?.network !== 'testnet' && o?.network !== 'mainnet') errors.push('network must be "testnet" or "mainnet"');
   if (errors.length) return { ok: false, errors };
   const paths = Array.isArray(o.spendPaths)
-    ? (o.spendPaths as Record<string, unknown>[]).slice(0, 20).map((p) => ({ name: str(p?.name, 40), who: str(p?.who, 80), requires: str(p?.requires, 300) }))
+    ? (o.spendPaths as Record<string, unknown>[])
+        .slice(0, 20)
+        .map((p) => ({ name: str(p?.name, 40), who: str(p?.who, 80), requires: str(p?.requires, 300) }))
     : undefined;
   const params =
     o.params && typeof o.params === 'object'
@@ -66,7 +71,10 @@ export const parseDescriptor = (input: unknown): { ok: true; contract: ContractD
   const or = o.oracle as { quorum?: unknown; signers?: unknown } | undefined;
   const oracle =
     or && Number.isInteger(or.quorum) && Array.isArray(or.signers)
-      ? { quorum: or.quorum as number, signers: (or.signers as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 20) }
+      ? {
+          quorum: or.quorum as number,
+          signers: (or.signers as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 20),
+        }
       : undefined;
   return {
     ok: true,
@@ -100,7 +108,8 @@ export const contractSaleProblems = (env: ContractEnvelope): string[] => {
   const out: string[] = [];
   if (!env.description.trim()) out.push('Add a description');
   if (!(env.sale.priceUsd >= 0 && env.sale.priceUsd <= 10_000)) out.push('Price must be between $0 and $10,000');
-  if (!(Number.isInteger(env.sale.copies) && env.sale.copies >= 1 && env.sale.copies <= 100_000)) out.push('Copies must be 1–100,000');
+  if (!(Number.isInteger(env.sale.copies) && env.sale.copies >= 1 && env.sale.copies <= 100_000))
+    out.push('Copies must be 1–100,000');
   if (!/^1[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(env.sale.payTo)) out.push('No payout address');
   return out;
 };

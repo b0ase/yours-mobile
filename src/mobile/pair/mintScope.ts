@@ -4,6 +4,7 @@
  * files bigger than one relay frame (relay maxFrame = 4 MB; sealed frames grow base64 twice).
  * Pure apart from crypto.subtle; the handler is in agentPairing.ts.
  */
+import { APP_NAME } from '../storeBuild';
 import { MAX_MINT_BYTES } from '../mint/mint';
 
 export const MAX_MINT_ITEMS = 500;
@@ -60,7 +61,7 @@ export function checkMintBudget(l: MintLimits | undefined, estUsd: number | null
   if (estUsd === null || !(estUsd >= 0))
     throw new MintLimitError(
       'NO_PRICE',
-      'bWalletX has no BSV price right now, so it can’t check the mint budget. Try again shortly.',
+      `${APP_NAME} has no BSV price right now, so it can’t check the mint budget. Try again shortly.`,
     );
   const r = remaining(l);
   if (r.items < 1)

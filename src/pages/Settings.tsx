@@ -574,16 +574,6 @@ export const Settings = () => {
     }
   };
 
-  const handleSaveProfileIntent = () => {
-    setDecisionType('save-profile');
-    setSpeedBumpMessage(
-      identity.isPublished
-        ? 'Updating your profile will broadcast a transaction. A small fee will be deducted from your wallet.'
-        : 'This will create your on-chain identity and save your profile. A small fee will be deducted from your wallet.',
-    );
-    setShowSpeedBump(true);
-  };
-
   const handleSaveProfile = async () => {
     const res = await identity.saveProfile({
       name: enteredName,
@@ -963,8 +953,8 @@ export const Settings = () => {
       <Section title="Preferences">
         <SettingRow
           icon={<Fingerprint size={16} />}
-          label="Identity"
-          description="On-chain BAP identity and profile"
+          label="Posting profile"
+          description="Your on-chain name and photo that sign your posts"
           onClick={() => setPage('identity')}
           isFirst
         />
@@ -1328,7 +1318,7 @@ export const Settings = () => {
       exit="exit"
       className="w-full px-4 pb-24"
     >
-      <SubPageHeader title="Identity" onBack={() => setPage('main')} />
+      <SubPageHeader title="Posting profile" onBack={() => setPage('main')} />
 
       {identity.loading && !identity.bapId ? (
         <div className="flex items-center justify-center py-8">
@@ -1343,8 +1333,8 @@ export const Settings = () => {
               className="text-xs text-center"
               style={{ color: '#98A2B3', lineHeight: 1.5 }}
             >
-              Set up your on-chain identity so apps and other users can recognize you. Your profile is stored
-              permanently on the blockchain.
+              Set up your posting profile so apps and other users can recognize you. Your profile is stored permanently
+              on the blockchain.
             </motion.p>
           )}
 
@@ -1418,7 +1408,7 @@ export const Settings = () => {
             <Button
               theme={theme}
               type="primary"
-              label={identity.isPublished ? 'Update Profile' : 'Create Identity'}
+              label={identity.isPublished ? 'Update Profile' : 'Create Posting Profile'}
               onClick={handleSaveProfile}
               loading={identity.loading}
               disabled={avatarUploading}

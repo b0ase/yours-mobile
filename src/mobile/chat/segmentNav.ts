@@ -51,3 +51,33 @@ export const onDmRequest = (fn: () => void) => {
   window.addEventListener(DM_EVENT, fn);
   return () => window.removeEventListener(DM_EVENT, fn);
 };
+
+/**
+ * Open a room by its ticker (a tapped push notification, src/mobile/push): switches Chat to DMs or
+ * Chatrooms, whose page takes the request once its room list has loaded.
+ */
+const ROOM_EVENT = 'bwallet:chat-room-ticker';
+let pendingRoom: { ticker: string; dm: boolean } | null = null;
+
+export const requestRoomByTicker = (ticker: string, dm: boolean) => {
+  pendingRoom = { ticker: ticker.replace(/^\$/, '').toUpperCase(), dm };
+  requestChatSegment(dm ? 'dms' : 'rooms');
+  try {
+    window.dispatchEvent(new Event(ROOM_EVENT));
+  } catch {
+    /* no window (tests) */
+  }
+};
+
+/** The pending ticker if it is for this segment (dm = the DMs page), else null (left for the other). */
+export const takeRoomTicker = (dm: boolean): string | null => {
+  if (!pendingRoom || pendingRoom.dm !== dm) return null;
+  const t = pendingRoom.ticker;
+  pendingRoom = null;
+  return t;
+};
+
+export const onRoomTicker = (fn: () => void) => {
+  window.addEventListener(ROOM_EVENT, fn);
+  return () => window.removeEventListener(ROOM_EVENT, fn);
+};

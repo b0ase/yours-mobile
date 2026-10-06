@@ -40,9 +40,9 @@ function withOriginator(wallet: WalletInterface, originator: string): WalletInte
       if (typeof value !== 'function') return value;
       return function (...args: unknown[]) {
         if (args.length < 2 || args[1] === undefined) {
-          return (value as Function).call(target, args[0], originator);
+          return (value as (...a: unknown[]) => unknown).call(target, args[0], originator);
         }
-        return (value as Function).apply(target, args);
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
       };
     },
   }) as WalletInterface;
