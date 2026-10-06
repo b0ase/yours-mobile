@@ -38,7 +38,9 @@ export const BCHAT_FEED_API =
 
 /** Recent bChat posts from bWalletX's own indexer. */
 export async function fetchBchatRecent(page = 1, limit = 30): Promise<FeedPost[]> {
-  const res = await fetch(`${BCHAT_FEED_API}/social/feed?page=${page}&limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(`${BCHAT_FEED_API}/social/feed?page=${page}&limit=${limit}`, {
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok) throw new Error(`bChat feed error (${res.status})`);
   return parseBmapFeed(await res.json());
 }
@@ -226,6 +228,11 @@ export async function publish(
   script: Script,
   description: string,
   tags: string[],
+  /**
+   * A tip / paid like's payment to the post's author (tip.ts planPayment): the output right after
+   * the OP_RETURN, in the same transaction (BCHAT-PROTOCOL-v2 §5).
+   */
+  payment?: { address: string; satoshis: number; lockingScript: Script },
 ): Promise<string> {
   const signed = await signWithIdentity(() => applyBapAip(ctx, script));
   if (!signed) throw new PostCancelledError();
@@ -233,6 +240,16 @@ export async function publish(
     description,
     outputs: [
       { lockingScript: signed.toHex(), satoshis: 0, outputDescription: description, basket: BSOCIAL_BASKET, tags },
+      ...(payment
+        ? [
+            {
+              lockingScript: payment.lockingScript.toHex(),
+              satoshis: payment.satoshis,
+              // ≤ 50 bytes (BRC-100); shown on the spending approval.
+              outputDescription: `Pay author ${payment.address}`,
+            },
+          ]
+        : []),
     ],
     options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
   });
