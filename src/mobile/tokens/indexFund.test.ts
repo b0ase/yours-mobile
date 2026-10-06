@@ -6,6 +6,7 @@ import {
   INDEX_FUND_NETWORK_SATS,
   INDEX_FUND_SATS,
   fundAmount,
+  holderIndexState,
   fundIndexing,
   indexCostSats,
   needsIndexFunding,
@@ -161,5 +162,22 @@ describe('min_funding (indexer change, 2 Oct 2026)', () => {
     expect(fundAmount({ feePerOutput: 1000, balance: -47_000, minFunding: 10_000_000 })).toBe(10_000_000);
     expect(fundAmount({ feePerOutput: 1000 })).toBe(INDEX_FUND_SATS);
     expect(fundAmount({ feePerOutput: 1000, balance: 0, minFunding: 10_000_000 })).toBe(INDEX_FUND_SATS);
+  });
+});
+
+describe('holderIndexState', () => {
+  const base = { feeAddress: '13B7JEP8p2DXAjCKaWWGuapmgqT3Fhc7gb', feePerOutput: 1000, minFunding: 10_000_000 };
+  test('unknown when the indexer did not answer', () => {
+    expect(holderIndexState(null)).toBe('unknown');
+    expect(holderIndexState(undefined)).toBe('unknown');
+  });
+  test('indexed when active and funded (FROGGER-like, below min_funding but active)', () => {
+    expect(holderIndexState({ ...base, isActive: true, balance: 9_966_980 })).toBe('indexed');
+  });
+  test('needs when inactive', () => {
+    expect(holderIndexState({ ...base, isActive: false, balance: 0 })).toBe('needs');
+  });
+  test('needs when active but cannot pay one more output', () => {
+    expect(holderIndexState({ ...base, isActive: true, balance: 999 })).toBe('needs');
   });
 });
