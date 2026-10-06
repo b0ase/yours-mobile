@@ -10,12 +10,13 @@
  * when buying (the same transaction pays the author). The key service gives the content key to whoever
  * proves they own a copy that was the author's or was paid for, up to `copies`.
  */
+import { APP_NAME } from '../storeBuild';
 import type { Strategy, StrategySpec } from '../agents/strategy';
 import { parseStrategy } from '../agents/strategy';
 
 export const STRATEGY_CONTENT_TYPE = 'application/vnd.bwalletx.strategy+json';
 export const ENVELOPE_FORMAT = 'bwalletx.strategy-nft/1';
-export const STRATEGY_DISCLAIMER = 'Strategies are programs written and sold by users. bWalletX doesn’t review, rate or recommend them.';
+export const STRATEGY_DISCLAIMER = `Strategies are programs written and sold by users. ${APP_NAME} doesn’t review, rate or recommend them.`;
 export const MAX_COPIES = 10_000;
 
 export type SaleTerms = { priceUsd: number; copies: number; payTo: string };
@@ -59,7 +60,8 @@ export const publishProblems = (s: Strategy, sale: SaleTerms, description: strin
   for (const f of SPEC_FIELDS) if (!s.spec?.[f]?.toString().trim()) out.push(`Spec: “${SPEC_LABELS[f]}” is empty`);
   if (!description.trim()) out.push('Add a description');
   if (!(sale.priceUsd >= 0.01 && sale.priceUsd <= 10_000)) out.push('Price must be between $0.01 and $10,000');
-  if (!(Number.isInteger(sale.copies) && sale.copies >= 1 && sale.copies <= MAX_COPIES)) out.push(`Copies must be 1–${MAX_COPIES}`);
+  if (!(Number.isInteger(sale.copies) && sale.copies >= 1 && sale.copies <= MAX_COPIES))
+    out.push(`Copies must be 1–${MAX_COPIES}`);
   if (!/^1[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(sale.payTo)) out.push('No payout address');
   return out;
 };
@@ -72,8 +74,12 @@ export const sealStrategy = async (
   const key = crypto.getRandomValues(new Uint8Array(32));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const k = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt']);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode(JSON.stringify(s))));
-  const spec = Object.fromEntries(SPEC_FIELDS.map((f) => [f, String(s.spec?.[f] ?? '').slice(0, 200)])) as Required<StrategySpec>;
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode(JSON.stringify(s))),
+  );
+  const spec = Object.fromEntries(
+    SPEC_FIELDS.map((f) => [f, String(s.spec?.[f] ?? '').slice(0, 200)]),
+  ) as Required<StrategySpec>;
   return {
     key: b64(key),
     envelope: {
@@ -106,7 +112,8 @@ export const openStrategy = async (env: Envelope, keyB64: string): Promise<Strat
 export const parseEnvelope = (input: unknown): Envelope | null => {
   try {
     const o = (typeof input === 'string' ? JSON.parse(input) : input) as Envelope;
-    if (o?.format !== ENVELOPE_FORMAT || typeof o.keyHash !== 'string' || !/^[0-9a-f]{64}$/.test(o.keyHash)) return null;
+    if (o?.format !== ENVELOPE_FORMAT || typeof o.keyHash !== 'string' || !/^[0-9a-f]{64}$/.test(o.keyHash))
+      return null;
     if (typeof o.ciphertext !== 'string' || typeof o.iv !== 'string' || !o.sale || !o.spec || !o.author) return null;
     return o;
   } catch {
@@ -115,4 +122,5 @@ export const parseEnvelope = (input: unknown): Envelope | null => {
 };
 
 /** What the owner signs to unlock or publish; the key service checks the action, outpoint and a 5-minute window. */
-export const proofMessage = (action: 'publish' | 'unlock', outpoint: string, ts: number) => `bwalletx strategy ${action}: ${outpoint}: ${ts}`;
+export const proofMessage = (action: 'publish' | 'unlock', outpoint: string, ts: number) =>
+  `bwalletx strategy ${action}: ${outpoint}: ${ts}`;

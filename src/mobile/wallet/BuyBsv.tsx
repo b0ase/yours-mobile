@@ -1,3 +1,4 @@
+import { APP_NAME } from '../storeBuild';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
@@ -28,7 +29,15 @@ const useLivePrice = () => {
 };
 
 /** The whole card is the button: gold, "Buy BSV" with today's price (owner, 6 Oct 2026). */
-export const BuyBsvCard = ({ rate, onClick, className = '' }: { rate: number; onClick: () => void; className?: string }) => (
+export const BuyBsvCard = ({
+  rate,
+  onClick,
+  className = '',
+}: {
+  rate: number;
+  onClick: () => void;
+  className?: string;
+}) => (
   <button
     type="button"
     onClick={onClick}
@@ -94,11 +103,29 @@ const PROVIDERS: { name: string; url: string; desc: string }[] = [
   // Checked 6 Oct 2026 (owner): only these two load a working BSV purchase without a partner key. Ramp is back once
   // our partner key arrives (docs/BUY-BSV-ONRAMP.md). Removed: BSV Association (Onramper test key), Guardarian
   // (BSV page gone, crypto only), Onramper (marketing page), cex.io (no BSV).
-  { name: 'ChangeNOW', url: 'https://changenow.io/currencies/bitcoin-sv?from=usd&to=bsv&fiatMode=true&amount=100', desc: 'Card, many currencies' },
-  { name: 'Alchemy Pay', url: 'https://ramp.alchemypay.org/?crypto=BCHSV&fiat=USD&network=BCHSV#/index', desc: 'Card, Apple Pay, Google Pay' },
+  {
+    name: 'ChangeNOW',
+    url: 'https://changenow.io/currencies/bitcoin-sv?from=usd&to=bsv&fiatMode=true&amount=100',
+    desc: 'Card, many currencies',
+  },
+  {
+    name: 'Alchemy Pay',
+    url: 'https://ramp.alchemypay.org/?crypto=BCHSV&fiat=USD&network=BCHSV#/index',
+    desc: 'Card, Apple Pay, Google Pay',
+  },
 ];
 
-const Row = ({ icon, title, sub, onClick }: { icon: React.ReactNode; title: string; sub: string; onClick: () => void }) => (
+const Row = ({
+  icon,
+  title,
+  sub,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  sub: string;
+  onClick: () => void;
+}) => (
   <button
     type="button"
     onClick={onClick}
@@ -155,9 +182,9 @@ export const BuyBsvSheet = ({ onClose, onReceive }: { onClose: () => void; onRec
           />
         ))}
         <p className="m-0 text-[11px] leading-relaxed" style={{ color: MUTED }}>
-          These are independent services, not bWalletX. They check your identity and set their own fees and limits. Copy
-          your BSV address from Receive and paste it there. <ExternalLink size={10} className="inline" /> Opens in the
-          wallet browser.
+          These are independent services, not {APP_NAME}. They check your identity and set their own fees and limits.
+          Copy your BSV address from Receive and paste it there. <ExternalLink size={10} className="inline" /> Opens in
+          the wallet browser.
         </p>
       </div>
     </div>,

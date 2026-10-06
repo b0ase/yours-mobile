@@ -1,3 +1,4 @@
+import { APP_NAME } from '../storeBuild';
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
@@ -212,19 +213,23 @@ export const BappFrameHost = () => {
             </button>
           </div>
           <div className={phone ? 'flex-1 flex justify-center py-3 min-h-0' : 'contents'}>
-          <iframe
-            key={session.key}
-            ref={frame}
-            src={session.url}
-            title={session.name}
-            onLoad={onLoad}
-            className="w-full flex-1 border-0 bg-white"
-            // Same rights as a top-level page in the full-screen browser, minus top navigation.
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
-            allow="camera; microphone; clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media"
-            referrerPolicy="strict-origin-when-cross-origin"
-            style={phone ? { width: 430, maxWidth: '100%', flex: 'none', borderRadius: 18, border: '1px solid #2b2f36' } : undefined}
-          />
+            <iframe
+              key={session.key}
+              ref={frame}
+              src={session.url}
+              title={session.name}
+              onLoad={onLoad}
+              className="w-full flex-1 border-0 bg-white"
+              // Same rights as a top-level page in the full-screen browser, minus top navigation.
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
+              allow="camera; microphone; clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media"
+              referrerPolicy="strict-origin-when-cross-origin"
+              style={
+                phone
+                  ? { width: 430, maxWidth: '100%', flex: 'none', borderRadius: 18, border: '1px solid #2b2f36' }
+                  : undefined
+              }
+            />
           </div>
         </div>
       )}
@@ -257,7 +262,9 @@ const BwxConfirmSheet = ({ text, from, onAnswer }: { text: string; from: string;
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="text-[12px] text-[#98A2B3] mb-1">bWalletX · asked by {from}</div>
+        <div className="text-[12px] text-[#98A2B3] mb-1">
+          {APP_NAME} · asked by {from}
+        </div>
         <div className="text-[15px] font-semibold text-[#F2F2F0] mb-5">{text}</div>
         <div className="flex gap-3">
           <button

@@ -1,3 +1,4 @@
+import { APP_NAME } from '../storeBuild';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft } from 'lucide-react';
@@ -12,7 +13,15 @@ import { useIssuer } from '../issuer/IssuerBadge';
  * picture, so changing one changes the other. The on-chain icon can't change (BSV-21), so it's
  * shown small underneath whenever the profile picture is used.
  */
-export const TokenIconHeader = ({ tokenId, ticker, onchain }: { tokenId?: string; ticker: string; onchain: string }) => {
+export const TokenIconHeader = ({
+  tokenId,
+  ticker,
+  onchain,
+}: {
+  tokenId?: string;
+  ticker: string;
+  onchain: string;
+}) => {
   const icon = useTokenIcon(tokenId, ticker, onchain);
   const issuer = useIssuer(icon.fromProfile && !icon.own ? tokenId : null);
   const [editing, setEditing] = useState(false);
@@ -20,7 +29,12 @@ export const TokenIconHeader = ({ tokenId, ticker, onchain }: { tokenId?: string
   return (
     <div className="flex flex-col items-center gap-1.5 mb-3">
       {icon.url ? (
-        <img src={icon.url} alt="" className="w-16 h-16 rounded-full object-cover" style={{ border: '2px solid #F5B80055' }} />
+        <img
+          src={icon.url}
+          alt=""
+          className="w-16 h-16 rounded-full object-cover"
+          style={{ border: '2px solid #F5B80055' }}
+        />
       ) : (
         <div className="w-16 h-16 rounded-full" style={{ background: '#17191E', border: '2px dashed #F5B80055' }} />
       )}
@@ -41,8 +55,8 @@ export const TokenIconHeader = ({ tokenId, ticker, onchain }: { tokenId?: string
       )}
       {icon.fromProfile && onchain && (
         <span className="flex items-center gap-1 text-[10px]" style={{ color: '#667085' }}>
-          On-chain icon <img src={onchain} alt="" className="w-3.5 h-3.5 rounded-full object-cover" /> (permanent;
-          other wallets show this)
+          On-chain icon <img src={onchain} alt="" className="w-3.5 h-3.5 rounded-full object-cover" /> (permanent; other
+          wallets show this)
         </span>
       )}
       {editing && <ChangeIconSheet onClose={() => setEditing(false)} />}
@@ -64,8 +78,8 @@ const ChangeIconSheet = ({ onClose }: { onClose: () => void }) => {
       </div>
       <div className="flex flex-col items-center px-5 pb-10 overflow-y-auto">
         <p className="text-sm text-center mt-2 mb-4" style={{ color: '#98A2B3' }}>
-          Your token's icon in bWalletX is your profile picture. Pick a photo; publish it so other bWalletX users see it
-          too.
+          Your token's icon in {APP_NAME} is your profile picture. Pick a photo; publish it so other {APP_NAME} users
+          see it too.
         </p>
         <AvatarPicker displayName={name} />
       </div>

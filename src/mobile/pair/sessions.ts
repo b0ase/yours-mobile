@@ -102,7 +102,7 @@ async function reply(l: Live, msg: PairMessage) {
 
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
-    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', 'bWalletX is locked. Unlock it on your phone.');
+    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${appNameFor()} is locked. Unlock it on your phone.`);
     const result = await handleAgentCall(grant, action, params, {
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
