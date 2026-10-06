@@ -18,9 +18,10 @@
           { label: 'Buy BSV', href: '/buy' }
         ] },
       { label: 'Social', href: '/social', pages: ['/social', '/friends'] },
-      { label: 'Agents', href: '/agent', pages: ['/agent', '/strategies', '/strategies/spec'],
+      { label: 'Agents', href: '/agents', pages: ['/agents', '/agent', '/strategies', '/strategies/spec', '/cli', '/mcp'],
         sub: [
-          { label: 'Agents', href: '/agent' },
+          { label: 'Agent accounts', href: '/agents' },
+          { label: 'b agent', href: '/agent' },
           { label: 'Strategies', href: '/strategies' },
           { label: 'Strategy spec', href: '/strategies/spec' },
           { label: 'CLI', href: '/cli' },
