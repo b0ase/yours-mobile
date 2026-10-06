@@ -63,10 +63,12 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
     let moving: HTMLElement[] = [];
 
     // Move the screen's content (not fixed backgrounds or this component's anchor) with the gesture.
+    // CSS `translate`, not `transform`: framer-motion owns `transform` on its sections and rewrote it mid-drag,
+    // so the Receive / Send / Mint row stayed put while the rest moved (owner, 6 Oct 2026).
     const moveContent = (y: number, animate: boolean) => {
       for (const k of moving) {
-        k.style.transition = animate && !reduce ? 'transform 260ms ease-out' : 'none';
-        k.style.transform = y ? `translateY(${y}px)` : '';
+        k.style.transition = animate && !reduce ? 'translate 260ms ease-out' : 'none';
+        k.style.translate = y ? `0 ${y}px` : '';
       }
     };
 
