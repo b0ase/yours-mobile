@@ -5,6 +5,12 @@ import { readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
 
+// The app's name in build-time text patches: bWallet in a store build, bWalletX otherwise (src/mobile/storeBuild.ts).
+const STORE_APP_NAME =
+  process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '')
+    ? 'bWallet'
+    : 'bWalletX';
+
 // BWALLET_* build settings (fee addresses etc.) may live in a gitignored .env.local; the shell wins.
 for (const [k, v] of Object.entries(loadEnv(process.env.NODE_ENV ?? 'production', __dirname, 'BWALLET_'))) {
   process.env[k] ??= v;
@@ -66,8 +72,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">\n<BuyTokenButton id={token.info.id} />',
     ],
     [
-      "onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, '_blank')}\n                className=\"flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer\"",
-      "onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, '_blank')}\n                className=\"hidden\"",
+      'onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, \'_blank\')}\n                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"',
+      'onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, \'_blank\')}\n                className="hidden"',
     ],
     [
       "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>",
@@ -137,10 +143,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
     // Password asked twice for every new account (owner, 6 Oct 2026).
-    [
-      '      if (newWallet && password !== passwordConfirm) {',
-      '      if (password !== passwordConfirm) {',
-    ],
+    ['      if (newWallet && password !== passwordConfirm) {', '      if (password !== passwordConfirm) {'],
     // Restore offer from SocialSignIn needs the bottom menu's page switch.
     [
       '  const { hideMenu, showMenu } = useBottomMenu();',
@@ -171,7 +174,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     [
       '      setStep(2);\n    } catch',
       "      markHandlePrompt(keys.identityAddress, 'create');\n      setStep(2);\n    } catch",
-    ],    // Password: generate a strong one, eye toggle, autocomplete hints so the phone / browser saves it
+    ], // Password: generate a strong one, eye toggle, autocomplete hints so the phone / browser saves it
     // (src/mobile/names/PasswordFields.tsx; iOS webcredentials:www.bwallet.space).
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -198,7 +201,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
-      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onRestore={() => (newWallet ? navigate(\'/restore-wallet\') : handleSelect(\'settings\', \'restore-account\'))} />\n      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
+      "      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onRestore={() => (newWallet ? navigate('/restore-wallet') : handleSelect('settings', 'restore-account'))} />\n      <form onSubmit={handleKeyGeneration} className=\"flex flex-col items-center w-full gap-0\">",
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
@@ -208,7 +211,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}",
-      "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter the password you unlock bWalletX with (one password for all your accounts). Next you will get this account\\'s own 12-word recovery phrase.'}",
+      `{newWallet ? 'This will be used to unlock your wallet.' : 'Enter the password you unlock ${STORE_APP_NAME} with (one password for all your accounts). Next you will get this account\\'s own 12-word recovery phrase.'}`,
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -284,10 +287,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '        <Show when={true}>\n          <Input\n            theme={theme}\n            placeholder={newWallet ? "Confirm Password" : "Your wallet password again"}',
     ],
     // Password asked twice for every restore (owner, 6 Oct 2026).
-    [
-      '      if (newWallet && password !== passwordConfirm) {',
-      '      if (password !== passwordConfirm) {',
-    ],
+    ['      if (newWallet && password !== passwordConfirm) {', '      if (password !== passwordConfirm) {'],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
@@ -467,8 +467,14 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '<SectionBoundary name="Card">',
       '<SectionBoundary name="Backup"><BackupGate sats={Math.round(bsvBalance * 100_000_000)} /></SectionBoundary>\n<SectionBoundary name="Card">',
     ],
-    ["onClick={() => setPageState('receive')}", "onClick={() => requestBackupThen(chromeStorageService, () => setPageState('receive'))}"],
-    ['      setShowBackupPromo(!dismissed && !hasRemotes);', '      setShowBackupPromo(false && !dismissed && !hasRemotes);'],
+    [
+      "onClick={() => setPageState('receive')}",
+      "onClick={() => requestBackupThen(chromeStorageService, () => setPageState('receive'))}",
+    ],
+    [
+      '      setShowBackupPromo(!dismissed && !hasRemotes);',
+      '      setShowBackupPromo(false && !dismissed && !hasRemotes);',
+    ],
     // "Missing assets? Open migration tool": only for wallets that could hold legacy Yours assets, not ones made here.
     [
       "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { requestBackupThen } from '../mobile/backup/backupState';",
@@ -546,24 +552,24 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // Settings main page: "Settings for: <account> ▾", then "This account" (identity, backup, permissions, names, tokens) and "All accounts (wallet)" (Manage accounts, password, USB key, preferences). Owner, 6 Oct 2026.
     [
-      "      {/* Account section */}\n      <Section title=\"Account\">\n        <SettingRow\n          icon={<Users size={16} />}\n          label=\"Manage Accounts\"\n          description=\"Create, restore, or edit accounts\"\n          onClick={() => setPage('manage-accounts')}\n          isFirst\n        />\n        <Divider />\n",
-      "      <SettingsAccountHeader />\n      <SettingsGroup title=\"This account\" note=\"Each account has its own 12 words, keys, names and tokens.\" />\n      <Section title=\"Account\">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label=\"Identity\"\n          description=\"Your names, posting profile and verification\"\n          onClick={() => setPage('identity')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Key size={16} />}\n          label=\"Wallet Backup\"\n          description=\"This account's recovery phrase and keys; the encrypted file holds every account\"\n          onClick={() => setPage('export-keys-options')}\n        />\n        <Divider />\n",
+      '      {/* Account section */}\n      <Section title="Account">\n        <SettingRow\n          icon={<Users size={16} />}\n          label="Manage Accounts"\n          description="Create, restore, or edit accounts"\n          onClick={() => setPage(\'manage-accounts\')}\n          isFirst\n        />\n        <Divider />\n',
+      '      <SettingsAccountHeader />\n      <SettingsGroup title="This account" note="Each account has its own 12 words, keys, names and tokens." />\n      <Section title="Account">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Identity"\n          description="Your names, posting profile and verification"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Key size={16} />}\n          label="Wallet Backup"\n          description="This account\'s recovery phrase and keys; the encrypted file holds every account"\n          onClick={() => setPage(\'export-keys-options\')}\n        />\n        <Divider />\n',
     ],
     [
-      "          description=\"Review and revoke connected apps and permissions\"",
-      "          description=\"Apps connected to this account and their permissions\"",
+      '          description="Review and revoke connected apps and permissions"',
+      '          description="Apps connected to this account and their permissions"',
     ],
     [
-      "      <Section title=\"Security\">\n        <SettingRow\n          icon={<Key size={16} />}\n          label=\"Wallet Backup\"\n          description=\"Backup seed, download JSON, or QR code\"\n          onClick={() => setPage('export-keys-options')}\n          isFirst\n          isLast={!usbSupported}\n        />",
-      "      <FeedSettings part=\"account\" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title=\"All accounts (wallet)\" note=\"One password and these preferences for every account on this device.\" />\n      <Section title=\"Wallet\">\n        <SettingRow\n          icon={<Users size={16} />}\n          label=\"Manage Accounts\"\n          description=\"Create, restore, or edit accounts\"\n          onClick={() => setPage('manage-accounts')}\n          isFirst\n          isLast={!usbSupported}\n        />",
+      '      <Section title="Security">\n        <SettingRow\n          icon={<Key size={16} />}\n          label="Wallet Backup"\n          description="Backup seed, download JSON, or QR code"\n          onClick={() => setPage(\'export-keys-options\')}\n          isFirst\n          isLast={!usbSupported}\n        />',
+      '      <FeedSettings part="account" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title="All accounts (wallet)" note="One password and these preferences for every account on this device." />\n      <Section title="Wallet">\n        <SettingRow\n          icon={<Users size={16} />}\n          label="Manage Accounts"\n          description="Create, restore, or edit accounts"\n          onClick={() => setPage(\'manage-accounts\')}\n          isFirst\n          isLast={!usbSupported}\n        />',
     ],
     [
-      "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label=\"Posting profile\"\n          description=\"Your on-chain name and photo that sign your posts\"\n          onClick={() => setPage('identity')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          description=\"Default: 100 sat/kb\"",
-      "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          isFirst\n          description=\"All accounts \u00b7 default 100 sat/kb\"",
+      '      <Section title="Preferences">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Posting profile"\n          description="Your on-chain name and photo that sign your posts"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          description="Default: 100 sat/kb"',
+      '      <Section title="Preferences">\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          isFirst\n          description="All accounts \u00b7 default 100 sat/kb"',
     ],
     [
-      "          description=\"Lock wallet after inactivity\"",
-      "          description=\"Lock every account after inactivity\"",
+      '          description="Lock wallet after inactivity"',
+      '          description="Lock every account after inactivity"',
     ],
     [
       "    const update: Partial<ChromeStorageObject['accounts']> = {\n      [selectedAccount]: {\n        ...account,\n        settings: { ...account.settings, customFeeRate: rate },\n      },\n    };",
