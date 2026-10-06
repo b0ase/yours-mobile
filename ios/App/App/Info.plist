@@ -40,7 +40,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>bWallet uses the camera to scan a website's QR code when you connect your wallet to it.</string>
+	<string>bWallet uses the camera for video calls and to scan QR codes, such as when you connect your wallet to a website.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>bWallet uses the microphone for voice calls with other bWallet users.</string>
 	<key>NSFaceIDUsageDescription</key>

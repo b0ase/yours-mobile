@@ -8,6 +8,7 @@ import {
   type CallState,
   type Peer,
   type ServerCall,
+  videoLayout,
 } from './machine';
 
 const peer: Peer = { key: '02' + 'a'.repeat(64), label: '$alice', verified: true };
@@ -151,4 +152,67 @@ test('formatDuration', () => {
   expect(formatDuration(0)).toBe('0:00');
   expect(formatDuration(65_000)).toBe('1:05');
   expect(formatDuration(3_725_000)).toBe('1:02:05');
+});
+
+describe('video', () => {
+  const activeVoice = () =>
+    run(IDLE, { type: 'DIAL', peer }, { type: 'PLACED', callId: 'c1' }, { type: 'REMOTE', callId: 'c1', status: 'active', at: 1 });
+
+  test('a voice call has no video and the audio-only layout', () => {
+    const s = activeVoice();
+    expect(s).toMatchObject({ phase: 'active', camera: false, remoteVideo: false, facing: 'user' });
+    expect(videoLayout(s)).toEqual({ remote: 'none', self: 'none' });
+  });
+
+  test('a video dial carries the camera through ringing into the call', () => {
+    let s = run(IDLE, { type: 'DIAL', peer, video: true });
+    expect(s).toMatchObject({ phase: 'dialing', camera: true });
+    expect(videoLayout(s)).toEqual({ remote: 'none', self: 'full' });
+    s = run(s, { type: 'PLACED', callId: 'c1' }, { type: 'REMOTE', callId: 'c1', status: 'active', at: 5 });
+    expect(s).toMatchObject({ phase: 'active', camera: true });
+  });
+
+  test('accepting with video vs voice', () => {
+    const ring = run(IDLE, { type: 'RING_IN', call: incoming(), peer });
+    expect(reduce(ring, { type: 'ACCEPT', video: true })).toMatchObject({ phase: 'connecting', camera: true });
+    expect(reduce(ring, { type: 'ACCEPT' })).toMatchObject({ phase: 'connecting', camera: false });
+  });
+
+  test('either side can turn video on and off mid-call', () => {
+    let s = run(activeVoice(), { type: 'TOGGLE_CAMERA' });
+    expect(s).toMatchObject({ camera: true });
+    s = reduce(s, { type: 'REMOTE_VIDEO', on: true });
+    expect(videoLayout(s)).toEqual({ remote: 'full', self: 'corner' });
+    s = reduce(s, { type: 'TOGGLE_CAMERA' });
+    expect(videoLayout(s)).toEqual({ remote: 'full', self: 'none' });
+    s = reduce(s, { type: 'REMOTE_VIDEO', on: false });
+    expect(videoLayout(s)).toEqual({ remote: 'none', self: 'none' });
+  });
+
+  test('remote video that arrives while connecting survives into active', () => {
+    const s = run(
+      IDLE,
+      { type: 'RING_IN', call: incoming(), peer },
+      { type: 'ACCEPT' },
+      { type: 'REMOTE_VIDEO', on: true },
+      { type: 'MEDIA_UP', at: 9 },
+    );
+    expect(s).toMatchObject({ phase: 'active', remoteVideo: true });
+  });
+
+  test('flip only with the camera on; same remote state is a no-op', () => {
+    const voice = activeVoice();
+    expect(reduce(voice, { type: 'FLIP_CAMERA' })).toBe(voice);
+    const on = reduce(voice, { type: 'TOGGLE_CAMERA' });
+    expect(reduce(on, { type: 'FLIP_CAMERA' })).toMatchObject({ facing: 'environment' });
+    expect(run(on, { type: 'FLIP_CAMERA' }, { type: 'FLIP_CAMERA' })).toMatchObject({ facing: 'user' });
+    expect(reduce(on, { type: 'REMOTE_VIDEO', on: false })).toBe(on);
+  });
+
+  test('camera events are ignored outside a call', () => {
+    expect(reduce(IDLE, { type: 'TOGGLE_CAMERA' })).toBe(IDLE);
+    const ring = run(IDLE, { type: 'RING_IN', call: incoming(), peer });
+    expect(reduce(ring, { type: 'TOGGLE_CAMERA' })).toBe(ring);
+    expect(videoLayout(ring)).toEqual({ remote: 'none', self: 'none' });
+  });
 });

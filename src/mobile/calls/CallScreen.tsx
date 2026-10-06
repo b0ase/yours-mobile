@@ -1,23 +1,38 @@
-import { useEffect, useState } from 'react';
-import { Ban, BadgeCheck, Mic, MicOff, Phone, PhoneOff, UserPlus, Volume2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Ban,
+  BadgeCheck,
+  Mic,
+  MicOff,
+  Phone,
+  PhoneOff,
+  SwitchCamera,
+  UserPlus,
+  Video,
+  VideoOff,
+  Volume2,
+} from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useAccountNames } from '../names/MyNameBadge';
 import { bareName } from '../names/names';
 import {
   accept,
+  bindVideo,
   blockCaller,
   decline,
   dismiss,
+  flipCamera,
   hangUp,
   setCallLabel,
   startCalls,
   stopCalls,
+  toggleCamera,
   toggleMute,
   toggleSpeaker,
 } from './store';
 import { useCalls } from './useCalls';
 import { addFriend, isFriend } from './friends';
-import { END_TEXT, formatDuration, type CallState } from './machine';
+import { END_TEXT, formatDuration, videoLayout, type CallState } from './machine';
 
 /**
  * App-wide call overlay (mounted next to MiniPlayer by vite.config.mobile.ts): starts the
@@ -90,8 +105,18 @@ export const CallScreen = () => {
   // The label callees verify: our full paymail (unambiguous), else the OpNS name. Shown bare.
   const { paymail, handle } = useAccountNames(identityAddress, '', '', false);
   const myName = paymail || handle;
-  const { call } = useCalls();
+  const { call, error } = useCalls();
   const [note, setNote] = useState('');
+  const localRef = useRef<HTMLVideoElement>(null);
+  const remoteRef = useRef<HTMLVideoElement>(null);
+  const inCall = call.phase !== 'idle';
+  // The <video> elements always exist while a call screen is up (hidden when unused), so the
+  // media layer can attach tracks the moment they arrive.
+  useEffect(() => {
+    if (!inCall) return;
+    bindVideo(localRef.current, remoteRef.current);
+    return () => bindVideo(null, null);
+  }, [inCall]);
 
   useEffect(() => setCallLabel(myName || undefined), [myName]);
   useEffect(() => {
@@ -105,6 +130,23 @@ export const CallScreen = () => {
 
   if (call.phase === 'idle') return null;
   const peer = call.peer;
+  const layout = videoLayout(call);
+  const videoOn = layout.remote === 'full' || layout.self === 'full';
+  const cam = 'camera' in call ? call : null;
+  const selfStyle: React.CSSProperties =
+    layout.self === 'corner'
+      ? {
+          position: 'absolute',
+          right: 16,
+          top: 'calc(var(--wallet-inset-top, 0px) + 16px)',
+          width: 104,
+          height: 148,
+          borderRadius: 14,
+          objectFit: 'cover',
+          zIndex: 2,
+          border: '1px solid rgba(255,255,255,0.25)',
+        }
+      : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 };
 
   return (
     <div
@@ -117,26 +159,64 @@ export const CallScreen = () => {
       role="dialog"
       aria-label="Call"
     >
-      <div className="flex flex-col items-center gap-3 px-6 text-center">
-        <div
-          className="w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold"
-          style={{ background: '#2a2208', border: `2px solid ${GOLD}`, color: GOLD }}
-        >
-          {bareName(peer.label).replace(/^\$/, '').slice(0, 1).toUpperCase()}
-        </div>
+      <video
+        ref={remoteRef}
+        autoPlay
+        playsInline
+        aria-label="Video from the other person"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          zIndex: 0,
+          display: layout.remote === 'full' ? 'block' : 'none',
+        }}
+      />
+      <video
+        ref={localRef}
+        autoPlay
+        playsInline
+        muted
+        aria-label="Your camera"
+        style={{
+          ...selfStyle,
+          // The selfie camera is shown mirrored, as every phone does; the back camera is not.
+          transform: cam?.facing === 'user' ? 'scaleX(-1)' : undefined,
+          display: layout.self === 'none' ? 'none' : 'block',
+        }}
+      />
+      <div
+        className="relative z-[1] flex flex-col items-center gap-3 px-6 text-center"
+        style={videoOn ? { textShadow: '0 1px 4px rgba(0,0,0,0.8)' } : undefined}
+      >
+        {!videoOn && (
+          <div
+            className="w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold"
+            style={{ background: '#2a2208', border: `2px solid ${GOLD}`, color: GOLD }}
+          >
+            {bareName(peer.label).replace(/^\$/, '').slice(0, 1).toUpperCase()}
+          </div>
+        )}
         <div className="flex items-center gap-1.5 max-w-[300px]">
           <span className="text-2xl font-semibold truncate">{bareName(peer.label)}</span>
           {peer.verified && <BadgeCheck size={18} color="#2ecc71" aria-label="Name verified" />}
         </div>
         <div className="text-sm text-[#98A2B3]">{status(call)}</div>
-        {note && <div className="text-xs text-[#F5B800]">{note}</div>}
+        {(note || (cam && error && /camera/i.test(error) ? error : '')) && (
+          <div className="text-xs text-[#F5B800]">{note || error}</div>
+        )}
       </div>
 
       {call.phase === 'incoming' && (
         <div className="flex flex-col items-center gap-8">
-          <div className="flex gap-16">
+          <div className="flex gap-10">
             <Round label="Decline" bg="#e5484d" onClick={() => void decline()}>
               <PhoneOff size={26} color="#fff" />
+            </Round>
+            <Round label="Video" bg="#2ecc71" onClick={() => void accept({ video: true })}>
+              <Video size={26} color="#fff" />
             </Round>
             <Round label="Accept" bg="#2ecc71" onClick={() => void accept()}>
               <Phone size={26} color="#fff" />
@@ -155,17 +235,29 @@ export const CallScreen = () => {
         call.phase === 'ringing-out' ||
         call.phase === 'connecting' ||
         call.phase === 'active') && (
-        <div className="flex flex-col items-center gap-10">
-          {call.phase === 'active' && (
-            <div className="flex gap-12">
+        <div className="relative z-[1] flex flex-col items-center gap-10">
+          <div className="flex gap-6">
+            {call.phase === 'active' && (
               <Round label={call.muted ? 'Unmute' : 'Mute'} on={call.muted} onClick={() => void toggleMute()}>
                 {call.muted ? <MicOff size={24} color="#111" /> : <Mic size={24} color="#fff" />}
               </Round>
+            )}
+            {cam && (
+              <Round label={cam.camera ? 'Camera off' : 'Camera'} on={cam.camera} onClick={() => void toggleCamera()}>
+                {cam.camera ? <Video size={24} color="#111" /> : <VideoOff size={24} color="#fff" />}
+              </Round>
+            )}
+            {cam?.camera && (
+              <Round label="Flip" onClick={() => void flipCamera()}>
+                <SwitchCamera size={24} color="#fff" />
+              </Round>
+            )}
+            {call.phase === 'active' && (
               <Round label="Speaker" on={call.speaker} onClick={() => void toggleSpeaker()}>
                 <Volume2 size={24} color={call.speaker ? '#111' : '#fff'} />
               </Round>
-            </div>
-          )}
+            )}
+          </div>
           <Round label="Hang up" bg="#e5484d" onClick={() => void hangUp()}>
             <PhoneOff size={26} color="#fff" />
           </Round>

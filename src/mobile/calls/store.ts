@@ -121,10 +121,33 @@ if (typeof document !== 'undefined') {
 async function joinMedia(callId: string) {
   if (!client) throw new Error('Calls are not ready');
   const t = await client.token(callId);
+  const s = snap.call;
+  const camera = 'camera' in s ? s.camera : false;
+  const facing = 'facing' in s ? s.facing : 'user';
   media = new CallMedia();
-  await media.connect(t.url, t.token, () => {
-    if (busy(snap.call)) dispatch({ type: 'FAIL', message: 'Connection lost' });
-  });
+  if (videoEls) media.bindVideo(videoEls.local, videoEls.remote);
+  const { cameraFailed } = await media.connect(
+    t.url,
+    t.token,
+    {
+      onDisconnected: () => {
+        if (busy(snap.call)) dispatch({ type: 'FAIL', message: 'Connection lost' });
+      },
+      onRemoteVideo: (on) => dispatch({ type: 'REMOTE_VIDEO', on }),
+    },
+    { camera, facing },
+  );
+  if (cameraFailed) {
+    dispatch({ type: 'TOGGLE_CAMERA' });
+    set({ error: 'Camera unavailable — continuing as a voice call' });
+  }
+}
+
+let videoEls: { local: HTMLVideoElement | null; remote: HTMLVideoElement | null } | null = null;
+/** The CallScreen hands in its <video> elements (or nulls on unmount). */
+export function bindVideo(local: HTMLVideoElement | null, remote: HTMLVideoElement | null) {
+  videoEls = local || remote ? { local, remote } : null;
+  media?.bindVideo(local, remote);
 }
 
 async function teardown() {
@@ -136,9 +159,9 @@ async function teardown() {
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 
-export async function dial(peer: Peer) {
+export async function dial(peer: Peer, opts: { video?: boolean } = {}) {
   if (!client || busy(snap.call)) return;
-  dispatch({ type: 'DIAL', peer });
+  dispatch({ type: 'DIAL', peer, video: !!opts.video });
   try {
     const call = await client.place(peer.key, { caller: myLabel, callee: peer.label });
     dispatch({ type: 'PLACED', callId: call.id });
@@ -154,10 +177,10 @@ export async function dial(peer: Peer) {
   }
 }
 
-export async function accept() {
+export async function accept(opts: { video?: boolean } = {}) {
   const s = snap.call;
   if (!client || s.phase !== 'incoming') return;
-  dispatch({ type: 'ACCEPT' });
+  dispatch({ type: 'ACCEPT', video: !!opts.video });
   try {
     await client.act(s.callId, 'accept');
     await joinMedia(s.callId);
@@ -192,6 +215,25 @@ export async function toggleSpeaker() {
   dispatch({ type: 'TOGGLE_SPEAKER' });
   const s = snap.call;
   if (s.phase === 'active') await media?.setSpeaker(s.speaker);
+}
+
+export async function toggleCamera() {
+  dispatch({ type: 'TOGGLE_CAMERA' });
+  const s = snap.call;
+  if (!('camera' in s)) return;
+  try {
+    await media?.setCamera(s.camera, s.facing);
+  } catch (e) {
+    // Permission refused / no camera: put the button back and say why.
+    if (s.camera) dispatch({ type: 'TOGGLE_CAMERA' });
+    set({ error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+export async function flipCamera() {
+  dispatch({ type: 'FLIP_CAMERA' });
+  const s = snap.call;
+  if ('camera' in s && s.camera) await media?.flipCamera(s.facing).catch(() => undefined);
 }
 
 export const dismiss = () => dispatch({ type: 'DISMISS' });

@@ -9,6 +9,7 @@ import {
   PhoneOutgoing,
   Trash2,
   UserPlus,
+  Video,
 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -211,8 +212,8 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
     handleSelect(asMenuItem('chat'));
     onLeave?.();
   };
-  const callKey = (key: string, label: string) => {
-    if (!inCall) void dial({ key, label, verified: true });
+  const callKey = (key: string, label: string, video = false) => {
+    if (!inCall) void dial({ key, label, verified: true }, { video });
   };
 
   const resolveInput = async () => {
@@ -233,11 +234,11 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
       setResolving(false);
     }
   };
-  const callName = async () => {
+  const callName = async (video = false) => {
     const peer = await resolveInput();
     if (!peer) return;
     setInput('');
-    void dial(peer);
+    void dial(peer, { video });
   };
   const addName = async () => {
     const peer = await resolveInput();
@@ -338,6 +339,16 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
                       onClick={() => callKey(f.identityKey!, f.name)}
                     >
                       <Phone size={16} color={GOLD} />
+                    </button>
+                  )}
+                  {f.identityKey && (
+                    <button
+                      aria-label={`Video call ${f.name}`}
+                      className="p-2"
+                      disabled={inCall}
+                      onClick={() => callKey(f.identityKey!, f.name, true)}
+                    >
+                      <Video size={16} color={GOLD} />
                     </button>
                   )}
                 </>
@@ -492,6 +503,14 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
               ) : (
                 <Phone size={18} color="#1a1300" />
               )}
+            </button>
+            <button
+              onClick={() => void callName(true)}
+              disabled={!input.trim() || resolving || inCall}
+              aria-label="Video call"
+              className="w-12 rounded-xl flex items-center justify-center border border-[#2b2f36] disabled:opacity-40"
+            >
+              <Video size={18} color={GOLD} />
             </button>
             <button
               onClick={() => void addName()}
