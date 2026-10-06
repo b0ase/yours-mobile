@@ -1,4 +1,3 @@
-import { HOSTED_YOURS_IMAGE } from './constants';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -54,9 +53,11 @@ export const sendTransactionNotification = (newTxCount: number) => {
   chrome.notifications.create(
     {
       type: 'basic',
-      iconUrl: HOSTED_YOURS_IMAGE,
-      title: 'New Transactions',
-      message: `Your SPV wallet has received ${newTxCount} new transaction${newTxCount > 1 ? 's' : ''}!`,
+      // The extension's own icon (owner, 6 Oct 2026: it showed the old Yours image). macOS still shows
+      // Chrome as the sender; this is the picture beside the text.
+      iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+      title: 'New transactions',
+      message: `You received ${newTxCount} new transaction${newTxCount > 1 ? 's' : ''}.`,
       priority: 2,
     },
     (notificationId: string) => {
