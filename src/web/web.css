@@ -75,3 +75,28 @@ html body #root {
     margin: 0 auto;
   }
 }
+
+/* Wide screens: the wallet card on the left, staying in view, and the rest of the wallet page on the right
+   (owner, 6 Oct 2026). Only the Wallet page's scroller holds .bw-wcard-wrap, so other pages are untouched. */
+@media (min-width: 900px) {
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) {
+    display: grid;
+    grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+    column-gap: 32px;
+    align-items: start;
+    align-content: start;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > * {
+    grid-column: 2;
+    width: 100%;
+    max-width: none;
+  }
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
+    grid-column: 1;
+    grid-row: 1 / span 60;
+    position: sticky;
+    top: 16px;
+  }
+}
