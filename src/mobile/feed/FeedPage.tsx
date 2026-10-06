@@ -464,16 +464,26 @@ const AuthorName = ({ name, className }: { name: string; className: string }) =>
   if (v === 'hidden') return <span className={className}>{HIDDEN_NAME}</span>;
   if (v === 'show' || shown) return <span className={className}>{name}</span>;
   return (
-    <button
+    // A span, not a <button>: names sit inside row buttons (search, who to follow).
+    <span
+      role="button"
+      tabIndex={0}
       onClick={(e) => {
         e.stopPropagation();
         setShown(true);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          setShown(true);
+        }
       }}
       aria-label="Name blurred: offensive language. Tap to show."
       className={`${className} select-none blur-sm`}
     >
       {name}
-    </button>
+    </span>
   );
 };
 
@@ -1238,7 +1248,7 @@ const LockSheet = ({
   return (
     <Sheet title="Lock BSV to back this post" onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back {safeName(post.author.name)}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in
+        Back <AuthorName name={post.author.name} className="" />'s post with your own coins. Nothing is sent to anyone: the BSV is locked in
         your wallet, and the post shows how much is locked behind it.
       </p>
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
@@ -2393,7 +2403,7 @@ const Leaderboard = ({
                   <Avatar author={r.author} source={r.source} size={36} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-semibold text-white">
-                      {safeName(r.author.name)}
+                      <AuthorName name={r.author.name} className="" />
                       {mine && <span style={{ color: GOLD }}> · You</span>}
                     </div>
                     <div className="truncate text-[11px]" style={{ color: MUTED }}>
@@ -2419,7 +2429,7 @@ const Leaderboard = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate text-[13px] font-semibold text-white">
-                        {safeName(r.post.author.name)}
+                        <AuthorName name={r.post.author.name} className="" />
                         {mine && <span style={{ color: GOLD }}> · You</span>}
                       </span>
                       <Via post={r.post} />
