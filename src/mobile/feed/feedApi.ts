@@ -179,20 +179,56 @@ export async function fetchFollowing(follows: { bapId: string | null; address: s
  * OP_RETURN output through the wallet (normal approval rules apply). Hands the raw tx to the
  * indexer so the post shows up without waiting for a block.
  */
+/** The wallet has no posting identity yet (no published BAP ID to sign with). */
+export class NoPostingIdentityError extends Error {
+  constructor() {
+    super('Set up your posting identity first.');
+    this.name = 'NoPostingIdentityError';
+  }
+}
+
+export const isNoIdentityError = (e: unknown) => /No BAP identity/i.test(e instanceof Error ? e.message : String(e));
+
+/**
+ * Who sets up a missing posting identity inline. The feed screen registers one that shows the
+ * one-tap setup sheet and resolves true once it is published (false when the person cancels).
+ */
+let identitySetup: (() => Promise<boolean>) | null = null;
+export const setIdentitySetupHandler = (fn: (() => Promise<boolean>) | null) => {
+  identitySetup = fn;
+};
+
+/** Sign with the identity key; with none yet, ask the registered handler to set one up, then sign. */
+export async function signWithIdentity(
+  sign: () => Promise<Script>,
+  setup: (() => Promise<boolean>) | null = identitySetup,
+): Promise<Script | null> {
+  try {
+    return await sign();
+  } catch (e) {
+    if (!isNoIdentityError(e)) throw e;
+    if (!setup) throw new NoPostingIdentityError();
+    if (!(await setup())) return null;
+    return sign();
+  }
+}
+
+/** Thrown by publish() when the person declined to set up their identity: nothing was posted. */
+export class PostCancelledError extends Error {
+  constructor() {
+    super('Not posted.');
+    this.name = 'PostCancelledError';
+  }
+}
+
 export async function publish(
   ctx: OneSatContext,
   script: Script,
   description: string,
   tags: string[],
 ): Promise<string> {
-  let signed: Script;
-  try {
-    signed = await applyBapAip(ctx, script);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    if (/No BAP identity/i.test(m)) throw new Error('Publish your identity first (Settings → Identity), then post.');
-    throw e;
-  }
+  const signed = await signWithIdentity(() => applyBapAip(ctx, script));
+  if (!signed) throw new PostCancelledError();
   const res = await executeTrackedAction(ctx.wallet, {
     description,
     outputs: [
