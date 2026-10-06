@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
 import { BAPPS } from '../bapps';
 import { pushBackCloser } from '../backStack';
@@ -12,6 +14,28 @@ import {
   subscribeBappFrame,
 } from './bappFrame';
 import { isAllowedFrameOrigin, parseXdmRequest, toXdmResponse } from './frameBridge';
+import { BWX_CHANGED, answerBwx, isBwxOrigin, parseBwx, type BwxDeps } from './bwxBridge';
+import {
+  allAgentsStopped,
+  getAgentAccount,
+  getAgentLog,
+  ghostColorOf,
+  listAgentAccounts,
+  onAgentsChange,
+  setAgentDailyCap,
+  setAgentLabels,
+  setAgentStopped,
+  setAllAgentsStopped,
+  spentToday,
+} from '../agents/agentAccounts';
+import { startAgentCreate } from '../agents/AgentAccountToggle';
+import { accountTag, useAccountSwitch } from '../account/AccountSwitcher';
+import { accountNamesFor } from '../names/MyNameBadge';
+import { loadLastBalance } from '../wallet/balanceLoad';
+import { cachedExchangeRate } from '../../utils/wallet';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { routeFor } from '../tabs/tabs';
 
 /**
  * The in-frame bApp: a slim header row and a cross-origin iframe filling the space between
@@ -22,13 +46,36 @@ export const BappFrameHost = () => {
   const { session, visible, opening } = useSyncExternalStore(subscribeBappFrame, getBappFrameState);
   const frame = useRef<HTMLIFrameElement>(null);
 
+  const bwxDeps = useBwxDeps();
+  const [ask, setAsk] = useState<{ text: string; resolve: (ok: boolean) => void } | null>(null);
+  const askRef = useRef(ask);
+  askRef.current = ask;
+
   // Wallet bridge (BRC-100 XDM): only our iframe, only its allowlisted origin.
   useEffect(() => {
     if (!session) return;
+    // One wallet-drawn sheet at a time; a second ask while one is open is refused.
+    const confirm = (text: string) =>
+      askRef.current
+        ? Promise.resolve(false)
+        : new Promise<boolean>((resolve) => {
+            const a = { text, resolve };
+            askRef.current = a;
+            setAsk(a);
+          });
     const onMessage = (e: MessageEvent) => {
       const win = frame.current?.contentWindow;
-      if (!win || e.source !== win) return;
-      if (e.origin !== session.origin || !isAllowedFrameOrigin(e.origin, BAPP_FRAME_ALLOWLIST)) return;
+      if (!win || e.source !== win || e.origin !== session.origin) return;
+      // BWX (agent data): first-party bAgents only, refused for every other origin (docs/BAGENTS-PLAN.md).
+      const bwx = parseBwx(e.data);
+      if (bwx) {
+        if (!isBwxOrigin(e.origin)) return;
+        void answerBwx(bwx, { ...bwxDeps.current, confirm } satisfies BwxDeps).then((reply) =>
+          win.postMessage(reply, e.origin),
+        );
+        return;
+      }
+      if (!isAllowedFrameOrigin(e.origin, BAPP_FRAME_ALLOWLIST)) return;
       const req = parseXdmRequest(e.data);
       if (!req) return;
       const pageUrl = lastUrlFor(e.origin) ?? session.url;
@@ -37,8 +84,19 @@ export const BappFrameHost = () => {
         .then((reply) => win.postMessage(toXdmResponse(req.id, reply), e.origin));
     };
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [session]);
+    // Push: tell bAgents when agent data changes, so it can re-read.
+    const offAgents = isBwxOrigin(session.origin)
+      ? onAgentsChange(() => frame.current?.contentWindow?.postMessage(BWX_CHANGED, session.origin))
+      : () => {};
+    return () => {
+      window.removeEventListener('message', onMessage);
+      offAgents();
+      // The app went away: an open question is answered "no".
+      askRef.current?.resolve(false);
+      askRef.current = null;
+      setAsk(null);
+    };
+  }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Back: the iframe's history first (it shares the joint session history; the wallet's
   // MemoryRouter adds no entries of its own), then close.
@@ -172,8 +230,105 @@ export const BappFrameHost = () => {
           </div>
         </div>
       )}
+      {ask && (
+        <BwxConfirmSheet
+          text={ask.text}
+          from={session?.name ?? 'bAgents'}
+          onAnswer={(ok) => {
+            ask.resolve(ok);
+            askRef.current = null;
+            setAsk(null);
+          }}
+        />
+      )}
     </>
   );
+};
+
+/** The wallet's own confirmation for a BWX change (resume, raise a cap): drawn by the wallet, above the frame. */
+const BwxConfirmSheet = ({ text, from, onAnswer }: { text: string; from: string; onAnswer: (ok: boolean) => void }) =>
+  createPortal(
+    <div
+      className="fixed inset-0 z-[300] flex items-end justify-center bg-black/60"
+      onClick={() => onAnswer(false)}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="w-full max-w-md rounded-t-3xl bg-[#111113] px-5 pt-5 border-t border-[#1C1C1E]"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-[12px] text-[#98A2B3] mb-1">bWalletX · asked by {from}</div>
+        <div className="text-[15px] font-semibold text-[#F2F2F0] mb-5">{text}</div>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => onAnswer(false)}
+            className="flex-1 rounded-2xl py-3 font-bold border border-[#2b2f36] text-[#F2F2F0] bg-transparent"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onAnswer(true)}
+            className="flex-1 rounded-2xl py-3 font-bold border-0 text-black"
+            style={{ background: '#FFC107' }}
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+
+/**
+ * Real BWX deps over agentAccounts and the account list (confirm is added by the host). Kept in a ref
+ * so the message listener sees fresh hooks without re-subscribing.
+ */
+const useBwxDeps = () => {
+  const { chromeStorageService } = useServiceContext();
+  const { handleSelect } = useBottomMenu();
+  const navigate = useNavigate();
+  const { switchAccount } = useAccountSwitch();
+  const info = (id: string) => {
+    const acct = chromeStorageService.getAllAccounts().find((a) => a.addresses.identityAddress === id);
+    const n = accountNamesFor(id, acct?.name ?? '', acct?.settings?.socialProfile?.displayName ?? '');
+    return { name: n.displayName, handle: accountTag(id, n.displayName, n.paymail, n.handle) };
+  };
+  const deps: Omit<BwxDeps, 'confirm'> = {
+    listAgents: listAgentAccounts,
+    getAgent: getAgentAccount,
+    ghostColorOf,
+    accountInfo: info,
+    currentId: () => chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress,
+    // The last balance the Wallet tab saw for that account (sats) at the last known rate; null when either is missing.
+    balanceUsd: (id) => {
+      const sats = loadLastBalance(id);
+      const rate = cachedExchangeRate() || chromeStorageService.getCurrentAccountObject().exchangeRateCache?.rate || 0;
+      return sats === null || !(rate > 0) ? null : Math.round((sats / 1e8) * rate * 100) / 100;
+    },
+    getLog: getAgentLog,
+    spentToday: (log) => spentToday(log),
+    allStopped: allAgentsStopped,
+    setStopped: (id, stopped) => setAgentStopped(id, stopped),
+    setAllStopped: setAllAgentsStopped,
+    setCap: setAgentDailyCap,
+    setLabels: setAgentLabels,
+    // Fund / Sweep / Receive live on the account itself: switch to it (the wallet reloads into it).
+    openAccount: (id) => switchAccount(id),
+    // Same as Account menu › Add agent account.
+    createAgent: () => {
+      startAgentCreate();
+      handleSelect('settings', 'create-account');
+      const route = routeFor('settings');
+      if (route) navigate(route);
+    },
+  };
+  const ref = useRef(deps);
+  ref.current = deps;
+  return ref;
 };
 
 /** Wide screen (web, extension tab): apps can be phone-sized or desktop-sized. */
