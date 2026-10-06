@@ -186,7 +186,28 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
   const [sweepTo, setSweepTo] = useState(others[0]?.addresses.identityAddress ?? '');
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState('');
-  if (!agent || !acct) return null;
+  // Never a blank screen (owner, 6 Oct 2026: new agent account went blank on the web): if the account
+  // or its agent record isn't loaded yet, say so and offer a reload.
+  if (!agent || !acct)
+    return createPortal(
+      <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: '#010101' }}>
+        <Header title="Agent account" onBack={onClose} />
+        <div className="flex flex-col items-center gap-3 px-4 pt-10 text-center">
+          <p className="text-sm m-0" style={{ color: MUTED }}>
+            {agent ? 'This account isn’t loaded on this device yet.' : 'This is no longer an agent account.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-2xl px-5 py-2 font-bold border-0"
+            style={{ background: GOLD, color: '#000' }}
+          >
+            Reload
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
   const address = acct.addresses.bsvAddress;
 
   const switchTo = async (to: string) => {
