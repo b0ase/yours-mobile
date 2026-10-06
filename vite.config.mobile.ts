@@ -558,7 +558,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "      <FeedSettings part=\"account\" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title=\"All accounts (wallet)\" note=\"One password and these preferences for every account on this device.\" />\n      <Section title=\"Wallet\">\n        <SettingRow\n          icon={<Users size={16} />}\n          label=\"Manage Accounts\"\n          description=\"Create, restore, or edit accounts\"\n          onClick={() => setPage('manage-accounts')}\n          isFirst\n          isLast={!usbSupported}\n        />",
     ],
     [
-      "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label=\"Identity\"\n          description=\"On-chain BAP identity and profile\"\n          onClick={() => setPage('identity')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          description=\"Default: 100 sat/kb\"",
+      "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label=\"Posting profile\"\n          description=\"Your on-chain name and photo that sign your posts\"\n          onClick={() => setPage('identity')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          description=\"Default: 100 sat/kb\"",
       "      <Section title=\"Preferences\">\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label=\"Custom Fee Rate\"\n          isFirst\n          description=\"All accounts \u00b7 default 100 sat/kb\"",
     ],
     [
