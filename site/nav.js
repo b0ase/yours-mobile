@@ -112,11 +112,11 @@
     // bChat instead of Telegram/Discord (owner, 6 Oct 2026): a white b, next to X and GitHub.
     var bc = document.createElement('a');
     bc.className = 'x-link bchat-link';
-    bc.href = 'https://www.bitcoinchat.online/';
+    bc.href = 'https://www.bitcoinchat.online/room/LOUNGE';
     bc.target = '_blank';
     bc.rel = 'noopener';
-    bc.setAttribute('aria-label', 'Chat with us on bChat');
-    bc.title = 'Chat with us on bChat';
+    bc.setAttribute('aria-label', 'Join the bWallet Lounge on bChat');
+    bc.title = 'Join the bWallet Lounge on bChat';
     // bChat's own b (bit-sign public/bchat-icon.svg: flag-top stem + bowl), in white.
     bc.innerHTML = '<svg viewBox="12 10 96 96" width="20" height="20" aria-hidden="true"><mask id="bc-hole"><rect x="0" y="0" width="120" height="120" fill="#fff"/><circle cx="60" cy="72" r="15" fill="#000"/></mask><g fill="currentColor" mask="url(#bc-hole)"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="33"/></g></svg>';
     cta.insertBefore(bc, gh.nextSibling);
