@@ -594,7 +594,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',
@@ -605,7 +605,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Push: device registration + notification taps (mobile/push/PushEngine).
     [
       '<UsbBackupPill />',
-      '<UsbBackupPill />\n<Suspense fallback={null}><ExtensionEdge /></Suspense>\n<Suspense fallback={null}><MiniPlayer /></Suspense>\n<Suspense fallback={null}><CallScreen /></Suspense>\n<Suspense fallback={null}><NotifyEngine /></Suspense>\n<Suspense fallback={null}><PushEngine /></Suspense>',
+      '<UsbBackupPill />\n<Suspense fallback={null}><ExtensionEdge /></Suspense>\n<Suspense fallback={null}><MiniPlayer /></Suspense>\n<Suspense fallback={null}><CallScreen /></Suspense>\n<Suspense fallback={null}><NotifyEngine /></Suspense>\n<Suspense fallback={null}><PushEngine /></Suspense>\n<Suspense fallback={null}><BappFrameHost /></Suspense>',
     ],
   ],
 };

@@ -2,7 +2,6 @@ import { Wallet, Store, LayoutGrid, Newspaper, MessageCircle } from 'lucide-reac
 import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
-import { BappFrameHost } from '../bappFrame/BappFrameHost';
 import { indexingEnabled, marketLabel } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, type MobileTab } from './tabs';
 
@@ -32,8 +31,6 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
   ).length;
   return (
     <>
-      {/* In-frame bApp: lives with the tab bar so it survives tab switches. */}
-      <BappFrameHost />
       <div
         className="flex items-center w-full absolute bottom-0 z-[100]"
         style={{

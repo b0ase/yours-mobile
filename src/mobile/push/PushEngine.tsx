@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useContext, useEffect } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { loadSession, SESSION_EVENT } from '../chat/api';
 import { requestRoomByTicker } from '../chat/segmentNav';
 import { asMenuItem } from '../tabs/tabs';
@@ -15,7 +15,10 @@ import { onPushRoute, syncPush, takeRouteFrom } from './register';
  */
 const PushEngine = () => {
   const { chromeStorageService } = useServiceContext();
-  const { handleSelect } = useBottomMenu();
+  // The context, not useBottomMenu: PushEngine mounts above <Router> (beside NotifyEngine), and
+  // useBottomMenu calls useNavigate, which throws there and blanked the whole wallet after unlock.
+  // Selecting the tab is enough: the TopNav/tab bar's useBottomMenu (inside the router) routes it.
+  const handleSelect = useContext(BottomMenuContext)?.handleSelect ?? (() => {});
   const identityAddress = chromeStorageService?.getCurrentAccountObject?.()?.account?.addresses?.identityAddress;
 
   // Registration follows the bChat session (shared by the app, like the Chat tab's): sign-in registers

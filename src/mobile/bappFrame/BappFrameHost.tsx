@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
 import { BAPPS } from '../bapps';
 import { pushBackCloser } from '../backStack';
@@ -34,8 +33,7 @@ import { accountNamesFor } from '../names/MyNameBadge';
 import { loadLastBalance } from '../wallet/balanceLoad';
 import { cachedExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useBottomMenu } from '../../hooks/useBottomMenu';
-import { routeFor } from '../tabs/tabs';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 
 /**
  * The in-frame bApp: a slim header row and a cross-origin iframe filling the space between
@@ -289,8 +287,10 @@ const BwxConfirmSheet = ({ text, from, onAnswer }: { text: string; from: string;
  */
 const useBwxDeps = () => {
   const { chromeStorageService } = useServiceContext();
-  const { handleSelect } = useBottomMenu();
-  const navigate = useNavigate();
+  // The context, not useBottomMenu/useNavigate: the bApp frame host mounts above <Router>, where
+  // useNavigate throws; that blanked the wallet right after unlock (5.1.69). Selecting the tab is
+  // enough: the tab bar's useBottomMenu, inside the router, does the routing.
+  const handleSelect = useContext(BottomMenuContext)?.handleSelect ?? (() => {});
   const { switchAccount } = useAccountSwitch();
   const info = (id: string) => {
     const acct = chromeStorageService.getAllAccounts().find((a) => a.addresses.identityAddress === id);
@@ -322,8 +322,6 @@ const useBwxDeps = () => {
     createAgent: () => {
       startAgentCreate();
       handleSelect('settings', 'create-account');
-      const route = routeFor('settings');
-      if (route) navigate(route);
     },
   };
   const ref = useRef(deps);
