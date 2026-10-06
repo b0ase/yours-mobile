@@ -19,6 +19,7 @@ import {
 } from './overlays';
 import { INTERNAL_ORIGIN, MOBILE_EXTENSION_ID, type Sender } from './protocol';
 import { installOverlayFetch } from './overlayFetch';
+import { initPushTaps } from './push/register';
 import '@fontsource/space-grotesk/700.css';
 import './mobile.css';
 
@@ -134,4 +135,6 @@ if (Capacitor.isNativePlatform()) {
   });
 }
 
+// Before the UI: a push tap that launched the app is held until PushEngine (after unlock) takes it.
+initPushTaps();
 await import('../index');

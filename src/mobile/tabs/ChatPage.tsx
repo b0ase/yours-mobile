@@ -28,6 +28,8 @@ import { avatarFor, B_AVATAR, pendingBQuestions, useAvatars } from '../chat/avat
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
+import { onRoomTicker, takeRoomTicker } from '../chat/segmentNav';
+import { RoomBell } from '../push/RoomBell';
 import { STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -228,6 +230,7 @@ const Conversation = ({
   openRoom = null,
   hidden,
   onMessageMenu = null,
+  bell = true,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -251,6 +254,8 @@ const Conversation = ({
   hidden?: ReadonlySet<string>;
   /** Long-press a message: report / block / delete. */
   onMessageMenu?: ((m: ChatMessage) => void) | null;
+  /** Push bell (All / Mentions / Off). Off for DMs, which always notify. */
+  bell?: boolean;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
@@ -425,6 +430,7 @@ const Conversation = ({
           {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
         </div>
         {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
+        {bell && <RoomBell ticker={room.ticker} />}
         {openRoom && (
           <button onClick={openRoom.onInfo} className="p-2 rounded-full active:opacity-60" aria-label="Room info">
             <Info size={20} color={GOLD} />
@@ -1626,6 +1632,36 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
+  // A tapped push notification (src/mobile/push): open the room by ticker once the lists have loaded.
+  const [pushTicker, setPushTicker] = useState<string | null>(null);
+  useEffect(() => {
+    if (!handle) return;
+    const take = () => {
+      const t = takeRoomTicker(false);
+      if (t) setPushTicker(t);
+    };
+    take();
+    return onRoomTicker(take);
+  }, [handle]);
+  useEffect(() => {
+    if (!pushTicker || !rooms) return;
+    const room = rooms.find((r) => r.ticker.toUpperCase() === pushTicker);
+    if (!room) return setPushTicker(null);
+    if (isOpenRoom(room)) {
+      setPushTicker(null);
+      return openOpenRoom(room);
+    }
+    const e = entries?.find((x) => x.room?.ticker.toUpperCase() === pushTicker);
+    if (e) {
+      setPushTicker(null);
+      void openEntry(e);
+    } else if (entries) {
+      setPushTicker(null);
+      setOpen({ room, entry: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushTicker, rooms, entries]);
+
   /** One token room row (unchanged from the token-only list). */
   const renderTokenRow = ({ e, invite }: (typeof shown)[number]) => {
     const title = entryTitle(e, e.room) ?? `$${e.gate.symbol}`;
@@ -2037,6 +2073,7 @@ const DmConversation = (p: DmConversationProps) => (
     onInvite={null}
     onBans={null}
     onBounties={null}
+    bell={false}
     peer={/↔/.test(p.room.name || '') ? roomTitle(p.room, p.me).replace(/^\$/, '') : null}
   />
 );

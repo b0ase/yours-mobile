@@ -22,6 +22,10 @@ const config: CapacitorConfig = {
       backgroundColor: '#010101',
       showSpinner: false,
     },
+    // In the foreground the app's own poller (src/mobile/notify) already tells you; push is for when it's closed.
+    PushNotifications: {
+      presentationOptions: [],
+    },
   },
 };
 

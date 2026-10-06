@@ -20,7 +20,7 @@ export const BCHAT_ORIGIN = 'https://www.bitcoinchat.online';
 
 export type HttpResponse = { status: number; data: unknown };
 export type Http = (req: {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
   headers: Record<string, string>;
   body?: unknown;
@@ -644,11 +644,19 @@ export const loadSession = (address?: string): ChatSession | null => {
   }
 };
 
+/** Fired on every sign-in / sign-out, so push registration (src/mobile/push) follows the bChat login. */
+export const SESSION_EVENT = 'bwallet:bchat-session';
+
 export const saveSession = (s: ChatSession | null) => {
   try {
     if (s) localStorage.setItem(KEY, JSON.stringify(s));
     else localStorage.removeItem(KEY);
   } catch {
     /* storage unavailable */
+  }
+  try {
+    window.dispatchEvent(new Event(SESSION_EVENT));
+  } catch {
+    /* no window (tests) */
   }
 };
