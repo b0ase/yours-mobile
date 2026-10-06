@@ -611,15 +611,20 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
 export const mobileText = (): Plugin => ({
   name: 'mobile-text',
   enforce: 'pre',
-  transform(code, id) {
-    const file = id.split('?')[0].slice(__dirname.length + 1);
-    const swaps = Object.entries(MOBILE_TEXT).flatMap(([k, v]) => (k.split('#')[0] === file ? v : []));
-    if (!swaps.length) return null;
-    for (const [from, to] of swaps) {
-      if (!code.includes(from)) this.error(`mobile-text: "${from}" not found in ${file}`);
-      code = code.split(from).join(to);
-    }
-    return { code, map: null };
+  // order: 'pre' on the hook too: in dev, @vitejs/plugin-react (also 'pre', listed earlier by the base
+  // config) reprints the source with Babel first, and the exact strings below would no longer match.
+  transform: {
+    order: 'pre',
+    handler(code, id) {
+      const file = id.split('?')[0].slice(__dirname.length + 1);
+      const swaps = Object.entries(MOBILE_TEXT).flatMap(([k, v]) => (k.split('#')[0] === file ? v : []));
+      if (!swaps.length) return null;
+      for (const [from, to] of swaps) {
+        if (!code.includes(from)) this.error(`mobile-text: "${from}" not found in ${file}`);
+        code = code.split(from).join(to);
+      }
+      return { code, map: null };
+    },
   },
 });
 
