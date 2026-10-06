@@ -151,9 +151,11 @@ const SOURCE_KEY = 'bwallet.feed.source';
 const loadSource = (): Source | 'all' => {
   try {
     const v = migrateSourceId(localStorage.getItem(SOURCE_KEY));
-    return SOURCES.some((s) => s.id === v) ? (v as Source | 'all') : 'all';
+    // No saved choice → Twetch, the one source still live (owner, 6 Oct 2026: the bmap indexer behind
+    // bChat and Treechat stopped in April). A choice the person made is kept.
+    return SOURCES.some((s) => s.id === v) ? (v as Source | 'all') : v === 'all' ? 'all' : 'twetch';
   } catch {
-    return 'all';
+    return 'twetch';
   }
 };
 const saveSource = (v: Source | 'all') => {

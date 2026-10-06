@@ -112,7 +112,8 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
 };
 
 /** Match order: specific sources first, "other" last. */
-const ORDER: Source[] = ['bchat', 'treechat', 'twetch', 'other'];
+// Twetch first: the only source whose indexer is live (6 Oct 2026).
+const ORDER: Source[] = ['twetch', 'bchat', 'treechat', 'other'];
 
 export const SOURCES: { id: Source | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
