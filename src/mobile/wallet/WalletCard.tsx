@@ -12,6 +12,8 @@ import { useAccountNames } from '../names/MyNameBadge';
 import { identityRowText } from '../names/identityText';
 import type { BalanceView } from './balanceLoad';
 import { useBackedUp } from '../backup/useBackedUp';
+import { ghostColorOf, onAgentsChange } from '../agents/agentAccounts';
+import { PixelGhost } from '../agents/PixelGhost';
 import { requestBackupThen } from '../backup/backupState';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
@@ -80,6 +82,12 @@ export const WalletCard = ({
   const id = account?.addresses.identityAddress;
   const names = useAccountNames(id, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '', false);
   const avatar = useAvatar(id);
+  // Agent accounts wear a ghost in their colour (agents/PixelGhost); re-read when agent settings change.
+  const [ghost, setGhost] = useState(() => ghostColorOf(id));
+  useEffect(() => {
+    setGhost(ghostColorOf(id));
+    return onAgentsChange(() => setGhost(ghostColorOf(id)));
+  }, [id]);
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
   const t = identityRowText(names.displayName, names.paymail, names.handle);
@@ -136,9 +144,14 @@ export const WalletCard = ({
       >
         {/* ── Front ── */}
         <div className="bw-wcard-face bw-wcard-front" aria-hidden={flipped}>
+          {ghost && (
+            <span className="bw-wcard-ghost">
+              <PixelGhost color={ghost} size={34} title="Agent account" />
+            </span>
+          )}
           <div className="bw-wcard-top">
             <div className="bw-wcard-holder">
-              <AccountAvatar src={avatar} size={22} />
+              <AccountAvatar src={avatar} size={22} id={id} />
               {t.tag ? (
                 <>
                   <span className="bw-wcard-handle">{t.tag}</span>

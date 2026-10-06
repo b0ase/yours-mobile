@@ -47,7 +47,7 @@ export const AccountStrip = () => {
           aria-label="Switch account"
           className="flex min-w-0 max-w-full items-center gap-2 border-0 bg-transparent p-0 text-left"
         >
-          <AccountAvatar src={avatar} size={20} ring={false} />
+          <AccountAvatar src={avatar} size={20} ring={false} id={current} />
           <span className="truncate text-[13px] font-bold text-white">{name}</span>
           <AgentMark id={current} />
           {showTag && (

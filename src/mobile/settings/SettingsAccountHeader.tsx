@@ -34,7 +34,7 @@ export const SettingsAccountHeader = () => {
         <span className="text-xs shrink-0" style={{ color: MUTED }}>
           Settings for:
         </span>
-        <AccountAvatar src={avatar} size={24} />
+        <AccountAvatar src={avatar} size={24} id={id} />
         <span className="min-w-0 flex-1 flex items-center gap-1.5">
           <span className="truncate text-sm font-bold text-white">{names.displayName || 'This account'}</span>
           <AgentMark id={id} />

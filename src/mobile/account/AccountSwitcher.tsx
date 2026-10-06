@@ -95,6 +95,7 @@ export const AccountList = ({
               <AccountAvatar
                 size={size}
                 ring={false}
+                id={id}
                 src={resolveAvatarUrl(
                   pickAvatar({
                     local: getLocalAvatar(id),

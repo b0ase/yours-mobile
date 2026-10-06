@@ -15,7 +15,15 @@ export type AgentAccount = {
   /** Most an agent may spend from this account per UTC day, in USD. null = no cap (the balance is the limit). */
   dailyCapUsd: number | null;
   createdAt: number;
+  /** This account's ghost colour (PixelGhost): its badge on the wallet card and its avatar. Set once. */
+  ghostColor?: string;
 };
+
+/**
+ * Ghost colours for agent accounts (owner, 6 Oct 2026): the four arcade ghosts first, then more. Each new
+ * agent account takes the first colour no other agent account uses, so the colour tells accounts apart.
+ */
+export const GHOST_COLORS = ['#FF0000', '#FFB8FF', '#00FFFF', '#FFB852', '#2ECC71', '#A06BFF', '#FFE14D', '#4D7CFF'];
 
 export type AgentLogEntry = {
   at: number;
@@ -67,11 +75,24 @@ export const listAgentAccounts = (): AgentAccount[] => Object.values(read<Store>
 export const getAgentAccount = (id?: string | null): AgentAccount | null => (id ? (read<Store>(KEY, {})[id] ?? null) : null);
 export const isAgentAccount = (id?: string | null) => !!getAgentAccount(id);
 
+/** An agent account's ghost colour, or null for a person's account. Accounts marked before colours existed
+ * get a stable one from their address. */
+export const ghostColorOf = (id?: string | null): string | null => {
+  const a = getAgentAccount(id);
+  if (!a) return null;
+  if (a.ghostColor) return a.ghostColor;
+  let h = 0;
+  for (const ch of a.identityAddress) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return GHOST_COLORS[h % GHOST_COLORS.length];
+};
+
 const save = (a: AgentAccount) => write(KEY, { ...read<Store>(KEY, {}), [a.identityAddress]: a });
 
 /** Mark an account as an agent account (Add account › Agent account). */
 export const markAgentAccount = (identityAddress: string, labels: string[] = [], now = Date.now()) => {
-  const a: AgentAccount = { identityAddress, labels: cleanLabels(labels), stopped: false, dailyCapUsd: null, createdAt: now };
+  const used = new Set(listAgentAccounts().map((x) => x.ghostColor));
+  const ghostColor = GHOST_COLORS.find((c) => !used.has(c)) ?? GHOST_COLORS[listAgentAccounts().length % GHOST_COLORS.length];
+  const a: AgentAccount = { identityAddress, labels: cleanLabels(labels), stopped: false, dailyCapUsd: null, createdAt: now, ghostColor };
   save(a);
   appendAgentLog(identityAddress, { at: now, action: 'create', detail: 'Agent account created', usd: 0 });
   return a;
