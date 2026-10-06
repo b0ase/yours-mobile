@@ -118,7 +118,7 @@
     bc.setAttribute('aria-label', 'Chat with us on bChat');
     bc.title = 'Chat with us on bChat';
     // bChat's own b (bit-sign public/bchat-icon.svg: flag-top stem + bowl), in white.
-    bc.innerHTML = '<svg viewBox="22 8 76 102" width="15" height="15" aria-hidden="true"><mask id="bc-hole"><rect x="0" y="0" width="120" height="120" fill="#fff"/><circle cx="60" cy="72" r="15" fill="#000"/></mask><g fill="currentColor" mask="url(#bc-hole)"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="33"/></g></svg>';
+    bc.innerHTML = '<svg viewBox="12 10 96 96" width="20" height="20" aria-hidden="true"><mask id="bc-hole"><rect x="0" y="0" width="120" height="120" fill="#fff"/><circle cx="60" cy="72" r="15" fill="#000"/></mask><g fill="currentColor" mask="url(#bc-hole)"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="33"/></g></svg>';
     cta.insertBefore(bc, gh.nextSibling);
   }
 
