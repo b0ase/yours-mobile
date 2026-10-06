@@ -83,3 +83,10 @@ export const buyCryptoEnabled = (store = STORE_BUILD) => !store;
 
 /** The app's own name for user-visible text: "bWallet" in a store build, "bWalletX" otherwise. */
 export const APP_NAME = appNameFor();
+
+/**
+ * The same gates as plain constants, for JSX: Rollup folds `!STORE_BUILD` at build time, so the store bundle
+ * doesn't even contain the hidden screens' text (a function call isn't folded).
+ */
+export const BUY_CRYPTO_ENABLED: boolean = !STORE_BUILD;
+export const PAID_FEATURES_ENABLED: boolean = !STORE_BUILD;

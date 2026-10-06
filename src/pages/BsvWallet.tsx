@@ -1,6 +1,6 @@
 import { validate } from 'bitcoin-address-validation';
 import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
-import { buyCryptoEnabled } from '../mobile/storeBuild';
+import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -1262,7 +1262,7 @@ export const BsvWallet = () => {
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
-        {buyCryptoEnabled() && (
+        {BUY_CRYPTO_ENABLED && (
           <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
         )}
 
@@ -1421,12 +1421,12 @@ export const BsvWallet = () => {
             }}
             // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
             action={
-              bsvBalance === 0 && buyCryptoEnabled()
+              bsvBalance === 0 && BUY_CRYPTO_ENABLED
                 ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) }
                 : undefined
             }
           />
-          {getBsvOpen && (
+          {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
               onReceive={() => {
@@ -1444,7 +1444,7 @@ export const BsvWallet = () => {
               usdBalance={mneeBalance}
               showPointer={mneeBalance > 0 || legacyMneeBalance > 0}
               isMNEE
-              onGetMneeClick={buyCryptoEnabled() ? () => setPageState('getMNEE') : undefined}
+              onGetMneeClick={BUY_CRYPTO_ENABLED ? () => setPageState('getMNEE') : undefined}
               onClick={() => {
                 if (legacyMneeBalance > 0) {
                   setShowLegacyMneePrompt(true);
@@ -1893,7 +1893,7 @@ export const BsvWallet = () => {
         <BsvPriceChart />
       </div>
       {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
-      {buyCryptoEnabled() && (
+      {BUY_CRYPTO_ENABLED && (
         <BuyBsvButton
           className="w-full mb-5"
           onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
@@ -2208,7 +2208,7 @@ export const BsvWallet = () => {
       <Show when={!isProcessing && pageState === 'asset-picker'}>{assetPickerView}</Show>
       <Show when={!isProcessing && pageState === 'send'}>{send}</Show>
       <Show when={!isProcessing && pageState === 'sendMNEE'}>{sendMNEE}</Show>
-      <Show when={!isProcessing && pageState === 'getMNEE'}>{getMnee}</Show>
+      {BUY_CRYPTO_ENABLED && <Show when={!isProcessing && pageState === 'getMNEE'}>{getMnee}</Show>}
       <SendConfirmation
         show={!!sendConfirmation}
         theme={theme}

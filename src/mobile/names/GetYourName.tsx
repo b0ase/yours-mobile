@@ -20,7 +20,7 @@ import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
 import { moneyNow } from '../money/money';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
-import { paidFeaturesEnabled } from '../storeBuild';
+import { PAID_FEATURES_ENABLED } from '../storeBuild';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -299,7 +299,7 @@ export const GetYourName = ({
 
   // A render helper, not a component: a nested component would remount and drop input focus.
   const tokenOptions = () => {
-    if (!paidFeaturesEnabled()) return null;
+    if (!PAID_FEATURES_ENABLED) return null;
     const t = personalTicker(handleName || query) ?? 'NAME';
     return (
       <div className="flex flex-col gap-2">

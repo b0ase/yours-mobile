@@ -25,7 +25,7 @@ import {
 import { getFundRecord, showOnWallet } from '../tokens/indexFund';
 import { FinishIndexing } from '../tokens/FinishIndexing';
 import { AvatarPicker } from './AvatarPicker';
-import { paidFeaturesEnabled } from '../storeBuild';
+import { PAID_FEATURES_ENABLED } from '../storeBuild';
 import { paymailAvatar } from './avatar';
 import { adoptSocialAvatar } from './socialAvatar';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
@@ -69,7 +69,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   const { theme } = useTheme();
   const [link, setLink] = useState(() => getPersonalLink(identityAddress));
   // Store build: free paymail only, no personal token + holder room (storeBuild.ts).
-  const [withToken, setWithToken] = useState(paidFeaturesEnabled);
+  const [withToken, setWithToken] = useState(PAID_FEATURES_ENABLED);
   const [supply, setSupply] = useState(DEFAULT_SUPPLY);
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
@@ -313,8 +313,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
           </p>
         )}
 
-        {/* Personal token + room is bWalletX-only: the store build shows no panel (or price) at all. */}
-        {paidFeaturesEnabled() || link ? (
+        {/* Personal token + room is bWalletX-only: the store build has no panel (or price), and none of its text. */}
+        {PAID_FEATURES_ENABLED ? (
           <div
             className="flex flex-col gap-2 rounded-2xl p-4"
             style={{ background: PANEL, border: `1px solid ${BORDER}` }}
@@ -336,7 +336,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
             {link && !busy && !getFundRecord(link.tokenId) ? (
               <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} compact />
             ) : null}
-            {link || !paidFeaturesEnabled() ? null : (
+            {link || !PAID_FEATURES_ENABLED ? null : (
               <>
                 <p className="text-[11px]" style={{ color: GRAY }}>
                   A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat

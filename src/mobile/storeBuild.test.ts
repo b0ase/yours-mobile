@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import {
+  BUY_CRYPTO_ENABLED,
+  PAID_FEATURES_ENABLED,
   buyCryptoEnabled,
   STORE_BUILD,
   agentModeFor,
@@ -86,17 +88,20 @@ describe('store build: no buying, no personal token, no bWalletX text', () => {
   test('buying crypto (Buy BSV, Get BSV, Get MNEE) is bWalletX only', () => {
     expect(buyCryptoEnabled(true)).toBe(false);
     expect(buyCryptoEnabled(false)).toBe(true);
+    // The JSX constants match the functions for this build.
+    expect(BUY_CRYPTO_ENABLED).toBe(buyCryptoEnabled());
+    expect(PAID_FEATURES_ENABLED).toBe(paidFeaturesEnabled());
     const wallet = src('../pages/BsvWallet.tsx');
-    expect(wallet).toMatch(/buyCryptoEnabled\(\) && \(\s*<BsvPriceBar/);
-    expect(wallet).toMatch(/buyCryptoEnabled\(\) && \(\s*<BuyBsvButton/);
-    expect(wallet).toContain('bsvBalance === 0 && buyCryptoEnabled()');
-    expect(wallet).toContain('onGetMneeClick={buyCryptoEnabled() ?');
+    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && \(\s*<BsvPriceBar/);
+    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && \(\s*<BuyBsvButton/);
+    expect(wallet).toContain('bsvBalance === 0 && BUY_CRYPTO_ENABLED');
+    expect(wallet).toContain('BUY_CRYPTO_ENABLED && getBsvOpen &&');
+    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && <Show when=\{!isProcessing && pageState === 'getMNEE'\}>/);
+    expect(wallet).toContain('onGetMneeClick={BUY_CRYPTO_ENABLED ?');
   });
 
-  test('Choose your handle: the token + room panel needs paid features (or an existing token)', () => {
-    expect(src('./names/HandleFlow.tsx')).toMatch(
-      /paidFeaturesEnabled\(\) \|\| link \? \(\s*<div[\s\S]*?Your token \+ room/,
-    );
+  test('Choose your handle: the token + room panel needs paid features', () => {
+    expect(src('./names/HandleFlow.tsx')).toMatch(/PAID_FEATURES_ENABLED \? \(\s*<div[\s\S]*?Your token \+ room/);
   });
 
   test('store-reachable screens take the app name from APP_NAME, not a literal bWalletX', () => {
