@@ -307,6 +307,8 @@ export type FeedPost = {
   twetchUserId?: string;
   /** Verified sats tipped / paid-liked to the author (bChat indexer meta `tipped`, BCHAT-PROTOCOL-v2 §5). */
   tipped?: number;
+  /** Bad-language flag when the post came from a bChat feed API (bit-sign lib/feed/language-flag.ts); else computed here. */
+  language?: 'slur' | 'strong' | null;
 };
 
 type Rec = Record<string, unknown>;

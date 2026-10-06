@@ -90,3 +90,18 @@ export const APP_NAME = appNameFor();
  */
 export const BUY_CRYPTO_ENABLED: boolean = !STORE_BUILD;
 export const PAID_FEATURES_ENABLED: boolean = !STORE_BUILD;
+
+/**
+ * Feed bad language (feed/language.ts). Store edition: slurs hidden with no reveal and swearing always
+ * blurred behind "Show anyway"; the two Settings toggles are not shown. bWalletX: swearing shown unless
+ * "Filter strong language" is on; slur posts hidden, revealable only after the adult opt-in.
+ */
+export const languageSettingsEnabled = (store = STORE_BUILD) => !store;
+export const languageOptsFor = (
+  prefs: { filterStrong: boolean; allowLanguageReveal: boolean },
+  store = STORE_BUILD,
+): { store: boolean; filterStrong: boolean; allowReveal: boolean } => ({
+  store,
+  filterStrong: store || prefs.filterStrong,
+  allowReveal: !store && prefs.allowLanguageReveal,
+});

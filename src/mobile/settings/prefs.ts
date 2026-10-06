@@ -39,6 +39,10 @@ export type Prefs = {
   notify: Record<NotifyCategory, boolean>;
   /** Your Twetch user number (twetch.com/u/<n>), so replies on Twetch reach you. Empty: unknown. */
   twetchUserId: string;
+  /** "Filter strong language": blur swearing in the Feed behind "Show anyway" (feed/language.ts). Off by default. */
+  filterStrong: boolean;
+  /** Adults' opt-in: "Show anyway" on posts hidden for slurs. Off by default; never in the store edition. */
+  allowLanguageReveal: boolean;
 };
 
 const ALL_ON = Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<NotifyCategory, boolean>;
@@ -54,6 +58,8 @@ export const DEFAULT_PREFS: Prefs = {
   indexAutoPayUsd: 0.1,
   notify: ALL_ON,
   twetchUserId: '',
+  filterStrong: false,
+  allowLanguageReveal: false,
 };
 
 const KEY = 'bwallet.prefs';
@@ -93,6 +99,8 @@ export const parsePrefs = (raw: unknown): Prefs => {
     notify: parseNotify(r.notify),
     twetchUserId:
       typeof r.twetchUserId === 'string' && /^\d{1,12}$/.test(r.twetchUserId.trim()) ? r.twetchUserId.trim() : '',
+    filterStrong: r.filterStrong === true,
+    allowLanguageReveal: r.allowLanguageReveal === true,
   };
 };
 

@@ -1,0 +1,25 @@
+{
+  "_comment": "Feed bad-language lists. SHARED: bit-sign src/lib/feed/language-lists.json and bwalletX src/mobile/feed/language-lists.json must be byte-identical (both selftests pin its sha256). Lower-case ASCII. slurs/strong match whole tokens (+ optional plural/verb suffix), after leetspeak, punctuation and repeated-letter normalisation; *Stems match inside a token too (so compounds and @handles are caught) unless the token is on the allowlist.",
+  "slurs": [
+    "nigger", "nigga", "niggah", "nigguh", "negroid", "sandnigger", "kike", "kyke", "spic", "spick", "chink", "gook", "wetback", "beaner",
+    "raghead", "towelhead", "paki", "gyppo", "gypo", "pikey", "zipperhead", "darkie", "darky", "golliwog", "wog",
+    "faggot", "fagot", "faggit", "fagget", "poofter", "battyboy", "battyman",
+    "tranny", "trannie", "shemale",
+    "retard", "retarded", "spaz", "spazz", "spacker", "spakka"
+  ],
+  "slurPhrases": ["porch monkey", "jungle bunny", "sand nigger", "batty boy", "batty man"],
+  "slurStems": ["nigger", "nigga", "faggot", "tranny"],
+  "strong": [
+    "fuck", "fucks", "fucked", "fucker", "fuckers", "fucking", "fuckin", "fuk", "fck", "fcking", "fuq", "fux", "phuck", "effing",
+    "shit", "shits", "shitty", "shite", "bullshit", "horseshit",
+    "cunt", "cunts", "bitch", "bitches", "bitchy", "bastard", "bastards", "asshole", "assholes", "arsehole", "arseholes",
+    "twat", "twats", "wanker", "wankers", "bollocks", "dickhead", "dickheads", "motherfucker", "slut", "sluts", "whore", "whores", "jackass", "dipshit"
+  ],
+  "strongStems": ["fuck", "shit", "cunt", "wank"],
+  "allowlist": [
+    "snigger", "sniggers", "sniggered", "sniggering", "niger", "nigeria", "nigerian", "nigerians", "nigerien", "gok", "spice", "spicy",
+    "scunthorpe", "shiitake", "shitake", "swank", "swanky", "swanker", "wankel", "pakistan", "pakistani", "retardant", "retardants",
+    "shiite", "shiites", "cocktail", "mishit", "mishits", "shitzu", "dickens", "chinking"
+  ],
+  "allowPhrases": ["chink in the armor", "chink in the armour", "chink in his armor", "chink in his armour", "chink in her armor", "chink in her armour", "chink in their armor", "chink in their armour", "chink in its armor", "chink in its armour", "chink of light"]
+}

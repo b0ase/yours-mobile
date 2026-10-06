@@ -21,12 +21,13 @@ import {
   BadgeCheck,
   Bot,
   ScanLine,
+  EyeOff,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
-import { isBWalletX, socialLoginEnabled } from '../storeBuild';
+import { isBWalletX, languageSettingsEnabled, socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -55,6 +56,7 @@ import {
   type HiddenAccount,
 } from '../feed/store';
 import type { FeedPost } from '../feed/post';
+import { isSlur, safeName } from '../feed/language';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from '../feed/bookmarkSync';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
@@ -225,8 +227,8 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
           {items.map((p) => (
             <ListRow
               key={p.txid}
-              title={p.author.name}
-              sub={p.text || `${p.media?.length ?? 0} attachment(s)`}
+              title={safeName(p.author.name)}
+              sub={isSlur(p.text) ? 'Post hidden: offensive language' : p.text || `${p.media?.length ?? 0} attachment(s)`}
               action="Remove"
               onAction={() => {
                 setItems((b) => toggleSyncedBookmark(b, p));
@@ -469,8 +471,49 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                   onChange={(v) => setPrefs({ animatedBackgrounds: v })}
                 />
               }
-              isLast
+              isLast={!languageSettingsEnabled()}
             />
+            {languageSettingsEnabled() && (
+              <>
+                <Divider />
+                <Row
+                  icon={<EyeOff size={16} />}
+                  label="Filter strong language"
+                  description={
+                    prefs.filterStrong ? 'Swearing is blurred until you tap Show anyway' : 'Swearing is shown as posted'
+                  }
+                  right={
+                    <Toggle
+                      label="Filter strong language"
+                      on={prefs.filterStrong}
+                      onChange={(v) => setPrefs({ filterStrong: v })}
+                    />
+                  }
+                />
+                <Divider />
+                <Row
+                  icon={<EyeOff size={16} />}
+                  label="Show anyway on hidden posts (18+)"
+                  description={
+                    prefs.allowLanguageReveal
+                      ? 'Posts hidden for slurs can be opened with Show anyway'
+                      : 'Posts with slurs stay hidden'
+                  }
+                  right={
+                    <Toggle
+                      label="Show anyway on hidden posts (18+)"
+                      on={prefs.allowLanguageReveal}
+                      onChange={(v) => {
+                        if (v && !window.confirm('Only for adults (18+). Allow Show anyway on posts hidden for offensive language?'))
+                          return;
+                        setPrefs({ allowLanguageReveal: v });
+                      }}
+                    />
+                  }
+                  isLast
+                />
+              </>
+            )}
           </Section>
           <Section title="Payments">
             <Row

@@ -138,6 +138,9 @@ import {
 } from './store';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from './bookmarkSync';
 import { PullToRefresh } from '../ui/PullToRefresh';
+import { isSlur, languageOf, languageView, safeName } from './language';
+import { usePrefs } from '../settings/usePrefs';
+import { languageOptsFor } from '../storeBuild';
 import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
@@ -362,7 +365,7 @@ const Avatar = ({
         border: ring,
       }}
     >
-      {(author.name || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
+      {(safeName(author.name) || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
     </div>
   );
 };
@@ -450,7 +453,51 @@ const ACTION_ICONS: Partial<Record<PostAction, typeof Heart>> = {
   mute: VolumeX,
 };
 
+/** The "Show anyway" veil over blurred strong language. */
+const ShowAnyway = ({ onShow }: { onShow: () => void }) => (
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      onShow();
+    }}
+    className="absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-lg text-[12px] text-white"
+    style={{ background: 'rgba(0,0,0,0.4)' }}
+  >
+    <span className="font-bold">Strong language</span>
+    <span className="underline">Show anyway</span>
+  </button>
+);
+
+/**
+ * Bad language (feed/language.ts): a slur post collapses to "Post hidden: offensive language" (a
+ * "Show anyway" only in bWalletX after the adult opt-in); swearing is blurred per post in the store
+ * edition, or in bWalletX with "Filter strong language" on.
+ */
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
+  const [prefs] = usePrefs();
+  const [revealed, setRevealed] = useState(false);
+  const view = languageView(post.language !== undefined ? post.language : languageOf(post.text), languageOptsFor(prefs));
+  if ((view === 'hide' || view === 'hide-final') && !revealed)
+    return (
+      <div
+        role="note"
+        className="flex items-center gap-3 px-4 py-3 text-[13px]"
+        style={{ borderBottom: `1px solid ${LINE}`, color: MUTED }}
+      >
+        <span>Post hidden: offensive language</span>
+        {view === 'hide' && (
+          <button onClick={() => setRevealed(true)} className="ml-auto underline text-white">
+            Show anyway
+          </button>
+        )}
+      </div>
+    );
+  return <PostCardBody post={post} a={a} blurText={view === 'blur'} />;
+};
+
+const PostCardBody = ({ post, a, blurText }: { post: FeedPost; a: PostActions; blurText: boolean }) => {
+  const [textShown, setTextShown] = useState(false);
+  const veiled = blurText && !textShown;
   const liked = a.liked.has(post.txid);
   const locked = a.locks[post.txid];
   return (
@@ -466,13 +513,13 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
           e.stopPropagation();
           a.onAuthor(post.author);
         }}
-        aria-label={`${post.author.name} profile`}
+        aria-label={`${safeName(post.author.name)} profile`}
       >
         <Avatar author={post.author} source={post.source} />
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[14px] font-bold text-white truncate">{post.author.name}</span>
+          <span className="text-[14px] font-bold text-white truncate">{safeName(post.author.name)}</span>
           <Via post={post} />
           <span className="text-[12px] shrink-0 whitespace-nowrap" style={{ color: MUTED }}>
             · {feedTimeLabel(post.at)}
@@ -493,7 +540,17 @@ const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
             Replying to a post
           </div>
         )}
-        {post.text && <p className="text-[14px] text-white whitespace-pre-wrap break-words mt-[2px]">{post.text}</p>}
+        {post.text && (
+          <div className="relative">
+            {veiled && <ShowAnyway onShow={() => setTextShown(true)} />}
+            <p
+              aria-hidden={veiled}
+              className={`text-[14px] text-white whitespace-pre-wrap break-words mt-[2px] ${veiled ? 'select-none blur-sm' : ''}`}
+            >
+              {post.text}
+            </p>
+          </div>
+        )}
         <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bchat'} />
         <div className="flex items-center gap-5 mt-2" onClick={(e) => e.stopPropagation()}>
           {postActions(post).row.map((act) => {
@@ -816,7 +873,7 @@ const Composer = ({
 
   return (
     <Sheet
-      title={replyTo ? `Reply to ${replyTo.author.name}` : quote ? `Quote ${quote.author.name}` : 'New post'}
+      title={replyTo ? `Reply to ${safeName(replyTo.author.name)}` : quote ? `Quote ${safeName(quote.author.name)}` : 'New post'}
       onClose={onClose}
     >
       {(replyTo ?? quote) && (
@@ -959,10 +1016,10 @@ const TipSheet = ({
       if (kind === 'tip') {
         // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
         savePrefs({ quickTip: n });
-        addSnackbar(`Tipped ${post.author.name} ${money(n, rate)}`, 'success');
+        addSnackbar(`Tipped ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
       } else {
         onLiked(post);
-        addSnackbar(`Liked and paid ${post.author.name} ${money(n, rate)}`, 'success');
+        addSnackbar(`Liked and paid ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
       }
       onClose();
     } catch (e) {
@@ -973,14 +1030,14 @@ const TipSheet = ({
   };
   if (!dest.ok)
     return (
-      <Sheet title={`Tip ${post.author.name}`} onClose={onClose}>
+      <Sheet title={`Tip ${safeName(post.author.name)}`} onClose={onClose}>
         <p className="text-sm" style={{ color: MUTED }}>
           Tips are not available on this post. {dest.reason}
         </p>
       </Sheet>
     );
   return (
-    <Sheet title={`Tip ${post.author.name}`} onClose={onClose}>
+    <Sheet title={`Tip ${safeName(post.author.name)}`} onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
         Sent in BSV to{' '}
         {post.source === 'twetch' ? "the author's Twetch signing key" : 'the address that signed this post'} (
@@ -1110,7 +1167,7 @@ const LockSheet = ({
   return (
     <Sheet title="Lock BSV to back this post" onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back {post.author.name}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet,
+        Back {safeName(post.author.name)}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet,
         and the post shows how much is locked behind it.
       </p>
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
@@ -1443,15 +1500,15 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   };
 
   const mute = (p: FeedPost) => {
-    rememberMuteName(p.author.name, p.author.address, p.author.bapId);
+    rememberMuteName(safeName(p.author.name), p.author.address, p.author.bapId);
     setMutes((m) => addMute(m, p.author.address, p.author.bapId));
     setMore(null);
-    addSnackbar(`Muted ${p.author.name}`, 'info');
+    addSnackbar(`Muted ${safeName(p.author.name)}`, 'info');
   };
   const block = (p: FeedPost) => {
-    setBlocks((b) => addBlock(b, { address: p.author.address, bapId: p.author.bapId, name: p.author.name }));
+    setBlocks((b) => addBlock(b, { address: p.author.address, bapId: p.author.bapId, name: safeName(p.author.name) }));
     setMore(null);
-    addSnackbar(`Blocked ${p.author.name}. Unblock in Settings → Privacy.`, 'info');
+    addSnackbar(`Blocked ${safeName(p.author.name)}. Unblock in Settings → Privacy.`, 'info');
   };
   const bookmark = (p: FeedPost) => {
     const on = isBookmarked(bookmarks, p.txid);
@@ -1467,7 +1524,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     if (!payDestination(p).ok || validateAmount(sats) || !oneClick.take(sats).ok) return setTipping(p);
     try {
       await sendPayment(apiContext, p, sats);
-      addSnackbar(`Tipped ${p.author.name} ${moneyNow(sats)} (one-click)`, 'success');
+      addSnackbar(`Tipped ${safeName(p.author.name)} ${moneyNow(sats)} (one-click)`, 'success');
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
     }
@@ -1489,7 +1546,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         'context:tx',
         `contextValue:${p.txid}`,
       ]);
-      addSnackbar(`Branched ${p.author.name}'s post`, 'success');
+      addSnackbar(`Branched ${safeName(p.author.name)}'s post`, 'success');
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
     }
@@ -1721,7 +1778,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         />
       )}
       {more && (
-        <Sheet title={more.author.name} onClose={() => setMore(null)}>
+        <Sheet title={safeName(more.author.name)} onClose={() => setMore(null)}>
           {postActions(more).more.map((act) => {
             const Icon = ACTION_ICONS[act] ?? MoreHorizontal;
             const danger = act === 'report';
@@ -1733,7 +1790,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 style={{ color: danger ? RED : '#fff' }}
               >
                 <Icon size={18} color={danger ? RED : MUTED} />
-                {act === 'mute' ? `Mute ${more.author.name}` : actionLabel(act, more.source)}
+                {act === 'mute' ? `Mute ${safeName(more.author.name)}` : actionLabel(act, more.source)}
               </button>
             );
           })}
@@ -1758,7 +1815,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
               style={{ color: RED }}
             >
               <Ban size={18} color={RED} />
-              Block {more.author.name}
+              Block {safeName(more.author.name)}
             </button>
           )}
         </Sheet>
@@ -1876,13 +1933,13 @@ const ProfileView = ({
     [posts, mutes, isMe, safetyTick],
   );
   return (
-    <Layer title={author.name} onBack={onBack}>
+    <Layer title={safeName(author.name)} onBack={onBack}>
       <div
         className="flex flex-col items-center px-6 pt-6 pb-4 text-center"
         style={{ borderBottom: `1px solid ${LINE}` }}
       >
         <Avatar author={author} size={80} />
-        <h2 className="mt-3 text-lg font-bold text-white">{author.name}</h2>
+        <h2 className="mt-3 text-lg font-bold text-white">{safeName(author.name)}</h2>
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
           {author.bapId ? `BAP ${author.bapId}` : author.address ? shortAddress(author.address) : ''}
         </p>
@@ -1916,7 +1973,7 @@ const ProfileView = ({
       </div>
       {reporting && (
         <ReportSheet
-          title={`Report or block ${author.name}`}
+          title={`Report or block ${safeName(author.name)}`}
           report={{
             kind: 'user',
             target: author.bapId ? `bap:${author.bapId}` : author.address ? `address:${author.address}` : author.name,
@@ -1932,7 +1989,7 @@ const ProfileView = ({
               className="rounded-xl py-2.5 text-sm font-semibold"
               style={{ background: '#2b2f36', color: '#ff6b6b' }}
             >
-              Block {author.name}
+              Block {safeName(author.name)}
             </button>
           }
         />
@@ -2260,7 +2317,7 @@ const Leaderboard = ({
                   <Avatar author={r.author} source={r.source} size={36} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-semibold text-white">
-                      {r.author.name}
+                      {safeName(r.author.name)}
                       {mine && <span style={{ color: GOLD }}> · You</span>}
                     </div>
                     <div className="truncate text-[11px]" style={{ color: MUTED }}>
@@ -2286,13 +2343,13 @@ const Leaderboard = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate text-[13px] font-semibold text-white">
-                        {r.post.author.name}
+                        {safeName(r.post.author.name)}
                         {mine && <span style={{ color: GOLD }}> · You</span>}
                       </span>
                       <Via post={r.post} />
                     </div>
                     <div className="truncate text-[12px]" style={{ color: '#c9ccd2' }}>
-                      {r.post.text || 'Media post'}
+                      {isSlur(r.post.text) ? 'Post hidden: offensive language' : r.post.text || 'Media post'}
                     </div>
                     <div className="text-[11px]" style={{ color: MUTED }}>
                       {feedTimeLabel(r.post.at)} · {r.lockers} locker{r.lockers === 1 ? '' : 's'}
