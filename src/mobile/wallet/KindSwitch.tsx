@@ -10,7 +10,7 @@ export const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, get
 const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
-  ['friends', 'Social'], // shown as Social (owner, 5 Oct 2026); the id stays 'friends' so saved choices keep working
+  ['friends', 'Friends'], // back to Friends (owner, 6 Oct 2026)
 ]);
 const SHOWN = new Set(KINDS.map(([k]) => k));
 

@@ -33,7 +33,7 @@ export const FriendsSection = () => {
       .catch(() => undefined);
   }, [apiContext]);
   const { handleSelect } = useBottomMenu();
-  // Your own $NAME token, pinned at the top of Social (owner, 5 Oct 2026).
+  // Your own $NAME token, pinned at the top of Friends (owner, 5 Oct 2026).
   const me = getPersonalLink(chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress);
   const mine = me ? held.find((b) => b.id && normId(b.id) === normId(me.tokenId)) : undefined;
   const mineAmount = mine ? Number(mine.all.confirmed) / 10 ** (mine.dec ?? 0) : 0;
