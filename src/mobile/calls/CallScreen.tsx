@@ -13,7 +13,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useAccountNames } from '../names/MyNameBadge';
+import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import {
   accept,

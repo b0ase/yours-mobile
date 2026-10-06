@@ -1,11 +1,10 @@
+import { openTicketRoomInChat } from './ticketRoom';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getBsv21Balances } from '@1sat/actions';
 import { MessageCircle, Ticket as TicketIcon } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { isNative } from '../native';
-import { asMenuItem } from '../tabs/tabs';
-import { requestChatRoom } from '../chat/nav';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { parseLookup } from '../chat/tokenRooms';
 import { formatSats, parseRoom, roomMarket } from '../market/indexer';
@@ -21,11 +20,6 @@ import { TICKET_COPY, eventLabel, localTickets, mergeTickets, onTicketsChanged, 
  */
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 type Stats = { floor: string | null; buyable: number; members: number | null };
-
-export const openTicketRoomInChat = (tokenId: string, select: (item: ReturnType<typeof asMenuItem>) => void) => {
-  requestChatRoom(`bsv21:${tokenId}`);
-  select(asMenuItem('chat'));
-};
 
 export const TicketsPanel = ({
   art,

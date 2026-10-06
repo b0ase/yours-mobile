@@ -1,3 +1,4 @@
+import { describeRules } from './describeRules';
 import { useRef, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import {
@@ -9,7 +10,6 @@ import {
   setStrategyMode,
   unloadStrategy,
   type Loaded,
-  type StrategyRules,
 } from './strategy';
 import { saveTextFile } from './saveText';
 import { PublishStrategy } from '../strategies/PublishStrategy';
@@ -21,21 +21,6 @@ const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
-
-/** One line per rule, in the words the user sees everywhere else. */
-export const describeRules = (r: StrategyRules) =>
-  [
-    `Tokens: ${r.tokens.map((t) => `$${t.replace(/^\$/, '')}`).join(', ')}`,
-    `May: ${r.actions.join(', ')}`,
-    r.buyBelowUsd !== undefined && `Buys only at or below $${r.buyBelowUsd}`,
-    r.sellAboveUsd !== undefined && `Sells only at or above $${r.sellAboveUsd}`,
-    `Up to $${r.maxPerTradeUsd} per trade`,
-    r.maxPerDayUsd !== undefined && `Up to $${r.maxPerDayUsd} a day`,
-    r.maxTotalUsd !== undefined && `Up to $${r.maxTotalUsd} in total`,
-    r.sendTo?.length && `Sends only to ${r.sendTo.join(', ')}`,
-    r.stop?.holdTokens && `Stops once it holds ${r.stop.holdTokens.toLocaleString()} tokens`,
-    r.stop?.downPct && `Stops if the account is down ${r.stop.downPct}%`,
-  ].filter(Boolean) as string[];
 
 const download = (l: Loaded) =>
   saveTextFile(`${l.strategy.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${l.strategy.version}.json`, JSON.stringify(l.strategy, null, 2));

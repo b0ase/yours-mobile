@@ -2,7 +2,7 @@ import { APP_NAME } from '../storeBuild';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ArrowLeft, Check, Eye, EyeOff, FileLock2, PenLine, ShieldCheck } from 'lucide-react';
-import { accountNamesFor } from '../names/MyNameBadge';
+import { accountNamesFor } from '../names/accountNames';
 import { isAgentAccount } from '../agents/agentAccounts';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';

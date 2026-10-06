@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useIdentity } from '../../hooks/useIdentity';
-import { useAccountNames } from '../names/MyNameBadge';
+import { useAccountNames } from '../names/accountNames';
 import { usePrefs } from '../settings/usePrefs';
 import { loadSession } from '../chat/api';
 import { mentionNames } from './notify';

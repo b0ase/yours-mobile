@@ -57,7 +57,7 @@ const rememberRecent = (url: string) => {
 };
 
 /** Accepts "1sat.market", "https://…"; rejects anything that isn't http(s). */
-export const normaliseUrl = (typed: string): string | null => {
+const normaliseUrl = (typed: string): string | null => {
   const text = typed.trim();
   if (!text || /\s/.test(text)) return null;
   const candidate = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`;

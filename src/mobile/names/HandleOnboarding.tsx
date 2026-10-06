@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { accountNamesFor } from './MyNameBadge';
+import { accountNamesFor } from './accountNames';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
 import { getPersonalLink, onPersonalChange } from './personalToken';

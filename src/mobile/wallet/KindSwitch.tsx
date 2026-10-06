@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'r
 import { getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
 import { walletKindsFor } from '../storeBuild';
 
-export const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
+const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
 
 // Tokens | NFTs | Friends (address book, owner 4 Oct 2026). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
 // (owner, 3 Oct 2026); the Tickets view (WalletKindGate kind="tickets") is kept but nothing opens it.

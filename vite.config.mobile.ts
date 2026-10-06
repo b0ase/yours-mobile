@@ -178,7 +178,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // (src/mobile/names/PasswordFields.tsx; iOS webcredentials:www.bwallet.space).
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { PasswordFields, saveWalletPassword } from '../../mobile/names/PasswordFields';",
+      "import { useNavigate } from 'react-router-dom';\nimport { PasswordFields } from '../../mobile/names/PasswordFields';\nimport { saveWalletPassword } from '../../mobile/names/walletPassword';",
     ],
     [
       '        <Input\n          theme={theme}\n          placeholder="Password"\n          type="password"\n          value={password}\n          onChange={(e) => setPassword(e.target.value)}\n        />\n        <Show when={newWallet}>\n          <Input\n            theme={theme}\n            placeholder="Confirm password"\n            type="password"\n            value={passwordConfirm}\n            onChange={(e) => setPasswordConfirm(e.target.value)}\n          />\n        </Show>',
@@ -215,12 +215,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { isAgentCreatePending } from '../../mobile/agents/AgentAccountToggle';",
+      "import { useNavigate } from 'react-router-dom';\nimport { isAgentCreatePending } from '../../mobile/agents/agentCreate';",
     ],
     // Agent account switch on Add account (src/mobile/agents, docs/SMART-WALLET-SPEC.md §1).
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { AgentAccountToggle, consumeAgentCreate } from '../../mobile/agents/AgentAccountToggle';",
+      "import { useNavigate } from 'react-router-dom';\nimport { AgentAccountToggle } from '../../mobile/agents/AgentAccountToggle';\nimport { consumeAgentCreate } from '../../mobile/agents/agentCreate';",
     ],
     [
       "        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",

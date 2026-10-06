@@ -14,7 +14,7 @@
 import { buyBsv21, sendBsv, type OneSatContext } from '@1sat/actions';
 import { appendAgentLog, getAgentAccount } from './agentAccounts';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
-import { describeRules } from './StrategySection';
+import { describeRules } from './describeRules';
 import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';

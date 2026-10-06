@@ -35,4 +35,10 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Page entry points: they mount a root and export nothing, so there is no module for
+    // Fast Refresh to hot-swap; a full reload is the expected behaviour for them.
+    files: ['src/prompt-tab.tsx', 'src/sweep-tab.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 );

@@ -10,7 +10,7 @@ import { Check, Copy, Eye, EyeOff, Wand2 } from 'lucide-react';
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_!@#%+=';
 
 /** 20 characters from a 64-symbol alphabet (~120 bits), no look-alikes (0/O, 1/l/I). */
-export const strongPassword = (len = 20): string => {
+const strongPassword = (len = 20): string => {
   const out: string[] = [];
   const buf = new Uint8Array(len * 2);
   while (out.length < len) {
@@ -18,20 +18,6 @@ export const strongPassword = (len = 20): string => {
     for (const b of buf) if (b < 256 - (256 % CHARS.length) && out.length < len) out.push(CHARS[b % CHARS.length]);
   }
   return out.join('');
-};
-
-/** Offer the new password to the browser's password manager, where it allows that (best effort). */
-export const saveWalletPassword = async (name: string, password: string) => {
-  const W = window as unknown as {
-    PasswordCredential?: new (d: { id: string; password: string; name?: string }) => Credential;
-  };
-  try {
-    if (W.PasswordCredential && navigator.credentials?.store) {
-      await navigator.credentials.store(new W.PasswordCredential({ id: name || APP_NAME, password, name: APP_NAME }));
-    }
-  } catch {
-    /* not offered here (e.g. extension pages); the user can copy it */
-  }
 };
 
 const field = 'w-full h-9 pl-4 pr-10 rounded-xl border text-sm outline-none bg-[#17191E] text-white border-[#98A2B340]';

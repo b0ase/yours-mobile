@@ -156,6 +156,8 @@ const BCORP_TEXT: Swaps = {
         (STORE ? 'bWallet' : 'bWalletX') +
         ", then try again.' : `Unable to reach this provider (${result?.status === 'error' ? result.error : ''}).`}",
     ],
+  ],
+  'src/components/storageProviders.ts': [
     ['Official storage partner of Yours Wallet.', 'Default wallet storage provider.'],
   ],
   'src/components/TopNav.tsx': [['alt="Yours Wallet"', 'alt="bWallet"']],

@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, Check } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
-import { PasswordFields, saveWalletPassword } from '../names/PasswordFields';
+import { PasswordFields } from '../names/PasswordFields';
+import { saveWalletPassword } from '../names/walletPassword';
 
 /**
  * Settings › Security › Change password (owner, 4 Oct 2026). The wallet is unlocked, so no old

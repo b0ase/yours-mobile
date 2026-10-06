@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { usePrefs } from '../settings/usePrefs';
 
 /** Scrims: Apps is lighter (tiles are bold); Wallet / Feed are darker so balances and post text stay crisp. */
-export const SCRIMS = {
+const SCRIMS = {
   apps: 'linear-gradient(180deg, rgba(1,1,1,0.55) 0%, rgba(1,1,1,0.68) 45%, rgba(1,1,1,0.85) 100%)',
   dark: 'linear-gradient(180deg, rgba(1,1,1,0.74) 0%, rgba(1,1,1,0.84) 40%, rgba(1,1,1,0.93) 100%)',
 } as const;

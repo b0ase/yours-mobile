@@ -16,7 +16,7 @@ const nameHasWallet = async (alias: string): Promise<boolean> => {
     return false;
   }
 };
-import { isAgentCreatePending } from '../agents/AgentAccountToggle';
+import { isAgentCreatePending } from '../agents/agentCreate';
 import {
   clearSocial,
   onSocialChange,

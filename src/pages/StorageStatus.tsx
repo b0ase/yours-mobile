@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { PageLoader } from '../components/PageLoader';
-import { ProviderPicker, KNOWN_PROVIDERS } from '../components/ProviderPicker';
+import { ProviderPicker } from '../components/ProviderPicker';
+import { KNOWN_PROVIDERS } from '../components/storageProviders';
 import { SpeedBump } from '../components/SpeedBump';
 import { useTheme } from '../hooks/useTheme';
 import { useSnackbar } from '../hooks/useSnackbar';

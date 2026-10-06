@@ -28,9 +28,9 @@ import {
   setAllAgentsStopped,
   spentToday,
 } from '../agents/agentAccounts';
-import { startAgentCreate } from '../agents/AgentAccountToggle';
-import { accountTag, useAccountSwitch } from '../account/AccountSwitcher';
-import { accountNamesFor } from '../names/MyNameBadge';
+import { startAgentCreate } from '../agents/agentCreate';
+import { accountTag, useAccountSwitch } from '../account/accountSwitch';
+import { accountNamesFor } from '../names/accountNames';
 import { loadLastBalance } from '../wallet/balanceLoad';
 import { cachedExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';

@@ -113,7 +113,7 @@ popup (React SPA)
 - `StorageConfig` (`{ activeRemote?: string; remotes?: string[] }`) is per-account
 - Background handlers: `STORAGE_ADD_REMOTE`, `STORAGE_REMOVE_REMOTE`, `STORAGE_SET_ACTIVE_STORAGE`, `STORAGE_SYNC_BACKUPS`, `STORAGE_GET_INFO`
 - `useRemoteStatus` hook fetches `/account/status` for known providers, BRC-103 liveness for custom remotes
-- Known providers are in `KNOWN_PROVIDERS` array in `ProviderPicker.tsx`
+- Known providers are in `KNOWN_PROVIDERS` array in `src/components/storageProviders.ts`
 
 ## Building and Testing Locally
 

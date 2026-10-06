@@ -60,7 +60,8 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
 import { useRoomIcon } from '../chat/roomIcon';
-import { ChatTabs, SegmentRow, SegmentTitle, useChatDisplayName } from '../feed/ChatSegments';
+import { ChatTabs, SegmentRow, SegmentTitle } from '../feed/ChatSegments';
+import { useChatDisplayName } from '../feed/chatDisplayName';
 import {
   avatarHue,
   latestCursor,
@@ -92,7 +93,8 @@ import {
 } from '../chat/bounties';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { DmsPage, type DmConversationProps } from '../chat/DmsPage';
-import { setBlocked, syncBlocks, UserSafetyButton } from '../ugc/UserSafety';
+import { UserSafetyButton } from '../ugc/UserSafety';
+import { setBlocked, syncBlocks } from '../ugc/blocks';
 import { blockedHandles, onUgcChange } from '../ugc/ugc';
 import {
   browseList,
@@ -104,7 +106,8 @@ import {
   withoutBlocked,
   type PublicRoom,
 } from '../chat/openRooms';
-import { longPress, MessageMenu, NewRoomSheet, OpenRoomSheet, useRoomCard } from '../chat/OpenRoomSheets';
+import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
+import { longPress, useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 
 /**

@@ -6,7 +6,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { AvatarPicker } from '../names/AvatarPicker';
 import { useTokenIcon } from './tokenIcon';
-import { useIssuer } from '../issuer/IssuerBadge';
+import { useIssuer } from '../issuer/useIssuer';
 
 /**
  * Token page header icon. Your own personal token gets "Change icon": the icon is your profile
