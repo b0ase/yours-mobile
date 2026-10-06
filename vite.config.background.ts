@@ -28,7 +28,8 @@ export default defineConfig({
     outDir: 'build',
     emptyOutDir: false,
     lib: {
-      entry: resolve(__dirname, 'src/background.ts'),
+      // Upstream background + Web Push handlers (src/mobile/push/extBackground.ts).
+      entry: resolve(__dirname, 'src/mobile/push/extBackground.ts'),
       name: 'background',
       formats: ['es'],
       fileName: () => 'background.js',
