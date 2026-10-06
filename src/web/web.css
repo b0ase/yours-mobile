@@ -1,7 +1,8 @@
 /*
  * Web wallet (vite.config.web.ts): the mobile UI hosted as a static site.
- * Phones get the mobile layout under a beta banner; wider screens get a
- * centred phone-width wallet on the black and gold background.
+ * Phones get the mobile layout under a beta banner. Wider screens get the wallet across the window
+ * (up to 1280px, centred) on the black and gold background: no phone-shaped column (owner, 6 Oct 2026:
+ * "the web version should be widescreen").
  */
 
 html:root {
@@ -58,33 +59,19 @@ html body #root {
   }
 
   html:root {
-    --wallet-width: 420px;
+    --wallet-width: 100%;
     --wallet-unlock-width: 420px;
-    --wallet-height: calc(100dvh - var(--web-banner-height) - 48px - var(--account-strip-height));
+    --wallet-height: calc(100dvh - var(--web-banner-height) - var(--account-strip-height));
   }
 
   .bwallet-web-banner {
-    width: 420px;
-    margin: 24px auto 0;
-    border-radius: 16px 16px 0 0;
+    width: 100%;
   }
 
   html body #root {
-    width: 420px;
-    max-width: 420px;
-    height: calc(100dvh - var(--web-banner-height) - 48px);
+    width: 100%;
+    max-width: 1280px;
+    height: calc(100dvh - var(--web-banner-height));
     margin: 0 auto;
-    border-radius: 0 0 16px 16px;
-    border: 1px solid rgba(245, 184, 0, 0.25);
-    border-top: 0;
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  }
-
-  .yours-overlay,
-  .yours-sheet-backdrop {
-    left: 50%;
-    right: auto;
-    width: 420px;
-    transform: translateX(-50%);
   }
 }
