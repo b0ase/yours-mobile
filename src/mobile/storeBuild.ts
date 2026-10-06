@@ -34,10 +34,9 @@ export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(
 ): T[] => (store ? kinds.filter((k) => !STORE_HIDDEN_WALLET_KINDS.includes(k[0])) : [...kinds]);
 
 /**
- * Market Tokens sub-filters: no Tickets (room access) or Launchpad (BlastPad curve trading) in a store
- * build. bApps is a plain token filter.
+ * Market Tokens sub-filters: no Tickets (room access) in a store build (curve coins: CURVE_COINS_ENABLED). bApps is a plain token filter.
  */
-export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['tickets', 'launchpad'];
+export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['tickets'];
 export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(
   filters: readonly T[],
   store = STORE_BUILD,
@@ -48,6 +47,16 @@ export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(
  * build 8 under 3.1.5(iii) (exchange functionality needs a licensed exchange); bWalletX keeps trading.
  */
 export const marketTradingEnabled = (store = STORE_BUILD) => !store;
+
+/**
+ * Bonding-curve coin trading (Market › Tokens, market/launchpad/): never in a store build, not even as
+ * code. A literal env check so Vite inlines it and Rollup drops the lazy import in MarketPage.tsx.
+ */
+export const CURVE_COINS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;

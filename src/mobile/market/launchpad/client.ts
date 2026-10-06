@@ -6,7 +6,7 @@
  */
 import { Beef, P2PKH, PublicKey, Transaction, UnlockingScript, Utils, type WalletInterface } from '@bsv/sdk';
 import { ONESAT, bsv21, noteFor, tokenCoins, tokenSpends } from './tokens';
-import { quoteBuy, quoteSell } from './curve';
+import { exactBsv, exactTokens, quoteBuy, quoteSell } from './curve';
 import { matchesPlan, type TradePlan } from './shape';
 import { BLASTPAD } from './api';
 
@@ -110,7 +110,7 @@ export async function trade(
     const outputs: Parameters<WalletInterface['createAction']>[0]['outputs'] = plan.outputs.map((o, i) => ({
       lockingScript: o.script,
       satoshis: o.sats,
-      outputDescription: o.what,
+      outputDescription: `${o.what}: ${exactBsv(BigInt(o.sats))}`,
       ...(side === 'buy' && i === 0
         ? {
             basket: 'bsv21',
@@ -126,19 +126,21 @@ export async function trade(
       outputs.push({
         lockingScript: bsv21(coin.id, left, ch.address).toHex(),
         satoshis: 1,
-        outputDescription: `The rest of your $${coin.sym}`,
+        outputDescription: `The rest of your $${coin.sym}: ${exactTokens(left)}`,
         basket: 'bsv21',
         tags: [`bsv21:${coin.id}`],
         customInstructions: noteFor(coin.id, left, coin.sym, 0, ch.keyID, coin.icon),
       });
     }
-    const n = Number(q.tokens).toLocaleString();
+    // Exact amounts (no rounding): what the wallet records and shows for this action.
+    const n = exactTokens(BigInt(q.tokens));
+    const bsv = exactBsv(BigInt(q.userSats));
     onStatus?.('Approve in your wallet…');
     const created = await w.client.createAction({
       description:
         side === 'buy'
-          ? `Buy ${n} $${coin.sym} on the TokenBlaster curve for ${(Number(q.userSats) / 1e8).toFixed(6)} BSV + fees`
-          : `Sell ${n} $${coin.sym} to the TokenBlaster curve for ${(Number(q.userSats) / 1e8).toFixed(6)} BSV`,
+          ? `Buy ${n} $${coin.sym} on the TokenBlaster curve for ${bsv} incl. curve fees, plus network fee`
+          : `Sell ${n} $${coin.sym} to the TokenBlaster curve for ${bsv} after curve fees`,
       inputBEEF: beef.toBinary(),
       inputs: [
         ...plan.inputs.map((i) => ({
@@ -149,7 +151,7 @@ export async function trade(
         ...sellCoins.map((c) => ({
           outpoint: c.outpoint.replace('_', '.'),
           unlockingScriptLength: 108,
-          inputDescription: `your $${coin.sym}`,
+          inputDescription: `your ${exactTokens(c.amt)} $${coin.sym}`,
         })),
       ],
       outputs,

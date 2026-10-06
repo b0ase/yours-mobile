@@ -13,8 +13,11 @@ import { openDappBrowser } from '../../dappBrowser';
 import { big, change24, coinImage, coinPage, fetchCoin, fetchCoins, sortBoard, wocTx, type BoardCoin } from './api';
 import {
   HOUSE_BPS,
+  MAX_BUY,
   MIN_BUY,
   ROUTE_BPS,
+  exactBsv,
+  exactTokens,
   fmtSats,
   fmtTokens,
   marketCap,
@@ -192,9 +195,10 @@ const CoinSheet = ({
   }, [amount, side]);
   const q = amt > 0n ? (side === 'buy' ? quoteBuy(sold, amt) : quoteSell(sold, amt)) : null;
   const tooSmall = side === 'buy' && amt > 0n && amt < BigInt(MIN_BUY);
-  const overHeld = side === 'sell' && held !== null && amt > held;
+  const tooBig = side === 'buy' && amt > BigInt(MAX_BUY);
+  const overHeld = side === 'sell' && (held === null || amt > held);
   const sellBlocked = side === 'sell' && indexed === false;
-  const ready = !!q && q.tokens > 0n && !tooSmall && !overHeld && !sellBlocked && !busy;
+  const ready = !!q && q.tokens > 0n && !tooSmall && !tooBig && !overHeld && !sellBlocked && !busy;
 
   const go = async () => {
     if (!ready) return;
@@ -359,7 +363,8 @@ const CoinSheet = ({
         </div>
 
         {tooSmall && <p className="text-xs text-[#F97066] m-0">Minimum buy is {fmtSats(MIN_BUY)} BSV.</p>}
-        {overHeld && <p className="text-xs text-[#F97066] m-0">That's more than you hold.</p>}
+        {tooBig && <p className="text-xs text-[#F97066] m-0">Maximum buy is {fmtSats(MAX_BUY)} BSV.</p>}
+        {overHeld && held !== null && <p className="text-xs text-[#F97066] m-0">That's more than you hold.</p>}
         {error && <p className="text-xs text-[#F97066] m-0 break-words">{error}</p>}
         {done && (
           <div className="text-xs text-[#A1FF8B] break-all">
@@ -381,8 +386,13 @@ const CoinSheet = ({
           >
             <p className="text-sm text-white m-0 leading-snug">
               {side === 'buy'
-                ? `Buy about ${fmtTokens(q.tokens)} $${coin.sym} for ${fmtSats(q.userSats)} BSV (${money(Number(q.userSats), rate)}), fees included?`
-                : `Sell ${fmtTokens(q.tokens)} $${coin.sym} for about ${fmtSats(q.userSats)} BSV (${money(Number(q.userSats), rate)}) after fees?`}
+                ? `Buy ${exactTokens(q.tokens)} $${coin.sym} for ${exactBsv(q.userSats)} (${money(Number(q.userSats), rate)}), curve fees included?`
+                : `Sell ${exactTokens(q.tokens)} $${coin.sym} for ${exactBsv(q.userSats)} (${money(Number(q.userSats), rate)}) after curve fees?`}
+            </p>
+            <p className="text-xs text-white m-0">
+              {side === 'buy'
+                ? `You get at least ${exactTokens((q.tokens * BigInt(10_000 - slip)) / BigInt(10_000))} $${coin.sym} or nothing is spent.`
+                : `You get at least ${exactBsv((q.userSats * BigInt(10_000 - slip)) / BigInt(10_000))} or nothing is spent.`}
             </p>
             <p className="text-[11px] text-[#98A2B3] m-0">
               One real BSV transaction from this account, plus a few hundred sats network fee. Max slippage {slip / 100}

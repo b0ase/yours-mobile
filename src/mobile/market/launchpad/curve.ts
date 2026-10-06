@@ -95,6 +95,17 @@ export function quoteSell(sold: bigint, tokens: bigint): Quote {
   };
 }
 
+/** Exact, unrounded amounts for confirmations and wallet descriptions: `0.00012345 BSV (12,345 sats)`. */
+export const exactBsv = (sats: bigint) => {
+  const neg = sats < BigInt(0);
+  const a = neg ? -sats : sats;
+  const whole = a / BigInt(100_000_000);
+  const frac = (a % BigInt(100_000_000)).toString().padStart(8, '0');
+  return `${neg ? '-' : ''}${whole}.${frac} BSV (${sats.toLocaleString('en-US')} sats)`;
+};
+/** Exact token count with thousands separators, e.g. `12,345,678`. */
+export const exactTokens = (t: bigint) => t.toLocaleString('en-US');
+
 /** Tokens per BSV etc. for display. */
 export const fmtSats = (s: number | bigint) => {
   const n = Number(s) / 1e8;

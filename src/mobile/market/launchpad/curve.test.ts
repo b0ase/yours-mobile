@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   GRAD_SOLD,
+  exactBsv,
+  exactTokens,
   HOUSE_BPS,
   ROUTE_BPS,
   SUPPLY,
@@ -61,5 +63,15 @@ describe('board helpers', () => {
       coin({ slot: 'd', vol24: 1, created_at: '2026-05-01' }),
     ]);
     expect(s.map((c) => c.slot)).toEqual(['b', 'c', 'd', 'a']);
+  });
+});
+
+describe('exact amounts', () => {
+  test('exactBsv shows every sat', () => {
+    expect(exactBsv(BigInt(12_345))).toBe('0.00012345 BSV (12,345 sats)');
+    expect(exactBsv(BigInt(2_000_000_001))).toBe('20.00000001 BSV (2,000,000,001 sats)');
+  });
+  test('exactTokens does not round', () => {
+    expect(exactTokens(BigInt('123456789012345678'))).toBe('123,456,789,012,345,678');
   });
 });
