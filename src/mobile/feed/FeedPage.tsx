@@ -105,6 +105,7 @@ import {
 } from './locks';
 import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
 import {
+  homeShareFor,
   payDestination,
   planPayment,
   TIP_MIN_SATS,
@@ -1102,6 +1103,16 @@ const TipSheet = ({
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
         {satsNote(sats, rate) || `Minimum ${fmtSats(TIP_MIN_SATS)}`}
       </p>
+      {(() => {
+        // Spec §6.2: the post's home app gets 5% on top, as its own output, when it has published an address.
+        const home = homeShareFor(post.source, sats);
+        return home ? (
+          <p className="text-[11px] mt-1" style={{ color: MUTED }}>
+            {home.app} gets {money(home.satoshis, rate)} on top, for hosting this post. The author still gets the full
+            amount.
+          </p>
+        ) : null;
+      })()}
       {error && (
         <p className="text-xs mt-2" style={{ color: RED }}>
           {error}

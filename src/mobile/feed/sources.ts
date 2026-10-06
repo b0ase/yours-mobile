@@ -54,6 +54,12 @@ export type SourceInfo = {
   postUrl: (p: { txid: string; threadId: string | null }) => string | null;
   /** Which actions a post from this source supports. */
   actions: SourceActions;
+  /**
+   * The app's OWN published payment address for the home app share (spec §6.2): 5% on top of a
+   * tip / paid like on its posts. Set only when the app has published or confirmed it — never a
+   * relay / shared posting address inferred from its posts (e.g. Treechat's signer). Unset = no share.
+   */
+  homePayTo?: string;
 };
 
 /**

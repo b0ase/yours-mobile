@@ -15,6 +15,10 @@ import {
   TIP_MIN_SATS,
   tipTotals,
   TREECHAT_RELAY_ADDRESSES,
+  HOME_SHARE_MAX_SATS,
+  homePayToOf,
+  homeShareAllowed,
+  homeShareFor,
 } from './tip';
 
 /** Mirrors bit-sign feed-tip-selftest.mts (BCHAT-PROTOCOL-v2 §5). */
@@ -117,6 +121,9 @@ describe('parsing and totals', () => {
       fee: 0,
       feeTo: null,
       feeValid: true,
+      home: 0,
+      homeTo: null,
+      homeValid: true,
     });
     expect(parsePayment(txFor('like', 1000))!.kind).toBe('like');
     expect(parsePayment(txFor('tip', 3000, 2999))!.valid).toBe(false);
@@ -181,5 +188,73 @@ describe('client fee (spec §6.1)', () => {
     expect(bad.valid).toBe(true);
     expect(bad.feeValid).toBe(false);
     expect(tipTotals([ok], () => author).get(TXID)).toEqual({ sats: 10_000, count: 1 });
+  });
+});
+
+describe('home app share (spec §6.2)', () => {
+  const home = PrivateKey.fromRandom().toAddress();
+  const twetch = { txid: TXID, source: 'twetch' as const, author: { address: author } };
+  test('registry is empty: no share for any source', () => {
+    for (const s of ['treechat', 'twetch', 'peck', 'fwetch', 'other', 'bchat'] as const)
+      expect(homePayToOf(s)).toBeNull();
+    expect(planPayment('tip', twetch, 10_000).payment.home).toBeUndefined();
+    expect(pushes(planPayment('tip', twetch, 10_000).script)).not.toContain('home');
+  });
+  test('caps: 5% rounded down, at most 10,000 sats, never for bChat posts', () => {
+    expect(homeShareFor('twetch', 10_019, home)?.satoshis).toBe(500);
+    expect(homeShareFor('peck', 100_000_000, home)?.satoshis).toBe(HOME_SHARE_MAX_SATS);
+    expect(homeShareFor('peck', 10_000, home, 50)?.satoshis).toBe(500);
+    expect(homeShareFor('bchat', 10_000, home)).toBeNull();
+    expect(homeShareAllowed(500, 10_000)).toBe(true);
+    expect(homeShareAllowed(501, 10_000)).toBe(false);
+    expect(() => buildTipScript(TXID, 10_000, 'bChat', null, { address: home, satoshis: 501 })).toThrow();
+  });
+  test('separate output on top; author still gets exactly amount; parser verifies it', () => {
+    const plan = planPayment('tip', twetch, 10_000, BCHAT_CLIENT_FEE, { homeTo: home });
+    expect(plan.payment.satoshis).toBe(10_000);
+    expect(plan.payment.home?.satoshis).toBe(500);
+    expect(decodeScript(plan.script)!.MAP).toMatchObject({ amount: '10000', home: '500', homeTo: home });
+    const build = (homeSats: number) => {
+      const tx = new Transaction();
+      tx.addOutput({ satoshis: 0, lockingScript: plan.script });
+      tx.addOutput({ satoshis: 10_000, lockingScript: plan.payment.lockingScript });
+      tx.addOutput({ satoshis: homeSats, lockingScript: plan.payment.home!.lockingScript });
+      return Transaction.fromHex(tx.toHex());
+    };
+    const ok = parsePayment(build(500))!;
+    expect(ok.valid && ok.homeValid && ok.home === 500 && ok.homeTo === home).toBe(true);
+    const bad = parsePayment(build(499))!;
+    expect(bad.valid).toBe(true);
+    expect(bad.homeValid).toBe(false);
+    expect(tipTotals([ok], () => author).get(TXID)).toEqual({ sats: 10_000, count: 1 });
+  });
+  test('home after a fee; skipped when it equals the author or the fee address', () => {
+    const app = PrivateKey.fromRandom().toAddress();
+    const plan = planPayment('tip', twetch, 10_000, { pct: 5, address: app }, { homeTo: home });
+    const tx = new Transaction();
+    tx.addOutput({ satoshis: 0, lockingScript: plan.script });
+    tx.addOutput({ satoshis: 10_000, lockingScript: plan.payment.lockingScript });
+    tx.addOutput({ satoshis: 500, lockingScript: plan.payment.fee!.lockingScript });
+    tx.addOutput({ satoshis: 500, lockingScript: plan.payment.home!.lockingScript });
+    const p = parsePayment(Transaction.fromHex(tx.toHex()))!;
+    expect(p.valid && p.feeValid && p.homeValid).toBe(true);
+    expect(planPayment('tip', twetch, 10_000, BCHAT_CLIENT_FEE, { homeTo: author }).payment.home).toBeUndefined();
+    expect(
+      planPayment('tip', twetch, 10_000, { pct: 5, address: home }, { homeTo: home }).payment.home,
+    ).toBeUndefined();
+    expect(() =>
+      planPayment('tip', { ...twetch, source: 'treechat' }, 10_000, BCHAT_CLIENT_FEE, { homeTo: home }),
+    ).toThrow();
+  });
+  test('spec test vector (unsigned part)', () => {
+    const unsigned = buildTipScript(TXID, 10_000, 'bChat', null, {
+      address: '1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH',
+      satoshis: 500,
+    }).toHex();
+    expect(
+      '006a223150755161374b36324d694b43747373534c4b79316b683536575755374d7455523503534554036170700562436861740474797065037469700176013207636f6e74657874027478027478406236303036666361333562363437663561313836663630393837383131383731666266646136656566666565653532626534666465323837643838353263616506616d6f756e7405313030303004686f6d650335303006686f6d65546f22314267475a3974634e34726d394b427a446e374b7072517a3837535a323653414d48017c22313550636948473232534e4c514a584d6f53556157566937575371633768436676610d424954434f494e5f454344534122314267475a3974634e34726d394b427a446e374b7072517a3837535a323653414d48412049264c2ec5dd5abe1376096c1b022b8b949cf61f8da666034d2b9583dcacc4e73332a18448cd64b392f64241f51e80609833fbe72ff3deba6c3d29b4e5be94c9'.startsWith(
+        unsigned,
+      ),
+    ).toBe(true);
   });
 });

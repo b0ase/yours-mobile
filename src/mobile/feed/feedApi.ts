@@ -456,6 +456,8 @@ export async function publish(
     lockingScript: Script;
     /** Optional client fee (spec §6.1): its own output right after the author's. */
     fee?: { address: string; satoshis: number; lockingScript: Script };
+    /** Optional home app share (spec §6.2): its own output after the fee (if any). */
+    home?: { address: string; satoshis: number; lockingScript: Script; app?: string };
   },
 ): Promise<string> {
   const signed = await signWithIdentity(() => applyBapAip(ctx, script));
@@ -480,6 +482,16 @@ export async function publish(
               lockingScript: payment.fee.lockingScript.toHex(),
               satoshis: payment.fee.satoshis,
               outputDescription: `App fee ${payment.fee.address}`,
+            },
+          ]
+        : []),
+      ...(payment?.home
+        ? [
+            {
+              lockingScript: payment.home.lockingScript.toHex(),
+              satoshis: payment.home.satoshis,
+              // ≤ 50 bytes (BRC-100); shown on the spending approval.
+              outputDescription: `Home app ${payment.home.address}`,
             },
           ]
         : []),
