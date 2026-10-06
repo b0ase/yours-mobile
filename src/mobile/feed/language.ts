@@ -6,9 +6,14 @@ import LISTS from './language-lists.json';
  * language-lists.json, which bwalletX ships byte-identical (src/mobile/feed/language-lists.json);
  * both repos' selftests pin its sha256, so changing one without the other fails a test.
  *
- *   'slur'   — hate slurs (racial, ethnic, homophobic, transphobic, disability). Always hidden.
+ *   'slur'   — hate slurs (racial, ethnic, homophobic, transphobic, disability). Blurred behind
+ *              "Show anyway" in bChat / bWalletX; hidden with no reveal in the bWallet store
+ *              edition; dropped from the embeddable feed.
  *   'strong' — ordinary swearing. Shown normally; blurred when a viewer opts in (or always in the
  *              bWallet store edition, behind "Show anyway").
+ *
+ * Filters only change what the viewer sees. Nothing is deleted: posts stay on-chain and readable
+ * in any app (spec §7, reader rule).
  *
  * Scunthorpe-safe: words match as whole tokens (plus a plural suffix), never as raw substrings.
  * A few unambiguous stems ("fuck", "nigger", …) also match inside a token, but only at its start
@@ -164,22 +169,28 @@ export function worstLanguage(...xs: Language[]): Language {
 export const isSlur = (text: string | null | undefined): boolean => languageOf(text) === 'slur';
 
 export const HIDDEN_NAME = 'Hidden name';
-/** A display name, or "Hidden name" when it contains a slur. */
+/** A display name, or "Hidden name" when it contains a slur (store edition, embeds, plain-text uses). */
 export const safeName = (name: string): string => (isSlur(name) ? HIDDEN_NAME : name);
 
+/** The line shown in Feed settings and under "Why hidden? / Why blurred?". */
+export const FILTER_NOTE = 'Filters only change what you see. Nothing is deleted: posts stay on-chain and readable in any app.';
+
 /** What a viewer sees for a flagged post or link card. */
-export type LanguageView = 'show' | 'blur' | 'hide' | 'hide-final';
+export type LanguageView = 'show' | 'blur' | 'hide-final';
 
 /**
  * How to show text with flag `lang`. Store edition: slurs hidden with no reveal, swearing blurred.
- * Elsewhere: slurs hidden (revealable when the viewer opted in to "Show anyway"), swearing shown
+ * Elsewhere (bChat, bWalletX): slurs blurred behind "Show anyway" (per post), swearing shown
  * unless "Filter strong language" is on.
  */
-export function languageView(
-    lang: Language,
-    opts: { store?: boolean; filterStrong?: boolean; allowReveal?: boolean } = {},
-): LanguageView {
-    if (lang === 'slur') return opts.store || !opts.allowReveal ? 'hide-final' : 'hide';
+export function languageView(lang: Language, opts: { store?: boolean; filterStrong?: boolean } = {}): LanguageView {
+    if (lang === 'slur') return opts.store ? 'hide-final' : 'blur';
     if (lang === 'strong') return opts.store || opts.filterStrong ? 'blur' : 'show';
     return 'show';
+}
+
+/** A display name: shown, blurred behind a tap (slur, bChat / bWalletX), or "Hidden name" (slur, store). */
+export function nameView(name: string | null | undefined, opts: { store?: boolean } = {}): 'show' | 'blur' | 'hidden' {
+    if (!isSlur(name)) return 'show';
+    return opts.store ? 'hidden' : 'blur';
 }

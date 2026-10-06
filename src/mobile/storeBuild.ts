@@ -112,16 +112,16 @@ export const BUY_CRYPTO_ENABLED: boolean = !STORE_BUILD;
 export const PAID_FEATURES_ENABLED: boolean = !STORE_BUILD;
 
 /**
- * Feed bad language (feed/language.ts). Store edition: slurs hidden with no reveal and swearing always
- * blurred behind "Show anyway"; the two Settings toggles are not shown. bWalletX: swearing shown unless
- * "Filter strong language" is on; slur posts hidden, revealable only after the adult opt-in.
+ * Feed bad language (feed/language.ts). Store edition: slurs hidden with no reveal (names read "Hidden
+ * name") and swearing always blurred behind "Show anyway"; the Settings toggle is not shown. bWalletX:
+ * slur posts and names blurred behind a per-post "Show anyway" / tap; swearing shown unless "Filter
+ * strong language" is on. A stored `allowLanguageReveal` (the retired 18+ opt-in) is ignored.
  */
 export const languageSettingsEnabled = (store = STORE_BUILD) => !store;
 export const languageOptsFor = (
-  prefs: { filterStrong: boolean; allowLanguageReveal: boolean },
+  prefs: { filterStrong: boolean },
   store = STORE_BUILD,
-): { store: boolean; filterStrong: boolean; allowReveal: boolean } => ({
+): { store: boolean; filterStrong: boolean } => ({
   store,
   filterStrong: store || prefs.filterStrong,
-  allowReveal: !store && prefs.allowLanguageReveal,
 });

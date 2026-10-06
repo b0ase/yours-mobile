@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { languageOf, languageView, safeName, HIDDEN_NAME } from './language';
+import { FILTER_NOTE, languageOf, languageView, nameView, safeName, HIDDEN_NAME } from './language';
 import { languageOptsFor } from '../storeBuild';
 
 /**
@@ -54,8 +54,8 @@ describe('languageOf', () => {
 });
 
 describe('edition behaviour', () => {
-  const off = { filterStrong: false, allowLanguageReveal: false };
-  const on = { filterStrong: true, allowLanguageReveal: true };
+  const off = { filterStrong: false };
+  const on = { filterStrong: true };
   test('store edition: slurs hidden with no reveal, even with the prefs set', () => {
     expect(languageView('slur', languageOptsFor(on, true))).toBe('hide-final');
   });
@@ -66,9 +66,21 @@ describe('edition behaviour', () => {
     expect(languageView('strong', languageOptsFor(off, false))).toBe('show');
     expect(languageView('strong', languageOptsFor({ ...off, filterStrong: true }, false))).toBe('blur');
   });
-  test('bWalletX: slurs hidden; Show anyway only after the adult opt-in', () => {
-    expect(languageView('slur', languageOptsFor(off, false))).toBe('hide-final');
-    expect(languageView('slur', languageOptsFor(on, false))).toBe('hide');
+  test('bWalletX: slurs blurred behind Show anyway, no 18+ opt-in', () => {
+    expect(languageView('slur', languageOptsFor(off, false))).toBe('blur');
+    expect(languageView('slur', languageOptsFor(on, false))).toBe('blur');
   });
+  test('names: blurred in bWalletX, Hidden name in the store edition', () => {
+    expect(nameView('xX_n1gger_Xx', { store: languageOptsFor(off, false).store })).toBe('blur');
+    expect(nameView('xX_n1gger_Xx', { store: languageOptsFor(off, true).store })).toBe('hidden');
+    expect(nameView('Richard', { store: true })).toBe('show');
+  });
+  test('the old 18+ pref is ignored', () => {
+    const legacy = { filterStrong: false, allowLanguageReveal: true } as { filterStrong: boolean };
+    expect(languageView('slur', languageOptsFor(legacy, true))).toBe('hide-final');
+    expect(Object.keys(languageOptsFor(legacy, false)).sort()).toEqual(['filterStrong', 'store']);
+  });
+  test('filter note', () =>
+    expect(FILTER_NOTE).toBe('Filters only change what you see. Nothing is deleted: posts stay on-chain and readable in any app.'));
   test('clean text always shown', () => expect(languageView(null, languageOptsFor(on, true))).toBe('show'));
 });

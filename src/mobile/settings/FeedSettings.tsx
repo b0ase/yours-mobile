@@ -56,7 +56,7 @@ import {
   type HiddenAccount,
 } from '../feed/store';
 import type { FeedPost } from '../feed/post';
-import { isSlur, safeName } from '../feed/language';
+import { FILTER_NOTE, isSlur, safeName } from '../feed/language';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from '../feed/bookmarkSync';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
@@ -489,32 +489,19 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                       onChange={(v) => setPrefs({ filterStrong: v })}
                     />
                   }
-                />
-                <Divider />
-                <Row
-                  icon={<EyeOff size={16} />}
-                  label="Show anyway on hidden posts (18+)"
-                  description={
-                    prefs.allowLanguageReveal
-                      ? 'Posts hidden for slurs can be opened with Show anyway'
-                      : 'Posts with slurs stay hidden'
-                  }
-                  right={
-                    <Toggle
-                      label="Show anyway on hidden posts (18+)"
-                      on={prefs.allowLanguageReveal}
-                      onChange={(v) => {
-                        if (v && !window.confirm('Only for adults (18+). Allow Show anyway on posts hidden for offensive language?'))
-                          return;
-                        setPrefs({ allowLanguageReveal: v });
-                      }}
-                    />
-                  }
                   isLast
                 />
               </>
             )}
           </Section>
+          <div className="px-4 -mt-2 mb-3">
+            <Note>
+              {languageSettingsEnabled()
+                ? 'Posts with slurs are blurred: tap Show anyway to read one. '
+                : 'Posts with slurs are hidden and strong language is blurred in this edition. '}
+              {FILTER_NOTE}
+            </Note>
+          </div>
           <Section title="Payments">
             <Row
               icon={<Zap size={16} />}
