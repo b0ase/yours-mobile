@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Push notifications (coming soon) · bWallet</title>
+    <meta name="description" content="Push notifications for bWallet are coming soon: messages, mentions, payments and calls on iPhone, Android and the web, even with the app closed. Who messaged you, not what they wrote." />
+    <meta name="theme-color" content="#F5B800" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.bwallet.space/push-notifications" />
+    <meta property="og:site_name" content="bWallet" />
+    <meta property="og:title" content="Push notifications in bWallet: never miss a message" />
+    <meta property="og:description" content="Push notifications for bWallet are coming soon: messages, mentions, payments and calls on iPhone, Android and the web, even with the app closed. Who messaged you, not what they wrote." />
+    <meta property="og:image" content="https://www.bwallet.space/og-push.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A phone lock screen with bWallet notifications: a message, a mention and a payment" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@bWallet" />
+    <meta name="twitter:title" content="Push notifications in bWallet: never miss a message" />
+    <meta name="twitter:description" content="Push notifications for bWallet are coming soon: messages, mentions, payments and calls on iPhone, Android and the web, even with the app closed. Who messaged you, not what they wrote." />
+    <meta name="twitter:image" content="https://www.bwallet.space/og-push.png" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .topbar { background: #F5B800 !important; backdrop-filter: none; }
+      .topbar .brand span, .topbar nav a { color: #010101 !important; }
+      .topbar nav a:hover, .topbar nav a[aria-current='page'] { color: #000 !important; text-decoration: underline; }
+      .topbar .dl-btn { background: #010101 !important; color: #F5B800 !important; box-shadow: none !important; }
+      .topbar .nav-cta .web-btn { color: #010101 !important; border-color: #010101 !important; }
+
+      .ext h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); margin: 18px 0 10px; }
+      .ext h2 { margin: 48px 0 10px; font-size: 1.5rem; }
+      .ext p, .ext li { line-height: 1.65; }
+      .ext code { background: #17191e; padding: 2px 7px; border-radius: 6px; overflow-wrap: anywhere; }
+      .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 22px 0; }
+      .pill { background: #101114; border: 1px solid #F5B80055; color: #F5B800; border-radius: 999px; padding: 8px 16px; font-weight: 700; overflow-wrap: anywhere; }
+      .arrow { color: #667085; }
+      .box { background: #101114; border: 1px solid #ffffff12; border-radius: 16px; padding: 18px 20px; margin: 16px 0; }
+      .box h3 { margin: 0 0 6px; font-size: 1rem; }
+      .box p { margin: 0; color: #a7adb8; }
+      .ext ol { padding-left: 1.3em; }
+      .ext ol li { margin: 6px 0; }
+      .examples { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.95rem; }
+      .examples td { padding: 9px 10px; border-bottom: 1px solid #ffffff12; overflow-wrap: anywhere; }
+      .examples td:first-child { color: #a7adb8; }
+      .ext .small { color: #8a8a86; font-size: 0.85rem; }
+      .ext .row { display: flex; gap: 12px; flex-wrap: wrap; margin: 26px 0; }
+        </style>
+  </head>
+  <body>
+    <div class="beta-banner">bWallet is in <strong>beta</strong>: test with small amounts.</div>
+    <header class="topbar">
+      <div class="wrap topbar-in">
+        <a class="brand" href="/"><img src="/logo.svg" alt="" width="34" height="30" /><span>bWallet</span></a>
+        <nav aria-label="Pages"><a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a><a href="https://bwalletx.com">Get bWalletX &rarr;</a></nav>
+        <span class="nav-cta"><a class="dl-btn" href="/get">Download</a><a class="web-btn" href="https://bwalletx.com">bWalletX &rarr;</a></span>
+      </div>
+    </header>
+    <script src="/nav.js" data-edition="store"></script>
+    <main class="ext">
+      <img src="/icon-192.png" alt="bWallet" width="72" height="72" style="border-radius:16px" />
+      <h1>Push notifications</h1>
+      <p class="lede">Never miss a message. Real push notifications for messages, mentions, payments and calls are being built now and rolling out soon, on your phone, the web wallet and the Chrome extension.</p>
+      <div class="flow">
+        <span class="pill">Coming soon</span><span class="pill">iPhone</span><span class="pill">Android</span><span class="pill">Web</span><span class="pill">Chrome extension</span>
+      </div>
+
+      <h2>How it works today</h2>
+      <p>While the app is open, it checks for new messages, replies, mentions and payments every 90 seconds and shows a notification on your phone. When the app is closed, nothing arrives yet. On the web wallet and the Chrome extension you see the bell inside the app only.</p>
+
+      <h2>What's coming</h2>
+      <div class="box"><h3>iPhone</h3><p>Apple Push Notifications, so alerts arrive with the app closed.</p></div>
+      <div class="box"><h3>Android</h3><p>Firebase Cloud Messaging, so alerts arrive with the app closed.</p></div>
+      <div class="box"><h3>Web wallet and Chrome extension</h3><p>Web Push, so your browser can tell you even when the tab isn't open.</p></div>
+
+      <h2>What will notify you</h2>
+      <ul>
+        <li><b>Direct messages</b> from friends, always.</li>
+        <li><b>Group chats</b>: each group has a bell with <b>All</b>, <b>Mentions</b> or <b>Off</b>. Groups start on Mentions, so busy rooms don't buzz you all day.</li>
+        <li><b>Mentions</b> of your <code>$name</code>.</li>
+        <li><b>Payments received</b>: BSV and tokens.</li>
+        <li><b>$b answers</b> to your <code>/b</code> questions.</li>
+        <li><b>Calls</b>.</li>
+      </ul>
+
+      <h2>Privacy</h2>
+      <p>By default a notification says who messaged you, not what they wrote, so nothing private shows on your lock screen. If you want message previews, turn them on in Settings. No message text is stored on our push server.</p>
+      <p>You can turn notifications off per group, per category, or entirely in <b>Settings &rsaquo; Notifications</b>. Your keys never leave your device; notifications don't need them.</p>
+
+      <h2>bWallet and bWalletX</h2>
+      <p>Notifications work the same in bWallet and in bWalletX.</p>
+
+      <div class="row">
+        <a class="btn btn-store" href="/">bWallet home</a>
+        <a class="btn btn-store btn-ghost" href="/privacy">Privacy</a>
+      </div>
+      <p class="small">Push notifications are in development and not live yet; this page will be updated as they roll out. Questions: <a href="mailto:support@bwalletx.com">support@bwalletx.com</a></p>
+    </main>
+  </body>
+</html>
