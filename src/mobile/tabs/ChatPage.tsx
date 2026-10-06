@@ -1,5 +1,5 @@
 import { IssuerBadge } from '../issuer/IssuerBadge';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
@@ -24,6 +24,7 @@ import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
+import { avatarFor, B_AVATAR, pendingBQuestions, useAvatars } from '../chat/avatars';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
@@ -154,10 +155,22 @@ const usePoll = (fn: () => void, ms: number, enabled: boolean) => {
   }, [ms, enabled]);
 };
 
-const Avatar = ({ title, size = 48, roomKey }: { title: string; size?: number; roomKey?: string | null }) => {
+const Avatar = ({
+  title,
+  size = 48,
+  roomKey,
+  src,
+}: {
+  title: string;
+  size?: number;
+  roomKey?: string | null;
+  /** A picture to use as is: a room's metadata.icon, a person's avatar. */
+  src?: string | null;
+}) => {
   const hue = avatarHue(title);
   // Token / collection rooms show the token's icon; letter tile when there is none or it fails.
-  const icon = useRoomIcon(roomKey);
+  const tokenIcon = useRoomIcon(src ? null : roomKey);
+  const icon = src || tokenIcon;
   const [broken, setBroken] = useState<string | null>(null);
   if (icon && broken !== icon)
     return (
@@ -185,6 +198,15 @@ const Avatar = ({ title, size = 48, roomKey }: { title: string; size?: number; r
     </div>
   );
 };
+
+/** A room's own picture (metadata.icon, https only), e.g. the bWallet Lounge's (owner, 6 Oct 2026). */
+const roomIcon = (room: ChatRoom): string | null => {
+  const icon = (room.metadata as { icon?: unknown } | null | undefined)?.icon;
+  return typeof icon === 'string' && /^https:\/\//.test(icon) ? icon : null;
+};
+/** Official rooms (metadata.open.official) show how to ask $b. */
+const isOfficialRoom = (room: ChatRoom) =>
+  Boolean((room.metadata as { open?: { official?: boolean } } | null | undefined)?.open?.official);
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -358,6 +380,14 @@ const Conversation = ({
   }, [messages, me, hidden, blockTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
+  // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
+  useAvatars(client, messages.map((m) => m.author_handle));
+  const waitingForB = pendingBQuestions(messages);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const askB = () => {
+    setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
+    requestAnimationFrame(() => composer.current?.focus());
+  };
 
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
@@ -380,7 +410,7 @@ const Conversation = ({
         <button onClick={onBack} className="p-2 rounded-full active:opacity-60" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
         </button>
-        <Avatar title={title} size={38} roomKey={entry?.key} />
+        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} />
         <div className="flex-1 min-w-0">
           <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</div>
           <div className="text-[11px]" style={{ color: MUTED }}>
@@ -478,10 +508,21 @@ const Conversation = ({
               </span>
             </div>
           ) : (
+            <Fragment key={it.key}>
             <div
-              key={it.key}
-              className={`flex ${it.mine ? 'justify-end' : 'justify-start'} ${it.firstOfGroup ? 'mt-2' : 'mt-[3px]'}`}
+              className={`flex items-end gap-2 ${it.mine ? 'justify-end' : 'justify-start'} ${it.firstOfGroup ? 'mt-2' : 'mt-[3px]'}`}
             >
+              {/* Avatars on other people's messages, on the first of a run; a spacer keeps the run aligned. */}
+              {!it.mine &&
+                (it.firstOfGroup ? (
+                  <Avatar
+                    title={it.message.author_handle || '?'}
+                    size={28}
+                    src={avatarFor(it.message.author_handle)}
+                  />
+                ) : (
+                  <div className="shrink-0" style={{ width: 28 }} />
+                ))}
               <div
                 {...(onMessageMenu && !it.message.pending ? longPress(() => onMessageMenu(it.message)) : {})}
                 className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug"
@@ -521,6 +562,18 @@ const Conversation = ({
                 </span>
               </div>
             </div>
+            {waitingForB.has(it.message.id) && (
+              <div className="flex items-end gap-2 justify-start mt-2" aria-live="polite">
+                <Avatar title="b" size={28} src={B_AVATAR} />
+                <div
+                  className="px-3 py-[7px] text-[14px] italic"
+                  style={{ borderRadius: 18, borderBottomLeftRadius: 6, background: PANEL, color: MUTED, border: `1px solid ${LINE}` }}
+                >
+                  $b is thinking…
+                </div>
+              </div>
+            )}
+            </Fragment>
           ),
         )}
       </div>
@@ -538,6 +591,12 @@ const Conversation = ({
           This room is closed. You can read it, but no one can post.
         </div>
       ) : (
+        <>
+        {isOfficialRoom(room) && (
+          <div className="px-4 pt-2 text-[12px] shrink-0" style={{ background: '#0b0b0b', color: MUTED, borderTop: `1px solid ${LINE}` }}>
+            Questions? Tap <b style={{ color: GOLD }}>/b</b> and ask $b, the bWalletX assistant. Just /b shows what it can do.
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -551,7 +610,17 @@ const Conversation = ({
           }}
         >
           {/* v2 hook: attachment / voice note / video note buttons go here (rooms/[ticker]/media). */}
+          <button
+            type="button"
+            onClick={askB}
+            aria-label="Ask $b, the bWalletX assistant"
+            className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]"
+            style={{ background: '#1a1608', color: GOLD, border: `1px solid ${GOLD}55` }}
+          >
+            /b
+          </button>
           <textarea
+            ref={composer}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -576,6 +645,7 @@ const Conversation = ({
             <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
           </button>
         </form>
+        </>
       )}
     </div>,
     document.body,
@@ -1182,7 +1252,7 @@ const OpenRoomRow = ({ room, me, onOpen }: { room: ChatRoom; me: string; onOpen:
   return (
     <li>
       <button onClick={onOpen} className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]">
-        <Avatar title={title} />
+        <Avatar title={title} src={roomIcon(room)} />
         <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
           <div className="flex items-baseline gap-2">
             <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>

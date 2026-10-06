@@ -514,6 +514,14 @@ export class BchatClient {
     return this.call(method, path, body);
   }
 
+  /** Profile pictures for up to 50 handles (bit-sign /api/bitsign/avatars): handle → https URL. */
+  async avatars(handles: string[]): Promise<Record<string, string>> {
+    if (!handles.length) return {};
+    const q = handles.map((h) => encodeURIComponent(h)).join(',');
+    const r = await this.call<{ avatars?: Record<string, string> }>('GET', `/api/bitsign/avatars?h=${q}`);
+    return r.avatars ?? {};
+  }
+
   /** bChat address book (bit-sign /api/bitsign/me/contacts), synced across devices. */
   async contacts(): Promise<BchatContact[]> {
     const r = await this.call<{ contacts?: BchatContact[] }>('GET', '/api/bitsign/me/contacts');
