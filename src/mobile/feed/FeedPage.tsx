@@ -116,7 +116,7 @@ import {
 } from './tip';
 import { oneClick } from '../settings/oneClick';
 import { isMe, rankPeople, rankPosts, TIMEFRAMES, cutoff, type LeaderboardData, type Timeframe } from './leaderboard';
-import { fetchExchangeRate } from '../../utils/wallet';
+import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import {
   addBlock,
   addLiked,
@@ -146,6 +146,7 @@ import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
 import { fmtSats, fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
+import { celebrateSend } from '../../components/sent/sent';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -1041,9 +1042,14 @@ type ApiCtx = ReturnType<typeof useServiceContext>['apiContext'];
  * posting identity, and the payment to the author in the SAME transaction. planPayment refuses
  * Treechat (shared relay signer) and anything without a payable author address.
  */
-const sendPayment = async (apiContext: ApiCtx, post: FeedPost, sats: number, kind: PayKind = 'tip') => {
+const sendPayment = async (
+  apiContext: ApiCtx,
+  post: FeedPost,
+  sats: number,
+  kind: PayKind = 'tip',
+): Promise<string> => {
   const plan = planPayment(kind, post, sats);
-  await publish(
+  return publish(
     apiContext,
     plan.script,
     kind === 'tip' ? 'bChat tip' : 'bChat paid like',
@@ -1083,14 +1089,20 @@ const TipSheet = ({
     setBusy(true);
     setError('');
     try {
-      await sendPayment(apiContext, post, n, kind);
+      const txid = await sendPayment(apiContext, post, n, kind);
+      const shown = celebrateSend(txid, {
+        amount: { kind: 'bsv', sats: n },
+        recipients: [safeName(post.author.name)],
+        rate,
+        title: kind === 'tip' ? 'Tipped!' : 'Liked and paid!',
+      });
       if (kind === 'tip') {
         // The next one-click tip (Settings → Payments) sends this amount, if it is within the limit.
         savePrefs({ quickTip: n });
-        addSnackbar(`Tipped ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
+        if (!shown) addSnackbar(`Tipped ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
       } else {
         onLiked(post);
-        addSnackbar(`Liked and paid ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
+        if (!shown) addSnackbar(`Liked and paid ${safeName(post.author.name)} ${money(n, rate)}`, 'success');
       }
       onClose();
     } catch (e) {
@@ -1604,8 +1616,14 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     // Unpayable posts (Treechat) open the sheet, which says why.
     if (!payDestination(p).ok || validateAmount(sats) || !oneClick.take(sats).ok) return setTipping(p);
     try {
-      await sendPayment(apiContext, p, sats);
-      addSnackbar(`Tipped ${safeName(p.author.name)} ${moneyNow(sats)} (one-click)`, 'success');
+      const txid = await sendPayment(apiContext, p, sats);
+      const shown = celebrateSend(txid, {
+        amount: { kind: 'bsv', sats },
+        recipients: [safeName(p.author.name)],
+        rate: cachedExchangeRate(),
+        title: 'Tipped!',
+      });
+      if (!shown) addSnackbar(`Tipped ${safeName(p.author.name)} ${moneyNow(sats)} (one-click)`, 'success');
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : String(e), 'error');
     }

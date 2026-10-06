@@ -25,6 +25,7 @@ import { BlockHeightProvider } from './contexts/providers/BlockHeightProvider';
 import { SyncProvider } from './contexts/providers/SyncProvider';
 import { BottomMenuProvider } from './contexts/providers/BottomMenuProvider';
 import { SnackbarProvider } from './contexts/providers/SnackbarProvider';
+import { SentHost } from './components/sent/SentScreen';
 import { SweepMigration } from './pages/SweepMigration';
 import { PANEL_PROMPT_EVENT, PanelPrompt } from './mobile/PanelPrompt';
 import { IS_EXTENSION } from './mobile/extension';
@@ -95,6 +96,7 @@ export const App = () => {
               <SnackbarProvider>
                 <SyncingBlocks />
                 <StorageRepairOverlay />
+                <SentHost />
                 {IS_EXTENSION && <PanelPrompt />}
                 <Show when={!isLocked} whenFalseContent={<UnlockWallet onUnlock={handleUnlock} />}>
                   <UsbGate>

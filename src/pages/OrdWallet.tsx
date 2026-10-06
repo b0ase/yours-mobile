@@ -14,6 +14,7 @@ import { useServiceContext } from '../hooks/useServiceContext';
 import { sleep } from '../utils/sleep';
 import { TopNav } from '../components/TopNav';
 import { getErrorMessage } from '../utils/tools';
+import { celebrateSend } from '../components/sent/sent';
 import { useIntersectionObserver } from '../hooks/useIntersectObserver';
 import { getTagValue, getOutputName, resolveOriginOutpoint } from '../utils/format';
 import { cancelOwnedOrdLockListings, ORDLOCK_LISTING_DISABLED_MESSAGE } from '../utils/cancelOrdLockListings';
@@ -392,7 +393,15 @@ export const OrdWallet = () => {
 
       console.log('[OrdWallet] Transfer success:', transferRes.txid);
       setSuccessTxId(transferRes.txid);
-      addSnackbar('Transfer Successful!', 'success');
+      const shown = celebrateSend(transferRes, {
+        amount: {
+          kind: 'nft',
+          count: transfers.length,
+          name: selectedOrdinals.length === 1 ? getOutputName(selectedOrdinals[0], '') : undefined,
+        },
+        recipients: transfers.map((t) => t.address),
+      });
+      if (!shown) addSnackbar('Transfer Successful!', 'success');
       refreshOrdinals();
     } catch (error) {
       console.error('[OrdWallet] Transfer exception:', error);

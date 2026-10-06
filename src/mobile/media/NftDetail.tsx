@@ -14,6 +14,7 @@ import { NameInput } from '../names/NameInput';
 import { setLocalAvatar } from '../names/avatar';
 import { nftAvatarUri, normalizeOutpoint, ordinalsUrl } from './nftActions';
 import type { MediaItem } from './useWalletMedia';
+import { celebrateSend } from '../../components/sent/sent';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
@@ -73,6 +74,7 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
       const res = await sendOrdinals.execute(apiContext, { transfers: [{ id: assetId, address: to }] });
       if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
       setMsg(`Sent. ${short(res.txid)}`);
+      celebrateSend(res, { amount: { kind: 'nft', count: 1, name: item.name }, recipients: [to] });
       setSending(false);
       setConfirm(false);
       onSent();

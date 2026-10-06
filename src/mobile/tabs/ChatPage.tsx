@@ -109,6 +109,7 @@ import {
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
 import { longPress, useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
+import { celebrateSend } from '../../components/sent/sent';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -801,7 +802,12 @@ const InviteSheet = ({
         recipients: [{ amount: BigInt(entry.gate.minRaw), destination: { address: target.address } }],
       });
       if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
-      addSnackbar(`Invited ${target.label} — sent ${amount}`, 'success');
+      const shown = celebrateSend(res, {
+        amount: { kind: 'token', display: amount, ticker: '' },
+        recipients: [target.label],
+        title: 'Invite sent!',
+      });
+      if (!shown) addSnackbar(`Invited ${target.label} — sent ${amount}`, 'success');
       onClose();
     } catch (e) {
       setError(errText(e));
@@ -1076,6 +1082,7 @@ const BountiesSheet = ({
     setBusy('Sending…');
     setError('');
     let confirmed = false;
+    let lastTxid = '';
     try {
       for (const t of paying.transfers) {
         const res =
@@ -1086,13 +1093,19 @@ const BountiesSheet = ({
               })
             : await sendBsv.execute(apiContext, { requests: [{ address: t.address, satoshis: t.sats }] });
         if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+        lastTxid = res.txid;
         // Record the FIRST broadcast at once, so a failure on a later leg can never lead to paying twice.
         if (!confirmed) {
           await client.confirmBountyPayout(room.ticker, paying.bountyNo, res.txid);
           confirmed = true;
         }
       }
-      addSnackbar(`Paid #${paying.bountyNo} to $${paying.claimant}`, 'success');
+      const shown = celebrateSend(lastTxid, {
+        amount: { kind: 'token', display: paying.transfers.map(transferLabel).join(' + '), ticker: '' },
+        recipients: [`$${paying.claimant}`],
+        title: 'Paid!',
+      });
+      if (!shown) addSnackbar(`Paid #${paying.bountyNo} to $${paying.claimant}`, 'success');
       setPaying(null);
       await load();
     } catch (e) {

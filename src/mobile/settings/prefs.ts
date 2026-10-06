@@ -41,6 +41,8 @@ export type Prefs = {
   twetchUserId: string;
   /** "Filter strong language": blur swearing in the Feed behind "Show anyway" (feed/language.ts). Off by default. */
   filterStrong: boolean;
+  /** "Sounds" (Settings › Preferences): the coin chime on the Sent! screen. On by default. */
+  sounds: boolean;
 };
 
 const ALL_ON = Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<NotifyCategory, boolean>;
@@ -57,6 +59,7 @@ export const DEFAULT_PREFS: Prefs = {
   notify: ALL_ON,
   twetchUserId: '',
   filterStrong: false,
+  sounds: true,
 };
 
 const KEY = 'bwallet.prefs';
@@ -97,6 +100,7 @@ export const parsePrefs = (raw: unknown): Prefs => {
     twetchUserId:
       typeof r.twetchUserId === 'string' && /^\d{1,12}$/.test(r.twetchUserId.trim()) ? r.twetchUserId.trim() : '',
     filterStrong: r.filterStrong === true,
+    sounds: r.sounds !== false,
     // A stored allowLanguageReveal (the retired 18+ opt-in) is dropped here: slurs are blurred per post now.
   };
 };

@@ -68,6 +68,7 @@ import { Account, ChromeStorageObject } from '../services/types/chromeStorage.ty
 import { SendBsv21View } from '../components/SendBsv21View';
 import { AssetPicker, type PickableAsset } from '../components/AssetPicker';
 import { SendConfirmation, type SendLineItem } from '../components/SendConfirmation';
+import { celebrateSend } from '../components/sent/sent';
 import { CoinHistory } from '../components/CoinHistory';
 import { getMneeBalance, sendMnee, deriveDepositAddresses, ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 import { MNEE_PROTOCOLS, mneeKeyDerivations } from '../utils/mneeDerivations';
@@ -868,7 +869,9 @@ export const BsvWallet = () => {
           updateMneeBalance().catch((err) => console.error('[handleSendMNEE] reconcile refresh failed:', err));
           setMneeHistoryRefreshKey((k) => k + 1);
           setPageState('main');
-          addSnackbar('Transaction Successful!', 'success');
+          if (!celebrateSend(res, { amount: { kind: 'mnee', amount: mneeTotal }, recipients: mneeOrder })) {
+            addSnackbar('Transaction Successful!', 'success');
+          }
         } catch (error: unknown) {
           console.error('MNEE transfer error:', error);
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -972,7 +975,15 @@ export const BsvWallet = () => {
         resetSendState();
         setBsvHistoryRefreshKey((k) => k + 1);
         setPageState('main');
-        addSnackbar('Transaction Successful!', 'success');
+        if (
+          !celebrateSend(sendRes, {
+            amount: { kind: 'bsv', sats: totalSats },
+            recipients: addressOrder,
+            rate: exchangeRate,
+          })
+        ) {
+          addSnackbar('Transaction Successful!', 'success');
+        }
       },
     });
   };

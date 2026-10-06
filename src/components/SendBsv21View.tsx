@@ -23,6 +23,7 @@ import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
 import { PriceChart } from '../mobile/wallet/PriceChart';
 import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
 import { GroupSendBar } from '../mobile/send/GroupSend';
+import { celebrateSend } from './sent/sent';
 
 export interface Token {
   isConfirmed: boolean;
@@ -275,7 +276,11 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
     setOverlayPrompt(null);
     sentAtomicRef.current = total;
     setSuccessTxId(sendRes.txid);
-    addSnackbar('Tokens Sent!', 'success');
+    const shown = celebrateSend(sendRes, {
+      amount: { kind: 'token', display: showAmount(total, token.info.dec), ticker: getTokenName(token.info) },
+      recipients: sendRecipients.map((r) => r.address),
+    });
+    if (!shown) addSnackbar('Tokens Sent!', 'success');
   };
 
   const openOverlayPrompt = async (

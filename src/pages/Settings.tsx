@@ -27,6 +27,7 @@ import {
   Usb,
   LifeBuoy,
   Wrench,
+  Volume2,
 } from 'lucide-react';
 import { FaDiscord } from 'react-icons/fa';
 import { Button } from '../components/Button';
@@ -68,6 +69,7 @@ import ProgressBar from '@ramonak/react-progress-bar';
 
 import { derivePasswordKey } from '../services/passKey';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { usePrefs } from '../mobile/settings/usePrefs';
 import {
   runUsbBackup,
   summariseUsbBackup,
@@ -265,6 +267,7 @@ const buildInfo = `v${manifestVersion} · ${__BUILD_COMMIT__}`;
 
 export const Settings = () => {
   const { theme } = useTheme();
+  const [appPrefs, setAppPrefs] = usePrefs();
   const { addSnackbar } = useSnackbar();
   const { record: repairRecord, outcome: repairOutcome, runRepair } = useStorageRepair();
   const { query, handleSelect } = useBottomMenu();
@@ -991,6 +994,20 @@ export const Settings = () => {
               style={{ width: '5rem', margin: 0 }}
             />
           }
+        />
+        <Divider />
+        <SettingRow
+          icon={<Volume2 size={16} />}
+          label="Sounds"
+          description="Play a chime when a payment is sent"
+          right={
+            <ToggleSwitch
+              theme={theme}
+              on={appPrefs.sounds}
+              onChange={() => setAppPrefs({ sounds: !appPrefs.sounds })}
+            />
+          }
+          isLast
         />
       </Section>
 
