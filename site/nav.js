@@ -117,7 +117,8 @@
     bc.rel = 'noopener';
     bc.setAttribute('aria-label', 'Chat with us on bChat');
     bc.title = 'Chat with us on bChat';
-    bc.innerHTML = '<span aria-hidden="true">b</span>';
+    // bChat's own b (bit-sign public/bchat-icon.svg: flag-top stem + bowl), in white.
+    bc.innerHTML = '<svg viewBox="22 8 76 102" width="15" height="15" aria-hidden="true"><mask id="bc-hole"><rect x="0" y="0" width="120" height="120" fill="#fff"/><circle cx="60" cy="72" r="15" fill="#000"/></mask><g fill="currentColor" mask="url(#bc-hole)"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="33"/></g></svg>';
     cta.insertBefore(bc, gh.nextSibling);
   }
 
@@ -127,7 +128,6 @@
     '.sub-nav{padding-top:0}' +
     '.nav-cta .x-link{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:1px solid #ffffff33;color:#fff;margin-right:8px;vertical-align:middle}' +
     '.nav-cta .x-link:hover{border-color:#F5B800;color:#F5B800}' +
-    '.nav-cta .bchat-link span{font:800 18px/1 system-ui,-apple-system,sans-serif;margin-top:-2px}' +
     'html.has-subnav main.ext{padding-top:190px!important}' +
     '@media (max-width:859px){html.has-subnav main.ext{padding-top:212px!important}}' +
     (store ? '.topbar .sub-nav a[aria-current="page"]{color:#F5B800!important;background:#010101!important;border-color:#010101!important}' +
