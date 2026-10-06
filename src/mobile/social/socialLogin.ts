@@ -67,8 +67,19 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
   lastError = '';
   const secret = hex(crypto.getRandomValues(new Uint8Array(32)));
   const vh = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)));
-  const { authorizeUrl: url } = await post<{ authorizeUrl: string }>('start', { provider, verifier_hash: vh });
+  // Web wallet: sign in in THIS tab and come back to web.bwalletx.com (owner, 6 Oct 2026: a new tab ended on the
+  // phones' "you're signed in" page with no way back to the wallet). The pending secret survives in localStorage.
+  const web = !Capacitor.isNativePlatform() && !IS_EXTENSION;
+  const { authorizeUrl: url } = await post<{ authorizeUrl: string }>('start', {
+    provider,
+    verifier_hash: vh,
+    ...(web ? { return_to: 'web' } : {}),
+  });
   write({ provider, secret, at: Date.now() });
+  if (web) {
+    window.location.assign(url);
+    return;
+  }
   if (IS_EXTENSION && typeof chrome !== 'undefined' && chrome.tabs) {
     const tab = await chrome.tabs.create({ url });
     const done = (id: number, info: chrome.tabs.TabChangeInfo) => {
@@ -93,12 +104,14 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
     }
     return;
   }
-  // Android: the system browser (Capacitor opens _blank outside the app); a new tab on the web.
+  // Android: the system browser (Capacitor opens _blank outside the app).
   window.open(url, '_blank');
 }
 
 const RETURN = 'https://www.bwallet.space/social';
-const isReturn = (url: string) => url.startsWith(RETURN) || url.startsWith('bwalletx://social');
+const WEB_RETURN = 'https://web.bwalletx.com/';
+const isReturn = (url: string) =>
+  url.startsWith(RETURN) || url.startsWith('bwalletx://social') || (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
 
 /** A return URL (universal link, bwalletx://, or the extension's tab): keep the ticket, fetch the profile. */
 export async function receiveSocialUrl(url: string): Promise<void> {
@@ -132,6 +145,16 @@ export async function receiveSocialUrl(url: string): Promise<void> {
 export function socialProof(): { profile: SocialProfile; ticket: string; secret: string } | null {
   const p = read();
   return p?.ticket && p.profile ? { profile: p.profile, ticket: p.ticket, secret: p.secret } : null;
+}
+
+// Web wallet: back from the provider in this tab with #p=…&t=… (or #error=…). Take it, then clear the address
+// bar so the ticket isn't left in history or re-read on reload.
+if (!Capacitor.isNativePlatform() && !IS_EXTENSION && typeof location !== 'undefined' && location.href.startsWith(WEB_RETURN)) {
+  const here = location.href;
+  if (isReturn(here)) {
+    history.replaceState(null, '', location.pathname + location.search);
+    void receiveSocialUrl(here);
+  }
 }
 
 if (Capacitor.isNativePlatform()) {

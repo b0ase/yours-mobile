@@ -46,4 +46,18 @@ describe('Continue with X (bWalletX own OAuth)', () => {
     expect(await social.callback('x', { state, error: 'access_denied' }, ENV)).toContain('error=cancelled');
     expect(await social.callback('google', { state, code: 'c' }, ENV)).toContain('error=');
   });
+
+  test('web return: lands on web.bwalletx.com in the same tab; anything else falls back to the app page', async () => {
+    const stateOf = (body) => new URL(social.start(body, ENV)[1].authorizeUrl).searchParams.get('state');
+    const fakeX = async (url) => ({
+      json: async () => (String(url).includes('/token') ? { access_token: 'a' } : { data: { id: '1', username: 'B0aseX', name: 'B' } }),
+    });
+    const web = await social.callback('x', { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'web' }), code: 'c' }, ENV, fakeX);
+    expect(web.startsWith('https://web.bwalletx.com/#')).toBe(true);
+    expect(web).toContain('t=');
+    const evil = await social.callback('x', { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'https://evil.example/' }), code: 'c' }, ENV, fakeX);
+    expect(evil.startsWith('https://www.bwallet.space/social#')).toBe(true);
+    const cancelled = await social.callback('x', { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'web' }), error: 'access_denied' }, ENV);
+    expect(cancelled).toBe('https://web.bwalletx.com/#error=cancelled');
+  });
 });

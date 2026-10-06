@@ -64,9 +64,14 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
   return { provider: t.p, id: t.id, name: t.name, display: t.d || null, avatar: t.a || null, alias: socialAliasFor(t.p, t.name) };
 }
 
-const returnUrl = (q) => `${RETURN}#${new URLSearchParams(q).toString()}`;
+// Where the browser lands after the provider. A fixed list, never a caller-supplied URL (no open redirect).
+// 'web': the web wallet, in the same tab it started from (owner, 6 Oct 2026: the return page stranded web
+// users on "you're signed in" with no way back to the wallet tab).
+const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/' };
+const returnUrl = (q, to = 'app') => `${RETURNS[to] || RETURN}#${new URLSearchParams(q).toString()}`;
 
-function start({ provider, verifier_hash: vh }, env = process.env, now = Date.now()) {
+function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {
+  const r = return_to === 'web' ? 'web' : undefined;
   if (provider !== 'x' && provider !== 'google') return [400, { error: 'provider must be x or google' }];
   if (!/^[0-9a-f]{64}$/.test(String(vh || ''))) return [400, { error: 'verifier_hash must be sha256 hex' }];
   const e = now + TTL_MS;
@@ -80,7 +85,7 @@ function start({ provider, verifier_hash: vh }, env = process.env, now = Date.no
       client_id: env.X_CLIENT_ID,
       redirect_uri: redirectUri('x', env),
       scope: 'users.read tweet.read',
-      state: seal({ p: 'x', vh, v, e }, env),
+      state: seal({ p: 'x', vh, v, e, r }, env),
       code_challenge: challenge,
       code_challenge_method: 'S256',
     }).toString();
@@ -93,7 +98,7 @@ function start({ provider, verifier_hash: vh }, env = process.env, now = Date.no
     redirect_uri: redirectUri('google', env),
     response_type: 'code',
     scope: 'openid email profile',
-    state: seal({ p: 'google', vh, e }, env),
+    state: seal({ p: 'google', vh, e, r }, env),
     access_type: 'online',
     prompt: 'select_account',
   }).toString();
@@ -104,7 +109,8 @@ function start({ provider, verifier_hash: vh }, env = process.env, now = Date.no
 async function callback(provider, q, env = process.env, f = fetch, now = Date.now()) {
   const st = open(q.state, env);
   if (!st || st.p !== provider || !(st.e > now)) return returnUrl({ error: 'That sign-in has expired. Please try again.' });
-  if (q.error || !q.code) return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' });
+  const to = st.r === 'web' ? 'web' : 'app';
+  if (q.error || !q.code) return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
   try {
     let user;
     if (provider === 'x') {
@@ -143,9 +149,9 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
       user = { id: String(u.id), name: u.email, d: u.name, a: u.picture };
     }
     const ticket = seal({ p: provider, id: user.id, name: String(user.name).trim().toLowerCase(), d: user.d, a: user.a, vh: st.vh, e: now + TTL_MS }, env);
-    return returnUrl({ p: provider, name: user.name, t: ticket });
+    return returnUrl({ p: provider, name: user.name, t: ticket }, to);
   } catch (e) {
-    return returnUrl({ error: e instanceof Error ? e.message : 'Sign-in failed' });
+    return returnUrl({ error: e instanceof Error ? e.message : 'Sign-in failed' }, to);
   }
 }
 
