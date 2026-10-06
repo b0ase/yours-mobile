@@ -1,5 +1,6 @@
 import bchatIcon from '../brand/sources/bchat.png';
 import otherIcon from '../brand/sources/other.png';
+import fwetchIcon from '../brand/sources/fwetch.png';
 import peckIcon from '../brand/sources/peck.png';
 import treechatIcon from '../brand/sources/treechat.png';
 import twetchIcon from '../brand/sources/twetch.png';
@@ -9,7 +10,7 @@ import twetchIcon from '../brand/sources/twetch.png';
  * is one entry here: how to recognise its MAP app, its label and bundled 64px logo
  * (src/mobile/brand/sources/, never hotlinked), and where its original post lives.
  */
-export type Source = 'bchat' | 'treechat' | 'twetch' | 'peck' | 'other';
+export type Source = 'bchat' | 'treechat' | 'twetch' | 'peck' | 'fwetch' | 'other';
 
 /**
  * Per-post actions. On-chain ones are Bitcoin Schema transactions signed by the user with
@@ -115,6 +116,18 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
     postUrl: (p) => `https://peck.to/tx/${p.txid}`,
     actions: BASIC,
   },
+  fwetch: {
+    id: 'fwetch',
+    label: 'Fwetch',
+    icon: fwetchIcon,
+    // From fwetch.lol/logo-512.png (gold flower on black).
+    color: '#F0B81A',
+    // Fwetch posts are not MAP; fwetch.ts sets app 'fwetch' on what it reads from its API.
+    matches: (a) => a === 'fwetch',
+    // Verified 2026-10-06: fwetch.lol routes #/post/<txid> to its thread view.
+    postUrl: (p) => `https://fwetch.lol/#/post/${p.txid}`,
+    actions: BASIC,
+  },
   other: {
     id: 'other',
     label: 'Other',
@@ -126,7 +139,7 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
 };
 
 /** Match order: specific sources first, "other" last. */
-const ORDER: Source[] = ['bchat', 'twetch', 'treechat', 'peck', 'other'];
+const ORDER: Source[] = ['bchat', 'twetch', 'treechat', 'peck', 'fwetch', 'other'];
 
 /** Chips: All, bChat, then the others (same order as bitcoinchat.online/feed). */
 export const SOURCES: { id: Source | 'all'; label: string }[] = [

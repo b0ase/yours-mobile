@@ -2,6 +2,7 @@ import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, LOCK_BASKET, type On
 import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
+import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
 import { parsePeckBody, parsePeckFeed, parsePeckItem, PECK_OVERLAY, PECK_READ_APPS } from './peck';
 import { cutoff, readCache, writeCache, type LeaderboardData, type Timeframe } from './leaderboard';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
@@ -93,6 +94,65 @@ const peckGet = async (path: string): Promise<unknown> => {
 export const fetchPeckPost = async (txid: string): Promise<FeedPost | null> =>
   !isTxid(txid) ? null : parsePeckItem(((await peckGet(`/v1/post/${txid}`)) as { data?: unknown })?.data);
 
+// ── Fwetch (fwetch.lol): read from its API; tips only to signatures we verified ourselves ──
+const fwetchVerified = new Map<string, string | null>();
+
+const fwetchGet = async (path: string): Promise<unknown> => {
+  const res = await fetch(`${FWETCH_API}${path}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Fwetch error (${res.status})`);
+  return res.json();
+};
+
+/** txid → author address, from the post's own pub/sig in its raw tx (never the API's signer_addr). */
+async function fwetchVerify(items: unknown[]): Promise<Map<string, string>> {
+  const ids = items
+    .map((i) => (i && typeof i === 'object' ? (i as Record<string, unknown>) : {}))
+    .filter((i) => Number(i.anon) !== 1 && !i.hidden && typeof i.txid === 'string' && isTxid(i.txid))
+    .map((i) => (i.txid as string).toLowerCase());
+  await Promise.all(
+    [...new Set(ids)]
+      .filter((t) => !fwetchVerified.has(t))
+      .map(async (txid) => {
+        try {
+          const r = (await fwetchGet(`/api/rawtx/${txid}`)) as { hex?: unknown };
+          if (fwetchVerified.size > 2_000) fwetchVerified.clear();
+          fwetchVerified.set(txid, typeof r?.hex === 'string' ? await verifyFwetchTx(r.hex, txid) : null);
+        } catch {
+          /* unverified this time: shown, not payable */
+        }
+      }),
+  );
+  const out = new Map<string, string>();
+  for (const t of ids) {
+    const a = fwetchVerified.get(t);
+    if (a) out.set(t, a);
+  }
+  return out;
+}
+
+const listOf = (b: unknown, k: string): unknown[] => {
+  const v = b && typeof b === 'object' ? (b as Record<string, unknown>)[k] : null;
+  return Array.isArray(v) ? v : [];
+};
+
+/** Recent Fwetch posts (scope:'local' included; Fwetch-hidden posts dropped). */
+export const fetchFwetch = async (limit = 40, offset = 0): Promise<FeedPost[]> => {
+  const items = listOf(await fwetchGet(`/api/feed?app=fwetch&board=all&sort=new&limit=${limit}&offset=${offset}`), 'posts');
+  return parseFwetchFeed({ posts: items }, await fwetchVerify(items));
+};
+
+async function fetchFwetchThread(txid: string): Promise<{ post: FeedPost | null; replies: FeedPost[] }> {
+  const b = await fwetchGet(`/api/post/${txid}`);
+  const post = (b as { post?: unknown })?.post;
+  const replies = listOf(b, 'replies');
+  const v = await fwetchVerify([post, ...replies]);
+  return { post: parseFwetchItem(post, v), replies: parseFwetchFeed({ posts: replies }, v) };
+}
+
+/** One Fwetch post by txid. */
+export const fetchFwetchPost = async (txid: string): Promise<FeedPost | null> =>
+  !isTxid(txid) ? null : (await fetchFwetchThread(txid)).post;
+
 function twetchAddress(pk: string): string {
   return PublicKey.fromString(pk).toAddress();
 }
@@ -136,6 +196,7 @@ const fetchParent = (ref: ParentRef): Promise<FeedPost | null> =>
       ? fetchBmapPost(ref.txid)
           .catch(() => null)
           .then((p) => p ?? (isTxid(ref.txid) ? fetchPeckPost(ref.txid!).catch(() => null) : null))
+          .then((p) => p ?? (isTxid(ref.txid) ? fetchFwetchPost(ref.txid!).catch(() => null) : null))
       : Promise.resolve(null);
 
 /**
@@ -149,13 +210,19 @@ export const fetchAncestors = (post: FeedPost): Promise<FeedPost[]> => ancestorC
  * txid, newest first). Twetch or the bChat indexer failing never blanks the feed.
  */
 export async function fetchForYou(): Promise<FeedPost[]> {
-  const [recent, bchat, twetch, peck] = await Promise.allSettled([fetchRecent(), fetchBchatRecent(), fetchTwetch(), fetchPeck()]);
+  const [recent, bchat, twetch, peck, fwetch] = await Promise.allSettled([
+    fetchRecent(),
+    fetchBchatRecent(),
+    fetchTwetch(),
+    fetchPeck(),
+    fetchFwetch(),
+  ]);
   const extra = (r: PromiseSettledResult<FeedPost[]>) => (r.status === 'fulfilled' ? r.value : []);
   if (recent.status === 'rejected') {
-    if (bchat.status === 'fulfilled' && bchat.value.length) return mergePosts(bchat.value, extra(twetch), extra(peck));
+    if (bchat.status === 'fulfilled' && bchat.value.length) return mergePosts(bchat.value, extra(twetch), extra(peck), extra(fwetch));
     throw recent.reason;
   }
-  return mergePosts(recent.value, extra(bchat), extra(twetch), extra(peck));
+  return mergePosts(recent.value, extra(bchat), extra(twetch), extra(peck), extra(fwetch));
 }
 
 /**
@@ -170,6 +237,10 @@ export async function fetchThread(post: FeedPost): Promise<FeedPost[]> {
     const replies = await peckGet(`/v1/thread/${post.txid}`)
       .then((b) => parsePeckFeed({ data: (b as { replies?: unknown })?.replies }))
       .catch(() => [] as FeedPost[]);
+    return [post, ...replies.sort((a, b) => a.at - b.at)];
+  }
+  if (post.source === 'fwetch' && isTxid(post.txid)) {
+    const { replies } = await fetchFwetchThread(post.txid).catch(() => ({ replies: [] as FeedPost[] }));
     return [post, ...replies.sort((a, b) => a.at - b.at)];
   }
   const root = threadRoot(post);
