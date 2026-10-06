@@ -58,7 +58,8 @@ const Img = ({ m, blurred, onFail }: { m: FeedMedia; blurred: boolean; onFail?: 
       alt=""
       loading="lazy"
       decoding="async"
-      className="w-full h-full object-cover"
+      // Whole image, natural aspect, capped at 70vh; never cropped (owner, 6 Oct 2026: tall images were cut).
+      className="block w-full h-auto max-h-[70vh] object-contain"
       style={blurred ? { filter: 'blur(24px)' } : undefined}
       onError={() => {
         if (src !== m.src) setSrc(m.src);
@@ -94,8 +95,8 @@ export const Gallery = ({
       }}
     >
       <div
-        className="flex overflow-x-auto snap-x snap-mandatory"
-        style={{ scrollbarWidth: 'none' }}
+        className="flex items-center overflow-x-auto snap-x snap-mandatory"
+        style={{ scrollbarWidth: 'none', background: '#000' }}
         onScroll={(e) => {
           const el = e.currentTarget;
           setAt(Math.round(el.scrollLeft / Math.max(1, el.clientWidth)));
@@ -105,7 +106,6 @@ export const Gallery = ({
           <div
             key={m.src.slice(0, 120)}
             className="w-full shrink-0 snap-center"
-            style={{ aspectRatio: many ? '1 / 1' : '4 / 3', maxHeight: 420 }}
           >
             <Img
               m={m}
