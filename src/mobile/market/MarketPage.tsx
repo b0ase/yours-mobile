@@ -56,6 +56,7 @@ import { OrdnanceGrid } from '../three3d/OrdnanceGrid';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
 import { StrategiesMarket } from '../strategies/StrategiesMarket';
 import { ContractsMarket } from '../contracts/ContractsMarket';
+import { LaunchpadPanel } from './launchpad/LaunchpadPanel';
 
 /**
  * Market tab: trending BSV-21 tokens and collections on the 1Sat order book
@@ -111,14 +112,16 @@ type Kind = 'tokens' | 'nfts';
 type View = 'collections' | NftCategory;
 /**
  * Tokens side sub-filters. bApps = the bApps' own tokens (bappTokens.ts), listed like any other token.
+ * Launchpad = BlastPad bonding-curve coins (launchpad/LaunchpadPanel.tsx).
  * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
-type TokenFilter = 'all' | 'social' | 'bapps' | 'tickets';
-// Store build: no Tickets (storeBuild.ts).
+type TokenFilter = 'all' | 'social' | 'bapps' | 'launchpad' | 'tickets';
+// Store build: no Tickets or Launchpad (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
   ['social', 'Friends', true], // shown as Friends (owner, 6 Oct 2026); id stays 'social'
   ['bapps', 'bApps', true],
+  ['launchpad', 'Launchpad', true],
   ['tickets', 'Tickets', true],
 ]);
 const TRADING = marketTradingEnabled();
@@ -391,6 +394,9 @@ const MarketPage = () => {
     { id: 'documents', label: 'Documents', kind: 'nfts', view: 'documents' },
     { id: 'collections', label: 'Collections', kind: 'nfts', view: 'collections' },
     { id: 'bapps', label: 'bApps', kind: 'tokens', token: 'bapps' },
+    ...(TOKEN_FILTERS.some(([f]) => f === 'launchpad')
+      ? [{ id: 'launchpad', label: 'Launchpad', kind: 'tokens' as Kind, token: 'launchpad' as TokenFilter }]
+      : []),
     ...(TOKEN_FILTERS.some(([f]) => f === 'tickets')
       ? [{ id: 'tickets', label: 'Tickets', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
       : []),
@@ -1028,7 +1034,9 @@ const MarketPage = () => {
         ) : room ? (
           roomView
         ) : kind === 'tokens' ? (
-          tokenFilter === 'tickets' ? (
+          tokenFilter === 'launchpad' ? (
+            <LaunchpadPanel />
+          ) : tokenFilter === 'tickets' ? (
             <TicketsPanel
               art={(icon, id) => <Art outpoint={icon} kind="bsv21" collectionId={id} />}
               onBuy={(t, holder) =>

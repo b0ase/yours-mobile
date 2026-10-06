@@ -33,8 +33,11 @@ export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(
   store = STORE_BUILD,
 ): T[] => (store ? kinds.filter((k) => !STORE_HIDDEN_WALLET_KINDS.includes(k[0])) : [...kinds]);
 
-/** Market Tokens sub-filters: no Tickets (room access) in a store build. bApps is a plain token filter. */
-export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['tickets'];
+/**
+ * Market Tokens sub-filters: no Tickets (room access) or Launchpad (BlastPad curve trading) in a store
+ * build. bApps is a plain token filter.
+ */
+export const STORE_HIDDEN_MARKET_FILTERS: readonly string[] = ['tickets', 'launchpad'];
 export const marketFiltersFor = <T extends readonly [string, ...unknown[]]>(
   filters: readonly T[],
   store = STORE_BUILD,
