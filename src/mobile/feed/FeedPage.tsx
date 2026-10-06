@@ -139,7 +139,7 @@ import {
 } from './store';
 import { bookmarkClient, syncBookmarks, toggleSyncedBookmark } from './bookmarkSync';
 import { PullToRefresh } from '../ui/PullToRefresh';
-import { isSlur, languageOf, languageView, safeName } from './language';
+import { FILTER_NOTE, HIDDEN_NAME, isSlur, languageOf, languageView, nameView, safeName } from './language';
 import { usePrefs } from '../settings/usePrefs';
 import { languageOptsFor } from '../storeBuild';
 import { VideoBackground } from '../ui/VideoBackground';
@@ -454,8 +454,51 @@ const ACTION_ICONS: Partial<Record<PostAction, typeof Heart>> = {
   mute: VolumeX,
 };
 
-/** The "Show anyway" veil over blurred strong language. */
-const ShowAnyway = ({ onShow }: { onShow: () => void }) => (
+/**
+ * An author's display name. A name with a slur is blurred until tapped in bWalletX, and reads
+ * "Hidden name" in the store edition (feed/language.ts nameView). Plain-text uses keep safeName.
+ */
+const AuthorName = ({ name, className }: { name: string; className: string }) => {
+  const [shown, setShown] = useState(false);
+  const v = nameView(name, { store: languageOptsFor({ filterStrong: false }).store });
+  if (v === 'hidden') return <span className={className}>{HIDDEN_NAME}</span>;
+  if (v === 'show' || shown) return <span className={className}>{name}</span>;
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        setShown(true);
+      }}
+      aria-label="Name blurred: offensive language. Tap to show."
+      className={`${className} select-none blur-sm`}
+    >
+      {name}
+    </button>
+  );
+};
+
+/** "Why hidden? / Why blurred?": what the filter does, and that nothing is deleted. */
+const WhyFiltered = ({ hidden }: { hidden: boolean }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1 text-[12px]" style={{ color: MUTED }} onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="underline">
+        {hidden ? 'Why hidden?' : 'Why blurred?'}
+      </button>
+      {open && (
+        <p className="mt-1">
+          {hidden
+            ? 'This post contains slurs or offensive language, which this edition hides. '
+            : 'This post contains language your Feed settings blur (Settings › Feed). '}
+          {FILTER_NOTE}
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** The "Show anyway" veil over blurred language. */
+const ShowAnyway = ({ onShow, label = 'Strong language' }: { onShow: () => void; label?: string }) => (
   <button
     onClick={(e) => {
       e.stopPropagation();
@@ -464,42 +507,49 @@ const ShowAnyway = ({ onShow }: { onShow: () => void }) => (
     className="absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-lg text-[12px] text-white"
     style={{ background: 'rgba(0,0,0,0.4)' }}
   >
-    <span className="font-bold">Strong language</span>
+    <span className="font-bold">{label}</span>
     <span className="underline">Show anyway</span>
   </button>
 );
 
 /**
- * Bad language (feed/language.ts): a slur post collapses to "Post hidden: offensive language" (a
- * "Show anyway" only in bWalletX after the adult opt-in); swearing is blurred per post in the store
- * edition, or in bWalletX with "Filter strong language" on.
+ * Bad language (feed/language.ts): in bWalletX a slur post is blurred behind a per-post "Show
+ * anyway" (filters only change what you see; nothing is deleted); in the store edition it
+ * collapses to "Post hidden: offensive language" with no reveal. Swearing is blurred per post in
+ * the store edition, or in bWalletX with "Filter strong language" on.
  */
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
   const [prefs] = usePrefs();
-  const [revealed, setRevealed] = useState(false);
-  const view = languageView(
-    post.language !== undefined ? post.language : languageOf(post.text),
-    languageOptsFor(prefs),
-  );
-  if ((view === 'hide' || view === 'hide-final') && !revealed)
+  const lang = post.language !== undefined ? post.language : languageOf(post.text);
+  const view = languageView(lang, languageOptsFor(prefs));
+  if (view === 'hide-final')
     return (
-      <div
-        role="note"
-        className="flex items-center gap-3 px-4 py-3 text-[13px]"
-        style={{ borderBottom: `1px solid ${LINE}`, color: MUTED }}
-      >
+      <div role="note" className="px-4 py-3 text-[13px]" style={{ borderBottom: `1px solid ${LINE}`, color: MUTED }}>
         <span>Post hidden: offensive language</span>
-        {view === 'hide' && (
-          <button onClick={() => setRevealed(true)} className="ml-auto underline text-white">
-            Show anyway
-          </button>
-        )}
+        <WhyFiltered hidden />
       </div>
     );
-  return <PostCardBody post={post} a={a} blurText={view === 'blur'} />;
+  return (
+    <PostCardBody
+      post={post}
+      a={a}
+      blurText={view === 'blur'}
+      blurLabel={lang === 'slur' ? 'Offensive language' : 'Strong language'}
+    />
+  );
 };
 
-const PostCardBody = ({ post, a, blurText }: { post: FeedPost; a: PostActions; blurText: boolean }) => {
+const PostCardBody = ({
+  post,
+  a,
+  blurText,
+  blurLabel,
+}: {
+  post: FeedPost;
+  a: PostActions;
+  blurText: boolean;
+  blurLabel: string;
+}) => {
   const [textShown, setTextShown] = useState(false);
   const veiled = blurText && !textShown;
   const liked = a.liked.has(post.txid);
@@ -523,7 +573,7 @@ const PostCardBody = ({ post, a, blurText }: { post: FeedPost; a: PostActions; b
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[14px] font-bold text-white truncate">{safeName(post.author.name)}</span>
+          <AuthorName name={post.author.name} className="text-[14px] font-bold text-white truncate" />
           <Via post={post} />
           <span className="text-[12px] shrink-0 whitespace-nowrap" style={{ color: MUTED }}>
             · {feedTimeLabel(post.at)}
@@ -546,13 +596,14 @@ const PostCardBody = ({ post, a, blurText }: { post: FeedPost; a: PostActions; b
         )}
         {post.text && (
           <div className="relative">
-            {veiled && <ShowAnyway onShow={() => setTextShown(true)} />}
+            {veiled && <ShowAnyway onShow={() => setTextShown(true)} label={blurLabel} />}
             <p
               aria-hidden={veiled}
               className={`text-[14px] text-white whitespace-pre-wrap break-words mt-[2px] ${veiled ? 'select-none blur-sm' : ''}`}
             >
               {post.text}
             </p>
+            {veiled && <WhyFiltered hidden={false} />}
           </div>
         )}
         <PostMedia media={post.media ?? []} links={post.links ?? []} blur={post.source !== 'bchat'} />
@@ -1964,7 +2015,7 @@ const ProfileView = ({
         style={{ borderBottom: `1px solid ${LINE}` }}
       >
         <Avatar author={author} size={80} />
-        <h2 className="mt-3 text-lg font-bold text-white">{safeName(author.name)}</h2>
+        <AuthorName name={author.name} className="mt-3 block text-lg font-bold text-white" />
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
           {author.bapId ? `BAP ${author.bapId}` : author.address ? shortAddress(author.address) : ''}
         </p>

@@ -41,8 +41,6 @@ export type Prefs = {
   twetchUserId: string;
   /** "Filter strong language": blur swearing in the Feed behind "Show anyway" (feed/language.ts). Off by default. */
   filterStrong: boolean;
-  /** Adults' opt-in: "Show anyway" on posts hidden for slurs. Off by default; never in the store edition. */
-  allowLanguageReveal: boolean;
 };
 
 const ALL_ON = Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<NotifyCategory, boolean>;
@@ -59,7 +57,6 @@ export const DEFAULT_PREFS: Prefs = {
   notify: ALL_ON,
   twetchUserId: '',
   filterStrong: false,
-  allowLanguageReveal: false,
 };
 
 const KEY = 'bwallet.prefs';
@@ -100,7 +97,7 @@ export const parsePrefs = (raw: unknown): Prefs => {
     twetchUserId:
       typeof r.twetchUserId === 'string' && /^\d{1,12}$/.test(r.twetchUserId.trim()) ? r.twetchUserId.trim() : '',
     filterStrong: r.filterStrong === true,
-    allowLanguageReveal: r.allowLanguageReveal === true,
+    // A stored allowLanguageReveal (the retired 18+ opt-in) is dropped here: slurs are blurred per post now.
   };
 };
 
