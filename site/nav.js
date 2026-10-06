@@ -109,6 +109,16 @@
     gh.title = 'Source code on GitHub';
     gh.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
     cta.insertBefore(gh, x.nextSibling);
+    // bChat instead of Telegram/Discord (owner, 6 Oct 2026): a white b, next to X and GitHub.
+    var bc = document.createElement('a');
+    bc.className = 'x-link bchat-link';
+    bc.href = 'https://www.bitcoinchat.online/';
+    bc.target = '_blank';
+    bc.rel = 'noopener';
+    bc.setAttribute('aria-label', 'Chat with us on bChat');
+    bc.title = 'Chat with us on bChat';
+    bc.innerHTML = '<span aria-hidden="true">b</span>';
+    cta.insertBefore(bc, gh.nextSibling);
   }
 
   var css = document.createElement('style');
@@ -117,6 +127,7 @@
     '.sub-nav{padding-top:0}' +
     '.nav-cta .x-link{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:1px solid #ffffff33;color:#fff;margin-right:8px;vertical-align:middle}' +
     '.nav-cta .x-link:hover{border-color:#F5B800;color:#F5B800}' +
+    '.nav-cta .bchat-link span{font:800 18px/1 system-ui,-apple-system,sans-serif;margin-top:-2px}' +
     'html.has-subnav main.ext{padding-top:190px!important}' +
     '@media (max-width:859px){html.has-subnav main.ext{padding-top:212px!important}}' +
     (store ? '.topbar .sub-nav a[aria-current="page"]{color:#F5B800!important;background:#010101!important;border-color:#010101!important}' +
