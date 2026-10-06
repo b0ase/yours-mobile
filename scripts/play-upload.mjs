@@ -66,7 +66,8 @@ try {
         console.log(`${t.track}: ${r.name ?? '-'} codes=${(r.versionCodes ?? []).join(',')} status=${r.status}`);
     if (!tracks.length) console.log('(no tracks yet)');
   } else {
-    const aab = readdirSync('dist').find((f) => /^bwallet-.*-play\.aab$/.test(f));
+    const files = readdirSync('dist');
+    const aab = files.includes(`bwallet-${VERSION}-play.aab`) ? `bwallet-${VERSION}-play.aab` : files.find((f) => /^bwallet-.*-play\.aab$/.test(f));
     if (!aab) throw new Error('no dist/bwallet-*-play.aab: run bash scripts/channel-build.sh android-play');
     console.log(`▸ uploading dist/${aab}`);
     const bundle = await call('POST', `${UPLOAD}/edits/${edit}/bundles?uploadType=media`, readFileSync(join('dist', aab)), {
