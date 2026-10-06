@@ -9,7 +9,8 @@
  */
 import type { AgentAccount, AgentLogEntry } from '../agents/agentAccounts';
 
-export const BWX_ORIGINS = ['https://agents.bwalletx.com', 'https://bagents.vercel.app'] as const;
+// Our own domain only: a *.vercel.app name can be claimed by anyone, so previews never get BWX (6 Oct 2026).
+export const BWX_ORIGINS = ['https://agents.bwalletx.com'] as const;
 
 /** Exact match only: no suffix/prefix games, no paths. */
 export const isBwxOrigin = (origin: unknown): boolean =>

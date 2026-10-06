@@ -23,7 +23,7 @@ page → wallet: { type: 'BWX', isInvocation: true, id, call: 'agents.list', arg
 wallet → page: { type: 'BWX', isInvocation: false, id, status: 'success' | 'error', result | description }
 ```
 
-- **First-party only.** BWX calls are answered for `https://agents.bwalletx.com` (and its preview host) and refused
+- **First-party only.** BWX calls are answered for `https://agents.bwalletx.com` only (a vercel.app name can be claimed by anyone) and refused
   for every other origin, even ones on the bApps list. Same frame-identity check as CWI.
 - **Reads** need no prompt. **Changes** follow the app's rules: Stop / Stop all / Resume are one tap (stopping is
   always safe); raising a cap, Fund and Sweep show the wallet's own confirmation sheet, never a bApp-drawn one.

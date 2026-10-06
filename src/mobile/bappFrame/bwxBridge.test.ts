@@ -53,7 +53,7 @@ const setup = (agents: AgentAccount[], answer = true, allStopped = false) => {
 describe('origin', () => {
   test('only the bAgents origins, exactly', () => {
     expect(isBwxOrigin('https://agents.bwalletx.com')).toBe(true);
-    expect(isBwxOrigin('https://bagents.vercel.app')).toBe(true);
+    expect(isBwxOrigin('https://bagents.vercel.app')).toBe(false); // claimable by anyone
     expect(isBwxOrigin('https://bitcoin-writer.com')).toBe(false); // on the bApps list, not bAgents
     expect(isBwxOrigin('https://agents.bwalletx.com.evil.com')).toBe(false);
     expect(isBwxOrigin('https://agents.bwalletx.com/')).toBe(false);
