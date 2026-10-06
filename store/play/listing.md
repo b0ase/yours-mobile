@@ -97,13 +97,19 @@ Never collected or sent: private keys, recovery phrase, contacts (phone address 
 | Data type | Collected | Shared | Purpose | Optional? | Where |
 |---|---|---|---|---|---|
 | Personal info → Name (display name) | Yes | No | App functionality | Optional (chat features) | bit-sign / bChat (bitcoinchat.online), our service |
-| Personal info → User IDs ($handle, paymail, wallet identity key) | Yes | No | App functionality, account management | Required for chat/names, optional otherwise | bit-sign; name lookups also go to 1Sat/OpNS, HandCash paymail |
-| Financial info → Purchase/transaction history (wallet transaction records, addresses, token holdings) | Yes | Yes, with service providers | App functionality (sync, backup) | Required (storage provider can be changed) | wallet.1sat.app, 1Sat indexing APIs, WhatsOnChain |
+| Personal info → User IDs ($handle, paymail, wallet identity key) | Yes | No | App functionality, account management | Required for chat/names, optional otherwise | bit-sign; push.bwalletx.com (the bChat handle a device is registered to); name lookups also go to 1Sat/OpNS and the paymail host of the address's domain (e.g. HandCash) |
+| Financial info → Purchase/transaction history (wallet transaction records, addresses, token holdings) | Yes | Yes, with service providers | App functionality (sync, backup) | Required (storage provider can be changed) | wallet.1sat.app, 1Sat indexing APIs, WhatsOnChain API (history / tx checks / price history) |
 | Messages → Other in-app messages (chat, DMs, posts) | Yes | No | App functionality | Optional | bit-sign / bChat |
 | Photos and videos (photos you post or set as avatar) | Yes | No | App functionality | Optional | bit-sign / bChat |
 | Other user-generated content (bookmarks, reports) | Yes | No | App functionality, safety | Optional | our service |
-| Device or other IDs (push token) | Yes | No | App functionality (notifications) | Optional (OS permission) | push.bwalletx.com via Firebase Cloud Messaging |
+| Device or other IDs (FCM push token, platform, app, bundle id) | Yes | No (FCM is a service provider) | App functionality (bChat notifications) | Optional: on by default after bChat sign-in, OS permission asked; off in Settings › Notifications | push.bwalletx.com (our server, Hetzner); delivered via Google Firebase Cloud Messaging |
+| App activity → Other actions (notification preferences: previews, quiet hours + time zone, alert kinds, per-room All/Mentions/Off) | Yes | No | App functionality | Optional | push.bwalletx.com |
+| Messages → Other in-app messages ($b assistant questions + recent conversation, up to the last few turns) | Only if the user enables $b and consents | Sent at the user's direction to their own AI provider (store edition: own API key, Anthropic / OpenAI / OpenRouter, direct from the phone; not via us) | App functionality | Optional | user's chosen AI provider |
 | Personal info → Other (identity verification) | Only if the user chooses KYC | Processed by bit-sign and Veriff | Account verification | Optional | bit-sign, Veriff |
+
+Message previews in push notifications are off by default (no message text passes through FCM unless the user turns previews on). Signing out of bChat, switching account or turning push off deletes the device row on push.bwalletx.com.
+
+Public feed posts are written to the public blockchain by the user (not collected by us); the feed is read from a public bmap indexer and our bChat indexer (push.bwalletx.com/feed).
 
 Calls are peer to peer; the service only helps devices connect and does not record calls.
 
@@ -111,8 +117,8 @@ Biometrics: handled by Android; the app never receives biometric data. Do not de
 
 ## Things to fix or confirm before submitting
 
-1. **Privacy policy vs push:** `site/privacy.html` says "no push notification service is used", but the app registers devices with `push.bwalletx.com` (FCM) when bChat signs in (`src/mobile/push/register.ts`). Update the policy before submitting, or the Data safety form and policy won't match.
-2. **"bWalletX" in the store edition:** the Create Account screen says "bWalletX can't show it again" in the store build.
-3. **"YOUR TOKEN + ROOM ~$0.00002"** appears on the Choose your handle sheet in the store build, although token rooms and paid features are meant to be off.
+1. ~~**Privacy policy vs push:**~~ Fixed 6 Oct 2026: policy now covers push (push.bwalletx.com, FCM / APNs), the $b assistant, feed, WhatsOnChain and paymail lookups. `site/privacy.html` says "no push notification service is used", but the app registers devices with `push.bwalletx.com` (FCM) when bChat signs in (`src/mobile/push/register.ts`). Update the policy before submitting, or the Data safety form and policy won't match.
+2. ~~**"bWalletX" in the store edition:**~~ Fixed: store-reachable text uses `APP_NAME` (storeBuild.ts). the Create Account screen says "bWalletX can't show it again" in the store build.
+3. ~~**"YOUR TOKEN + ROOM ~$0.00002"**~~ Fixed: the panel is hidden unless `paidFeaturesEnabled()`. Also hidden in the store build: Buy BSV card/sheet, Get BSV, Get MNEE, Get PNEEs (`buyCryptoEnabled()` / `marketTradingEnabled()`). appears on the Choose your handle sheet in the store build, although token rooms and paid features are meant to be off.
 4. **Apps tab** lists a "bExchange" bApp. It's an external app, but an exchange icon in a store build may draw a review question.
 5. **Feed** shows live posts from Twetch and others, including some profanity. That's why it isn't in the screenshots; make sure filtering and reporting are in place before review.
