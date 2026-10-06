@@ -86,6 +86,8 @@ import {
   fetchThread,
   lockToPost,
   publish,
+  PostCancelledError,
+  setIdentitySetupHandler,
 } from './feedApi';
 import {
   BLOCKS_PER_DAY,
@@ -794,6 +796,7 @@ const Composer = ({
       );
       onPosted(txid);
     } catch (e) {
+      if (e instanceof PostCancelledError) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy('');
@@ -1154,6 +1157,67 @@ const LockSheet = ({
   );
 };
 
+/**
+ * One-tap posting identity, shown the first time someone posts (or likes, follows…) without one.
+ * The same on-chain profile Settings → Identity creates; here it is a single step in the flow.
+ */
+const IdentitySetupSheet = ({
+  initialName,
+  image,
+  onSave,
+  onDone,
+}: {
+  initialName: string;
+  image: string | null;
+  onSave: (name: string) => Promise<string | undefined>;
+  onDone: (ok: boolean) => void;
+}) => {
+  const [name, setName] = useState(initialName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    const err = await onSave(name.trim());
+    setBusy(false);
+    if (err) setError(err);
+    else onDone(true);
+  };
+  return (
+    <Sheet title="Set up your posting identity" onClose={() => !busy && onDone(false)}>
+      <p className="text-xs mb-3" style={{ color: MUTED }}>
+        A one-time on-chain profile (name + photo) that signs your posts, so every BSV app knows they're yours. Costs a
+        fraction of a cent.
+      </p>
+      <div className="flex items-center gap-3">
+        {image && <img src={image} alt="" className="h-10 w-10 rounded-full object-cover" />}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={64}
+          placeholder="Your name"
+          aria-label="Your name"
+          className="flex-1 rounded-xl px-3 py-2 text-sm text-white outline-none"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        />
+      </div>
+      {error && (
+        <p className="text-xs mt-2" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
+      <button
+        onClick={() => void save()}
+        disabled={busy || !name.trim()}
+        className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
+        style={{ background: GOLD, color: '#1a1300' }}
+      >
+        {busy ? 'Setting up…' : 'Set up and continue'}
+      </button>
+    </Sheet>
+  );
+};
+
 // ── page ────────────────────────────────────────────────────────────────────
 
 export const FeedPage = ({ header }: { header?: ReactNode }) => {
@@ -1172,6 +1236,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [safetyTick, setSafetyTick] = useState(0);
   const [composing, setComposing] = useState<{ replyTo: FeedPost | null; quote?: FeedPost } | null>(null);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
+  // The inline identity step: publish() waits on this when the wallet has no posting identity.
+  const [settingUp, setSettingUp] = useState<((ok: boolean) => void) | null>(null);
+  useEffect(() => {
+    setIdentitySetupHandler(() => new Promise<boolean>((resolve) => setSettingUp(() => resolve)));
+    return () => setIdentitySetupHandler(null);
+  }, []);
   const [locking, setLocking] = useState<FeedPost | null>(null);
   const [sort, setSort] = useState<FeedSort>(start.sort);
   const [blocks, setBlocks] = useState<HiddenAccount[]>(loadBlocks);
@@ -1529,6 +1599,25 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         />
       )}
       {tipping && <TipSheet post={tipping} onClose={() => setTipping(null)} />}
+      {settingUp && (
+        <IdentitySetupSheet
+          initialName={identity.profile.name || chromeStorageService.getCurrentAccountObject().account?.name || ''}
+          image={identity.profile.image ? resolveImageUrl(identity.profile.image, apiContext) : null}
+          onSave={async (name) =>
+            (
+              await identity.saveProfile({
+                name,
+                image: identity.profile.image,
+                description: identity.profile.description,
+              })
+            ).error
+          }
+          onDone={(ok) => {
+            settingUp(ok);
+            setSettingUp(null);
+          }}
+        />
+      )}
       {locking && (
         <LockSheet
           post={locking}
@@ -1702,7 +1791,7 @@ const ProfileView = ({
         </p>
         {isMe && !author.bapId && (
           <p className="text-xs mt-2" style={{ color: MUTED }}>
-            Publish your identity in Settings to post.
+            Your first post sets up your posting identity.
           </p>
         )}
         {!isMe && (
