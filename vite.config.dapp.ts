@@ -12,6 +12,8 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { path: 'path-browserify' }, preserveSymlinks: true },
+  // The mobile build already copied public/ (and swapped in the bWalletX icons); don't copy it again.
+  publicDir: false,
   logLevel: 'warn',
   build: {
     outDir: 'build-mobile',

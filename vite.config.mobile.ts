@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv, mergeConfig, type Plugin } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
-import { readFileSync, renameSync } from 'fs';
+import { copyFileSync, readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
 
@@ -690,10 +690,27 @@ export const MOBILE_DEFINES = {
   __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.bwallet.space'),
 };
 
+/**
+ * public/ is the extension's folder and still carries the Yours favicon and logos, so a browser tab on the
+ * mobile build showed the Yours icon (owner, 7 Oct 2026). Overwrite them with the bWalletX icons after the copy.
+ */
+const bwalletxIcons = (): Plugin => ({
+  name: 'bwalletx-icons',
+  apply: 'build',
+  closeBundle() {
+    const from = (f: string) => resolve(__dirname, 'assets/bwalletx-ext', f);
+    const to = (f: string) => resolve(__dirname, 'build-mobile', f);
+    copyFileSync(from('favicon.ico'), to('favicon.ico'));
+    copyFileSync(from('icon192.png'), to('logo192.png'));
+    copyFileSync(from('icon512.png'), to('logo512.png'));
+    for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copyFileSync(from(f), to(`icons/${f}`));
+  },
+});
+
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [brand(), mobileText(), bcorpText(), bcorpColours(), mobilePages()],
+    plugins: [brand(), mobileText(), bcorpText(), bcorpColours(), mobilePages(), bwalletxIcons()],
     build: {
       outDir: 'build-mobile',
       target: 'es2022',
