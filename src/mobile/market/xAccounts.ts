@@ -5,7 +5,7 @@ import { lookupPersonal } from '../names/claimPersonal';
 import { cached, parseRoom, roomMeta, type HotRoom } from './indexer';
 
 /**
- * Market › Tokens › Social (owner, 4 Oct 2026; replaces "X Accounts"): people's personal tokens. Every
+ * Market › Tokens › Friends (owner, 4 Oct 2026; replaces "X Accounts"): people's personal tokens. Every
  * bWalletX name (X-verified b0asex.x, Google-verified name.gmail, or a plain name) whose owner minted
  * their $NAME token, e.g. b0asex.x → $B0ASEX.
  */

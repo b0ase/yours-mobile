@@ -117,7 +117,7 @@ type TokenFilter = 'all' | 'social' | 'bapps' | 'tickets';
 // Store build: no Tickets (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
-  ['social', 'Social', true],
+  ['social', 'Friends', true], // shown as Friends (owner, 6 Oct 2026); id stays 'social'
   ['bapps', 'bApps', true],
   ['tickets', 'Tickets', true],
 ]);
@@ -384,7 +384,7 @@ const MarketPage = () => {
   type Cat = { id: string; label: string; kind: Kind; token?: TokenFilter; view?: View; soon?: boolean };
   const CATS: Cat[] = [
     { id: 'tokens', label: 'Tokens', kind: 'tokens', token: 'all' },
-    { id: 'social', label: 'Social', kind: 'tokens', token: 'social' },
+    { id: 'social', label: 'Friends', kind: 'tokens', token: 'social' },
     { id: 'music', label: 'Music', kind: 'nfts', view: 'music' },
     { id: 'video', label: 'Video', kind: 'nfts', view: 'video' },
     { id: 'images', label: 'Images', kind: 'nfts', view: 'images' },
@@ -538,7 +538,7 @@ const MarketPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rooms, directory, safetyRev],
   );
-  // Social: people's personal tokens (xAccounts.ts), loaded when the filter opens.
+  // Friends: people's personal tokens (xAccounts.ts), loaded when the filter opens.
   const [xRows, setXRows] = useState<HotRoom[] | null>(null);
   useEffect(() => {
     if (tokenFilter !== 'social') return;
