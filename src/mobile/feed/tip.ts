@@ -64,6 +64,24 @@ export function payDestination(post: { source: Source; author: { address: string
   return { ok: true, address: a };
 }
 
+/** Client fee caps (spec §6.1): ≤ 5% of the author amount and ≤ 10,000 sats, never from the author's share. */
+export const CLIENT_FEE_MAX_PCT = 5;
+export const CLIENT_FEE_MAX_SATS = 10_000;
+/** bChat's own client fee. 0 = none (the owner has not set one): no fee output, no fee keys. */
+export const BCHAT_CLIENT_FEE: { pct: number; address: string } = { pct: 0, address: '' };
+
+export const clientFeeAllowed = (fee: number, amount: number): boolean =>
+  Number.isSafeInteger(fee) && fee >= 1 && fee <= CLIENT_FEE_MAX_SATS && fee * 100 <= amount * CLIENT_FEE_MAX_PCT;
+
+export type ClientFee = { address: string; satoshis: number };
+
+/** The client fee for a payment under a fee policy (rounded down, capped); null for none. */
+export function clientFeeFor(amount: number, policy: { pct: number; address: string } = BCHAT_CLIENT_FEE): ClientFee | null {
+  if (!policy.pct || !policy.address || !isP2pkhAddress(policy.address)) return null;
+  const sats = Math.min(Math.floor((amount * Math.min(policy.pct, CLIENT_FEE_MAX_PCT)) / 100), CLIENT_FEE_MAX_SATS);
+  return sats >= 1 ? { address: policy.address, satoshis: sats } : null;
+}
+
 export function validateAmount(sats: unknown): string | null {
   if (typeof sats !== 'number' || !Number.isSafeInteger(sats)) return 'Enter a whole number of sats.';
   if (sats < TIP_MIN_SATS) return `The smallest payment is ${TIP_MIN_SATS} sats.`;
@@ -74,10 +92,18 @@ export function validateAmount(sats: unknown): string | null {
 const pushStr = (s: Script, v: string) => s.writeBin(Utils.toArray(v, 'utf8'));
 
 /** The unsigned MAP script for a tip or paid like (AIP is appended by the signer). */
-export function buildPayScript(kind: PayKind, txid: string, sats: number, app = FEED_APP): Script {
+export function buildPayScript(
+  kind: PayKind,
+  txid: string,
+  sats: number,
+  app = FEED_APP,
+  fee: ClientFee | null = null,
+): Script {
   if (!isTxid(txid)) throw new Error('That post id is not valid.');
   const bad = validateAmount(sats);
   if (bad) throw new Error(bad);
+  if (fee && (!clientFeeAllowed(fee.satoshis, sats) || !isP2pkhAddress(fee.address)))
+    throw new Error('That app fee is over the allowed cap.');
   const kv: [string, string][] = [
     ['app', app],
     ['type', kind],
@@ -87,6 +113,7 @@ export function buildPayScript(kind: PayKind, txid: string, sats: number, app = 
     ['amount', String(sats)],
   ];
   if (kind === 'like') kv.push(['paid', '1']);
+  if (fee) kv.push(['fee', String(fee.satoshis)], ['feeTo', fee.address]);
   const s = new Script().writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
   pushStr(s, MAP_PREFIX);
   pushStr(s, 'SET');
@@ -97,11 +124,14 @@ export function buildPayScript(kind: PayKind, txid: string, sats: number, app = 
   return s;
 }
 
-export const buildTipScript = (txid: string, sats: number, app = FEED_APP) => buildPayScript('tip', txid, sats, app);
-export const buildPaidLikeScript = (txid: string, sats: number, app = FEED_APP) =>
-  buildPayScript('like', txid, sats, app);
+export const buildTipScript = (txid: string, sats: number, app = FEED_APP, fee: ClientFee | null = null) =>
+  buildPayScript('tip', txid, sats, app, fee);
+export const buildPaidLikeScript = (txid: string, sats: number, app = FEED_APP, fee: ClientFee | null = null) =>
+  buildPayScript('like', txid, sats, app, fee);
 
-export type PayPlan = { script: Script; payment: { address: string; satoshis: number; lockingScript: Script } };
+type PayOutput = { address: string; satoshis: number; lockingScript: Script };
+/** `payment` is output k+1 (the author, exactly the amount); `payment.fee`, when set, is output k+2. */
+export type PayPlan = { script: Script; payment: PayOutput & { fee?: PayOutput } };
 
 /**
  * Everything a wallet needs for one tip / paid like: the MAP script (output k) and the payment
@@ -111,11 +141,22 @@ export function planPayment(
   kind: PayKind,
   post: { txid: string; source: Source; author: { address: string } },
   sats: number,
+  policy: { pct: number; address: string } = BCHAT_CLIENT_FEE,
 ): PayPlan {
   const to = payDestination(post);
   if (!to.ok) throw new Error(to.reason);
-  const script = buildPayScript(kind, post.txid, sats);
-  return { script, payment: { address: to.address, satoshis: sats, lockingScript: new P2PKH().lock(to.address) } };
+  const fee = clientFeeFor(sats, policy);
+  if (fee && fee.address === to.address) throw new Error('The app fee cannot go to the author.');
+  const script = buildPayScript(kind, post.txid, sats, FEED_APP, fee);
+  return {
+    script,
+    payment: {
+      address: to.address,
+      satoshis: sats,
+      lockingScript: new P2PKH().lock(to.address),
+      ...(fee ? { fee: { ...fee, lockingScript: new P2PKH().lock(fee.address) } } : {}),
+    },
+  };
 }
 
 // ── reading ──────────────────────────────────────────────────────────────────────
@@ -131,6 +172,11 @@ export type ParsedPayment = {
   valid: boolean;
   /** AIP signer (the payer), when signed. */
   from: string | null;
+  /** Declared client fee (§6.1), 0 when none; its destination. */
+  fee: number;
+  feeTo: string | null;
+  /** No fee declared, or output k+2 pays `feeTo` exactly `fee` within the caps. Never affects `valid`. */
+  feeValid: boolean;
 };
 
 const P2PKH_RE = /^76a914([0-9a-f]{40})88ac$/;
@@ -152,7 +198,16 @@ export function parsePayment(tx: Pick<Transaction, 'outputs'>): ParsedPayment | 
     const pkh = next ? P2PKH_RE.exec(next.lockingScript.toHex()) : null;
     const payTo = pkh ? Utils.toBase58Check(Utils.toArray(pkh[1], 'hex'), [0]) : null;
     const valid = !!payTo && Number.isSafeInteger(amount) && amount >= TIP_MIN_SATS && next!.satoshis === amount;
-    return { kind, target, amount, payTo, valid, from: d.aip?.address ?? null };
+    const fee = /^[1-9]\d*$/.test(m.fee ?? '') ? Number(m.fee) : 0;
+    const feeTo = fee ? (m.feeTo ?? '').trim() || null : null;
+    let feeValid = true;
+    if (fee) {
+      const fo = tx.outputs[k + 2];
+      const fpkh = fo ? P2PKH_RE.exec(fo.lockingScript.toHex()) : null;
+      const fto = fpkh ? Utils.toBase58Check(Utils.toArray(fpkh[1], 'hex'), [0]) : null;
+      feeValid = !!feeTo && fto === feeTo && fo!.satoshis === fee && clientFeeAllowed(fee, amount) && feeTo !== payTo;
+    }
+    return { kind, target, amount, payTo, valid, from: d.aip?.address ?? null, fee, feeTo, feeValid };
   }
   return null;
 }

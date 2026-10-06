@@ -159,6 +159,29 @@ export function buildLikeScript(txid: string, app = FEED_APP, unlike = false): S
 }
 
 /**
+ * An author's hide / unhide of their own post (spec §7.1):
+ *   MAP SET app bChat type hide|unhide v 2 context tx tx <txid>   (AIP appended by the signer)
+ * Readers honour it only when it is signed by the same key that signed the post.
+ */
+export function buildHideScript(txid: string, unhide = false, app = FEED_APP): Script {
+  if (!isTxid(txid)) throw new Error('That post id is not valid.');
+  const s = opReturn();
+  s.writeBin(toArray(MAP_PREFIX, 'utf8'));
+  pushStr(s, 'SET');
+  for (const [k, v] of [
+    ['app', app],
+    ['type', unhide ? 'unhide' : 'hide'],
+    ['v', '2'],
+    ['context', 'tx'],
+    ['tx', txid.toLowerCase()],
+  ]) {
+    pushStr(s, k);
+    pushStr(s, v);
+  }
+  return s;
+}
+
+/**
  * Branch (repost): the Bitcoin Schema repost, `MAP SET app bChat type repost context tx tx <txid>`.
  * Twetch's own branch is `type branch tx <txid> action twetch/branch-and-like@0.0.1`, signed by
  * Twetch's server; we share its `tx` key but always write our own app and the schema type.

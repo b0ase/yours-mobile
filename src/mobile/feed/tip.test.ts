@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Script, Transaction, Utils } from '@bsv/sdk';
 import { decodeScript, MAP_PREFIX } from './post';
 import {
+  BCHAT_CLIENT_FEE,
   buildPaidLikeScript,
+  clientFeeAllowed,
+  clientFeeFor,
+  CLIENT_FEE_MAX_SATS,
   buildTipScript,
   PAID_LIKE_DEFAULT_SATS,
   parsePayment,
@@ -110,6 +114,9 @@ describe('parsing and totals', () => {
       payTo: author,
       valid: true,
       from: null,
+      fee: 0,
+      feeTo: null,
+      feeValid: true,
     });
     expect(parsePayment(txFor('like', 1000))!.kind).toBe('like');
     expect(parsePayment(txFor('tip', 3000, 2999))!.valid).toBe(false);
@@ -138,5 +145,41 @@ describe('indexer meta', () => {
     expect(p.tipped).toBe(4000);
     const [q] = parseBmapFeed({ results: [doc], meta: [{ tx: TXID, likes: 1, replies: 0 }] });
     expect(q.tipped).toBeUndefined();
+  });
+});
+
+describe('client fee (spec §6.1)', () => {
+  const app = PrivateKey.fromRandom().toAddress();
+  const policy = { pct: 5, address: app };
+  test('bChat fee is 0: no fee output, no fee keys', () => {
+    expect(BCHAT_CLIENT_FEE.pct).toBe(0);
+    expect(planPayment('tip', bchat, 100_000).payment.fee).toBeUndefined();
+    expect(pushes(buildTipScript(TXID, 100_000))).not.toContain('fee');
+  });
+  test('caps', () => {
+    expect(clientFeeFor(10_000, policy)?.satoshis).toBe(500);
+    expect(clientFeeFor(100_000_000, policy)?.satoshis).toBe(CLIENT_FEE_MAX_SATS);
+    expect(clientFeeAllowed(500, 10_000)).toBe(true);
+    expect(clientFeeAllowed(501, 10_000)).toBe(false);
+    expect(() => buildTipScript(TXID, 10_000, 'bChat', { address: app, satoshis: 501 })).toThrow();
+  });
+  test('author output stays exactly the amount; fee is a separate output and does not invalidate the tip', () => {
+    const plan = planPayment('tip', bchat, 10_000, policy);
+    expect(plan.payment.satoshis).toBe(10_000);
+    expect(plan.payment.fee?.satoshis).toBe(500);
+    expect(decodeScript(plan.script)!.MAP).toMatchObject({ amount: '10000', fee: '500', feeTo: app });
+    const build = (feeSats: number) => {
+      const tx = new Transaction();
+      tx.addOutput({ satoshis: 0, lockingScript: plan.script });
+      tx.addOutput({ satoshis: 10_000, lockingScript: plan.payment.lockingScript });
+      tx.addOutput({ satoshis: feeSats, lockingScript: plan.payment.fee!.lockingScript });
+      return Transaction.fromHex(tx.toHex());
+    };
+    const ok = parsePayment(build(500))!;
+    expect(ok.valid && ok.feeValid).toBe(true);
+    const bad = parsePayment(build(499))!;
+    expect(bad.valid).toBe(true);
+    expect(bad.feeValid).toBe(false);
+    expect(tipTotals([ok], () => author).get(TXID)).toEqual({ sats: 10_000, count: 1 });
   });
 });

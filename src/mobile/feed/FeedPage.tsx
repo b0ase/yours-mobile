@@ -32,6 +32,7 @@ import {
   Check,
   Clock,
   Trophy,
+  EyeOff,
 } from 'lucide-react';
 import { inscribe, sendBsv } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -53,6 +54,7 @@ import { ReportSheet } from '../ugc/UgcSheets';
 import {
   buildFollowScript,
   buildBranchScript,
+  buildHideScript,
   buildLikeScript,
   buildPostScript,
   quoteText,
@@ -1493,6 +1495,25 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     }
   };
 
+  // "Hide my post" (spec §7.1): a signed hide with this wallet's posting key. Readers honour it only
+  // when that key signed the post, so it is offered on posts that look like ours.
+  const myKeys = {
+    bapId: identity.bapId,
+    addresses: Object.values(chromeStorageService.getCurrentAccountObject().account?.addresses ?? {}).filter(
+      (x): x is string => typeof x === 'string' && !!x,
+    ),
+  };
+  const hideMine = async (p: FeedPost) => {
+    setMore(null);
+    try {
+      await publish(apiContext, buildHideScript(p.txid), 'Hide my post', ['app:bWallet', 'type:hide', `tx:${p.txid}`]);
+      addSnackbar('Hidden. Open Feed apps drop it once they see your signed request.', 'success');
+    } catch (e) {
+      if (e instanceof PostCancelledError) return;
+      addSnackbar(e instanceof Error ? e.message : String(e), 'error');
+    }
+  };
+
   const onAction = (p: FeedPost, act: PostAction) => {
     setMore(null);
     const url = sourceUrl(p);
@@ -1716,6 +1737,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
               </button>
             );
           })}
+          {more.source !== 'treechat' && isMe(more.author, myKeys) && (
+            <button onClick={() => void hideMine(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
+              <EyeOff size={18} color={MUTED} />
+              Hide my post
+            </button>
+          )}
           <button onClick={() => bookmark(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
             {isBookmarked(bookmarks, more.txid) ? (
               <BookmarkCheck size={18} color={GOLD} />
