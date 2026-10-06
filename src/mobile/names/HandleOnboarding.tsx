@@ -63,9 +63,18 @@ export const HandleOnboarding = () => {
   useEffect(() => {
     if (!apiContext || !id) return;
     let live = true;
-    syncAccountNames(apiContext, id, { force: true })
-      .catch(() => undefined)
-      .finally(() => live && setSynced(true));
+    // Only a lookup that answered counts: a failed one (the wallet still syncing after a restore) must not
+    // read as "no name" and ask a restored wallet to pick one again (owner, 6 Oct 2026). Retry instead.
+    let tries = 0;
+    const attempt = () =>
+      syncAccountNames(apiContext, id, { force: true })
+        .catch(() => false)
+        .then((ok) => {
+          if (!live) return;
+          if (ok) setSynced(true);
+          else if (++tries < 6) setTimeout(attempt, 10_000);
+        });
+    attempt();
     return () => {
       live = false;
     };
@@ -86,7 +95,8 @@ export const HandleOnboarding = () => {
 
   if (open) return <HandleFlow onClose={close} />;
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
-  if (!id || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;
+  // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
+  if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;
   return (
     <div
       className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"

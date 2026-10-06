@@ -242,7 +242,8 @@ export const WalletCard = ({
                   onRetry();
                 }}
               >
-                Couldn't refresh. Tap to retry.
+                <RefreshCw size={12} aria-hidden="true" />
+                Still syncing. Tap to retry.
               </button>
             )}
           </div>

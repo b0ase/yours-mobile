@@ -113,21 +113,25 @@ export const ctxIdentityAddress = async (ctx: OneSatContext): Promise<string | n
   }
 };
 
-/** Refresh profile name, OpNS names and paymail for the current account; collect paymail inbox. */
+/**
+ * Refresh profile name, OpNS names and paymail for the current account; collect paymail inbox.
+ * Resolves true only when every lookup answered (false: skipped or something failed), so callers can
+ * tell "has no name" from "couldn't check yet".
+ */
 export const syncAccountNames = async (
   ctx: OneSatContext,
   identityAddress: string,
   opts: { force?: boolean; minIntervalMs?: number } = {},
-) => {
-  if (!identityAddress) return;
+): Promise<boolean> => {
+  if (!identityAddress) return false;
   const now = Date.now();
-  if (!opts.force && now - (lastSync.get(identityAddress) ?? 0) < (opts.minIntervalMs ?? 120_000)) return;
+  if (!opts.force && now - (lastSync.get(identityAddress) ?? 0) < (opts.minIntervalMs ?? 120_000)) return false;
   // Only write this account's caches from this account's own wallet (see ctxIdentityAddress).
-  if ((await ctxIdentityAddress(ctx)) !== identityAddress) return;
+  if ((await ctxIdentityAddress(ctx)) !== identityAddress) return false;
   lastSync.set(identityAddress, now);
   const f = (u: string, i?: RequestInit) => fetch(u, i);
 
-  await Promise.allSettled([
+  const results = await Promise.allSettled([
     (async () => {
       // Unpublished: no profile name (also clears a name cached here by mistake for another account).
       if ((await resolveBapId(ctx)) === null) return setCachedProfileName(identityAddress, '');
@@ -157,6 +161,7 @@ export const syncAccountNames = async (
       }
     })(),
   ]);
+  return results.every((r) => r.status === 'fulfilled');
 };
 
 export const onAccountNamesChange = (cb: () => void) => {

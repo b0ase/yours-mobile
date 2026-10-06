@@ -150,6 +150,9 @@ const pendingImports = new Map<string, Promise<void>>();
 
 const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   console.log('[background] initializeWallet: starting, current accountContext:', !!accountContext);
+  // Stage timings (owner, 6 Oct 2026: a restore took ~50 s); read them in the service worker console.
+  const t0 = Date.now();
+  const stage = (name: string) => console.log(`[background] initializeWallet: ${name} at ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   if (accountContext) {
     dropWalletContext('before-init');
   }
@@ -292,8 +295,14 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       console.log('[background] Transaction proven:', txid);
       notifyBalanceUpdate();
     },
-    beforeSync: importPendingRestore,
-    afterSync: reviewRestoredUtxos,
+    beforeSync: async (a) => {
+      stage('storage ready, before sync');
+      await importPendingRestore(a);
+    },
+    afterSync: async (a) => {
+      stage('address sync done');
+      await reviewRestoredUtxos(a);
+    },
   });
   if (lockGeneration !== startedUnder || !(await chromeStorageService.getPassKey())) {
     // Locked while we were initialising (a restore's detached init can run
@@ -302,6 +311,7 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     await ctx.close().catch((err) => console.error('[background] close after late lock:', err));
     return null;
   }
+  stage('initWallet done');
   accountContext = ctx;
   mirrorServices = ctx.syncContext.services as unknown as Parameters<typeof mirrorToMiner>[0];
   console.log('[background] initializeWallet: initWallet returned, accountContext:', !!accountContext);

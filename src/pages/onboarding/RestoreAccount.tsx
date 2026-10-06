@@ -108,6 +108,8 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
       }
 
       await sleep(50);
+      const t0 = Date.now();
+      const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
       const keys = await keysService.generateSeedAndStoreEncrypted(
         password,
         newWallet,
@@ -122,12 +124,15 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
         return;
       }
 
+      console.log('[restore] keys stored at', at());
       const chromeObject = await chromeStorageService.getAndSetStorage();
       if (!chromeObject?.accounts) throw new Error('No accounts found!');
       const objKeys = Object.keys(chromeObject.accounts);
       if (!objKeys) throw new Error('Object identity address not found');
       await chromeStorageService.switchAccount(keys.identityAddress);
+      console.log('[restore] wallet started at', at());
       await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);
+      console.log('[restore] done at', at());
 
       setStep(4);
     } catch (error) {

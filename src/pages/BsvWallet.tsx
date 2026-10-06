@@ -506,6 +506,15 @@ export const BsvWallet = () => {
     return satoshis;
   };
 
+  // While the balance is unknown or stale, keep asking every 10 s (owner, 6 Oct 2026: after a restore the
+  // wallet is busy syncing for a minute or more, and "Couldn't refresh" stayed until a manual tap).
+  useEffect(() => {
+    if (!balanceFailed) return;
+    const t = setInterval(() => void getAndSetBsvBalance(), 10_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balanceFailed]);
+
   const loadRate = async () => {
     const rate = await withTimeout(
       fetchExchangeRate(apiContext.chain, apiContext.wocApiKey),
@@ -1333,7 +1342,7 @@ export const BsvWallet = () => {
               className="mt-1 text-[11px] border-0 bg-transparent cursor-pointer p-0"
               style={{ color: theme.color.global.gray }}
             >
-              Couldn't refresh. Tap to retry.
+              Still syncing. Tap to retry.
             </button>
           )}
         </motion.div>
