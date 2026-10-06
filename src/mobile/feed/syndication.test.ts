@@ -55,7 +55,8 @@ describe('source app', () => {
     expect(sourceLabel('twetch')).toBe('Twetch');
     expect(sourceLabel('1satsocial')).toBe('1satsocial');
     expect(sourceLabel('bWallet')).toBe('');
-    expect(sourceLabel('peck.agents')).toBe('peck.agents');
+    expect(sourceLabel('peck.agents')).toBe('Peck');
+    expect(sourceLabel('fren-bot')).toBe('fren-bot');
   });
 
   test('Treechat post: username as author, created_at as time, thread id, link', () => {
@@ -136,7 +137,7 @@ describe('source filter', () => {
     at,
     author: { address, bapId: null, name: address, avatar: null },
   });
-  const posts = [mk(1, 'bWallet', 1), mk(2, 'treechat', 4), mk(3, 'twetch', 3), mk(4, 'peck.agents', 2, 'friend')];
+  const posts = [mk(1, 'bWallet', 1), mk(2, 'treechat', 4), mk(3, 'twetch', 3), mk(4, 'fren-bot', 2, 'friend')];
   test('filters by source', () => {
     expect(filterFeed(posts, 'treechat').map((x) => x.txid)).toEqual([tx(2)]);
     expect(filterFeed(posts, 'other').map((x) => x.txid)).toEqual([tx(4)]);

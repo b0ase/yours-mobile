@@ -28,13 +28,14 @@ describe('source registry', () => {
       expect(s.icon).not.toMatch(/^https?:/);
       expect(typeof s.postUrl).toBe('function');
     }
-    expect(SOURCES.map((s) => s.id)).toEqual(['all', 'twetch', 'bchat', 'treechat']);
+    expect(SOURCES.map((s) => s.id)).toEqual(['all', 'bchat', 'twetch', 'treechat', 'peck']);
   });
   test('matching MAP app values', () => {
     expect(sourceOf(' bWallet ')).toBe('bchat');
     expect(sourceOf('treechat_staging')).toBe('treechat');
     expect(sourceOf('TWETCH')).toBe('twetch');
-    expect(sourceOf('peck.agents')).toBe('other');
+    expect(sourceOf('peck.agents')).toBe('peck');
+    expect(sourceOf('fren-bot')).toBe('other');
     expect(sourceInfo('twetch').label).toBe('Twetch');
     expect(sourceLabel('bsocial')).toBe('bSocial');
     expect(sourceLabel('bWallet')).toBe('');

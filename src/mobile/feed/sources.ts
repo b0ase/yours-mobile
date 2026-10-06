@@ -1,5 +1,6 @@
 import bchatIcon from '../brand/sources/bchat.png';
 import otherIcon from '../brand/sources/other.png';
+import peckIcon from '../brand/sources/peck.png';
 import treechatIcon from '../brand/sources/treechat.png';
 import twetchIcon from '../brand/sources/twetch.png';
 
@@ -8,7 +9,7 @@ import twetchIcon from '../brand/sources/twetch.png';
  * is one entry here: how to recognise its MAP app, its label and bundled 64px logo
  * (src/mobile/brand/sources/, never hotlinked), and where its original post lives.
  */
-export type Source = 'bchat' | 'treechat' | 'twetch' | 'other';
+export type Source = 'bchat' | 'treechat' | 'twetch' | 'peck' | 'other';
 
 /**
  * Per-post actions. On-chain ones are Bitcoin Schema transactions signed by the user with
@@ -101,6 +102,19 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
       more: ['quote', 'copyLink', 'open', 'bookmark', 'unlock', 'report', 'mute'],
     },
   },
+  peck: {
+    id: 'peck',
+    label: 'Peck',
+    icon: peckIcon,
+    // From peck.to's apple-touch-icon (black bird on white); this is a neutral warm accent.
+    color: '#E8A33D',
+    // peck.to writes MAP app=peck.to; its agents / seed corpora write peck.agents, peck.cross… —
+    // attributed to Peck, but only peck.to is read (feedApi.fetchPeck).
+    matches: (a) => a === 'peck.to' || a.startsWith('peck.'),
+    // Verified 2026-10-06: peck.to/tx/<txid> is its post page.
+    postUrl: (p) => `https://peck.to/tx/${p.txid}`,
+    actions: BASIC,
+  },
   other: {
     id: 'other',
     label: 'Other',
@@ -112,9 +126,9 @@ export const SOURCE_REGISTRY: Record<Source, SourceInfo> = {
 };
 
 /** Match order: specific sources first, "other" last. */
-// Twetch first: the only source whose indexer is live (6 Oct 2026).
-const ORDER: Source[] = ['twetch', 'bchat', 'treechat', 'other'];
+const ORDER: Source[] = ['bchat', 'twetch', 'treechat', 'peck', 'other'];
 
+/** Chips: All, bChat, then the others (same order as bitcoinchat.online/feed). */
 export const SOURCES: { id: Source | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
   // No "Other" chip: those posts still show under All.

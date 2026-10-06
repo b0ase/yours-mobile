@@ -2,11 +2,13 @@ import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, LOCK_BASKET, type On
 import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
+import { parsePeckBody, parsePeckFeed, parsePeckItem, PECK_OVERLAY, PECK_READ_APPS } from './peck';
 import { cutoff, readCache, writeCache, type LeaderboardData, type Timeframe } from './leaderboard';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
 import {
   ancestorChain,
   groupThread,
+  isTxid,
   mergePosts,
   parseBmapFeed,
   parseBmapPost,
@@ -77,6 +79,20 @@ export const fetchTwetch = async (limit = 60): Promise<FeedPost[]> => {
   return parseTwetchFeed(await res.json(), twetchAddress);
 };
 
+/** Recent Peck (peck.to) posts from its public overlay — current to the chain tip. */
+export const fetchPeck = async (limit = 40, offset = 0): Promise<FeedPost[]> =>
+  parsePeckFeed(await peckGet(`/v1/feed?app=${encodeURIComponent(PECK_READ_APPS[0])}&limit=${limit}&offset=${offset}`));
+
+const peckGet = async (path: string): Promise<unknown> => {
+  const res = await fetch(`${PECK_OVERLAY}${path}`, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Peck error (${res.status})`);
+  return parsePeckBody(await res.text());
+};
+
+/** One Peck post by txid (bmap stopped indexing in April 2026). */
+export const fetchPeckPost = async (txid: string): Promise<FeedPost | null> =>
+  !isTxid(txid) ? null : parsePeckItem(((await peckGet(`/v1/post/${txid}`)) as { data?: unknown })?.data);
+
 function twetchAddress(pk: string): string {
   return PublicKey.fromString(pk).toAddress();
 }
@@ -114,7 +130,13 @@ export const fetchBmapPost = async (txid: string): Promise<FeedPost | null> => {
 };
 
 const fetchParent = (ref: ParentRef): Promise<FeedPost | null> =>
-  ref.twetchId ? fetchTwetchPost(ref.twetchId) : ref.txid ? fetchBmapPost(ref.txid) : Promise.resolve(null);
+  ref.twetchId
+    ? fetchTwetchPost(ref.twetchId)
+    : ref.txid
+      ? fetchBmapPost(ref.txid)
+          .catch(() => null)
+          .then((p) => p ?? (isTxid(ref.txid) ? fetchPeckPost(ref.txid!).catch(() => null) : null))
+      : Promise.resolve(null);
 
 /**
  * The canonical chain above a post: what it replies to (or quotes / branches), up to the root,
@@ -127,13 +149,13 @@ export const fetchAncestors = (post: FeedPost): Promise<FeedPost[]> => ancestorC
  * txid, newest first). Twetch or the bChat indexer failing never blanks the feed.
  */
 export async function fetchForYou(): Promise<FeedPost[]> {
-  const [recent, bchat, twetch] = await Promise.allSettled([fetchRecent(), fetchBchatRecent(), fetchTwetch()]);
+  const [recent, bchat, twetch, peck] = await Promise.allSettled([fetchRecent(), fetchBchatRecent(), fetchTwetch(), fetchPeck()]);
   const extra = (r: PromiseSettledResult<FeedPost[]>) => (r.status === 'fulfilled' ? r.value : []);
   if (recent.status === 'rejected') {
-    if (bchat.status === 'fulfilled' && bchat.value.length) return mergePosts(bchat.value, extra(twetch));
+    if (bchat.status === 'fulfilled' && bchat.value.length) return mergePosts(bchat.value, extra(twetch), extra(peck));
     throw recent.reason;
   }
-  return mergePosts(recent.value, extra(bchat), extra(twetch));
+  return mergePosts(recent.value, extra(bchat), extra(twetch), extra(peck));
 }
 
 /**
@@ -144,6 +166,12 @@ export async function fetchForYou(): Promise<FeedPost[]> {
  */
 export async function fetchThread(post: FeedPost): Promise<FeedPost[]> {
   if (post.source === 'twetch' && post.twetchId) return [post, ...(await fetchTwetchReplies(post.twetchId))];
+  if (post.source === 'peck' && isTxid(post.txid)) {
+    const replies = await peckGet(`/v1/thread/${post.txid}`)
+      .then((b) => parsePeckFeed({ data: (b as { replies?: unknown })?.replies }))
+      .catch(() => [] as FeedPost[]);
+    return [post, ...replies.sort((a, b) => a.at - b.at)];
+  }
   const root = threadRoot(post);
   const jobs: Promise<FeedPost[]>[] = [fetchReplies(root)];
   if (root !== post.txid)
