@@ -109,25 +109,39 @@ async function fwetchVerify(items: unknown[]): Promise<Map<string, string>> {
     .map((i) => (i && typeof i === 'object' ? (i as Record<string, unknown>) : {}))
     .filter((i) => Number(i.anon) !== 1 && !i.hidden && typeof i.txid === 'string' && isTxid(i.txid))
     .map((i) => (i.txid as string).toLowerCase());
-  await Promise.all(
-    [...new Set(ids)]
-      .filter((t) => !fwetchVerified.has(t))
-      .map(async (txid) => {
-        try {
-          const r = (await fwetchGet(`/api/rawtx/${txid}`)) as { hex?: unknown };
-          if (fwetchVerified.size > 2_000) fwetchVerified.clear();
-          fwetchVerified.set(txid, typeof r?.hex === 'string' ? await verifyFwetchTx(r.hex, txid) : null);
-        } catch {
-          /* unverified this time: shown, not payable */
-        }
-      }),
-  );
+  // Fwetch's rawtx endpoint 404s under parallel load: a few at a time, WhatsOnChain as fallback,
+  // within a time budget. Trust is the same either way: the bytes must hash to the txid.
+  const todo = [...new Set(ids)].filter((t) => !fwetchVerified.has(t));
+  const one = async (txid: string) => {
+    const hex = await fwetchRawTx(txid);
+    if (hex === null) return; // unverified this time: shown, not payable
+    if (fwetchVerified.size > 2_000) fwetchVerified.clear();
+    fwetchVerified.set(txid, await verifyFwetchTx(hex, txid));
+  };
+  const deadline = Date.now() + 8_000;
+  for (let i = 0; i < todo.length && Date.now() < deadline; i += 4) await Promise.all(todo.slice(i, i + 4).map(one));
   const out = new Map<string, string>();
   for (const t of ids) {
     const a = fwetchVerified.get(t);
     if (a) out.set(t, a);
   }
   return out;
+}
+
+async function fwetchRawTx(txid: string): Promise<string | null> {
+  try {
+    const r = (await fwetchGet(`/api/rawtx/${txid}`)) as { hex?: unknown };
+    if (typeof r?.hex === 'string') return r.hex;
+  } catch {
+    /* fall back */
+  }
+  try {
+    const res = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`, { signal: AbortSignal.timeout(8_000) });
+    const hex = res.ok ? (await res.text()).trim() : '';
+    return /^[0-9a-f]+$/i.test(hex) ? hex : null;
+  } catch {
+    return null;
+  }
 }
 
 const listOf = (b: unknown, k: string): unknown[] => {
@@ -331,7 +345,13 @@ export async function publish(
    * A tip / paid like's payment to the post's author (tip.ts planPayment): the output right after
    * the OP_RETURN, in the same transaction (BCHAT-PROTOCOL-v2 §5).
    */
-  payment?: { address: string; satoshis: number; lockingScript: Script },
+  payment?: {
+    address: string;
+    satoshis: number;
+    lockingScript: Script;
+    /** Optional client fee (spec §6.1): its own output right after the author's. */
+    fee?: { address: string; satoshis: number; lockingScript: Script };
+  },
 ): Promise<string> {
   const signed = await signWithIdentity(() => applyBapAip(ctx, script));
   if (!signed) throw new PostCancelledError();
@@ -346,6 +366,15 @@ export async function publish(
               satoshis: payment.satoshis,
               // ≤ 50 bytes (BRC-100); shown on the spending approval.
               outputDescription: `Pay author ${payment.address}`,
+            },
+          ]
+        : []),
+      ...(payment?.fee
+        ? [
+            {
+              lockingScript: payment.fee.lockingScript.toHex(),
+              satoshis: payment.fee.satoshis,
+              outputDescription: `App fee ${payment.fee.address}`,
             },
           ]
         : []),
