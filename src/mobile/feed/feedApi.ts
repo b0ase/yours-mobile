@@ -3,7 +3,16 @@ import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
 import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
-import { parsePeckBody, parsePeckFeed, parsePeckItem, PECK_OVERLAY, PECK_READ_APPS } from './peck';
+import {
+  parseOverlayAny,
+  parsePeckBody,
+  parsePeckFeed,
+  parseTreechatOverlayFeed,
+  PECK_OVERLAY,
+  PECK_READ_APPS,
+  TREECHAT_OVERLAY_APP,
+} from './peck';
+import { buildTreechatTree, treechatThreadIdFromRawTx } from './treechat';
 import { cutoff, readCache, writeCache, type LeaderboardData, type Timeframe } from './leaderboard';
 import { PublicKey, Transaction, Utils, type Script } from '@bsv/sdk';
 import {
@@ -90,9 +99,78 @@ const peckGet = async (path: string): Promise<unknown> => {
   return parsePeckBody(await res.text());
 };
 
-/** One Peck post by txid (bmap stopped indexing in April 2026). */
+/** One Peck or Treechat post by txid from the overlay (bmap stopped indexing in April 2026). */
 export const fetchPeckPost = async (txid: string): Promise<FeedPost | null> =>
-  !isTxid(txid) ? null : parsePeckItem(((await peckGet(`/v1/post/${txid}`)) as { data?: unknown })?.data);
+  !isTxid(txid) ? null : parseOverlayAny(((await peckGet(`/v1/post/${txid}`)) as { data?: unknown })?.data);
+
+/**
+ * Recent Treechat posts from the overlay (bmap, the old source, stopped at block ~944922), with
+ * thread ids filled in for the app.treechat.com link.
+ */
+export const fetchTreechat = async (limit = 40, offset = 0): Promise<FeedPost[]> =>
+  withTreechatThreadIds(
+    parseTreechatOverlayFeed(await peckGet(`/v1/feed?app=${TREECHAT_OVERLAY_APP}&limit=${limit}&offset=${offset}`)),
+  );
+
+const treechatOverlayReplies = async (txid: string): Promise<FeedPost[]> =>
+  !isTxid(txid)
+    ? []
+    : parseTreechatOverlayFeed({ data: ((await peckGet(`/v1/thread/${txid}`)) as { replies?: unknown })?.replies });
+
+// Treechat thread ids (MAP treechat_thread_id): the overlay omits them, so read the raw tx
+// (treechat.ts checks it hashes to the txid). A mined tx never changes; misses are retried.
+const treechatThreadIds = new Map<string, string | null>();
+
+async function fetchThreadIds(txids: string[]): Promise<void> {
+  const todo = [...new Set(txids)].filter((t) => isTxid(t) && !treechatThreadIds.has(t)).slice(0, 60);
+  if (!todo.length) return;
+  if (treechatThreadIds.size > 20_000) treechatThreadIds.clear();
+  const found = new Map<string, string>();
+  for (let i = 0; i < todo.length; i += 20) {
+    try {
+      const res = await fetch(`${WOC}/txs/hex`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ txids: todo.slice(i, i + 20) }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      const rows: unknown = res.ok ? await res.json() : [];
+      for (const r of Array.isArray(rows) ? rows : []) {
+        const { txid, hex } = (r ?? {}) as { txid?: unknown; hex?: unknown };
+        if (typeof txid === 'string' && typeof hex === 'string') found.set(txid.toLowerCase(), hex);
+      }
+    } catch {
+      /* singles below */
+    }
+  }
+  // Unconfirmed txs are not in the bulk endpoint: a few, one at a time.
+  await Promise.all(
+    todo
+      .filter((t) => !found.has(t))
+      .slice(0, 6)
+      .map(async (t) => {
+        try {
+          const res = await fetch(`${WOC}/tx/${t}/hex`, { signal: AbortSignal.timeout(6_000) });
+          const hex = res.ok ? (await res.text()).trim() : '';
+          if (hex) found.set(t, hex);
+        } catch {
+          /* next read */
+        }
+      }),
+  );
+  for (const [t, hex] of found) treechatThreadIds.set(t, treechatThreadIdFromRawTx(hex, t));
+}
+
+/** Fill `threadId` on Treechat posts that lack it. Best effort: a failure leaves it null. */
+export async function withTreechatThreadIds(posts: FeedPost[]): Promise<FeedPost[]> {
+  const need = posts.filter((p) => p.source === 'treechat' && !p.threadId).map((p) => p.txid);
+  if (!need.length) return posts;
+  await fetchThreadIds(need).catch(() => undefined);
+  return posts.map((p) => {
+    const id = p.source === 'treechat' && !p.threadId ? treechatThreadIds.get(p.txid) : null;
+    return id ? { ...p, threadId: id } : p;
+  });
+}
 
 // ── Fwetch (fwetch.lol): read from its API; tips only to signatures we verified ourselves ──
 const fwetchVerified = new Map<string, string | null>();
@@ -136,7 +214,9 @@ async function fwetchRawTx(txid: string): Promise<string | null> {
     /* fall back */
   }
   try {
-    const res = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`, { signal: AbortSignal.timeout(8_000) });
+    const res = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`, {
+      signal: AbortSignal.timeout(8_000),
+    });
     const hex = res.ok ? (await res.text()).trim() : '';
     return /^[0-9a-f]+$/i.test(hex) ? hex : null;
   } catch {
@@ -151,7 +231,10 @@ const listOf = (b: unknown, k: string): unknown[] => {
 
 /** Recent Fwetch posts (scope:'local' included; Fwetch-hidden posts dropped). */
 export const fetchFwetch = async (limit = 40, offset = 0): Promise<FeedPost[]> => {
-  const items = listOf(await fwetchGet(`/api/feed?app=fwetch&board=all&sort=new&limit=${limit}&offset=${offset}`), 'posts');
+  const items = listOf(
+    await fwetchGet(`/api/feed?app=fwetch&board=all&sort=new&limit=${limit}&offset=${offset}`),
+    'posts',
+  );
   return parseFwetchFeed({ posts: items }, await fwetchVerify(items));
 };
 
@@ -224,29 +307,51 @@ export const fetchAncestors = (post: FeedPost): Promise<FeedPost[]> => ancestorC
  * txid, newest first). Twetch or the bChat indexer failing never blanks the feed.
  */
 export async function fetchForYou(): Promise<FeedPost[]> {
-  const [recent, bchat, twetch, peck, fwetch] = await Promise.allSettled([
+  const [recent, bchat, twetch, peck, fwetch, treechat] = await Promise.allSettled([
     fetchRecent(),
     fetchBchatRecent(),
     fetchTwetch(),
     fetchPeck(),
     fetchFwetch(),
+    fetchTreechat(),
   ]);
   const extra = (r: PromiseSettledResult<FeedPost[]>) => (r.status === 'fulfilled' ? r.value : []);
+  const tc = extra(treechat);
   if (recent.status === 'rejected') {
-    if (bchat.status === 'fulfilled' && bchat.value.length) return mergePosts(bchat.value, extra(twetch), extra(peck), extra(fwetch));
+    if (bchat.status === 'fulfilled' && bchat.value.length)
+      return mergePosts(bchat.value, extra(twetch), extra(peck), extra(fwetch), tc);
+    if (tc.length) return mergePosts(tc, extra(twetch), extra(peck), extra(fwetch));
     throw recent.reason;
   }
-  return mergePosts(recent.value, extra(bchat), extra(twetch), extra(peck), extra(fwetch));
+  // bmap's Treechat posts are months old (it stopped at block ~944922): the overlay replaces
+  // them while it answers.
+  const bmap = tc.length ? recent.value.filter((p) => p.source !== 'treechat') : recent.value;
+  return mergePosts(bmap, extra(bchat), extra(twetch), extra(peck), extra(fwetch), tc);
 }
 
 /**
- * A whole thread. Treechat: the root post + its replies (Treechat points every reply's MAP tx
- * at the root), plus a text search for the thread id (bmap has no index on
- * MAP.treechat_thread_id, so a direct query times out) filtered to exact matches.
- * Others: the post's direct replies. Each source is optional; whatever loads is shown.
+ * A whole thread. Treechat: the conversation tree from the overlay (treechat.ts — parent_txid
+ * chains walked up to the root and down through /v1/thread), with bmap's old threads (every
+ * reply pointed MAP tx at the root, plus a text search for the thread id) merged in; oldest
+ * first. Others: the post's direct replies. Each source is optional; whatever loads is shown.
  */
 export async function fetchThread(post: FeedPost): Promise<FeedPost[]> {
   if (post.source === 'twetch' && post.twetchId) return [post, ...(await fetchTwetchReplies(post.twetchId))];
+  if (post.source === 'treechat' && isTxid(post.txid)) {
+    const tree = await buildTreechatTree(post, {
+      post: async (t) => (await fetchPeckPost(t).catch(() => null)) ?? fetchBmapPost(t).catch(() => null),
+      replies: treechatOverlayReplies,
+      extra: async (t) => {
+        const jobs: Promise<FeedPost[]>[] = [fetchReplies(t)];
+        if (post.threadId && t === post.txid)
+          jobs.push(get(`/social/post/search?q=${encodeURIComponent(post.threadId)}&limit=100`).then(parseBmapFeed));
+        const got = await Promise.allSettled(jobs);
+        const all = got.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+        return post.threadId && t === post.txid ? groupThread(post, all) : all;
+      },
+    });
+    return (await withTreechatThreadIds(tree.posts)).sort((a, b) => a.at - b.at);
+  }
   if (post.source === 'peck' && isTxid(post.txid)) {
     const replies = await peckGet(`/v1/thread/${post.txid}`)
       .then((b) => parsePeckFeed({ data: (b as { replies?: unknown })?.replies }))

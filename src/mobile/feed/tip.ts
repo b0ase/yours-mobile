@@ -1,6 +1,6 @@
 import { OP, P2PKH, Script, Utils, type Transaction } from '@bsv/sdk';
 import { decodeScript, isTxid, MAP_PREFIX } from './post';
-import { FEED_APP, type Source } from './sources';
+import { FEED_APP, SOURCE_REGISTRY, type Source } from './sources';
 
 /**
  * bChat tips and paid likes (bit-sign docs/BCHAT-PROTOCOL-v2-DRAFT.md §2, §5). PURE: no wallet, no network.
@@ -12,7 +12,9 @@ import { FEED_APP, type Source } from './sources';
  *   out k:   OP_FALSE OP_RETURN MAP SET app bChat type tip  v 2 context tx tx <txid> amount <A>        | AIP …
  *            OP_FALSE OP_RETURN MAP SET app bChat type like v 2 context tx tx <txid> amount <A> paid 1 | AIP …
  *   out k+1: P2PKH -> the post's author, exactly A sats
- *   then:    change (no bChat fee output)
+ *   [k+2:    P2PKH -> client fee, only with MAP fee/feeTo (bChat's is 0)]
+ *   [next:   P2PKH -> the post's HOME app, H sats, only with MAP home/homeTo (spec §6.2)]
+ *   then:    change
  */
 export const TIP_MIN_SATS = 546;
 /** Hard ceiling on one tip (1 BSV) so a typo cannot empty a wallet. */
@@ -76,10 +78,45 @@ export const clientFeeAllowed = (fee: number, amount: number): boolean =>
 export type ClientFee = { address: string; satoshis: number };
 
 /** The client fee for a payment under a fee policy (rounded down, capped); null for none. */
-export function clientFeeFor(amount: number, policy: { pct: number; address: string } = BCHAT_CLIENT_FEE): ClientFee | null {
+export function clientFeeFor(
+  amount: number,
+  policy: { pct: number; address: string } = BCHAT_CLIENT_FEE,
+): ClientFee | null {
   if (!policy.pct || !policy.address || !isP2pkhAddress(policy.address)) return null;
   const sats = Math.min(Math.floor((amount * Math.min(policy.pct, CLIENT_FEE_MAX_PCT)) / 100), CLIENT_FEE_MAX_SATS);
   return sats >= 1 ? { address: policy.address, satoshis: sats } : null;
+}
+
+/**
+ * Home app share (spec §6.2): a tip / paid like on a post from ANOTHER app adds
+ * BCHAT_HOME_SHARE_PCT % of the author amount ON TOP, as its own output, to the address that app
+ * published for itself (SOURCE_REGISTRY[source].homePayTo). Same caps as the client fee. No
+ * published address → no share, silently. Never to the author, never from the author's amount.
+ */
+export const HOME_SHARE_MAX_PCT = 5;
+export const HOME_SHARE_MAX_SATS = 10_000;
+export const BCHAT_HOME_SHARE_PCT = 5;
+export const homeShareAllowed = (home: number, amount: number): boolean =>
+  Number.isSafeInteger(home) && home >= 1 && home <= HOME_SHARE_MAX_SATS && home * 100 <= amount * HOME_SHARE_MAX_PCT;
+export type HomeShare = { address: string; satoshis: number; app: string };
+
+/** The home app's published payment address for a source, or null (none published). */
+export function homePayToOf(source: Source): string | null {
+  if (source === 'bchat' || source === 'other') return null;
+  const a = SOURCE_REGISTRY[source]?.homePayTo;
+  return a && isP2pkhAddress(a) ? a : null;
+}
+
+/** The home share for `amount` sats on a post from `source`, or null. `homeTo` overrides the registry. */
+export function homeShareFor(
+  source: Source,
+  amount: number,
+  homeTo: string | null = homePayToOf(source),
+  pct = BCHAT_HOME_SHARE_PCT,
+): HomeShare | null {
+  if (source === 'bchat' || !homeTo || !isP2pkhAddress(homeTo) || !(pct > 0)) return null;
+  const sats = Math.min(Math.floor((amount * Math.min(pct, HOME_SHARE_MAX_PCT)) / 100), HOME_SHARE_MAX_SATS);
+  return sats >= 1 ? { address: homeTo, satoshis: sats, app: SOURCE_REGISTRY[source].label } : null;
 }
 
 export function validateAmount(sats: unknown): string | null {
@@ -98,12 +135,17 @@ export function buildPayScript(
   sats: number,
   app = FEED_APP,
   fee: ClientFee | null = null,
+  home: { address: string; satoshis: number } | null = null,
 ): Script {
   if (!isTxid(txid)) throw new Error('That post id is not valid.');
   const bad = validateAmount(sats);
   if (bad) throw new Error(bad);
   if (fee && (!clientFeeAllowed(fee.satoshis, sats) || !isP2pkhAddress(fee.address)))
     throw new Error('That app fee is over the allowed cap.');
+  if (home && (!homeShareAllowed(home.satoshis, sats) || !isP2pkhAddress(home.address)))
+    throw new Error('That home app share is over the allowed cap.');
+  if (home && fee && home.address === fee.address)
+    throw new Error('The home app share and the app fee cannot share an address.');
   const kv: [string, string][] = [
     ['app', app],
     ['type', kind],
@@ -114,6 +156,7 @@ export function buildPayScript(
   ];
   if (kind === 'like') kv.push(['paid', '1']);
   if (fee) kv.push(['fee', String(fee.satoshis)], ['feeTo', fee.address]);
+  if (home) kv.push(['home', String(home.satoshis)], ['homeTo', home.address]);
   const s = new Script().writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
   pushStr(s, MAP_PREFIX);
   pushStr(s, 'SET');
@@ -124,14 +167,28 @@ export function buildPayScript(
   return s;
 }
 
-export const buildTipScript = (txid: string, sats: number, app = FEED_APP, fee: ClientFee | null = null) =>
-  buildPayScript('tip', txid, sats, app, fee);
-export const buildPaidLikeScript = (txid: string, sats: number, app = FEED_APP, fee: ClientFee | null = null) =>
-  buildPayScript('like', txid, sats, app, fee);
+type HomeOut = { address: string; satoshis: number } | null;
+export const buildTipScript = (
+  txid: string,
+  sats: number,
+  app = FEED_APP,
+  fee: ClientFee | null = null,
+  home: HomeOut = null,
+) => buildPayScript('tip', txid, sats, app, fee, home);
+export const buildPaidLikeScript = (
+  txid: string,
+  sats: number,
+  app = FEED_APP,
+  fee: ClientFee | null = null,
+  home: HomeOut = null,
+) => buildPayScript('like', txid, sats, app, fee, home);
 
 type PayOutput = { address: string; satoshis: number; lockingScript: Script };
-/** `payment` is output k+1 (the author, exactly the amount); `payment.fee`, when set, is output k+2. */
-export type PayPlan = { script: Script; payment: PayOutput & { fee?: PayOutput } };
+/**
+ * `payment` is output k+1 (the author, exactly the amount); `payment.fee`, when set, is output k+2;
+ * `payment.home`, when set, is the output after that (k+2 with no fee, k+3 with one).
+ */
+export type PayPlan = { script: Script; payment: PayOutput & { fee?: PayOutput; home?: PayOutput & { app: string } } };
 
 /**
  * Everything a wallet needs for one tip / paid like: the MAP script (output k) and the payment
@@ -142,12 +199,16 @@ export function planPayment(
   post: { txid: string; source: Source; author: { address: string } },
   sats: number,
   policy: { pct: number; address: string } = BCHAT_CLIENT_FEE,
+  opts: { homeTo?: string | null } = {},
 ): PayPlan {
   const to = payDestination(post);
   if (!to.ok) throw new Error(to.reason);
   const fee = clientFeeFor(sats, policy);
   if (fee && fee.address === to.address) throw new Error('The app fee cannot go to the author.');
-  const script = buildPayScript(kind, post.txid, sats, FEED_APP, fee);
+  let home = homeShareFor(post.source, sats, opts.homeTo === undefined ? homePayToOf(post.source) : opts.homeTo);
+  // Never to the author or the fee address: skip silently (the author is still paid in full).
+  if (home && (home.address === to.address || home.address === fee?.address)) home = null;
+  const script = buildPayScript(kind, post.txid, sats, FEED_APP, fee, home);
   return {
     script,
     payment: {
@@ -155,6 +216,7 @@ export function planPayment(
       satoshis: sats,
       lockingScript: new P2PKH().lock(to.address),
       ...(fee ? { fee: { ...fee, lockingScript: new P2PKH().lock(fee.address) } } : {}),
+      ...(home ? { home: { ...home, lockingScript: new P2PKH().lock(home.address) } } : {}),
     },
   };
 }
@@ -177,6 +239,11 @@ export type ParsedPayment = {
   feeTo: string | null;
   /** No fee declared, or output k+2 pays `feeTo` exactly `fee` within the caps. Never affects `valid`. */
   feeValid: boolean;
+  /** Declared home app share (§6.2), 0 when none; its destination. */
+  home: number;
+  homeTo: string | null;
+  /** No share declared, or the output after the fee (or k+2) pays `homeTo` exactly `home` within the caps. Never affects `valid`. */
+  homeValid: boolean;
 };
 
 const P2PKH_RE = /^76a914([0-9a-f]{40})88ac$/;
@@ -207,7 +274,35 @@ export function parsePayment(tx: Pick<Transaction, 'outputs'>): ParsedPayment | 
       const fto = fpkh ? Utils.toBase58Check(Utils.toArray(fpkh[1], 'hex'), [0]) : null;
       feeValid = !!feeTo && fto === feeTo && fo!.satoshis === fee && clientFeeAllowed(fee, amount) && feeTo !== payTo;
     }
-    return { kind, target, amount, payTo, valid, from: d.aip?.address ?? null, fee, feeTo, feeValid };
+    const home = /^[1-9]\d*$/.test(m.home ?? '') ? Number(m.home) : 0;
+    const homeTo = home ? (m.homeTo ?? '').trim() || null : null;
+    let homeValid = true;
+    if (home) {
+      const ho = tx.outputs[k + 2 + (fee ? 1 : 0)];
+      const hpkh = ho ? P2PKH_RE.exec(ho.lockingScript.toHex()) : null;
+      const hto = hpkh ? Utils.toBase58Check(Utils.toArray(hpkh[1], 'hex'), [0]) : null;
+      homeValid =
+        !!homeTo &&
+        hto === homeTo &&
+        ho!.satoshis === home &&
+        homeShareAllowed(home, amount) &&
+        homeTo !== payTo &&
+        homeTo !== feeTo;
+    }
+    return {
+      kind,
+      target,
+      amount,
+      payTo,
+      valid,
+      from: d.aip?.address ?? null,
+      fee,
+      feeTo,
+      feeValid,
+      home,
+      homeTo,
+      homeValid,
+    };
   }
   return null;
 }

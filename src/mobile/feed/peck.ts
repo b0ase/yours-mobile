@@ -34,13 +34,39 @@ export function parsePeckBody(text: string): unknown {
   return JSON.parse(text.replace(/[\u0000-\u001f]/g, ' '));
 }
 
+/** The overlay's MAP app for Treechat (bmap, our old Treechat source, stopped at block ~944922). */
+export const TREECHAT_OVERLAY_APP = 'treechat';
+
 export function parsePeckItem(item: unknown): FeedPost | null {
+  return parseOverlayItem(item, 'peck');
+}
+
+/**
+ * A Treechat post from the overlay. Treechat relays everyone through one shared key, so the
+ * author is a `treechat:` key named by the MAP username (`display_name`) — never payable, and
+ * tip.payDestination refuses source 'treechat' anyway. The overlay does not return MAP
+ * treechat_thread_id (the original-post link): treechat.ts reads it from the raw tx.
+ * Replies point `parent_txid` at the post they answer (MAP context=tx), which may itself be a
+ * reply — a Treechat conversation is a tree, rebuilt by upstream.loadThread.
+ */
+export function parseTreechatOverlayItem(item: unknown): FeedPost | null {
+  return parseOverlayItem(item, 'treechat');
+}
+
+/** Any overlay item we read: Peck or Treechat by its MAP app; anything else null. */
+export function parseOverlayAny(item: unknown): FeedPost | null {
+  return parsePeckItem(item) ?? parseTreechatOverlayItem(item);
+}
+
+function parseOverlayItem(item: unknown, kind: 'peck' | 'treechat'): FeedPost | null {
   const p = asRec(item);
   const txid = asStr(p.txid).toLowerCase();
   const type = asStr(p.type);
   if (!isTxid(txid) || (type !== 'post' && type !== 'reply')) return null;
   const app = asStr(p.app).trim();
-  if (!app.toLowerCase().startsWith('peck')) return null;
+  const lapp = app.toLowerCase();
+  if (kind === 'peck' ? !lapp.startsWith('peck') : lapp !== TREECHAT_OVERLAY_APP && !lapp.startsWith('treechat_'))
+    return null;
   const mime = asStr(p.media_type).toLowerCase();
   const raw = asStr(p.content);
   if (mime && !mime.startsWith('text/')) return null; // image bodies arrive as "HEX:…"
@@ -51,6 +77,21 @@ export function parsePeckItem(item: unknown): FeedPost | null {
   const verified = p.aip_verified === true && isP2pkhAddress(signer);
   const parent = asStr(p.parent_txid).toLowerCase();
   const at = Date.parse(asStr(p.timestamp));
+  const name = asStr(p.display_name).trim().slice(0, 60);
+  const author =
+    kind === 'treechat'
+      ? {
+          address: `treechat:${(name || signer).toLowerCase().slice(0, 80)}`,
+          bapId: null,
+          name: name || 'Treechat user',
+          avatar: null,
+        }
+      : {
+          address: verified ? signer : `peck:${signer.slice(0, 80)}`,
+          bapId: null,
+          name: name || (signer ? shortAddress(signer) : 'Peck user'),
+          avatar: null,
+        };
   return {
     txid,
     text: fromText.text.slice(0, MAX_POST_CHARS * 2),
@@ -58,15 +99,10 @@ export function parsePeckItem(item: unknown): FeedPost | null {
     media: fromText.media,
     links: fromText.links,
     app,
-    source: 'peck',
+    source: kind,
     threadId: null,
     replyTo: isTxid(parent) ? parent : null,
-    author: {
-      address: verified ? signer : `peck:${signer.slice(0, 80)}`,
-      bapId: null,
-      name: asStr(p.display_name).trim().slice(0, 60) || (signer ? shortAddress(signer) : 'Peck user'),
-      avatar: null,
-    },
+    author,
     at: Number.isFinite(at) ? at : 0,
     likes: Number(p.like_count) || 0,
     replies: Number(p.reply_count) || 0,
@@ -75,13 +111,25 @@ export function parsePeckItem(item: unknown): FeedPost | null {
 
 /** An overlay /v1/feed body → Peck posts (reposts, images and non-Peck apps dropped). */
 export function parsePeckFeed(body: unknown): FeedPost[] {
+  return parseOverlayFeed(body, parsePeckItem);
+}
+
+/** An overlay /v1/feed?app=treechat body → Treechat posts. */
+export function parseTreechatOverlayFeed(body: unknown): FeedPost[] {
+  return parseOverlayFeed(body, parseTreechatOverlayItem);
+}
+
+function parseOverlayFeed(body: unknown, parse: (item: unknown) => FeedPost | null): FeedPost[] {
   const data = asRec(body).data;
   if (!Array.isArray(data)) return [];
   const seen = new Set<string>();
   const out: FeedPost[] = [];
   for (const item of data) {
-    const p = parsePeckItem(item);
-    if (p && !seen.has(p.txid)) { seen.add(p.txid); out.push(p); }
+    const p = parse(item);
+    if (p && !seen.has(p.txid)) {
+      seen.add(p.txid);
+      out.push(p);
+    }
   }
   return out;
 }

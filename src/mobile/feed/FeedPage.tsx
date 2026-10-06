@@ -476,7 +476,10 @@ const ShowAnyway = ({ onShow }: { onShow: () => void }) => (
 const PostCard = ({ post, a }: { post: FeedPost; a: PostActions }) => {
   const [prefs] = usePrefs();
   const [revealed, setRevealed] = useState(false);
-  const view = languageView(post.language !== undefined ? post.language : languageOf(post.text), languageOptsFor(prefs));
+  const view = languageView(
+    post.language !== undefined ? post.language : languageOf(post.text),
+    languageOptsFor(prefs),
+  );
   if ((view === 'hide' || view === 'hide-final') && !revealed)
     return (
       <div
@@ -873,7 +876,13 @@ const Composer = ({
 
   return (
     <Sheet
-      title={replyTo ? `Reply to ${safeName(replyTo.author.name)}` : quote ? `Quote ${safeName(quote.author.name)}` : 'New post'}
+      title={
+        replyTo
+          ? `Reply to ${safeName(replyTo.author.name)}`
+          : quote
+            ? `Quote ${safeName(quote.author.name)}`
+            : 'New post'
+      }
       onClose={onClose}
     >
       {(replyTo ?? quote) && (
@@ -1167,8 +1176,8 @@ const LockSheet = ({
   return (
     <Sheet title="Lock BSV to back this post" onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back {safeName(post.author.name)}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet,
-        and the post shows how much is locked behind it.
+        Back {safeName(post.author.name)}'s post with your own coins. Nothing is sent to anyone: the BSV is locked in
+        your wallet, and the post shows how much is locked behind it.
       </p>
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
       <div className="flex gap-2">
@@ -1795,7 +1804,10 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
             );
           })}
           {more.source !== 'treechat' && isMe(more.author, myKeys) && (
-            <button onClick={() => void hideMine(more)} className="w-full flex items-center gap-3 py-3 text-sm text-white">
+            <button
+              onClick={() => void hideMine(more)}
+              className="w-full flex items-center gap-3 py-3 text-sm text-white"
+            >
               <EyeOff size={18} color={MUTED} />
               Hide my post
             </button>
