@@ -59,5 +59,7 @@ describe('Continue with X (bWalletX own OAuth)', () => {
     expect(evil.startsWith('https://www.bwallet.space/social#')).toBe(true);
     const cancelled = await social.callback('x', { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'web' }), error: 'access_denied' }, ENV);
     expect(cancelled).toBe('https://web.bwalletx.com/#error=cancelled');
+    const testers = await social.callback('x', { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'testers' }), code: 'c' }, ENV, fakeX);
+    expect(testers.startsWith('https://bwalletx.com/testers#')).toBe(true);
   });
 });

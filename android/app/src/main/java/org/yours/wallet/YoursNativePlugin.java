@@ -594,6 +594,21 @@ public class YoursNativePlugin extends Plugin {
         });
     }
 
+    /** Tester check-ins (src/mobile/testers/checkin.ts): who installed this app; com.android.vending = Google Play. */
+    @PluginMethod
+    public void installerPackage(PluginCall call) {
+        String installer = null;
+        try {
+            android.content.pm.PackageManager pm = getContext().getPackageManager();
+            String pkg = getContext().getPackageName();
+            if (android.os.Build.VERSION.SDK_INT >= 30) installer = pm.getInstallSourceInfo(pkg).getInstallingPackageName();
+            else installer = pm.getInstallerPackageName(pkg);
+        } catch (Exception ignored) {}
+        JSObject out = new JSObject();
+        out.put("installer", installer);
+        call.resolve(out);
+    }
+
     /** bWallet calls: loudspeaker on/off for WebRTC audio (src/mobile/calls/media.ts). */
     @PluginMethod
     public void audioSetSpeaker(PluginCall call) {

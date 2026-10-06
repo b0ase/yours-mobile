@@ -67,11 +67,13 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
 // Where the browser lands after the provider. A fixed list, never a caller-supplied URL (no open redirect).
 // 'web': the web wallet, in the same tab it started from (owner, 6 Oct 2026: the return page stranded web
 // users on "you're signed in" with no way back to the wallet tab).
-const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/' };
+// 'testers': the paid Android testers sign-up page (bwalletx.com/testers); the ticket is verified there
+// server-side via /api/social/preview.
+const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/', testers: 'https://bwalletx.com/testers' };
 const returnUrl = (q, to = 'app') => `${RETURNS[to] || RETURN}#${new URLSearchParams(q).toString()}`;
 
 function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {
-  const r = return_to === 'web' ? 'web' : undefined;
+  const r = return_to === 'web' || return_to === 'testers' ? return_to : undefined;
   if (provider !== 'x' && provider !== 'google') return [400, { error: 'provider must be x or google' }];
   if (!/^[0-9a-f]{64}$/.test(String(vh || ''))) return [400, { error: 'verifier_hash must be sha256 hex' }];
   const e = now + TTL_MS;
@@ -109,7 +111,7 @@ function start({ provider, verifier_hash: vh, return_to }, env = process.env, no
 async function callback(provider, q, env = process.env, f = fetch, now = Date.now()) {
   const st = open(q.state, env);
   if (!st || st.p !== provider || !(st.e > now)) return returnUrl({ error: 'That sign-in has expired. Please try again.' });
-  const to = st.r === 'web' ? 'web' : 'app';
+  const to = st.r === 'web' || st.r === 'testers' ? st.r : 'app';
   if (q.error || !q.code) return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
   try {
     let user;

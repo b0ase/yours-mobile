@@ -38,6 +38,8 @@ export interface YoursNativePlugin {
   browserRespond(opts: { requestId: string; response: string }): Promise<void>;
   /** Dispatch a provider event (account/network change) into the page. */
   browserEmit(opts: { event: string; detail: string }): Promise<void>;
+  /** Android: the package that installed this app (com.android.vending = Google Play); null if unknown. */
+  installerPackage(): Promise<{ installer: string | null }>;
 
   /** bWallet calls: route call audio to the loudspeaker (true) or the earpiece (false). */
   audioSetSpeaker(opts: { on: boolean }): Promise<void>;
@@ -82,6 +84,9 @@ const web: Partial<YoursNativePlugin> = {
   async browserRespond() {},
   async browserEmit() {},
   async audioSetSpeaker() {},
+  async installerPackage() {
+    return { installer: null };
+  },
 };
 
 export const YoursNative = registerPlugin<YoursNativePlugin>('YoursNative', {

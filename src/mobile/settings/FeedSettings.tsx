@@ -36,6 +36,8 @@ import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
 import { PushSettings } from '../push/PushSettings';
+import { TesterSettings } from '../testers/TesterSettings';
+import { testersEnabled } from '../testers/checkin';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
 
@@ -659,6 +661,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               isLast
             />
           </Section>
+          {testersEnabled() && (
+            <Section title="Testing">
+              <TesterSettings />
+            </Section>
+          )}
           <AgentSettings Section={Section} Row={Row} Divider={Divider} />
           <Section title="Privacy">
             <Row
