@@ -94,10 +94,12 @@
     "release:android-play": "bash scripts/channel-build.sh android-play",
     "release:android-direct": "bash scripts/channel-build.sh android-direct",
     "pin:upstream": "tsx scripts/pin-from-bun-lock.ts && pnpm install",
-    "add-app": "node scripts/add-app.mjs"
+    "add-app": "node scripts/add-app.mjs",
+    "lint": "eslint src"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
+    "@eslint/js": "^9.39.5",
     "@tailwindcss/vite": "^4.2.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -113,6 +115,10 @@
     "@vitejs/plugin-react": "^5.1.2",
     "chalk": "^5.6.2",
     "crypto-browserify": "^3.12.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
     "husky": "^9.1.6",
     "prettier": "3.8.3",
     "process": "^0.11.10",
@@ -121,6 +127,7 @@
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.5.4",
+    "typescript-eslint": "^8.71.1",
     "vite": "^7.3.0",
     "vite-plugin-node-polyfills": "^0.24.0"
   },
