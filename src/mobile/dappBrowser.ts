@@ -24,6 +24,13 @@ export const lastUrlFor = (origin: string) => lastUrls.get(origin);
 export const isDappBrowserOpen = () => open;
 
 export const openDappBrowser = async (url: string) => {
+  // Web wallet and extension: no in-app browser, and dapp-provider.js isn't in those builds. Open a tab
+  // straight away, inside the tap, or Safari's pop-up blocker eats it (owner, 6 Oct 2026: ChangeNOW and
+  // Alchemy Pay "don't open anything" on the web).
+  if (!isNative) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
   providerSource ??= fetch(new URL('dapp-provider.js', document.baseURI)).then((r) => {
     if (!r.ok) throw new Error('dapp-provider.js missing from the app bundle');
     return r.text();
