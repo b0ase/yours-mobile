@@ -56,3 +56,7 @@ Screen Shot*.png
 /s[0-9]*.png
 *.screenshot.png
 _HOT.md
+
+# Firebase config for push (owner keeps it in ~/Secrets/bwalletx-push/; scripts copy it in). Never commit: the repo is public.
+google-services.json
+GoogleService-Info.plist

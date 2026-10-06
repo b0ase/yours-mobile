@@ -41,6 +41,10 @@ retry() {
 }
 trap restore EXIT
 
+# Push (FCM): google-services.json is gitignored (public repo); copy it in from the owner's secrets if missing.
+GS=$HOME/Secrets/bwalletx-push/google-services.json
+[[ -f android/app/google-services.json || ! -f $GS ]] || cp "$GS" android/app/google-services.json
+
 echo "▸ web build ($CH)"
 VITE_CHANNEL=$CH VITE_STORE_BUILD=${STORE:+1} pnpm build:mobile >/dev/null
 pnpm exec cap sync >/dev/null
