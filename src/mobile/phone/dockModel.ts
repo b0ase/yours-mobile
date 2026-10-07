@@ -14,7 +14,13 @@ export type DockItem =
   | { kind: 'app'; url: string; name: string; icon?: string };
 export type DockState = { v: 1; items: DockItem[] };
 
-export const DOCK_MAX = 12;
+/** Like the iPhone: four slots plus the fixed centre b (owner, round 4). */
+export const DOCK_MAX = 4;
+/**
+ * A dock saved before the 4-slot limit may hold more (up to the old 12): it is kept as the user left it (never
+ * trimmed, so nothing is lost); adding is refused until it is under DOCK_MAX.
+ */
+export const DOCK_LOAD_MAX = 12;
 /** Slots left of the b. The rest sit right of it and scroll. */
 export const DOCK_LEFT = 2;
 export const DOCK_KEY = 'bwallet:dock:v1';
@@ -57,7 +63,7 @@ const valid = (x: unknown): x is DockItem => {
   return false;
 };
 
-/** Clean a list: unknown and duplicate items dropped, store-disallowed items dropped, capped at DOCK_MAX. */
+/** Clean a list: unknown and duplicate items dropped, store-disallowed items dropped, capped at DOCK_LOAD_MAX. */
 export const cleanDock = (items: readonly unknown[], store = STORE_BUILD): DockItem[] => {
   const seen = new Set<string>();
   const out: DockItem[] = [];
@@ -72,7 +78,7 @@ export const cleanDock = (items: readonly unknown[], store = STORE_BUILD): DockI
     seen.add(k);
     out.push(item);
   }
-  return dockItemsFor(out, store).slice(0, DOCK_MAX);
+  return dockItemsFor(out, store).slice(0, DOCK_LOAD_MAX);
 };
 
 /**
@@ -120,6 +126,23 @@ export const addable = (items: readonly DockItem[], screens: readonly { id: Scre
     ...ACTIONS.map((id): DockItem => ({ kind: 'action', id })),
     ...screens.map((s): DockItem => ({ kind: 'screen', id: s.id })),
   ].filter((c) => !items.some((i) => sameItem(i, c)));
+
+/**
+ * iPhone model (owner, round 4): Wallet, Exchange, Feed, Chat (and Apps in a store build) are ordinary Home
+ * tiles that sit in the dock by default. Each is shown in exactly one place: the dock, or the Home grid. So
+ * Wallet is never lost: off the dock it is a Home tile.
+ */
+export const HOME_SCREEN_IDS: readonly ScreenId[] = ['wallet', 'exchange', 'apps', 'feed', 'chat'];
+
+/** The screen tiles the Home grid shows: those not in the dock, for this build's strip. Wallet first. */
+export const homeScreenTiles = (items: readonly DockItem[], strip: readonly { id: ScreenId }[]): ScreenId[] =>
+  HOME_SCREEN_IDS.filter(
+    (id) => strip.some((s) => s.id === id) && !items.some((i) => i.kind === 'screen' && i.id === id),
+  ).filter((id) => id !== 'apps' || !strip.some((s) => s.id === 'exchange'));
+
+/** App URLs in the dock: the Home grid leaves them out. */
+export const dockAppUrls = (items: readonly DockItem[]): Set<string> =>
+  new Set(items.flatMap((i) => (i.kind === 'app' ? [i.url] : [])));
 
 /** Split for the layout: the first DOCK_LEFT slots sit left of the b, the rest right of it (scrolling). */
 export const splitDock = <T>(items: readonly T[]): { left: T[]; right: T[] } => ({
