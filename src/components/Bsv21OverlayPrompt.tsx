@@ -12,8 +12,9 @@ import { PageLoader } from './PageLoader';
  * - not-valid: the overlay does not recognize enough of the outputs
  * - not-found: the overlay has never seen the token
  * - unseen: the overlay has not seen some of the outputs yet (e.g. just received)
+ * - stale: the wallet lists outputs the overlay says are already spent
  */
-export type Bsv21OverlayIssue = 'not-active' | 'queued' | 'not-valid' | 'not-found' | 'unseen';
+export type Bsv21OverlayIssue = 'not-active' | 'queued' | 'not-valid' | 'not-found' | 'unseen' | 'stale';
 
 export type Bsv21OverlayPromptProps = {
   show: boolean;
@@ -51,6 +52,11 @@ const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
       return {
         title: 'Not validated yet',
         body: `The overlay hasn't picked up some of your ${tokenName} yet. This is normal right after tokens arrive or the overlay is funded. Wait a few minutes and try again.`,
+      };
+    case 'stale':
+      return {
+        title: 'Wallet out of date',
+        body: `Your ${tokenName} are fine, but this wallet's copy of them is out of date: it still lists tokens that were already sent. Go to Settings > Troubleshooting and tap Repair Sync, then try again.`,
       };
     case 'not-found':
       return {

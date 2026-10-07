@@ -13,9 +13,17 @@ describe('classifyBsv21Shortfall', () => {
     );
   });
 
-  test('invalid or spent outputs are not-valid', () => {
+  test('outputs the overlay says are already spent mean a stale local list', () => {
+    // TERANODE, 7 Oct 2026: the wallet still listed the spent deploy output (21M)
+    // instead of the valid change 75f04ce8…_1, and the user saw "Tokens not validated".
+    expect(classifyBsv21Shortfall([{ amount: 21_000_000n, state: 'spent' }], 1000n)).toBe('stale');
+    expect(classifyBsv21Shortfall([{ amount: 400n, state: 'valid' }, { amount: 5000n, state: 'spent' }], 1000n)).toBe(
+      'stale',
+    );
+  });
+
+  test('invalid outputs are not-valid', () => {
     expect(classifyBsv21Shortfall([{ amount: 5000n, state: 'invalid' }], 1000n)).toBe('not-valid');
-    expect(classifyBsv21Shortfall([{ amount: 5000n, state: 'spent' }], 1000n)).toBe('not-valid');
     expect(classifyBsv21Shortfall([{ amount: 100n, state: 'unknown' }], 1000n)).toBe('not-valid');
   });
 });
