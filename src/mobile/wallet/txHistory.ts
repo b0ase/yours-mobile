@@ -24,7 +24,17 @@ export type RawTx = {
 };
 
 /** What the app knows about a txid from its own records. */
-export type LocalInfo = { description?: string; labels?: string[]; kind?: string };
+export type LocalInfo = {
+  description?: string;
+  labels?: string[];
+  kind?: string;
+  /**
+   * The BRC-100 wallet's own net change for this action (listActions `satoshis`: + in, - out, fee included).
+   * The wallet's coins sit on keys it derives per payment, not on the account's fixed addresses, so for a
+   * tx it funded this is the only place the amount shows up.
+   */
+  satoshis?: number;
+}
 
 export type HistoryRow = {
   txid: string;
@@ -113,6 +123,7 @@ export const classify = (
   prev: Map<string, { sats: number; address: string }>,
   local?: LocalInfo,
   now = Date.now(),
+  inputValues?: Map<string, number>,
 ): HistoryRow => {
   let ownIn = 0;
   let allInputsOwn = tx.vin.length > 0;
@@ -150,6 +161,33 @@ export const classify = (
     direction = net >= 0 ? 'in' : 'out';
     amountSats = net;
   }
+  // The BRC-100 wallet funded it from its derived keys (nothing spent from our fixed addresses): the wallet's
+  // own figure is the balance change. Fee = inputs - outputs when every input's value is known.
+  if (ownIn === 0 && local?.satoshis !== undefined && local.satoshis !== 0) {
+    let inSum = 0;
+    let known = tx.vin.length > 0;
+    for (const i of tx.vin) {
+      const v = i.txid !== undefined && i.vout !== undefined ? inputValues?.get(`${i.txid}:${i.vout}`) : undefined;
+      if (v === undefined) known = false;
+      else inSum += v;
+    }
+    const net = local.satoshis;
+    const walletFee = net < 0 && known ? Math.max(0, Math.min(-net, inSum - totalOut)) : 0;
+    direction = net >= 0 ? 'in' : 'out';
+    amountSats = net + walletFee;
+    return {
+      txid: tx.txid,
+      time: tx.time ? tx.time * 1000 : now,
+      direction,
+      amountSats,
+      feeSats: walletFee,
+      counterparty: net < 0 ? counterparty : '',
+      label: labelFor(direction, local, tx),
+      note: local.description ?? '',
+      blockHeight: tx.blockHeight,
+      confirmations: tx.confirmations ?? 0,
+    };
+  }
   const fromMatch = local?.description?.match(/from\s+(\S+@\S+|\$\S+)/i);
   if (direction === 'in' && fromMatch) counterparty = fromMatch[1];
   return {
@@ -167,12 +205,36 @@ export const classify = (
 };
 
 /** Newest first; txs seen on several of our addresses appear once. */
-export const buildRows = (txs: RawTx[], own: Set<string>, local: Map<string, LocalInfo>, now = Date.now()) => {
+export const buildRows = (
+  txs: RawTx[],
+  own: Set<string>,
+  local: Map<string, LocalInfo>,
+  now = Date.now(),
+  /** Values of other outputs our txs spend (`txid:vout` → sats), for the fee of wallet-funded txs. */
+  extraValues: Map<string, number> = new Map(),
+) => {
   const uniq = new Map<string, RawTx>();
   for (const t of txs) if (!uniq.has(t.txid)) uniq.set(t.txid, t);
   const list = [...uniq.values()];
   const prev = ownOutputs(list, own);
-  return list.map((t) => classify(t, own, prev, local.get(t.txid), now)).sort((a, b) => b.time - a.time);
+  const values = new Map(extraValues);
+  for (const t of list) for (const o of t.vout) values.set(`${t.txid}:${o.n}`, o.sats);
+  return list.map((t) => classify(t, own, prev, local.get(t.txid), now, values)).sort((a, b) => b.time - a.time);
+};
+
+/** Txs the wallet funded whose inputs come from txs we have not loaded: fetch these to know the fee. */
+export const missingParents = (txs: RawTx[], local: Map<string, LocalInfo>) => {
+  const have = new Set(txs.map((t) => t.txid));
+  const need = new Set<string>();
+  for (const t of txs)
+    if ((local.get(t.txid)?.satoshis ?? 0) < 0) for (const i of t.vin) if (i.txid && !have.has(i.txid)) need.add(i.txid);
+  return [...need];
+};
+
+/** The "for N sats" a purchase description states: a cross-check only, never the amount. */
+export const statedPriceSats = (description: string | undefined) => {
+  const m = description?.match(/\bfor (\d+) sats?\b/i);
+  return m ? Number(m[1]) : undefined;
 };
 
 // ─── Date ranges ─────────────────────────────────────────────────────────────

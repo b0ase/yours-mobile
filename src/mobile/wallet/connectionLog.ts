@@ -102,7 +102,7 @@ const hostOf = (o: string) => {
 };
 
 /** Merge the recorded log, the BRC-100 grants and the account's history into one row per app (pure). */
-export const mergeConnections = (log: ConnectionLog, groups: PermissionGroup[], rows: HistoryRow[]): ConnectionRow[] => {
+export const mergeConnections = (log: ConnectionLog, groups: PermissionGroup[], rows: HistoryRow[], seen: string[] = []): ConnectionRow[] => {
   const m = new Map<string, ConnectionRow>();
   const get = (host: string) => {
     let r = m.get(host);
@@ -128,7 +128,15 @@ export const mergeConnections = (log: ConnectionLog, groups: PermissionGroup[], 
       if (t === 'spending' && typeof p.authorizedAmount === 'number') r.spendLimitSats = (r.spendLimitSats ?? 0) + p.authorizedAmount;
     }
   }
-  for (const x of rows) if (x.app) get(x.app).spentSats += Math.max(0, -(x.amountSats - x.feeSats));
+  for (const x of rows)
+    if (x.app) {
+      const r = get(x.app);
+      r.spentSats += Math.max(0, -(x.amountSats - x.feeSats));
+      if (x.amountSats < 0 && !log[x.app]?.payments.some((p) => p.txid === x.txid)) r.payments += 1;
+      r.firstSeen = Math.min(r.firstSeen ?? x.time, x.time);
+      r.lastSeen = Math.max(r.lastSeen ?? x.time, x.time);
+    }
+  for (const h of seen) get(h);
   return [...m.values()].sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0) || a.host.localeCompare(b.host));
 };
 
@@ -165,6 +173,50 @@ export const updateConnectionLog = (fn: (l: ConnectionLog) => ConnectionLog) => 
       /* the log must never break a wallet call */
     });
   return chain;
+};
+
+/**
+ * Apps built into the wallet (TokenBlaster, the Market, bChat…) call the wallet from the page itself, not through
+ * background.ts, so background never logged them (owner, 8 Oct 2026: Connections empty on iPhone). They log here.
+ * Never throws and never waits on the wallet call.
+ */
+export const logInWalletApp = (app: string, method: string, payment?: Omit<AppPayment, 'at'>) => {
+  const now = Date.now();
+  void updateConnectionLog((l) => {
+    const next = recordCall(l, app, method, now);
+    return payment?.txid ? recordPayment(next, app, { ...payment, at: now }) : next;
+  });
+};
+
+/**
+ * Apps this device has opened, from what the dApp browser and bApp frames already keep (recent sites, per-app
+ * layout): a backfill for use before the log existed. Pure: takes the localStorage entries.
+ */
+export const deviceAppHosts = (entries: [string, string | null][]): string[] => {
+  const out = new Set<string>();
+  for (const [k, v] of entries) {
+    if (k.startsWith('bwallet.appLayout.')) out.add(hostOf(k.slice('bwallet.appLayout.'.length)));
+    if (k === 'bwallet:recent-sites' && v)
+      try {
+        for (const u of JSON.parse(v) as unknown[]) if (typeof u === 'string' && /^https?:\/\//.test(u)) out.add(hostOf(u));
+      } catch {
+        /* not ours to fix */
+      }
+  }
+  return [...out].filter(Boolean);
+};
+
+export const readDeviceAppHosts = (): string[] => {
+  try {
+    const entries: [string, string | null][] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) entries.push([k, localStorage.getItem(k)]);
+    }
+    return deviceAppHosts(entries);
+  } catch {
+    return [];
+  }
 };
 
 /** Forget one app's log (after the user revokes it, if they ask to). */

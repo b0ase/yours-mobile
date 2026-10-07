@@ -10,7 +10,7 @@
  *  - Mint: cost = BSV spent on it.  Listing, cancelling, own-wallet transfers: not disposals.
  */
 import { csvField, BOM, type HistoryRow } from './txHistory';
-import { NOT_TAX_ADVICE, taxYearOf, type Disposal, type LedgerEvent } from './gains';
+import { GAINS_BETA, NOT_TAX_ADVICE, taxYearOf, type Disposal, type LedgerEvent } from './gains';
 
 export type Overrides = {
   /** txids the user marked as a move between their own wallets. */
@@ -70,7 +70,7 @@ export const buildLedger = (
     };
     const bsv = (side: LedgerEvent['side'], sats: number) => ev('BSV', 'BSV', side, sats, val(sats));
     const key = assetKeyOf(r);
-    const qty = r.asset ? (r.asset.kind === 'nft' ? 1 : Number(r.asset.qty)) : 0;
+    const qty = r.asset ? (r.asset.kind === 'nft' ? 1 : Number(r.asset.qty) / 10 ** (r.asset.dec ?? 0)) : 0;
     const assetOk = !!r.asset && r.asset.id !== '' && Number.isFinite(qty) && qty > 0;
     const entered = ovr.lotValue[`${r.txid}|${key}`];
     const spent = Math.max(0, -r.amountSats) + r.feeSats;
@@ -132,7 +132,7 @@ export const GAINS_CSV_COLUMNS = [
 ] as const;
 
 export const gainsCsv = (ds: Disposal[], opts: { uk: boolean; currency: string; method: string }) => {
-  const lines = [GAINS_CSV_COLUMNS.join(',')];
+  const lines = [csvField(GAINS_BETA), GAINS_CSV_COLUMNS.join(',')];
   for (const d of ds) {
     const rules = [...new Set(d.matches.map((m) => m.rule))].join('+');
     const acquired = [...new Set(d.matches.map((m) => m.acquiredOn).filter(Boolean))].join(' ');

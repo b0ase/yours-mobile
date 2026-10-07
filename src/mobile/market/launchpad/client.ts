@@ -10,6 +10,7 @@ import { ONESAT, bsv21, noteFor, tokenCoins, tokenSpends } from './tokens';
 import { exactBsv, exactTokens } from './curve';
 import { matchesPlan, type TradePlan } from './shape';
 import { BLASTPAD } from './api';
+import { logInWalletApp } from '../../wallet/connectionLog';
 import { PlanError, checkSellPayout, minimums, payoutOutput, validatePlan, type CheckedPlan } from './validate';
 
 /** The trader: the active account's in-app BRC-100 wallet, its BSV address and identity key. */
@@ -237,6 +238,12 @@ export async function executeTrade(p: PreparedTrade, onStatus?: (s: string) => v
       onStatus?.('Sending…');
       const done = await w.client.signAction({ reference: signable.reference, spends });
       sent = true;
+      // History › Connections: in-wallet apps don't pass through background.ts, so log here.
+      logInWalletApp('tokenblaster', 'createAction', {
+        txid: done.txid ?? tx.id('hex'),
+        sats: side === 'buy' ? Number(q.userSats) : 0,
+        description: `${side} $${coin.sym}`,
+      });
       let finalTx: number[];
       if (done.tx) finalTx = Array.from(done.tx);
       else {

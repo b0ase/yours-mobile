@@ -1,4 +1,5 @@
 import { Beef } from '@bsv/sdk';
+import { logInWalletApp } from '../wallet/connectionLog';
 
 /**
  * The 1Sat APIs and our Market use `txid_vout` outpoints, but buyBsv21 and
@@ -42,6 +43,7 @@ const pushSize = (n: number) => n + (n < 0x4c ? 1 : n <= 0xff ? 2 : n <= 0xffff 
 const serOutput = (scriptHexLen: number) => 8 + varIntSize(scriptHexLen / 2) + scriptHexLen / 2;
 
 type CreateArgs = {
+  description?: string;
   inputBEEF?: number[] | Uint8Array;
   inputs?: Array<{ outpoint: string; unlockingScriptLength?: number }>;
   outputs?: Array<{ lockingScript: string }>;
@@ -86,8 +88,12 @@ export const purchaseContext = <C extends { wallet: W }, W extends WalletLike>(c
   const wallet = new Proxy(ctx.wallet, {
     get(target, prop, receiver) {
       if (prop === 'createAction')
-        return (args: CreateArgs, originator?: string) =>
-          target.createAction(withUnlockRoom(args, outpoint) as never, originator);
+        return async (args: CreateArgs, originator?: string) => {
+          const r = (await target.createAction(withUnlockRoom(args, outpoint) as never, originator)) as { txid?: string } | undefined;
+          // History › Connections: the in-wallet Market calls the wallet from the page, not via background.ts.
+          logInWalletApp('1sat.market', 'createAction', r?.txid ? { txid: r.txid, sats: 0, description: args.description?.slice(0, 120) } : undefined);
+          return r;
+        };
       const v = Reflect.get(target, prop, receiver);
       return typeof v === 'function' ? v.bind(target) : v;
     },

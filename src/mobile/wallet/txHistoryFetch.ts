@@ -127,7 +127,7 @@ type ListActions = (args: {
   includeLabels?: boolean;
   limit?: number;
   offset?: number;
-}) => Promise<{ totalActions: number; actions: { txid: string; description?: string; labels?: string[] }[] }>;
+}) => Promise<{ totalActions: number; actions: { txid: string; description?: string; labels?: string[]; satoshis?: number }[] }>;
 
 /** Every action the wallet logged (description + labels), by txid. Never throws. */
 export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
@@ -136,7 +136,8 @@ export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
   try {
     for (let offset = 0; offset < 100_000; offset += 1000) {
       const r = await listActions({ labels: [], includeLabels: true, limit: 1000, offset });
-      for (const a of r.actions) m.set(a.txid, { description: a.description, labels: a.labels });
+      for (const a of r.actions)
+        m.set(a.txid, { description: a.description, labels: a.labels, ...(typeof a.satoshis === 'number' ? { satoshis: a.satoshis } : {}) });
       if (r.actions.length < 1000 || offset + 1000 >= r.totalActions) break;
     }
   } catch {
@@ -150,13 +151,13 @@ export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
  * BSV-20 ticks are their own name.
  */
 export const fetchTokenSymbols = async (ids: string[]) => {
-  const m = new Map<string, string>();
+  const m = new Map<string, { sym?: string; dec?: number }>();
   for (const id of ids.filter((x) => /^[0-9a-f]{64}_\d+$/.test(x)).slice(0, 60)) {
     try {
       const r = await fetch(`https://ordinals.gorillapool.io/api/bsv20/id/${id}`);
       if (!r.ok) continue;
-      const j = (await r.json()) as { sym?: string };
-      if (j.sym) m.set(id, j.sym);
+      const j = (await r.json()) as { sym?: string; dec?: number };
+      m.set(id, { sym: j.sym, dec: typeof j.dec === 'number' ? j.dec : undefined });
     } catch {
       /* names are a nice-to-have */
     }
