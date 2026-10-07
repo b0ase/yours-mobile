@@ -22,12 +22,13 @@ import {
   Bot,
   ScanLine,
   EyeOff,
+  PiggyBank,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
-import { isBWalletX, languageSettingsEnabled, socialLoginEnabled } from '../storeBuild';
+import { isBWalletX, languageSettingsEnabled, potsEnabled, socialLoginEnabled } from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -42,6 +43,7 @@ import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
+const PotsScreen = lazy(() => import('../pots/PotsScreen'));
 import { TermsScreen } from '../ugc/UgcSheets';
 import { SUPPORT_EMAIL } from '../ugc/ugc';
 import { DeleteAccountScreen } from '../account/DeleteAccountScreen';
@@ -374,6 +376,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'password'
     | 'social'
     | 'agents'
+    | 'pots'
     | 'push'
     | null
   >(null);
@@ -555,6 +558,18 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               />
             </div>
           </Section>
+          {potsEnabled() && (
+            <Section title="Pots">
+              <Row
+                icon={<PiggyBank size={16} />}
+                label="Pots and standing orders"
+                description="Money set aside in its own pot, with regular payments from it. Pause any time."
+                onClick={() => setScreen('pots')}
+                isFirst
+                isLast
+              />
+            </Section>
+          )}
           {isBWalletX() && (
             <Section title="Agents">
               <Row
@@ -745,6 +760,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />
         </Screen>
+      )}
+      {screen === 'pots' && (
+        <Suspense fallback={null}>
+          <PotsScreen onClose={() => setScreen(null)} />
+        </Suspense>
       )}
       {screen === 'scan' && (
         <Suspense fallback={null}>

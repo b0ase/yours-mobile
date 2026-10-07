@@ -12,7 +12,7 @@ import {
   allAgentsStopped,
   getAgentAccount,
   getAgentLog,
-  listAgentAccounts,
+  listAgentsOnly,
   onAgentsChange,
   setAgentDailyCap,
   setAgentLabels,
@@ -65,7 +65,7 @@ const Switch = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
   </button>
 );
 
-export const AgentBadge = ({ stopped = false }: { stopped?: boolean }) => (
+export const AgentBadge = ({ stopped = false, label = 'AGENT' }: { stopped?: boolean; label?: string }) => (
   <span
     className="text-[9px] font-bold rounded px-1.5 py-0.5"
     style={{
@@ -74,7 +74,7 @@ export const AgentBadge = ({ stopped = false }: { stopped?: boolean }) => (
       letterSpacing: '0.05em',
     }}
   >
-    {stopped ? 'AGENT · STOPPED' : 'AGENT'}
+    {stopped ? `${label} · STOPPED` : label}
   </span>
 );
 
@@ -90,7 +90,7 @@ export const AgentsScreen = ({ onClose }: { onClose: () => void }) => {
   const navigate = useNavigate();
   const [open, setOpen] = useState<string | null>(null);
   const accounts = chromeStorageService.getAllAccounts?.() ?? [];
-  const agents = listAgentAccounts();
+  const agents = listAgentsOnly();
   const stopAll = allAgentsStopped();
 
   const newAgent = () => {

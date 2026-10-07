@@ -20,7 +20,7 @@ import {
   getAgentAccount,
   getAgentLog,
   ghostColorOf,
-  listAgentAccounts,
+  listAgentsOnly,
   onAgentsChange,
   setAgentDailyCap,
   setAgentLabels,
@@ -305,7 +305,7 @@ const useBwxDeps = () => {
     return { name: n.displayName, handle: accountTag(id, n.displayName, n.paymail, n.handle) };
   };
   const deps: Omit<BwxDeps, 'confirm'> = {
-    listAgents: listAgentAccounts,
+    listAgents: listAgentsOnly,
     getAgent: getAgentAccount,
     ghostColorOf,
     accountInfo: info,

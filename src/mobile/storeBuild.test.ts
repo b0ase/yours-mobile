@@ -161,3 +161,36 @@ describe('TOKENBLASTER_ENABLED: tokenblaster.lol data and the 1Sat Ordnance 3D c
     expect(src('./market/MarketPage.tsx')).toContain('...(TRADING && TOKENBLASTER_ENABLED');
   });
 });
+
+describe('pots and subscriptions: pots + person standing orders everywhere, services and billing bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('pots and standing orders are on in both builds', async () => {
+    const { potsEnabled, standingOrdersEnabled } = await import('./storeBuild');
+    expect(potsEnabled(true)).toBe(true);
+    expect(potsEnabled(false)).toBe(true);
+    expect(standingOrdersEnabled(true)).toBe(true);
+    expect(standingOrdersEnabled(false)).toBe(true);
+  });
+  test('service subscriptions and billing are off in a store build', async () => {
+    const { subscriptionsEnabled, billingAllowed } = await import('./storeBuild');
+    expect(subscriptionsEnabled(true)).toBe(false);
+    expect(subscriptionsEnabled(false)).toBe(true);
+    expect(billingAllowed(true)).toBe(false);
+    expect(billingAllowed(false)).toBe(true);
+  });
+  test('SUBSCRIPTIONS_ENABLED / BILLING_ENABLED are the inverse of STORE_BUILD, from the same literal env', async () => {
+    const { SUBSCRIPTIONS_ENABLED, BILLING_ENABLED } = await import('./storeBuild');
+    expect(SUBSCRIPTIONS_ENABLED).toBe(!STORE_BUILD);
+    expect(BILLING_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'SUBSCRIPTIONS_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+    expect(cond(s, 'BILLING_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('own-service payees are data only behind SUBSCRIPTIONS_ENABLED', () => {
+    expect(src('./pots/pots.ts')).toMatch(/OWN_SERVICE_PAYEES[^=]*= SUBSCRIPTIONS_ENABLED\s*\?/);
+  });
+});

@@ -271,6 +271,12 @@ All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
 - **Unchanged**: peer-to-peer send/receive, paymail, tips and Feed locks, NFT viewing and media minting
   (with no fee), DMs, calls, the Feed, the Apps browser, and settings.
 - **Buy BSV**: stays hidden (it was already hidden in both builds).
+- **Pots and standing orders** (7 Oct 2026, `src/mobile/pots/`): pots (labelled sub-accounts: fund, name, cap,
+  Stop/Resume) and standing orders to a person or paymail stay on (`potsEnabled`, `standingOrdersEnabled`): P2P
+  transfers under 3.1.3(e) / 3.1.5, payee shown as entered. Subscriptions to apps and services (the bChat / $b agent
+  payees, and later "Subscribe with bWalletX" requests) are gated by the literal-env `SUBSCRIPTIONS_ENABLED`, so the
+  payee data is not in the store bundle; the bWalletX billing subscription is gated by `BILLING_ENABLED` (always
+  false in a store build) and is OFF everywhere. `storeBuild.test.ts` checks both ways.
 
 Build: `pnpm release:ios-store` / `pnpm release:android-play` (store rules) and `pnpm release:ios-private` /
 `pnpm release:android-direct` (everything on), via `scripts/channel-build.sh` and `src/mobile/channel.ts`.

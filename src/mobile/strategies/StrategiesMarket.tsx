@@ -4,7 +4,7 @@ import { Bot, Loader2, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { fetchExchangeRate } from '../../utils/wallet';
-import { listAgentAccounts } from '../agents/agentAccounts';
+import { listAgentsOnly } from '../agents/agentAccounts';
 import { loadStrategy, type Strategy } from '../agents/strategy';
 import { marketFeeSats } from '../market/fee';
 import { buyStrategy, listStrategies, ownedStrategyOutpoints, priceSats, unlockStrategy, type Listing } from './market';
@@ -22,7 +22,7 @@ const RISK_COLOR: Record<string, string> = { Low: '#6CE9A6', Medium: GOLD, High:
 export const LoadInto = ({ strategy, onDone }: { strategy: Strategy; onDone: () => void }) => {
   const { chromeStorageService } = useServiceContext();
   const accounts = chromeStorageService.getAllAccounts?.() ?? [];
-  const agents = listAgentAccounts();
+  const agents = listAgentsOnly();
   const { addSnackbar } = useSnackbar();
   if (!agents.length)
     return (
