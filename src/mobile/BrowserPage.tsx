@@ -1353,7 +1353,7 @@ setDefaultBuilder(() =>
   defaultScreens(
     readFavourites(),
     BAPP_TILES.map((t) => t.url),
-    GAME_TILES.map((t) => t.url),
+    GAME_SECTIONS.flatMap((s) => s.tiles.map((t) => t.url)),
   ),
 );
 
