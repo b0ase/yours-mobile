@@ -14,7 +14,7 @@ export const HistoryButton = ({ className = '' }: { className?: string }) => {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={`flex items-center justify-center gap-1.5 rounded-xl py-3 text-sm font-bold border cursor-pointer ${className}`}
+        className={`flex items-center justify-center gap-1.5 rounded-xl py-3 text-sm font-bold border cursor-pointer ${className}`.trim()}
         style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
       >
         <History size={15} aria-hidden="true" />

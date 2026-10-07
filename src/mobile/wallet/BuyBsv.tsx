@@ -72,36 +72,49 @@ export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; 
   );
 };
 
-/** Today's BSV price, the left of the wallet's top row. */
-const PriceFeed = ({ rate }: { rate: number }) => (
-  <span className="flex flex-col justify-center shrink-0 pr-1 leading-tight">
-    <span className="text-[15px] font-extrabold text-white">{rate > 0 ? `$${rate.toFixed(2)}` : '…'}</span>
+/** The wallet top row's shared cell style: equal columns, same height, radius and border (owner round 7). */
+const CELL = 'flex-1 basis-0 min-w-0 h-14 rounded-xl flex items-center justify-center border cursor-pointer';
+
+/** Today's BSV price; opens the BSV view, the same as the BSV card below the wallet card. */
+const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
+  <button
+    type="button"
+    onClick={onOpen}
+    aria-label="BSV price"
+    className={`${CELL} flex-col leading-tight`}
+    style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
+  >
+    <span className="text-[15px] font-extrabold">{rate > 0 ? `$${rate.toFixed(2)}` : '…'}</span>
     <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
       per BSV
     </span>
-  </span>
+  </button>
 );
 
 /**
- * Wallet top row (owner, round 6): price feed · Buy BSV · History, the two buttons half width each. Was a single
- * Buy BSV card (6 Oct 2026); History moved here from under the card.
+ * Wallet top row (owner, rounds 6–7): price · Buy BSV · History, three equal columns. The price opens the BSV view
+ * (`onPrice`, the BSV card's own handler).
  */
-export const BsvPriceBar = ({ onReceive }: { onReceive: () => void }) => {
+export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onPrice: () => void }) => {
   const rate = useLivePrice();
   const [open, setOpen] = useState(false);
   return (
     <>
       <div className="w-[92%] mb-4 flex items-stretch gap-2">
-        <PriceFeed rate={rate} />
+        <PriceCell rate={rate} onOpen={onPrice} />
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex-1 rounded-xl py-3 text-sm font-extrabold border-0 cursor-pointer"
-          style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+          className={`${CELL} text-sm font-extrabold`}
+          style={{
+            background: 'linear-gradient(135deg, #de973f, #f9dd63)',
+            borderColor: '#f5b80066',
+            color: '#1a1300',
+          }}
         >
           Buy BSV
         </button>
-        <HistoryButton className="flex-1" />
+        <HistoryButton className={CELL} />
       </div>
       {open && (
         <BuyBsvSheet
@@ -116,13 +129,13 @@ export const BsvPriceBar = ({ onReceive }: { onReceive: () => void }) => {
   );
 };
 
-/** Store edition (no Buy BSV): price feed · History, History taking the Buy space. */
-export const BsvHistoryBar = () => {
+/** Store edition (no Buy BSV): price · History, two equal halves. */
+export const BsvHistoryBar = ({ onPrice }: { onPrice: () => void }) => {
   const rate = useLivePrice();
   return (
     <div className="w-[92%] mb-4 flex items-stretch gap-2">
-      <PriceFeed rate={rate} />
-      <HistoryButton className="flex-1" />
+      <PriceCell rate={rate} onOpen={onPrice} />
+      <HistoryButton className={CELL} />
     </div>
   );
 };
