@@ -154,7 +154,7 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
     prev = h;
     pieces.push({ height: h, sats: amounts[i], date: dateForHeight(h, now, currentHeight), usdTarget });
   }
-  return checkSpan(pieces);
+  return checkSpan(pieces, currentHeight);
 }
 
 /** One unlock date for the whole amount. */
@@ -162,14 +162,14 @@ export function buildOnce(sats: number, unlockAt: Date, now: Date, currentHeight
   if (!Number.isInteger(sats) || sats < MIN_PIECE_SATS) return fail(`Lock at least ${MIN_PIECE_SATS.toLocaleString()} sats.`);
   if (unlockAt.getTime() <= now.getTime()) return fail('Choose a date in the future.');
   const h = heightForDate(unlockAt, now, currentHeight);
-  return checkSpan([{ height: h, sats, date: dateForHeight(h, now, currentHeight) }]);
+  return checkSpan([{ height: h, sats, date: dateForHeight(h, now, currentHeight) }], currentHeight);
 }
 
-function checkSpan(pieces: Piece[]): ScheduleResult {
+/** No single lock output more than about ten years away. */
+function checkSpan(pieces: Piece[], currentHeight: number): ScheduleResult {
   const totalSats = pieces.reduce((s, p) => s + p.sats, 0);
-  const first = pieces[0]?.height ?? 0;
-  const last = pieces[pieces.length - 1]?.height ?? 0;
-  if (last - first > MAX_LOCK_BLOCKS || pieces.some((p) => p.height <= 0)) return fail('That runs for more than ten years.');
+  if (pieces.some((p) => p.height <= 0 || p.height - currentHeight > MAX_LOCK_BLOCKS))
+    return fail('No lock can be more than about ten years away.');
   return { pieces, totalSats };
 }
 
@@ -325,7 +325,9 @@ export function buildPercent(p: PercentInput, now: Date, currentHeight: number):
     pieces[MAX_PIECES - 1].sats = rest;
     tail = true;
   }
-  const totalSats = pieces.reduce((s, x) => s + x.sats, 0);
+  const span = checkSpan(pieces, currentHeight);
+  if (span.error) return { ...span, periods };
+  const totalSats = span.totalSats;
   return { pieces, totalSats, periods, end: endDate, tail, warning: tail ? `Payouts after #${MAX_PIECES - 1} are held in one lock that the wallet re-splits when it matures.` : undefined };
 }
 

@@ -52,6 +52,8 @@ describe('schedules', () => {
     expect(r.pieces[0].height).toBe(H + 30 * 144);
     expect(buildOnce(10_000_000, day(-1), NOW, H).error).toBeTruthy();
     expect(buildOnce(10, day(5), NOW, H).error).toBeTruthy();
+    expect(buildOnce(10_000_000, day(3651), NOW, H).error).toContain('ten years');
+    expect(buildOnce(10_000_000, day(3649), NOW, H).error).toBeUndefined();
   });
   test('0.1 BSV a week for 10 weeks', () => {
     const r = buildGradual({ start: day(7), frequency: 'weekly', count: 10, perPayoutSats: 10_000_000 }, NOW, H);
@@ -151,6 +153,10 @@ describe('percentage payouts', () => {
     const e = percentAmounts(1_000_000, 0.01, 'original');
     expect(typeof e).toBe('string');
     expect(e as string).toContain('weekly');
+  });
+  test('no piece more than ten years out (monthly 1% of original = 100 months is fine; 0.1% monthly is not)', () => {
+    expect(buildPercent({ totalSats: 100_000_000, pct: 1, base: 'original', start: day(30), frequency: 'monthly' }, NOW, H).error).toBeUndefined();
+    expect(buildPercent({ totalSats: 1_000_000_000, pct: 0.1, base: 'original', start: day(30), frequency: 'monthly' }, NOW, H).error).toContain('ten years');
   });
   test('long schedules fold into a tail lock and report the end date', () => {
     const r = buildPercent({ totalSats: 100_000_000, pct: 0.01, base: 'original', start: day(1), frequency: 'daily' }, NOW, H);

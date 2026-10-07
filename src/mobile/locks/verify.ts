@@ -69,8 +69,22 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 
+/** WhatsOnChain rate-limits (429, which a browser also reports as a CORS failure): retry with backoff. */
+async function retrying(f: typeof fetch, url: string, init?: RequestInit, tries = 4): Promise<Response> {
+  for (let i = 0; ; i++) {
+    try {
+      const r = await f(url, init);
+      if (r.status !== 429 || i >= tries - 1) return r;
+    } catch (e) {
+      if (i >= tries - 1) throw e;
+    }
+    await new Promise((res) => setTimeout(res, 800 * 2 ** i));
+  }
+}
+
 /** Fetch the tx, the spent state of its lock outputs and the height, then check. */
-export async function verifyLockTx(txid: string, f: typeof fetch = fetch): Promise<VerifyResult> {
+export async function verifyLockTx(txid: string, fetcher: typeof fetch = fetch): Promise<VerifyResult> {
+  const f = ((url: string, init?: RequestInit) => retrying(fetcher, url, init)) as typeof fetch;
   if (!/^[0-9a-f]{64}$/i.test(txid)) throw new Error('That is not a transaction id.');
   const hexRes = await f(`${WOC}/tx/${txid}/hex`);
   if (!hexRes.ok) throw new Error('Transaction not found.');
