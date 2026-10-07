@@ -18,6 +18,7 @@ import {
   type PairMessage,
   type RelayFrame,
 } from '../../pair/protocol';
+import { inOrder } from '../../pair/in-order';
 import { handleSiteCall } from '../dappBrowser';
 import { appNameFor } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
@@ -139,7 +140,8 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
 function attach(l: Live) {
   const { ws, sealer, stored } = l;
   live.set(stored.c, l);
-  ws.onmessage = async (ev) => {
+  // In order: two sealed frames back to back must not race through sealer.open.
+  ws.onmessage = inOrder(async (ev: MessageEvent) => {
     const f = JSON.parse(String(ev.data)) as RelayFrame | unknown;
     if ((f as RelayFrame).t === 'relay') {
       const v = (f as RelayFrame).verifiedOrigin;
@@ -153,7 +155,7 @@ function attach(l: Live) {
     if (msg.t === 'req') void onRequest(l, msg.id, msg.action, msg.params);
     else if (msg.t === 'ping') void reply(l, { t: 'ping' });
     else if (msg.t === 'close') forget(stored.c, false);
-  };
+  });
   ws.onerror = null;
   ws.onclose = () => {
     if (live.get(stored.c) !== l) return;
@@ -216,7 +218,7 @@ export function beginPairing(scanned: string): Promise<PendingPair> {
     ws.onerror = () => fail('Could not reach the pairing service. Check your connection and try again.');
     ws.onclose = (ev) =>
       !settled && fail(ev.code === 1006 ? 'This code has expired or was already used.' : 'Pairing closed.');
-    ws.onmessage = async (ev) => {
+    ws.onmessage = inOrder(async (ev: MessageEvent) => {
       const f = JSON.parse(String(ev.data)) as RelayFrame;
       if (f.t !== 'relay' || !f.verifiedOrigin || settled) return;
       clearTimeout(timer);
@@ -258,7 +260,7 @@ export function beginPairing(scanned: string): Promise<PendingPair> {
         },
         cancel: () => ws.close(),
       });
-    };
+    });
   });
 }
 
