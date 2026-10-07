@@ -9,7 +9,7 @@ import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personal
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, Search, ShieldCheck, Tag, X } from 'lucide-react';
+import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, Rocket, Search, ShieldCheck, Tag, X } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { PageLoader } from '../../components/PageLoader';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -45,7 +45,13 @@ import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
 import { BAPPS } from '../bapps';
 import { CURVE_FILTER, CURVE_LABEL, loadCurvePanel } from './launchpad/tile';
-import { CURVE_COINS_ENABLED, TOKENBLASTER_ENABLED, marketFiltersFor, marketLabel, marketTradingEnabled } from '../storeBuild';
+import {
+  CURVE_COINS_ENABLED,
+  TOKENBLASTER_ENABLED,
+  marketFiltersFor,
+  marketLabel,
+  marketTradingEnabled,
+} from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel } from '../tickets/TicketsPanel';
@@ -404,9 +410,6 @@ const MarketPage = () => {
     { id: 'documents', label: 'Documents', kind: 'nfts', view: 'documents' },
     { id: 'collections', label: 'Collections', kind: 'nfts', view: 'collections' },
     { id: 'bapps', label: 'bApps', kind: 'tokens', token: 'bapps' },
-    ...(CURVE_COINS_ENABLED
-      ? [{ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens' as Kind, token: CURVE_FILTER as TokenFilter }]
-      : []),
     ...(TOKEN_FILTERS.some(([f]) => f === 'tickets')
       ? [{ id: 'tickets', label: 'Tickets', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
       : []),
@@ -414,53 +417,68 @@ const MarketPage = () => {
       ? [
           { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind },
           { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind },
-          { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind },
           // 3D NFTs: 1Sat Ordnance game guns from tokenblaster.lol as spinning models (owner, 6 Oct 2026).
           // bWalletX only: buying sends you to an outside store, which the app stores reject.
         ]
       : []),
-    ...(TRADING && TOKENBLASTER_ENABLED
-      ? [
-          { id: '3d', label: '3D', kind: 'nfts' as Kind, view: '3d' as View },
-        ]
-      : []),
+    ...(TRADING && TOKENBLASTER_ENABLED ? [{ id: '3d', label: '3D', kind: 'nfts' as Kind, view: '3d' as View }] : []),
   ];
+  // Bonds is a tab inside Contracts (owner, 7 Oct 2026): panel 'bonds' means Contracts › Bonds.
   const activeCat =
-    panel ??
+    (panel ? 'contracts' : null) ??
     (strategiesOpen ? 'strategies' : null) ??
     (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
   // A grid of square filter buttons, all visible at once: no sideways scrolling, so nothing (e.g. Bonds) is
   // hidden (owner, 5 Oct 2026). Four across, wrapping onto more rows as categories are added.
+  const pick = (c: Cat) => {
+    setStrategiesOpen(c.id === 'strategies');
+    setPanel(c.id === 'contracts' ? 'contracts' : null);
+    setKind(c.kind);
+    if (c.token) setTokenFilter(c.token);
+    if (c.view) setView(c.view);
+    setRoom(null);
+  };
+  // Launchpad: a full-width gold bar above the grid (owner, 7 Oct 2026), like the Send / Receive / Mint pills.
+  // Never in a store build (CURVE_COINS_ENABLED).
+  const launchOn = CURVE_COINS_ENABLED && activeCat === CURVE_FILTER;
   const categoryTiles = (
-    <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
-      {CATS.map((c) => {
-        const on = !c.soon && activeCat === c.id;
-        return (
-          <button
-            key={c.id}
-            role="tab"
-            aria-selected={on}
-            disabled={c.soon}
-            onClick={() => {
-              if (c.soon) return;
-              setStrategiesOpen(c.id === 'strategies');
-              setPanel(c.id === 'contracts' || c.id === 'bonds' ? c.id : null);
-              setKind(c.kind);
-              if (c.token) setTokenFilter(c.token);
-              if (c.view) setView(c.view);
-              setRoom(null);
-            }}
-            className="flex min-h-[44px] items-center justify-center rounded-xl px-1 py-2 text-center text-[12px] font-semibold leading-tight"
-            style={{
-              background: on ? '#F5B800' : '#17191E',
-              color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
-            }}
-          >
-            {c.label}
-            {c.soon && <span className="ml-1 text-[9px] font-medium uppercase tracking-wide">soon</span>}
-          </button>
-        );
-      })}
+    <div className="flex flex-col gap-1.5">
+      {CURVE_COINS_ENABLED && (
+        <button
+          type="button"
+          aria-pressed={launchOn}
+          onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
+          className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
+          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px #F5B800' } : { opacity: 0.85 }}
+        >
+          <Rocket size={16} /> {CURVE_LABEL}
+          {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
+        </button>
+      )}
+      <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
+        {CATS.map((c) => {
+          const on = !c.soon && activeCat === c.id;
+          return (
+            <button
+              key={c.id}
+              role="tab"
+              aria-selected={on}
+              disabled={c.soon}
+              onClick={() => {
+                if (!c.soon) pick(c);
+              }}
+              className="flex min-h-[44px] items-center justify-center rounded-xl px-1 py-2 text-center text-[12px] font-semibold leading-tight"
+              style={{
+                background: on ? '#F5B800' : '#17191E',
+                color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
+              }}
+            >
+              {c.label}
+              {c.soon && <span className="ml-1 text-[9px] font-medium uppercase tracking-wide">soon</span>}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 
@@ -1042,7 +1060,10 @@ const MarketPage = () => {
         ) : strategiesOpen && !room ? (
           <StrategiesMarket />
         ) : panel && !room ? (
-          <ContractsMarket filter={panel === 'bonds' ? 'bond' : undefined} />
+          <ContractsMarket
+            tab={panel === 'bonds' ? 'bonds' : 'all'}
+            onTab={(t) => setPanel(t === 'bonds' ? 'bonds' : 'contracts')}
+          />
         ) : room ? (
           roomView
         ) : kind === 'tokens' ? (
