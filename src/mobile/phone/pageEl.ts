@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react';
 
 /** Shared by the phone layout's pager (pager.tsx, PhoneShell.tsx) and TopNav. */
 
-/** True inside a neighbour preview during a page drag: TopNav renders nothing there. */
+/** True for a phone-layout page that is mounted but not on screen (phone/pager.tsx): no TopNav, no bApp frame. */
 export const PeekContext = createContext(false);
 export const useInPeek = () => useContext(PeekContext);
 

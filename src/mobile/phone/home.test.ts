@@ -49,6 +49,19 @@ describe('HOME', () => {
     expect(apps.indexOf('Your apps')).toBeLessThan(apps.indexOf('>Recents<'));
   });
 
+  test('keep-alive paging: strip pages stay mounted; off-screen pages hide and give up the bApp frame', () => {
+    const pager = readFileSync(join(import.meta.dir, 'pager.tsx'), 'utf8');
+    expect(pager).toContain('keptPages.add(page.id)');
+    expect(pager).toContain('screens.map((_, i) =>');
+    expect(pager).not.toMatch(/keptPages\.delete|keptPages\.clear/);
+    const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
+    expect(apps).toContain('if (offScreen) return;');
+    const chat = readFileSync(join(import.meta.dir, '../tabs/ChatPage.tsx'), 'utf8');
+    expect(chat).toContain("display: offScreen ? 'none' : undefined");
+    const dots = readFileSync(join(import.meta.dir, 'PageDots.tsx'), 'utf8');
+    expect(dots).toContain('data-testid="page-title"');
+  });
+
   test('the phone layout is off by default', () => {
     const src = readFileSync(join(import.meta.dir, 'flag.ts'), 'utf8');
     expect(src).toContain("=== '1'");

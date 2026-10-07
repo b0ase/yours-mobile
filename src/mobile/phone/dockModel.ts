@@ -127,23 +127,6 @@ export const addable = (items: readonly DockItem[], screens: readonly { id: Scre
     ...screens.map((s): DockItem => ({ kind: 'screen', id: s.id })),
   ].filter((c) => !items.some((i) => sameItem(i, c)));
 
-/**
- * iPhone model (owner, round 4): Wallet, Exchange, Feed, Chat (and Apps in a store build) are ordinary Home
- * tiles that sit in the dock by default. Each is shown in exactly one place: the dock, or the Home grid. So
- * Wallet is never lost: off the dock it is a Home tile.
- */
-export const HOME_SCREEN_IDS: readonly ScreenId[] = ['wallet', 'exchange', 'apps', 'feed', 'chat'];
-
-/** The screen tiles the Home grid shows: those not in the dock, for this build's strip. Wallet first. */
-export const homeScreenTiles = (items: readonly DockItem[], strip: readonly { id: ScreenId }[]): ScreenId[] =>
-  HOME_SCREEN_IDS.filter(
-    (id) => strip.some((s) => s.id === id) && !items.some((i) => i.kind === 'screen' && i.id === id),
-  ).filter((id) => id !== 'apps' || !strip.some((s) => s.id === 'exchange'));
-
-/** App URLs in the dock: the Home grid leaves them out. */
-export const dockAppUrls = (items: readonly DockItem[]): Set<string> =>
-  new Set(items.flatMap((i) => (i.kind === 'app' ? [i.url] : [])));
-
 /** Split for the layout: the first DOCK_LEFT slots sit left of the b, the rest right of it (scrolling). */
 export const splitDock = <T>(items: readonly T[]): { left: T[]; right: T[] } => ({
   left: items.slice(0, DOCK_LEFT),

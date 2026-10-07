@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { sendBsv, sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
+import { useInPeek } from '../phone/pageEl';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
@@ -401,11 +402,14 @@ const Conversation = ({
     requestAnimationFrame(() => composer.current?.focus());
   };
 
+  // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it.
+  const offScreen = useInPeek();
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
       className="fixed left-0 right-0 z-[110] flex flex-col"
       style={{
+        display: offScreen ? 'none' : undefined,
         top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
         bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem))',
         background: BG,

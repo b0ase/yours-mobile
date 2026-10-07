@@ -24,7 +24,7 @@ export const SCREENS: readonly Screen[] = [
     ? [{ id: 'exchange', label: 'Exchange', route: '/m/market', legacyIds: ['market'] } satisfies Screen]
     : []),
   { id: 'home', label: 'Home', route: '/m/home', legacyIds: [] },
-  { id: 'apps', label: 'Apps', route: '/browser', aliases: ['/m/apps'], legacyIds: ['browser'] },
+  { id: 'apps', label: 'bApps', route: '/browser', aliases: ['/m/apps'], legacyIds: ['browser'] },
   { id: 'games', label: 'Games', route: '/m/games', legacyIds: [] },
   { id: 'people', label: 'People', route: '/m/people', legacyIds: [] },
   { id: 'feed', label: 'Feed', route: '/m/feed', legacyIds: ['feed'] },
@@ -57,4 +57,34 @@ export const neighbour = (id: ScreenId, dir: 1 | -1, strip: readonly Screen[] = 
   const i = strip.findIndex((s) => s.id === id);
   if (i < 0) return null;
   return strip[i + dir] ?? null;
+};
+
+/**
+ * Option B (owner, round 5; plan §14.4): only app screens swipe. These pages open from their tiles or the dock,
+ * with no swipe neighbours, and stay mounted once opened (phone/pager.tsx) so they reopen instantly.
+ */
+export const KEEP_PAGES: readonly ScreenId[] = ['wallet', 'exchange', 'people', 'feed', 'chat'];
+
+/** The page (not an app screen) a path shows, or null. */
+export const pageForPath = (pathname: string, strip: readonly Screen[] = STRIP): Screen | null => {
+  const s = screenForPath(pathname, strip);
+  return s && KEEP_PAGES.includes(s.id) ? s : null;
+};
+
+/** App screen i's route: Home is /m/home, the others /m/screen/2, /m/screen/3… */
+export const appScreenRoute = (i: number) => (i <= 0 ? '/m/home' : `/m/screen/${i + 1}`);
+
+/**
+ * The app screen a path shows (index), or null. Old routes still land: Apps (/browser, /m/apps) on screen 2 and
+ * Games (/m/games) on screen 3, or the last screen there is.
+ */
+export const appIndexForPath = (pathname: string, count: number): number | null => {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  const last = Math.max(0, count - 1);
+  if (path === '/m/home') return 0;
+  const m = /^\/m\/screen\/(\d+)$/.exec(path);
+  if (m) return Math.min(Math.max(0, Number(m[1]) - 1), last);
+  if (path === '/browser' || path === '/m/apps') return Math.min(1, last);
+  if (path === '/m/games') return Math.min(2, last);
+  return null;
 };

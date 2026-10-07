@@ -31,8 +31,11 @@ export const setDock = (items: DockItem[]) => {
 
 const subscribe = (fn: () => void) => {
   listeners.add(fn);
-  return () => listeners.delete(fn);
+  return () => {
+    listeners.delete(fn);
+  };
 };
+export const dockSubscribe = subscribe;
 
 export const useDock = (): [DockItem[], (items: DockItem[]) => void] => [
   useSyncExternalStore(subscribe, read, read),
