@@ -1,24 +1,11 @@
-/**
- * Hosts whose payments History files under Games: the bGames catalogue (src/mobile/games/gamesCatalog.ts on
- * feat/games-catalog, not merged yet) plus bGames itself. When that branch lands, build this list from
- * GAMES / the catalogue URLs instead of keeping a copy here.
- */
-export const GAME_URLS = [
-  'https://bitcoin-gaming.vercel.app', // bGames
-  'https://insertarcade.com/',
-  'https://hastearcade.com',
-  'https://5tars.io',
-  'https://ninjapunkgirls.online',
-  'https://paiybit.com/paiybit/arcade',
-  'https://bitcoinsv.itch.io/bitcoin-versus-crypto',
-  'https://pixelwar.click',
-  'https://numbercrunchermath.com',
-  'https://agelessrepublic.com/',
-  'https://hypertypist.com/',
-  'https://peerjump.fun/',
-];
+import { GAMES } from '../games/gamesCatalog';
 
-export const GAME_HOSTS: readonly string[] = [...new Set(GAME_URLS.map((u) => new URL(u).host))];
+/**
+ * Hosts whose payments History files under Games: every game in this build's bGames catalogue
+ * (src/mobile/games/gamesCatalog.ts, which includes bGames itself). A store build's catalogue has no
+ * real-money or TokenBlaster games, so their hosts are not listed there either.
+ */
+export const GAME_HOSTS: readonly string[] = [...new Set(GAMES.map((g) => new URL(g.url).host.replace(/^www\./, '')))];
 
 /** Exact host or a subdomain of one (play.hastearcade.com). */
 export const isGameHost = (host: string) => {
