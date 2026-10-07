@@ -16,6 +16,9 @@ const AgentPage = lazy(() => import('../agent/AgentPage'));
 const HomeScreen = lazy(() => import('../phone/HomeScreen'));
 const PeopleScreen = lazy(() => import('../phone/PeopleScreen'));
 const BrowserPage = lazy(() => import('../BrowserPage'));
+// The phone top bar's Lock BSV button (locks/, docs/TIME-LOCK-PLAN.md).
+const LockScreen = lazy(() => import('../locks/LockScreen'));
+const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
 // No app-wide error boundary upstream: one throw blanked the whole page (owner, 6 Oct 2026).
 const MobileRoutes = () => (
@@ -27,6 +30,8 @@ const MobileRoutes = () => (
         <Route path="media" element={<MediaPage />} />
         {/* The top bar's centre b: the b agent. */}
         <Route path="agent" element={<AgentPage />} />
+        <Route path="lock" element={<LockScreen />} />
+        <Route path="lock/verify" element={<LockVerify />} />
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
