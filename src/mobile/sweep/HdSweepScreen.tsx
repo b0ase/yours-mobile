@@ -21,6 +21,7 @@ import {
   wifKey,
   type SingleKey,
 } from './hd';
+import { MONEYBUTTON_PATH, addressHash, sfpOutputsFor, splitSpendable, type SfpOutput } from './moneybutton';
 
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -28,24 +29,38 @@ const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 const RED = '#F97066';
 
-/** Has this address ever been used? WhatsOnChain address history (404 or an empty list = never). */
-const woCUsed = async (address: string): Promise<boolean> => {
+const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
+
+/** GET from WhatsOnChain with 429 retries; null on 404. */
+const wocGet = async (path: string): Promise<Response | null> => {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/address/${address}/history`);
+    const r = await fetch(`${WOC}${path}`);
     if (r.status === 429) {
       await new Promise((ok) => setTimeout(ok, 1000 * (attempt + 1)));
       continue;
     }
     // Stay under the free API's ~3 requests a second.
     await new Promise((ok) => setTimeout(ok, 350));
-    // WhatsOnChain answers 404 "Not Found" for an address it has never seen.
-    if (r.status === 404) return false;
-    if (!r.ok) throw new Error(`Address lookup failed (${r.status})`);
-    const list = (await r.json()) as unknown[];
-    return Array.isArray(list) && list.length > 0;
+    // WhatsOnChain answers 404 "Not Found" for an address or tx it has never seen.
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`Lookup failed (${r.status})`);
+    return r;
   }
   throw new Error('Address lookup is busy. Try again in a minute.');
 };
+
+/** The txids in an address's history (WhatsOnChain), empty when it was never used. */
+const wocHistory = async (address: string): Promise<string[]> => {
+  const r = await wocGet(`/address/${address}/history`);
+  const list = r ? ((await r.json()) as { tx_hash?: string }[]) : [];
+  return Array.isArray(list) ? list.map((h) => h.tx_hash ?? '').filter(Boolean) : [];
+};
+
+/** Has this address ever been used? */
+const woCUsed = async (address: string): Promise<boolean> => (await wocHistory(address)).length > 0;
+
+/** How many history transactions to read per address when looking for Money Button tokens. */
+const SFP_TX_LIMIT = 200;
 
 type Found = {
   /** Which wallet types / paths had history, e.g. "Yours / bWalletX payment (m/44'/236'/0'/1/0)". */
@@ -54,6 +69,8 @@ type Found = {
   assets: ScannedAssets;
   /** outpoint → private key of the address holding it */
   keyFor: Map<string, string>;
+  /** Money Button (SFP) token outputs still held; never swept, listed only. */
+  sfp: SfpOutput[];
 };
 type Result = { label: string; txid?: string; error?: string };
 
@@ -89,6 +106,9 @@ const mergeTokens = (all: TokenBalance[]): TokenBalance[] => {
  * names/paymail.ts internalizes payments by derivationPrefix/Suffix). A phrase scan can't enumerate
  * those, so we say so instead of implying the sweep found everything (6 Oct 2026).
  */
+const SFP_NOTE =
+  'Money Button tokens (Simple Fabriik Protocol) can only move with a signature from Money Button’s token server, which shut down in 2022. They stay where they are, untouched: the sweep leaves them and the small amount of BSV inside each one alone.';
+
 const BRC100_NOTE =
   'Coins received through newer wallet features (Yours 5 / bWalletX change and paymail payments) sit at one-off keys that can’t be found from the phrase alone. To move those, restore the phrase as an account here (Add account › Restore) and send from it.';
 
@@ -96,7 +116,8 @@ const BRC100_NOTE =
  * Settings › Sweep from another wallet: move everything from another wallet into the current bWallet
  * account. One box takes a recovery phrase, a WIF private key or an xprv; every known wallet layout is
  * tried (Yours / bWalletX / RelayX / Twetch single keys, SimplyCash and BIP44 HD walks), so nobody has
- * to know which wallet their phrase came from (owner, 6 Oct 2026). Review in dollars, then one sweep
+ * to know which wallet their phrase came from (owner, 6 Oct 2026). Money Button phrases match
+ * the m/44'/0'/0' walk; their SFP tokens are listed and kept out of the BSV sweep (moneybutton.ts). Review in dollars, then one sweep
  * per asset kind, each input signed by the key of the address it sits at.
  *
  * The phrase, key and passphrase live only in this screen's state; they are cleared on leaving.
@@ -181,11 +202,13 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       // 2. Which of those addresses were ever used, across every layout (one wallet can match several).
       const used = new Map<string, string>(); // address → wif
       const matches: string[] = [];
+      const mbAddresses = new Set<string>(); // used addresses on Money Button's path (or a pasted key)
       for (const [i, k] of singles.entries()) {
         if (cancelled.current) return;
         setProgress(`Checking ${k.wallet} ${k.label} key (${i + 1} of ${singles.length})`);
         if (input.kind === 'wif' || (await woCUsed(k.address))) {
           if (!used.has(k.address)) used.set(k.address, k.wif);
+          if (input.kind === 'wif') mbAddresses.add(k.address);
           matches.push(input.kind === 'wif' ? `Private key (${k.address})` : `${k.wallet} ${k.label} (${k.path})`);
         }
       }
@@ -197,6 +220,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         if (!hits.length) continue;
         matches.push(`${label}: ${hits.length} address${hits.length === 1 ? '' : 'es'}`);
         for (const h of hits) if (!used.has(h.address)) used.set(h.address, h.wif);
+        if (path === MONEYBUTTON_PATH || input.kind === 'xprv') hits.forEach((h) => mbAddresses.add(h.address));
       }
       if (!used.size) {
         setError(
@@ -226,7 +250,31 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         tokens.push(...r.bsv21Tokens);
       }
       assets.bsv21Tokens = mergeTokens(tokens);
-      setFound({ matches, addresses: used.size, assets, keyFor });
+
+      // 4. Money Button tokens (SFP). Their scripts aren't P2PKH, so indexers don't list them under the
+      // address; read the address's own history and look for SFP outputs that name it.
+      const sfp: SfpOutput[] = [];
+      if (mbAddresses.size) {
+        const hashes = new Set([...mbAddresses].map(addressHash));
+        const seen = new Set<string>();
+        for (const [i, address] of [...mbAddresses].entries()) {
+          const txids = (await wocHistory(address)).slice(0, SFP_TX_LIMIT);
+          for (const [j, txid] of txids.entries()) {
+            if (cancelled.current) return;
+            if (seen.has(txid)) continue;
+            seen.add(txid);
+            setProgress(`Looking for Money Button tokens: address ${i + 1} of ${mbAddresses.size}, tx ${j + 1}`);
+            const r = await wocGet(`/tx/${txid}/hex`);
+            if (r) sfp.push(...sfpOutputsFor((await r.text()).trim(), txid, hashes));
+          }
+        }
+        if (sfp.length) {
+          const spends = await apiContext.services.txo.getSpends(sfp.map((o) => o.outpoint)).catch(() => []);
+          const held = sfp.filter((_, i) => !spends[i]);
+          sfp.splice(0, sfp.length, ...held);
+        }
+      }
+      setFound({ matches, addresses: used.size, assets, keyFor, sfp });
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The scan failed. Try again.');
@@ -246,9 +294,20 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
     if (assets.funding.length) {
       setProgress('Sweeping BSV…');
       try {
-        const inputs = await prepareSweepInputs(apiContext, toInputs(assets.funding));
-        const r = await sweepBsv.execute(apiContext, { inputs, keys: keysFor(inputs) });
-        out.push({ label: `BSV (${moneyNow(assets.totalBsv)})`, txid: r.txid, error: r.error });
+        // Only plain P2PKH coins are swept as BSV. Token outputs (Money Button SFP, anything with a
+        // script we don't recognise) are kept back so they are never spent as plain BSV.
+        const prepared = await prepareSweepInputs(apiContext, toInputs(assets.funding));
+        const { spendable: inputs, kept } = splitSpendable(prepared, new Set(found.sfp.map((o) => o.outpoint)));
+        if (inputs.length) {
+          const sats = inputs.reduce((n, i) => n + i.satoshis, 0);
+          const r = await sweepBsv.execute(apiContext, { inputs, keys: keysFor(inputs) });
+          out.push({ label: `BSV (${moneyNow(sats)})`, txid: r.txid, error: r.error });
+        }
+        if (kept.length)
+          out.push({
+            label: `Left untouched: ${kept.length} coin${kept.length === 1 ? '' : 's'} that aren’t plain BSV`,
+            txid: kept.map((k) => k.outpoint).join(', '),
+          });
       } catch (e) {
         out.push({ label: 'BSV', error: String(e) });
       }
@@ -302,9 +361,9 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         {step === 'enter' && (
           <>
             <p className="text-xs" style={{ color: MUTED }}>
-              Move everything from another wallet (bWalletX, Yours, RelayX, Twetch, SimplyCash and other 12 or 24-word
-              wallets) into this account. We try every known wallet layout for you. What you paste stays on this phone
-              and is forgotten when you leave this screen.
+              Move everything from another wallet (bWalletX, Yours, Money Button, RelayX, Twetch, SimplyCash and other
+              12 or 24-word wallets) into this account. We try every known wallet layout for you. What you paste stays
+              on this phone and is forgotten when you leave this screen.
             </p>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-white">Recovery phrase, private key or xprv</span>
@@ -350,7 +409,9 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                   />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-white">Custom path (tried as well as the usual ones)</span>
+                  <span className="text-xs font-semibold text-white">
+                    Custom path (tried as well as the usual ones)
+                  </span>
                   <input
                     value={customPath}
                     onChange={(e) => setCustomPath(e.target.value)}
@@ -414,6 +475,19 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                 </p>
               )}
             </div>
+            {!!found.sfp.length && (
+              <div className="rounded-2xl p-4 flex flex-col gap-1" style={{ background: PANEL }}>
+                <p className="text-xs font-semibold text-white">Money Button tokens (kept, not swept)</p>
+                {found.sfp.map((t) => (
+                  <p key={t.outpoint} className="text-[11px] break-all text-white">
+                    {t.amount.toLocaleString('en-US')} × {t.asset}
+                  </p>
+                ))}
+                <p className="text-[11px]" style={{ color: MUTED }}>
+                  {SFP_NOTE}
+                </p>
+              </div>
+            )}
             <div className="rounded-2xl p-4 flex flex-col gap-1" style={{ background: PANEL }}>
               <p className="text-xs font-semibold text-white">Matched</p>
               {found.matches.map((m) => (
