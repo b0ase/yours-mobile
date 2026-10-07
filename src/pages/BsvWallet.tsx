@@ -1274,6 +1274,12 @@ export const BsvWallet = () => {
     </motion.div>
   );
 
+  /** The BSV view (price chart, send): the BSV card's tap, and the top row's price (owner round 7). */
+  const openBsvView = () => {
+    setSendSource('main');
+    setPageState('send');
+  };
+
   const listItemStyle = {
     borderColor: theme.color.global.gray + '14',
   };
@@ -1294,9 +1300,12 @@ export const BsvWallet = () => {
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
         {BUY_CRYPTO_ENABLED && (
-          <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
+          <BsvPriceBar
+            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+            onPrice={openBsvView}
+          />
         )}
-        {!BUY_CRYPTO_ENABLED && <BsvHistoryBar />}
+        {!BUY_CRYPTO_ENABLED && <BsvHistoryBar onPrice={openBsvView} />}
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>
@@ -1447,10 +1456,7 @@ export const BsvWallet = () => {
               </span>
             }
             showPointer={true}
-            onClick={() => {
-              setSendSource('main');
-              setPageState('send');
-            }}
+            onClick={openBsvView}
             // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
             action={
               bsvBalance === 0 && BUY_CRYPTO_ENABLED
