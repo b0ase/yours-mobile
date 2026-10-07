@@ -534,6 +534,7 @@ export const AgentConversation = ({
         )}
         <div className="flex items-end gap-2">
           <textarea
+            data-agent-input
             value={input}
             onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT))}
             onKeyDown={(e) => {

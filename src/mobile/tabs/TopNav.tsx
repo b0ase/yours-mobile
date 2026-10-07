@@ -8,10 +8,8 @@ import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
+import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, X } from 'lucide-react';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
-import { screenForPath } from '../phone/screens';
-import { screenLabel } from '../phone/icons';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AgentToolsSheet } from '../agents/AgentToolsSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
@@ -121,73 +119,75 @@ export const TopNav = () => {
 
   return (
     <>
-      <AccountStrip />
+      {!phone && <AccountStrip />}
       {phone ? (
-        // Phone layout (test switch, owner 7 Oct 2026): one compact row. Left: Accounts + the page title.
-        // Centre: "Ask b" (the agent page; a pill, not a second b glyph, so it doesn't read as the dock's big b,
-        // which is Home). Right: Calls · Media · Settings/Lock.
+        // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
+        // Accounts · Calls · b (the agent, /m/agent) · Media · Settings. No account strip above it.
         <div
-          className="grid grid-cols-[1fr_auto_1fr] items-center fixed top-0 w-full z-10 px-2 h-14 gap-1"
+          className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
           style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
-          <div className="flex items-center min-w-0 gap-0.5">
-            <button
-              type="button"
-              onClick={() => setDrawer(true)}
-              className="shrink-0 w-9 h-9 flex items-center justify-center bg-transparent"
-              aria-label="Accounts menu"
-            >
-              <Menu size={22} color={ICON} />
-            </button>
-            <span className="min-w-0 truncate text-[15px] font-bold" style={{ color: ICON }} data-testid="page-title">
-              {(() => {
-                const s = screenForPath(pathname);
-                return s ? screenLabel(s.id, s.label) : '';
-              })()}
-            </span>
-          </div>
           <button
             type="button"
-            aria-label={X_MARK ? 'Ask bX agent' : 'Ask b'}
+            onClick={() => setDrawer(true)}
+            className="w-9 h-9 flex items-center justify-center bg-transparent"
+            aria-label="Accounts menu"
+          >
+            <Menu size={22} color={ICON} />
+          </button>
+          <button
+            type="button"
+            aria-label="Calls"
+            onClick={() => setCallsOpen(true)}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Phone size={16} color={ACCENT} />
+          </button>
+          <button
+            type="button"
+            aria-label={X_MARK ? 'bX agent' : 'b agent'}
             onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
             aria-pressed={onAgent}
-            className="h-8 rounded-full px-3 flex items-center gap-1 text-[13px] font-bold cursor-pointer"
-            style={{ border: RING, color: ACCENT, background: onAgent ? `${ACCENT}22` : 'transparent' }}
+            className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer"
+            style={{ background: FLIP ? '#010101' : '#F5B800' }}
           >
-            <Sparkles size={13} color={ACCENT} /> Ask b
+            {FLIP ? (
+              <img src={bGlyph} alt="" width={22} height={22} />
+            ) : (
+              <svg viewBox="23 8 74 100" width={17} height={23} aria-hidden>
+                <mask id="bnavp">
+                  <rect x="0" y="0" width="140" height="140" fill="#fff" />
+                  <circle cx="60" cy="72" r="15" fill="#000" />
+                </mask>
+                <g fill="#010101" mask="url(#bnavp)">
+                  <polygon points="45,12 45,76 27,76 27,30" />
+                  <circle cx="60" cy="72" r="33" />
+                </g>
+              </svg>
+            )}
           </button>
-          <div className="flex items-center justify-end gap-1.5">
-            <button
-              type="button"
-              aria-label="Calls"
-              onClick={() => setCallsOpen(true)}
-              className="w-8 h-8 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-              style={{ border: RING }}
-            >
-              <Phone size={15} color={ACCENT} />
-            </button>
-            <button
-              type="button"
-              aria-label="Media"
-              onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
-              aria-pressed={onMedia}
-              className="w-8 h-8 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-              style={{ border: RING }}
-            >
-              <Play size={15} color={ACCENT} fill={ACCENT} />
-            </button>
-            <button
-              type="button"
-              aria-label="Settings and lock"
-              aria-haspopup="menu"
-              aria-expanded={phoneMenu}
-              onClick={() => setPhoneMenu((v) => !v)}
-              className="w-8 h-8 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-              style={{ border: RING }}
-            >
-              <Settings size={15} color={ICON} />
-            </button>
-          </div>
+          <button
+            type="button"
+            aria-label="Media"
+            onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
+            aria-pressed={onMedia}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Play size={16} color={ACCENT} fill={ACCENT} />
+          </button>
+          <button
+            type="button"
+            aria-label="Settings and lock"
+            aria-haspopup="menu"
+            aria-expanded={phoneMenu}
+            onClick={() => setPhoneMenu((v) => !v)}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Settings size={16} color={ICON} />
+          </button>
           {phoneMenu && (
             <>
               <div className="fixed inset-0 z-[299]" onClick={() => setPhoneMenu(false)} />

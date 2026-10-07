@@ -805,16 +805,51 @@ body,
 
 /* Agent-account ghost (agents/PixelGhost.tsx): two-frame skirt and glancing eyes, stepped like an arcade
    sprite. On the wallet card it sits bottom right (owner, 6 Oct 2026). */
-.bw-ghost { image-rendering: pixelated; flex-shrink: 0; }
-.bw-ghost-a, .bw-ghost-look-l { animation: bw-ghost-on 0.5s steps(1, end) infinite; }
-.bw-ghost-b, .bw-ghost-look-r { animation: bw-ghost-off 0.5s steps(1, end) infinite; }
-.bw-ghost-look-l { animation-duration: 1.6s; }
-.bw-ghost-look-r { animation-duration: 1.6s; }
-@keyframes bw-ghost-on { 0% { opacity: 1; } 50% { opacity: 0; } }
-@keyframes bw-ghost-off { 0% { opacity: 0; } 50% { opacity: 1; } }
+.bw-ghost {
+  image-rendering: pixelated;
+  flex-shrink: 0;
+}
+.bw-ghost-a,
+.bw-ghost-look-l {
+  animation: bw-ghost-on 0.5s steps(1, end) infinite;
+}
+.bw-ghost-b,
+.bw-ghost-look-r {
+  animation: bw-ghost-off 0.5s steps(1, end) infinite;
+}
+.bw-ghost-look-l {
+  animation-duration: 1.6s;
+}
+.bw-ghost-look-r {
+  animation-duration: 1.6s;
+}
+@keyframes bw-ghost-on {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes bw-ghost-off {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .bw-ghost-a, .bw-ghost-look-l { animation: none; opacity: 1; }
-  .bw-ghost-b, .bw-ghost-look-r { animation: none; opacity: 0; }
+  .bw-ghost-a,
+  .bw-ghost-look-l {
+    animation: none;
+    opacity: 1;
+  }
+  .bw-ghost-b,
+  .bw-ghost-look-r {
+    animation: none;
+    opacity: 0;
+  }
 }
 .bw-wcard-ghost {
   position: absolute;
@@ -822,4 +857,17 @@ body,
   bottom: 14px;
   pointer-events: none;
   filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.5));
+}
+
+/* Phone layout: the ring that fills while the dock's big b is held (phone/Dock.tsx HomeButton). */
+.bw-hold-ring {
+  stroke-dashoffset: 100;
+  animation-name: bw-hold-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes bw-hold-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
 }

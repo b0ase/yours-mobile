@@ -213,6 +213,7 @@ const Shell = () => {
           badges={badges}
           onOpen={open}
           onHome={goHome}
+          onAgent={() => navigate('/m/agent')}
           onChange={setDock}
           onAdd={() => setAdding(true)}
           pageKey={pathname}

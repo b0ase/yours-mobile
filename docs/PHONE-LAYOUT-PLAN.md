@@ -328,6 +328,11 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - **Apps in the dock:** touch and hold any app on Apps or Home › **Add to Dock** (shown for every app, right under Open). Dock app items use the Apps-page tile style (the icon fills the rounded square).
 - **Keyboard:** the /m/agent page and phone sheets lift above the iOS keyboard (ui/keyboardInset.ts).
 
+### 14.2 Round 3 (owner on the iPhone, 7 Oct 2026), now built (supersedes the top bar and the no-hold rule in §14.1)
+- **Top bar, one row, icons only, evenly spaced:** Accounts chooser · Calls · **b** (round gold button, opens /m/agent) · Media · Settings. No page title. The separate account strip above it is gone in the phone layout; the account list is in the chooser.
+- **Hold on the dock's big b is back:** tap = HOME, touch and hold 500 ms = the full /m/agent page (not a sheet), with the composer focused on release where iOS allows. Built for WKWebView: touch events drive it (pointer events only for mouse/pen), no callout/selection, contextmenu blocked, a move over 10 px cancels; a gold ring fills while holding; tap and hold never both fire.
+- **HOME:** a fixed 4 × 6 page (24 slots) filling the space between the top bar and the dock, like an iPhone home page. Empty slots stay empty; more than 24 continue below. Scroll down for Your apps (+ Add app), then Recents (recently opened apps).
+
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 
 **Decided shape:** the phone layout ships first. The b button sits in the middle of the dock: one tap = HOME, press and hold = the $b agent listening (like Siri). Speech becomes a request to the agent, which can act.

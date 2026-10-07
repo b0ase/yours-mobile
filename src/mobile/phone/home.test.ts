@@ -17,16 +17,36 @@ describe('HOME', () => {
     }
   });
 
-  test('the dock b is Home only (no hold); the agent is Ask b in the top bar and a tile in Apps', () => {
+  test('dock b: tap = Home, hold = the agent page; top bar is Accounts · Calls · b · Media · Settings', () => {
     const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
-    expect(dock).toContain('aria-label="Home"');
-    expect(dock).not.toMatch(/onAgent|B_HOLD_MS/);
+    expect(dock).toContain('onTouchStart');
+    expect(dock).toContain('B_HOLD_MS');
+    expect(dock).toContain("WebkitTouchCallout: 'none'");
+    expect(dock).toContain('e.preventDefault()');
+    const shell = readFileSync(join(import.meta.dir, 'PhoneShell.tsx'), 'utf8');
+    expect(shell).toContain("onAgent={() => navigate('/m/agent')}");
     const top = readFileSync(join(import.meta.dir, '../tabs/TopNav.tsx'), 'utf8');
-    expect(top).toContain('Ask b');
-    expect(top).toContain("aria-label=\"Calls\"");
-    expect(top).toContain("aria-label=\"Media\"");
+    const row = top.slice(top.indexOf('owner round 3'));
+    const order = [
+      'aria-label="Accounts menu"',
+      'aria-label="Calls"',
+      "'b agent'",
+      'aria-label="Media"',
+      'aria-label="Settings and lock"',
+    ].map((l) => row.indexOf(l));
+    expect(order.every((i) => i > 0)).toBe(true);
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+    expect(top).toContain('{!phone && <AccountStrip />}');
     const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
     expect(apps).toContain('[AGENT_TILE, ...notHome(BAPP_TILES)]');
+  });
+
+  test('HOME is a fixed 4 × 6 page with Your apps and Recents below', () => {
+    const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
+    expect(apps).toContain('const HOME_ROWS = 6;');
+    expect(apps).toContain('const HOME_SLOTS = 4 * HOME_ROWS;');
+    expect(apps).toContain('HOME_SLOTS - first.length');
+    expect(apps.indexOf('Your apps')).toBeLessThan(apps.indexOf('>Recents<'));
   });
 
   test('the phone layout is off by default', () => {

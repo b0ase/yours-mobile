@@ -105,6 +105,10 @@ type Tile = {
 };
 
 const ICON = 'h-[60px] w-[60px] rounded-[16px]';
+/** Phone layout HOME: 4 columns × 6 rows, sized to the space between the top bar (3.5rem) and the dock. */
+const HOME_ROWS = 6;
+const HOME_SLOTS = 4 * HOME_ROWS;
+const HOME_PAGE_H = 'calc(var(--wallet-height, 100dvh) - 3.5rem - var(--dock-h, 3.75rem) - 1.75rem)';
 const ONE_LINE = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 /** Home-screen icon: the site's icon, else a monogram ("b" in gold for bApps). */
@@ -621,6 +625,44 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
     );
   };
 
+  /**
+   * Phone layout HOME (owner, round 3): a fixed 4 × 6 page (24 slots) filling the height between the top bar and
+   * the dock, like an iPhone home page. Empty slots stay empty; more than 24 apps continue below it.
+   */
+  const homePage = (tiles: Tile[]) => {
+    const first = tiles.slice(0, HOME_SLOTS);
+    const rest = tiles.slice(HOME_SLOTS);
+    return (
+      <>
+        <div
+          data-testid="home-page-grid"
+          className="grid grid-cols-4 gap-x-3 items-start justify-items-center"
+          style={{ gridTemplateRows: `repeat(${HOME_ROWS}, minmax(0, 1fr))`, height: HOME_PAGE_H, minHeight: '28rem' }}
+        >
+          {first.map((t) => (
+            <AppTile
+              key={t.key}
+              tile={t}
+              onOpen={() => go(t.url, t.bapp)}
+              onInfo={() => setInfo(t)}
+              onArrange={() => {
+                setInfo(null);
+                setArranging(true);
+              }}
+            />
+          ))}
+          {Array.from({ length: HOME_SLOTS - first.length }, (_, i) => (
+            <span key={`empty${i}`} aria-hidden className="h-[60px] w-[60px]" />
+          ))}
+        </div>
+        {first.length === 0 && (
+          <p className="text-[12px] text-[#98A2B3] text-center -mt-2">Touch and hold any app, then Add to Home.</p>
+        )}
+        {rest.length > 0 && grid(0, rest)}
+      </>
+    );
+  };
+
   const note = (text: string) => <p className="text-[10px] leading-relaxed text-[#98A2B3] text-center px-2">{text}</p>;
 
   const pageBody = (i: number) => {
@@ -641,6 +683,8 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
               </div>
               <ArrangeGrid tiles={favouriteTiles} onReorder={reorderHome} onRemove={removeFromHome} />
             </div>
+          ) : phone && only === 'home' ? (
+            homePage(favouriteTiles)
           ) : favouriteTiles.length > 0 ? (
             grid(0, favouriteTiles)
           ) : (
@@ -666,9 +710,10 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
               <p className="text-[12px] text-[#98A2B3] m-0">Add any website, like zanaadu.com. Saved to your wallet.</p>
             )}
           </div>
-          {recent.length > 0 && (
+          {(recent.length > 0 || (phone && only === 'home')) && (
             <div className="flex flex-col gap-2">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recent</h2>
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
+              {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
               <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                 {recent.map((url) => (
                   <button

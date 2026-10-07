@@ -5,6 +5,10 @@
 /** A press becomes a long-press only if the finger stays within this many px (so a scroll never triggers it). */
 export const LONG_PRESS_SLOP = 8;
 export const DOCK_LONG_PRESS_MS = 500;
+/** Holding the dock's big b this long opens the b agent page; a shorter press is a tap (HOME). */
+export const B_HOLD_MS = 500;
+/** A finger that moves more than this while holding the b cancels the hold (and the tap). */
+export const B_HOLD_SLOP = 10;
 
 export const longPressCancelled = (dx: number, dy: number, slop = LONG_PRESS_SLOP) => Math.hypot(dx, dy) > slop;
 
