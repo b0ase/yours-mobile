@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
+import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
 import { appIconFor, useUserApps } from './apps/userApps';
 import { useBackClose } from './backStack';
@@ -168,8 +169,23 @@ const RADAR_SECTIONS = RADAR_GROUPS.filter((g) => radarGroupShown(g.id))
     ),
   }))
   .filter((g) => g.tiles.length > 0);
-// Games get their own page (owner, 5 Oct 2026); Other apps shows the rest.
-const GAME_TILES = RADAR_SECTIONS.find((g) => g.label === 'Games')?.tiles ?? [];
+// Games get their own page (owner, 5 Oct 2026), from the bGames catalogue (games/gamesCatalog.ts), grouped
+// by source; Other apps shows the rest. Store build: gamesFor drops TokenBlaster and real-money games.
+const RADAR_ICONS = new Map(RADAR_APPS.map((a) => [bareHost(a.url), a.icon]));
+const GAME_SECTIONS = GAME_SOURCES.map((s) => ({
+  label: s.label,
+  tiles: gamesFor()
+    .filter((g) => g.source === s.id)
+    .map(
+      (g): Tile => ({
+        key: `g:${g.name}`,
+        name: g.name,
+        url: g.url,
+        icon: RADAR_ICONS.get(bareHost(g.url)) ?? g.img,
+        desc: g.desc,
+      }),
+    ),
+})).filter((s) => s.tiles.length > 0);
 const OTHER_SECTIONS = RADAR_SECTIONS.filter((g) => g.label !== 'Games');
 
 const LONG_PRESS_MS = 450;
@@ -677,8 +693,13 @@ const BrowserPage = () => {
     if (i === 3) {
       return (
         <>
-          {grid(3, notHome(GAME_TILES))}
-          {note('Not made by The Bitcoin Corporation. Touch and hold a game for details.')}
+          {GAME_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
+            <div key={g.label} className="flex flex-col gap-3">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+              {grid(3, notHome(g.tiles))}
+            </div>
+          ))}
+          {note('More BSV games are not made by The Bitcoin Corporation. Touch and hold a game for details.')}
         </>
       );
     }
