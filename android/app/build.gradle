@@ -51,6 +51,8 @@ android {
         release {
             if (System.getenv("YOURS_UPLOAD_KEYSTORE")) signingConfig signingConfigs.release
             minifyEnabled false
+            // Ship native debug symbols in the AAB so Play can symbolicate native crashes (Play warned on 5.1.76).
+            ndk { debugSymbolLevel 'SYMBOL_TABLE' }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
