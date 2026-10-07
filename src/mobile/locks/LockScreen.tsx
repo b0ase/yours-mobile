@@ -547,11 +547,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </div>
               )}
               {schedule!.warning && <div className="text-xs" style={{ color: GOLD }}>{schedule!.warning}</div>}
-              <div className="max-h-72 overflow-y-auto">
-                <table className="w-full text-[11px]">
+              <div className="max-h-72 overflow-y-auto overflow-x-hidden">
+                <table className="w-full table-fixed text-[11px] [overflow-wrap:anywhere]">
                   <thead style={{ color: MUTED }}>
                     <tr>
-                      <th className="text-left font-semibold py-1">#</th>
+                      <th className="text-left font-semibold py-1 w-6">#</th>
                       <th className="text-left font-semibold">Date ≈</th>
                       <th className="text-right font-semibold">Block</th>
                       <th className="text-right font-semibold">BSV</th>
@@ -656,9 +656,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   }
 
   return (
-    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
+    <div className="w-full h-full flex flex-col overflow-y-auto overflow-x-hidden overscroll-x-none pb-44" style={{ background: '#010101' }}>
       <TopNav />
-      <div className="mt-14 flex flex-col gap-3">{body}</div>
+      <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
     </div>
   );
 };
