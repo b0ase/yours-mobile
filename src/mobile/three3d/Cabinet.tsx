@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ShieldCheck, X } from 'lucide-react';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { createGltfLoader } from './gltfLoader';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { useBackClose } from '../backStack';
 import { openBapp } from '../bappFrame/bappFrame';
@@ -52,8 +51,17 @@ const usesBase = (w: Weapon) => BASE_MODELS.some((b) => w.model.endsWith(`/${b}.
 const tintFor = (w: Weapon) => w.tintAmount ?? (usesBase(w) || FULL_TINT.has(w.id) ? 0.65 : 0.22);
 const flipFor = (w: Weapon) => w.flip ?? (!usesBase(w) && FLIPPED.has(w.id));
 
+/** Why a model didn't load, in words the owner can act on (shown in the viewer instead of a blank canvas). */
+const loadError = (err: unknown): string => {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  const ext = /extension "?([A-Z0-9_]+)"?/i.exec(msg)?.[1];
+  if (ext) return `This model uses ${ext}, which the viewer can't decode yet.`;
+  if (/fetch|network|load failed|status/i.test(msg)) return "Couldn't download the 3D model. Check your connection and try again.";
+  return "Couldn't load the 3D model.";
+};
+
 /** Spinning, draggable model. One WebGL context, only while the cabinet is open; everything is disposed on close. */
-const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void }) => {
+const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: (why: string) => void }) => {
   const host = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
 
@@ -63,7 +71,14 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
     let dead = false;
     const w = el.clientWidth;
     const h = el.clientHeight;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      // WKWebView can refuse a WebGL context (memory pressure, too many contexts): say so, don't go blank.
+      onError('3D graphics (WebGL) are not available right now.');
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(w, h);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -96,10 +111,18 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
       renderer.render(scene, camera);
     };
 
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const fail = (why: string) => {
+      if (dead) return;
+      dead = true;
+      onError(why);
+    };
+    // A model that never arrives must not leave "Loading" up forever.
+    const timeout = setTimeout(() => fail('The 3D model took too long to load.'), 60_000);
+    const loader = createGltfLoader();
     loader.load(
       weapon.model,
       (gltf) => {
+        clearTimeout(timeout);
         if (dead) return;
         // The minigun is skinned: SkeletonUtils.clone, or the copy keeps following the original's bones.
         const gun = skeletonClone(gltf.scene);
@@ -133,7 +156,10 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
         tick();
       },
       undefined,
-      () => !dead && onError(),
+      (err) => {
+        clearTimeout(timeout);
+        fail(loadError(err));
+      },
     );
 
     const onResize = () => {
@@ -147,6 +173,7 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
 
     return () => {
       dead = true;
+      clearTimeout(timeout);
       cancelAnimationFrame(frame);
       window.removeEventListener('resize', onResize);
       controls.dispose();
@@ -177,7 +204,7 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
 
 /** Any GLB / glTF inscription (Market › 3D listing): the same spinning viewer, no tint, flip or rim colour. */
 export const ModelPreview = ({ url }: { url: string }) => {
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState('');
   const weapon = useMemo<Weapon>(
     () => ({
       id: url,
@@ -200,11 +227,15 @@ export const ModelPreview = ({ url }: { url: string }) => {
   return (
     <div className="relative w-full h-full">
       {failed ? (
-        <div className="absolute inset-0 flex items-center justify-center text-xs" style={{ color: MUTED }}>
-          Couldn&apos;t load the 3D model.
+        <div
+          role="alert"
+          className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm"
+          style={{ color: MUTED }}
+        >
+          {failed}
         </div>
       ) : (
-        <ModelView weapon={weapon} onError={() => setFailed(true)} />
+        <ModelView weapon={weapon} onError={setFailed} />
       )}
     </div>
   );

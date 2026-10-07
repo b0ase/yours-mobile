@@ -1144,7 +1144,7 @@ const MarketPage = () => {
             )}
             {preview.category === '3d' &&
               (ModelPreview ? (
-                <Suspense fallback={null}>
+                <Suspense fallback={<p className="text-xs text-[#98A2B3]">Loading 3D viewer…</p>}>
                   <ModelPreview url={contentUrls(preview.origin)[0]} />
                 </Suspense>
               ) : null)}
