@@ -41,4 +41,10 @@ export default tseslint.config(
     files: ['src/prompt-tab.tsx', 'src/sweep-tab.tsx'],
     rules: { 'react-refresh/only-export-components': 'off' },
   },
+  {
+    // A byte-identical copy of bit-sign's src/lib/feed/language.ts (canonical; language.test.ts
+    // compares them), which writes its invisible-character class literally.
+    files: ['src/mobile/feed/language.ts'],
+    rules: { 'no-irregular-whitespace': 'off' },
+  },
 );

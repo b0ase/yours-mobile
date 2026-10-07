@@ -5,7 +5,8 @@
  * it here. Edit by hand freely; keep the markers.
  */
 import type { RadarApp } from './radarApps';
-import { ownerAppsFor } from './storeBuild';
+import { ownerAppsFor, TOKENBLASTER_ENABLED } from './storeBuild';
+import { TOKENBLASTER_APPS } from './ownerAppsX';
 import owner_budz_lol from './brand/apps/radar/owner-budz-lol.png';
 import owner_budgirls_pro from './brand/apps/radar/owner-budgirls-pro.png';
 import owner_zanaadu_com from './brand/apps/radar/owner-zanaadu-com.png';
@@ -20,7 +21,6 @@ import owner_zerodice_online from './brand/apps/radar/owner-zerodice-online.png'
 import owner_ninjapunkgirls_online from './brand/apps/radar/owner-ninjapunkgirls-online.png';
 import owner_tankscope_pro from './brand/apps/radar/owner-tankscope-pro.png';
 import owner_bmusic_space from './brand/apps/radar/owner-bmusic-space.png';
-import owner_tokenblaster from './brand/apps/tokenblaster.png';
 import owner_vexvoid_com from './brand/apps/radar/owner-vexvoid-com.png';
 // ADD-APP:IMPORTS
 
@@ -39,7 +39,9 @@ const ALL_OWNER_APPS: RadarApp[] = [
   { name: 'Ninja Punk Girls', url: 'https://ninjapunkgirls.online', desc: 'Collect, trade, and battle with unique Ninja Punk Girls NFTs in the ultimate cyberpunk gam', group: 'games', icon: owner_ninjapunkgirls_online, source: 'owner' },
   { name: 'TankScope', url: 'https://tankscope.pro', desc: 'Field capture and customer reporting for route-based aquarium service businesses. Per-tank', group: 'tools', icon: owner_tankscope_pro, source: 'owner' },
   { name: 'bMusic', url: 'https://bmusic.space', desc: 'MINT · RECORD · REEL · RELEASE. Pump.fun for music. Mint an AI artist for $0.99, record a ', group: 'media', icon: owner_bmusic_space, source: 'owner' },
-  { name: 'TokenBlaster', url: 'https://www.tokenblaster.lol/blast', desc: 'Load your token into the gun and blast it at the chain', group: 'tools', icon: owner_tokenblaster, source: 'owner' },
+  // bWalletX only: not even as data in a store build (TOKENBLASTER_ENABLED; vite.config.mobile.ts swaps
+  // ownerAppsX.ts for ownerAppsX.store.ts there, so its icon is not emitted either).
+  ...(TOKENBLASTER_ENABLED ? TOKENBLASTER_APPS : []),
   { name: 'VexVoid', url: 'https://www.vexvoid.com/', desc: 'VexVoid — music and audio-visual releases. Listen, watch and collect', group: 'media', icon: owner_vexvoid_com, source: 'owner' },
   // ADD-APP:ENTRIES
 ];

@@ -45,7 +45,7 @@ import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
 import { BAPPS } from '../bapps';
 import { CURVE_FILTER, CURVE_LABEL, loadCurvePanel } from './launchpad/tile';
-import { CURVE_COINS_ENABLED, marketFiltersFor, marketLabel, marketTradingEnabled } from '../storeBuild';
+import { CURVE_COINS_ENABLED, TOKENBLASTER_ENABLED, marketFiltersFor, marketLabel, marketTradingEnabled } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel } from '../tickets/TicketsPanel';
@@ -54,7 +54,6 @@ import { TICKET_COPY, eventLabel, type Ticket } from '../tickets/tickets';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { openDappBrowser } from '../dappBrowser';
-import { OrdnanceGrid } from '../three3d/OrdnanceGrid';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
 import { StrategiesMarket } from '../strategies/StrategiesMarket';
 import { ContractsMarket } from '../contracts/ContractsMarket';
@@ -129,6 +128,10 @@ const TRADING = marketTradingEnabled();
 // Curve coins load on demand and only outside a store build: CURVE_COINS_ENABLED folds to false there
 // and Rollup drops ./launchpad/* entirely (code, strings and sourcemap sources).
 const CurvePanel = CURVE_COINS_ENABLED ? lazy(loadCurvePanel) : null;
+// 1Sat Ordnance (tokenblaster.lol) 3D catalogue: bWalletX only, dropped from a store build.
+const OrdnanceGrid = TOKENBLASTER_ENABLED
+  ? lazy(() => import('../three3d/OrdnanceGrid').then((m) => ({ default: m.OrdnanceGrid })))
+  : null;
 const KIND_KEY = 'bwallet.market.kind';
 const readKind = (): Kind => {
   try {
@@ -410,6 +413,10 @@ const MarketPage = () => {
           { id: 'bonds', label: 'Bonds', kind: 'tokens' as Kind },
           // 3D NFTs: 1Sat Ordnance game guns from tokenblaster.lol as spinning models (owner, 6 Oct 2026).
           // bWalletX only: buying sends you to an outside store, which the app stores reject.
+        ]
+      : []),
+    ...(TRADING && TOKENBLASTER_ENABLED
+      ? [
           { id: '3d', label: '3D', kind: 'nfts' as Kind },
         ]
       : []),
@@ -1030,8 +1037,10 @@ const MarketPage = () => {
           mineView
         ) : strategiesOpen && !room ? (
           <StrategiesMarket />
-        ) : panel === '3d' && !room ? (
-          <OrdnanceGrid />
+        ) : panel === '3d' && !room && OrdnanceGrid ? (
+          <Suspense fallback={null}>
+            <OrdnanceGrid />
+          </Suspense>
         ) : panel && !room ? (
           <ContractsMarket filter={panel === 'bonds' ? 'bond' : undefined} />
         ) : room ? (

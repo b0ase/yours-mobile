@@ -59,10 +59,23 @@ export const CURVE_COINS_ENABLED: boolean = !(
 );
 
 /**
+ * Everything tokenblaster.lol (the TokenBlaster owner tile, Home addition, and the 1Sat Ordnance 3D
+ * catalogue with its "buy it there" link): bWalletX only, absent from a store build even as data
+ * (outside purchase of digital goods: Apple 3.1.1, Play Payments). Literal env check so Vite inlines
+ * it and Rollup drops the data and the lazy imports. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const TOKENBLASTER_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Owner apps left out of a store build: TokenBlaster sells guns and runs a coin launchpad, so a store
  * app linking to it would point users at outside buying (Apple 3.1.1/3.1.5, Play Payments).
  */
-export const STORE_HIDDEN_OWNER_APPS: readonly string[] = ['TokenBlaster'];
+// Folds to [] in a store build, where the tile's data is not in the bundle at all (TOKENBLASTER_ENABLED).
+export const STORE_HIDDEN_OWNER_APPS: readonly string[] = TOKENBLASTER_ENABLED ? ['TokenBlaster'] : [];
 export const ownerAppsFor = <T extends { name: string }>(apps: readonly T[], store = STORE_BUILD): T[] =>
   store ? apps.filter((a) => !STORE_HIDDEN_OWNER_APPS.includes(a.name)) : [...apps];
 

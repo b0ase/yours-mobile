@@ -1,3 +1,4 @@
+import { TOKENBLASTER_ENABLED } from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -365,7 +366,7 @@ const FAV_KEY = 'bwallet:favourite-apps';
 const DEFAULT_FAVOURITES = [
   'bChat',
   'bMovies',
-  'TokenBlaster',
+  ...(TOKENBLASTER_ENABLED ? ['TokenBlaster'] : []),
   'bMusic',
   'bMint',
   'bWriter',
@@ -386,7 +387,9 @@ const DEFAULT_FAVOURITES = [
   .filter((u): u is string => !!u);
 
 // Apps added to Home once for people who already arranged it (they can still remove them).
-const HOME_ADDITIONS: { flag: string; name: string }[] = [{ flag: 'bwallet:home-add:tokenblaster', name: 'TokenBlaster' }];
+const HOME_ADDITIONS: { flag: string; name: string }[] = TOKENBLASTER_ENABLED
+  ? [{ flag: 'bwallet:home-add:tokenblaster', name: 'TokenBlaster' }]
+  : [];
 
 const readFavourites = (): string[] => {
   try {

@@ -44,6 +44,11 @@ export const MOBILE_SWAPS: Record<string, string> = {
   // Account drawer (Phantom-style) in place of the dropdown + GitHub button.
   [resolve(__dirname, 'src/components/TopNav.tsx')]: resolve(__dirname, 'src/mobile/tabs/TopNav.tsx'),
 };
+// Store builds (ios-store, android-play): the bWalletX-only owner tiles are not in the bundle, icon included.
+const STORE_CHANNEL =
+  process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+if (STORE_CHANNEL)
+  MOBILE_SWAPS[resolve(__dirname, 'src/mobile/ownerAppsX.ts')] = resolve(__dirname, 'src/mobile/ownerAppsX.store.ts');
 const brand = () => sharedBrand(MOBILE_SWAPS);
 
 // All mobile builds: mount the mobile-only tab routes (/m/settings, /m/media,
@@ -721,6 +726,8 @@ export default mergeConfig(
     build: {
       outDir: 'build-mobile',
       target: 'es2022',
+      // No source maps in a store app: they carry the source comments of code the store build drops.
+      sourcemap: !STORE_CHANNEL,
       rollupOptions: {
         input: {
           main: resolve(__dirname, 'mobile.html'),

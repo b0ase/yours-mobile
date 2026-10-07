@@ -55,8 +55,8 @@ const CONFUSABLE: Record<string, string> = {
 function fold(text: string): string {
     return text
         .normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, '')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[­​-‏⁠﻿]/g, '')
         .toLowerCase()
         .replace(/[Ͱ-ӿ]/g, (c) => CONFUSABLE[c] ?? c);
 }

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileQuestion, Music, Play, RefreshCw, Send } from 'lucide-react';
 import type { MediaKind } from './media';
@@ -8,8 +8,14 @@ import { NftDetail } from './NftDetail';
 import { refreshMessage } from './nftActions';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { getTagValue } from '../../utils/format';
-import { loadIssued, loadWeapons, normOutpoint, type Weapon } from '../three3d/ordnance';
-import { LazyCabinet, WeaponTile } from '../three3d/OrdnanceGrid';
+import type { Weapon } from '../three3d/ordnance';
+import { TOKENBLASTER_ENABLED } from '../storeBuild';
+
+// 1Sat Ordnance guns (tokenblaster.lol): bWalletX only, not in a store build even as code.
+const WeaponTile = TOKENBLASTER_ENABLED
+  ? lazy(() => import('../three3d/OrdnanceGrid').then((m) => ({ default: m.WeaponTile })))
+  : null;
+const LazyCabinet = TOKENBLASTER_ENABLED ? lazy(() => import('../three3d/Cabinet')) : null;
 
 /**
  * Wallet › NFTs: the wallet's non-fungible inscriptions as a media library, filtered by kind,
@@ -53,10 +59,13 @@ export const MediaSection = () => {
   const [guns, setGuns] = useState<Map<string, Weapon>>(new Map());
   const [cabinet, setCabinet] = useState<Weapon | null>(null);
   useEffect(() => {
-    if (!items.length) return;
+    if (!TOKENBLASTER_ENABLED || !items.length) return;
     let live = true;
-    Promise.all([loadIssued(), loadWeapons()])
-      .then(([issued, weapons]) => {
+    import('../three3d/ordnance')
+      .then(({ loadIssued, loadWeapons, normOutpoint }) =>
+        Promise.all([loadIssued(), loadWeapons()]).then(([issued, weapons]) => ({ issued, weapons, normOutpoint })),
+      )
+      .then(({ issued, weapons, normOutpoint }) => {
         const byId = new Map(weapons.map((w) => [w.id, w]));
         const m = new Map<string, Weapon>();
         items.forEach((i) => {
@@ -95,8 +104,10 @@ export const MediaSection = () => {
 
   const tile = (item: MediaItem) => {
     const gun = guns.get(item.output.outpoint);
-    return gun ? (
-      <WeaponTile key={item.output.outpoint} weapon={gun} onOpen={() => setCabinet(gun)} sub="Verified" />
+    return gun && WeaponTile ? (
+      <Suspense key={item.output.outpoint} fallback={null}>
+        <WeaponTile weapon={gun} onOpen={() => setCabinet(gun)} sub="Verified" />
+      </Suspense>
     ) : (
       <button
         key={item.output.outpoint}
@@ -203,7 +214,7 @@ export const MediaSection = () => {
       </div>
 
       {open && <NftDetail item={open} onClose={() => setOpen(null)} onSent={reload} />}
-      {cabinet && (
+      {cabinet && LazyCabinet && (
         <Suspense fallback={null}>
           <LazyCabinet weapon={cabinet} owned onClose={() => setCabinet(null)} />
         </Suspense>

@@ -131,3 +131,33 @@ describe('store build: no buying, no personal token, no bWalletX text', () => {
     }
   });
 });
+
+describe('TOKENBLASTER_ENABLED: tokenblaster.lol data and the 1Sat Ordnance 3D catalogue are bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { TOKENBLASTER_ENABLED } = await import('./storeBuild');
+    expect(TOKENBLASTER_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'TOKENBLASTER_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the TokenBlaster tile and Home addition are data only behind the flag', () => {
+    expect(src('./ownerApps.ts')).toContain('...(TOKENBLASTER_ENABLED ? TOKENBLASTER_APPS : [])');
+    expect(src('./ownerAppsX.store.ts')).not.toContain('TokenBlaster');
+    expect(src('../../vite.config.mobile.ts')).toContain("'src/mobile/ownerAppsX.store.ts'");
+    const b = src('./BrowserPage.tsx');
+    expect(b).toContain("...(TOKENBLASTER_ENABLED ? ['TokenBlaster'] : [])");
+    expect(b).toMatch(/HOME_ADDITIONS[^=]*= TOKENBLASTER_ENABLED\s*\?/);
+  });
+  test('no static import of the Ordnance catalogue outside three3d/', () => {
+    for (const f of ['./market/MarketPage.tsx', './media/MediaSection.tsx']) {
+      const s = src(f);
+      expect(s).not.toMatch(/^import (?!type )[^;]*from '\.\.\/three3d\/(ordnance|OrdnanceGrid|Cabinet)';/m);
+      expect(s).toContain('TOKENBLASTER_ENABLED');
+    }
+    expect(src('./market/MarketPage.tsx')).toContain('...(TRADING && TOKENBLASTER_ENABLED');
+  });
+});
