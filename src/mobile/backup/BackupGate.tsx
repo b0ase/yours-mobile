@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isIosWebApp, isWebApp } from '../webApp';
 import { BackupStep } from './BackupStep';
+import { useInPeek } from '../phone/pageEl';
 import {
   backupExit,
   balancePromptShown,
@@ -35,6 +36,7 @@ export const BackupGate = ({ sats }: { sats: number }) => {
   const [request, setRequest] = useState<BackupRequest | null>(null);
   const [reminder, setReminder] = useState(false);
   const backedUp = isBackedUp(settings);
+  const offScreen = useInPeek();
 
   useEffect(() => {
     const update = () => setSettings(currentBackupSettings(chromeStorageService));
@@ -125,7 +127,8 @@ export const BackupGate = ({ sats }: { sats: number }) => {
           </div>
         </div>
       )}
-      {request && (
+      {/* Phone layout: Wallet may be mounted off screen (phone/pager.tsx); the step waits until it is shown. */}
+      {request && !offScreen && (
         <BackupStep
           web={web}
           exit={backupExit(request.reason, web, sats === 0)}

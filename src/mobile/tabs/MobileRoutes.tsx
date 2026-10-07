@@ -29,6 +29,8 @@ const MobileRoutes = () => (
         <Route path="agent" element={<AgentPage />} />
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
+        {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
+        <Route path="screen/:n" element={<BrowserPage only="apps" />} />
         <Route path="games" element={<BrowserPage only="games" />} />
         <Route path="people" element={<PeopleScreen />} />
         {MarketPage && <Route path="market" element={<MarketPage />} />}

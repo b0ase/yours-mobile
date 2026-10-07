@@ -3,7 +3,6 @@ import { useReducedMotion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BottomMenuContext, type MenuItems } from '../../contexts/BottomMenuContext';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { backStackSize } from '../backStack';
 import { getBappFrameState, openBapp } from '../bappFrame/bappFrame';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled } from '../storeBuild';
@@ -15,13 +14,13 @@ import { addToDock, dockKey, type DockItem } from './dockModel';
 import { useDock } from './dockStore';
 import { usePhoneLayout } from './flag';
 import { PHONE_ADD_TO_DOCK, PHONE_GO, PHONE_TOAST } from './events';
-import { ensureFavourite } from './homeFavourites';
+import { placeFirstFree, renameScreen, screenTitle } from './appScreens';
+import { getAppScreens, setAppScreens, useAppScreens } from './appScreensStore';
 import { lockAxis, PAGE_SNAP_MS, pageRelease, rubberBand } from './gesture';
 import { getPageEl } from './pageEl';
-import { ScreenPeek } from './pager';
 import { PageDots } from './PageDots';
 import { backGoesHome, setPhoneBack } from './phoneBack';
-import { HOME, neighbour, screenById, screenForPath, STRIP, type Screen, type ScreenId } from './screens';
+import { appIndexForPath, appScreenRoute, pageForPath, screenById, STRIP, type Screen } from './screens';
 import { SendReceiveSheet } from './SendReceiveSheet';
 import { useAppServices } from './useAppServices';
 import { requestWalletAction, type WalletAction } from './walletAction';
@@ -42,6 +41,15 @@ const inSideScroller = (el: Element | null): boolean => {
   }
   return false;
 };
+
+/**
+ * An open sheet or dialog on screen (not in a page kept off screen, phone/pager.tsx): no page swipe. The back
+ * stack can't say this any more, since a kept page may hold its own open sheet while hidden.
+ */
+const sheetOnScreen = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="dialog"],[aria-modal="true"]')].some(
+    (el) => !el.closest('.bw-page-off') && el.getClientRects().length > 0,
+  );
 
 /** First strip page this session: a cold start lands on HOME, not the wallet (plan §6). */
 let landed = false;
@@ -70,7 +78,11 @@ const Shell = () => {
   const [sendReceive, setSendReceive] = useState(false);
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const current = screenForPath(pathname);
+  const screens = useAppScreens().screens;
+  const count = screens.length;
+  /** The app screen on show (swipeable), or the page (Wallet, Exchange, Feed, Chat…), or neither. */
+  const curIdx = appIndexForPath(pathname, count);
+  const current = curIdx === null ? pageForPath(pathname) : null;
   const reduce = useReducedMotion();
   const visible = !!menu?.isVisible;
 
@@ -79,11 +91,20 @@ const Shell = () => {
     chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
   ).length;
 
-  /** Go to a strip page (replace), keeping the old bottom-bar selection in step for upstream callers. */
+  /** Go to app screen i (replace). */
+  const goScreen = (i: number) => {
+    const route = appScreenRoute(Math.max(0, Math.min(i, count - 1)));
+    if (pathname !== route) navigate(route, { replace: true });
+    menu?.clearSelection();
+  };
+  /** Go to a page (replace), keeping the old bottom-bar selection in step for upstream callers. Home, Apps and
+   *  Games are app screens 1, 2 and 3 now (Option B). */
   const go = (s: Screen) => {
+    if (s.id === 'home' || s.id === 'apps' || s.id === 'games')
+      return goScreen(s.id === 'home' ? 0 : s.id === 'apps' ? 1 : 2);
     const legacy = s.legacyIds[0];
     if (s.id === 'wallet') setWalletKind('tokens');
-    if (screenForPath(pathname)?.id === s.id) {
+    if (pageForPath(pathname)?.id === s.id) {
       // Already here: reset the screen's inner pages, like re-tapping a tab did.
       if (legacy) window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: legacy }));
       if (pathname !== s.route) navigate(s.route, { replace: true });
@@ -95,29 +116,27 @@ const Shell = () => {
   };
   const goRef = useRef(go);
   goRef.current = go;
-  const goHome = () => {
-    const h = screenById(HOME);
-    if (h) go(h);
-  };
+  const goScreenRef = useRef(goScreen);
+  goScreenRef.current = goScreen;
+  const goHome = () => goScreen(0);
 
   // A cold start opens on HOME.
   useEffect(() => {
-    if (landed || !current) return;
+    if (landed || (!current && curIdx === null)) return;
     landed = true;
     try {
       sessionStorage.removeItem('bwallet:apps-page');
     } catch {
       /* storage unavailable */
     }
-    if (current.id === 'wallet') goHome();
+    if (current?.id === 'wallet') goHome();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id]);
+  }, [current?.id, curIdx]);
 
   // Android Back: off HOME → HOME.
   useEffect(() => {
     setPhoneBack(() => {
-      const s = current;
-      if (!backGoesHome(s?.id)) return false;
+      if (!backGoesHome(current ? current.id : curIdx ? 'screen' : null)) return false;
       goHome();
       return true;
     });
@@ -128,70 +147,45 @@ const Shell = () => {
   // snaps. Transforms only, set straight on the elements (no React render per move). Never from the dock, a
   // sideways scroller, a text field or an open sheet / bApp, so inner swipers keep working; the axis locks after
   // 10px, so vertical scrolling inside pages is untouched.
-  const [peek, setPeek] = useState<{ id: ScreenId; side: -1 | 1 } | null>(null);
-  const [dotTarget, setDotTarget] = useState<ScreenId | null>(null);
-  const peekEl = useRef<HTMLDivElement | null>(null);
-  const peekRect = useRef<DOMRect | null>(null);
-  const pendingSlide = useRef<Screen | null>(null);
+  const [dotTarget, setDotTarget] = useState<number | null>(null);
   const settling = useRef(false);
-  const place = (tx: number, side: number, ms: number) => {
+  /** Move the whole track (phone/pager.tsx) by tx px; while it is off rest, the neighbours show. */
+  const place = (tx: number, ms: number, dragging: boolean) => {
     const el = getPageEl();
     if (!el) return;
-    const w = el.clientWidth;
-    const t = ms ? `transform ${ms}ms cubic-bezier(0.2, 0.8, 0.2, 1)` : 'none';
-    el.style.transition = t;
+    el.style.transition = ms ? `transform ${ms}ms cubic-bezier(0.2, 0.8, 0.2, 1)` : 'none';
     el.style.transform = tx ? `translate3d(${tx}px,0,0)` : '';
-    const pe = peekEl.current;
-    if (pe) {
-      pe.style.transition = t;
-      pe.style.transform = `translate3d(${side * w + tx}px,0,0)`;
-    }
+    if (dragging) el.dataset.dragging = '1';
+    else delete el.dataset.dragging;
   };
-  const showPeek = (id: ScreenId, side: -1 | 1) => {
-    const el = getPageEl();
-    if (el) peekRect.current = el.getBoundingClientRect();
-    setPeek((p) => (p && p.id === id && p.side === side ? p : { id, side }));
-  };
-  /** Snap to `target` (a neighbour, already peeking) or back (null). */
-  const settle = (target: Screen | null, side: -1 | 1, tx: number) => {
-    const el = getPageEl();
-    const w = el?.clientWidth ?? window.innerWidth;
+  /** Snap to `target` (a neighbour on `side`) or back (null). */
+  const settle = (target: number | null, side: -1 | 1, tx: number) => {
+    const w = getPageEl()?.clientWidth ?? window.innerWidth;
     const ms = reduce ? 0 : Math.round(PAGE_SNAP_MS * Math.min(1, Math.max(0.4, (w - Math.abs(tx)) / w + 0.2)));
     settling.current = true;
-    place(target ? -side * w : 0, side, ms);
+    place(target !== null ? -side * w : 0, ms, true);
     window.setTimeout(() => {
-      if (target) {
-        goRef.current(target); // the route changes; the layout effect below resets the transforms
+      if (target !== null) {
+        goScreenRef.current(target); // the route changes; the layout effect below puts the track back at rest
       } else {
-        place(0, side, 0);
-        setPeek(null);
+        place(0, 0, false);
         settling.current = false;
       }
       setDotTarget(null);
     }, ms + 16);
   };
-  // After the route changes, put the page back in place before the browser paints, then drop the preview.
+  // After the route changes the new page is the track's centre: reset before the browser paints.
   useLayoutEffect(() => {
-    place(0, 0, 0);
-    setPeek(null);
+    place(0, 0, false);
     settling.current = false;
   }, [pathname]);
-  // A slide started by a tap (dock, dots): once the target is mounted beside the page, animate to it.
-  useLayoutEffect(() => {
-    const target = pendingSlide.current;
-    if (!peek || !target || target.id !== peek.id) return;
-    pendingSlide.current = null;
-    place(0, peek.side, 0);
-    requestAnimationFrame(() => settle(target, peek.side, 0));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peek]);
-  /** Go to a strip page with a slide (dock and dots); the same page or reduced motion just goes. */
-  const slideTo = (s: Screen) => {
-    const here = current;
-    if (reduce || !here || here.id === s.id || settling.current || !getPageEl()) return go(s);
-    const side = STRIP.findIndex((x) => x.id === s.id) > STRIP.findIndex((x) => x.id === here.id) ? 1 : -1;
-    pendingSlide.current = s;
-    showPeek(s.id, side);
+  /** Go to app screen `to`: a neighbour slides in (dots); further away, or reduced motion, just goes. */
+  const slideTo = (to: number) => {
+    const from = curIdx;
+    if (reduce || from === null || settling.current || !getPageEl() || Math.abs(to - from) !== 1) return goScreen(to);
+    const side: -1 | 1 = to > from ? 1 : -1;
+    place(0, 0, true);
+    requestAnimationFrame(() => settle(to, side, 0));
   };
   const slideRef = useRef(slideTo);
   slideRef.current = slideTo;
@@ -208,20 +202,21 @@ const Shell = () => {
       side: -1 | 1;
     };
     let d: Drag | null = null;
-    const here = () => screenForPath(pathname);
+    const here = () => appIndexForPath(pathname, count);
+    const exists = (i: number) => i >= 0 && i < count;
     const down = (e: TouchEvent) => {
       d = null;
-      if (settling.current || e.touches.length !== 1 || !here()) return;
+      if (settling.current || e.touches.length !== 1 || here() === null) return;
       const t = e.target as Element | null;
       if (!t || t.closest?.(NO_SWIPE) || inSideScroller(t)) return;
-      if (backStackSize() > 0 || getBappFrameState().session) return;
+      if (sheetOnScreen() || getBappFrameState().session) return;
       const p = e.touches[0];
       d = { x: p.clientX, y: p.clientY, axis: null, lx: p.clientX, lt: performance.now(), vx: 0, tx: 0, side: 1 };
     };
     const move = (e: TouchEvent) => {
       const p = e.touches[0];
       const h = here();
-      if (!d || !p || !h) return;
+      if (!d || !p || h === null) return;
       const dx = p.clientX - d.x;
       if (!d.axis) {
         d.axis = lockAxis(dx, p.clientY - d.y);
@@ -235,25 +230,23 @@ const Shell = () => {
       d.lt = now;
       const w = getPageEl()?.clientWidth ?? window.innerWidth;
       const side: -1 | 1 = dx < 0 ? 1 : -1;
-      const n = neighbour(h.id, side);
+      const n = exists(h + side) ? h + side : null;
       d.side = side;
-      d.tx = n && !reduce ? dx : rubberBand(dx, w);
-      if (n) showPeek(n.id, side);
-      place(d.tx, side, 0);
-      setDotTarget(n && Math.abs(dx) > w / 2 ? n.id : null);
+      d.tx = n !== null && !reduce ? dx : rubberBand(dx, w);
+      place(d.tx, 0, true);
+      setDotTarget(n !== null && Math.abs(dx) > w / 2 ? n : null);
     };
     const up = () => {
       const s = d;
       d = null;
       const h = here();
-      if (!s || s.axis !== 'x' || !h) return;
+      if (!s || s.axis !== 'x' || h === null) return;
       const w = getPageEl()?.clientWidth ?? window.innerWidth;
-      const dir = pageRelease(s.tx, s.vx, w, !!neighbour(h.id, -1), !!neighbour(h.id, 1));
-      const target = dir ? neighbour(h.id, dir) : null;
-      if (reduce && target) {
-        place(0, 0, 0);
-        setPeek(null);
-        return goRef.current(target);
+      const dir = pageRelease(s.tx, s.vx, w, exists(h - 1), exists(h + 1));
+      const target = dir ? h + dir : null;
+      if (reduce && target !== null) {
+        place(0, 0, false);
+        return goScreenRef.current(target);
       }
       settle(target, s.side, s.tx);
     };
@@ -268,7 +261,7 @@ const Shell = () => {
       document.removeEventListener('touchcancel', up);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, reduce]);
+  }, [pathname, reduce, count]);
 
   // Others (an app's details "Add to Dock") reach the shell by event.
   useEffect(() => {
@@ -289,7 +282,7 @@ const Shell = () => {
     // A Home screen tile (Wallet, Exchange, Feed…) opens its page.
     const goTo = (e: Event) => {
       const sc = screenById((e as CustomEvent<string>).detail);
-      if (sc) slideRef.current(sc);
+      if (sc) goRef.current(sc);
     };
     window.addEventListener(PHONE_GO, goTo);
     window.addEventListener(PHONE_ADD_TO_DOCK, add);
@@ -316,11 +309,10 @@ const Shell = () => {
   const open = (item: DockItem) => {
     if (item.kind === 'screen') {
       const s = screenById(item.id);
-      if (s) slideRef.current(s);
+      if (s) go(s);
     } else if (item.kind === 'action') setSendReceive(true);
     else {
-      const apps = screenById('apps');
-      if (apps && current?.id !== 'apps') go(apps);
+      if (curIdx === null) goHome();
       openBapp(item.name, item.url).catch(() => setToast('Could not open the app'));
     }
   };
@@ -342,39 +334,31 @@ const Shell = () => {
           onHome={goHome}
           onAgent={() => navigate('/m/agent')}
           onChange={(next) => {
-            // An app leaving the dock goes back on Home (an app is in the dock or on Home, never lost).
+            // An app leaving the dock goes to the first free slot on the app screens (never lost). Page tiles
+            // (Wallet…) are placed by the app-screens store itself (appScreensStore.ts reconcile).
+            let placed = getAppScreens();
             for (const i of dock)
-              if (i.kind === 'app' && !next.some((n) => n.kind === 'app' && n.url === i.url)) ensureFavourite(i.url);
+              if (i.kind === 'app' && !next.some((n) => n.kind === 'app' && n.url === i.url))
+                placed = placeFirstFree(placed, i.url);
+            if (placed !== getAppScreens()) setAppScreens(placed);
             setDock(next);
           }}
           onAdd={() => setAdding(true)}
           pageKey={pathname}
           dots={
-            current ? (
-              <PageDots strip={STRIP} current={dotTarget ?? current.id} onGo={(s) => slideRef.current(s)} />
+            curIdx !== null ? (
+              <PageDots
+                titles={screens.map((x, i) => screenTitle(x, i))}
+                current={dotTarget ?? curIdx}
+                onGo={(i) => slideRef.current(i)}
+                onRename={(i) => {
+                  const name = window.prompt('Name this screen', screenTitle(screens[i], i));
+                  if (name !== null) setAppScreens(renameScreen(getAppScreens(), i, name));
+                }}
+              />
             ) : null
           }
         />
-      )}
-      {peek && (
-        <div
-          ref={peekEl}
-          aria-hidden
-          data-phone-peek
-          className="fixed overflow-hidden pointer-events-none"
-          style={{
-            zIndex: 5,
-            background: '#010101',
-            top: peekRect.current?.top ?? 0,
-            left: peekRect.current?.left ?? 0,
-            width: peekRect.current?.width ?? '100%',
-            height: peekRect.current?.height ?? '100%',
-            transform: `translate3d(${peek.side * (peekRect.current?.width ?? window.innerWidth)}px,0,0)`,
-            willChange: 'transform',
-          }}
-        >
-          <ScreenPeek id={peek.id} />
-        </div>
       )}
       {toast && (
         <div

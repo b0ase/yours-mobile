@@ -871,3 +871,13 @@ body,
     stroke-dashoffset: 0;
   }
 }
+
+/* Phone layout keep-alive track (phone/pager.tsx): pages off to the side are hidden at rest (their fixed bars
+   too) and shown while a finger drags the track. */
+.bw-page-off {
+  visibility: hidden;
+  pointer-events: none;
+}
+[data-phone-track][data-dragging] > .bw-page-off {
+  visibility: visible;
+}

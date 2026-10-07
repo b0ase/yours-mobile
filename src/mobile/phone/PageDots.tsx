@@ -1,39 +1,51 @@
 import { House } from 'lucide-react';
-import type { Screen, ScreenId } from './screens';
-import { screenLabel } from './icons';
 
-/** Page dots along the top of the dock: a tablist of real buttons; HOME is a small house. */
+/**
+ * Page dots along the top of the dock, for the app screens only (Option B, plan §14.4): a tablist of real
+ * buttons; Home is a small house; the screen on show shows its title (tap it to rename the screen).
+ */
 export const PageDots = ({
-  strip,
+  titles,
   current,
   onGo,
+  onRename,
 }: {
-  strip: readonly Screen[];
-  current: ScreenId;
-  onGo: (s: Screen) => void;
+  titles: readonly string[];
+  current: number;
+  onGo: (i: number) => void;
+  onRename: (i: number) => void;
 }) => (
-  <div role="tablist" aria-label="Screens" className="flex justify-center h-4">
+  <div role="tablist" aria-label="App screens" className="flex justify-center h-4">
     <div className="flex items-center">
-      {strip.map((s, i) => {
-        const on = s.id === current;
+      {titles.map((title, i) => {
+        const on = i === current;
         return (
           <button
-            key={s.id}
+            key={i}
             type="button"
             role="tab"
             aria-selected={on}
-            aria-label={`${screenLabel(s.id, s.label)}, page ${i + 1} of ${strip.length}`}
-            onClick={() => onGo(s)}
+            aria-label={
+              on
+                ? `${title}, screen ${i + 1} of ${titles.length}. Tap to rename`
+                : `${title}, screen ${i + 1} of ${titles.length}`
+            }
+            onClick={() => (on ? onRename(i) : onGo(i))}
             className="flex items-center justify-center bg-transparent border-0 p-0"
-            style={{ width: 20, height: 16 }}
+            style={{ minWidth: 20, height: 16 }}
           >
-            {s.id === 'home' ? (
-              <House size={10} color={on ? '#FFD24D' : '#667085'} strokeWidth={3} />
-            ) : (
+            {on ? (
               <span
-                className="block rounded-full"
-                style={{ width: 6, height: 6, background: on ? '#FFD24D' : '#667085' }}
-              />
+                data-testid="page-title"
+                className="rounded-full px-2 text-[10px] font-bold leading-[14px] whitespace-nowrap"
+                style={{ background: '#FFD24D', color: '#010101' }}
+              >
+                {title}
+              </span>
+            ) : i === 0 ? (
+              <House size={10} color="#667085" strokeWidth={3} />
+            ) : (
+              <span className="block rounded-full" style={{ width: 6, height: 6, background: '#667085' }} />
             )}
           </button>
         );
