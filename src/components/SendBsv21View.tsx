@@ -295,7 +295,8 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
 
   /**
    * sendBsv21 reports outputs the overlay hasn't seen yet ('unknown') as not
-   * valid. Re-check so a just-arrived transfer reads as "not validated yet".
+   * valid, and skips outputs it reports spent. Re-check so a just-arrived
+   * transfer reads as "not validated yet" and a stale local list as "repair sync".
    */
   const refineNotValid = async (total: bigint): Promise<Bsv21OverlayIssue> => {
     try {
@@ -321,7 +322,7 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
         owned.map((o) => ({ amount: o.amount, state: states.get(o.outpoint) })),
         total,
       );
-      return shortfall === 'unseen' ? 'unseen' : shortfall === 'queued' ? 'queued' : 'not-valid';
+      return shortfall;
     } catch (error) {
       console.error('[SendBsv21View] overlay shortfall re-check failed:', error);
       return 'not-valid';
