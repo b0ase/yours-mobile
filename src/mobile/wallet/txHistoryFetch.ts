@@ -4,6 +4,7 @@
  * a second, with backoff on 429. Labels from the wallet's own action log (listActions, all pages).
  */
 import type { LocalInfo, RawTx } from './txHistory';
+import { trailingP2pkh } from './historyEvents';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const PACE_MS = 350;
@@ -55,7 +56,7 @@ export const addressTxids = async (address: string, apiKey?: string, onPage?: (n
   return out;
 };
 
-type WocTx = {
+export type WocTx = {
   txid: string;
   time?: number;
   blocktime?: number;
@@ -71,12 +72,19 @@ export const toRawTx = (t: WocTx): RawTx => ({
   blockHeight: t.blockheight || undefined,
   confirmations: t.confirmations ?? 0,
   vin: t.vin.map((i) => (i.coinbase ? { coinbase: i.coinbase } : { txid: i.txid, vout: i.vout })),
-  vout: t.vout.map((o) => ({
-    n: o.n,
-    sats: Math.round(o.value * 100_000_000),
-    addresses: o.scriptPubKey?.addresses ?? [],
-    script: (o.scriptPubKey?.hex ?? '').slice(0, 400),
-  })),
+  vout: t.vout.map((o) => {
+    const hex = o.scriptPubKey?.hex ?? '';
+    const listed = o.scriptPubKey?.addresses ?? [];
+    // WhatsOnChain leaves `addresses` empty for an inscription wrapped round a P2PKH (1Sat ordinals and tokens).
+    const inner = listed.length ? null : trailingP2pkh(hex);
+    return {
+      n: o.n,
+      sats: Math.round(o.value * 100_000_000),
+      addresses: inner ? [inner] : listed,
+      // Enough for a BSV-20/21 inscription's JSON and the OrdLock prefix (historyEvents.ts).
+      script: hex.slice(0, 1200),
+    };
+  }),
 });
 
 /** Tx details, 20 per request (the WhatsOnChain bulk limit). */
@@ -137,13 +145,36 @@ export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
   return m;
 };
 
-/** The whole history: txids for each address, then the txs. */
+/**
+ * BSV-21 symbols for token ids, from the GorillaPool 1Sat indexer (best effort; ids left out on failure).
+ * BSV-20 ticks are their own name.
+ */
+export const fetchTokenSymbols = async (ids: string[]) => {
+  const m = new Map<string, string>();
+  for (const id of ids.filter((x) => /^[0-9a-f]{64}_\d+$/.test(x)).slice(0, 60)) {
+    try {
+      const r = await fetch(`https://ordinals.gorillapool.io/api/bsv20/id/${id}`);
+      if (!r.ok) continue;
+      const j = (await r.json()) as { sym?: string };
+      if (j.sym) m.set(id, j.sym);
+    } catch {
+      /* names are a nice-to-have */
+    }
+  }
+  return m;
+};
+
+/**
+ * The whole history: txids for each address, then the txs. `extraTxids` (the wallet's own action log) adds txs
+ * the address index can miss, e.g. an inscription output it does not file under the address.
+ */
 export const fetchAccountTxs = async (
   addresses: string[],
   apiKey: string | undefined,
   onProgress: (p: Progress) => void,
+  extraTxids: Iterable<string> = [],
 ) => {
-  const all = new Set<string>();
+  const all = new Set<string>(extraTxids);
   for (let i = 0; i < addresses.length; i++) {
     onProgress({ phase: `Finding transactions (address ${i + 1} of ${addresses.length})`, done: i, total: addresses.length });
     const ids = await addressTxids(addresses[i], apiKey, (n) =>

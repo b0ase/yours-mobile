@@ -8,6 +8,8 @@
  * payments) and from the tx itself (bChat tip/like OP_RETURN, 1-sat outputs).
  */
 
+import type { Asset, Category, EventType } from './historyEvents';
+
 export type Direction = 'in' | 'out' | 'self';
 
 /** A tx as fetched (WhatsOnChain /txs shape, trimmed). */
@@ -41,6 +43,11 @@ export type HistoryRow = {
   usdRate?: number;
   /** True when usdRate is today's price, not the price on the day. */
   usdRateIsCurrent?: boolean;
+  /** History v2 (historyEvents.ts): what it was, the token/NFT involved and the app that asked for it. */
+  category?: Category;
+  type?: EventType;
+  asset?: Asset;
+  app?: string;
 };
 
 const SAT = 100_000_000;
@@ -262,6 +269,13 @@ export const CSV_COLUMNS = [
   'account',
   'block_height',
   'confirmations',
+  'category',
+  'type',
+  'asset_kind',
+  'asset_id',
+  'asset_symbol',
+  'asset_qty',
+  'app',
 ] as const;
 
 /** RFC 4180 field: quote when it holds a comma, quote, CR or LF; double inner quotes. */
@@ -310,6 +324,13 @@ export const toCsv = (rows: HistoryRow[], account: string): string => {
         account,
         r.blockHeight ?? '',
         r.confirmations,
+        r.category ?? '',
+        r.type ?? '',
+        r.asset?.kind ?? '',
+        r.asset?.id ?? '',
+        r.asset?.symbol ?? '',
+        r.asset?.qty ?? '',
+        r.app ?? '',
       ]
         .map(csvField)
         .join(','),

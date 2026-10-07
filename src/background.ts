@@ -1,6 +1,7 @@
 /* global chrome */
 import { mirrorToMiner } from './mobile/minerMirror';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
+import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
 import type {
   ListOutputsArgs,
@@ -1365,6 +1366,11 @@ if (isInServiceWorker) {
     ensureWallet(isFromExtension)
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
+        // Connections log (History › Connections): which outside site or app called, and what.
+        if (!isFromExtension && typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR) {
+          const origin = message.originator;
+          void updateConnectionLog((l) => recordCall(l, origin, String(message.action)));
+        }
         switch (message.action) {
           // CWI (BRC-100) handlers - direct passthrough to wallet
           // WalletPermissionsManager handles permission prompts internally
@@ -2842,6 +2848,16 @@ if (isInServiceWorker) {
 
       const result = await signer.createAction(message.params, message.originator);
       console.log('[createAction] Success');
+      if (message.originator && message.originator !== ADMIN_ORIGINATOR && result.txid) {
+        const origin = message.originator;
+        const payment = {
+          at: Date.now(),
+          txid: result.txid,
+          sats: requestedSats(message.params.outputs),
+          description: message.params.description?.slice(0, 120),
+        };
+        void updateConnectionLog((l) => recordPayment(l, origin, payment));
+      }
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
         success: true,
