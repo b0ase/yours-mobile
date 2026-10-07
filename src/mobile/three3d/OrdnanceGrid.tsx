@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Box } from 'lucide-react';
 import { cachedExchangeRate } from '../../utils/wallet';
+import ModelThumb from './ModelThumb';
 import { loadWeapons, RARITY_COLOR, type Weapon } from './ordnance';
 
 // three.js only loads when someone opens a cabinet.
@@ -22,10 +23,18 @@ export const WeaponTile = ({ weapon, onOpen, sub }: { weapon: Weapon; onOpen: ()
     {weapon.image ? (
       <img src={weapon.image} alt={weapon.name} loading="lazy" className="w-full h-full object-cover" />
     ) : (
-      // The manifest has no art for any gun now (image: null): an empty <img> made every tile blank.
-      <div className="w-full h-full flex items-center justify-center" style={{ color: RARITY_COLOR[weapon.rarity] }}>
-        <Box size={44} />
-      </div>
+      // The manifest has no art for any gun now (image: null): a rendered still of the model, Box if that fails.
+      <ModelThumb
+        url={weapon.model}
+        cacheKey={`ordnance:${weapon.id}:${weapon.model}`}
+        opts={{ tint: weapon.tint, tintAmount: weapon.tintAmount ?? 0.22, turn: weapon.flip ? Math.PI : 0 }}
+        alt={weapon.name}
+        fallback={
+          <div className="w-full h-full flex items-center justify-center" style={{ color: RARITY_COLOR[weapon.rarity] }}>
+            <Box size={44} />
+          </div>
+        }
+      />
     )}
     <span
       className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
