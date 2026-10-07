@@ -43,7 +43,14 @@ export type Prefs = {
   filterStrong: boolean;
   /** "Sounds" (Settings › Preferences): the coin chime on the Sent! screen. On by default. */
   sounds: boolean;
+  /**
+   * Country rules for History › Gains (wallet/gains.ts): 'uk' = HMRC share pooling in GBP, UK tax year
+   * (6 Apr–5 Apr); 'other' = FIFO in USD, calendar year. Default UK.
+   */
+  taxCountry: TaxCountry;
 };
+
+export type TaxCountry = 'uk' | 'other';
 
 const ALL_ON = Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<NotifyCategory, boolean>;
 
@@ -60,6 +67,7 @@ export const DEFAULT_PREFS: Prefs = {
   twetchUserId: '',
   filterStrong: false,
   sounds: true,
+  taxCountry: 'uk',
 };
 
 const KEY = 'bwallet.prefs';
@@ -101,6 +109,7 @@ export const parsePrefs = (raw: unknown): Prefs => {
       typeof r.twetchUserId === 'string' && /^\d{1,12}$/.test(r.twetchUserId.trim()) ? r.twetchUserId.trim() : '',
     filterStrong: r.filterStrong === true,
     sounds: r.sounds !== false,
+    taxCountry: r.taxCountry === 'other' ? 'other' : 'uk',
     // A stored allowLanguageReveal (the retired 18+ opt-in) is dropped here: slurs are blurred per post now.
   };
 };

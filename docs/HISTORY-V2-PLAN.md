@@ -69,6 +69,23 @@ and losses for a tax year, exported as CSV (one line per disposal: date, asset, 
 - **Wording, on screen and in every export:** "This is a record of your wallet activity to help you or your
   accountant. It is not tax advice. Check the figures, and ask a tax adviser if you're unsure."
 
+## 4a. Phase 2 as built (owner approved 7 Oct 2026)
+
+- Country in Settings › Tax reports: UK → HMRC pooling in GBP, tax year 6 Apr–5 Apr, London calendar days;
+  Other → FIFO in USD, calendar year (`gains.ts`, `taxLedger.ts`, `GainsView.tsx`).
+- BSV is an asset: receipts are acquisitions at market value, spends and fees are disposals; buying a token is a
+  BSV disposal plus a token acquisition; selling one is the reverse.
+- Prices: WhatsOnChain daily BSV/USD and Bank of England XUDLUSS (US$ per £), both cached in localStorage; a
+  missing day uses the nearest earlier day (`fiatRates.ts`). The BoE CSV has no CORS header, so phones fetch it
+  natively; the desktop/web build may only have cached rates.
+- Airdrops and gifts of tokens/NFTs: cost 0 unless the user enters one; any send/receive can be marked
+  "own wallet" (left out entirely). Stored per device.
+- NFTs keep the id of the outpoint they were listed from (1Sat ordinal sat tracking), so a sale matches its buy.
+- App labels: a createAction description or label starting `game:` or `app:` (e.g. `game: round 12 won`) is shown
+  on the row and in the CSV (`app_note`); `game:` files it under Games.
+- Games = the bGames catalogue hosts plus bGames (`gameHosts.ts`, a copy until feat/games-catalog merges).
+- Gains tab: per tax year totals, per-asset net, each disposal with its matching rule, accountant CSV.
+
 ## 5. Phases
 
 1. **Now (feat/history-v2):** event classifier + filter chips (Payments, Tokens, NFTs, Games, Subscriptions, Apps,

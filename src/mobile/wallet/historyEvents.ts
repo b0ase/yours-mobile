@@ -170,7 +170,30 @@ const assetOf = (b: Bsv20, outpoint: string, symbols?: Map<string, string>): Ass
   return { kind: 'token', id, symbol: symbols?.get(id) ?? b.sym ?? b.tick, qty: b.amt };
 };
 
-/** OrdLock listings created by this account (we funded the tx, so it is ours), with what they hold. */
+/**
+ * The input outpoint whose first satoshi lands at the start of output `n` (1Sat ordinal theory: sats keep their
+ * order from inputs to outputs). Only when every earlier input's value is known (our own coins); else null.
+ */
+export const sourceOutpoint = (t: RawTx, n: number, prev: Map<string, { sats: number }>): string | null => {
+  let offset = 0;
+  for (const o of t.vout) {
+    if (o.n === n) break;
+    offset += o.sats;
+  }
+  let at = 0;
+  for (const i of t.vin) {
+    const p = i.txid !== undefined ? prev.get(`${i.txid}:${i.vout}`) : undefined;
+    if (!p) return null;
+    if (offset < at + p.sats) return `${i.txid}_${i.vout}`;
+    at += p.sats;
+  }
+  return null;
+};
+
+/**
+ * OrdLock listings created by this account (we funded the tx, so it is ours), with what they hold. An NFT keeps
+ * the id of the outpoint it was listed from (where we got it), so a sale matches its purchase in the tax report.
+ */
 export const findListings = (txs: RawTx[], prev: Map<string, { sats: number; address: string }>) => {
   const m = new Map<string, { asset: Asset }>();
   for (const t of txs) {
@@ -180,10 +203,23 @@ export const findListings = (txs: RawTx[], prev: Map<string, { sats: number; add
       if (!isOrdLock(o.script)) continue;
       const b = parseBsv20(parseInscription(o.script));
       const op = `${t.txid}_${o.n}`;
-      m.set(`${t.txid}:${o.n}`, { asset: b ? assetOf(b, op) : { kind: 'nft', id: op, qty: '1' } });
+      const src = b ? null : sourceOutpoint(t, o.n, prev);
+      m.set(`${t.txid}:${o.n}`, { asset: b ? assetOf(b, op) : { kind: 'nft', id: src ?? op, qty: '1' } });
     }
   }
   return m;
+};
+
+/**
+ * App labels on a payment (the convention for apps: a createAction description, or a label, starting
+ * `game:` or `app:`, e.g. "game: round 12 won"). Returns what to show and whether the app says it's a game.
+ */
+export const appLabelOf = (local: LocalInfo | undefined): { game: boolean; text: string } | null => {
+  for (const t of [local?.description ?? '', ...(local?.labels ?? [])]) {
+    const m = t.match(/^\s*(game|app)\s*:\s*(.{1,120})/i);
+    if (m) return { game: m[1].toLowerCase() === 'game', text: m[2].trim() };
+  }
+  return null;
 };
 
 const ownAddr = (o: RawTx['vout'][number], own: Set<string>) =>
@@ -211,12 +247,14 @@ const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'tok
 /** Add category / type / asset / app to a row (txHistory.classify did direction and amounts). */
 export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: LocalInfo | undefined, ctx: EventContext): ClassifiedRow => {
   const app = ctx.appByTxid?.get(row.txid);
+  const appLabel = appLabelOf(local);
   const base = (category: Category, type: EventType, asset?: Asset): ClassifiedRow => ({
     ...row,
     category,
     type,
     asset,
     app: app?.app,
+    ...(appLabel ? { appNote: appLabel.text } : {}),
   });
   const plainType: EventType = row.direction === 'in' ? 'receive' : row.direction === 'out' ? 'send' : 'self';
 
@@ -272,10 +310,10 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
     return base(loc.kind, loc.type, asset);
   }
 
-  if (app?.game) return { ...base('game', 'payment'), label: row.direction === 'in' ? 'game winnings' : 'game payment' };
+  if (app?.game || appLabel?.game) return { ...base('game', 'payment'), label: row.direction === 'in' ? 'game winnings' : 'game payment' };
   if (row.label === 'pot payment' || ctx.accountKind === 'pot') return base('subscription', row.direction === 'out' ? 'payment' : plainType);
   if (row.label === 'agent spend') return base('app', 'payment');
-  if (app) return { ...base('app', row.direction === 'out' ? 'payment' : plainType), label: row.label === 'send' ? 'app payment' : row.label };
+  if (app || appLabel) return { ...base('app', row.direction === 'out' ? 'payment' : plainType), label: row.label === 'send' ? 'app payment' : row.label };
   if (['tip', 'like', 'lock', 'seal'].includes(row.label)) return base('social', plainType);
   if (row.label === 'NFT') return base('nft', plainType);
   if (row.label === 'token transfer') return base('token', plainType);

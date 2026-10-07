@@ -27,6 +27,8 @@ import { CATEGORIES, assetText, classifyEvent, filterCategory, findListings, typ
 import { ownOutputs, type RawTx } from './txHistory';
 import { appsByTxid, loadConnectionLog } from './connectionLog';
 import { ConnectionsView } from './ConnectionsView';
+import { GainsView } from './GainsView';
+import { cacheBsvUsd } from './fiatRates';
 import { statementHtml } from './txStatement';
 
 const BG = '#0d0e11';
@@ -67,7 +69,7 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [shown, setShown] = useState(100);
   const [category, setCategory] = useState<Category | 'all'>('all');
-  const [view, setView] = useState<'tx' | 'connections'>('tx');
+  const [view, setView] = useState<'tx' | 'connections' | 'gains'>('tx');
 
   const load = useCallback(async () => {
     setError('');
@@ -107,7 +109,8 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
         fetchDailyRates(Math.floor(oldest / 1000) - 86400, Math.floor(now / 1000), key),
         fetchExchangeRate(apiContext.chain, apiContext.wocApiKey).catch(() => 0),
       ]);
-      setData({ rows: withRates(rows, ratesByDay(daily), current), at: now });
+      // Daily BSV/USD is cached on the device, so a failed price fetch still has the days seen before.
+      setData({ rows: withRates(rows, cacheBsvUsd(ratesByDay(daily)), current), at: now });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -185,6 +188,7 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
         {(
           [
             ['tx', 'Transactions'],
+            ['gains', 'Gains'],
             ['connections', 'Connections'],
           ] as const
         ).map(([id, label]) => (
@@ -204,6 +208,8 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
 
       {view === 'connections' ? (
         <ConnectionsView rows={data?.rows ?? []} />
+      ) : view === 'gains' ? (
+        <GainsView rows={data?.rows ?? []} account={accountName} />
       ) : (
       <div className="flex-1 overflow-y-auto px-4 pb-8" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
         {progress && (
@@ -360,10 +366,11 @@ const Row = ({ r }: { r: HistoryRow }) => {
             {usd ? ` · $${usd}${r.usdRateIsCurrent ? ' (current rate)' : ''}` : ''}
           </span>
         </div>
-        {(r.asset || r.app) && (
+        {(r.asset || r.app || r.appNote) && (
           <div className="text-xs mt-1 break-all" style={{ color: '#fff' }}>
             {r.asset && <span>{assetText(r.asset)} </span>}
             {r.app && <span style={{ color: MUTED }}>{r.asset ? '· ' : ''}via {r.app}</span>}
+            {r.appNote && <span>{r.asset || r.app ? ' · ' : ''}“{r.appNote}”</span>}
           </div>
         )}
         {(r.feeSats > 0 || r.counterparty || r.note) && (

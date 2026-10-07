@@ -93,7 +93,8 @@ describe('NFT buy and sell (OrdLock market)', () => {
     const fund = funding(NFT_LIST.vin, 'ord-holder', 1);
     const rows = run([NFT_LIST, NFT_BUY, ...fund], ['ord-holder', payout]);
     expect(rows.find((r) => r.txid === NFT_LIST.txid)).toMatchObject({ category: 'nft', type: 'list' });
-    expect(rows.find((r) => r.txid === NFT_BUY.txid)).toMatchObject({ category: 'nft', type: 'sell', amountSats: 21_800, asset: { id: `${NFT_LIST.txid}_8` } });
+    expect(rows.find((r) => r.txid === NFT_BUY.txid)).toMatchObject({ category: 'nft', type: 'sell', amountSats: 21_800, asset: { id: `${NFT_LIST.vin[8].txid}_${NFT_LIST.vin[8].vout}` } });
+    // 1Sat ordinal theory: output 8 of the bulk listing carries the sat of input 8, so the sale keeps the id the NFT was bought under.
   });
 });
 
@@ -130,12 +131,24 @@ describe('local records, apps, games, pots', () => {
     const rows = run(pay(id, '1Game', 500), ['1Me'], new Map(), apps);
     expect(filterCategory(rows, 'game').map((r) => r.txid)).toEqual([id]);
     const csv = toCsv(rows, 'acct');
-    expect(csv.split('\r\n')[0]).toContain('category,type,asset_kind,asset_id,asset_symbol,asset_qty,app');
-    expect(csv).toContain(',game,payment,,,,,bitcoin-gaming.vercel.app');
+    expect(csv.split('\r\n')[0]).toContain('category,type,asset_kind,asset_id,asset_symbol,asset_qty,app,app_note');
+    expect(csv).toContain(',game,payment,,,,,bitcoin-gaming.vercel.app,');
   });
   test('asset text', () => {
     expect(assetText({ kind: 'token', id: NPG, symbol: '$NINJAPUNKGIRLS', qty: '204' })).toBe('204 $NINJAPUNKGIRLS');
     expect(assetText({ kind: 'nft', id: `${NFT_LIST.txid}_8` })).toBe('NFT 04caf459…d5_8');
+  });
+});
+
+describe('app labels', () => {
+  test('"game: round 12 won" files a payment under Games and shows the note', () => {
+    const id = '9'.repeat(64);
+    const txs: RawTx[] = [
+      { txid: 'f'.repeat(64), time: 1, confirmations: 9, vin: [{ txid: '1'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 10_000, addresses: ['1Me'] }] },
+      { txid: id, time: 2, confirmations: 9, vin: [{ txid: 'f'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 500, addresses: ['1G'] }, { n: 1, sats: 9_450, addresses: ['1Me'] }] },
+    ];
+    const local = new Map([[id, { description: 'game: round 12 won' }]]);
+    expect(run(txs, ['1Me'], local).find((r) => r.txid === id)).toMatchObject({ category: 'game', appNote: 'round 12 won' });
   });
 });
 
@@ -154,7 +167,8 @@ describe('connections log', () => {
   });
   test('game hosts', () => {
     expect(isGameHost('bitcoin-gaming.vercel.app')).toBe(true);
-    expect(isGameHost('zerodice.games')).toBe(true);
+    expect(isGameHost('play.hastearcade.com')).toBe(true);
+    expect(isGameHost('zerodice.games')).toBe(false);
     expect(isGameHost('shop.example')).toBe(false);
   });
   test('merge log + BRC-100 grants + history spend', () => {
