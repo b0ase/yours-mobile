@@ -39,3 +39,16 @@ body {
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
+
+/* Native dropdowns: light text on dark everywhere. Option lists ignore inherited colours on Chrome/macOS and
+   WKWebView, so they get their own (owner, 8 Oct 2026: Settings › Tax reports was black on dark grey). */
+select {
+  color-scheme: dark;
+  color: #fff !important;
+  background-color: #1a1a1a !important;
+}
+select option,
+select optgroup {
+  color: #fff;
+  background-color: #1a1a1a;
+}

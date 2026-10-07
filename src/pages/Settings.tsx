@@ -1019,7 +1019,7 @@ export const Settings = () => {
               aria-label="Tax rules"
               value={appPrefs.taxCountry}
               onChange={(e) => setAppPrefs({ taxCountry: e.target.value === 'other' ? 'other' : 'uk' })}
-              style={{ background: 'transparent', color: 'inherit', border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
+              style={{ border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
             >
               <option value="uk">UK (HMRC pooling, GBP)</option>
               <option value="other">Other (FIFO, USD)</option>
