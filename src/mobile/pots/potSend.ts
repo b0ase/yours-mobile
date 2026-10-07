@@ -52,7 +52,7 @@ export const payeeAddress = async (p: Payee): Promise<string> => {
   if (!p.paymail) throw new Error('No payee address');
   const r = await resolveRecipient((u, i) => fetch(u, i), parseRecipient(p.paymail));
   if (r.targetKind === 'address') return r.target;
-  throw new Error(`${p.paymail} only takes P2P payments, which standing orders can’t send yet`);
+  throw new Error(`${p.paymail} only takes P2P payments, which subscriptions can’t send yet`);
 };
 
 export type PotPayment = { address: string; sats: number };

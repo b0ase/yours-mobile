@@ -550,7 +550,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "          <GetYourName profileName={identity.isPublished ? identity.profile.name : ''} />\n          {identity.bapId && identity.isPublished && (",
     ],
     ['          {identityPubKey && (', '          <IdentityVerification />\n          {identityPubKey && ('],
-    // Settings → Feed / Payments / Privacy (default feed, autoplay, one-click pay, bookmarks, blocked & muted).
+    // Settings → General (one row each for Feed, Payments, Subscriptions, … opening its own page), Privacy, Connections, Help.
     [
       '      {/* Preferences section */}',
       '      <FeedSettings part="wallet" Section={Section} Row={SettingRow} Divider={Divider} />\n      {/* Preferences section */}',
@@ -566,7 +566,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <Section title="Security">\n        <SettingRow\n          icon={<Key size={16} />}\n          label="Wallet Backup"\n          description="Backup seed, download JSON, or QR code"\n          onClick={() => setPage(\'export-keys-options\')}\n          isFirst\n          isLast={!usbSupported}\n        />',
-      '      <FeedSettings part="account" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title="All accounts (wallet)" note="One password and these preferences for every account on this device." />\n      <Section title="Wallet">\n        <SettingRow\n          icon={<Users size={16} />}\n          label="Manage Accounts"\n          description="Create, restore, or edit accounts"\n          onClick={() => setPage(\'manage-accounts\')}\n          isFirst\n          isLast={!usbSupported}\n        />',
+      '      <FeedSettings part="account" Section={Section} Row={SettingRow} Divider={Divider} />\n      <SettingsGroup title="All accounts (wallet)" note="One password and these preferences for every account on this device." />\n      <FeedSettings part="notify" Section={Section} Row={SettingRow} Divider={Divider} />\n      <Section title="Wallet">\n        <SettingRow\n          icon={<Users size={16} />}\n          label="Manage Accounts"\n          description="Create, restore, or edit accounts"\n          onClick={() => setPage(\'manage-accounts\')}\n          isFirst\n          isLast={!usbSupported}\n        />',
     ],
     [
       '      <Section title="Preferences">\n        <SettingRow\n          icon={<Fingerprint size={16} />}\n          label="Posting profile"\n          description="Your on-chain name and photo that sign your posts"\n          onClick={() => setPage(\'identity\')}\n          isFirst\n        />\n        <Divider />\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          description="Default: 100 sat/kb"',
