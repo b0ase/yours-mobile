@@ -24,7 +24,12 @@ export type Preset = { id: string; label: string; path: string; note: string };
 export const PRESETS: Preset[] = [
   { id: 'simplycash', label: 'SimplyCash', path: "m/44'/145'/0'", note: "BIP44, coin type 145'" },
   { id: 'bsv', label: 'BIP44 (BSV)', path: "m/44'/236'/0'", note: "coin type 236'" },
-  { id: 'btc', label: 'BIP44 (Bitcoin legacy)', path: "m/44'/0'/0'", note: "coin type 0'" },
+  {
+    id: 'btc',
+    label: 'Money Button / BIP44 (Bitcoin legacy)',
+    path: "m/44'/0'/0'",
+    note: "coin type 0'; Money Button's path",
+  },
   { id: 'custom', label: 'Custom path', path: '', note: 'Type the account path' },
 ];
 
