@@ -1,9 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { neighbour, SCREENS, screenForPath, screenForSelected, stripFor } from './screens';
+import { coldStartRedirect, LANDING, neighbour, SCREENS, screenById, screenForPath, screenForSelected, stripFor } from './screens';
 
 const ids = (s: { id: string }[]) => s.map((x) => x.id);
 
 describe('phone layout screens', () => {
+  test('cold start / unlock lands on the Wallet, not Home', () => {
+    expect(LANDING).toBe('wallet');
+    expect(screenById(LANDING)?.route).toBe('/bsv-wallet');
+    // Unlock opens /bsv-wallet: it stays there.
+    expect(coldStartRedirect(screenForPath('/bsv-wallet')?.id ?? null)).toBeNull();
+    // Deep links / notification taps keep their target.
+    expect(coldStartRedirect('feed')).toBeNull();
+    expect(coldStartRedirect('chat')).toBeNull();
+    expect(coldStartRedirect(null)).toBeNull();
+    // The old behaviour, if the landing were Home again.
+    expect(coldStartRedirect('wallet', 'home')).toBe('home');
+  });
+
   test('strip order: Wallet · Exchange · HOME · Apps · Games · People · Feed · Chat', () => {
     expect(ids(stripFor(false, true))).toEqual([
       'wallet',

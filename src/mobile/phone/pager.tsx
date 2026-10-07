@@ -5,7 +5,7 @@ import { MARKET_ENABLED } from '../storeBuild';
 import { TermsGate } from '../ugc/UgcSheets';
 import { APPS_PAGED, usePhoneLayout } from './flag';
 import { useAppScreens } from './appScreensStore';
-import { appIndexForPath, pageForPath, type ScreenId } from './screens';
+import { appIndexForPath, coldStartRedirect, pageForPath, type ScreenId } from './screens';
 
 /**
  * Keep-alive and iOS-style paging (docs/PHONE-LAYOUT-PLAN.md §14.3, §14.4). <PhonePage> is patched round
@@ -64,8 +64,8 @@ export const PhonePage = ({ children }: { children: ReactNode }) => {
   if (!on) return <>{children}</>;
   const idx = appIndexForPath(pathname, screens.length);
   const page = idx === null ? pageForPath(pathname) : null;
-  // The Wallet route a cold start opens on is about to become Home: don't mount it behind Home.
-  if (page && (hasLanded() || page.id !== 'wallet')) keptPages.add(page.id);
+  // A cold start lands on the Wallet (screens.ts LANDING), so it is mounted like any other page.
+  if (page && (hasLanded() || coldStartRedirect(page.id) === null)) keptPages.add(page.id);
   // App screens: the one on show and its neighbours are mounted; once mounted, a screen stays mounted.
   if (idx !== null) for (const i of [idx - 1, idx, idx + 1]) if (i >= 0 && i < screens.length) mountedScreens.add(i);
   return (
