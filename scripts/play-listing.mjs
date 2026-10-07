@@ -72,11 +72,12 @@ try {
     { 'content-type': 'application/json' },
   );
   console.log(`✓ listing text (${LANG}): ${SHORT.length}/80 short, ${FULL.length}/4000 full`);
-  const details = await call('GET', `${API}/edits/${edit}/details`);
+  const details = process.env.SKIP_DETAILS ? null : await call('GET', `${API}/edits/${edit}/details`);
+  if (details)
   await call('PATCH', `${API}/edits/${edit}/details`, JSON.stringify({ ...details, ...CONTACT }), {
     'content-type': 'application/json',
   });
-  console.log(`✓ contact details (default language ${details.defaultLanguage})`);
+  if (details) console.log(`✓ contact details (default language ${details.defaultLanguage})`);
 
   const upload = async (type, file) => {
     const path = join(ASSETS, file);

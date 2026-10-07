@@ -78,7 +78,15 @@ try {
       track: TRACK,
       releases: [{ name: `${VERSION} (${bundle.versionCode})`, versionCodes: [String(bundle.versionCode)], status: 'completed' }],
     }), { 'content-type': 'application/json' });
-    await call('POST', `${API}/edits/${edit}:commit`);
+    // While another track is in review, Play refuses to auto-send changes ("Changes cannot be sent for review
+    // automatically"). Then commit without sending: fine for internal; for other tracks send them in Publishing overview.
+    try {
+      await call('POST', `${API}/edits/${edit}:commit`);
+    } catch (e) {
+      if (!/sent for review automatically|changesNotSentForReview/i.test(String(e))) throw e;
+      await call('POST', `${API}/edits/${edit}:commit?changesNotSentForReview=true`);
+      if (TRACK !== 'internal') console.log('! committed without sending for review: send it in Play Console › Publishing overview');
+    }
     console.log(`✓ ${VERSION} (${bundle.versionCode}) released to ${TRACK}`);
   }
 } finally {
