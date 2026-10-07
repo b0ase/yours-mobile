@@ -61,6 +61,14 @@ export function parseOverlayStatus(details: unknown): OverlayStatus | null {
 export const needsIndexFunding = (s: OverlayStatus | null) => !s || !s.isActive || s.balance < s.feePerOutput;
 
 /**
+ * Token detail "Index $X" button (any holder, not just the issuer): 'needs' when the indexer knows
+ * the token and it is inactive or can't pay one more output; 'indexed' when it is active and funded;
+ * 'unknown' when the indexer didn't answer (offer nothing, never ask for money on a guess).
+ */
+export const holderIndexState = (s: OverlayStatus | null | undefined): 'needs' | 'indexed' | 'unknown' =>
+  !s ? 'unknown' : needsIndexFunding(s) ? 'needs' : 'indexed';
+
+/**
  * Sats to send. When the indexer states a minimum: exactly what brings the balance up to it (a
  * fresh mint: the whole minimum). Otherwise the configured funding. Never less than one output's fee.
  */

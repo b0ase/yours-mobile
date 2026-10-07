@@ -232,9 +232,14 @@ export const bcorpText = (extra: Swaps = {}): Plugin => {
   return {
     name: 'bcorp-text',
     enforce: 'pre',
-    transform(code, id) {
-      if (BRAND !== 'bcorp') return null;
-      return transform.call(this, code, id);
+    // order: 'pre' on the hook: in dev, @vitejs/plugin-react reprints sources with Babel first and the
+    // exact-text swaps would no longer match (same as mobile-text).
+    transform: {
+      order: 'pre',
+      handler(code, id) {
+        if (BRAND !== 'bcorp') return null;
+        return transform.call(this, code, id);
+      },
     },
     transformIndexHtml: (html) =>
       BRAND === 'bcorp'

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { withBeefHint } from '../../brand/walletError';
 import { useTabHome } from '../tabs/useTabHome';
 import { xAccountRows } from './xAccounts';
@@ -44,7 +44,8 @@ import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
 import { BAPPS } from '../bapps';
-import { marketFiltersFor, marketLabel, marketTradingEnabled } from '../storeBuild';
+import { CURVE_FILTER, CURVE_LABEL, loadCurvePanel } from './launchpad/tile';
+import { CURVE_COINS_ENABLED, marketFiltersFor, marketLabel, marketTradingEnabled } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel } from '../tickets/TicketsPanel';
@@ -112,17 +113,22 @@ type Kind = 'tokens' | 'nfts';
 type View = 'collections' | NftCategory;
 /**
  * Tokens side sub-filters. bApps = the bApps' own tokens (bappTokens.ts), listed like any other token.
+ * Curve coins = bonding-curve coins (./launchpad/tile.ts), not in a store build.
  * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
-type TokenFilter = 'all' | 'social' | 'bapps' | 'tickets';
-// Store build: no Tickets (storeBuild.ts).
+type TokenFilter = 'all' | 'social' | 'bapps' | typeof CURVE_FILTER | 'tickets';
+// Store build: no Tickets or curve coins (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
   ['social', 'Friends', true], // shown as Friends (owner, 6 Oct 2026); id stays 'social'
   ['bapps', 'bApps', true],
+  ...(CURVE_COINS_ENABLED ? [[CURVE_FILTER, CURVE_LABEL, true] as [TokenFilter, string, boolean]] : []),
   ['tickets', 'Tickets', true],
 ]);
 const TRADING = marketTradingEnabled();
+// Curve coins load on demand and only outside a store build: CURVE_COINS_ENABLED folds to false there
+// and Rollup drops ./launchpad/* entirely (code, strings and sourcemap sources).
+const CurvePanel = CURVE_COINS_ENABLED ? lazy(loadCurvePanel) : null;
 const KIND_KEY = 'bwallet.market.kind';
 const readKind = (): Kind => {
   try {
@@ -391,6 +397,9 @@ const MarketPage = () => {
     { id: 'documents', label: 'Documents', kind: 'nfts', view: 'documents' },
     { id: 'collections', label: 'Collections', kind: 'nfts', view: 'collections' },
     { id: 'bapps', label: 'bApps', kind: 'tokens', token: 'bapps' },
+    ...(CURVE_COINS_ENABLED
+      ? [{ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens' as Kind, token: CURVE_FILTER as TokenFilter }]
+      : []),
     ...(TOKEN_FILTERS.some(([f]) => f === 'tickets')
       ? [{ id: 'tickets', label: 'Tickets', kind: 'tokens' as Kind, token: 'tickets' as TokenFilter }]
       : []),
@@ -1028,7 +1037,11 @@ const MarketPage = () => {
         ) : room ? (
           roomView
         ) : kind === 'tokens' ? (
-          tokenFilter === 'tickets' ? (
+          tokenFilter === CURVE_FILTER && CurvePanel ? (
+            <Suspense fallback={null}>
+              <CurvePanel />
+            </Suspense>
+          ) : tokenFilter === 'tickets' ? (
             <TicketsPanel
               art={(icon, id) => <Art outpoint={icon} kind="bsv21" collectionId={id} />}
               onBuy={(t, holder) =>

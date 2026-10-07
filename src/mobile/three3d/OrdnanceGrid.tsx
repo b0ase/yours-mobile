@@ -56,7 +56,7 @@ export const OrdnanceGrid = () => {
   return (
     <div className="flex flex-col gap-2 pb-24">
       <p className="m-0 text-xs text-[#98A2B3]">
-        1Sat Ordnance by tokenblaster.lol: game guns as 1Sat NFTs. Owning one unlocks it in Double-O Kweg and the Arena.
+        1Sat Ordnance by tokenblaster.lol: game guns as 1Sat NFTs. Owning one unlocks it in Double-O Satoshi and the Arena.
       </p>
       <div className="grid grid-cols-2 gap-2">
         {weapons.map((w) => (

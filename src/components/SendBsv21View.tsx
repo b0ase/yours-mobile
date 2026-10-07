@@ -22,6 +22,7 @@ import { SELL_ENABLED } from '../mobile/sell/sell';
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
 import { PriceChart } from '../mobile/wallet/PriceChart';
 import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
+import { TokenIndexButton } from '../mobile/tokens/TokenIndexButton';
 import { GroupSendBar } from '../mobile/send/GroupSend';
 import { celebrateSend } from './sent/sent';
 
@@ -452,6 +453,11 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
             <div className="mx-4 mb-5 rounded-2xl p-4" style={{ background: row }}>
               <PriceChart tokenId={token.info.id} />
             </div>
+          </Show>
+
+          {/* Pay to index (any holder), only when the 1Sat overlay says it's needed */}
+          <Show when={!!token.info.id}>
+            <TokenIndexButton tokenId={token.info.id!} ticker={tokenName} />
           </Show>
 
           {/* Send form */}

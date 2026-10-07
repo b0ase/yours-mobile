@@ -5,6 +5,7 @@
  * it here. Edit by hand freely; keep the markers.
  */
 import type { RadarApp } from './radarApps';
+import { ownerAppsFor } from './storeBuild';
 import owner_budz_lol from './brand/apps/radar/owner-budz-lol.png';
 import owner_budgirls_pro from './brand/apps/radar/owner-budgirls-pro.png';
 import owner_zanaadu_com from './brand/apps/radar/owner-zanaadu-com.png';
@@ -23,7 +24,7 @@ import owner_tokenblaster from './brand/apps/tokenblaster.png';
 import owner_vexvoid_com from './brand/apps/radar/owner-vexvoid-com.png';
 // ADD-APP:IMPORTS
 
-export const OWNER_APPS: RadarApp[] = [
+const ALL_OWNER_APPS: RadarApp[] = [
   { name: 'BUDZ', url: 'https://budz.lol', desc: 'BUDZ — twelve strains, twelve tokens. Every strain gets a ticker and a room: hold the one ', group: 'social', icon: owner_budz_lol, source: 'owner' },
   { name: 'BUDGIRLS', url: 'https://budgirls.pro', desc: 'BUDGIRLS — cannabis influencers, tokenised. Pick your girl and hold her ticker to get into', group: 'social', icon: owner_budgirls_pro, source: 'owner' },
   { name: 'Zanaadu', url: 'https://zanaadu.com', desc: 'Post, engage, and earn on a social network where every upvote pays creators directly. Stor', group: 'social', icon: owner_zanaadu_com, source: 'owner' },
@@ -42,3 +43,5 @@ export const OWNER_APPS: RadarApp[] = [
   { name: 'VexVoid', url: 'https://www.vexvoid.com/', desc: 'VexVoid — music and audio-visual releases. Listen, watch and collect', group: 'media', icon: owner_vexvoid_com, source: 'owner' },
   // ADD-APP:ENTRIES
 ];
+/** Store builds leave out apps that sell or trade (storeBuild.ts). */
+export const OWNER_APPS: RadarApp[] = ownerAppsFor(ALL_OWNER_APPS);
