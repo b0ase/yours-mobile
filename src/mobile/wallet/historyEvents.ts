@@ -12,7 +12,7 @@
 import { Utils } from '@bsv/sdk';
 import type { HistoryRow, LocalInfo, RawTx } from './txHistory';
 
-export type Category = 'payment' | 'token' | 'nft' | 'game' | 'subscription' | 'app' | 'social';
+export type Category = 'payment' | 'token' | 'nft' | 'game' | 'subscription' | 'app' | 'social' | 'lock';
 
 /** What happened, in words a statement can use. */
 export type EventType =
@@ -46,6 +46,7 @@ export const CATEGORIES: { id: Category | 'all'; label: string }[] = [
   { id: 'subscription', label: 'Subscriptions' },
   { id: 'app', label: 'Apps' },
   { id: 'social', label: 'Social' },
+  { id: 'lock', label: 'Locks' },
 ];
 
 // ─── Script parsing ──────────────────────────────────────────────────────────
@@ -133,7 +134,17 @@ export const parseBsv20 = (ins: Inscription | null): Bsv20 | null => {
   }
 };
 
-export const isOrdLock = (scriptHex: string | undefined) => (scriptHex ?? '').toLowerCase().includes(ORDLOCK_HEX);
+/**
+ * Time-lock (1Sat Lock / Hodlocker) suffix start. The Lock and OrdLock contracts share ORDLOCK_HEX as
+ * their prefix, so a time-lock must be told apart by its suffix or it would read as a market listing.
+ */
+export const TIMELOCK_SUFFIX_HEX = '610079040065cd1d9f690079547a75537a537a537a5179537a75527a527a';
+export const isTimeLock = (scriptHex: string | undefined) => {
+  const s = (scriptHex ?? '').toLowerCase();
+  return s.includes(ORDLOCK_HEX) && s.includes(TIMELOCK_SUFFIX_HEX);
+};
+export const isOrdLock = (scriptHex: string | undefined) =>
+  (scriptHex ?? '').toLowerCase().includes(ORDLOCK_HEX) && !isTimeLock(scriptHex);
 
 /**
  * The P2PKH address at the end of a script that WhatsOnChain does not decode (an inscription wrapped round a
@@ -267,6 +278,11 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
       return { ...base(asset.kind, back ? 'cancel' : 'sell', asset), label: `${asset.kind === 'nft' ? 'NFT' : 'token'} ${back ? 'listing cancelled' : 'sold'}` };
     }
     const funded = tx.vin.some((i) => ctx.prev.has(`${i.txid}:${i.vout}`));
+    // Lock BSV (time-locks): locking, and claiming matured locks back to the wallet.
+    if (tx.vout.some((o) => isTimeLock(o.script)) && row.label !== 'lock')
+      return { ...base('lock', plainType), label: 'BSV locked' };
+    if (row.label === 'time lock' || row.label === 'lock claimed')
+      return { ...base('lock', plainType), label: row.label === 'lock claimed' ? 'locked BSV claimed' : 'BSV locked' };
     const lockOut = tx.vout.find((o) => isOrdLock(o.script));
     if (funded && lockOut) {
       const b = parseBsv20(parseInscription(lockOut.script));
@@ -314,6 +330,8 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
   if (row.label === 'pot payment' || ctx.accountKind === 'pot') return base('subscription', row.direction === 'out' ? 'payment' : plainType);
   if (row.label === 'agent spend') return base('app', 'payment');
   if (app || appLabel) return { ...base('app', row.direction === 'out' ? 'payment' : plainType), label: row.label === 'send' ? 'app payment' : row.label };
+  if (row.label === 'time lock') return { ...base('lock', plainType), label: 'BSV locked' };
+  if (row.label === 'lock claimed') return { ...base('lock', plainType), label: 'locked BSV claimed' };
   if (['tip', 'like', 'lock', 'seal'].includes(row.label)) return base('social', plainType);
   if (row.label === 'NFT') return base('nft', plainType);
   if (row.label === 'token transfer') return base('token', plainType);
