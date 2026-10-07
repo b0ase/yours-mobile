@@ -55,7 +55,6 @@ const TopNavBar = () => {
   const { theme } = useTheme();
   const { chromeStorageService, apiContext, lockWallet } = useServiceContext();
   const phone = usePhoneLayout();
-  const [phoneMenu, setPhoneMenu] = useState(false);
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
@@ -90,7 +89,6 @@ const TopNavBar = () => {
   const { switchingTo, switchAccount: handleSwitchAccount } = useAccountSwitch(() => setDrawer(false));
 
   useBackClose(drawer && !switchingTo, () => setDrawer(false));
-  useBackClose(phoneMenu, () => setPhoneMenu(false));
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
   // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
@@ -132,7 +130,7 @@ const TopNavBar = () => {
         // Portalled to <body> so a page drag (phone/pager.tsx) never moves the bar.
         createPortal(
           // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
-          // Accounts · Calls · b (the agent, /m/agent) · Media · Settings. No account strip above it.
+          // Accounts · Calls · b (the agent, /m/agent) · Media · Lock. No account strip above it.
           <div
             className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
             style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
@@ -187,47 +185,16 @@ const TopNavBar = () => {
             >
               <Play size={16} color={ACCENT} fill={ACCENT} />
             </button>
+            {/* Owner round 6: Settings is in the Accounts menu, so this is one Lock button that locks at once. */}
             <button
               type="button"
-              aria-label="Settings and lock"
-              aria-haspopup="menu"
-              aria-expanded={phoneMenu}
-              onClick={() => setPhoneMenu((v) => !v)}
+              aria-label="Lock now"
+              onClick={() => void lockWallet()}
               className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
               style={{ border: RING }}
             >
-              <Settings size={16} color={ICON} />
+              <Lock size={16} color={ICON} />
             </button>
-            {phoneMenu && (
-              <>
-                <div className="fixed inset-0 z-[299]" onClick={() => setPhoneMenu(false)} />
-                <div
-                  role="menu"
-                  className="absolute right-2 top-12 z-[300] w-52 rounded-2xl p-1.5 bg-[#17191E] border border-[#2b2f36] shadow-xl"
-                >
-                  {(
-                    [
-                      [<Settings key="s" size={16} color="#fff" />, 'Settings', () => go()],
-                      [<Lock key="l" size={16} color="#fff" />, 'Lock now', () => void lockWallet()],
-                    ] as const
-                  ).map(([icon, label, run]) => (
-                    <button
-                      key={label}
-                      role="menuitem"
-                      type="button"
-                      onClick={() => {
-                        setPhoneMenu(false);
-                        run();
-                      }}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-white bg-transparent active:bg-white/5"
-                    >
-                      {icon}
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
           </div>,
           document.body,
         )
@@ -370,7 +337,7 @@ const TopNavBar = () => {
           </motion.div>
         )}
       </AnimatePresence>
-      <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} />
+      <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} fullScreen={phone} />
       {toolsOpen && <AgentToolsSheet onClose={() => setToolsOpen(false)} />}
       {pairOpen && (
         <Suspense fallback={null}>

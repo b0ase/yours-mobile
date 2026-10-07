@@ -1,6 +1,8 @@
 import { validate } from 'bitcoin-address-validation';
-import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
+import { BsvHistoryBar, BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
 import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
+import { phoneLayoutOn } from '../mobile/phone/flag';
+import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -176,7 +178,10 @@ export const BsvWallet = () => {
   const [showBackupPromo, setShowBackupPromo] = useState(false);
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
   const [showMigrationBanner, setShowMigrationBanner] = useState(false);
-  const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>([]);
+  // Cache first (owner round 6): last token balances at once, refreshed in the background.
+  const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() =>
+    loadTokenCache<Bsv21Balance>(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress),
+  );
   const [manageFavorites, setManageFavorites] = useState(false);
   const [account, setAccount] = useState<Account>();
   const [token, setToken] = useState<{ isConfirmed: boolean; info: Bsv21Balance } | null>(null);
@@ -425,6 +430,7 @@ export const BsvWallet = () => {
   const getAndSetAccountAndBsv21s = async (): Promise<Bsv21Balance[]> => {
     const res = await getBsv21Balances.execute(apiContext, {});
     setBsv21s(res);
+    saveTokenCache(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress, res);
     setAccount(chromeStorageService.getCurrentAccountObject().account);
     return res;
   };
@@ -1275,7 +1281,9 @@ export const BsvWallet = () => {
   const main = (
     <MainContent>
       <motion.div
-        initial="hidden"
+        // Phone layout: every card shows at once (no 70 ms-per-card fade-in queue, which on a busy iPhone left
+        // only the wallet card visible for a while; owner round 6).
+        initial={phoneLayoutOn() ? false : 'hidden'}
         animate="visible"
         variants={{
           hidden: {},
@@ -1288,6 +1296,7 @@ export const BsvWallet = () => {
         {BUY_CRYPTO_ENABLED && (
           <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
         )}
+        {!BUY_CRYPTO_ENABLED && <BsvHistoryBar />}
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>

@@ -32,7 +32,7 @@ describe('HOME', () => {
       'aria-label="Calls"',
       "'b agent'",
       'aria-label="Media"',
-      'aria-label="Settings and lock"',
+      'aria-label="Lock now"',
     ].map((l) => row.indexOf(l));
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((x, y) => x - y)).toEqual(order);

@@ -348,6 +348,15 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - **Keep-alive, no flicker:** `<PhonePage>` renders the app screens itself in one track over one still wallpaper (all mounted), and each page once opened stays mounted (hidden while another shows), so lists, scroll, images and state are as they were. Off-screen pages give up the bApp frame and hide their portalled room / backup step until shown. Icons decode async at a fixed size.
 - **Not done yet:** a page opened for the first time still loads its data as before (no cache-first rendering added); drag-to-move tiles between screens (menu only for now).
 
+
+### 14.5 Round 6 (owner, 7 Oct 2026), now built
+- **Wallet speed:** all cards show at once in the phone layout (no 70 ms-per-card fade-in queue); token balances render from a per-account cache, then refresh; Wallet, Feed and Chat are prewarmed (mounted hidden) at idle after the start; the Wallet route a cold start lands on is no longer mounted behind Home. Hidden kept pages use content-visibility: hidden.
+- **Smooth paging:** one transform write per frame on the track (rAF), width read once per drag, will-change only while dragging, only the neighbour screens paint during a drag; app screens mount current ± 1, then stay.
+- **Feed and Chat cache-first:** last posts / room list from localStorage at once (ui/listCache.ts), live data replaces them quietly.
+- **Pull down from the top of an app screen = the b agent** (70 px; a small b cue grows and turns gold; ignores the top 100 px and sideways swipes).
+- **Top bar:** Accounts · Calls · b · Media · **Lock** (locks at once; Settings is in the Accounts menu). Calls opens full screen.
+- **Wallet top row:** price · Buy BSV · History (store edition: price · History). Mint is gold like Send / Receive. Card gold is linear: clamp(bsv / 100, 0, 1).
+
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 
 **Decided shape:** the phone layout ships first. The b button sits in the middle of the dock: one tap = HOME, press and hold = the $b agent listening (like Siri). Speech becomes a request to the agent, which can act.

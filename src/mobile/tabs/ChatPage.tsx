@@ -22,6 +22,7 @@ import {
 import { sendBsv, sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
+import { readListCache, writeListCache } from '../ui/listCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
@@ -1378,7 +1379,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [handle, setHandle] = useState<string | null>(client.handle);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [rooms, setRooms] = useState<ChatRoom[] | null>(null);
+
   const [holdings, setHoldings] = useState<Holding[] | null>(null);
   const [lookups, setLookups] = useState<Record<string, TokenRoomLookup>>({});
   const [listError, setListError] = useState('');
@@ -1405,6 +1406,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { card, reload: reloadCard } = useRoomCard(client, openTicker);
   const { chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  // Cache first (owner round 6): the last room list shows at once; the live list replaces it quietly.
+  const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(`chat:rooms:${identityAddress}`));
   const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
@@ -1494,13 +1497,14 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       .rooms()
       .then((r) => {
         setRooms(r);
+        writeListCache(`chat:rooms:${identityAddress}`, r, 100);
         setListError('');
       })
       .catch((e) => {
         if (e instanceof ChatApiError && e.status === 401) return authLost();
         setListError(errText(e));
       });
-  }, [client, apiContext, handle, online, authLost]);
+  }, [client, apiContext, handle, online, authLost, identityAddress]);
 
   useEffect(refresh, [refresh]);
   usePoll(refresh, LIST_POLL_MS, !!handle && !open);
