@@ -16,8 +16,18 @@ import { usePhoneLayout } from './flag';
 import { PHONE_ADD_TO_DOCK, PHONE_GO, PHONE_TOAST } from './events';
 import { placeFirstFree, renameScreen, screenTitle } from './appScreens';
 import { getAppScreens, setAppScreens, useAppScreens } from './appScreensStore';
-import { lockAxis, PAGE_SNAP_MS, pageRelease, rubberBand } from './gesture';
-import { getPageEl } from './pageEl';
+import {
+  lockAxis,
+  PAGE_SNAP_MS,
+  pageRelease,
+  PULL_THRESHOLD,
+  PULL_TOP_ZONE,
+  pullProgress,
+  pullReached,
+  rubberBand,
+} from './gesture';
+import bGlyph from '../brand/bwallet-glyph.svg';
+import { getPageEl, hasLanded, prewarmPages, setLanded } from './pageEl';
 import { PageDots } from './PageDots';
 import { backGoesHome, setPhoneBack } from './phoneBack';
 import { appIndexForPath, appScreenRoute, pageForPath, screenById, STRIP, type Screen } from './screens';
@@ -52,7 +62,6 @@ const sheetOnScreen = () =>
   );
 
 /** First strip page this session: a cold start lands on HOME, not the wallet (plan §6). */
-let landed = false;
 
 /**
  * The phone layout (docs/PHONE-LAYOUT-PLAN.md), mounted ONCE inside the router (vite.config.mobile.ts App.tsx
@@ -122,14 +131,23 @@ const Shell = () => {
 
   // A cold start opens on HOME.
   useEffect(() => {
-    if (landed || (!current && curIdx === null)) return;
-    landed = true;
+    if (hasLanded() || (!current && curIdx === null)) return;
+    setLanded();
     try {
       sessionStorage.removeItem('bwallet:apps-page');
     } catch {
       /* storage unavailable */
     }
     if (current?.id === 'wallet') goHome();
+    // Prefetch Wallet, Feed and Chat once the start has settled (idle): mounted hidden, so they open with their data.
+    const warm = () => prewarmPages(['wallet', 'feed', 'chat']);
+    const t = window.setTimeout(() => {
+      const ric = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number })
+        .requestIdleCallback;
+      if (ric) ric(warm, { timeout: 4000 });
+      else warm();
+    }, 2500);
+    void t;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, curIdx]);
 
@@ -190,6 +208,20 @@ const Shell = () => {
   const slideRef = useRef(slideTo);
   slideRef.current = slideTo;
 
+  // The pull-to-agent cue: a small b that grows and fills as the finger pulls (transforms and opacity only).
+  const pullCue = useRef<HTMLDivElement | null>(null);
+  const showPull = (pull: number) => {
+    const el = pullCue.current;
+    if (!el) return;
+    const r = pullProgress(pull);
+    el.style.opacity = pull > 0 ? String(Math.min(1, 0.25 + r)) : '0';
+    el.style.transition = pull > 0 || reduce ? 'none' : 'opacity 200ms ease-out, transform 260ms ease-out';
+    el.style.transform = reduce
+      ? 'translate3d(-50%,0,0)'
+      : `translate3d(-50%,${Math.min(pull, PULL_THRESHOLD * 1.4) * 0.5}px,0) scale(${0.6 + 0.4 * r})`;
+    el.dataset.ready = r >= 1 ? '1' : '';
+  };
+
   useEffect(() => {
     type Drag = {
       x: number;
@@ -200,7 +232,13 @@ const Shell = () => {
       vx: number;
       tx: number;
       side: -1 | 1;
+      w: number;
+      /** Pull down from the top of an app screen = the b agent (owner round 6). */
+      pullOk: boolean;
+      pull: number;
     };
+    let frame = 0;
+    let lastDot: number | null = null;
     let d: Drag | null = null;
     const here = () => appIndexForPath(pathname, count);
     const exists = (i: number) => i >= 0 && i < count;
@@ -211,7 +249,24 @@ const Shell = () => {
       if (!t || t.closest?.(NO_SWIPE) || inSideScroller(t)) return;
       if (sheetOnScreen() || getBappFrameState().session) return;
       const p = e.touches[0];
-      d = { x: p.clientX, y: p.clientY, axis: null, lx: p.clientX, lt: performance.now(), vx: 0, tx: 0, side: 1 };
+      // Width read once per drag: no layout reads while the finger moves.
+      const w = getPageEl()?.clientWidth ?? window.innerWidth;
+      // Pull-to-agent only from a screen scrolled to the very top, and never from the status-bar / top-bar zone.
+      const scroller = document.querySelector(`[data-phone-screen="${here()}"] section`);
+      const pullOk = p.clientY > PULL_TOP_ZONE && (!scroller || scroller.scrollTop <= 0);
+      d = {
+        x: p.clientX,
+        y: p.clientY,
+        axis: null,
+        lx: p.clientX,
+        lt: performance.now(),
+        vx: 0,
+        tx: 0,
+        side: 1,
+        w,
+        pullOk,
+        pull: 0,
+      };
     };
     const move = (e: TouchEvent) => {
       const p = e.touches[0];
@@ -222,26 +277,51 @@ const Shell = () => {
         d.axis = lockAxis(dx, p.clientY - d.y);
         if (!d.axis) return;
       }
-      if (d.axis === 'y') return void (d = null);
+      if (d.axis === 'y') {
+        const dy = p.clientY - d.y;
+        if (!d.pullOk || (dy <= 0 && d.pull === 0)) return void (d = null);
+        e.preventDefault(); // at the top, pulling down: the agent cue moves, not the page
+        d.pull = Math.max(0, dy);
+        const pull = d.pull;
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => showPull(pull));
+        return;
+      }
       e.preventDefault(); // horizontal: the page moves, not the scroller
       const now = performance.now();
       if (now > d.lt) d.vx = 0.8 * ((p.clientX - d.lx) / (now - d.lt)) + 0.2 * d.vx;
       d.lx = p.clientX;
       d.lt = now;
-      const w = getPageEl()?.clientWidth ?? window.innerWidth;
+      const w = d.w;
       const side: -1 | 1 = dx < 0 ? 1 : -1;
       const n = exists(h + side) ? h + side : null;
       d.side = side;
       d.tx = n !== null && !reduce ? dx : rubberBand(dx, w);
-      place(d.tx, 0, true);
-      setDotTarget(n !== null && Math.abs(dx) > w / 2 ? n : null);
+      // One transform write per frame, straight on the track (no React render per move).
+      const tx = d.tx;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => place(tx, 0, true));
+      const dot = n !== null && Math.abs(dx) > w / 2 ? n : null;
+      if (dot !== lastDot) setDotTarget((lastDot = dot));
     };
     const up = () => {
       const s = d;
       d = null;
       const h = here();
+      cancelAnimationFrame(frame);
+      lastDot = null;
+      if (s?.axis === 'y') {
+        const go = pullReached(s.pull);
+        showPull(0);
+        if (go) {
+          navigate('/m/agent');
+          // Focus the composer once it is there (iOS may only show the keyboard on a tap).
+          window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus(), 350);
+        }
+        return;
+      }
       if (!s || s.axis !== 'x' || h === null) return;
-      const w = getPageEl()?.clientWidth ?? window.innerWidth;
+      const w = s.w;
       const dir = pageRelease(s.tx, s.vx, w, exists(h - 1), exists(h + 1));
       const target = dir ? h + dir : null;
       if (reduce && target !== null) {
@@ -360,6 +440,14 @@ const Shell = () => {
           }
         />
       )}
+      <div
+        ref={pullCue}
+        aria-hidden
+        className="bw-pull-cue fixed left-1/2 z-[95] pointer-events-none flex items-center justify-center rounded-full"
+        style={{ top: 'calc(var(--wallet-inset-top, 0px) + 4rem)', width: 44, height: 44, opacity: 0 }}
+      >
+        <img src={bGlyph} alt="" width={24} height={24} draggable={false} />
+      </div>
       {toast && (
         <div
           role="status"

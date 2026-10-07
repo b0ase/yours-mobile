@@ -7,6 +7,9 @@ import {
   longPressCancelled,
   LONG_PRESS_SLOP,
   pageRelease,
+  pullProgress,
+  pullReached,
+  PULL_THRESHOLD,
   rubberBand,
 } from './gesture';
 import { backGoesHome } from './phoneBack';
@@ -63,5 +66,16 @@ describe('iOS-style paging maths', () => {
     expect(Math.abs(rubberBand(100, 390))).toBeLessThan(40);
     expect(rubberBand(-100, 390)).toBeLessThan(0);
     expect(rubberBand(0, 390)).toBe(0);
+  });
+});
+
+describe('pull to the b agent', () => {
+  test('progress fills to the 70px threshold; below it springs back', () => {
+    expect(PULL_THRESHOLD).toBe(70);
+    expect(pullProgress(0)).toBe(0);
+    expect(pullProgress(35)).toBeCloseTo(0.5, 6);
+    expect(pullProgress(200)).toBe(1);
+    expect(pullReached(69)).toBe(false);
+    expect(pullReached(70)).toBe(true);
   });
 });

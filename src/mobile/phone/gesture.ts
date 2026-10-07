@@ -71,3 +71,11 @@ export const pageRelease = (dx: number, vx: number, width: number, hasPrev: bool
 /** Axis lock: null until the finger has moved AXIS_LOCK_PX, then 'x' or 'y'. */
 export const lockAxis = (dx: number, dy: number): 'x' | 'y' | null =>
   Math.hypot(dx, dy) < AXIS_LOCK_PX ? null : Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+
+/** Pull down from the top of an app screen to open the b agent (owner round 6, like iOS Spotlight). */
+export const PULL_THRESHOLD = 70;
+/** Touches starting this close to the top (status bar, top bar) never pull. */
+export const PULL_TOP_ZONE = 100;
+/** 0..1 as the finger pulls; 1 = release opens the agent. */
+export const pullProgress = (pull: number) => Math.max(0, Math.min(1, pull / PULL_THRESHOLD));
+export const pullReached = (pull: number) => pull >= PULL_THRESHOLD;

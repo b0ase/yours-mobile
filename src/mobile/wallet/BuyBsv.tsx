@@ -5,6 +5,7 @@ import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-reac
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
+import { HistoryButton } from './HistoryButton';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -71,16 +72,37 @@ export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; 
   );
 };
 
+/** Today's BSV price, the left of the wallet's top row. */
+const PriceFeed = ({ rate }: { rate: number }) => (
+  <span className="flex flex-col justify-center shrink-0 pr-1 leading-tight">
+    <span className="text-[15px] font-extrabold text-white">{rate > 0 ? `$${rate.toFixed(2)}` : '…'}</span>
+    <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
+      per BSV
+    </span>
+  </span>
+);
+
 /**
- * Wallet: BSV price feed + Buy BSV, where the "Missing assets?" banner was (owner, 6 Oct 2026: a Buy button on the BSV
- * card would cover the balance; getting BSV is the biggest onboarding problem).
+ * Wallet top row (owner, round 6): price feed · Buy BSV · History, the two buttons half width each. Was a single
+ * Buy BSV card (6 Oct 2026); History moved here from under the card.
  */
 export const BsvPriceBar = ({ onReceive }: { onReceive: () => void }) => {
   const rate = useLivePrice();
   const [open, setOpen] = useState(false);
   return (
     <>
-      <BuyBsvCard rate={rate} onClick={() => setOpen(true)} className="w-[92%] mb-4" />
+      <div className="w-[92%] mb-4 flex items-stretch gap-2">
+        <PriceFeed rate={rate} />
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex-1 rounded-xl py-3 text-sm font-extrabold border-0 cursor-pointer"
+          style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+        >
+          Buy BSV
+        </button>
+        <HistoryButton className="flex-1" />
+      </div>
       {open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
@@ -91,6 +113,17 @@ export const BsvPriceBar = ({ onReceive }: { onReceive: () => void }) => {
         />
       )}
     </>
+  );
+};
+
+/** Store edition (no Buy BSV): price feed · History, History taking the Buy space. */
+export const BsvHistoryBar = () => {
+  const rate = useLivePrice();
+  return (
+    <div className="w-[92%] mb-4 flex items-stretch gap-2">
+      <PriceFeed rate={rate} />
+      <HistoryButton className="flex-1" />
+    </div>
   );
 };
 

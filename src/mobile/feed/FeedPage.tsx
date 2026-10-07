@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { readListCache, writeListCache } from '../ui/listCache';
 import { useBackClose } from '../backStack';
 import { NotificationsBell } from '../notify/NotificationsPanel';
 import { askNotifyPermissionOnce } from '../notify/engine';
@@ -1445,7 +1446,11 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [follows, setFollows] = useState<Follow[]>(loadFollows);
   const [mutes, setMutes] = useState<string[]>(loadMutes);
   const [liked, setLiked] = useState<string[]>(loadLiked);
-  const [raw, setRaw] = useState<Record<Tab, FeedPost[] | null>>({ following: null, foryou: null });
+  // Cache first (owner round 6): the last posts show at once; the live feed replaces them quietly.
+  const [raw, setRaw] = useState<Record<Tab, FeedPost[] | null>>(() => ({
+    following: readListCache<FeedPost>('feed:following'),
+    foryou: readListCache<FeedPost>('feed:foryou'),
+  }));
   const [error, setError] = useState('');
   const [source, setSource] = useState<Source | 'all'>(loadSource);
   const [safetyTick, setSafetyTick] = useState(0);
@@ -1489,6 +1494,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       try {
         const posts = which === 'foryou' ? await fetchForYou() : await fetchFollowing(follows);
         setRaw((r) => ({ ...r, [which]: posts }));
+        writeListCache(`feed:${which}`, posts);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setRaw((r) => ({ ...r, [which]: r[which] ?? [] }));

@@ -1,6 +1,6 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense, useSyncExternalStore, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import { PeekContext, setPageEl } from './pageEl';
+import { hasLanded, keptPages, keptSnapshot, keptSubscribe, PeekContext, setPageEl } from './pageEl';
 import { MARKET_ENABLED } from '../storeBuild';
 import { TermsGate } from '../ugc/UgcSheets';
 import { usePhoneLayout } from './flag';
@@ -18,7 +18,8 @@ import { appIndexForPath, pageForPath, type ScreenId } from './screens';
  * hidden. At rest the page on screen has no transform, so its fixed sheets still sit above the dock. Only the page
  * on screen counts as on screen (PeekContext: its TopNav renders, it owns the bApp frame).
  */
-const keptPages = new Set<ScreenId>();
+
+const mountedScreens = new Set<number>();
 
 const BrowserPage = lazy(() => import('../BrowserPage'));
 const Wallpaper = lazy(() => import('../BrowserPage').then((m) => ({ default: m.AppsWallpaper })));
@@ -59,10 +60,14 @@ export const PhonePage = ({ children }: { children: ReactNode }) => {
   const on = usePhoneLayout();
   const { pathname } = useLocation();
   const screens = useAppScreens().screens;
+  useSyncExternalStore(keptSubscribe, keptSnapshot, keptSnapshot);
   if (!on) return <>{children}</>;
   const idx = appIndexForPath(pathname, screens.length);
   const page = idx === null ? pageForPath(pathname) : null;
-  if (page) keptPages.add(page.id);
+  // The Wallet route a cold start opens on is about to become Home: don't mount it behind Home.
+  if (page && (hasLanded() || page.id !== 'wallet')) keptPages.add(page.id);
+  // App screens: the one on show and its neighbours are mounted; once mounted, a screen stays mounted.
+  if (idx !== null) for (const i of [idx - 1, idx, idx + 1]) if (i >= 0 && i < screens.length) mountedScreens.add(i);
   return (
     <>
       {idx === null && !page && children}
@@ -73,13 +78,14 @@ export const PhonePage = ({ children }: { children: ReactNode }) => {
         </Suspense>
         <div ref={idx === null ? undefined : setPageEl} data-phone-track className="relative w-full h-full">
           {screens.map((_, i) => {
+            if (!mountedScreens.has(i)) return null;
             const off = idx === null ? 1 : i - idx;
             return (
               <div
                 key={i}
                 data-phone-screen={i}
                 aria-hidden={off !== 0 || undefined}
-                className={`absolute inset-0 ${off === 0 ? '' : 'bw-page-off'}`}
+                className={`absolute inset-0 ${off === 0 ? '' : Math.abs(off) === 1 ? 'bw-page-off bw-page-near' : 'bw-page-off'}`}
                 style={off === 0 ? undefined : { transform: `translate3d(${off * 100}%,0,0)` }}
               >
                 <PeekContext.Provider value={off !== 0}>
