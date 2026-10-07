@@ -26,7 +26,7 @@ The extension does not use cookies or similar tracking technologies. No personal
 
 ### Contact Information:
 
-For any questions or concerns regarding this Privacy Policy or the Yours Wallet extension, you may contact us on X @[yoursxbt](https://x.com/yoursxbt).
+For any questions or concerns about this Privacy Policy or bWalletX, email [support@bwalletx.com](mailto:support@bwalletx.com) or contact [@bWalletX](https://x.com/bWalletX) on X. The current policy is at [bwalletx.com/privacy](https://bwalletx.com/privacy).
 
 Changes to the Privacy Policy:
 

@@ -165,12 +165,15 @@ The **[Contributing with Agents](docs/contributing-with-agents.md)** guide gives
 "Read docs/contributing-with-agents.md, then fix issue #123"
 ```
 
-Or [create an issue](https://github.com/yours-org/yours-wallet/issues) and the team will get to it.
+Or [create an issue](https://github.com/bitcoin-corp/bwallet/issues) and the team will get to it.
 
 ## Contact
 
-- [@yoursxbt on X](https://twitter.com/yoursxbt)
-- [Discord](https://discord.gg/qHs6hTkmsf)
+- Email: [support@bwalletx.com](mailto:support@bwalletx.com)
+- X: [@bWalletX](https://x.com/bWalletX)
+- bChat: [bitcoinchat.online](https://www.bitcoinchat.online)
+- YouTube: [@bWalletX](https://www.youtube.com/@bWalletX)
+- Website: [bwalletx.com](https://bwalletx.com)
 
 ## License
 
