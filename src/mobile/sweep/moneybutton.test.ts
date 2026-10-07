@@ -4,6 +4,7 @@ import {
   addressHash,
   isP2pkh,
   MONEYBUTTON_PATH,
+  ownerRange,
   parseSfp,
   sfpOutputsFor,
   splitSpendable,
@@ -70,5 +71,37 @@ describe('Money Button import', () => {
     expect(parseSfp('61')).toBeNull();
     expect(parseSfp('6107736670')).toBeNull();
     expect(parseSfp('0063036f7264')).toBeNull();
+  });
+
+  // Real mainnet mint of a Money Button asset (sfp@0.1, Aug 2020), public data. The funding input came
+  // from a used receive address (12GJAc…) but the token owner (c0d311… = 1JaZb4…) is an address with
+  // no plain history: owner matching must cover unused addresses in the walked range.
+  const REAL_TX =
+    '0100000001f6634b83b45a662849b75958cd130fd1bc80c2b1349539229a0ae72901266f72010000006b483045022100ceae82e86572a34c5ad2375470baecf9ac6e6732a584826f431b4a5e0bacff6c022009111876abb2291ebe12e364b6b6df326d43fc3eb8209e50f3eb16c24ef3b0fa412102c375a9c478894866d36595c7998520eeb1848c0f690801095defac1d449c3b23ffffffff022202000000000000c2610773667040302e31223466336363346462663432612e6173736574406d6f6e6579627574746f6e2e636f6d14036d480462d6bc7b69b303cd6688e4bfb9e13a1314c0d3114698049d91bf1a779be4878b789a9ca73a000000005779547a75537a537a537a5679537a75527a527a5579527a75517a5479517a75615379587987695879008791695c79a9517987695d795d79ac695a79a9527987695b795b79ac77777777777777777777777777776a1240420f00000000006d696e74696e670f00003fb00600000000001976a914be278f8b053b4c1d44a7f27a27b03b8caed85e0088ac00000000';
+  const REAL_TXID = 'a3042ad4188a35d3c34952c401d86ef66332888aee5985ed63c8c4baaf6ed178';
+
+  test('real Money Button mint (sfp@0.1)', () => {
+    const sfp = parseSfp(txOutputs(REAL_TX)[0].script)!;
+    expect(sfp).toMatchObject({ version: 'sfp@0.1', asset: '4f3cc4dbf42a.asset@moneybutton.com', amount: 1000000n });
+    expect(sfp.hashes).toEqual([
+      '036d480462d6bc7b69b303cd6688e4bfb9e13a13',
+      'c0d3114698049d91bf1a779be4878b789a9ca73a',
+    ]);
+    const owner = new Set([addressHash('1JaZb4KiX4WfWggym5A1TXT8vbxqP8co9F')]);
+    expect(sfpOutputsFor(REAL_TX, REAL_TXID, owner).map((o) => o.outpoint)).toEqual([`${REAL_TXID}_0`]);
+    // The funding address alone doesn't own it.
+    expect(
+      sfpOutputsFor(REAL_TX, REAL_TXID, new Set([addressHash('12GJAcMfQgaQUXiLaZrTBQwpbJovdTezon')])),
+    ).toHaveLength(0);
+  });
+
+  test('owner range covers unused addresses up to last used + gap on both chains', () => {
+    const acct = accountKey(PHRASE, '', MONEYBUTTON_PATH);
+    const used = [addressAt(acct, MONEYBUTTON_PATH, 0, 5)];
+    const r = new Set(ownerRange(acct, MONEYBUTTON_PATH, used));
+    expect(r.size).toBe(5 + 1 + 20 + 20);
+    expect(r.has(addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, 3).address))).toBe(true);
+    expect(r.has(addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, 25).address))).toBe(true);
+    expect(r.has(addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, 26).address))).toBe(false);
   });
 });

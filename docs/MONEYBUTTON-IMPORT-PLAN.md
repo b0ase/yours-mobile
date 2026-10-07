@@ -55,3 +55,7 @@ Not in phase 1:
 1. Upload a bit-sign backup file into the sweep (decrypt on device).
 2. `sfp@` prefix search via JungleBus so tokens are found even when the owner address has no history.
 3. Export of held SFP outpoints (CSV/JSON) as a record of ownership.
+
+## Tested against a real wallet (7 Oct 2026, read-only, public data only)
+
+The owner's Money Button wallet (m/44'/0'/0'/0, Aug 2020 to Feb 2021) has 15 `sfp@0.1` outputs, of which 9 are unspent, across 8 assets (`<12 hex>.asset@moneybutton.com`). Every one pushes two hash160s: the Money Button authoriser (`036d4804…`, 1K7waK…, the same on every output) and the owner. **None of the owners is a used receive address.** The used addresses only paid the fees. So the first build, which matched owners against used addresses, found nothing. Matching now covers every address in the walked range (index 0 to the last used index plus 20, both chains). Still to confirm with the phrase: that the owner hashes really are receive addresses in the gaps.

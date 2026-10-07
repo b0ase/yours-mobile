@@ -21,7 +21,14 @@ import {
   wifKey,
   type SingleKey,
 } from './hd';
-import { MONEYBUTTON_PATH, addressHash, sfpOutputsFor, splitSpendable, type SfpOutput } from './moneybutton';
+import {
+  MONEYBUTTON_PATH,
+  addressHash,
+  ownerRange,
+  sfpOutputsFor,
+  splitSpendable,
+  type SfpOutput,
+} from './moneybutton';
 
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -203,12 +210,19 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       const used = new Map<string, string>(); // address → wif
       const matches: string[] = [];
       const mbAddresses = new Set<string>(); // used addresses on Money Button's path (or a pasted key)
+      // hash160s that may own Money Button tokens: every address in the walked range, used or not. Money
+      // Button put token owners at receive indices that never got a plain payment (tested against a real
+      // wallet, 7 Oct 2026), so matching only used addresses missed every token.
+      const mbOwners = new Set<string>();
       for (const [i, k] of singles.entries()) {
         if (cancelled.current) return;
         setProgress(`Checking ${k.wallet} ${k.label} key (${i + 1} of ${singles.length})`);
         if (input.kind === 'wif' || (await woCUsed(k.address))) {
           if (!used.has(k.address)) used.set(k.address, k.wif);
-          if (input.kind === 'wif') mbAddresses.add(k.address);
+          if (input.kind === 'wif') {
+            mbAddresses.add(k.address);
+            mbOwners.add(addressHash(k.address));
+          }
           matches.push(input.kind === 'wif' ? `Private key (${k.address})` : `${k.wallet} ${k.label} (${k.path})`);
         }
       }
@@ -220,7 +234,10 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         if (!hits.length) continue;
         matches.push(`${label}: ${hits.length} address${hits.length === 1 ? '' : 'es'}`);
         for (const h of hits) if (!used.has(h.address)) used.set(h.address, h.wif);
-        if (path === MONEYBUTTON_PATH || input.kind === 'xprv') hits.forEach((h) => mbAddresses.add(h.address));
+        if (path === MONEYBUTTON_PATH || input.kind === 'xprv') {
+          hits.forEach((h) => mbAddresses.add(h.address));
+          ownerRange(key, path, hits).forEach((h) => mbOwners.add(h));
+        }
       }
       if (!used.size) {
         setError(
@@ -255,7 +272,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       // address; read the address's own history and look for SFP outputs that name it.
       const sfp: SfpOutput[] = [];
       if (mbAddresses.size) {
-        const hashes = new Set([...mbAddresses].map(addressHash));
+        const hashes = mbOwners;
         const seen = new Set<string>();
         for (const [i, address] of [...mbAddresses].entries()) {
           const txids = (await wocHistory(address)).slice(0, SFP_TX_LIMIT);

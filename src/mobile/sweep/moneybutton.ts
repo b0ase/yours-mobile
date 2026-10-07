@@ -1,4 +1,5 @@
-import { Utils } from '@bsv/sdk';
+import { HD, Utils } from '@bsv/sdk';
+import { GAP, addressAt, type HdAddress } from './hd';
 
 /**
  * Money Button (moneybutton.com, Yours Inc, 2018 to 2022): the import side of "Sweep from another wallet".
@@ -142,4 +143,21 @@ export function splitSpendable<T extends { outpoint: string; lockingScript: stri
   const kept: T[] = [];
   for (const i of inputs) (isP2pkh(i.lockingScript) && !protectedOutpoints.has(i.outpoint) ? spendable : kept).push(i);
   return { spendable, kept };
+}
+
+/**
+ * hash160s of every address on both chains from index 0 to the last used one plus GAP. SFP token
+ * owners sit at addresses with no plain history, in the gaps between used ones, so owner matching has
+ * to cover the whole walked range and not only the used addresses.
+ */
+export function ownerRange(account: HD, accountPath: string, used: HdAddress[]): string[] {
+  const out: string[] = [];
+  for (const chain of [0, 1] as const) {
+    const idx = used
+      .filter((u) => u.path.startsWith(`${accountPath}/${chain}/`))
+      .map((u) => Number(u.path.split('/').pop()));
+    const last = idx.length ? Math.max(...idx) : -1;
+    for (let i = 0; i <= last + GAP; i++) out.push(addressHash(addressAt(account, accountPath, chain, i).address));
+  }
+  return out;
 }
