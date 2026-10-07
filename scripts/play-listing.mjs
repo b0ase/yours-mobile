@@ -13,26 +13,16 @@ import { homedir } from 'os';
 import { join } from 'path';
 
 const PACKAGE = 'com.bitcoincorp.bwallet';
-const LANG = process.env.PLAY_LANG ?? 'en-GB';
-const ASSETS = join(process.cwd(), 'dist/play-assets');
+let LANG = process.env.PLAY_LANG ?? '';
+const ASSETS = join(process.cwd(), 'store/play');
 const KEY_FILE = process.env.PLAY_SERVICE_ACCOUNT ?? join(homedir(), '.yours-mobile/play-service-account.json');
 
-const TITLE = 'bWallet (Beta)';
-const SHORT = 'The BSV wallet for tokens: 1Sat Ordinals, BSV-21 and BRC-100 apps.';
-const FULL = `bWallet is the BSV wallet for tokens, from The Bitcoin Corporation Ltd.
-
-• Hold and send BSV, 1Sat Ordinals and BSV-21 tokens
-• Use BRC-100 apps in the built-in browser, where you approve every request
-• Non-custodial: private keys stay on your device, encrypted with your password in the Android Keystore
-• Optional fingerprint unlock
-• Open source: https://github.com/b0ase/yours-mobile
-
-Transaction records sync to 1Sat wallet storage by default; you can change the storage provider in settings.
-
-Based on the open-source Yours Wallet (MIT licence). Not affiliated with or endorsed by its authors.
-
-This is beta software. Use a new wallet with small amounts only, and keep your recovery phrase safe.`;
-
+// Texts and graphics come from store/play/ (listing.md is the source of truth for the Play listing).
+const LISTING = readFileSync(join(process.cwd(), 'store/play/listing.md'), 'utf8');
+const TITLE = 'bWallet';
+const SHORT = LISTING.match(/\*\*Short description[^\n]*\n\n> (.+)/)[1].trim();
+const FULL = LISTING.split(/\*\*Full description[^\n]*\n\n```\n/)[1].split('\n```')[0].trim();
+const CONTACT = { contactEmail: 'support@bwalletx.com', contactWebsite: 'https://www.bwallet.space' };
 const key = JSON.parse(readFileSync(KEY_FILE, 'utf8'));
 const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
 
@@ -73,13 +63,20 @@ const call = async (method, url, body, headers = {}) => {
 
 const { id: edit } = await call('POST', `${API}/edits`);
 try {
+  // The default store listing is in the app's default language (Play Console › Store settings).
+  LANG ||= (await call('GET', `${API}/edits/${edit}/details`)).defaultLanguage;
   await call(
     'PUT',
     `${API}/edits/${edit}/listings/${LANG}`,
     JSON.stringify({ language: LANG, title: TITLE, shortDescription: SHORT, fullDescription: FULL }),
     { 'content-type': 'application/json' },
   );
-  console.log(`✓ listing text (${LANG})`);
+  console.log(`✓ listing text (${LANG}): ${SHORT.length}/80 short, ${FULL.length}/4000 full`);
+  const details = await call('GET', `${API}/edits/${edit}/details`);
+  await call('PATCH', `${API}/edits/${edit}/details`, JSON.stringify({ ...details, ...CONTACT }), {
+    'content-type': 'application/json',
+  });
+  console.log(`✓ contact details (default language ${details.defaultLanguage})`);
 
   const upload = async (type, file) => {
     const path = join(ASSETS, file);
@@ -95,7 +92,8 @@ try {
   }
   await upload('icon', 'icon-512.png');
   await upload('featureGraphic', 'feature-graphic-1024x500.png');
-  for (const n of [1, 2, 3, 4]) await upload('phoneScreenshots', `phone-${n}.png`);
+  for (const f of ['screenshot-01-wallet.png', 'screenshot-02-receive.png', 'screenshot-03-send.png', 'screenshot-04-collections.png'])
+    await upload('phoneScreenshots', f);
 
   // Unpublished apps reject changesNotSentForReview; listing changes are reviewed with the next release.
   await call('POST', `${API}/edits/${edit}:commit`);
