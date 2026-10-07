@@ -62,6 +62,16 @@ describe('HOME', () => {
     expect(dots).toContain('data-testid="page-title"');
   });
 
+  test('round 8: one vertical Apps page with sticky section headers; paging kept behind APPS_PAGED', () => {
+    const flag = readFileSync(join(import.meta.dir, 'flag.ts'), 'utf8');
+    expect(flag).toContain('export const APPS_PAGED = false;');
+    const pager = readFileSync(join(import.meta.dir, 'pager.tsx'), 'utf8');
+    expect(pager).toContain('<BrowserPage screen={idx ?? 0} sections />');
+    const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
+    expect(apps).toContain('className="sticky top-0');
+    expect(apps).not.toMatch(/sticky top-0[^"]*backdrop/);
+  });
+
   test('the phone layout is off by default', () => {
     const src = readFileSync(join(import.meta.dir, 'flag.ts'), 'utf8');
     expect(src).toContain("=== '1'");

@@ -357,6 +357,12 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - **Top bar:** Accounts · Calls · b · Media · **Lock** (locks at once; Settings is in the Accounts menu). Calls opens full screen.
 - **Wallet top row:** price · Buy BSV · History (store edition: price · History). Mint is gold like Send / Receive. Card gold is linear: clamp(bsv / 100, 0, 1).
 
+
+### 14.6 Round 8 (owner, 7 Oct 2026), now built: one vertical Apps page
+- Sideways paging was laggy on an old iPhone and confusing. The app screens are now **sections of one vertical Apps page**: Home, bApps, Games, the user's screens, then Your apps, Recents and the catalogue. Each section's name is a **sticky header** (solid background, no blur; tap to rename). Grids are 4 columns with rows flowing naturally (no 4 × 6 page, no filler slots).
+- The paging track, dots and sideways swipe stay in the code behind `APPS_PAGED` (phone/flag.ts, false) for later.
+- Kept: Move to section… / New section, Add / Remove from Dock, dock b tap = top of Apps (scrolls up if already there), hold = agent, pull down at scrollTop 0 = agent. Saved layouts are unchanged; screens simply show as sections. Icons decode async and load lazily.
+
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 
 **Decided shape:** the phone layout ships first. The b button sits in the middle of the dock: one tap = HOME, press and hold = the $b agent listening (like Siri). Speech becomes a request to the agent, which can act.

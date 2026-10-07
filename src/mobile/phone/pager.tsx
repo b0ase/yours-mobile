@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { hasLanded, keptPages, keptSnapshot, keptSubscribe, PeekContext, setPageEl } from './pageEl';
 import { MARKET_ENABLED } from '../storeBuild';
 import { TermsGate } from '../ugc/UgcSheets';
-import { usePhoneLayout } from './flag';
+import { APPS_PAGED, usePhoneLayout } from './flag';
 import { useAppScreens } from './appScreensStore';
 import { appIndexForPath, pageForPath, type ScreenId } from './screens';
 
@@ -76,27 +76,38 @@ export const PhonePage = ({ children }: { children: ReactNode }) => {
         <Suspense fallback={null}>
           <Wallpaper />
         </Suspense>
-        <div ref={idx === null ? undefined : setPageEl} data-phone-track className="relative w-full h-full">
-          {screens.map((_, i) => {
-            if (!mountedScreens.has(i)) return null;
-            const off = idx === null ? 1 : i - idx;
-            return (
-              <div
-                key={i}
-                data-phone-screen={i}
-                aria-hidden={off !== 0 || undefined}
-                className={`absolute inset-0 ${off === 0 ? '' : Math.abs(off) === 1 ? 'bw-page-off bw-page-near' : 'bw-page-off'}`}
-                style={off === 0 ? undefined : { transform: `translate3d(${off * 100}%,0,0)` }}
-              >
-                <PeekContext.Provider value={off !== 0}>
-                  <Suspense fallback={null}>
-                    <BrowserPage screen={i} />
-                  </Suspense>
-                </PeekContext.Provider>
-              </div>
-            );
-          })}
-        </div>
+        {!APPS_PAGED ? (
+          // Round 8: one vertical Apps page, every screen a section (sticky headers). No track, no transforms.
+          <div data-phone-screen={0} aria-hidden={idx === null || undefined} className="absolute inset-0">
+            <PeekContext.Provider value={idx === null}>
+              <Suspense fallback={null}>
+                <BrowserPage screen={idx ?? 0} sections />
+              </Suspense>
+            </PeekContext.Provider>
+          </div>
+        ) : (
+          <div ref={idx === null ? undefined : setPageEl} data-phone-track className="relative w-full h-full">
+            {screens.map((_, i) => {
+              if (!mountedScreens.has(i)) return null;
+              const off = idx === null ? 1 : i - idx;
+              return (
+                <div
+                  key={i}
+                  data-phone-screen={i}
+                  aria-hidden={off !== 0 || undefined}
+                  className={`absolute inset-0 ${off === 0 ? '' : Math.abs(off) === 1 ? 'bw-page-off bw-page-near' : 'bw-page-off'}`}
+                  style={off === 0 ? undefined : { transform: `translate3d(${off * 100}%,0,0)` }}
+                >
+                  <PeekContext.Provider value={off !== 0}>
+                    <Suspense fallback={null}>
+                      <BrowserPage screen={i} />
+                    </Suspense>
+                  </PeekContext.Provider>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       {/* Pages: mounted once opened, then kept (hidden while another is on screen). */}
       {[...keptPages].map((id) => {

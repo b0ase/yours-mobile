@@ -52,3 +52,9 @@ const subscribe = (fn: () => void) => {
 };
 
 export const usePhoneLayout = () => useSyncExternalStore(subscribe, phoneLayoutOn, () => false);
+
+/**
+ * Round 8 (owner): app screens are one vertical Apps page with sticky section headers. The horizontal paging
+ * track, dots and swipe (phone/pager.tsx, PhoneShell.tsx) stay in the code behind this flag for later.
+ */
+export const APPS_PAGED = false;
