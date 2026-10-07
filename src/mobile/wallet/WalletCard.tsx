@@ -1,6 +1,6 @@
 import * as qr from 'qrcode';
-import { lazy, Suspense, useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { Check, Copy, History, Loader2, PenLine, RefreshCw } from 'lucide-react';
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
@@ -37,8 +37,6 @@ export type WalletCardProps = {
   /** Balance hidden (privacy): the card shows a neutral gold so its colour does not reveal the balance. */
   balanceHidden?: boolean;
 };
-
-const HistoryScreen = lazy(() => import('./HistoryScreen'));
 
 const SIG_HINT_KEY = 'bwallet.cardSigHintSeen';
 const sigHintSeen = () => {
@@ -101,7 +99,6 @@ export const WalletCard = ({
     saveCardUnit(u);
   };
   const [handleOpen, setHandleOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
@@ -377,33 +374,7 @@ export const WalletCard = ({
           </div>
         </div>
       </div>
-      {/* Activity / History + export (src/mobile/wallet/HistoryScreen). */}
-      <button
-        type="button"
-        className="bw-wcard-history"
-        onClick={() => setHistoryOpen(true)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          margin: '8px auto 0',
-          padding: '6px 14px',
-          borderRadius: 999,
-          border: '1px solid #2b2f36',
-          background: '#17191E',
-          color: '#fff',
-          fontSize: 13,
-          cursor: 'pointer',
-        }}
-      >
-        <History size={14} aria-hidden="true" />
-        History
-      </button>
-      {historyOpen && (
-        <Suspense fallback={null}>
-          <HistoryScreen onClose={() => setHistoryOpen(false)} />
-        </Suspense>
-      )}
+      {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
       {sig.ui}
     </div>

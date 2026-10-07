@@ -1076,7 +1076,7 @@ const MarketPage = () => {
               <div
                 className="fixed left-0 right-0 z-[60] px-4 py-2"
                 style={{
-                  bottom: 'calc(3.75rem + env(safe-area-inset-bottom))',
+                  bottom: 'calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom))',
                   background: 'linear-gradient(transparent, #010101 35%)',
                 }}
               >

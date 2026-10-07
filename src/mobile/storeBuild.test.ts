@@ -349,3 +349,32 @@ describe('store build has no Market', () => {
     expect(v).toContain("['  const listView = (', '  const listView = MARKET_ENABLED && (']");
   });
 });
+
+describe('phone layout store gates', () => {
+  test('Exchange screen: shown in a direct build, hidden in a store build', async () => {
+    const { screenShown, screensFor, dockItemsFor, peopleSellingEnabled } = await import('./storeBuild');
+    expect(screenShown('exchange', false)).toBe(true);
+    expect(screenShown('exchange', true)).toBe(false);
+    expect(screenShown('wallet', true)).toBe(true);
+    const s = [{ id: 'wallet' }, { id: 'exchange' }, { id: 'feed' }];
+    expect(screensFor(s, true).map((x) => x.id)).toEqual(['wallet', 'feed']);
+    expect(screensFor(s, false)).toHaveLength(3);
+    const items = [
+      { kind: 'screen', id: 'exchange' },
+      { kind: 'action', id: 'sendReceive' },
+      { kind: 'screen', id: 'chat' },
+    ];
+    expect(dockItemsFor(items, true)).toEqual([
+      { kind: 'action', id: 'sendReceive' },
+      { kind: 'screen', id: 'chat' },
+    ]);
+    expect(dockItemsFor(items, false)).toHaveLength(3);
+    expect(peopleSellingEnabled(true)).toBe(false);
+    expect(peopleSellingEnabled(false)).toBe(true);
+  });
+
+  test('the phone layout switch is off unless set', async () => {
+    const { phoneLayoutOn } = await import('./phone/flag');
+    expect(phoneLayoutOn()).toBe(false);
+  });
+});

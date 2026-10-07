@@ -55,6 +55,21 @@ html:root {
   --account-strip-height: 0px;
   --wallet-inset-top: calc(env(safe-area-inset-top) + var(--account-strip-height));
 }
+/* Height of whatever sits at the bottom: the tab bar (tabs/BottomMenu.tsx), or the phone layout's dock
+   (phone/Dock.tsx, behind the Settings › Testing switch, which sets data-phone-layout). Pages pad by it. */
+html:root {
+  --dock-h: 3.75rem;
+}
+html[data-phone-layout]:root {
+  --dock-h: 5rem;
+}
+/* Phone layout dock: horizontal scroll, no scrollbar. */
+.bw-dock-scroll {
+  scrollbar-width: none;
+}
+.bw-dock-scroll::-webkit-scrollbar {
+  display: none;
+}
 html.has-account-strip:root {
   --account-strip-height: 28px;
 }
@@ -790,16 +805,51 @@ body,
 
 /* Agent-account ghost (agents/PixelGhost.tsx): two-frame skirt and glancing eyes, stepped like an arcade
    sprite. On the wallet card it sits bottom right (owner, 6 Oct 2026). */
-.bw-ghost { image-rendering: pixelated; flex-shrink: 0; }
-.bw-ghost-a, .bw-ghost-look-l { animation: bw-ghost-on 0.5s steps(1, end) infinite; }
-.bw-ghost-b, .bw-ghost-look-r { animation: bw-ghost-off 0.5s steps(1, end) infinite; }
-.bw-ghost-look-l { animation-duration: 1.6s; }
-.bw-ghost-look-r { animation-duration: 1.6s; }
-@keyframes bw-ghost-on { 0% { opacity: 1; } 50% { opacity: 0; } }
-@keyframes bw-ghost-off { 0% { opacity: 0; } 50% { opacity: 1; } }
+.bw-ghost {
+  image-rendering: pixelated;
+  flex-shrink: 0;
+}
+.bw-ghost-a,
+.bw-ghost-look-l {
+  animation: bw-ghost-on 0.5s steps(1, end) infinite;
+}
+.bw-ghost-b,
+.bw-ghost-look-r {
+  animation: bw-ghost-off 0.5s steps(1, end) infinite;
+}
+.bw-ghost-look-l {
+  animation-duration: 1.6s;
+}
+.bw-ghost-look-r {
+  animation-duration: 1.6s;
+}
+@keyframes bw-ghost-on {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes bw-ghost-off {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .bw-ghost-a, .bw-ghost-look-l { animation: none; opacity: 1; }
-  .bw-ghost-b, .bw-ghost-look-r { animation: none; opacity: 0; }
+  .bw-ghost-a,
+  .bw-ghost-look-l {
+    animation: none;
+    opacity: 1;
+  }
+  .bw-ghost-b,
+  .bw-ghost-look-r {
+    animation: none;
+    opacity: 0;
+  }
 }
 .bw-wcard-ghost {
   position: absolute;
@@ -807,4 +857,47 @@ body,
   bottom: 14px;
   pointer-events: none;
   filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.5));
+}
+
+/* Phone layout: the ring that fills while the dock's big b is held (phone/Dock.tsx HomeButton). */
+.bw-hold-ring {
+  stroke-dashoffset: 100;
+  animation-name: bw-hold-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes bw-hold-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Phone layout keep-alive track (phone/pager.tsx): pages off to the side are hidden at rest (their fixed bars
+   too) and shown while a finger drags the track. */
+.bw-page-off {
+  visibility: hidden;
+  pointer-events: none;
+}
+[data-phone-track][data-dragging] > .bw-page-near {
+  visibility: visible;
+}
+/* While dragging: the track is its own layer; screens further away are not painted at all. */
+[data-phone-track][data-dragging] {
+  will-change: transform;
+}
+[data-phone-track] > .bw-page-off:not(.bw-page-near) {
+  content-visibility: hidden;
+}
+/* Kept pages off screen (Wallet, Feed, Chat… phone/pager.tsx): state kept, no layout or paint work while hidden. */
+[data-phone-kept].bw-page-off {
+  content-visibility: hidden;
+}
+/* Pull-to-agent cue (phone/PhoneShell.tsx): dark until the pull is far enough, then gold. */
+.bw-pull-cue {
+  background: #17191e;
+  border: 2px solid #ffd24d55;
+}
+.bw-pull-cue[data-ready='1'] {
+  background: #2a2205;
+  border-color: #ffd24d;
 }

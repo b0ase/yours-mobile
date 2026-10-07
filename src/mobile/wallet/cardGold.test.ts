@@ -4,17 +4,15 @@ import { CARD_GOLD_HIDDEN, cardGold, cardGoldLevel } from './cardGold';
 describe('cardGold', () => {
   test('boundaries', () => {
     expect(cardGold(0)).toBe(0);
-    expect(cardGold(0.001)).toBe(0);
-    expect(cardGold(0.0005)).toBe(0);
+    expect(cardGold(0.03)).toBeCloseTo(0.0003, 9); // 3M sats: still near-black
     expect(cardGold(100)).toBe(1);
     expect(cardGold(5000)).toBe(1);
     expect(cardGold(Infinity)).toBe(1);
   });
   test('documented points', () => {
-    expect(cardGold(0.01)).toBeCloseTo(0.2, 6);
-    expect(cardGold(0.1)).toBeCloseTo(0.4, 6);
-    expect(cardGold(1)).toBeCloseTo(0.6, 6);
-    expect(cardGold(10)).toBeCloseTo(0.8, 6);
+    expect(cardGold(1)).toBeCloseTo(0.01, 9);
+    expect(cardGold(10)).toBeCloseTo(0.1, 9);
+    expect(cardGold(50)).toBeCloseTo(0.5, 9);
   });
   test('negative and NaN → 0', () => {
     expect(cardGold(-1)).toBe(0);
@@ -35,6 +33,6 @@ describe('cardGold', () => {
     expect(cardGoldLevel(1000, { hidden: true })).toBe(CARD_GOLD_HIDDEN);
     expect(cardGoldLevel(0, { hidden: true })).toBe(CARD_GOLD_HIDDEN);
     expect(cardGoldLevel(1000, { known: false })).toBe(0);
-    expect(cardGoldLevel(1, { known: true })).toBeCloseTo(0.6, 6);
+    expect(cardGoldLevel(50, { known: true })).toBeCloseTo(0.5, 9);
   });
 });

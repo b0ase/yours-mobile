@@ -1,6 +1,8 @@
 import { validate } from 'bitcoin-address-validation';
-import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
+import { BsvHistoryBar, BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
 import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
+import { phoneLayoutOn } from '../mobile/phone/flag';
+import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -81,6 +83,7 @@ import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay } from '../mobile/wallet/payNav';
+import { onWalletAction, takeWalletAction } from '../mobile/phone/walletAction';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
@@ -175,7 +178,10 @@ export const BsvWallet = () => {
   const [showBackupPromo, setShowBackupPromo] = useState(false);
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
   const [showMigrationBanner, setShowMigrationBanner] = useState(false);
-  const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>([]);
+  // Cache first (owner round 6): last token balances at once, refreshed in the background.
+  const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() =>
+    loadTokenCache<Bsv21Balance>(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress),
+  );
   const [manageFavorites, setManageFavorites] = useState(false);
   const [account, setAccount] = useState<Account>();
   const [token, setToken] = useState<{ isConfirmed: boolean; info: Bsv21Balance } | null>(null);
@@ -243,6 +249,17 @@ export const BsvWallet = () => {
     };
     take();
     return onPay(take);
+  }, []);
+
+  // Phone layout: HOME's / the dock's Send and Receive open the same screens as the buttons under the card.
+  useEffect(() => {
+    const take = () => {
+      const a = takeWalletAction();
+      if (a === 'receive') setPageState('receive');
+      else if (a === 'send') setPageState('asset-picker');
+    };
+    take();
+    return onWalletAction(take);
   }, []);
 
   const addRecipient = () => {
@@ -413,6 +430,7 @@ export const BsvWallet = () => {
   const getAndSetAccountAndBsv21s = async (): Promise<Bsv21Balance[]> => {
     const res = await getBsv21Balances.execute(apiContext, {});
     setBsv21s(res);
+    saveTokenCache(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress, res);
     setAccount(chromeStorageService.getCurrentAccountObject().account);
     return res;
   };
@@ -1256,6 +1274,12 @@ export const BsvWallet = () => {
     </motion.div>
   );
 
+  /** The BSV view (price chart, send): the BSV card's tap, and the top row's price (owner round 7). */
+  const openBsvView = () => {
+    setSendSource('main');
+    setPageState('send');
+  };
+
   const listItemStyle = {
     borderColor: theme.color.global.gray + '14',
   };
@@ -1263,7 +1287,9 @@ export const BsvWallet = () => {
   const main = (
     <MainContent>
       <motion.div
-        initial="hidden"
+        // Phone layout: every card shows at once (no 70 ms-per-card fade-in queue, which on a busy iPhone left
+        // only the wallet card visible for a while; owner round 6).
+        initial={phoneLayoutOn() ? false : 'hidden'}
         animate="visible"
         variants={{
           hidden: {},
@@ -1274,8 +1300,12 @@ export const BsvWallet = () => {
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
         {BUY_CRYPTO_ENABLED && (
-          <BsvPriceBar onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))} />
+          <BsvPriceBar
+            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+            onPrice={openBsvView}
+          />
         )}
+        {!BUY_CRYPTO_ENABLED && <BsvHistoryBar onPrice={openBsvView} />}
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>
@@ -1426,10 +1456,7 @@ export const BsvWallet = () => {
               </span>
             }
             showPointer={true}
-            onClick={() => {
-              setSendSource('main');
-              setPageState('send');
-            }}
+            onClick={openBsvView}
             // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
             action={
               bsvBalance === 0 && BUY_CRYPTO_ENABLED

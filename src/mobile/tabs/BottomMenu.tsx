@@ -4,6 +4,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled, marketLabel } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
+import { usePhoneLayout } from '../phone/flag';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:
@@ -22,6 +23,7 @@ export type { BottomMenuProps };
 export default Menu;
 
 export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) => {
+  const phone = usePhoneLayout();
   const active = tabFor(selected);
   // Own tokens whose room isn't set up (minus "Not now"): count on the Wallet tab.
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -29,6 +31,8 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
     apiContext,
     chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
   ).length;
+  // Phone layout test switch on: the dock (phone/PhoneShell.tsx) replaces this bar.
+  if (phone) return null;
   return (
     <>
       <div

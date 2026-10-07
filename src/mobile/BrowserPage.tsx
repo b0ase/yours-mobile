@@ -3,7 +3,31 @@ import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeFavourites';
+import {
+  defaultScreens,
+  moveToScreen,
+  removeKey,
+  renameScreen,
+  reorderScreen,
+  screenOf,
+  screenTitle,
+} from './phone/appScreens';
+import {
+  getAppScreens,
+  REQUIRED_TILES,
+  setAppScreens,
+  setDefaultBuilder,
+  useAppScreens,
+} from './phone/appScreensStore';
+import { useDock } from './phone/dockStore';
+import { screenById, type ScreenId } from './phone/screens';
+import { SCREEN_ICON, screenLabel } from './phone/icons';
+import { PHONE_APPS_TOP, PHONE_GO } from './phone/events';
+import { useInPeek } from './phone/pageEl';
+import bGlyph from './brand/bwallet-glyph.svg';
+import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
@@ -31,6 +55,9 @@ import bgPoster from './brand/bg/liquid-gold.jpg';
 import { VideoBackground } from './ui/VideoBackground';
 import { IS_EXTENSION } from './extension';
 import { useKeyboardInset } from './ui/keyboardInset';
+import { usePhoneLayout } from './phone/flag';
+import { PHONE_ADD_TO_DOCK } from './phone/events';
+import type { DockItem } from './phone/dockModel';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -100,14 +127,28 @@ type Tile = {
   bapp?: BApp;
   /** One-line tagline for third-party apps (from BSVRadar or the Metanet app store). */
   desc?: string;
+  /** Phone layout: a strip screen shown as a Home tile (Wallet, Exchange, Feed, Chat…), not a web app. */
+  screen?: ScreenId;
 };
 
 const ICON = 'h-[60px] w-[60px] rounded-[16px]';
+/** Phone layout HOME: 4 columns × 6 rows, sized to the space between the top bar (3.5rem) and the dock. */
+const HOME_ROWS = 6;
+const HOME_SLOTS = 4 * HOME_ROWS;
+const HOME_PAGE_H = 'calc(var(--wallet-height, 100dvh) - 3.5rem - var(--dock-h, 3.75rem) - 1.75rem)';
 const ONE_LINE = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 /** Home-screen icon: the site's icon, else a monogram ("b" in gold for bApps). */
 const TileIcon = ({ tile }: { tile: Tile }) => {
   const [failed, setFailed] = useState(false);
+  if (tile.screen) {
+    const Icon = SCREEN_ICON[tile.screen];
+    return (
+      <div className={`${ICON} flex items-center justify-center`} style={{ background: '#17191E' }}>
+        <Icon size={28} color="#FFD24D" />
+      </div>
+    );
+  }
   if (tile.icon && !failed) {
     return (
       <img
@@ -115,6 +156,10 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         alt=""
         draggable={false}
         onError={() => setFailed(true)}
+        decoding="async"
+        loading="lazy"
+        width={60}
+        height={60}
         className={`${ICON} object-cover bg-[#17191E]`}
       />
     );
@@ -158,6 +203,9 @@ const bappTile = (a: BApp): Tile => ({
 const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id))
   .filter((a) => appsTileShown(a.name))
   .map(bappTile);
+/** The b agent as an Apps tile (owner, 7 Oct 2026): opens /m/agent, the same as "Ask b" in the top bar. */
+const AGENT_KEY = 'sys:agent';
+const AGENT_TILE: Tile = { key: AGENT_KEY, name: 'b agent', url: '/m/agent', icon: bGlyph };
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
@@ -384,7 +432,6 @@ const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) 
 allowFrameUrls(ALL_TILES.filter((t) => !t.bapp?.noFrame).map((t) => t.url));
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
-const FAV_KEY = 'bwallet:favourite-apps';
 // The featured suite: our own bApps, then the ones with their original icons, then Treechat and Twetch.
 const DEFAULT_FAVOURITES = [
   'bChat',
@@ -415,7 +462,8 @@ const HOME_ADDITIONS: { flag: string; name: string }[] = TOKENBLASTER_ENABLED
   ? [{ flag: 'bwallet:home-add:tokenblaster', name: 'TokenBlaster' }]
   : [];
 
-const readFavourites = (): string[] => {
+const readFavourites = (): string[] => mergeFavouriteExtras(readSavedFavourites());
+const readSavedFavourites = (): string[] => {
   try {
     const raw = localStorage.getItem(FAV_KEY);
     if (!raw) return DEFAULT_FAVOURITES;
@@ -454,20 +502,77 @@ const readPage = () => {
   }
 };
 
-/** Bottom address bar: 0.5rem above the tab bar (tabs/BottomMenu.tsx, 3.75rem). */
-const SEARCH_BAR_BOTTOM = 'calc(3.75rem + 0.5rem)';
+/** Bottom address bar: 0.5rem above the tab bar / phone dock (--dock-h, mobile.css). */
+const SEARCH_BAR_BOTTOM = 'calc(var(--dock-h, 3.75rem) + 0.5rem)';
 /** Page grids scroll clear of the tab bar + the address bar (~3.25rem) + gaps. */
-const PAGE_BOTTOM_PAD = 'calc(3.75rem + 5.5rem)';
+const PAGE_BOTTOM_PAD = 'calc(var(--dock-h, 3.75rem) + 5.5rem)';
 
-const BrowserPage = () => {
+/**
+ * Phone layout (phone/, test switch): Apps' pages become swipe screens of their own. `only` shows one of them with
+ * no inner pager or switch: 'home' (HOME: favourites, under `header`), 'apps' (bApps + Other apps), 'games'.
+ * With the switch on and no `only`, /browser is Apps.
+ */
+type Only = 'home' | 'apps' | 'games';
+
+/** The app screens' wallpaper (phone/pager.tsx draws it once, still, behind the moving track). */
+export const AppsWallpaper = () => <VideoBackground src={bgVideo} poster={bgPoster} />;
+
+const BrowserPage = ({
+  only: onlyProp,
+  header,
+  screen,
+  sections,
+}: {
+  only?: Only;
+  header?: React.ReactNode;
+  /** Phone layout app screen index (phone/pager.tsx): Home is 0. */
+  screen?: number;
+  /**
+   * Phone layout, round 8 (APPS_PAGED off): every app screen as a section of one vertical page, with sticky
+   * headers; `screen` is then the section to scroll to.
+   */
+  sections?: boolean;
+} = {}) => {
+  const phone = usePhoneLayout();
+  const navigate = useNavigate();
+  const only: Only | undefined = onlyProp ?? (phone ? 'apps' : undefined);
   const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
   const [recent, setRecent] = useState(readRecent);
   const [favourites, setFavourites] = useState(readFavourites);
+  // The dock puts an app back on Home when it leaves the dock (phone/homeFavourites.ts).
+  useEffect(() => {
+    const reread = () => setFavourites(readFavourites());
+    window.addEventListener(FAVOURITES_CHANGED, reread);
+    return () => window.removeEventListener(FAVOURITES_CHANGED, reread);
+  }, []);
+  const [dock] = useDock();
+  const appScreens = useAppScreens();
+  const [moving, setMoving] = useState(false);
+  /** Sections mode: which section is being arranged. */
+  const [arrangeIdx, setArrangeIdx] = useState(0);
+  const scrollRef = useRef<HTMLElement>(null);
+  // Sections mode: a route to screen n scrolls to that section; the dock b on Apps scrolls to the top.
+  const reduceScroll = useReducedMotion();
+  useEffect(() => {
+    if (!sections || screen === undefined) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = screen > 0 ? el.querySelector<HTMLElement>(`[data-apps-section="${screen}"]`) : null;
+    el.scrollTo({ top: target ? target.offsetTop : 0, behavior: reduceScroll ? 'auto' : 'smooth' });
+  }, [sections, screen, reduceScroll]);
+  useEffect(() => {
+    if (!sections) return;
+    const top = () => scrollRef.current?.scrollTo({ top: 0, behavior: reduceScroll ? 'auto' : 'smooth' });
+    window.addEventListener(PHONE_APPS_TOP, top);
+    return () => window.removeEventListener(PHONE_APPS_TOP, top);
+  }, [sections, reduceScroll]);
   const [info, setInfo] = useState<Tile | null>(null);
-  const [page, setPage] = useState(readPage);
+  const [page, setPage] = useState(() =>
+    only === 'home' ? 0 : only === 'games' ? 3 : only === 'apps' ? 1 : readPage(),
+  );
   // Apps › Add app: the user's own sites, saved to the wallet (apps/userApps.ts).
   const userApps = useUserApps();
   const [addingApp, setAddingApp] = useState(false);
@@ -558,11 +663,14 @@ const BrowserPage = () => {
     if (!next.some((u) => ALL_TILES.some((x) => x.url === u))) setArranging(false);
   };
 
-  // The in-frame bApp shows only while this page (the Apps tab) is on screen.
+  // The in-frame bApp shows only while this page (the Apps tab) is on screen. Phone layout: the page stays
+  // mounted off to the side (phone/pager.tsx), so only the page on screen claims the frame.
+  const offScreen = useInPeek();
   useEffect(() => {
+    if (offScreen) return;
     setBappFrameVisible(true);
     return () => setBappFrameVisible(false);
-  }, []);
+  }, [offScreen]);
 
   const go = (url: string, bapp?: BApp) => {
     setError('');
@@ -603,8 +711,8 @@ const BrowserPage = () => {
           <AppTile
             key={t.key}
             tile={t}
-            onOpen={() => go(t.url, t.bapp)}
-            onInfo={() => setInfo(t)}
+            onOpen={() => (t.key === AGENT_KEY ? navigate(t.url) : go(t.url, t.bapp))}
+            onInfo={() => (t.key === AGENT_KEY ? navigate(t.url) : setInfo(t))}
             onArrange={
               i === 0
                 ? () => {
@@ -618,6 +726,214 @@ const BrowserPage = () => {
       </motion.div>
     );
   };
+
+  /**
+   * Phone layout HOME (owner, round 3): a fixed 4 × 6 page (24 slots) filling the height between the top bar and
+   * the dock, like an iPhone home page. Empty slots stay empty; more than 24 apps continue below it.
+   */
+  const homePage = (tiles: Tile[], flow?: { section: number }) => {
+    // Round 8: sections flow (4 columns, natural rows, no filler slots).
+    if (flow)
+      return tiles.length ? (
+        <div className="grid grid-cols-4 gap-x-3 gap-y-5 items-start justify-items-center">
+          {tiles.map((t) => (
+            <AppTile
+              key={t.key}
+              tile={t}
+              onOpen={() =>
+                t.screen
+                  ? window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: t.screen }))
+                  : t.key === AGENT_KEY
+                    ? navigate(t.url)
+                    : go(t.url, t.bapp)
+              }
+              onInfo={() => setInfo(t)}
+              onArrange={() => {
+                setInfo(null);
+                setArrangeIdx(flow.section);
+                setArranging(true);
+              }}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-[12px] text-[#98A2B3] m-0">Empty. Touch and hold an app, then Move to section….</p>
+      );
+    const first = tiles.slice(0, HOME_SLOTS);
+    const rest = tiles.slice(HOME_SLOTS);
+    return (
+      <>
+        <div
+          data-testid="home-page-grid"
+          className="grid grid-cols-4 gap-x-3 items-start justify-items-center"
+          style={{ gridTemplateRows: `repeat(${HOME_ROWS}, minmax(0, 1fr))`, height: HOME_PAGE_H, minHeight: '28rem' }}
+        >
+          {first.map((t) => (
+            <AppTile
+              key={t.key}
+              tile={t}
+              onOpen={() =>
+                t.screen
+                  ? window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: t.screen }))
+                  : t.key === AGENT_KEY
+                    ? navigate(t.url)
+                    : go(t.url, t.bapp)
+              }
+              onInfo={() => setInfo(t)}
+              onArrange={() => {
+                setInfo(null);
+                setArranging(true);
+              }}
+            />
+          ))}
+          {Array.from({ length: HOME_SLOTS - first.length }, (_, i) => (
+            <span key={`empty${i}`} aria-hidden className="h-[60px] w-[60px]" />
+          ))}
+        </div>
+        {first.length === 0 && (
+          <p className="text-[12px] text-[#98A2B3] text-center -mt-2">Touch and hold any app, then Add to Home.</p>
+        )}
+        {rest.length > 0 && grid(0, rest)}
+      </>
+    );
+  };
+
+  /** A tile key (phone/appScreens.ts) → its tile. */
+  const keyTile = (k: string): Tile | null => {
+    if (k === AGENT_KEY) return AGENT_TILE;
+    if (k.startsWith('screen:')) {
+      const id = k.slice(7) as ScreenId;
+      const sc = screenById(id);
+      return sc ? { key: k, name: screenLabel(id, sc.label), url: sc.route, screen: id } : null;
+    }
+    return ALL_TILES.find((t) => t.url === k) ?? userTiles.find((t) => t.url === k) ?? null;
+  };
+  const tileKey = (t: Tile) => (t.key === AGENT_KEY ? AGENT_KEY : t.screen ? `screen:${t.screen}` : t.url);
+  const placed = new Set([
+    ...appScreens.screens.flatMap((x) => x.items),
+    ...dock.flatMap((i) => (i.kind === 'app' ? [i.url] : [])),
+  ]);
+  const notPlaced = (tiles: Tile[]) => tiles.filter((t) => !placed.has(t.url));
+
+  /** Phone layout app screen i: its 4 × 6 grid; Home also has Your apps, Recents and More apps below. */
+  const screenBody = (i: number, flow = false) => {
+    const items = appScreens.screens[i]?.items ?? [];
+    const tiles = items.map(keyTile).filter((t): t is Tile => !!t);
+    return (
+      <>
+        {arranging && (!flow || arrangeIdx === i) && tiles.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-[#98A2B3]">Drag to rearrange. Tap − to take it off this screen.</span>
+              <button
+                onClick={() => setArranging(false)}
+                className="rounded-full px-4 py-1.5 text-[13px] font-bold"
+                style={{ background: '#FFD24D', color: '#010101' }}
+              >
+                Done
+              </button>
+            </div>
+            <ArrangeGrid
+              tiles={tiles}
+              onReorder={(from, to) =>
+                setAppScreens(
+                  reorderScreen(
+                    getAppScreens(),
+                    i,
+                    items.indexOf(tileKey(tiles[from])),
+                    items.indexOf(tileKey(tiles[to])),
+                  ),
+                )
+              }
+              onRemove={(t) => setAppScreens(removeKey(getAppScreens(), tileKey(t)))}
+            />
+          </div>
+        ) : (
+          homePage(tiles, flow ? { section: i } : undefined)
+        )}
+        {i === 0 && !flow && homeExtras()}
+      </>
+    );
+  };
+
+  /** Your apps, Recents and the catalogue: under Home (paged) or at the end of the sections page. */
+  const homeExtras = () => (
+    <>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Your apps</h2>
+          <button
+            type="button"
+            onClick={() => setAddingApp(true)}
+            className="rounded-full px-3 py-1 text-[12px] font-bold border-0"
+            style={{ background: '#F5B800', color: '#010101' }}
+          >
+            + Add app
+          </button>
+        </div>
+        {userTiles.length > 0 ? (
+          grid(0, notPlaced(userTiles))
+        ) : (
+          <p className="text-[12px] text-[#98A2B3] m-0">Add any website, like zanaadu.com. Saved to your wallet.</p>
+        )}
+      </div>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
+        {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
+        <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          {recent.map((url) => (
+            <button
+              key={url}
+              onClick={() => go(url)}
+              className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+            >
+              <Clock size={11} /> {hostOf(url)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* The catalogue: every app not on a screen or in the dock. Touch and hold to place one. */}
+      {[
+        { label: 'More bApps', tiles: BAPP_TILES },
+        { label: 'More apps', tiles: OTHER_TILES },
+        ...RADAR_SECTIONS.map((g) => ({ label: g.label, tiles: g.tiles })),
+      ]
+        .map((g) => ({ ...g, tiles: notPlaced(g.tiles) }))
+        .filter((g) => g.tiles.length)
+        .map((g) => (
+          <div key={g.label} className="flex flex-col gap-3">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+            {grid(0, g.tiles)}
+          </div>
+        ))}
+      {note(`Touch and hold an app to add it to the Dock or move it to another section. ${UNOFFICIAL_NOTICE}`)}
+    </>
+  );
+
+  /** Round 8: all app screens as sections of one page, each with a sticky header (tap to rename). */
+  const sectionsBody = () => (
+    <>
+      {appScreens.screens.map((x, i) => (
+        <div key={i} data-apps-section={i} className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const name = window.prompt('Name this section', screenTitle(x, i));
+              if (name !== null) setAppScreens(renameScreen(getAppScreens(), i, name));
+            }}
+            aria-label={`${screenTitle(x, i)}. Tap to rename`}
+            // Solid background, no blur: cheap to keep stuck while scrolling on old iPhones.
+            className="sticky top-0 z-[2] -mx-4 px-4 py-2 text-left text-[12px] font-bold uppercase tracking-wider border-0"
+            style={{ background: '#010101', color: '#FFD24D' }}
+          >
+            {screenTitle(x, i)}
+          </button>
+          {screenBody(i, true)}
+        </div>
+      ))}
+      {homeExtras()}
+    </>
+  );
 
   const note = (text: string) => <p className="text-[10px] leading-relaxed text-[#98A2B3] text-center px-2">{text}</p>;
 
@@ -664,9 +980,10 @@ const BrowserPage = () => {
               <p className="text-[12px] text-[#98A2B3] m-0">Add any website, like zanaadu.com. Saved to your wallet.</p>
             )}
           </div>
-          {recent.length > 0 && (
+          {(recent.length > 0 || (phone && only === 'home')) && (
             <div className="flex flex-col gap-2">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recent</h2>
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
+              {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
               <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                 {recent.map((url) => (
                   <button
@@ -687,8 +1004,10 @@ const BrowserPage = () => {
     if (i === 1) {
       return (
         <>
-          {grid(1, notHome(BAPP_TILES))}
-          {note(`Touch and hold an app for details. Grey dot = demo. ${UNOFFICIAL_NOTICE}`)}
+          {grid(1, [AGENT_TILE, ...notHome(BAPP_TILES)])}
+          {note(
+            `Touch and hold an app for details${phone ? ' or to add it to the Dock' : ''}. Grey dot = demo. ${UNOFFICIAL_NOTICE}`,
+          )}
         </>
       );
     }
@@ -720,61 +1039,110 @@ const BrowserPage = () => {
   };
 
   return (
-    <div className="relative w-full overflow-hidden" style={{ height: '100%', background: '#010101' }}>
+    <div
+      className="relative w-full overflow-hidden"
+      style={{ height: '100%', background: screen === undefined ? '#010101' : 'transparent' }}
+    >
       {addingApp && <AddAppSheet store={userApps} onClose={() => setAddingApp(false)} />}
-      <VideoBackground src={bgVideo} poster={bgPoster} />
+      {screen === undefined && <VideoBackground src={bgVideo} poster={bgPoster} />}
       <TopNav />
-      <div className="relative flex h-full w-full flex-col pt-14">
-        {/* The page switch stays pinned at the top; the address bar lives at the bottom (Safari-style). */}
-        <div
-          className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
-          style={{ background: 'rgba(1,1,1,0.75)' }}
-        >
-          <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+      {screen !== undefined ? (
+        <div className="relative h-full w-full pt-14">
+          <section
+            ref={scrollRef}
+            aria-label={sections ? 'Apps' : screenTitle(appScreens.screens[screen], screen)}
+            className="h-full w-full overflow-y-auto overflow-x-hidden"
+            style={{ overscrollBehaviorY: 'contain' }}
+          >
+            <div
+              className={`w-full px-4 flex flex-col gap-6 ${sections ? 'pt-0' : 'pt-4'}`}
+              style={{ paddingBottom: 'calc(var(--dock-h, 3.75rem) + 2.5rem)' }}
+            >
+              {sections ? sectionsBody() : screenBody(screen)}
+            </div>
+          </section>
+        </div>
+      ) : only ? (
+        <div className="relative h-full w-full pt-14">
+          <section
+            aria-label={only === 'home' ? 'Home' : only === 'games' ? 'Games' : 'Apps'}
+            className="h-full w-full overflow-y-auto overflow-x-hidden"
+            style={{ overscrollBehaviorY: 'contain' }}
+          >
+            <div
+              className="w-full px-4 pt-4 flex flex-col gap-6"
+              style={{ paddingBottom: only === 'apps' ? PAGE_BOTTOM_PAD : 'calc(var(--dock-h, 3.75rem) + 2.5rem)' }}
+            >
+              {header}
+              {only === 'home' ? (
+                pageBody(0)
+              ) : only === 'games' ? (
+                pageBody(3)
+              ) : (
+                <>
+                  {pageBody(1)}
+                  {pageBody(2)}
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="relative flex h-full w-full flex-col pt-14">
+          {/* The page switch stays pinned at the top; the address bar lives at the bottom (Safari-style). */}
+          <div
+            className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
+            style={{ background: 'rgba(1,1,1,0.75)' }}
+          >
+            <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+              {PAGES.map((label, i) => (
+                <button
+                  key={label}
+                  role="tab"
+                  aria-selected={page === i}
+                  onClick={() => goPage(i)}
+                  className="flex-1 min-w-0 rounded-lg py-2 px-0.5 text-[13px] font-bold border-0 outline-none cursor-pointer transition-colors"
+                  style={{
+                    background: page === i ? '#A1FF8B' : 'transparent',
+                    color: page === i ? '#010101' : '#98A2B3',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div
+            ref={pager}
+            onScroll={onPagerScroll}
+            className="flex min-h-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+            style={{ scrollbarWidth: 'none', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch' }}
+          >
             {PAGES.map((label, i) => (
-              <button
+              <section
                 key={label}
-                role="tab"
-                aria-selected={page === i}
-                onClick={() => goPage(i)}
-                className="flex-1 min-w-0 rounded-lg py-2 px-0.5 text-[13px] font-bold border-0 outline-none cursor-pointer transition-colors"
-                style={{
-                  background: page === i ? '#A1FF8B' : 'transparent',
-                  color: page === i ? '#010101' : '#98A2B3',
-                }}
+                aria-label={label}
+                className="h-full w-full shrink-0 snap-start snap-always overflow-y-auto overflow-x-hidden"
+                style={{ overscrollBehaviorY: 'contain' }}
               >
-                {label}
-              </button>
+                <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: PAGE_BOTTOM_PAD }}>
+                  {pageBody(i)}
+                </div>
+              </section>
             ))}
           </div>
         </div>
-
-        <div
-          ref={pager}
-          onScroll={onPagerScroll}
-          className="flex min-h-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
-          style={{ scrollbarWidth: 'none', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch' }}
-        >
-          {PAGES.map((label, i) => (
-            <section
-              key={label}
-              aria-label={label}
-              className="h-full w-full shrink-0 snap-start snap-always overflow-y-auto overflow-x-hidden"
-              style={{ overscrollBehaviorY: 'contain' }}
-            >
-              <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: PAGE_BOTTOM_PAD }}>
-                {pageBody(i)}
-              </div>
-            </section>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Address bar, pinned just above the tab bar (Safari-style). With the keyboard open (iOS doesn't
           resize the page) it rides on top of the keyboard instead. */}
       <div
         className="absolute left-0 right-0 z-[101] px-4"
-        style={{ bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM, display: bappOpen ? 'none' : undefined }}
+        style={{
+          bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM,
+          display: bappOpen || screen !== undefined || (only && only !== 'apps') ? 'none' : undefined,
+        }}
       >
         <div
           className="rounded-[22px] p-1 backdrop-blur-md"
@@ -845,13 +1213,13 @@ const BrowserPage = () => {
                         </span>
                       )}
                     </div>
-                    <div className={`text-xs text-[#98A2B3] ${ONE_LINE}`}>{hostOf(info.url)}</div>
+                    {!info.screen && <div className={`text-xs text-[#98A2B3] ${ONE_LINE}`}>{hostOf(info.url)}</div>}
                   </div>
                   <button onClick={() => setInfo(null)} aria-label="Close" className="p-1">
                     <X size={20} style={{ color: '#98A2B3' }} />
                   </button>
                 </div>
-                {info.bapp ? (
+                {info.screen ? null : info.bapp ? (
                   <p className="text-sm text-[#D0D5DD] leading-relaxed">{info.bapp.verb}</p>
                 ) : (
                   <>
@@ -861,23 +1229,92 @@ const BrowserPage = () => {
                 )}
                 <button
                   onClick={() => {
-                    const url = info.url;
+                    const { url, screen } = info;
                     setInfo(null);
-                    go(url);
+                    if (screen) window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: screen }));
+                    else go(url);
                   }}
                   className="rounded-xl py-3 text-sm font-bold"
                   style={{ background: '#FFD24D', color: '#010101' }}
                 >
                   Open
                 </button>
-                <button
-                  onClick={() => toggleFavourite(info)}
-                  className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
-                >
-                  <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
-                  {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
-                </button>
-                {isFavourite(info) && (
+                {/* Phone layout: any app can go in the dock (owner, 7 Oct 2026). */}
+                {phone && (
+                  <button
+                    onClick={() => {
+                      const item: DockItem = info.screen
+                        ? { kind: 'screen', id: info.screen }
+                        : {
+                            kind: 'app',
+                            url: info.url,
+                            name: info.name,
+                            icon: typeof info.icon === 'string' ? info.icon : undefined,
+                          };
+                      setInfo(null);
+                      window.dispatchEvent(new CustomEvent(PHONE_ADD_TO_DOCK, { detail: item }));
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                  >
+                    <Plus size={15} style={{ color: '#FFD24D' }} /> Add to Dock
+                  </button>
+                )}
+                {phone && screen !== undefined && (
+                  <>
+                    <button
+                      onClick={() => setMoving((v) => !v)}
+                      className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                      aria-expanded={moving}
+                    >
+                      {screenOf(appScreens, tileKey(info)) < 0
+                        ? `Add to a ${sections ? 'section' : 'screen'}…`
+                        : `Move to ${sections ? 'section' : 'screen'}…`}
+                    </button>
+                    {moving && (
+                      <div className="flex flex-col gap-1 rounded-xl bg-[#101114] p-1" role="menu">
+                        {[
+                          ...appScreens.screens.map((x, n) => screenTitle(x, n)),
+                          sections ? 'New section' : 'New screen',
+                        ].map((title, n) => (
+                          <button
+                            key={n}
+                            role="menuitem"
+                            disabled={n === screenOf(appScreens, tileKey(info))}
+                            onClick={() => {
+                              setAppScreens(moveToScreen(getAppScreens(), tileKey(info), n));
+                              setMoving(false);
+                              setInfo(null);
+                            }}
+                            className="rounded-lg py-2.5 text-sm font-semibold text-white bg-transparent disabled:opacity-40"
+                          >
+                            {title}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {screenOf(appScreens, tileKey(info)) >= 0 && !REQUIRED_TILES.includes(tileKey(info)) && (
+                      <button
+                        onClick={() => {
+                          setAppScreens(removeKey(getAppScreens(), tileKey(info)));
+                          setInfo(null);
+                        }}
+                        className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                      >
+                        {sections ? 'Remove from sections' : 'Remove from screens'}
+                      </button>
+                    )}
+                  </>
+                )}
+                {!info.screen && screen === undefined && (
+                  <button
+                    onClick={() => toggleFavourite(info)}
+                    className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                  >
+                    <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
+                    {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
+                  </button>
+                )}
+                {screen === undefined && isFavourite(info) && (!only || only === 'home') && (
                   <button
                     onClick={() => {
                       setInfo(null);
@@ -910,5 +1347,14 @@ const BrowserPage = () => {
     </div>
   );
 };
+
+// The first app-screens layout (or the migration from Home favourites + the bApps and Games pages).
+setDefaultBuilder(() =>
+  defaultScreens(
+    readFavourites(),
+    BAPP_TILES.map((t) => t.url),
+    GAME_TILES.map((t) => t.url),
+  ),
+);
 
 export default BrowserPage;
