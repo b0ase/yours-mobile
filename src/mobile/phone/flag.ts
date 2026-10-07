@@ -7,10 +7,13 @@ import { useSyncExternalStore } from 'react';
  */
 export const PHONE_LAYOUT_KEY = 'bwallet:phone-layout';
 const EVENT = 'bwallet:phone-layout-changed';
+// Preview builds only: VITE_PHONE_LAYOUT_DEFAULT=1 makes the layout ON unless the user turned it off.
+const DEFAULT_ON = import.meta.env?.VITE_PHONE_LAYOUT_DEFAULT === '1';
 
 export const phoneLayoutOn = (): boolean => {
   try {
-    return localStorage.getItem(PHONE_LAYOUT_KEY) === '1';
+    const v = localStorage.getItem(PHONE_LAYOUT_KEY);
+    return v === null ? DEFAULT_ON : v === '1';
   } catch {
     return false;
   }
@@ -29,6 +32,7 @@ applyAttr(phoneLayoutOn());
 export const setPhoneLayout = (on: boolean) => {
   try {
     if (on) localStorage.setItem(PHONE_LAYOUT_KEY, '1');
+    else if (DEFAULT_ON) localStorage.setItem(PHONE_LAYOUT_KEY, '0');
     else localStorage.removeItem(PHONE_LAYOUT_KEY);
   } catch {
     /* storage unavailable: stays as it was */
