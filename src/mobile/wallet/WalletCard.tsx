@@ -17,6 +17,7 @@ import { ghostColorOf, onAgentsChange } from '../agents/agentAccounts';
 import { PixelGhost } from '../agents/PixelGhost';
 import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
+import { cardGoldLevel } from './cardGold';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -33,6 +34,24 @@ export type WalletCardProps = {
   /** Manual refresh (icon on the card); also run quietly every minute and when the wallet comes back into view. */
   onRefresh?: (manual: boolean) => void;
   refreshing?: boolean;
+  /** Balance hidden (privacy): the card shows a neutral gold so its colour does not reveal the balance. */
+  balanceHidden?: boolean;
+};
+
+const SIG_HINT_KEY = 'bwallet.cardSigHintSeen';
+const sigHintSeen = () => {
+  try {
+    return localStorage.getItem(SIG_HINT_KEY) === '1';
+  } catch {
+    return true;
+  }
+};
+const markSigHintSeen = () => {
+  try {
+    localStorage.setItem(SIG_HINT_KEY, '1');
+  } catch {
+    /* private mode: the hint just shows again next time */
+  }
 };
 
 // Every 20 s while the wallet is on screen, so purchases and incoming coins appear quickly (owner, 6 Oct 2026).
@@ -54,6 +73,7 @@ export const WalletCard = ({
   receiveAddress,
   onRefresh,
   refreshing = false,
+  balanceHidden = false,
 }: WalletCardProps) => {
   // Balances otherwise only load once (owner, 4 Oct 2026: 1 BSV arrived but the card never moved).
   useEffect(() => {
@@ -118,8 +138,13 @@ export const WalletCard = ({
   const [turning, setTurning] = useState(false);
   // Swap faces at the midpoint of the 2D turn (CSS .is-turning).
   const backedUp = useBackedUp();
+  const [hintSeen, setHintSeen] = useState(sigHintSeen);
   const turn = () => {
     if (turning) return;
+    if (!hintSeen) {
+      markSigHintSeen();
+      setHintSeen(true);
+    }
     setTurning(true);
     setTimeout(() => setFlipped((f) => !f), 220);
     setTimeout(() => setTurning(false), 440);
@@ -134,11 +159,14 @@ export const WalletCard = ({
   };
   const stop = (e: MouseEvent) => e.stopPropagation();
   const sig = useCardSignature(id);
+  // More golden as the BSV balance grows (cardGold.ts); drives --gold in mobile.css.
+  const gold = cardGoldLevel(sats / 100_000_000, { hidden: balanceHidden, known: view !== 'unknown' && view !== 'spinner' });
 
   return (
     <div className="bw-wcard-wrap">
       <div
         className={`bw-wcard${turning ? ' is-turning' : ''}`}
+        style={{ ['--gold' as string]: gold.toFixed(3) }}
         role="button"
         tabIndex={0}
         aria-label={flipped ? 'Show card front' : 'Show receive QR and identity'}
@@ -236,6 +264,12 @@ export const WalletCard = ({
                 <span className="bw-wcard-sats">{unit === 'usd' ? cardSats(sats) : formatUSD(usd)}</span>
               </>
             )}
+            {!hintSeen && !sig.svgPath && (
+              <span className="bw-wcard-sighint">
+                <PenLine size={11} aria-hidden="true" />
+                Flip the card to add your signature
+              </span>
+            )}
             {failed && (
               <button
                 type="button"
@@ -298,18 +332,25 @@ export const WalletCard = ({
                 <span>{shortAddr(receiveAddress)}</span>
                 <Copy size={13} color="#98A2B3" />
               </button>
+              <span className="bw-wcard-sig-cap">
+                AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}
+              </span>
               <div
                 className={`bw-wcard-sig${sig.svgPath ? ' has-drawn' : ''}`}
                 role="img"
-                aria-label={sig.svgPath ? 'Your drawn signature. Press and hold to change it.' : 'Signature strip. Press and hold to sign.'}
+                aria-label={sig.svgPath ? 'Your drawn signature. Tap Edit to change it.' : 'Signature strip. Tap to sign.'}
                 {...sig.pressHandlers}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  sig.open();
+                }}
               >
                 {sig.svgPath ? (
                   <svg className="bw-wcard-sig-drawn" viewBox={sig.viewBox} preserveAspectRatio="xMinYMid meet" aria-hidden="true">
                     <path d={sig.svgPath} fill="#1b2a5a" />
                   </svg>
                 ) : (
-                  <span className="bw-wcard-sig-name">{t.tag || account?.name || ''}</span>
+                  <span className="bw-wcard-sig-empty">Sign here</span>
                 )}
                 <button
                   type="button"
@@ -321,7 +362,8 @@ export const WalletCard = ({
                     sig.open();
                   }}
                 >
-                  <PenLine size={13} color="#5a6380" />
+                  <PenLine size={13} color="#5a6380" aria-hidden="true" />
+                  <span>{sig.svgPath ? 'Edit' : 'Sign'}</span>
                 </button>
               </div>
               <span className="bw-wcard-sig-line">Signed by identity key</span>

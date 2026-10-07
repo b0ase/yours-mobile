@@ -159,3 +159,20 @@ export const onSignatureChange = (cb: () => void) => {
   window.addEventListener(EVENT, cb);
   return () => window.removeEventListener(EVENT, cb);
 };
+
+/** Screen box of the pad (getBoundingClientRect). */
+export type PadRect = { left: number; top: number; width: number; height: number };
+
+/**
+ * Portrait phones draw the pad rotated 90° clockwise (CSS rotate(90deg)) so it runs along the long
+ * side. The pad's own x axis then points down the screen and its y axis points left. These map
+ * between screen (client) coordinates and the pad's unrotated local pixels, whose size is padSize().
+ */
+export const padSize = (r: PadRect, rotated: boolean) =>
+  rotated ? { w: r.height, h: r.width } : { w: r.width, h: r.height };
+
+export const screenToPad = (cx: number, cy: number, r: PadRect, rotated: boolean): [number, number] =>
+  rotated ? [cy - r.top, r.left + r.width - cx] : [cx - r.left, cy - r.top];
+
+export const padToScreen = (x: number, y: number, r: PadRect, rotated: boolean): [number, number] =>
+  rotated ? [r.left + r.width - y, r.top + x] : [r.left + x, r.top + y];

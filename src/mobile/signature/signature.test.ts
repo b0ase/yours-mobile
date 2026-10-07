@@ -20,6 +20,9 @@ const {
   signatureFromStrokes,
   simplifyPoints,
   strokesToPath,
+  padSize,
+  padToScreen,
+  screenToPad,
 } = await import('./signature');
 type SigPoint = [number, number, number];
 
@@ -117,5 +120,54 @@ describe('card signature storage', () => {
     }
     setSignature('1AAA', 'garbage');
     expect(mem.has('bwallet.signature.1AAA')).toBe(false);
+  });
+});
+
+describe('rotated signature pad (portrait)', () => {
+  // Portrait phone: the 4:1 pad is drawn rotated, 160 px wide on screen and 640 px tall.
+  const rotRect = { left: 100, top: 50, width: 160, height: 640 };
+  const flatRect = { left: 10, top: 20, width: 640, height: 160 };
+
+  test('rotated pad is 640 × 160 in its own space', () => {
+    expect(padSize(rotRect, true)).toEqual({ w: 640, h: 160 });
+    expect(padSize(flatRect, false)).toEqual({ w: 640, h: 160 });
+  });
+
+  test('corners: pad top-left is the screen top-right; pad x runs down the screen', () => {
+    expect(screenToPad(260, 50, rotRect, true)).toEqual([0, 0]);
+    expect(screenToPad(260, 690, rotRect, true)).toEqual([640, 0]);
+    expect(screenToPad(100, 50, rotRect, true)).toEqual([0, 160]);
+    expect(screenToPad(100, 690, rotRect, true)).toEqual([640, 160]);
+  });
+
+  test('rotate and back is the identity, both ways', () => {
+    for (const rotated of [true, false]) {
+      const r = rotated ? rotRect : flatRect;
+      for (const [x, y] of [
+        [0, 0],
+        [123.5, 77],
+        [640, 160],
+        [320, 1],
+      ] as const) {
+        const [cx, cy] = padToScreen(x, y, r, rotated);
+        const [bx, by] = screenToPad(cx, cy, r, rotated);
+        expect(bx).toBeCloseTo(x, 9);
+        expect(by).toBeCloseTo(y, 9);
+      }
+    }
+  });
+
+  test('the same stroke drawn rotated or flat saves the identical signature', () => {
+    const local = scribble(60, 640, 160);
+    const viaRot = local.map(([x, y, p]) => {
+      const [cx, cy] = padToScreen(x, y, rotRect, true);
+      const [px, py] = screenToPad(cx, cy, rotRect, true);
+      return [px, py, p] as SigPoint;
+    });
+    const a = signatureFromStrokes([{ pen: false, points: local }], 640, 160);
+    const s = padSize(rotRect, true);
+    const b = signatureFromStrokes([{ pen: false, points: viaRot }], s.w, s.h);
+    expect(a).not.toBe('');
+    expect(b).toBe(a);
   });
 });

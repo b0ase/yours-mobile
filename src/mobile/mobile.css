@@ -223,7 +223,7 @@ body,
 .bw-label {
   font-size: 13px;
   font-weight: 500;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -307,13 +307,47 @@ body,
       rgba(255, 236, 170, 0.16) 50%,
       transparent 64%
     ),
+    /* Gold (cardGold.ts, --gold 0..1): a dark vignette keeps white text above WCAG AA, over a deep
+       antique-gold gradient whose opacity is the gold level, over the original black card. */
+    radial-gradient(140% 120% at 30% 55%, transparent 35%, rgb(0 0 0 / calc(var(--gold) * 0.35)) 100%),
+    linear-gradient(
+      160deg,
+      rgb(176 132 44 / var(--gold)) 0%,
+      rgb(140 101 26 / var(--gold)) 50%,
+      rgb(92 64 12 / var(--gold)) 100%
+    ),
     radial-gradient(120% 90% at 0% 0%, #2a2a2c 0%, transparent 60%),
     linear-gradient(160deg, #1b1b1d 0%, #0b0b0c 55%, #050505 100%);
-  border: 1px solid rgba(255, 210, 77, 0.22);
+  border: 1px solid rgb(255 210 77 / calc(0.22 + var(--gold) * 0.4));
   box-shadow:
     0 18px 40px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   color: #f2f2f0;
+  /* Secondary text and icons brighten as the card turns gold, to keep contrast. */
+  --bw-wcard-muted: color-mix(in srgb, #8e8e89, #fff4d8 calc(var(--gold) * 100%));
+}
+.bw-wcard-face .bw-wcard-icon svg,
+.bw-wcard-face .bw-wcard-addr svg,
+.bw-wcard-face .bw-wcard-sync svg {
+  stroke: var(--bw-wcard-muted);
+}
+.bw-wcard-face .bw-wcard-sync {
+  color: var(--bw-wcard-muted) !important;
+}
+/* Gold level: animated where @property is supported; elsewhere it just snaps. */
+@property --gold {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+.bw-wcard {
+  --gold: 0;
+  transition: --gold 1.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-wcard {
+    transition: none;
+  }
 }
 .bw-wcard-front {
   display: flex;
@@ -338,7 +372,7 @@ body,
 .bw-wcard-brand {
   font-size: 10px;
   letter-spacing: 0.12em;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
 }
 .bw-wcard-centre {
   display: flex;
@@ -359,7 +393,7 @@ body,
 }
 .bw-wcard-sats {
   font-size: 12px;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
 }
 .bw-wcard-retry {
   margin-top: 4px;
@@ -389,7 +423,7 @@ body,
 .bw-wcard-handle {
   font-size: 18px;
   font-weight: 800;
-  color: #ffd24d;
+  color: color-mix(in srgb, #ffd24d, #fffaf0 calc(var(--gold, 0) * 100%));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -418,7 +452,7 @@ body,
   align-items: flex-end;
   font-size: 8px;
   letter-spacing: 0.12em;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
   flex-shrink: 0;
 }
 .bw-wcard-since b {
@@ -468,7 +502,7 @@ body,
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
 }
 .bw-wcard-addr {
   display: inline-flex;
@@ -537,6 +571,65 @@ body,
   padding: 14px;
   color: #f2f2f0;
 }
+/* Signature strip labels: like the "authorised signature" line on a bank card. */
+.bw-wcard-sig-cap {
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--bw-wcard-muted, #8e8e89);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bw-wcard-sig,
+.bw-wcard-sig.has-drawn {
+  padding-right: 52px;
+}
+.bw-wcard-sig-empty {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  font-style: italic;
+  line-height: 28px;
+  color: #5a6380;
+  white-space: nowrap;
+}
+.bw-wcard-sig .bw-wcard-sig-pen {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #3b4566;
+  line-height: 1;
+}
+.bw-wcard-sighint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--bw-wcard-muted, #8e8e89);
+}
+/* Portrait phone: the sheet is turned 90° so the pad runs along the long side (SignaturePad.tsx maps
+   the pointer back into the pad's own space). Its width is the screen height. */
+.bw-sigpad.is-rotated {
+  padding: 0;
+  overflow: hidden;
+}
+.bw-sigpad.is-rotated .bw-sigpad-sheet {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  width: calc(100vh - 40px);
+  width: calc(100dvh - 40px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-width: none;
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+.bw-sigpad.is-rotated .bw-sigpad-box {
+  max-height: none;
+}
 .bw-sigpad-title {
   font-size: 13px;
   font-weight: 700;
@@ -577,7 +670,7 @@ body,
 .bw-sigpad-note {
   margin: 0;
   font-size: 11px;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
 }
 .bw-sigpad-btns {
   display: grid;
@@ -625,7 +718,7 @@ body,
 }
 .bw-wcard-sig-line {
   font-size: 9px;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
   font-family: ui-monospace, Menlo, monospace;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -642,7 +735,7 @@ body,
 .bw-wcard-unit button {
   border: 0;
   background: transparent;
-  color: #8e8e89;
+  color: var(--bw-wcard-muted, #8e8e89);
   font-size: 11px;
   font-weight: 700;
   padding: 3px 10px;

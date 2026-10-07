@@ -1,13 +1,31 @@
-import { useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
-import { SIG_VIEWBOX, signatureFromStrokes, strokesToPath, type SigStroke } from './signature';
+import { SIG_VIEWBOX, padSize, screenToPad, signatureFromStrokes, strokesToPath, type SigStroke } from './signature';
+
+/** Portrait phone: the pad is drawn rotated 90° so it runs along the long side (no need to turn the phone). */
+const PORTRAIT_PHONE = '(orientation: portrait) and (pointer: coarse) and (max-width: 640px)';
+const usePortraitPhone = () => {
+  const mq = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PORTRAIT_PHONE) : null);
+  const [on, setOn] = useState(() => !!mq()?.matches);
+  useEffect(() => {
+    const m = mq();
+    if (!m) return;
+    const f = () => setOn(m.matches);
+    f();
+    m.addEventListener?.('change', f);
+    return () => m.removeEventListener?.('change', f);
+  }, []);
+  return on;
+};
 
 type Props = { onCancel: () => void; onSave: (svgPath: string) => void };
 
 /**
  * Full-screen signing sheet. The pad has the strip's 4:1 shape, so the drawing maps 1:1 onto the
- * 1000 × 250 box. Pointer events cover finger, stylus (with pressure) and mouse (extension side panel).
+ * 1000 × 250 box. On a portrait phone the whole sheet is drawn rotated 90° along the long side, and
+ * pointer positions are mapped back into the pad's own (unrotated) space, so the saved signature is
+ * the same as one drawn in landscape. Pointer events cover finger, stylus (with pressure) and mouse (extension side panel).
  */
 export const SignaturePad = ({ onCancel, onSave }: Props) => {
   useBackClose(true, onCancel);
@@ -16,15 +34,19 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
   const [error, setError] = useState('');
   const live = useRef<SigStroke | null>(null);
   const [, redraw] = useState(0);
+  const rotated = usePortraitPhone();
 
-  const size = () => {
+  const rect = () => {
     const r = pad.current?.getBoundingClientRect();
-    return { w: r?.width ?? 0, h: r?.height ?? 0, left: r?.left ?? 0, top: r?.top ?? 0 };
+    return { left: r?.left ?? 0, top: r?.top ?? 0, width: r?.width ?? 0, height: r?.height ?? 0 };
   };
-  const pt = (e: RPointerEvent): [number, number, number] => {
-    const { left, top } = size();
-    return [e.clientX - left, e.clientY - top, e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5];
+  const size = () => padSize(rect(), rotated);
+  const at = (cx: number, cy: number, pressure: number): [number, number, number] => {
+    const [x, y] = screenToPad(cx, cy, rect(), rotated);
+    return [x, y, pressure];
   };
+  const pt = (e: RPointerEvent): [number, number, number] =>
+    at(e.clientX, e.clientY, e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5);
   const down = (e: RPointerEvent) => {
     if (e.button > 0) return;
     e.preventDefault();
@@ -37,8 +59,7 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
     if (!live.current) return;
     const events = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
     if (events.length) {
-      const { left, top } = size();
-      for (const c of events) live.current.points.push([c.clientX - left, c.clientY - top, live.current.pen ? c.pressure || 0.5 : 0.5]);
+      for (const c of events) live.current.points.push(at(c.clientX, c.clientY, live.current.pen ? c.pressure || 0.5 : 0.5));
     } else live.current.points.push(pt(e));
     redraw((n) => n + 1);
   };
@@ -56,6 +77,9 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
   }));
   const preview = w ? strokesToPath(shown, 0) : '';
 
+  // Strokes are kept in pad pixels; a rotation change mid-drawing would rescale them, so start over.
+  useEffect(() => setStrokes([]), [rotated]);
+
   const save = () => {
     const path = signatureFromStrokes(strokes, w, h);
     if (!path) {
@@ -66,9 +90,9 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
   };
 
   return createPortal(
-    <div className="bw-sigpad" role="dialog" aria-modal="true" aria-label="Draw your signature">
+    <div className={`bw-sigpad${rotated ? ' is-rotated' : ''}`} role="dialog" aria-modal="true" aria-label="Draw your signature">
       <div className="bw-sigpad-sheet">
-        <div className="bw-sigpad-title">Sign with your finger</div>
+        <div className="bw-sigpad-title">{rotated ? 'Sign along the phone' : 'Sign with your finger'}</div>
         <div
           ref={pad}
           className="bw-sigpad-box"
