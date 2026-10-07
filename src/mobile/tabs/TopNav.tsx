@@ -45,6 +45,16 @@ const ICON = FLIP ? '#010101' : '#F2F2F0';
 const ACCENT = FLIP ? '#010101' : '#F5B800';
 const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
 
+/** Padlock with a coin: Lock BSV (time-locks), not "lock the app". */
+const LockCoin = ({ color, accent }: { color: string; accent: string }) => (
+  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <rect x="3" y="11" width="13" height="10" rx="2" stroke={color} strokeWidth="2" />
+    <path d="M6 11V7.5a3.5 3.5 0 0 1 7 0V11" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <circle cx="17.5" cy="16.5" r="5.5" fill={accent} stroke="#010101" strokeWidth="1" />
+    <path d="M17.5 13.6v5.8M16 14.9h2.2a1 1 0 0 1 0 1.6h-1.4a1 1 0 0 0 0 1.6H19" stroke="#010101" strokeWidth="1.1" strokeLinecap="round" />
+  </svg>
+);
+
 export const TopNav = () => {
   // A neighbour page shown during a page drag: the real bar is already on screen.
   if (useInPeek()) return null;
@@ -60,6 +70,7 @@ const TopNavBar = () => {
   const pathname = useLocation().pathname;
   const onAgent = pathname.startsWith('/m/agent');
   const onMedia = pathname.startsWith('/m/media');
+  const onLock = pathname.startsWith('/m/lock');
   const [drawer, setDrawer] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
   const [callsOpen, setCallsOpen] = useState(false);
@@ -185,15 +196,16 @@ const TopNavBar = () => {
             >
               <Play size={16} color={ACCENT} fill={ACCENT} />
             </button>
-            {/* Owner round 6: Settings is in the Accounts menu, so this is one Lock button that locks at once. */}
+            {/* Owner, 7 Oct 2026: this is Lock BSV (time-locks, /m/lock). Locking the app moved to the Accounts menu. */}
             <button
               type="button"
-              aria-label="Lock now"
-              onClick={() => void lockWallet()}
+              aria-label="Lock BSV"
+              onClick={() => (onLock ? navigate(-1) : navigate('/m/lock'))}
+              aria-pressed={onLock}
               className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
               style={{ border: RING }}
             >
-              <Lock size={16} color={ICON} />
+              <LockCoin color={ICON} accent={ACCENT} />
             </button>
           </div>,
           document.body,
@@ -332,6 +344,10 @@ const TopNavBar = () => {
                   },
                 )}
                 {action(<Settings size={16} color="#fff" />, 'Settings', () => go())}
+                {action(<Lock size={16} color="#fff" />, 'Lock wallet', () => {
+                  setDrawer(false);
+                  void lockWallet();
+                })}
               </div>
             </motion.div>
           </motion.div>

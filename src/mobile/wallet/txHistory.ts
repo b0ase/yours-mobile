@@ -83,6 +83,9 @@ export const labelFor = (direction: Direction, local: LocalInfo | undefined, tx?
     [/\btip\b/, 'tip'],
     [/\bseal/, 'seal'],
     [/index(ing)? fee|\bindex\b|\$402|path402/, 'indexing fee'],
+    // Lock BSV (locks/lockApi.ts and @1sat/actions lockBsv / unlockBsv). "Lock BSV to a post" stays social.
+    [/^\s*lock bsv in \d+ output|lock receipt/, 'time lock'],
+    [/\bunlock \d+ lock/, 'lock claimed'],
     [/\block\b/, 'lock'],
     [/opns|\$name|handle/, 'name'],
     [/listing|\bbuy\b|purchase|\bsale\b/, 'market'],
