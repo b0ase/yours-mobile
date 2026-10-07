@@ -351,6 +351,8 @@ export type LockPlan = {
   pendingAmounts?: number[];
   frequency?: Frequency;
   customDays?: number;
+  /** Dollar mode: where a surplus goes (SurplusTo). */
+  surplusTo?: 'next' | 'extend';
 };
 
 export type PlanStatus = 'Locked' | 'Ready to claim' | 'Partly claimed' | 'Finished';
@@ -409,3 +411,34 @@ export function resplitTail(pending: number[], tailHeight: number, f: Frequency,
   }
   return { pieces, pendingAmounts };
 }
+
+// ── surplus setting (dollar mode) ───────────────────────────────────────────
+
+/**
+ * Where a dollar-mode surplus goes. 'next': a fresh lock at the next payout's height (that payout gets
+ * bigger). 'extend': a fresh lock one period after the last payout (the payouts last longer).
+ */
+export type SurplusTo = 'next' | 'extend';
+
+/** Default: extend for schedules longer than a year, next otherwise. */
+export const defaultSurplusTo = (pieces: { height: number }[], currentHeight: number): SurplusTo =>
+  (pieces[pieces.length - 1]?.height ?? 0) - currentHeight > BLOCKS_PER_DAY * 365 ? 'extend' : 'next';
+
+/** Height for a re-locked surplus, or null when it should stay in the wallet. */
+export function surplusHeight(p: Pick<LockPlan, 'pieces' | 'surplusTo' | 'frequency' | 'customDays'>, height: number): number | null {
+  const open = p.pieces.filter((x) => !x.claimed && x.height > height).sort((a, b) => a.height - b.height);
+  if ((p.surplusTo ?? 'next') === 'next') return open[0]?.height ?? null;
+  const last = Math.max(height, ...p.pieces.map((x) => x.height));
+  return last + periodBlocks(p.frequency ?? 'monthly', p.customDays);
+}
+
+// ── backup of plans ─────────────────────────────────────────────────────────
+
+/** Plans on this device and plans from a restored backup: union by id, the device copy wins. */
+export function mergePlans(local: LockPlan[], backed: LockPlan[]): LockPlan[] {
+  const ids = new Set(local.map((p) => p.id));
+  return [...local, ...backed.filter((p) => p && typeof p.id === 'string' && !ids.has(p.id))];
+}
+
+/** "Locked until X, then pays every period": nothing unlocks before the first payout's height. */
+export const lockedUntil = (pieces: { height: number; date: Date }[]) => pieces[0] ?? null;

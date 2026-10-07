@@ -21,24 +21,44 @@ import {
 import { buildInscriptionScript, Lock } from '@1sat/templates';
 import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
 import { buildReceipt, receiptMap, receiptSvg, type ReceiptIdentity, type ReceiptMode } from './receipt';
-import { MAX_PIECES, type LockMode, type LockPlan, type PlanPiece } from './schedule';
+import { MAX_PIECES, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
+import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 
 const LOCK_KEY_ID = 'lock';
 const planKey = (account: string) => `bwx.lockPlans.${account}`;
 
-export function loadPlans(account: string): LockPlan[] {
+/** The account's settings copy (restored from a backup file with the account). */
+const backedPlans = (cs: ChromeStorageService | undefined, account: string): LockPlan[] => {
+  const a = cs?.getAllAccounts().find((x) => x.addresses?.identityAddress === account);
+  const list = a?.settings?.lockPlans;
+  return Array.isArray(list) ? (list as LockPlan[]) : [];
+};
+
+export function loadPlans(account: string, cs?: ChromeStorageService): LockPlan[] {
+  let local: LockPlan[] = [];
   try {
-    return JSON.parse(localStorage.getItem(planKey(account)) || '[]') as LockPlan[];
+    local = JSON.parse(localStorage.getItem(planKey(account)) || '[]') as LockPlan[];
   } catch {
-    return [];
+    local = [];
   }
+  return mergePlans(local, backedPlans(cs, account));
 }
-export function savePlans(account: string, plans: LockPlan[]) {
+
+/** localStorage for speed, plus the account's settings so the backup file includes them. */
+export function savePlans(account: string, plans: LockPlan[], cs?: ChromeStorageService) {
   try {
     localStorage.setItem(planKey(account), JSON.stringify(plans));
   } catch {
     // storage full / blocked: the locks themselves are on chain and in the wallet
   }
+  const found = cs?.getAllAccounts().find((x) => x.addresses?.identityAddress === account);
+  if (!cs || !found) return;
+  const { address: _drop, ...acct } = found as typeof found & { address?: string };
+  void cs
+    .updateNested('accounts', { [account]: { ...acct, settings: { ...acct.settings, lockPlans: plans } } } as Parameters<
+      typeof cs.updateNested<'accounts'>
+    >[1])
+    .catch(() => undefined);
 }
 
 /** The address every lock in this wallet pays to (lockBsv's derived key). */
@@ -60,6 +80,7 @@ export type CreateLockInput = {
   pendingAmounts?: number[];
   frequency?: LockPlan['frequency'];
   customDays?: number;
+  surplusTo?: LockPlan['surplusTo'];
 };
 
 /** Lock outputs (and the receipt) in one transaction. Returns the txid. */
@@ -94,18 +115,20 @@ async function lockTx(ctx: OneSatContext, address: string, pieces: CreateLockInp
 }
 
 /** Lock a schedule. Irreversible once broadcast: the caller must have shown the confirmation step. */
-export async function createLock(ctx: OneSatContext, account: string, input: CreateLockInput): Promise<LockPlan> {
+export async function createLock(ctx: OneSatContext, account: string, input: CreateLockInput, cs?: ChromeStorageService): Promise<LockPlan> {
   const address = await lockAddress(ctx);
   let receiptOut: { hex: string; ci: string; tags: string[] } | undefined;
   if (input.receipt) {
     const r = buildReceipt({
-      mode: (input.mode === 'percent' ? 'bsv' : input.mode) as ReceiptMode,
+      mode: input.mode as ReceiptMode,
       pieces: input.pieces,
       lockAddress: address,
       identity: input.receipt.identity,
       rate: input.receipt.rate,
       usdPerPayout: input.usdPerPayout,
       bufferPct: input.bufferPct,
+      pct: input.pct,
+      pctBase: input.base,
     });
     // The receipt goes to a fresh key of the wallet's own ordinals (as @1sat/actions inscribe does).
     const keyID = `inscribe-${Utils.toHex(Random(8))}`;
@@ -135,21 +158,22 @@ export async function createLock(ctx: OneSatContext, account: string, input: Cre
     pendingAmounts: input.pendingAmounts,
     frequency: input.frequency,
     customDays: input.customDays,
+    surplusTo: input.surplusTo,
   };
-  savePlans(account, [plan, ...loadPlans(account)]);
+  savePlans(account, [plan, ...loadPlans(account, cs)], cs);
   return plan;
 }
 
 /** Add more lock pieces to an existing plan (a dollar-target surplus, or the next percent batch). */
-export async function relock(ctx: OneSatContext, account: string, planId: string, pieces: PlanPiece[], pendingAmounts?: number[]) {
+export async function relock(ctx: OneSatContext, account: string, planId: string, pieces: PlanPiece[], pendingAmounts?: number[], cs?: ChromeStorageService) {
   const address = await lockAddress(ctx);
   const txid = await lockTx(ctx, address, pieces);
-  const plans = loadPlans(account).map((p) =>
+  const plans = loadPlans(account, cs).map((p) =>
     p.id === planId
-      ? { ...p, txids: [...p.txids, txid], pieces: [...p.pieces, ...pieces.map((x, vout) => ({ ...x, vout, txid }))], pendingAmounts }
+      ? { ...p, txids: [...p.txids, txid], pieces: [...p.pieces, ...pieces.map((x, vout) => ({ ...x, vout, txid }))], pendingAmounts: pendingAmounts ?? p.pendingAmounts }
       : p,
   );
-  savePlans(account, plans);
+  savePlans(account, plans, cs);
   return txid;
 }
 

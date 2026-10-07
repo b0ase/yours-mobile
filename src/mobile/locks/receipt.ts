@@ -13,7 +13,7 @@ import { fmtBsv, fmtUsd, type Piece } from './schedule';
 export const RECEIPT_TYPE = 'lock-receipt';
 export const VERIFY_URL = 'https://bwalletx.com/lock/verify';
 
-export type ReceiptMode = 'date' | 'bsv' | 'usd-target';
+export type ReceiptMode = 'date' | 'bsv' | 'usd-target' | 'percent';
 export type ReceiptIdentity = { handle?: string; paymail?: string; idKey?: string; address: string };
 export type Receipt = {
   app: 'bwalletx';
@@ -25,6 +25,9 @@ export type Receipt = {
   usdAtLock?: number;
   usdPerPayout?: number;
   bufferPct?: number;
+  /** Percent mode: X% per payout, of the original amount or of what is left. */
+  pct?: number;
+  pctBase?: 'original' | 'remaining';
   /** The address whose key can claim the locks (inside every lock script). */
   lockAddress: string;
   schedule: { vout: number; height: number; sats: number }[];
@@ -41,6 +44,8 @@ export function buildReceipt(o: {
   rate?: number;
   usdPerPayout?: number;
   bufferPct?: number;
+  pct?: number;
+  pctBase?: 'original' | 'remaining';
   now?: Date;
 }): Receipt {
   const amountSats = o.pieces.reduce((s, p) => s + p.sats, 0);
@@ -52,6 +57,7 @@ export function buildReceipt(o: {
     amountSats,
     ...(o.rate && o.rate > 0 ? { usdAtLock: Math.round((amountSats / 1e8) * o.rate * 100) / 100 } : {}),
     ...(o.mode === 'usd-target' ? { usdPerPayout: o.usdPerPayout, bufferPct: o.bufferPct } : {}),
+    ...(o.mode === 'percent' ? { pct: o.pct, pctBase: o.pctBase } : {}),
     lockAddress: o.lockAddress,
     // Lock outputs come first, in schedule order (vout 0..n-1); the receipt follows them.
     schedule: o.pieces.map((p, i) => ({ vout: i, height: p.height, sats: p.sats })),
@@ -73,10 +79,36 @@ export function scheduleLine(r: Receipt): string {
   return `${n} payouts of ${per}, blocks ${first}–${last}`;
 }
 
+export const modeText = (r: Receipt): string =>
+  r.mode === 'date'
+    ? 'One unlock date'
+    : r.mode === 'usd-target'
+      ? `Dollar target ${fmtUsd(r.usdPerPayout ?? 0)} per payout (${r.bufferPct ?? 0}% buffer)`
+      : r.mode === 'percent'
+        ? `${r.pct}% of ${r.pctBase === 'remaining' ? 'what is left' : 'the original'} per payout`
+        : `${fmtBsv(r.schedule[0]?.sats ?? 0)} per payout`;
+
+/** The card: amount, USD at lock time, mode and target, schedule, and every identity field the account has. */
 export function receiptSvg(r: Receipt): string {
-  const who = r.identity.handle || r.identity.paymail || r.identity.address;
-  const usd = r.usdAtLock != null ? `≈ ${fmtUsd(r.usdAtLock)} at lock time` : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="380" viewBox="0 0 600 380"><metadata id="lock-receipt">${esc(JSON.stringify(r))}</metadata><rect width="600" height="380" rx="28" fill="#0b0b0c"/><rect x="10" y="10" width="580" height="360" rx="22" fill="none" stroke="#F5B800" stroke-width="2"/><g font-family="Helvetica,Arial,sans-serif"><text x="40" y="70" fill="#F5B800" font-size="22" font-weight="700">bWalletX · Lock receipt</text><text x="40" y="140" fill="#F2F2F0" font-size="48" font-weight="800">${esc(fmtBsv(r.amountSats))}</text><text x="40" y="175" fill="#98A2B3" font-size="18">${esc(usd)}</text><text x="40" y="225" fill="#F2F2F0" font-size="20">${esc(scheduleLine(r))}</text><text x="40" y="262" fill="#F2F2F0" font-size="18">Locked by ${esc(who)}</text><text x="40" y="320" fill="#F5B800" font-size="16">Verify at bwalletx.com/lock/verify</text><text x="40" y="345" fill="#667085" font-size="13">Nobody can unlock these coins before the heights above.</text></g></svg>`;
+  const lines: [string, number, string][] = [];
+  const add = (text: string, size = 17, color = '#F2F2F0') => lines.push([text, size, color]);
+  if (r.usdAtLock != null) add(`≈ ${fmtUsd(r.usdAtLock)} at lock time`, 18, '#98A2B3');
+  add(modeText(r));
+  add(scheduleLine(r));
+  if (r.identity.handle) add(`Locked by ${r.identity.handle}`);
+  if (r.identity.paymail) add(`Paymail ${r.identity.paymail}`, 15, '#98A2B3');
+  if (r.identity.idKey) add(`Identity key ${r.identity.idKey}`, 11, '#98A2B3');
+  add(`Address ${r.identity.address}`, 13, '#98A2B3');
+  let y = 175;
+  const body = lines
+    .map(([t, size, color]) => {
+      const out = `<text x="40" y="${y}" fill="${color}" font-size="${size}">${esc(t)}</text>`;
+      y += size + 14;
+      return out;
+    })
+    .join('');
+  const h = y + 70;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${h}" viewBox="0 0 640 ${h}"><metadata id="lock-receipt">${esc(JSON.stringify(r))}</metadata><rect width="640" height="${h}" rx="28" fill="#0b0b0c"/><rect x="10" y="10" width="620" height="${h - 20}" rx="22" fill="none" stroke="#F5B800" stroke-width="2"/><g font-family="Helvetica,Arial,sans-serif"><text x="40" y="70" fill="#F5B800" font-size="22" font-weight="700">bWalletX · Lock receipt</text><text x="40" y="135" fill="#F2F2F0" font-size="46" font-weight="800">${esc(fmtBsv(r.amountSats))}</text>${body}<text x="40" y="${h - 50}" fill="#F5B800" font-size="16">Verify at bwalletx.com/lock/verify</text><text x="40" y="${h - 28}" fill="#667085" font-size="13">Nobody can unlock these coins before the heights in this receipt.</text></g></svg>`;
 }
 
 /** MAP fields for the inscription (MAP values are strings). */

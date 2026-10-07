@@ -16,8 +16,11 @@ import {
   fmtBsv,
   fmtUsd,
   MAX_PIECES,
+  defaultSurplusTo,
   payoutFor,
   percentAmounts,
+  surplusHeight,
+  type SurplusTo,
   planStatus,
   resplitTail,
   satsToUsd,
@@ -85,7 +88,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
 
   const [height, setHeight] = useState(0);
   const [rate, setRate] = useState(cachedExchangeRate());
-  const [plans, setPlans] = useState<LockPlan[]>(() => loadPlans(account));
+  const [plans, setPlans] = useState<LockPlan[]>(() => loadPlans(account, chromeStorageService));
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -93,14 +96,14 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       const h = (await apiContext.services?.chaintracks.currentHeight()) ?? 0;
       setHeight(h);
       const unspent = new Set((await walletLockOutpoints(apiContext)).map((o) => o.outpoint));
-      const synced = syncClaimed(loadPlans(account), unspent, h);
-      savePlans(account, synced);
+      const synced = syncClaimed(loadPlans(account, chromeStorageService), unspent, h);
+      savePlans(account, synced, chromeStorageService);
       setPlans(synced);
     } catch {
       // offline: show what we have
     }
     setRate(await fetchExchangeRate('main'));
-  }, [apiContext, account]);
+  }, [apiContext, account, chromeStorageService]);
   useEffect(() => void refresh(), [refresh]);
 
   // ── builder state ──
@@ -121,6 +124,18 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [pct, setPct] = useState('1');
   const [base, setBase] = useState<PercentBase>('original');
   const [receipt, setReceipt] = useState(false);
+  /** null = automatic (extend for schedules over a year, else next). */
+  const [surplusPick, setSurplusPick] = useState<SurplusTo | null>(null);
+  const pension = () => {
+    setKind('gradual');
+    setGmode('usd');
+    setFrequency('monthly');
+    setStart(dayInput(new Date(Date.now() + 3 * 365 * 86_400_000)));
+    setUntil('count');
+    setCount('60');
+    setUsdPer('100');
+    if (!label) setLabel('Pension');
+  };
   const [typed, setTyped] = useState('');
 
   const schedule: ScheduleResult | PercentResult | null = useMemo(() => {
@@ -139,6 +154,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     return buildGradual({ ...common, perPayoutSats: bsvToSats(bsvPer) }, now, height);
   }, [height, kind, amountBsv, unlockOn, start, frequency, customDays, until, count, end, gmode, pct, base, usdPer, rate, buffer, bsvPer]);
 
+  const surplusTo: SurplusTo = surplusPick ?? (schedule?.pieces.length ? defaultSurplusTo(schedule.pieces, height) : 'next');
   const mode: LockMode = kind === 'once' ? 'date' : gmode === 'usd' ? 'usd-target' : gmode === 'percent' ? 'percent' : 'bsv';
   const ok = schedule && !schedule.error && schedule.pieces.length > 0;
 
@@ -158,10 +174,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
         frequency,
         customDays: Number(customDays),
         pendingAmounts: pr.tail ? (percentAmounts(bsvToSats(amountBsv), Number(pct), base) as number[]).slice(MAX_PIECES - 1) : undefined,
+        surplusTo: mode === 'usd-target' ? surplusTo : undefined,
         receipt: receipt
           ? { identity: { handle: names.handle || undefined, paymail: names.paymail || undefined, idKey: acct?.pubKeys?.identityPubKey, address: account }, rate }
           : undefined,
-      });
+      }, chromeStorageService);
       addSnackbar('Locked. It cannot be undone.', 'success');
       setTyped('');
       setView({ kind: 'list' });
@@ -176,7 +193,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   // ── claim + dollar payouts ──
   const totals = aggregate(plans, height);
   const [payouts, setPayouts] = useState<
-    { plan: LockPlan; lines: string[]; relock?: { height: number; sats: number }; batch?: ReturnType<typeof resplitTail> }[] | null
+    { plan: LockPlan; lines: string[]; relock?: { height: number; sats: number; usdTarget?: number; extend?: boolean }; batch?: ReturnType<typeof resplitTail> }[] | null
   >(null);
 
   const claim = async () => {
@@ -189,7 +206,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       for (const p of before) {
         const ready = p.pieces.filter((x) => !x.claimed && x.height <= height);
         if (!ready.length) continue;
-        const later = p.pieces.filter((x) => !x.claimed && x.height > height).sort((a, b) => a.height - b.height)[0];
+        const target = surplusHeight(p, height);
         const lines: string[] = [];
         let surplus = 0;
         let batch: ReturnType<typeof resplitTail> | undefined;
@@ -203,7 +220,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             lines.push(`${fmtBsv(x.sats)} to your wallet`);
             continue;
           }
-          const r = payoutFor(x.sats, x.usdTarget, todays, !!later);
+          const r = payoutFor(x.sats, x.usdTarget, todays, target != null);
           if (r.kind === 'wait') lines.push(`${fmtBsv(x.sats)} claimed. ${r.reason} The full piece is in your wallet as BSV.`);
           else if (r.kind === 'short') {
             x.paidUsd = r.paidUsd;
@@ -214,9 +231,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             lines.push(`Paid ${fmtUsd(r.paidUsd)} (${fmtBsv(r.paySats)})${r.relock ? `, surplus ${fmtBsv(r.surplusSats)}` : ''}`);
           }
         }
-        out.push({ plan: p, lines, relock: surplus && later ? { height: later.height, sats: surplus } : undefined, batch: batch?.pieces.length ? batch : undefined });
+        out.push({ plan: p, lines, relock: surplus && target != null ? { height: target, sats: surplus, usdTarget: p.usdPerPayout, extend: p.surplusTo === 'extend' } : undefined, batch: batch?.pieces.length ? batch : undefined });
       }
-      savePlans(account, loadPlans(account).map((p) => before.find((b) => b.id === p.id) ?? p));
+      savePlans(account, loadPlans(account, chromeStorageService).map((p) => before.find((b) => b.id === p.id) ?? p), chromeStorageService);
       setPayouts(out);
       await refresh();
     } catch (e) {
@@ -226,10 +243,10 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     }
   };
 
-  const doRelock = async (planId: string, piece: { height: number; sats: number }) => {
+  const doRelock = async (planId: string, piece: { height: number; sats: number; usdTarget?: number }) => {
     setBusy(true);
     try {
-      await relock(apiContext, account, planId, [{ vout: 0, height: piece.height, sats: piece.sats }]);
+      await relock(apiContext, account, planId, [{ vout: 0, height: piece.height, sats: piece.sats, usdTarget: piece.usdTarget }], undefined, chromeStorageService);
       addSnackbar('Surplus re-locked', 'success');
       setPayouts((ps) => ps?.map((x) => (x.plan.id === planId ? { ...x, relock: undefined } : x)) ?? null);
       await refresh();
@@ -243,7 +260,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const doBatch = async (planId: string, b: ReturnType<typeof resplitTail>) => {
     setBusy(true);
     try {
-      await relock(apiContext, account, planId, b.pieces, b.pendingAmounts);
+      await relock(apiContext, account, planId, b.pieces, b.pendingAmounts, chromeStorageService);
       addSnackbar('Next payouts locked', 'success');
       setPayouts((ps) => ps?.map((x) => (x.plan.id === planId ? { ...x, batch: undefined } : x)) ?? null);
       await refresh();
@@ -324,7 +341,8 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                   {p.relock && (
                     <div className="flex flex-col gap-2 mt-1">
                       <span>
-                        Re-lock the surplus {fmtBsv(p.relock.sats)} into the next payout (block {p.relock.height})? This is a new lock and
+                        Re-lock the extra {fmtBsv(p.relock.sats)}{' '}
+                        {p.relock.extend ? `as a new payout after your last one (block ${p.relock.height})` : `into your next payout (block ${p.relock.height})`}? This is a new lock and
                         cannot be undone. Or keep it in your wallet.
                       </span>
                       <div className="flex gap-2">
@@ -396,6 +414,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
           <Field label="Name (only you see this)">
             <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Savings 2027" />
           </Field>
+          <button type="button" onClick={pension} className="text-left rounded-2xl p-3 text-xs" style={{ ...cardStyle, color: MUTED }}>
+            <span className="text-white font-semibold">Pension:</span> locked until a date, then pays monthly
+          </button>
           <Seg value={kind} onChange={setKind} options={[['gradual', 'Gradual payouts'], ['once', 'One unlock date']]} />
           {kind === 'once' ? (
             <>
@@ -424,6 +445,20 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                     piece unlocks, your wallet pays out the target at that day&apos;s price; a surplus can be re-locked, a shortfall pays the
                     whole piece. Dollar amounts are targets, not guarantees.
                   </p>
+                  <Field label="Extra goes to">
+                    <Seg
+                      value={surplusTo}
+                      onChange={setSurplusPick}
+                      options={[
+                        ['next', 'Next payment'],
+                        ['extend', 'Extends the schedule'],
+                      ]}
+                    />
+                  </Field>
+                  <p className="text-[11px]" style={{ color: MUTED }}>
+                    If BSV goes up, the extra can make your next payment bigger, or make your payouts last longer. You approve each re-lock.
+                    {surplusPick == null ? ' (Set automatically: longer than a year extends.)' : ''}
+                  </p>
                 </>
               )}
               {gmode === 'bsv' && (
@@ -450,7 +485,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </>
               )}
               <div className="flex gap-2">
-                <Field label="First payout">
+                <Field label="Locked until (first payout)">
                   <input className={inputCls} type="date" value={start} onChange={(e) => setStart(e.target.value)} />
                 </Field>
                 <Field label="Every">
@@ -497,6 +532,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 {mode === 'usd-target' ? ` · includes a ${buffer}% buffer` : ''}
                 {pr?.periods ? ` · ${pr.periods} payouts, last ≈ ${fmtDate(pr.end!)}` : ''}
               </div>
+              {kind === 'gradual' && (
+                <div className="text-xs text-white">
+                  Nothing unlocks before ≈ {fmtDate(schedule!.pieces[0].date)} (block {schedule!.pieces[0].height}). Then{' '}
+                  {schedule!.pieces.length > 1 ? `${frequency === 'custom' ? `every ${customDays} days` : frequency} until ≈ ${fmtDate(schedule!.pieces[schedule!.pieces.length - 1].date)}` : 'that is the only payout'}.
+                </div>
+              )}
               {schedule!.warning && <div className="text-xs" style={{ color: GOLD }}>{schedule!.warning}</div>}
               <div className="max-h-72 overflow-y-auto">
                 <table className="w-full text-[11px]">
@@ -530,8 +571,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
           <label className="flex items-start gap-3 rounded-2xl p-3" style={cardStyle}>
             <input type="checkbox" className="mt-1" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} />
             <span className="text-xs" style={{ color: MUTED }}>
-              <span className="text-white font-semibold">Mint a public receipt</span> (an NFT in the same transaction). Anyone can see it and
-              verify the lock at bwalletx.com/lock/verify. It links your {names.handle ? `handle ${names.handle}` : 'identity'} to this amount, in public, for good.
+              <span className="text-white font-semibold">Mint a public receipt</span> (an NFT in the same transaction). It is public and
+              permanent: anyone can see it and verify the lock at bwalletx.com/lock/verify. It shows the amount, its USD value at lock time, the
+              schedule and target, and your {names.handle ? `handle ${names.handle}, ` : ''}paymail and identity key, for good.
             </span>
           </label>
           <button disabled={!ok} onClick={() => setView({ kind: 'confirm' })} className={btn} style={{ background: GOLD, color: '#1a1300' }}>

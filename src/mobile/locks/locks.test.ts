@@ -333,3 +333,53 @@ describe('percent tail re-split', () => {
     expect(small.pendingAmounts).toEqual([]);
   });
 });
+
+describe('owner answers: surplus setting, pension, backup, receipt detail', () => {
+  test('surplus default: extend over a year, next otherwise', async () => {
+    const { defaultSurplusTo } = await import('./schedule');
+    expect(defaultSurplusTo([{ height: H + 144 * 30 }], H)).toBe('next');
+    expect(defaultSurplusTo([{ height: H + 144 * 400 }], H)).toBe('extend');
+  });
+  test('surplus height: next payout, or one period after the last', async () => {
+    const { surplusHeight } = await import('./schedule');
+    const pieces = [
+      { txid: 't', vout: 0, height: H, sats: 1, claimed: true },
+      { txid: 't', vout: 1, height: H + 4383, sats: 1 },
+      { txid: 't', vout: 2, height: H + 8766, sats: 1 },
+    ];
+    expect(surplusHeight({ pieces, surplusTo: 'next', frequency: 'monthly' }, H)).toBe(H + 4383);
+    expect(surplusHeight({ pieces, surplusTo: 'extend', frequency: 'monthly' }, H)).toBe(H + 8766 + 4383);
+    expect(surplusHeight({ pieces: pieces.slice(0, 1), surplusTo: 'next' }, H)).toBeNull();
+  });
+  test('pension: locked until a date, then monthly; nothing before the start', () => {
+    const start = day(3 * 365);
+    const r = buildGradual({ start, frequency: 'monthly', count: 24, usdPerPayout: 500, rate: 50, bufferPct: 20 }, NOW, H);
+    expect(r.error).toBeUndefined();
+    const startHeight = heightForDate(start, NOW, H);
+    expect(r.pieces[0].height).toBe(startHeight);
+    expect(r.pieces.every((p) => p.height >= startHeight)).toBe(true);
+    expect(r.pieces[1].date.getMonth()).toBe(stepDate(start, 'monthly', 1).getMonth());
+  });
+  test('plans restored from a backup merge with this device, device copy wins', async () => {
+    const { mergePlans } = await import('./schedule');
+    const p = (id: string, label: string) => ({ id, label, mode: 'bsv' as const, txids: [id], createdAt: '', pieces: [] });
+    const m = mergePlans([p('a', 'mine')], [p('a', 'old'), p('b', 'restored')]);
+    expect(m.map((x) => `${x.id}:${x.label}`)).toEqual(['a:mine', 'b:restored']);
+  });
+  test('receipt carries full detail and shows it on the card', () => {
+    const r = buildReceipt({
+      mode: 'usd-target',
+      pieces: [{ height: UNTIL, sats: 1_000_000 }],
+      lockAddress: address,
+      identity: { handle: '$b0asex', paymail: 'b0asex@bwalletx.com', idKey: '02' + 'ab'.repeat(32), address },
+      rate: 50,
+      usdPerPayout: 10,
+      bufferPct: 20,
+    });
+    expect(r).toMatchObject({ usdAtLock: 0.5, usdPerPayout: 10, bufferPct: 20, mode: 'usd-target' });
+    const svg = receiptSvg(r);
+    for (const t of ['at lock time', '$b0asex', 'b0asex@bwalletx.com', 'Identity key 02ab', 'Dollar target $10.00', 'Verify at bwalletx.com/lock/verify']) expect(svg).toContain(t);
+    const pr = buildReceipt({ mode: 'percent', pieces: [{ height: UNTIL, sats: 5000 }], lockAddress: address, identity: { address }, pct: 1, pctBase: 'remaining' });
+    expect(receiptSvg(pr)).toContain('1% of what is left');
+  });
+});

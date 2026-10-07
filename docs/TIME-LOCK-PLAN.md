@@ -78,9 +78,59 @@ same as Mint. The things to watch in review are the copy (no "savings account", 
 whether App Review reads dollar targets as a financial product. If they push back, hide the `$ per payout` mode
 behind `STORE_BUILD` and keep BSV and % modes.
 
+## 8. Owner decisions (7 Oct 2026), built
+
+- **Where the extra goes ($ mode)** is a setting: "Extra goes to: Next payment / Extends the schedule". The UI explains it as "If BSV goes up, the extra can make your next payment bigger, or make your payouts last longer." Default: *extends* for schedules longer than a year, *next* otherwise. *Extends* adds a new piece one period after the last one, with the same $ target. Every re-lock is still approved by the user.
+- **Next batch** for long % schedules: the user is prompted (unchanged).
+- **Receipt** shows the full detail on the card and in the JSON: amount, "≈ $X at lock time", mode and target per payout (plus the buffer, or % and its base), schedule, handle, paymail, identity key and address. It stays opt-in, and the toggle says it is public and permanent.
+- **Backup:** plans (names, modes, $ targets, surplus setting, pending percent batches) are mirrored into the account's `settings.lockPlans` in chrome storage. The encrypted backup file (`MASTER_BACKUP`) carries every account's settings, so a restore brings the plans back. They are merged with this device's copy, and the device copy wins. Note: in the backup zip, keys are encrypted and settings sit beside them like the rest of the account settings.
+- **Pension:** a preset, "Pension: locked until a date, then pays monthly", sets dollar mode, monthly, a first payout three years out and 60 payouts. The date field is labelled "Locked until (first payout)". The preview starts with "Nothing unlocks before ≈ date (block H). Then monthly until ≈ date." It is tested: the first height equals the start date's height and none is earlier. Because of the ten-year cap per piece, a pension further out than that has to be set up in stages, or by percent with the tail.
+
+## 9. Inheritance (design only, not built)
+
+**Goal:** if the owner stops using the wallet, their heirs can claim the locked coins, but never before the owner could, and only after a further delay.
+
+**Script.** A new OP_PUSH_TX variant of the existing Lock contract, with two spend paths in one output:
+- **Owner path:** `nLockTime >= H1`, signature by the owner's key hash. This is the same as today.
+- **Heir path:** `nLockTime >= H2` (H2 > H1, e.g. H1 + 52,560 blocks ≈ 1 year), and m-of-n heir signatures. 1-of-1 is a single CHECKSIG; m-of-n uses OP_CHECKMULTISIG against heir pubkeys, or n CHECKSIGs with a counter (clearer to audit).
+- Both paths keep the preimage check and the `nSequence < 0xffffffff` check. The unlocking script carries a path selector (0/1), so it is OP_IF/OP_ELSE around the two checks. It is a new sCrypt contract, compiled and pinned like LOCKUP_PREFIX/SUFFIX, and never hand-edited.
+
+**Heir keys, two options:**
+1. **Preferred: each heir's own wallet key.** The heir shares an identity or derived public key (BRC-42 with the owner as counterparty, so the key is unlinkable on chain). Nothing secret ever leaves the heir. They need a wallet that can sign the heir path. bWalletX would add "Claim an inheritance".
+2. **Inheritance NFT:** the owner generates a key share per heir and sends each heir an NFT holding that share, **encrypted to the heir's identity key** (BRC-2/ECIES). Never plaintext on chain. It helps heirs who have no wallet yet. The cost: the owner once held the heir secret, the encrypted share is on chain for good (so it depends on how long the encryption holds up), and losing the identity key loses the share.
+
+Compared with plain heir pubkeys: plain pubkeys are simpler, involve no secret handling, and are what we recommend. NFT shares are mainly a delivery mechanism, a notice in the heir's wallet. The NFT can still be sent as a **notice** (amount, schedule, how to claim) without any key material in it.
+
+**Refresh (dead-man switch).** H2 is fixed in each output, so "still alive" means re-locking. After H1 the owner spends the output back into a new one with a later H1 and H2. Before H1 the owner cannot touch it, so a refresh only happens at maturity. Design H1 as the refresh cadence (e.g. yearly) and H2 = H1 + grace. The wallet prompts "Refresh your inheritance locks" when H1 passes. Any owner spend between H1 and H2 resets it. If the owner never refreshes, heirs can claim after H2.
+
+**Risks:**
+- Heirs lose their keys. Use m-of-n with m < n, plus "check your heir key" reminders.
+- Collusion. m heirs together can claim after H2, but never before.
+- Privacy. Heir pubkeys are visible in the script. Derived keys avoid linking them to public identities. The receipt must not name heirs unless the owner opts in.
+- Size and fees. The script is about 1 kB plus 34 bytes per heir pubkey. Claims carry the preimage plus m signatures, around 1.3–1.6 kB per input.
+- Owner death before H1: heirs still wait until H2, by design.
+- Long horizons depend on BSV consensus keeping OP_PUSH_TX semantics.
+
+**Receipt and verifier:** the receipt adds `heirs: {m, n, keys?: hidden|listed}, h2`. The verifier decodes both paths and shows "Owner from block H1 · Heirs (2 of 3) from block H2", with status Locked / Owner can claim / Heirs can claim / Claimed (by owner or by heirs, read from the spending input's path selector).
+
+**Test plan (before any mainnet use):** interpreter tests (`@bsv/sdk Spend`) for:
+- owner before H1 fails, at H1 passes;
+- heirs before H2 fail (including between H1 and H2), at H2 pass with m signatures;
+- m−1 signatures fail; a duplicate signature fails; a wrong key fails;
+- the wrong path selector fails; a final sequence fails;
+- an owner refresh spend passes;
+- fuzz over heights around H1 and H2.
+
+Then a testnet run of lock, refresh and both claims, and an independent review of the compiled script.
+
+**Recommendation:** build it as plain heir pubkeys (BRC-42 derived), 1-of-1 and m-of-n, with yearly refresh prompts and a notice NFT that contains no key material. Ship the script only after the interpreter suite and testnet pass.
+
+**Open questions:**
+1. Default grace period (H2 − H1): 6 months or 1 year?
+2. Heirs listed publicly on the receipt, or hidden by default?
+3. Do we support heirs with no wallet (the encrypted-share NFT), or require a wallet?
+4. Should heirs get the whole lock at H2, or should the payout schedule continue for them?
+
 ## Open questions for the owner
 
-1. Surplus re-lock target: we use the **next** piece. Should it go to the last piece instead, which extends the schedule?
-2. Percent tail: is an auto prompt on app open enough, or should the next batch be locked automatically without asking?
-3. Receipt identity: handle, paymail and identity key are included when present. Is that OK, or should it be the handle only?
-4. Plans live in localStorage. Back them up with the account backup (bWalletX backup format)?
+Questions 1–5 were answered on 7 Oct (section 8). The inheritance questions are in section 9.
