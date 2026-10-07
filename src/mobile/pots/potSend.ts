@@ -1,4 +1,4 @@
-import { P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction } from '@bsv/sdk';
+import { P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction, Utils } from '@bsv/sdk';
 import { OneSatServices } from '@1sat/wallet-browser';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { decrypt } from '../../utils/crypto';
@@ -57,8 +57,12 @@ export const payeeAddress = async (p: Payee): Promise<string> => {
 
 export type PotPayment = { address: string; sats: number };
 
-/** Sign and broadcast one tx from the pot paying `outputs`. */
-export const payFromPot = async (store: ChromeStorageService, potId: string, outputs: PotPayment[]): Promise<string> => {
+/** Sign (but don't broadcast) one tx from the pot paying `outputs`. payDue records it before broadcasting. */
+export const signFromPot = async (
+  store: ChromeStorageService,
+  potId: string,
+  outputs: PotPayment[],
+): Promise<{ rawTx: string; txid: string }> => {
   const acct = potAccount(store, potId);
   if (!acct?.encryptedKeys) throw new Error('This pot isn’t on this device');
   const passKey = await store.getPassKey();
@@ -93,6 +97,16 @@ export const payFromPot = async (store: ChromeStorageService, potId: string, out
   if (added < need) throw new Error('Not enough in the pot');
   await tx.fee(new SatoshisPerKilobyte(store.getCustomFeeRate()));
   await tx.sign();
-  const r = await svc().submitToStack(tx.toBinary());
-  return r.txid || tx.id('hex');
+  return { rawTx: tx.toHex(), txid: tx.id('hex') };
+};
+
+const REFUSED = new Set(['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFORMED']);
+
+/**
+ * Broadcast a signed raw tx. Idempotent: sending the same tx again gets its current status (seen / mined),
+ * so payDue can safely retry a payment whose first broadcast outcome it never recorded.
+ */
+export const broadcastRaw = async (rawTx: string): Promise<void> => {
+  const r = await svc().submitToStack(Utils.toArray(rawTx, 'hex'));
+  if (REFUSED.has(r.txStatus)) throw new Error(`Payment refused by the network (${r.txStatus}${r.extraInfo ? `: ${r.extraInfo}` : ''})`);
 };

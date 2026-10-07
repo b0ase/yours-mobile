@@ -27,6 +27,7 @@ const {
   subscriptionsUnlocked,
 } = await import('./pots');
 const { payDue } = await import('./payDue');
+const { getPending } = await import('./pots');
 const { parseConfig, DEFAULT_CONFIG, getRemoteConfig } = await import('../config/remoteConfig');
 const { plannedReminders, reminderId } = await import('./notifyPots');
 const { getAgentAccount, getAgentLog, listAgentsOnly, markAgentAccount, setAgentDailyCap, setAgentStopped, setAllAgentsStopped, spendAllowed } =
@@ -34,6 +35,15 @@ const { getAgentAccount, getAgentLog, listAgentsOnly, markAgentAccount, setAgent
 type Subscription = import('./pots').Subscription;
 
 const T = (iso: string) => Date.parse(iso);
+type Outs = { address: string; sats: number }[];
+/** sign + broadcast deps from a "pay" stub returning a txid (the raw tx is just 'raw:' + txid here). */
+const P = (pay: (potId: string, outputs: Outs) => Promise<string>) => ({
+  sign: async (potId: string, outputs: Outs) => {
+    const txid = await pay(potId, outputs);
+    return { rawTx: `raw:${txid}`, txid };
+  },
+  broadcast: async () => undefined,
+});
 const DAY = 86_400_000;
 const sub = (p: Partial<Subscription> = {}): Subscription => ({
   id: 's1',
@@ -226,7 +236,7 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     const s = setup();
     const paid: { potId: string; outputs: { address: string; sats: number }[] }[] = [];
     const r = await payDue(
-      { bsvUsd: 50, resolve: async (p) => p.address!, pay: async (potId, outputs) => (paid.push({ potId, outputs }), 'tx1') },
+      { bsvUsd: 50, resolve: async (p) => p.address!, ...P(async (potId, outputs) => (paid.push({ potId, outputs }), 'tx1')) },
       NOW,
     );
     expect(r).toEqual([{ id: s.id, ok: true, count: 3, txid: 'tx1' }]);
@@ -235,7 +245,7 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect(getSub(s.id)?.paidCount).toBe(3);
     expect(getAgentLog('1Pot')[0]).toMatchObject({ action: 'sub-pay', usd: 30, txid: 'tx1' });
     // Nothing more due until tomorrow.
-    expect(await payDue({ bsvUsd: 50, resolve: async () => '1x', pay: async () => 'tx2' }, NOW)).toEqual([]);
+    expect(await payDue({ bsvUsd: 50, resolve: async () => '1x', ...P(async () => 'tx2') }, NOW)).toEqual([]);
   });
 
   test('more than 3 missed: confirm pays all, decline skips the older ones', async () => {
@@ -243,7 +253,7 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     setAllAgentsStopped(false);
     const counts: number[] = [];
     await payDue(
-      { bsvUsd: 50, resolve: async () => '1L', pay: async (_p, o) => (counts.push(o.length), 't'), confirm: async () => false },
+      { bsvUsd: 50, resolve: async () => '1L', ...P(async (_p, o) => (counts.push(o.length), 't')), confirm: async () => false },
       NOW,
     );
     expect(counts).toEqual([3]);
@@ -253,7 +263,7 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     mem.clear();
     const s2 = setup({ start: NOW - 5 * DAY - 1000, amount: { value: 1, currency: 'USD' } });
     const c2: number[] = [];
-    const all = { bsvUsd: 50, resolve: async () => '1L', pay: async (_p: string, o: unknown[]) => (c2.push(o.length), 't'), confirm: async () => true };
+    const all = { bsvUsd: 50, resolve: async () => '1L', ...P(async (_p: string, o: unknown[]) => (c2.push(o.length), 't')), confirm: async () => true };
     // A confirmed catch-up is still held to the pot's daily cap ($3.30 here)…
     expect((await payDue(all, NOW))[0].ok).toBe(false);
     expect(c2).toEqual([]);
@@ -268,7 +278,7 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     const s = setup();
     setAgentStopped('1Pot', true, NOW);
     let signed = 0;
-    const deps = { bsvUsd: 50, resolve: async () => '1L', pay: async () => (signed++, 't') };
+    const deps = { bsvUsd: 50, resolve: async () => '1L', ...P(async () => (signed++, 't')) };
     const r = await payDue(deps, NOW);
     expect(r[0].ok).toBe(false);
     expect(signed).toBe(0);
@@ -283,10 +293,10 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
 
   test('not enough in the pot → lowFunds, retried next open', async () => {
     const s = setup();
-    const r = await payDue({ bsvUsd: 50, resolve: async () => '1L', pay: async () => Promise.reject(new Error('Not enough in the pot')) }, NOW);
+    const r = await payDue({ bsvUsd: 50, resolve: async () => '1L', ...P(async () => Promise.reject(new Error('Not enough in the pot'))) }, NOW);
     expect(r[0].ok).toBe(false);
     expect(getSub(s.id)?.status).toBe('lowFunds');
-    const ok = await payDue({ bsvUsd: 50, resolve: async () => '1L', pay: async () => 'tx' }, NOW);
+    const ok = await payDue({ bsvUsd: 50, resolve: async () => '1L', ...P(async () => 'tx') }, NOW);
     expect(ok[0].ok).toBe(true);
     expect(getSub(s.id)?.status).toBe('active');
   });
@@ -294,7 +304,7 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
   test('pause skips the paused periods; cancel stops it', async () => {
     const s = setup();
     pauseSub(s.id, NOW);
-    expect(await payDue({ bsvUsd: 50, resolve: async () => '1L', pay: async () => 't' }, NOW)).toEqual([]);
+    expect(await payDue({ bsvUsd: 50, resolve: async () => '1L', ...P(async () => 't') }, NOW)).toEqual([]);
     resumeSub(s.id, NOW);
     const r = getSub(s.id)!;
     expect(r.status).toBe('active');
@@ -307,14 +317,14 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
 
   test('ends after maxCount', async () => {
     const s = setup({ maxCount: 2 });
-    await payDue({ bsvUsd: 50, resolve: async () => '1L', pay: async () => 't' }, NOW);
+    await payDue({ bsvUsd: 50, resolve: async () => '1L', ...P(async () => 't') }, NOW);
     expect(getSub(s.id)?.status).toBe('ended');
     expect(getSub(s.id)?.paidCount).toBe(2);
   });
 
   test('no price → USD orders wait without failing', async () => {
     const s = setup();
-    const r = await payDue({ bsvUsd: 0, resolve: async () => '1L', pay: async () => 't' }, NOW);
+    const r = await payDue({ bsvUsd: 0, resolve: async () => '1L', ...P(async () => 't') }, NOW);
     expect(r[0].ok).toBe(false);
     expect(getSub(s.id)?.status).toBe('active');
   });
@@ -324,9 +334,110 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     const svc = sub({ id: 'svc', payee: { name: 'bChat', service: 'bchat' }, start: NOW - DAY });
     mem.set('bwallet.subs', JSON.stringify({ svc }));
     let signed = 0;
-    const r = await payDue({ bsvUsd: 50, resolve: async () => '1L', pay: async () => (signed++, 't'), subsOn: false }, NOW);
+    const r = await payDue({ bsvUsd: 50, resolve: async () => '1L', ...P(async () => (signed++, 't')), subsOn: false }, NOW);
     expect(r[0].ok).toBe(false);
     expect(signed).toBe(0);
+  });
+});
+
+describe('crash safety: a payment is recorded before it is broadcast', () => {
+  const NOW = T('2026-03-10T12:00:00Z');
+  beforeEach(() => mem.clear());
+  const setup = () => {
+    makePot('1Pot', 'Rent', undefined, NOW);
+    return addSubscription(
+      { potId: '1Pot', payee: { name: 'Landlord', address: '1Landlord' }, amount: { value: 10, currency: 'USD' }, period: 'day', start: NOW - 2 * DAY - 1000, maxCount: null },
+      50,
+      NOW,
+    );
+  };
+
+  test('crash after broadcast, before save: next run pays nothing new', async () => {
+    const s = setup();
+    let signs = 0;
+    const network: string[] = [];
+    // Run 1: signs, records pending, broadcasts, then "crashes" before the sub is saved.
+    const crashing = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => (signs++, { rawTx: 'RAW1', txid: 'TX1' }),
+      broadcast: async (raw: string) => {
+        network.push(raw);
+        throw new Error('app killed');
+      },
+    };
+    expect((await payDue(crashing, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)).toMatchObject({ subId: s.id, periodIndex: 0, count: 3, rawTx: 'RAW1', txid: 'TX1' });
+    expect(getPending(s.id)?.dueTimes).toHaveLength(3);
+    expect(getSub(s.id)?.periodIndex).toBe(0);
+
+    // Run 2: the network already has TX1 ("already known"). No new tx is signed; the periods are marked paid.
+    const next = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => (signs++, { rawTx: 'RAW2', txid: 'TX2' }),
+      broadcast: async (raw: string) => {
+        network.push(raw);
+        throw new Error('txn-already-known');
+      },
+    };
+    expect(await payDue(next, NOW)).toEqual([{ id: s.id, ok: true, count: 3, txid: 'TX1' }]);
+    expect(signs).toBe(1);
+    expect(network).toEqual(['RAW1', 'RAW1']);
+    expect(getSub(s.id)?.periodIndex).toBe(3);
+    expect(getSub(s.id)?.paidCount).toBe(3);
+    expect(getPending(s.id)).toBeNull();
+    expect(getAgentLog('1Pot').filter((l) => l.action === 'sub-pay')).toHaveLength(1);
+    // And nothing further is due.
+    expect(await payDue(next, NOW)).toEqual([]);
+    expect(signs).toBe(1);
+  });
+
+  test('crash before broadcast: the same tx is rebroadcast, never a fresh one', async () => {
+    const s = setup();
+    let signs = 0;
+    // Run 1: signed and recorded, then killed before broadcast got anywhere.
+    await payDue(
+      {
+        bsvUsd: 50,
+        resolve: async () => '1L',
+        sign: async () => (signs++, { rawTx: 'RAW1', txid: 'TX1' }),
+        broadcast: async () => Promise.reject(new Error('Network request failed')),
+      },
+      NOW,
+    );
+    expect(getPending(s.id)?.rawTx).toBe('RAW1');
+    // Run 2 (later): rebroadcasts RAW1, succeeds.
+    const sent: string[] = [];
+    const r = await payDue(
+      {
+        bsvUsd: 50,
+        resolve: async () => '1L',
+        sign: async () => (signs++, { rawTx: 'RAW2', txid: 'TX2' }),
+        broadcast: async (raw: string) => void sent.push(raw),
+      },
+      NOW + 60_000,
+    );
+    expect(r).toEqual([{ id: s.id, ok: true, count: 3, txid: 'TX1' }]);
+    expect(sent).toEqual(['RAW1']);
+    expect(signs).toBe(1);
+    expect(getSub(s.id)?.periodIndex).toBe(3);
+    expect(getPending(s.id)).toBeNull();
+  });
+
+  test('crash after save, before the record is cleared: no double count', async () => {
+    const s = setup();
+    // Simulate: sub already advanced to 3 but the pending record for periods 0..2 is still there.
+    mem.set('bwallet.pots.pending', JSON.stringify({ [s.id]: { subId: s.id, potId: '1Pot', periodIndex: 0, count: 3, dueTimes: [], rawTx: 'RAW1', txid: 'TX1', usd: 30, at: NOW } }));
+    const cur = getSub(s.id)!;
+    mem.set('bwallet.subs', JSON.stringify({ [s.id]: { ...cur, periodIndex: 3, paidCount: 3 } }));
+    let signs = 0;
+    const r = await payDue({ bsvUsd: 50, resolve: async () => '1L', ...P(async () => (signs++, 'TX2')) }, NOW);
+    expect(r).toEqual([{ id: s.id, ok: true, count: 3, txid: 'TX1' }]);
+    expect(signs).toBe(0);
+    expect(getSub(s.id)?.periodIndex).toBe(3);
+    expect(getSub(s.id)?.paidCount).toBe(3);
+    expect(getPending(s.id)).toBeNull();
   });
 });
 

@@ -4,7 +4,7 @@ import type { ChromeStorageService } from '../../services/ChromeStorage.service'
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { isLowFunds, listPots, listSubs, potCovers, type Subscription } from './pots';
 import { payDue } from './payDue';
-import { payFromPot, payeeAddress, potBalanceSats } from './potSend';
+import { broadcastRaw, payeeAddress, potBalanceSats, signFromPot } from './potSend';
 import { notifyLowFunds, notifyPot, reschedulePotReminders } from './notifyPots';
 
 /**
@@ -33,7 +33,8 @@ const tick = async () => {
   await payDue({
     bsvUsd,
     resolve: payeeAddress,
-    pay: (potId, outputs) => payFromPot(e.store, potId, outputs),
+    sign: (potId, outputs) => signFromPot(e.store, potId, outputs),
+    broadcast: broadcastRaw,
     confirm: confirmCatchUp,
     notify: (t, b) => void notifyPot(t, b),
   }).catch(() => []);

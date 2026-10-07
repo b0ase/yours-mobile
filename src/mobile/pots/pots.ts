@@ -54,6 +54,7 @@ export type Subscription = {
 
 const POTS = 'bwallet.pots';
 const SUBS = 'bwallet.subs';
+const PENDING = 'bwallet.pots.pending';
 const EVENT = 'bwallet:pots';
 /** Missed payments caught up on open without asking; more needs a confirm. */
 export const MAX_CATCH_UP = 3;
@@ -246,6 +247,33 @@ export const saveSub = (s: Subscription) => {
   const next = { ...s, nextDue: nextDue(s) ?? s.nextDue };
   write(SUBS, { ...read<Record<string, Subscription>>(SUBS, {}), [s.id]: next });
   return next;
+};
+
+/**
+ * A signed standing-order payment that may or may not have reached the network. Written BEFORE broadcasting,
+ * so a crash between broadcast and saveSub can't lead to a second, fresh tx for the same periods: the next run
+ * rebroadcasts this exact tx (idempotent: same txid) and marks these periods paid.
+ */
+export type PendingPayment = {
+  subId: string;
+  potId: string;
+  /** sub.periodIndex when signed; the payment covers periodIndex .. periodIndex + count - 1. */
+  periodIndex: number;
+  count: number;
+  dueTimes: number[];
+  rawTx: string;
+  txid: string;
+  usd: number;
+  at: number;
+};
+export const getPending = (subId: string): PendingPayment | null =>
+  read<Record<string, PendingPayment>>(PENDING, {})[subId] ?? null;
+export const savePending = (p: PendingPayment) =>
+  write(PENDING, { ...read<Record<string, PendingPayment>>(PENDING, {}), [p.subId]: p });
+export const clearPending = (subId: string) => {
+  const all = read<Record<string, PendingPayment>>(PENDING, {});
+  delete all[subId];
+  write(PENDING, all);
 };
 
 /** Turn a freshly created account into a pot (agent account kind 'pot' + the pot record). */
