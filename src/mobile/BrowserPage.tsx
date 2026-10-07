@@ -1,4 +1,4 @@
-import { MARKET_ENABLED, TOKENBLASTER_ENABLED, appsTileShown, radarGroupShown } from './storeBuild';
+import { MARKET_ENABLED, STORE_BUILD, TOKENBLASTER_ENABLED, appsTileShown, radarGroupShown } from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -86,6 +86,8 @@ const apps = [
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
     .filter((a) => new URL(a.link).hostname !== 'yours.org')
+    // Haste pays leaderboard prizes, so the store edition leaves it out (as in the games catalogue).
+    .filter((a) => !STORE_BUILD || new URL(a.link).hostname !== 'hastearcade.com')
     .map((a) => ({ name: a.name, link: a.link, icon: a.icon })),
 ];
 
