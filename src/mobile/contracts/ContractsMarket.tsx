@@ -32,8 +32,15 @@ const Row = ({ k, v }: { k: string; v: string }) => (
   </div>
 );
 
-/** Exchange › Contracts (and Bonds, filtered). bWalletX only. */
-export const ContractsMarket = ({ filter }: { filter?: string }) => {
+export type ContractsTab = 'all' | 'bonds';
+const TABS: [ContractsTab, string][] = [
+  ['all', 'All'],
+  ['bonds', 'Bonds'],
+];
+
+/** Exchange › Contracts, with sub-tabs All / Bonds (Bonds was its own Exchange filter until 7 Oct 2026). bWalletX only. */
+export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; onTab?: (t: ContractsTab) => void }) => {
+  const filter = tab === 'bonds' ? 'bond' : undefined;
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [items, setItems] = useState<ContractListing[] | null>(null);
@@ -80,6 +87,21 @@ export const ContractsMarket = ({ filter }: { filter?: string }) => {
   const shown = (items ?? []).filter((c) => !filter || c.envelope.contract.name.toLowerCase().includes(filter));
   return (
     <section className="flex flex-col gap-3">
+      <div className="flex gap-1 rounded-xl p-1" style={{ background: CARD }} role="tablist" aria-label="Contract kind">
+        {TABS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => onTab?.(id)}
+            className="flex-1 rounded-lg py-1.5 text-xs font-semibold border-0"
+            style={{ background: tab === id ? GOLD : 'transparent', color: tab === id ? '#010101' : MUTED }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
         {CONTRACT_DISCLAIMER}
       </p>
