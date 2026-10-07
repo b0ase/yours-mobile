@@ -47,8 +47,8 @@ export const ACCOUNT_DATA_VERSION = 2;
 /** Default remote storage provider (active store for new wallets). */
 export const DEFAULT_STORAGE_REMOTE_URL = 'https://wallet.1sat.app';
 
-/** Yours support channel on Discord (Settings > Troubleshooting). */
-export const DISCORD_SUPPORT_URL = 'https://discord.gg/RD4uuhzMSh';
+/** bWalletX support (Settings > Support). */
+export const SUPPORT_EMAIL_URL = 'mailto:support@bwalletx.com?subject=bWalletX%20support';
 
 /** Account service (`/account/status`) for the default storage provider. */
 export const DEFAULT_ACCOUNT_URL = 'https://accounts.1sat.app';

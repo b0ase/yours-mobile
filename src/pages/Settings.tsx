@@ -30,7 +30,7 @@ import {
   Volume2,
   Receipt,
 } from 'lucide-react';
-import { FaDiscord } from 'react-icons/fa';
+import { FaEnvelope } from 'react-icons/fa';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { QrCode } from '../components/QrCode';
@@ -43,7 +43,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { YoursEventName } from '../inject';
 import { sendMessage } from '../utils/chromeHelpers';
-import { DISCORD_SUPPORT_URL, FEE_PER_KB } from '../utils/constants';
+import { FEE_PER_KB, SUPPORT_EMAIL_URL } from '../utils/constants';
 import { ChromeStorageObject, UsbBackupAccountStatus, UsbSecurity } from '../services/types/chromeStorage.types';
 import {
   deleteHandle,
@@ -1145,10 +1145,10 @@ export const Settings = () => {
 
         <Section title="Support">
           <SettingRow
-            icon={<FaDiscord size={16} />}
-            label="Discord"
-            description="Ask the Yours team for help. Paste your repair log if sync looks wrong."
-            onClick={() => window.open(DISCORD_SUPPORT_URL, '_blank')}
+            icon={<FaEnvelope size={16} />}
+            label="Email support"
+            description="support@bwalletx.com. Paste your repair log if sync looks wrong."
+            onClick={() => window.open(SUPPORT_EMAIL_URL, '_blank')}
             isFirst
             isLast
           />

@@ -25,7 +25,7 @@ export const theme: Theme = {
         ? { walletName: 'bWallet', displayName: 'bWallet' }
         : { displayName: 'Yours Wallet Mobile' }),
     badge: __BRAND__ === 'bcorp' ? 'Beta' : 'Experimental',
-    repo: 'https://github.com/b0ase/yours-mobile',
+    repo: 'https://github.com/bitcoin-corp/bwallet',
     services: { ...upstream.settings.services, browser: true },
   },
 };

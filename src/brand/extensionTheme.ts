@@ -13,6 +13,6 @@ export const theme: Theme = {
     walletName: 'bWalletX',
     displayName: 'bWalletX',
     badge: 'Beta',
-    repo: 'https://github.com/b0ase/yours-mobile',
+    repo: 'https://github.com/bitcoin-corp/bwallet',
   },
 };

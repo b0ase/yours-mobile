@@ -30,7 +30,7 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { getPageEl, hasLanded, prewarmPages, setLanded } from './pageEl';
 import { PageDots } from './PageDots';
 import { backGoesHome, setPhoneBack } from './phoneBack';
-import { appIndexForPath, appScreenRoute, pageForPath, screenById, STRIP, type Screen } from './screens';
+import { appIndexForPath, coldStartRedirect, appScreenRoute, pageForPath, screenById, STRIP, type Screen } from './screens';
 import { SendReceiveSheet } from './SendReceiveSheet';
 import { useAppServices } from './useAppServices';
 import { requestWalletAction, type WalletAction } from './walletAction';
@@ -133,7 +133,7 @@ const Shell = () => {
     goScreen(0);
   };
 
-  // A cold start opens on HOME.
+  // A cold start lands on the Wallet (LANDING), where unlock already put it.
   useEffect(() => {
     if (hasLanded() || (!current && curIdx === null)) return;
     setLanded();
@@ -142,7 +142,7 @@ const Shell = () => {
     } catch {
       /* storage unavailable */
     }
-    if (current?.id === 'wallet') goHome();
+    if (coldStartRedirect(current?.id ?? null) === 'home') goHome();
     // Prefetch Wallet, Feed and Chat once the start has settled (idle): mounted hidden, so they open with their data.
     const warm = () => prewarmPages(['wallet', 'feed', 'chat']);
     const t = window.setTimeout(() => {

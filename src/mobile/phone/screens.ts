@@ -33,6 +33,17 @@ export const SCREENS: readonly Screen[] = [
 
 export const HOME: ScreenId = 'home';
 
+/** Where a cold start / unlock lands in the phone layout (owner, 5.1.84): the Wallet, not Home. */
+export const LANDING: ScreenId = 'wallet';
+
+/**
+ * Unlock opens the Wallet route (onboarding/Start.tsx). The screen a cold start should move on to from the screen it
+ * opened on, or null to stay: only that unlock route is redirected, so deep links and notification taps keep their
+ * target.
+ */
+export const coldStartRedirect = (openedOn: ScreenId | null, landing: ScreenId = LANDING): ScreenId | null =>
+  openedOn === 'wallet' && landing !== 'wallet' ? landing : null;
+
 /** The strip for a build: a store build has no Exchange (and no build without the Market shows it). */
 export const stripFor = (store = STORE_BUILD, market = MARKET_ENABLED): Screen[] =>
   screensFor(SCREENS, store).filter((s) => market || s.id !== 'exchange');
