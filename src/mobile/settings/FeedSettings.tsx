@@ -49,6 +49,7 @@ import { PushSettings } from '../push/PushSettings';
 import { onPushState, pushEnabled, setPushEnabled } from '../push/register';
 import { loadSession } from '../chat/api';
 import { TesterSettings } from '../testers/TesterSettings';
+import { PhoneLayoutToggle } from '../phone/PhoneLayoutToggle';
 import { testersEnabled } from '../testers/checkin';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
@@ -576,11 +577,10 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               isLast
             />
           </Section>
-          {testersEnabled() && (
-            <Section title="Testing">
-              <TesterSettings />
-            </Section>
-          )}
+          <Section title="Testing">
+            <PhoneLayoutToggle />
+            {testersEnabled() && <TesterSettings />}
+          </Section>
           <Section title="Privacy">
             <Row
               icon={<Bookmark size={16} />}

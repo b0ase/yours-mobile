@@ -8,7 +8,11 @@ import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, Download, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, X } from 'lucide-react';
+import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
+import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
+import { screenForPath } from '../phone/screens';
+import { screenLabel } from '../phone/icons';
+import { PHONE_AGENT } from '../phone/events';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AgentToolsSheet } from '../agents/AgentToolsSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
@@ -44,7 +48,9 @@ const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
 
 export const TopNav = () => {
   const { theme } = useTheme();
-  const { chromeStorageService, apiContext } = useServiceContext();
+  const { chromeStorageService, apiContext, lockWallet } = useServiceContext();
+  const phone = usePhoneLayout();
+  const [phoneMenu, setPhoneMenu] = useState(false);
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
@@ -57,7 +63,9 @@ export const TopNav = () => {
   const [pairOpen, setPairOpen] = useState(false);
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
+  // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
   useEffect(() => {
+    if (phoneLayoutOn()) return;
     const show = () => {
       const url = takePairLink();
       if (url) {
@@ -71,16 +79,18 @@ export const TopNav = () => {
   // Reconnect paired sites / CLIs. In the extension the sessions live in this page (side panel), since the
   // wallet keys and context only exist here; the background worker only hands over pair links (links.ts).
   useEffect(() => {
-    initPairing();
+    if (!phoneLayoutOn()) initPairing();
   }, []);
   // Same as upstream TopNav.handleSwitchAccount (shared with the account strip and Settings).
   const { switchingTo, switchAccount: handleSwitchAccount } = useAccountSwitch(() => setDrawer(false));
 
   useBackClose(drawer && !switchingTo, () => setDrawer(false));
+  useBackClose(phoneMenu, () => setPhoneMenu(false));
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
   // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
   useEffect(() => {
+    if (phoneLayoutOn()) return;
     setAgentPairDeps({ ctx: apiContext, currentId: current, feeRate: () => chromeStorageService.getCustomFeeRate() });
   }, [apiContext, current, chromeStorageService]);
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
@@ -113,72 +123,143 @@ export const TopNav = () => {
   return (
     <>
       <AccountStrip />
-      {/* Five equal slots: Accounts · Calls · b agent · Media · Settings. */}
-      <div
-        className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
-        style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
-      >
-        <button
-          type="button"
-          onClick={() => setDrawer(true)}
-          className="w-9 h-9 flex items-center justify-center bg-transparent"
-          aria-label="Accounts menu"
+      {phone ? (
+        // Phone layout (test switch): Accounts · screen title · Settings/Lock. The b lives in the dock.
+        <div
+          className="grid grid-cols-[3rem_1fr_3rem] items-center fixed top-0 w-full z-10 px-2 h-14"
+          style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
-          <Menu size={22} color={ICON} />
-        </button>
-        <button
-          type="button"
-          aria-label="Calls"
-          onClick={() => setCallsOpen(true)}
-          className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-          style={{ border: RING }}
-        >
-          <Phone size={16} color={ACCENT} />
-        </button>
-        {/* The b opens the b agent. */}
-        <button
-          type="button"
-          aria-label={X_MARK ? 'bX agent' : 'b agent'}
-          // Toggle: the b opens the b agent, and closes it again when it's already open.
-          onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
-          aria-pressed={onAgent}
-          className="relative w-10 h-10 flex items-center justify-center bg-transparent"
-        >
-          {FLIP ? (
-            <svg viewBox="23 8 74 100" width={20} height={26} aria-hidden>
-              <mask id="bnav">
-                <rect x="0" y="0" width="140" height="140" fill="#fff" />
-                <circle cx="60" cy="72" r="15" fill="#000" />
-              </mask>
-              <g fill="#010101" mask="url(#bnav)">
-                <polygon points="45,12 45,76 27,76 27,30" />
-                <circle cx="60" cy="72" r="33" />
-              </g>
-            </svg>
-          ) : (
-            <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
+          <button
+            type="button"
+            onClick={() => setDrawer(true)}
+            className="w-9 h-9 flex items-center justify-center bg-transparent"
+            aria-label="Accounts menu"
+          >
+            <Menu size={22} color={ICON} />
+          </button>
+          <span className="text-center text-[15px] font-bold truncate" style={{ color: ICON }}>
+            {(() => {
+              const s = screenForPath(pathname);
+              return s ? screenLabel(s.id, s.label) : '';
+            })()}
+          </span>
+          <button
+            type="button"
+            aria-label="Settings and lock"
+            aria-haspopup="menu"
+            aria-expanded={phoneMenu}
+            onClick={() => setPhoneMenu((v) => !v)}
+            className="justify-self-end w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Settings size={16} color={ICON} />
+          </button>
+          {phoneMenu && (
+            <>
+              <div className="fixed inset-0 z-[299]" onClick={() => setPhoneMenu(false)} />
+              <div
+                role="menu"
+                className="absolute right-2 top-12 z-[300] w-52 rounded-2xl p-1.5 bg-[#17191E] border border-[#2b2f36] shadow-xl"
+              >
+                {(
+                  [
+                    [<Settings key="s" size={16} color="#fff" />, 'Settings', () => go()],
+                    [<Lock key="l" size={16} color="#fff" />, 'Lock now', () => void lockWallet()],
+                    [
+                      <Sparkles key="b" size={16} color="#fff" />,
+                      'Ask b',
+                      () => window.dispatchEvent(new Event(PHONE_AGENT)),
+                    ],
+                    [<Phone key="c" size={16} color="#fff" />, 'Calls', () => setCallsOpen(true)],
+                    [<Play key="m" size={16} color="#fff" />, 'Media', () => navigate('/m/media')],
+                  ] as const
+                ).map(([icon, label, run]) => (
+                  <button
+                    key={label}
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setPhoneMenu(false);
+                      run();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-white bg-transparent active:bg-white/5"
+                  >
+                    {icon}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-        </button>
-        <button
-          type="button"
-          aria-label="Media"
-          onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
-          aria-pressed={onMedia}
-          className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-          style={{ border: RING }}
+        </div>
+      ) : (
+        // Five equal slots: Accounts · Calls · b agent · Media · Settings.
+        <div
+          className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
+          style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
-          <Play size={16} color={ACCENT} fill={ACCENT} />
-        </button>
-        <button
-          type="button"
-          aria-label="Settings"
-          onClick={() => go()}
-          className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-          style={{ border: RING }}
-        >
-          <Settings size={16} color={ICON} />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setDrawer(true)}
+            className="w-9 h-9 flex items-center justify-center bg-transparent"
+            aria-label="Accounts menu"
+          >
+            <Menu size={22} color={ICON} />
+          </button>
+          <button
+            type="button"
+            aria-label="Calls"
+            onClick={() => setCallsOpen(true)}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Phone size={16} color={ACCENT} />
+          </button>
+          {/* The b opens the b agent. */}
+          <button
+            type="button"
+            aria-label={X_MARK ? 'bX agent' : 'b agent'}
+            // Toggle: the b opens the b agent, and closes it again when it's already open.
+            onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
+            aria-pressed={onAgent}
+            className="relative w-10 h-10 flex items-center justify-center bg-transparent"
+          >
+            {FLIP ? (
+              <svg viewBox="23 8 74 100" width={20} height={26} aria-hidden>
+                <mask id="bnav">
+                  <rect x="0" y="0" width="140" height="140" fill="#fff" />
+                  <circle cx="60" cy="72" r="15" fill="#000" />
+                </mask>
+                <g fill="#010101" mask="url(#bnav)">
+                  <polygon points="45,12 45,76 27,76 27,30" />
+                  <circle cx="60" cy="72" r="33" />
+                </g>
+              </svg>
+            ) : (
+              <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label="Media"
+            onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
+            aria-pressed={onMedia}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Play size={16} color={ACCENT} fill={ACCENT} />
+          </button>
+          <button
+            type="button"
+            aria-label="Settings"
+            onClick={() => go()}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+            style={{ border: RING }}
+          >
+            <Settings size={16} color={ICON} />
+          </button>
+        </div>
+      )}
 
       <AnimatePresence>
         {drawer && (

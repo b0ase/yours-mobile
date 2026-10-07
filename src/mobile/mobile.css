@@ -55,6 +55,21 @@ html:root {
   --account-strip-height: 0px;
   --wallet-inset-top: calc(env(safe-area-inset-top) + var(--account-strip-height));
 }
+/* Height of whatever sits at the bottom: the tab bar (tabs/BottomMenu.tsx), or the phone layout's dock
+   (phone/Dock.tsx, behind the Settings › Testing switch, which sets data-phone-layout). Pages pad by it. */
+html:root {
+  --dock-h: 3.75rem;
+}
+html[data-phone-layout]:root {
+  --dock-h: 5rem;
+}
+/* Phone layout dock: horizontal scroll, no scrollbar. */
+.bw-dock-scroll {
+  scrollbar-width: none;
+}
+.bw-dock-scroll::-webkit-scrollbar {
+  display: none;
+}
 html.has-account-strip:root {
   --account-strip-height: 28px;
 }

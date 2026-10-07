@@ -164,7 +164,7 @@ export const BappFrameHost = () => {
           className="absolute left-0 right-0 z-[90] flex flex-col"
           style={{
             top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
-            bottom: '3.75rem',
+            bottom: 'var(--dock-h, 3.75rem)',
             background: '#010101',
             visibility: visible ? 'visible' : 'hidden',
             pointerEvents: visible ? 'auto' : 'none',
