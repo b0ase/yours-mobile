@@ -36,6 +36,11 @@ export type Settings = {
    * least once for this account (Done or Skip).
    */
   sweepCompleted?: boolean;
+  /**
+   * Lock BSV plans (names, modes, dollar targets: src/mobile/locks/schedule.ts LockPlan). Mirrored here so
+   * the encrypted backup file carries them and a restore brings them back. The coins never depend on them.
+   */
+  lockPlans?: unknown[];
 };
 
 /**

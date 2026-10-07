@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import fixtures from './fixtures/marketTxs.json';
-import { assetText, classifyEvent, filterCategory, findListings, isOrdLock, parseBsv20, parseInscription, trailingP2pkh } from './historyEvents';
+import { Lock } from '@1sat/templates';
+import { PrivateKey } from '@bsv/sdk';
+import { assetText, classifyEvent, filterCategory, findListings, isOrdLock, isTimeLock, parseBsv20, parseInscription, trailingP2pkh } from './historyEvents';
 import { buildRows, ownOutputs, toCsv, type LocalInfo, type RawTx } from './txHistory';
 import { toRawTx, type WocTx } from './txHistoryFetch';
 import { appsByTxid, isGameHost, mergeConnections, recordCall, recordPayment, requestedSats } from './connectionLog';
@@ -183,5 +185,29 @@ describe('connections log', () => {
     );
     expect(rows[0]).toMatchObject({ host: 'app.example', calls: 1, payments: 1, spentSats: 1020, spendLimitSats: 10_000, grants: { spending: 1, protocol: 1 } });
     expect(rows[1]).toMatchObject({ host: 'old.example', calls: 0, grants: { basket: 1 } });
+  });
+});
+
+describe('Locks category (time-locks)', () => {
+  const lockHex = Lock.lock(PrivateKey.fromRandom().toAddress(), 970_500).toHex();
+  test('a time-lock is not an OrdLock listing, though they share a prefix', () => {
+    expect(isTimeLock(lockHex)).toBe(true);
+    expect(isOrdLock(lockHex)).toBe(false);
+    expect(isOrdLock(TOKEN_LIST.vout[0].script)).toBe(true);
+    expect(isTimeLock(TOKEN_LIST.vout[0].script)).toBe(false);
+  });
+  test('lock and claim rows land in Locks', () => {
+    const me = PrivateKey.fromRandom().toAddress();
+    const lockTx: RawTx = { txid: 'a'.repeat(64), time: 1_700_000_100, confirmations: 1, vin: [{ txid: 'f'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 10_000, addresses: [], script: lockHex }, { n: 1, sats: 39_000, addresses: [me] }] };
+    const claimTx: RawTx = { txid: 'b'.repeat(64), time: 1_700_000_200, confirmations: 1, vin: [{ txid: 'a'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 9_800, addresses: [me] }] };
+    const local = new Map<string, LocalInfo>([
+      ['a'.repeat(64), { description: 'Lock BSV in 1 output(s)' } as LocalInfo],
+      ['b'.repeat(64), { description: 'Unlock 1 lock(s)' } as LocalInfo],
+    ]);
+    const rows = run([...funding(lockTx.vin, me), lockTx, claimTx], [me], local);
+    const byId = new Map(rows.map((r) => [r.txid, r]));
+    expect(byId.get('a'.repeat(64))?.category).toBe('lock');
+    expect(byId.get('b'.repeat(64))?.category).toBe('lock');
+    expect(filterCategory(rows, 'lock')).toHaveLength(2);
   });
 });
