@@ -7,6 +7,8 @@ import { Hub } from './hub';
 import type { PlatformHooks } from '../platform';
 import { initBiometricUnlock } from './biometricUnlock';
 import { handleBack } from './backStack';
+import { phoneBack } from './phone/phoneBack';
+import './phone/flag';
 import { UNOFFICIAL_NOTICE } from './brandText';
 import { initDappBrowser, onOverlayCountChanged, routeWindowOpen } from './dappBrowser';
 import {
@@ -132,7 +134,8 @@ if (Capacitor.isNativePlatform()) {
   CapApp.addListener('backButton', () => {
     const top = topOverlayId();
     if (top !== undefined) removeOverlay(top);
-    else if (!handleBack()) void CapApp.minimizeApp(); // in-app sheets (useBackClose) first
+    // In-app sheets (useBackClose) first; then, in the phone layout, a strip page other than HOME goes HOME.
+    else if (!handleBack() && !phoneBack()) void CapApp.minimizeApp();
   });
 }
 

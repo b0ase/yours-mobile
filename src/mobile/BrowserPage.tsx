@@ -30,6 +30,9 @@ import bgPoster from './brand/bg/liquid-gold.jpg';
 import { VideoBackground } from './ui/VideoBackground';
 import { IS_EXTENSION } from './extension';
 import { useKeyboardInset } from './ui/keyboardInset';
+import { usePhoneLayout } from './phone/flag';
+import { PHONE_ADD_TO_DOCK } from './phone/events';
+import type { DockItem } from './phone/dockModel';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -436,12 +439,21 @@ const readPage = () => {
   }
 };
 
-/** Bottom address bar: 0.5rem above the tab bar (tabs/BottomMenu.tsx, 3.75rem). */
-const SEARCH_BAR_BOTTOM = 'calc(3.75rem + 0.5rem)';
+/** Bottom address bar: 0.5rem above the tab bar / phone dock (--dock-h, mobile.css). */
+const SEARCH_BAR_BOTTOM = 'calc(var(--dock-h, 3.75rem) + 0.5rem)';
 /** Page grids scroll clear of the tab bar + the address bar (~3.25rem) + gaps. */
-const PAGE_BOTTOM_PAD = 'calc(3.75rem + 5.5rem)';
+const PAGE_BOTTOM_PAD = 'calc(var(--dock-h, 3.75rem) + 5.5rem)';
 
-const BrowserPage = () => {
+/**
+ * Phone layout (phone/, test switch): Apps' pages become swipe screens of their own. `only` shows one of them with
+ * no inner pager or switch: 'home' (HOME: favourites, under `header`), 'apps' (bApps + Other apps), 'games'.
+ * With the switch on and no `only`, /browser is Apps.
+ */
+type Only = 'home' | 'apps' | 'games';
+
+const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.ReactNode } = {}) => {
+  const phone = usePhoneLayout();
+  const only: Only | undefined = onlyProp ?? (phone ? 'apps' : undefined);
   const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
   const [address, setAddress] = useState('');
@@ -449,7 +461,9 @@ const BrowserPage = () => {
   const [recent, setRecent] = useState(readRecent);
   const [favourites, setFavourites] = useState(readFavourites);
   const [info, setInfo] = useState<Tile | null>(null);
-  const [page, setPage] = useState(readPage);
+  const [page, setPage] = useState(() =>
+    only === 'home' ? 0 : only === 'games' ? 3 : only === 'apps' ? 1 : readPage(),
+  );
   // Apps › Add app: the user's own sites, saved to the wallet (apps/userApps.ts).
   const userApps = useUserApps();
   const [addingApp, setAddingApp] = useState(false);
@@ -701,57 +715,87 @@ const BrowserPage = () => {
       {addingApp && <AddAppSheet store={userApps} onClose={() => setAddingApp(false)} />}
       <VideoBackground src={bgVideo} poster={bgPoster} />
       <TopNav />
-      <div className="relative flex h-full w-full flex-col pt-14">
-        {/* The page switch stays pinned at the top; the address bar lives at the bottom (Safari-style). */}
-        <div
-          className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
-          style={{ background: 'rgba(1,1,1,0.75)' }}
-        >
-          <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+      {only ? (
+        <div className="relative h-full w-full pt-14">
+          <section
+            aria-label={only === 'home' ? 'Home' : only === 'games' ? 'Games' : 'Apps'}
+            className="h-full w-full overflow-y-auto overflow-x-hidden"
+            style={{ overscrollBehaviorY: 'contain' }}
+          >
+            <div
+              className="w-full px-4 pt-4 flex flex-col gap-6"
+              style={{ paddingBottom: only === 'apps' ? PAGE_BOTTOM_PAD : 'calc(var(--dock-h, 3.75rem) + 2.5rem)' }}
+            >
+              {header}
+              {only === 'home' ? (
+                pageBody(0)
+              ) : only === 'games' ? (
+                pageBody(3)
+              ) : (
+                <>
+                  {pageBody(1)}
+                  {pageBody(2)}
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="relative flex h-full w-full flex-col pt-14">
+          {/* The page switch stays pinned at the top; the address bar lives at the bottom (Safari-style). */}
+          <div
+            className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
+            style={{ background: 'rgba(1,1,1,0.75)' }}
+          >
+            <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+              {PAGES.map((label, i) => (
+                <button
+                  key={label}
+                  role="tab"
+                  aria-selected={page === i}
+                  onClick={() => goPage(i)}
+                  className="flex-1 min-w-0 rounded-lg py-2 px-0.5 text-[13px] font-bold border-0 outline-none cursor-pointer transition-colors"
+                  style={{
+                    background: page === i ? '#A1FF8B' : 'transparent',
+                    color: page === i ? '#010101' : '#98A2B3',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div
+            ref={pager}
+            onScroll={onPagerScroll}
+            className="flex min-h-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+            style={{ scrollbarWidth: 'none', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch' }}
+          >
             {PAGES.map((label, i) => (
-              <button
+              <section
                 key={label}
-                role="tab"
-                aria-selected={page === i}
-                onClick={() => goPage(i)}
-                className="flex-1 min-w-0 rounded-lg py-2 px-0.5 text-[13px] font-bold border-0 outline-none cursor-pointer transition-colors"
-                style={{
-                  background: page === i ? '#A1FF8B' : 'transparent',
-                  color: page === i ? '#010101' : '#98A2B3',
-                }}
+                aria-label={label}
+                className="h-full w-full shrink-0 snap-start snap-always overflow-y-auto overflow-x-hidden"
+                style={{ overscrollBehaviorY: 'contain' }}
               >
-                {label}
-              </button>
+                <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: PAGE_BOTTOM_PAD }}>
+                  {pageBody(i)}
+                </div>
+              </section>
             ))}
           </div>
         </div>
-
-        <div
-          ref={pager}
-          onScroll={onPagerScroll}
-          className="flex min-h-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
-          style={{ scrollbarWidth: 'none', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch' }}
-        >
-          {PAGES.map((label, i) => (
-            <section
-              key={label}
-              aria-label={label}
-              className="h-full w-full shrink-0 snap-start snap-always overflow-y-auto overflow-x-hidden"
-              style={{ overscrollBehaviorY: 'contain' }}
-            >
-              <div className="w-full px-4 pt-4 flex flex-col gap-6" style={{ paddingBottom: PAGE_BOTTOM_PAD }}>
-                {pageBody(i)}
-              </div>
-            </section>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Address bar, pinned just above the tab bar (Safari-style). With the keyboard open (iOS doesn't
           resize the page) it rides on top of the keyboard instead. */}
       <div
         className="absolute left-0 right-0 z-[101] px-4"
-        style={{ bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM, display: bappOpen ? 'none' : undefined }}
+        style={{
+          bottom: keyboard ? `${keyboard + 8}px` : SEARCH_BAR_BOTTOM,
+          display: bappOpen || (only && only !== 'apps') ? 'none' : undefined,
+        }}
       >
         <div
           className="rounded-[22px] p-1 backdrop-blur-md"
@@ -854,7 +898,24 @@ const BrowserPage = () => {
                   <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
                   {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
                 </button>
-                {isFavourite(info) && (
+                {phone && only === 'home' && isFavourite(info) && (
+                  <button
+                    onClick={() => {
+                      const item: DockItem = {
+                        kind: 'app',
+                        url: info.url,
+                        name: info.name,
+                        icon: typeof info.icon === 'string' ? info.icon : undefined,
+                      };
+                      setInfo(null);
+                      window.dispatchEvent(new CustomEvent(PHONE_ADD_TO_DOCK, { detail: item }));
+                    }}
+                    className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                  >
+                    Add to Dock
+                  </button>
+                )}
+                {isFavourite(info) && (!only || only === 'home') && (
                   <button
                     onClick={() => {
                       setInfo(null);

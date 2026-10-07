@@ -81,6 +81,7 @@ import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay } from '../mobile/wallet/payNav';
+import { onWalletAction, takeWalletAction } from '../mobile/phone/walletAction';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
@@ -243,6 +244,17 @@ export const BsvWallet = () => {
     };
     take();
     return onPay(take);
+  }, []);
+
+  // Phone layout: HOME's / the dock's Send and Receive open the same screens as the buttons under the card.
+  useEffect(() => {
+    const take = () => {
+      const a = takeWalletAction();
+      if (a === 'receive') setPageState('receive');
+      else if (a === 'send') setPageState('asset-picker');
+    };
+    take();
+    return onWalletAction(take);
   }, []);
 
   const addRecipient = () => {

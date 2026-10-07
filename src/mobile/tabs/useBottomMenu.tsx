@@ -31,7 +31,8 @@ export const useBottomMenu = () => {
     routedSelection = context.selected;
     if (opensWalletNfts(context.selected)) setWalletKind('nfts');
     const route = routeFor(context.selected);
-    if (route) navigate(route);
+    // Already there (e.g. the phone layout swiped to it): don't push a duplicate history entry.
+    if (route && path.current !== route) navigate(route);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context.selected]);
 

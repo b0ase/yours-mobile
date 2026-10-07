@@ -217,3 +217,22 @@ export const POTS_INTRO = STORE_BUILD
   ? 'Put money aside in a pot and set up regular payments from it to a person or paymail. The pot balance is the most they can ever take. Payments go out when you open the app on or after each date; pause any time.'
   : 'Put money aside in a pot and set up subscriptions (regular payments) from it. The pot balance is the most they can ever take. Payments go out when you open the app on or after each date; pause any time.';
 export const POT_NAME_PLACEHOLDER = STORE_BUILD ? 'Name (e.g. Rent, Savings)' : 'Name (e.g. Rent, bChat)';
+
+/**
+ * Phone layout (src/mobile/phone, docs/PHONE-LAYOUT-PLAN.md §8): swipe screens and dock items left out of a store
+ * build. Exchange is the Market, which a store build does not have at all (MARKET_ENABLED above).
+ */
+export const STORE_HIDDEN_SCREENS: readonly string[] = ['exchange'];
+export const screenShown = (id: string, store = STORE_BUILD) => !store || !STORE_HIDDEN_SCREENS.includes(id);
+export const screensFor = <T extends { id: string }>(screens: readonly T[], store = STORE_BUILD): T[] =>
+  screens.filter((s) => screenShown(s.id, store));
+/** Dock items a store build may show: no hidden screens, and no app tile a store build hides (appsTileShown). */
+export const dockItemsFor = <T extends { kind: string; id?: string; name?: string }>(
+  items: readonly T[],
+  store = STORE_BUILD,
+): T[] =>
+  items.filter((i) =>
+    i.kind === 'screen' ? screenShown(i.id ?? '', store) : i.kind === 'app' ? appsTileShown(i.name ?? '', store) : true,
+  );
+/** Release B (People): no buying or selling a person's tokens or apps in a store build. */
+export const peopleSellingEnabled = (store = STORE_BUILD) => !store;
