@@ -50,6 +50,7 @@
     "livekit-client": "^2.22.3",
     "lucide-react": "^0.577.0",
     "path-browserify": "^1.0.1",
+    "perfect-freehand": "^1.2.3",
     "promise-queue-manager": "^3.0.5",
     "qrcode": "^1.5.3",
     "react": "^18.2.0",
