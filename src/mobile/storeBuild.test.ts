@@ -294,4 +294,58 @@ describe('store build has no Market', () => {
     expect(radarGroupShown('social', true)).toBe(true);
     expect(radarGroupShown('market', false)).toBe(true);
   });
+  const appsEval = (expr: string, env: Record<string, string> = { VITE_STORE_BUILD: '1' }) => {
+    const r = Bun.spawnSync(
+      [
+        'bun',
+        '-e',
+        `const b = await import('./src/mobile/bapps.ts'); const r = await import('./src/mobile/radarApps.ts'); console.log(JSON.stringify(${expr}));`,
+      ],
+      { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env } },
+    );
+    return JSON.parse(r.stdout.toString());
+  };
+  const APPS_EXPR =
+    '{ bapps: b.BAPPS.map((a) => a.name), groups: r.RADAR_GROUPS.map((g) => g.id), radar: r.RADAR_APPS.filter((a) => a.group === "market" || a.group === "buy").length }';
+  test('store build: bExchange, the market group and its apps are not in the data at all', () => {
+    for (const env of [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, { VITE_CHANNEL: 'android-play' }]) {
+      const a = appsEval(APPS_EXPR, env);
+      expect(a.bapps).not.toContain('bExchange');
+      expect(a.bapps).toContain('bMaps');
+      expect(a.groups).not.toContain('market');
+      expect(a.groups).toContain('social');
+      expect(a.radar).toBe(0);
+    }
+  });
+  test('bWalletX keeps bExchange and Markets & collectibles', () => {
+    const a = appsEval(APPS_EXPR, {});
+    expect(a.bapps).toContain('bExchange');
+    expect(a.groups).toContain('market');
+    expect(a.radar).toBeGreaterThan(10);
+  });
+  test('the exchange data lives in exchangeAppsX.ts: MARKET_ENABLED-gated, swapped for an empty file in store builds', () => {
+    const x = src('./exchangeAppsX.ts');
+    expect(x).toMatch(/EXCHANGE_BAPPS[^=]*= MARKET_ENABLED\s*\?/);
+    expect(x).toMatch(/MARKET_APPS[^=]*= MARKET_ENABLED\s*\?/);
+    expect(x).toContain("'./brand/apps/bexchange.png'");
+    const st = src('./exchangeAppsX.store.ts');
+    expect(st).not.toMatch(/bExchange|bexchange|Markets|\.png/);
+    expect(st).toContain('EXCHANGE_BAPPS: BApp[] = []');
+    expect(st).toContain("MARKET_APPS: Omit<RadarApp, 'source'>[] = []");
+    const v = readFileSync(new URL('../../vite.config.mobile.ts', import.meta.url), 'utf8');
+    expect(v).toMatch(
+      /MOBILE_SWAPS\[resolve\(__dirname, 'src\/mobile\/exchangeAppsX\.ts'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/exchangeAppsX\.store\.ts'/,
+    );
+    // Nothing else imports the bExchange icon or holds a 'market' tile.
+    expect(src('./bapps.ts')).not.toMatch(/bexchange|name: 'bExchange'/);
+    const r = src('./radarApps.ts');
+    expect(r).not.toContain("group: 'market'");
+    expect(r).toMatch(
+      /\.\.\.\(MARKET_ENABLED \? \[\{ id: 'market' as const, label: 'Markets & collectibles' \}\] : \[\]\)/,
+    );
+  });
+  test('the inherited Ordinals › List ("Global orderbook") view is behind MARKET_ENABLED', () => {
+    const v = readFileSync(new URL('../../vite.config.mobile.ts', import.meta.url), 'utf8');
+    expect(v).toContain("['  const listView = (', '  const listView = MARKET_ENABLED && (']");
+  });
 });
