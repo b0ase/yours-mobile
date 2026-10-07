@@ -29,9 +29,8 @@ export type ConnectionEntry = {
 
 export type ConnectionLog = Record<string, ConnectionEntry>;
 
-/** Game hosts, so their payments show under Games (bGames bApp and anything with "game" in the host). */
-export const GAME_HOSTS = ['bitcoin-gaming.vercel.app'];
-export const isGameHost = (host: string) => GAME_HOSTS.includes(host) || /(^|[.-])(b?games?|gaming)([.-]|$)/i.test(host);
+export { isGameHost } from './gameHosts';
+import { isGameHost } from './gameHosts';
 
 const clean = (o: string) => o.replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 253);
 

@@ -48,6 +48,8 @@ export type HistoryRow = {
   type?: EventType;
   asset?: Asset;
   app?: string;
+  /** What the app said about the payment ("round 12 won"), from a `game:` / `app:` description or label. */
+  appNote?: string;
 };
 
 const SAT = 100_000_000;
@@ -235,12 +237,21 @@ export const balances = (all: HistoryRow[], r: Range) => {
 
 // ─── Prices ──────────────────────────────────────────────────────────────────
 
-const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+export const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** Fill usdRate from daily rates (UTC day → $), else today's rate flagged as current. */
+/** The rate on `day`, else on the nearest earlier day we have (never a later one). */
+export const nearestPrevious = (rates: Map<string, number>, day: string): number | undefined => {
+  const hit = rates.get(day);
+  if (hit !== undefined) return hit;
+  let best: string | undefined;
+  for (const k of rates.keys()) if (k < day && (best === undefined || k > best)) best = k;
+  return best === undefined ? undefined : rates.get(best);
+};
+
+/** Fill usdRate from daily rates (UTC day → $; a missing day uses the nearest earlier one), else today's rate flagged as current. */
 export const withRates = (rows: HistoryRow[], daily: Map<string, number>, current: number): HistoryRow[] =>
   rows.map((r) => {
-    const d = daily.get(dayKey(r.time));
+    const d = nearestPrevious(daily, dayKey(r.time));
     if (d) return { ...r, usdRate: d, usdRateIsCurrent: false };
     return current > 0 ? { ...r, usdRate: current, usdRateIsCurrent: true } : r;
   });
@@ -276,6 +287,7 @@ export const CSV_COLUMNS = [
   'asset_symbol',
   'asset_qty',
   'app',
+  'app_note',
 ] as const;
 
 /** RFC 4180 field: quote when it holds a comma, quote, CR or LF; double inner quotes. */
@@ -331,6 +343,7 @@ export const toCsv = (rows: HistoryRow[], account: string): string => {
         r.asset?.symbol ?? '',
         r.asset?.qty ?? '',
         r.app ?? '',
+        r.appNote ?? '',
       ]
         .map(csvField)
         .join(','),

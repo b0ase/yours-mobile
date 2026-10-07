@@ -28,6 +28,7 @@ import {
   LifeBuoy,
   Wrench,
   Volume2,
+  Receipt,
 } from 'lucide-react';
 import { FaDiscord } from 'react-icons/fa';
 import { Button } from '../components/Button';
@@ -1006,6 +1007,23 @@ export const Settings = () => {
               on={appPrefs.sounds}
               onChange={() => setAppPrefs({ sounds: !appPrefs.sounds })}
             />
+          }
+        />
+        <Divider />
+        <SettingRow
+          icon={<Receipt size={16} />}
+          label="Tax reports"
+          description="Rules for History › Gains (not tax advice)"
+          right={
+            <select
+              aria-label="Tax rules"
+              value={appPrefs.taxCountry}
+              onChange={(e) => setAppPrefs({ taxCountry: e.target.value === 'other' ? 'other' : 'uk' })}
+              style={{ background: 'transparent', color: 'inherit', border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
+            >
+              <option value="uk">UK (HMRC pooling, GBP)</option>
+              <option value="other">Other (FIFO, USD)</option>
+            </select>
           }
           isLast
         />
