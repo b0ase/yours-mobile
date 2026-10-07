@@ -14,7 +14,15 @@ import { Bsv21OverlayPrompt, type Bsv21OverlayIssue } from './Bsv21OverlayPrompt
 import { Show } from './Show';
 import { SpeedBump } from './SpeedBump';
 import { CoinHistory } from './CoinHistory';
-import { ONESAT_MAINNET_CONTENT_URL, fundBsv21Overlay, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import {
+  BSV21_BASKET,
+  ONESAT_MAINNET_CONTENT_URL,
+  bsv21FieldsFromOutput,
+  fundBsv21Overlay,
+  sendBsv21,
+  type Bsv21Balance,
+} from '@1sat/actions';
+import { classifyBsv21Shortfall } from '../utils/bsv21OverlayShortfall';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag } from 'lucide-react';
 import { SellSheet } from '../mobile/sell/SellSheet';
@@ -265,7 +273,8 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
     if (!sendRes.txid || sendRes.error) {
       console.error('[SendBsv21View] sendBsv21 error:', sendRes.error);
       setIsProcessing(false);
-      const issue = validateOverlay && sendRes.error ? OVERLAY_ISSUES[sendRes.error] : undefined;
+      let issue = validateOverlay && sendRes.error ? OVERLAY_ISSUES[sendRes.error] : undefined;
+      if (issue === 'not-valid') issue = await refineNotValid(total);
       if (issue) {
         await openOverlayPrompt(issue, sendRecipients, total);
         return;
@@ -282,6 +291,41 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
       recipients: sendRecipients.map((r) => r.address),
     });
     if (!shown) addSnackbar('Tokens Sent!', 'success');
+  };
+
+  /**
+   * sendBsv21 reports outputs the overlay hasn't seen yet ('unknown') as not
+   * valid. Re-check so a just-arrived transfer reads as "not validated yet".
+   */
+  const refineNotValid = async (total: bigint): Promise<Bsv21OverlayIssue> => {
+    try {
+      const tokenId = token.info.id!;
+      const norm = (id: string) => id.replace('.', '_');
+      const list = await apiContext.wallet.listOutputs({
+        basket: BSV21_BASKET,
+        includeTags: true,
+        includeCustomInstructions: true,
+        limit: 10000,
+      });
+      const owned = list.outputs.flatMap((o) => {
+        const f = bsv21FieldsFromOutput({ tags: o.tags, customInstructions: o.customInstructions, outpoint: o.outpoint });
+        if (!f.tokenId || !f.amt || norm(f.tokenId) !== norm(tokenId)) return [];
+        return [{ outpoint: o.outpoint, amount: BigInt(f.amt) }];
+      });
+      const statuses = await apiContext.services!.bsv21.getOutputStatus(
+        tokenId,
+        owned.map((o) => o.outpoint),
+      );
+      const states = new Map(statuses.map((s) => [s.outpoint, s.state as string]));
+      const shortfall = classifyBsv21Shortfall(
+        owned.map((o) => ({ amount: o.amount, state: states.get(o.outpoint) })),
+        total,
+      );
+      return shortfall === 'unseen' ? 'unseen' : shortfall === 'queued' ? 'queued' : 'not-valid';
+    } catch (error) {
+      console.error('[SendBsv21View] overlay shortfall re-check failed:', error);
+      return 'not-valid';
+    }
   };
 
   const openOverlayPrompt = async (

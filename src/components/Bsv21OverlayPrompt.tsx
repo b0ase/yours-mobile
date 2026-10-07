@@ -11,8 +11,9 @@ import { PageLoader } from './PageLoader';
  * - queued: the overlay has the outputs but has not validated them yet
  * - not-valid: the overlay does not recognize enough of the outputs
  * - not-found: the overlay has never seen the token
+ * - unseen: the overlay has not seen some of the outputs yet (e.g. just received)
  */
-export type Bsv21OverlayIssue = 'not-active' | 'queued' | 'not-valid' | 'not-found';
+export type Bsv21OverlayIssue = 'not-active' | 'queued' | 'not-valid' | 'not-found' | 'unseen';
 
 export type Bsv21OverlayPromptProps = {
   show: boolean;
@@ -45,6 +46,11 @@ const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
       return {
         title: 'Tokens not validated',
         body: `The overlay doesn't recognize enough of your ${tokenName} as valid to cover this transfer.`,
+      };
+    case 'unseen':
+      return {
+        title: 'Not validated yet',
+        body: `The overlay hasn't picked up some of your ${tokenName} yet. This is normal right after tokens arrive or the overlay is funded. Wait a few minutes and try again.`,
       };
     case 'not-found':
       return {
