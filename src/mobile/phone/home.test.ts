@@ -72,8 +72,8 @@ describe('HOME', () => {
     expect(apps).not.toMatch(/sticky top-0[^"]*backdrop/);
   });
 
-  test('the phone layout is off by default', () => {
+  test('the phone layout is on by default (classic only when set to 0)', () => {
     const src = readFileSync(join(import.meta.dir, 'flag.ts'), 'utf8');
-    expect(src).toContain("=== '1'");
+    expect(src).toContain("!== '0'");
   });
 });

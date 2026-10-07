@@ -373,8 +373,30 @@ describe('phone layout store gates', () => {
     expect(peopleSellingEnabled(false)).toBe(true);
   });
 
-  test('the phone layout switch is off unless set', async () => {
-    const { phoneLayoutOn } = await import('./phone/flag');
-    expect(phoneLayoutOn()).toBe(false);
+  test('the phone layout is on unless classic is chosen; explicit choices are kept', async () => {
+    const { phoneLayoutOn, setPhoneLayout, PHONE_LAYOUT_KEY } = await import('./phone/flag');
+    const g = globalThis as Record<string, unknown>;
+    const had = { localStorage: g.localStorage, window: g.window };
+    const store = new Map<string, string>();
+    g.localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    g.window ??= { dispatchEvent: () => true };
+    try {
+      expect(phoneLayoutOn()).toBe(true);
+      store.set(PHONE_LAYOUT_KEY, '1');
+      expect(phoneLayoutOn()).toBe(true);
+      store.set(PHONE_LAYOUT_KEY, '0');
+      expect(phoneLayoutOn()).toBe(false);
+      setPhoneLayout(true);
+      expect(store.get(PHONE_LAYOUT_KEY)).toBe('1');
+      setPhoneLayout(false);
+      expect(store.get(PHONE_LAYOUT_KEY)).toBe('0');
+    } finally {
+      g.localStorage = had.localStorage;
+      g.window = had.window;
+    }
   });
 });

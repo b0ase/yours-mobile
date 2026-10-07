@@ -577,10 +577,14 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               isLast
             />
           </Section>
-          <Section title="Testing">
+          <Section title="Appearance">
             <PhoneLayoutToggle />
-            {testersEnabled() && <TesterSettings />}
           </Section>
+          {testersEnabled() && (
+            <Section title="Testing">
+              <TesterSettings />
+            </Section>
+          )}
           <Section title="Privacy">
             <Row
               icon={<Bookmark size={16} />}

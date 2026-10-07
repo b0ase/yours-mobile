@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Test switch for the phone layout (docs/PHONE-LAYOUT-PLAN.md). Default OFF: with it off the app is unchanged.
- * Turn on with Settings › Testing › "New phone layout", or localStorage['bwallet:phone-layout'] = '1'.
+ * The phone layout (docs/PHONE-LAYOUT-PLAN.md) is the default since 5.1.83. Settings › Appearance › "Classic layout"
+ * turns it off by storing '0' in localStorage['bwallet:phone-layout']; anything else (unset or '1') means on.
  * The switch also sets <html data-phone-layout>, which mobile.css uses for --dock-h.
  */
 export const PHONE_LAYOUT_KEY = 'bwallet:phone-layout';
@@ -10,9 +10,9 @@ const EVENT = 'bwallet:phone-layout-changed';
 
 export const phoneLayoutOn = (): boolean => {
   try {
-    return localStorage.getItem(PHONE_LAYOUT_KEY) === '1';
+    return localStorage.getItem(PHONE_LAYOUT_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 };
 
@@ -28,8 +28,7 @@ applyAttr(phoneLayoutOn());
 
 export const setPhoneLayout = (on: boolean) => {
   try {
-    if (on) localStorage.setItem(PHONE_LAYOUT_KEY, '1');
-    else localStorage.removeItem(PHONE_LAYOUT_KEY);
+    localStorage.setItem(PHONE_LAYOUT_KEY, on ? '1' : '0');
   } catch {
     /* storage unavailable: stays as it was */
   }
@@ -47,7 +46,7 @@ const subscribe = (fn: () => void) => {
   };
 };
 
-export const usePhoneLayout = () => useSyncExternalStore(subscribe, phoneLayoutOn, () => false);
+export const usePhoneLayout = () => useSyncExternalStore(subscribe, phoneLayoutOn, () => true);
 
 /**
  * Round 8 (owner): app screens are one vertical Apps page with sticky section headers. The horizontal paging
