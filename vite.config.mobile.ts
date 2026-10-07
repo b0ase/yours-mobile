@@ -54,6 +54,11 @@ if (STORE_CHANNEL) {
     __dirname,
     'src/mobile/exchangeAppsX.store.ts',
   );
+  // TokenBlaster arcade games in Apps › Games: not in the store bundle.
+  MOBILE_SWAPS[resolve(__dirname, 'src/mobile/games/gamesCatalogX.ts')] = resolve(
+    __dirname,
+    'src/mobile/games/gamesCatalogX.store.ts',
+  );
 }
 const brand = () => sharedBrand(MOBILE_SWAPS);
 
