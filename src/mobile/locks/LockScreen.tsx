@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { EMPTY_AMOUNTS, PLACEHOLDERS, PREVIEW_LABEL, PREVIEW_NOTE, valuesEntered } from './builderForm';
+import { BIG_LOCK_QUESTION, EMPTY_AMOUNTS, PLACEHOLDERS, PREVIEW_LABEL, PREVIEW_NOTE, START_SMALL_NOTE, needsSizeCheck, valuesEntered } from './builderForm';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Check, Plus, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -138,6 +138,8 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     if (!label) setLabel('Pension');
   };
   const [typed, setTyped] = useState('');
+  /** Soft check above 0.01 BSV: shown after Review, until answered. */
+  const [sizeAsk, setSizeAsk] = useState(false);
 
   const entered = valuesEntered({ kind, gmode, until, amountBsv, usdPer, bsvPer, pct, count });
   const schedule: ScheduleResult | PercentResult | null = useMemo(() => {
@@ -413,6 +415,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       <>
         {header('New lock', () => setView({ kind: 'list' }))}
         <div className="px-4 flex flex-col gap-3">
+          <div className="rounded-2xl p-3 text-xs font-semibold flex gap-2" style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}>
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" /> {START_SMALL_NOTE}
+          </div>
           <Field label="Name (only you see this)">
             <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Savings 2027" />
           </Field>
@@ -579,9 +584,28 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               schedule and target, and your {names.handle ? `handle ${names.handle}, ` : ''}paymail and identity key, for good.
             </span>
           </label>
-          <button disabled={!ok} onClick={() => setView({ kind: 'confirm' })} className={btn} style={{ background: GOLD, color: '#1a1300' }}>
-            Review
-          </button>
+          {sizeAsk && ok ? (
+            <div className={card} style={{ background: '#2a1d00', border: `1px solid ${GOLD}` }}>
+              <p className="text-sm text-white font-semibold">{BIG_LOCK_QUESTION}</p>
+              <div className="flex gap-2">
+                <button className={`${btn} flex-1`} style={{ background: '#2b2f36', color: '#fff' }} onClick={() => setSizeAsk(false)}>
+                  Make it smaller
+                </button>
+                <button className={`${btn} flex-1`} style={{ background: GOLD, color: '#1a1300' }} onClick={() => (setSizeAsk(false), setView({ kind: 'confirm' }))}>
+                  Yes, continue
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              disabled={!ok}
+              onClick={() => (needsSizeCheck(schedule!.totalSats) ? setSizeAsk(true) : setView({ kind: 'confirm' }))}
+              className={btn}
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              Review
+            </button>
+          )}
         </div>
       </>
     );
