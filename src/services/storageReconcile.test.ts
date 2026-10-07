@@ -13,6 +13,8 @@ import {
   type ReconcileRecord,
   reconcileOutcome,
   type StoreIndex,
+  staleSpends,
+  unspentCandidates,
 } from './storageReconcile';
 
 const A = 'a'.repeat(64);
@@ -185,5 +187,46 @@ describe('reconcileOutcome', () => {
 
   test('a finished run without a verify step is not clean', () => {
     expect(reconcileOutcome(finished)).toBe('differences');
+  });
+});
+
+describe('stale unspent rescan', () => {
+  test('candidates are outputs listed unspent, excluding conflicts and recorded spends', () => {
+    const local = index({
+      transactions: [tx(1, A), tx(2, B)],
+      outputs: [out(1, 1, A, 0), out(2, 1, A, 1, 2), out(3, 2, B, 0)],
+    });
+    const remote = index({
+      transactions: [tx(1, A), tx(3, C)],
+      outputs: [out(1, 1, A, 0), out(2, 1, A, 1), out(4, 3, C, 0)],
+    });
+    const diff = diffIndexes(local, remote);
+    expect(diff.spendConflicts.map((c) => c.outpoint)).toEqual([`${A}.1`]);
+    expect(unspentCandidates(local, remote, diff.spendConflicts).sort()).toEqual([`${A}.0`, `${B}.0`, `${C}.0`].sort());
+  });
+
+  test('an output both stores agree is unspent is still a candidate', () => {
+    const local = index({ transactions: [tx(1, A)], outputs: [out(1, 1, A, 0)] });
+    const remote = index({ transactions: [tx(1, A)], outputs: [out(1, 1, A, 0)] });
+    const diff = diffIndexes(local, remote);
+    expect(diff.spendConflicts).toEqual([]);
+    expect(unspentCandidates(local, remote, diff.spendConflicts)).toEqual([`${A}.0`]);
+  });
+
+  test('only a positive indexer spend marks an output stale', () => {
+    const spends = new Map<string, string | null>([
+      [`${A}.0`, B],
+      [`${A}.1`, null],
+    ]);
+    expect(staleSpends([`${A}.0`, `${A}.1`, `${A}.2`], spends)).toEqual([
+      { outpoint: `${A}.0`, txid: A, vout: 0, spentBy: B },
+    ]);
+  });
+
+  test('a stale output marked spent matches the spent verdict even without the spender in the wallet', () => {
+    const fixed = index({ transactions: [tx(1, A)], outputs: [{ ...out(1, 1, A, 0), spendable: false }] });
+    expect(matchesVerdict(fixed, `${A}.0`, { kind: 'spent', txid: B })).toBe(true);
+    const still = index({ transactions: [tx(1, A)], outputs: [out(1, 1, A, 0)] });
+    expect(matchesVerdict(still, `${A}.0`, { kind: 'spent', txid: B })).toBe(false);
   });
 });

@@ -237,6 +237,45 @@ export const matchesVerdict = (index: StoreIndex, outpoint: string, verdict: Spe
   return !o.spendable && spender === null;
 };
 
+/**
+ * Outputs a store lists as spendable with no recorded spender. When both
+ * stores agree on that, the diff sees no conflict, yet the output may have
+ * been spent by a transaction the wallet never recorded (another device, an
+ * older app, a failed sync). These are re-checked against the indexer.
+ * Conflicted outpoints are excluded: they get their own verdict.
+ */
+export const unspentCandidates = (local: StoreIndex, remote: StoreIndex, conflicts: SpendConflict[]): string[] => {
+  const skip = new Set(conflicts.map((c) => c.outpoint));
+  const out = new Set<string>();
+  for (const index of [local, remote]) {
+    for (const [outpoint, o] of index.outputs) {
+      if (skip.has(outpoint) || !o.spendable || spenderKey(index, o) !== null) continue;
+      out.add(outpoint);
+    }
+  }
+  return [...out];
+};
+
+export interface StaleSpend {
+  outpoint: string;
+  txid: string;
+  vout: number;
+  /** Spending txid the indexer reports. */
+  spentBy: string;
+}
+
+/**
+ * Candidates the indexer reports spent. Only a positive spend answer counts:
+ * a missing answer (not indexed, lookup failed) leaves the output alone.
+ */
+export const staleSpends = (candidates: string[], spends: Map<string, string | null>): StaleSpend[] =>
+  candidates.flatMap((outpoint) => {
+    const spentBy = spends.get(outpoint);
+    if (!spentBy) return [];
+    const dot = outpoint.lastIndexOf('.');
+    return [{ outpoint, txid: outpoint.slice(0, dot), vout: Number(outpoint.slice(dot + 1)), spentBy }];
+  });
+
 export type ReconcileTrigger = 'migration' | 'manual';
 
 export type ReconcilePhase =
@@ -270,6 +309,8 @@ export interface ReconcileRecord {
   pushedCorrections?: { inserts: number; updates: number };
   spendConflicts?: Array<SpendConflict & { verdict: SpendVerdict }>;
   corrected?: string[];
+  /** Outputs both stores listed unspent that the indexer reports spent, marked spent in both. */
+  rescan?: { checked: number; stale: StaleSpend[] };
   verify?: { onlyLocal: number; onlyRemote: number; mismatched: string[] };
   error?: string;
   errorStack?: string;

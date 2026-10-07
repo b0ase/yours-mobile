@@ -25,7 +25,9 @@ import {
   type ReconcileTrigger,
   type SpendVerdict,
   type StoreIndex,
+  staleSpends,
   txidsToCheck,
+  unspentCandidates,
 } from './storageReconcile';
 
 /**
@@ -199,7 +201,8 @@ export const finishInterruptedReconcile = async (): Promise<void> => {
 
 /**
  * Bring local and remote storage to the union of both, with conflicting
- * spends settled by the chain. Holds the storage sync lock throughout, so no
+ * spends settled by the chain, and outputs both stores list unspent re-checked
+ * against the indexer (spent ones are marked spent in both stores). Holds the storage sync lock throughout, so no
  * wallet activity interleaves. The record is saved as each phase starts and
  * after every chunk, so the popup can show progress and a failure leaves the
  * phase and offsets it stopped at.
@@ -248,11 +251,14 @@ export const reconcileStorage = async (
       record.onlyRemote = diff.onlyRemote;
 
       await enter('check-chain');
+      const candidates = unspentCandidates(localIndex, remoteIndex, diff.spendConflicts);
       const chain = await askChain(
         services,
-        diff.spendConflicts.map((c) => c.outpoint),
+        [...diff.spendConflicts.map((c) => c.outpoint), ...candidates],
         txidsToCheck(diff.spendConflicts),
       );
+      const stale = staleSpends(candidates, chain.spends);
+      record.rescan = { checked: candidates.length, stale };
       const conflicts = diff.spendConflicts.map((c) => ({
         ...c,
         verdict: decideSpend(c, localIndex, remoteIndex, chain),
@@ -269,6 +275,10 @@ export const reconcileStorage = async (
       record.corrected = [];
       for (const c of conflicts) {
         if (await applyVerdict(local, user.userId, c.txid, c.vout, c.verdict)) record.corrected.push(c.outpoint);
+      }
+      for (const st of stale) {
+        const verdict: SpendVerdict = { kind: 'spent', txid: st.spentBy };
+        if (await applyVerdict(local, user.userId, st.txid, st.vout, verdict)) record.corrected.push(st.outpoint);
       }
       if (record.corrected.length > 0) {
         await enter('push-corrections');
@@ -296,7 +306,18 @@ export const reconcileStorage = async (
             (c) =>
               !matchesVerdict(localAfter, c.outpoint, c.verdict) || !matchesVerdict(remoteAfter, c.outpoint, c.verdict),
           )
-          .map((c) => c.outpoint),
+          .map((c) => c.outpoint)
+          .concat(
+            stale
+              .filter((st) => {
+                const verdict: SpendVerdict = { kind: 'spent', txid: st.spentBy };
+                return (
+                  !matchesVerdict(localAfter, st.outpoint, verdict) ||
+                  !matchesVerdict(remoteAfter, st.outpoint, verdict)
+                );
+              })
+              .map((st) => st.outpoint),
+          ),
       };
       // Finished cleanly: the phase and offsets only matter when a run stops partway.
       record.phase = undefined;
