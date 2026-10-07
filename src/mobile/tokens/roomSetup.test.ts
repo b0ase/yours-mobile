@@ -8,6 +8,8 @@ import {
   dismissRoomSetup,
   isRoomSetupDismissed,
   payRoomSetup,
+  roomSetupExtraOutputs,
+  setupFeeFor,
   roomSetupFeeAddress,
   setupFeeSats,
   setupTotal,
@@ -137,4 +139,24 @@ test('mint quotes no longer include indexing', () => {
   expect(c.totalSats).toBeLessThan(INDEX_FUND_SATS);
   // Personal $NAME token: network fee only.
   expect(PERSONAL_FEE_ESTIMATE_SATS).toBe(PERSONAL_NETWORK_FEE_SATS);
+});
+
+describe('Index $X: only the issuer pays the bCorp setup fee', () => {
+  const ADDR = '192nuX6cz81MH3T2gwsam3FxYoDrvzDYpU';
+  test('non-issuer holder: no fee, no bCorp output, total is the indexing cost only', () => {
+    const fee = setupFeeFor(12_345, false);
+    expect(fee).toBe(0);
+    expect(roomSetupExtraOutputs('X', fee, ADDR)).toEqual([]);
+    const t = setupTotal({ feePerOutput: 1000 }, fee);
+    expect(t.feeSats).toBe(0);
+    expect(t.totalSats).toBe(t.indexSats + t.networkSats);
+  });
+  test('issuer: unchanged (fee output to the bCorp address)', () => {
+    const fee = setupFeeFor(12_345, true);
+    expect(fee).toBe(12_345);
+    expect(roomSetupExtraOutputs('X', fee, ADDR)).toEqual([
+      { address: ADDR, satoshis: 12_345, outputDescription: 'bWallet room setup ($X)' },
+    ]);
+    expect(setupTotal({ feePerOutput: 1000 }, fee).feeSats).toBe(12_345);
+  });
 });

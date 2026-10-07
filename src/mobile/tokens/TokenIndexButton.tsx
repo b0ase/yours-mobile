@@ -3,6 +3,8 @@ import { money } from '../money/money';
 import { indexingEnabled } from '../storeBuild';
 import { holderIndexState } from './indexFund';
 import { useRoomSetup } from './useRoomSetup';
+import { ownTokens } from './pendingIndexing';
+import { useServiceContext } from '../../hooks/useServiceContext';
 
 /**
  * Token detail screen: "Index $X" for ANY holder when the 1Sat overlay says the token needs funding
@@ -14,7 +16,13 @@ export const TokenIndexButton = (props: { tokenId: string; ticker: string; excha
   indexingEnabled() ? <Inner {...props} /> : null;
 
 const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker: string; exchangeRate?: number }) => {
-  const s = useRoomSetup(tokenId, ticker, { exchangeRate });
+  const { chromeStorageService } = useServiceContext();
+  // Only the issuer (a token minted here, or the account's own $NAME) pays the bCorp setup fee;
+  // any other holder pays just the indexing cost.
+  const identity = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  const norm = (id: string) => id.replace('.', '_');
+  const issuer = ownTokens(identity).some((t) => norm(t.tokenId) === norm(tokenId));
+  const s = useRoomSetup(tokenId, ticker, { exchangeRate, issuer });
   const state = holderIndexState(s.status);
   if (state === 'unknown') return null;
   if (state === 'indexed' && !s.msg) {
@@ -43,7 +51,7 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
           style={{ background: '#FFD24D', color: '#000' }}
         >
           <Sparkles size={15} />
-          {`Index $${ticker} · ${money(s.total.totalSats, s.rate)} (${s.total.totalSats.toLocaleString()} sats)`}
+          {`Index $${ticker} · ${money(s.total.totalSats, s.rate)} (${s.total.totalSats.toLocaleString()} sats${s.total.feeSats > 0 ? ' incl. bCorp setup' : ''})`}
         </button>
       )}
       {s.msg && (

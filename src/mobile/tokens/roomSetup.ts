@@ -66,6 +66,18 @@ export const setupTotal = (
   };
 };
 
+/**
+ * The bCorp setup fee for this payer: only the token's issuer pays it. Any other holder funding the
+ * index (token detail "Index $X") pays just the indexing cost (owner, 7 Oct 2026).
+ */
+export const setupFeeFor = (feeSats: number, isIssuer: boolean) => (isIssuer ? feeSats : 0);
+
+/** The bCorp fee output of a room setup, if any (none when the fee is 0 or there is no fee address). */
+export const roomSetupExtraOutputs = (ticker: string, feeSats: number, feeAddress = roomSetupFeeAddress()) =>
+  feeAddress && feeSats > 0
+    ? [{ address: feeAddress, satoshis: feeSats, outputDescription: `bWallet room setup ($${ticker})`.slice(0, 50) }]
+    : [];
+
 /** Pay a room setup (after the user's tap / confirmation): indexer + bCorp fee in one tx. */
 export const payRoomSetup = (
   ctx: OneSatContext,
@@ -78,16 +90,7 @@ export const payRoomSetup = (
   fundIndexing(ctx, tokenId, ticker, {
     status,
     timeoutMs: 8000,
-    extraOutputs:
-      feeAddress && feeSats > 0
-        ? [
-            {
-              address: feeAddress,
-              satoshis: feeSats,
-              outputDescription: `bWallet room setup ($${ticker})`.slice(0, 50),
-            },
-          ]
-        : [],
+    extraOutputs: roomSetupExtraOutputs(ticker, feeSats, feeAddress),
   });
 
 // ── "Not now" (per token, this device) ──

@@ -1,9 +1,9 @@
 import { defineConfig, loadEnv, mergeConfig, type Plugin } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
-import { copyFileSync, readFileSync, renameSync } from 'fs';
+import { copyFileSync, existsSync, readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
-import { brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
+import { BRAND, brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
 
 // The app's name in build-time text patches: bWallet in a store build, bWalletX otherwise (src/mobile/storeBuild.ts).
 const STORE_APP_NAME =
@@ -698,12 +698,19 @@ const bwalletxIcons = (): Plugin => ({
   name: 'bwalletx-icons',
   apply: 'build',
   closeBundle() {
-    const from = (f: string) => resolve(__dirname, 'assets/bwalletx-ext', f);
+    // Only the bcorp brand: bWalletX (non-store) gets the bWalletX set, the store bWallet its own
+    // (black b on yellow); other brands keep public/. Missing icons skip instead of failing the build.
+    if (BRAND !== 'bcorp') return;
+    const store =
+      process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+    const dir = store ? 'assets/bwallet-ext' : 'assets/bwalletx-ext';
+    const from = (f: string) => resolve(__dirname, dir, f);
     const to = (f: string) => resolve(__dirname, 'build-mobile', f);
-    copyFileSync(from('favicon.ico'), to('favicon.ico'));
-    copyFileSync(from('icon192.png'), to('logo192.png'));
-    copyFileSync(from('icon512.png'), to('logo512.png'));
-    for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copyFileSync(from(f), to(`icons/${f}`));
+    const copy = (a: string, b: string) => existsSync(from(a)) && copyFileSync(from(a), to(b));
+    copy('favicon.ico', 'favicon.ico');
+    copy('icon192.png', 'logo192.png');
+    copy('icon512.png', 'logo512.png');
+    for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copy(f, `icons/${f}`);
   },
 });
 

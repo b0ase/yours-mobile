@@ -6,7 +6,7 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { indexAutoPay } from './indexAutoPay';
 import { markIndexingPaid } from './pendingIndexing';
 import { getFundRecord, needsIndexFunding, overlayStatus, type OverlayStatus } from './indexFund';
-import { ROOM_SETUP_FEE_USD, payRoomSetup, setupFeeSats, setupTotal } from './roomSetup';
+import { ROOM_SETUP_FEE_USD, payRoomSetup, setupFeeFor, setupFeeSats, setupTotal } from './roomSetup';
 import { money, moneyWithSats, useBsvUsd } from '../money/money';
 
 /**
@@ -18,7 +18,11 @@ import { money, moneyWithSats, useBsvUsd } from '../money/money';
 export const useRoomSetup = (
   tokenId: string,
   ticker: string,
-  { exchangeRate = 0, onDone }: { exchangeRate?: number; onDone?: () => void } = {},
+  {
+    exchangeRate = 0,
+    onDone,
+    issuer = true,
+  }: { exchangeRate?: number; onDone?: () => void; /** false: a holder, not the issuer: no bCorp fee. */ issuer?: boolean } = {},
 ) => {
   const { addSnackbar } = useSnackbar();
   const { apiContext } = useServiceContext();
@@ -49,7 +53,7 @@ export const useRoomSetup = (
   const open = !!status && !needsIndexFunding(status);
   // Priced once per render; the confirm sheet freezes it (quote) so what is shown is what is paid.
   const [quote, setQuote] = useState<ReturnType<typeof setupTotal> | null>(null);
-  const total = status ? setupTotal(status, setupFeeSats(ROOM_SETUP_FEE_USD, rate)) : null;
+  const total = status ? setupTotal(status, setupFeeFor(setupFeeSats(ROOM_SETUP_FEE_USD, rate), issuer)) : null;
 
   const pay = async (t: NonNullable<typeof total>, oneTap = false) => {
     if (!status) return;
