@@ -14,9 +14,14 @@
 import puppeteer, { type Page } from 'puppeteer';
 import { randomBytes } from 'crypto';
 
-const URL = process.env.SMOKE_URL ?? 'http://localhost:4780/';
+// EXT=build audits the Chrome extension build (side panel size) instead of the phone preview.
+const EXT = process.env.EXT;
+let URL = process.env.SMOKE_URL ?? 'http://localhost:4780/';
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const WIDTHS = [320, 375, 390];
+const WIDTHS = EXT ? [360, 400] : [320, 375, 390];
+/** Past the last content a page may keep its normal bottom padding (the tab bar / dock, ~5rem + safe area). */
+const OVERSCROLL_MAX = 180;
+const HEIGHT = Number(process.env.AUDIT_HEIGHT ?? 760);
 const SKIP = /^v\d|lock wallet|sign out|log ?out|delete|remove|lock now|disable|reset|wipe|erase|forget|switch account|source code/i;
 const password = randomBytes(12).toString('base64url');
 const found = new Map<string, Set<string>>();
@@ -26,7 +31,7 @@ const waitText = (page: Page, text: string, timeout = 60_000) =>
   page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text);
 
 /** In the page: every overflowing page/scroller and the outermost elements sticking out of it. */
-const probe = () => {
+const probe = (OVERSCROLL_MAX: number) => {
   const describe = (el: Element) => {
     const cls = typeof el.className === 'string' ? el.className.trim().split(/\s+/).slice(0, 6).join('.') : '';
     const text = (el as HTMLElement).innerText?.replace(/\s+/g, ' ').trim().slice(0, 40) ?? '';
@@ -77,22 +82,55 @@ const probe = () => {
             .join(' | ')})`),
     );
   }
+  // Vertical over-scroll: empty space after the last content (scrollHeight minus the last content's bottom).
+  const vscrollers: Element[] = [document.scrollingElement!];
+  for (const el of document.querySelectorAll('*')) {
+    const st = getComputedStyle(el);
+    if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 2 && el.getClientRects().length) vscrollers.push(el);
+  }
+  for (const sc of vscrollers) {
+    const doc = sc === document.scrollingElement;
+    const top = doc ? -window.scrollY : sc.getBoundingClientRect().top - sc.scrollTop;
+    let bottom = 0;
+    for (const el of sc.querySelectorAll('*')) {
+      const st = getComputedStyle(el);
+      if (st.position === 'fixed' || st.visibility === 'hidden' || !el.getClientRects().length) continue;
+      if (el.children.length && !(el as HTMLElement).innerText?.trim() && !['IMG', 'VIDEO', 'CANVAS', 'svg'].includes(el.tagName)) continue;
+      if (el.children.length) continue; // leaves only: wrappers carry the padding
+      let nested = false; // content of an inner scroller is that scroller's, not this one's
+      for (let q = el.parentElement; q && q !== sc; q = q.parentElement) if (/(auto|scroll)/.test(getComputedStyle(q).overflowY)) nested = true;
+      if (nested) continue;
+      const r = el.getBoundingClientRect();
+      if (r.height === 0) continue;
+      bottom = Math.max(bottom, r.bottom - top);
+    }
+    if (doc && sc.scrollHeight <= sc.clientHeight + 2) continue;
+    const gap = sc.scrollHeight - bottom;
+    if ((window as unknown as { __dump?: boolean }).__dump) {
+      out.push(`DUMP ${describe(sc).slice(0, 80)} sh=${sc.scrollHeight} ch=${sc.clientHeight} bottom=${Math.round(bottom)}`);
+    }
+    if (bottom > 0 && gap > OVERSCROLL_MAX)
+      out.push(`${doc ? 'page' : describe(sc)} scrolls ${Math.round(gap)}px past its last content`);
+  }
   return out;
 };
 
 const measure = async (page: Page, screen: string) => {
   // Measure the layout itself, not the mobile.css safeguard that hides it.
-  await page.evaluate(() => document.documentElement.setAttribute('data-overflow-audit', ''));
+  await page.evaluate((d) => {
+    document.documentElement.setAttribute('data-overflow-audit', '');
+    (window as unknown as { __dump?: boolean }).__dump = d;
+  }, !!process.env.DUMP);
   for (const w of WIDTHS) {
-    await page.setViewport({ width: w, height: 760, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+    await page.setViewport({ width: w, height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
     await sleep(500);
-    for (const line of await page.evaluate(probe)) {
+    for (const line of await page.evaluate(probe, OVERSCROLL_MAX)) {
       const key = `${screen} — ${line}`;
       if (!found.has(key)) found.set(key, new Set());
       found.get(key)!.add(String(w));
     }
   }
-  await page.setViewport({ width: 390, height: 760, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  await page.setViewport({ width: WIDTHS[WIDTHS.length - 1], height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
 };
 
 const clickByText = async (page: Page, text: string) => {
@@ -144,10 +182,16 @@ const rows = (page: Page) =>
       .filter((t) => t.length > 1 && !['Wallet', 'Exchange', 'Market', 'Feed', 'Chat', 'Settings', 'Tools', 'About'].includes(t)),
   );
 
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run'] });
+const browser = EXT
+  ? await puppeteer.launch({ headless: true, enableExtensions: [EXT], args: ['--no-first-run'] }) // Chrome for Testing
+  : await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run'] });
+if (EXT) {
+  const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'));
+  URL = `chrome-extension://${new globalThis.URL(sw.url()).hostname}/index.html`;
+}
 const page = await browser.newPage();
 await page.emulate({
-  viewport: { width: 390, height: 760, deviceScaleFactor: 1, isMobile: true, hasTouch: true },
+  viewport: { width: 390, height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true },
   userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
 });
 const errors: string[] = [];
@@ -158,6 +202,13 @@ const step = async (name: string, go: () => Promise<void>) => {
     await home(page);
     await go();
     await measure(page, name);
+    if (process.env.SHOTS) {
+      await page.evaluate(() => {
+        for (const el of [document.scrollingElement!, ...document.querySelectorAll('*')]) el.scrollTop = 1e6;
+      });
+      await sleep(400);
+      await page.screenshot({ path: `${process.env.SHOTS}/${name.replace(/[^\w]+/g, '_')}.png` });
+    }
     console.log(`  ✓ ${name}`);
   } catch (e) {
     errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
@@ -234,4 +285,4 @@ if (found.size) {
   console.log(`\n${found.size} overflow(s):`);
   for (const [k, w] of found) console.log(`  [${[...w].join(',')}] ${k}`);
   process.exitCode = 1;
-} else console.log('\nno horizontal overflow');
+} else console.log('\nno horizontal or vertical overflow');

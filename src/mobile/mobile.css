@@ -927,3 +927,9 @@ input[type='month'] {
   max-width: 100%;
   display: block;
 }
+/* Upstream ToggleSwitch hides its checkbox with .sr-only (position:absolute) in an unpositioned label, so
+   the 1px input is placed against an ancestor outside the Settings scroller, escapes its clip and
+   stretches the outer box: Settings then scrolls on into a tall black area (owner, extension 5.1.83). */
+label:has(> .sr-only) {
+  position: relative;
+}
