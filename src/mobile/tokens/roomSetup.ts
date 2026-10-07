@@ -2,6 +2,7 @@ import validate from 'bitcoin-address-validation';
 import type { OneSatContext } from '@1sat/actions';
 import { STORE_BUILD, bcorpFeeAddress } from '../storeBuild';
 import { hasRate, usdToSats } from '../money/money';
+import { BCHAT_ORIGIN } from '../chat/api';
 import { INDEX_FUND_NETWORK_SATS, fundAmount, fundIndexing, type OverlayStatus } from './indexFund';
 
 /**
@@ -41,6 +42,66 @@ export const setupFeeSats = (
   if (store || !address || !hasRate(rate) || !(usd > 0)) return 0;
   return usdToSats(usd, rate) ?? 0;
 };
+
+// ── First 1,000 rooms free (owner, 7 Oct 2026) ──
+
+/**
+ * What the server (bit-sign, the source of truth) says the bCorp setup fee is right now:
+ * GET /api/bitsign/rooms/setup-fee → { feeUsd, freeRemaining, reason }. It is 0 while fewer than
+ * 1,000 token rooms have ever been created. The wallet charges only what the server says, capped
+ * at the build's ROOM_SETUP_FEE_USD; any failure or odd answer means FREE, never a charge.
+ */
+export type ServerSetupFee = { feeUsd: number; freeRemaining: number; reason: string };
+
+export const SETUP_FEE_URL = `${BCHAT_ORIGIN}/api/bitsign/rooms/setup-fee`;
+export const FREE_FEE: ServerSetupFee = { feeUsd: 0, freeRemaining: 0, reason: 'unknown' };
+
+export const parseServerFee = (j: unknown): ServerSetupFee => {
+  const o = (j && typeof j === 'object' ? j : {}) as Record<string, unknown>;
+  const feeUsd = typeof o.feeUsd === 'number' && Number.isFinite(o.feeUsd) && o.feeUsd > 0 ? o.feeUsd : 0;
+  const freeRemaining =
+    typeof o.freeRemaining === 'number' && Number.isFinite(o.freeRemaining) && o.freeRemaining > 0
+      ? Math.floor(o.freeRemaining)
+      : 0;
+  const reason = typeof o.reason === 'string' ? o.reason : 'unknown';
+  return { feeUsd, freeRemaining, reason };
+};
+
+/** The dollars to charge: the server's figure, never more than this build's fee. */
+export const chargeUsd = (server: ServerSetupFee | undefined, buildUsd = ROOM_SETUP_FEE_USD) =>
+  server ? Math.min(server.feeUsd, buildUsd) : 0;
+
+let cached: { at: number; fee: ServerSetupFee } | null = null;
+
+/** Ask the server (cached 60 s). Never throws: a failure is FREE. */
+export const fetchServerSetupFee = async (
+  fetchFn: typeof fetch = (...a) => fetch(...a),
+  now = Date.now(),
+): Promise<ServerSetupFee> => {
+  if (cached && now - cached.at < 60_000) return cached.fee;
+  try {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : undefined;
+    const t = ctl ? setTimeout(() => ctl.abort(), 5000) : undefined;
+    const res = await fetchFn(SETUP_FEE_URL, { signal: ctl?.signal }).finally(() => t && clearTimeout(t));
+    if (!res.ok) return FREE_FEE;
+    const fee = parseServerFee(await res.json());
+    cached = { at: now, fee };
+    return fee;
+  } catch {
+    return FREE_FEE;
+  }
+};
+
+/** Test hook. */
+export const resetServerSetupFeeCache = () => {
+  cached = null;
+};
+
+/** "Free: one of the first 1,000 rooms (N left)", or '' when the free offer doesn't apply. */
+export const freeRoomNote = (server: ServerSetupFee | undefined) =>
+  server && server.reason === 'free-first-1000' && server.freeRemaining > 0 && server.feeUsd === 0
+    ? `Free: one of the first 1,000 rooms (${server.freeRemaining.toLocaleString('en-US')} left)`
+    : '';
 
 export type SetupTotal = {
   /** To the token's 1Sat fee address (up to min_funding). */

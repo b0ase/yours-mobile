@@ -1344,6 +1344,11 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
         <div className="text-[13px] line-clamp-2" style={{ color: MUTED }}>
           {s.msg || 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'}
         </div>
+        {s.needs && s.freeNote && (
+          <div className="text-[12px] font-semibold" style={{ color: GOLD }}>
+            {s.freeNote}
+          </div>
+        )}
       </div>
       {s.needs && (
         <button

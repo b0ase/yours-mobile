@@ -321,6 +321,11 @@ const MyTokenRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }) 
           <p className="mt-0.5 text-xs" style={{ color: s.open ? GOLD : MUTED }}>
             {state}
           </p>
+          {s.needs && s.freeNote && (
+            <p className="mt-0.5 text-xs" style={{ color: GOLD }}>
+              {s.freeNote}
+            </p>
+          )}
         </div>
         {s.needs && s.total && (
           <button

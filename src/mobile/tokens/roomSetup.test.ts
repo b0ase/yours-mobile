@@ -4,6 +4,12 @@ import { P2PKH } from '@bsv/sdk';
 import { INDEX_FUND_NETWORK_SATS, INDEX_FUND_SATS } from './indexFund';
 import {
   DISMISS_PREFIX,
+  FREE_FEE,
+  chargeUsd,
+  fetchServerSetupFee,
+  freeRoomNote,
+  parseServerFee,
+  resetServerSetupFeeCache,
   ROOM_SETUP_FEE_USD,
   dismissRoomSetup,
   isRoomSetupDismissed,
@@ -158,5 +164,36 @@ describe('Index $X: only the issuer pays the bCorp setup fee', () => {
       { address: ADDR, satoshis: 12_345, outputDescription: 'bWallet room setup ($X)' },
     ]);
     expect(setupTotal({ feePerOutput: 1000 }, fee).feeSats).toBe(12_345);
+  });
+});
+
+describe('first 1,000 rooms free (server decides)', () => {
+  const ok = (body: unknown) => (async () => ({ ok: true, json: async () => body })) as unknown as typeof fetch;
+
+  beforeEach(() => resetServerSetupFeeCache());
+
+  test('free while under 1,000: charges nothing and says so', async () => {
+    const f = await fetchServerSetupFee(ok({ feeUsd: 0, freeRemaining: 995, reason: 'free-first-1000' }));
+    expect(chargeUsd(f)).toBe(0);
+    expect(freeRoomNote(f)).toBe('Free: one of the first 1,000 rooms (995 left)');
+  });
+
+  test('after 1,000: the server fee, capped at the build fee', async () => {
+    const f = await fetchServerSetupFee(ok({ feeUsd: 1, freeRemaining: 0, reason: 'standard' }));
+    expect(chargeUsd(f, 1)).toBe(1);
+    expect(chargeUsd({ ...f, feeUsd: 50 }, 1)).toBe(1);
+    expect(freeRoomNote(f)).toBe('');
+  });
+
+  test('a failed or odd answer is FREE, never a charge', async () => {
+    const boom = (async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+    expect(await fetchServerSetupFee(boom)).toEqual(FREE_FEE);
+    resetServerSetupFeeCache();
+    const bad = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch;
+    expect(chargeUsd(await fetchServerSetupFee(bad))).toBe(0);
+    expect(chargeUsd(parseServerFee({ feeUsd: 'lots' }))).toBe(0);
+    expect(chargeUsd(undefined)).toBe(0);
   });
 });

@@ -6,7 +6,16 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { indexAutoPay } from './indexAutoPay';
 import { markIndexingPaid } from './pendingIndexing';
 import { getFundRecord, needsIndexFunding, overlayStatus, type OverlayStatus } from './indexFund';
-import { ROOM_SETUP_FEE_USD, payRoomSetup, setupFeeFor, setupFeeSats, setupTotal } from './roomSetup';
+import {
+  chargeUsd,
+  fetchServerSetupFee,
+  freeRoomNote,
+  payRoomSetup,
+  setupFeeFor,
+  setupFeeSats,
+  setupTotal,
+  type ServerSetupFee,
+} from './roomSetup';
 import { money, moneyWithSats, useBsvUsd } from '../money/money';
 
 /**
@@ -34,6 +43,17 @@ export const useRoomSetup = (
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [done, setDone] = useState(false);
+  // The server decides the bCorp fee (first 1,000 rooms free). Loading or failed = free.
+  const [serverFee, setServerFee] = useState<ServerSetupFee | undefined>(undefined);
+
+  useEffect(() => {
+    if (!issuer) return;
+    let on = true;
+    void fetchServerSetupFee().then((f) => on && setServerFee(f));
+    return () => {
+      on = false;
+    };
+  }, [issuer]);
 
   useEffect(() => {
     let on = true;
@@ -53,7 +73,7 @@ export const useRoomSetup = (
   const open = !!status && !needsIndexFunding(status);
   // Priced once per render; the confirm sheet freezes it (quote) so what is shown is what is paid.
   const [quote, setQuote] = useState<ReturnType<typeof setupTotal> | null>(null);
-  const total = status ? setupTotal(status, setupFeeFor(setupFeeSats(ROOM_SETUP_FEE_USD, rate), issuer)) : null;
+  const total = status ? setupTotal(status, setupFeeFor(setupFeeSats(chargeUsd(serverFee), rate), issuer)) : null;
 
   const pay = async (t: NonNullable<typeof total>, oneTap = false) => {
     if (!status) return;
@@ -104,7 +124,10 @@ export const useRoomSetup = (
     />
   );
 
-  return { status, needs, waiting, open, total, rate, busy, msg, start, sheet };
+  /** "Free: one of the first 1,000 rooms (N left)" for the issuer while the offer lasts, else ''. */
+  const freeNote = issuer ? freeRoomNote(serverFee) : '';
+
+  return { status, needs, waiting, open, total, rate, busy, msg, start, sheet, freeNote };
 };
 
 /** "Set up · $1.93" */
