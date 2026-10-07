@@ -24,7 +24,8 @@ export type Game = {
 
 export const GAME_SOURCES: { id: GameSource; label: string }[] = [
   { id: 'b0ase', label: 'bGames' },
-  { id: 'tokenblaster', label: 'TokenBlaster arcade' },
+  // Folds away in a store build, so the name is not in that bundle (docs/STORE-AUDIT.md).
+  ...(TOKENBLASTER_ENABLED ? [{ id: 'tokenblaster' as const, label: 'TokenBlaster arcade' }] : []),
   { id: 'third-party', label: 'More BSV games' },
 ];
 
