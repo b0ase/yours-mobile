@@ -58,4 +58,21 @@ Not in phase 1:
 
 ## Tested against a real wallet (7 Oct 2026, read-only, public data only)
 
-The owner's Money Button wallet (m/44'/0'/0'/0, Aug 2020 to Feb 2021) has 15 `sfp@0.1` outputs, of which 9 are unspent, across 8 assets (`<12 hex>.asset@moneybutton.com`). Every one pushes two hash160s: the Money Button authoriser (`036d4804…`, 1K7waK…, the same on every output) and the owner. **None of the owners is a used receive address.** The used addresses only paid the fees. So the first build, which matched owners against used addresses, found nothing. Matching now covers every address in the walked range (index 0 to the last used index plus 20, both chains). Still to confirm with the phrase: that the owner hashes really are receive addresses in the gaps.
+The owner's Money Button wallet (m/44'/0'/0'/0, Aug 2020 to Feb 2021, 31 txs, change chain unused) has 15 `sfp@0.1` outputs across 7 assets (`<12 hex>.asset@moneybutton.com`). Every one pushes two hash160s: the Money Button authoriser (`036d4804…`, 1K7waK…, the same on all of them) and the owner.
+
+**Owners are receive addresses in the gaps, confirmed against the phrase.** Used addresses only paid the fees. The owners sit at unused indices on the same chain:
+
+- 30 → a3042ad4:0, 32 → c98b0100:0, 34 → e3cbe5a8:0, 36 → fa7dcb96:0, 38 → e7a45eda:0
+- 41 → 980cca4d:1, 43 → d40480c9:0, 45 → bf8161f2:0
+- 52, 53 → e124454e:0/1; 56, 55 → 28ffc739:0/1; 60 → 7ff5bdad:1
+
+980cca4d:0 (10,000) and 7ff5bdad:0 (10,000,000) were sent to other people. No hits on m/44'/0'/0'/1, m/44'/0'/1'/0, m/44'/236', m/44'/145', m/0, m/0' or m/0'/1.
+
+Still held by this wallet: six single mints (a3042ad4, c98b0100, e3cbe5a8, fa7dcb96, d40480c9, bf8161f2) plus 89,990,000 of c6c0c9f0324e at 7ff5bdad:1. Decimals are unknown because the asset paymail lookup is gone, so amounts are shown raw.
+
+**Owner-matching rule** (`findOwnedSfp`):
+
+- Match owners against every address from index 0 to the last used index plus 20, on both chains.
+- Then keep extending the range to 20 past the highest matched owner, and repeat until it stops growing.
+
+In this wallet the highest owner index is 60 and the last fee address is 59, so the first range already covers it. The extension handles owners that sit past the last fee address.

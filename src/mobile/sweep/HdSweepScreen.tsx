@@ -24,8 +24,8 @@ import {
 import {
   MONEYBUTTON_PATH,
   addressHash,
-  ownerRange,
-  sfpOutputsFor,
+  findOwnedSfp,
+  type OwnerAccount,
   splitSpendable,
   type SfpOutput,
 } from './moneybutton';
@@ -214,6 +214,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       // Button put token owners at receive indices that never got a plain payment (tested against a real
       // wallet, 7 Oct 2026), so matching only used addresses missed every token.
       const mbOwners = new Set<string>();
+      const mbAccounts: OwnerAccount[] = [];
       for (const [i, k] of singles.entries()) {
         if (cancelled.current) return;
         setProgress(`Checking ${k.wallet} ${k.label} key (${i + 1} of ${singles.length})`);
@@ -236,7 +237,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         for (const h of hits) if (!used.has(h.address)) used.set(h.address, h.wif);
         if (path === MONEYBUTTON_PATH || input.kind === 'xprv') {
           hits.forEach((h) => mbAddresses.add(h.address));
-          ownerRange(key, path, hits).forEach((h) => mbOwners.add(h));
+          mbAccounts.push({ key, path, used: hits });
         }
       }
       if (!used.size) {
@@ -272,7 +273,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       // address; read the address's own history and look for SFP outputs that name it.
       const sfp: SfpOutput[] = [];
       if (mbAddresses.size) {
-        const hashes = mbOwners;
+        const txs: { txid: string; hex: string }[] = [];
         const seen = new Set<string>();
         for (const [i, address] of [...mbAddresses].entries()) {
           const txids = (await wocHistory(address)).slice(0, SFP_TX_LIMIT);
@@ -282,9 +283,10 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
             seen.add(txid);
             setProgress(`Looking for Money Button tokens: address ${i + 1} of ${mbAddresses.size}, tx ${j + 1}`);
             const r = await wocGet(`/tx/${txid}/hex`);
-            if (r) sfp.push(...sfpOutputsFor((await r.text()).trim(), txid, hashes));
+            if (r) txs.push({ txid, hex: (await r.text()).trim() });
           }
         }
+        sfp.push(...findOwnedSfp(txs, mbOwners, mbAccounts));
         if (sfp.length) {
           const spends = await apiContext.services.txo.getSpends(sfp.map((o) => o.outpoint)).catch(() => []);
           const held = sfp.filter((_, i) => !spends[i]);

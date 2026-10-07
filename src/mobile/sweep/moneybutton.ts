@@ -145,19 +145,49 @@ export function splitSpendable<T extends { outpoint: string; lockingScript: stri
   return { spendable, kept };
 }
 
+export type OwnerAccount = { key: HD; path: string; used: HdAddress[] };
+
+const lastOn = (used: HdAddress[], path: string, chain: 0 | 1) =>
+  Math.max(
+    -1,
+    ...used.filter((u) => u.path.startsWith(`${path}/${chain}/`)).map((u) => Number(u.path.split('/').pop())),
+  );
+
 /**
- * hash160s of every address on both chains from index 0 to the last used one plus GAP. SFP token
- * owners sit at addresses with no plain history, in the gaps between used ones, so owner matching has
- * to cover the whole walked range and not only the used addresses.
+ * SFP outputs in `txs` owned by `fixed` hashes (pasted keys) or by any address of `accounts`.
+ *
+ * Money Button put token owners at receive addresses with no plain history, in the gaps between used
+ * ones (confirmed on a real wallet, 7 Oct 2026), so owners are matched across the whole walked range:
+ * index 0 to the last used index plus GAP, on both chains. The range then keeps growing to GAP past
+ * the highest matched owner, in case owners sit beyond the last address that paid a fee.
  */
-export function ownerRange(account: HD, accountPath: string, used: HdAddress[]): string[] {
-  const out: string[] = [];
-  for (const chain of [0, 1] as const) {
-    const idx = used
-      .filter((u) => u.path.startsWith(`${accountPath}/${chain}/`))
-      .map((u) => Number(u.path.split('/').pop()));
-    const last = idx.length ? Math.max(...idx) : -1;
-    for (let i = 0; i <= last + GAP; i++) out.push(addressHash(addressAt(account, accountPath, chain, i).address));
+export function findOwnedSfp(
+  txs: { txid: string; hex: string }[],
+  fixed: Set<string>,
+  accounts: OwnerAccount[],
+): SfpOutput[] {
+  const where = new Map<string, { a: number; chain: 0 | 1; i: number }>();
+  const end = accounts.map((acc) => [lastOn(acc.used, acc.path, 0) + GAP, lastOn(acc.used, acc.path, 1) + GAP]);
+  const done = accounts.map(() => [-1, -1]);
+  for (;;) {
+    accounts.forEach((acc, a) =>
+      ([0, 1] as const).forEach((chain) => {
+        for (let i = done[a][chain] + 1; i <= end[a][chain]; i++)
+          where.set(addressHash(addressAt(acc.key, acc.path, chain, i).address), { a, chain, i });
+        done[a][chain] = end[a][chain];
+      }),
+    );
+    const owners = new Set([...fixed, ...where.keys()]);
+    const found = txs.flatMap((t) => sfpOutputsFor(t.hex, t.txid, owners));
+    let grew = false;
+    for (const o of found)
+      for (const h of o.hashes) {
+        const w = where.get(h);
+        if (w && w.i + GAP > end[w.a][w.chain]) {
+          end[w.a][w.chain] = w.i + GAP;
+          grew = true;
+        }
+      }
+    if (!grew) return found;
   }
-  return out;
 }

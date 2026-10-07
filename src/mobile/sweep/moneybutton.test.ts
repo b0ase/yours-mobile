@@ -4,7 +4,7 @@ import {
   addressHash,
   isP2pkh,
   MONEYBUTTON_PATH,
-  ownerRange,
+  findOwnedSfp,
   parseSfp,
   sfpOutputsFor,
   splitSpendable,
@@ -95,13 +95,35 @@ describe('Money Button import', () => {
     ).toHaveLength(0);
   });
 
-  test('owner range covers unused addresses up to last used + gap on both chains', () => {
+  test('owners in the gaps, and the range grows past the highest matched owner', () => {
     const acct = accountKey(PHRASE, '', MONEYBUTTON_PATH);
+    const at = (i: number) => addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, i).address);
+    const push = (hex: string) => (hex.length / 2).toString(16).padStart(2, '0') + hex;
+    const ascii = (t: string) => Buffer.from(t).toString('hex');
+    const sfpScript = (owner: string, amt: number) =>
+      '61' +
+      push(ascii('sfp@0.1')) +
+      push(ascii('x.asset@moneybutton.com')) +
+      push('036d480462d6bc7b69b303cd6688e4bfb9e13a13') +
+      push(owner) +
+      '00000000' +
+      '6a' +
+      push(amt.toString(16).padStart(2, '0') + '00000000000000');
+    const out = (script: string) => '2202000000000000' + (script.length / 2).toString(16).padStart(2, '0') + script;
+    // Used (fee) address at 5 → first range ends at 25. Owner at 22 is in range; owner at 40 is only
+    // reached by growing the range to 22 + 20; owner at 70 stays out of reach.
+    const hex =
+      '01000000' +
+      '00' +
+      '03' +
+      out(sfpScript(at(22), 1)) +
+      out(sfpScript(at(40), 2)) +
+      out(sfpScript(at(70), 3)) +
+      '00000000';
     const used = [addressAt(acct, MONEYBUTTON_PATH, 0, 5)];
-    const r = new Set(ownerRange(acct, MONEYBUTTON_PATH, used));
-    expect(r.size).toBe(5 + 1 + 20 + 20);
-    expect(r.has(addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, 3).address))).toBe(true);
-    expect(r.has(addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, 25).address))).toBe(true);
-    expect(r.has(addressHash(addressAt(acct, MONEYBUTTON_PATH, 0, 26).address))).toBe(false);
+    const found = findOwnedSfp([{ txid: TXID, hex }], new Set(), [{ key: acct, path: MONEYBUTTON_PATH, used }]);
+    expect(found.map((o) => o.amount)).toEqual([1n, 2n]);
+    // A pasted key's hash matches on its own.
+    expect(findOwnedSfp([{ txid: TXID, hex }], new Set([at(70)]), []).map((o) => o.amount)).toEqual([3n]);
   });
 });
