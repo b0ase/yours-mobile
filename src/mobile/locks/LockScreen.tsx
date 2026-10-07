@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { EMPTY_AMOUNTS, PLACEHOLDERS, PREVIEW_LABEL, PREVIEW_NOTE, valuesEntered } from './builderForm';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Check, Plus, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -110,18 +111,18 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<Kind>('gradual');
   const [gmode, setGmode] = useState<GradualMode>('usd');
-  const [amountBsv, setAmountBsv] = useState('0.1');
+  const [amountBsv, setAmountBsv] = useState<string>(EMPTY_AMOUNTS.amountBsv);
   const [unlockOn, setUnlockOn] = useState(dayInput(new Date(Date.now() + 365 * 86_400_000)));
   const [start, setStart] = useState(dayInput(new Date(Date.now() + 86_400_000)));
   const [frequency, setFrequency] = useState<Frequency>('daily');
   const [customDays, setCustomDays] = useState('3');
   const [until, setUntil] = useState<'count' | 'end'>('count');
-  const [count, setCount] = useState('30');
+  const [count, setCount] = useState<string>(EMPTY_AMOUNTS.count);
   const [end, setEnd] = useState(dayInput(new Date(Date.now() + 30 * 86_400_000)));
-  const [usdPer, setUsdPer] = useState('10');
+  const [usdPer, setUsdPer] = useState<string>(EMPTY_AMOUNTS.usdPer);
   const [buffer, setBuffer] = useState(String(DEFAULT_BUFFER_PCT));
-  const [bsvPer, setBsvPer] = useState('0.01');
-  const [pct, setPct] = useState('1');
+  const [bsvPer, setBsvPer] = useState<string>(EMPTY_AMOUNTS.bsvPer);
+  const [pct, setPct] = useState<string>(EMPTY_AMOUNTS.pct);
   const [base, setBase] = useState<PercentBase>('original');
   const [receipt, setReceipt] = useState(false);
   /** null = automatic (extend for schedules over a year, else next). */
@@ -138,8 +139,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   };
   const [typed, setTyped] = useState('');
 
+  const entered = valuesEntered({ kind, gmode, until, amountBsv, usdPer, bsvPer, pct, count });
   const schedule: ScheduleResult | PercentResult | null = useMemo(() => {
-    if (!height) return null;
+    if (!height || !entered) return null;
     const now = new Date();
     if (kind === 'once') return buildOnce(bsvToSats(amountBsv), fromDayInput(unlockOn), now, height);
     const common = {
@@ -152,14 +154,14 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       return buildPercent({ totalSats: bsvToSats(amountBsv), pct: Number(pct), base, start: common.start, frequency, customDays: Number(customDays) }, now, height);
     if (gmode === 'usd') return buildGradual({ ...common, usdPerPayout: Number(usdPer), rate, bufferPct: Number(buffer) }, now, height);
     return buildGradual({ ...common, perPayoutSats: bsvToSats(bsvPer) }, now, height);
-  }, [height, kind, amountBsv, unlockOn, start, frequency, customDays, until, count, end, gmode, pct, base, usdPer, rate, buffer, bsvPer]);
+  }, [height, entered, kind, amountBsv, unlockOn, start, frequency, customDays, until, count, end, gmode, pct, base, usdPer, rate, buffer, bsvPer]);
 
   const surplusTo: SurplusTo = surplusPick ?? (schedule?.pieces.length ? defaultSurplusTo(schedule.pieces, height) : 'next');
   const mode: LockMode = kind === 'once' ? 'date' : gmode === 'usd' ? 'usd-target' : gmode === 'percent' ? 'percent' : 'bsv';
-  const ok = schedule && !schedule.error && schedule.pieces.length > 0;
+  const ok = entered && schedule && !schedule.error && schedule.pieces.length > 0;
 
   const doLock = async () => {
-    if (!schedule || schedule.error || typed !== 'LOCK') return;
+    if (!ok || !schedule || schedule.error || typed !== 'LOCK') return;
     setBusy(true);
     try {
       const pr = schedule as PercentResult;
@@ -415,13 +417,13 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Savings 2027" />
           </Field>
           <button type="button" onClick={pension} className="text-left rounded-2xl p-3 text-xs" style={{ ...cardStyle, color: MUTED }}>
-            <span className="text-white font-semibold">Pension:</span> locked until a date, then pays monthly
+            <span className="text-white font-semibold">Pension template:</span> fills in example values ($100 a month for 5 years, from 3 years out). Check them before you review
           </button>
           <Seg value={kind} onChange={setKind} options={[['gradual', 'Gradual payouts'], ['once', 'One unlock date']]} />
           {kind === 'once' ? (
             <>
               <Field label="Amount (BSV)">
-                <input className={inputCls} inputMode="decimal" value={amountBsv} onChange={(e) => setAmountBsv(e.target.value)} />
+                <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.amountBsv} value={amountBsv} onChange={(e) => setAmountBsv(e.target.value)} />
               </Field>
               <Field label="Unlock on (approximate)">
                 <input className={inputCls} type="date" value={unlockOn} onChange={(e) => setUnlockOn(e.target.value)} />
@@ -434,7 +436,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 <>
                   <div className="flex gap-2">
                     <Field label="Dollars per payout (target)">
-                      <input className={inputCls} inputMode="decimal" value={usdPer} onChange={(e) => setUsdPer(e.target.value)} />
+                      <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.usdPer} value={usdPer} onChange={(e) => setUsdPer(e.target.value)} />
                     </Field>
                     <Field label="Buffer %">
                       <input className={inputCls} inputMode="numeric" value={buffer} onChange={(e) => setBuffer(e.target.value)} />
@@ -463,17 +465,17 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               )}
               {gmode === 'bsv' && (
                 <Field label="BSV per payout">
-                  <input className={inputCls} inputMode="decimal" value={bsvPer} onChange={(e) => setBsvPer(e.target.value)} />
+                  <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.bsvPer} value={bsvPer} onChange={(e) => setBsvPer(e.target.value)} />
                 </Field>
               )}
               {gmode === 'percent' && (
                 <>
                   <div className="flex gap-2">
                     <Field label="Amount (BSV)">
-                      <input className={inputCls} inputMode="decimal" value={amountBsv} onChange={(e) => setAmountBsv(e.target.value)} />
+                      <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.amountBsv} value={amountBsv} onChange={(e) => setAmountBsv(e.target.value)} />
                     </Field>
                     <Field label="% per payout">
-                      <input className={inputCls} inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} />
+                      <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.pct} value={pct} onChange={(e) => setPct(e.target.value)} />
                     </Field>
                   </div>
                   <Seg value={base} onChange={setBase} options={[['original', '% of original'], ['remaining', '% of remaining']]} />
@@ -506,7 +508,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 <>
                   <Seg value={until} onChange={setUntil} options={[['count', 'Number of payouts'], ['end', 'End date']]} />
                   {until === 'count' ? (
-                    <input className={inputCls} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value)} />
+                    <input className={inputCls} inputMode="numeric" placeholder={PLACEHOLDERS.count} value={count} onChange={(e) => setCount(e.target.value)} />
                   ) : (
                     <input className={inputCls} type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
                   )}
@@ -523,9 +525,10 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
           {ok && (
             <div className={card} style={cardStyle}>
               <div className="flex justify-between text-sm text-white font-bold">
-                <span>Total locked</span>
+                <span>{PREVIEW_LABEL}</span>
                 <span>{fmtBsv(schedule!.totalSats)}</span>
               </div>
+              <div className="text-[11px] font-semibold" style={{ color: GOLD }}>{PREVIEW_NOTE}</div>
               <div className="text-xs" style={{ color: MUTED }}>
                 {schedule!.pieces.length} lock output{schedule!.pieces.length === 1 ? '' : 's'}
                 {est(schedule!.totalSats)}
