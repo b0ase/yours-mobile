@@ -389,15 +389,29 @@ export const Dock = ({
               <ChevronRight size={16} color="#fff" />
             </button>
             <span className="flex-1 min-w-0 text-[11px] leading-tight" style={{ color: MUTED }}>
-              {pickedIndex >= 0 ? `Move ${itemLabel(items[pickedIndex], labels)}` : 'Tap an item to move it'}
+              {pickedIndex >= 0 ? itemLabel(items[pickedIndex], labels) : 'Tap an item'}
             </span>
-            <button
-              type="button"
-              onClick={onAdd}
-              className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
-            >
-              <Plus size={14} /> Add
-            </button>
+            {pickedIndex >= 0 ? (
+              // Touch and hold › Remove from Dock: it goes back to the Home grid (owner, round 4).
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(removeFromDock(items, items[pickedIndex]));
+                  setPicked(null);
+                }}
+                className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+              >
+                <Minus size={14} /> Remove from Dock
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onAdd}
+                className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+              >
+                <Plus size={14} /> Add
+              </button>
+            )}
           </div>
           <button
             type="button"

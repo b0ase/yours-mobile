@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { classifySwipe, edgeFade, fadeMask, longPressCancelled, LONG_PRESS_SLOP } from './gesture';
+import {
+  classifySwipe,
+  edgeFade,
+  fadeMask,
+  lockAxis,
+  longPressCancelled,
+  LONG_PRESS_SLOP,
+  pageRelease,
+  rubberBand,
+} from './gesture';
 import { backGoesHome } from './phoneBack';
 
 describe('phone gestures', () => {
@@ -32,5 +41,27 @@ describe('phone gestures', () => {
     expect(backGoesHome('wallet')).toBe(true);
     expect(backGoesHome('home')).toBe(false);
     expect(backGoesHome(null)).toBe(false);
+  });
+});
+
+describe('iOS-style paging maths', () => {
+  test('axis locks after 10px, by the larger component', () => {
+    expect(lockAxis(5, 5)).toBe(null);
+    expect(lockAxis(12, 3)).toBe('x');
+    expect(lockAxis(3, -12)).toBe('y');
+  });
+  test('release: distance or flick commits, never past an end', () => {
+    expect(pageRelease(-200, 0, 390, true, true)).toBe(1);
+    expect(pageRelease(200, 0, 390, true, true)).toBe(-1);
+    expect(pageRelease(-60, 0, 390, true, true)).toBe(0);
+    expect(pageRelease(-60, -0.8, 390, true, true)).toBe(1);
+    expect(pageRelease(-60, 0.8, 390, true, true)).toBe(0);
+    expect(pageRelease(-300, -1, 390, true, false)).toBe(0);
+    expect(pageRelease(300, 1, 390, false, true)).toBe(0);
+  });
+  test('rubber band moves less than the finger and keeps the sign', () => {
+    expect(Math.abs(rubberBand(100, 390))).toBeLessThan(40);
+    expect(rubberBand(-100, 390)).toBeLessThan(0);
+    expect(rubberBand(0, 390)).toBe(0);
   });
 });

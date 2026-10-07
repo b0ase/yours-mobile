@@ -6,6 +6,8 @@ import {
   DEFAULT_DOCK,
   defaultDock,
   DOCK_MAX,
+  dockAppUrls,
+  homeScreenTiles,
   OLD_DEFAULT_DOCK,
   moveInDock,
   normaliseDock,
@@ -89,9 +91,10 @@ describe('phone dock model', () => {
     expect(cleanDock(raw, false)).toEqual([{ kind: 'screen', id: 'wallet' }, app(1)]);
   });
 
-  test('cap: never more than DOCK_MAX; the 13th is refused', () => {
+  test('cap: four slots (plus the fixed b); the 5th is refused', () => {
     const many = Array.from({ length: 20 }, (_, i) => app(i));
-    expect(cleanDock(many, false)).toHaveLength(DOCK_MAX);
+    // An old saved dock (up to 12) is kept, never trimmed to 4.
+    expect(cleanDock(many, false)).toHaveLength(12);
     const full = many.slice(0, DOCK_MAX);
     const r = addToDock(full, app(99), false);
     expect(r.ok).toBe(false);
@@ -100,7 +103,7 @@ describe('phone dock model', () => {
   });
 
   test('add, remove, move', () => {
-    let items = [...DEFAULT_DOCK];
+    let items = removeFromDock(defaultDock(false), { kind: 'screen', id: 'chat' });
     const a = addToDock(items, { kind: 'screen', id: 'games' }, false);
     expect(a.ok).toBe(true);
     items = a.items;
@@ -108,11 +111,50 @@ describe('phone dock model', () => {
     expect(addToDock(items, { kind: 'screen', id: 'games' }, false).ok).toBe(false);
     items = moveInDock(items, items.length - 1, 0);
     expect(items[0]).toEqual({ kind: 'screen', id: 'games' });
-    items = removeFromDock(items, { kind: 'screen', id: 'wallet' });
-    expect(items.some((i) => i.kind === 'screen' && i.id === 'wallet')).toBe(false);
-    // Remove everything: allowed (HOME keeps Send/Receive).
     for (const i of [...items]) items = removeFromDock(items, i);
     expect(items).toEqual([]);
+  });
+
+  test('a full default dock refuses a fifth item', () => {
+    const r = addToDock(defaultDock(false), { kind: 'screen', id: 'games' }, false);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('full');
+  });
+
+  test('iPhone model: an app or screen is in the dock or on Home, never both, never lost', () => {
+    const strip = stripFor(false, true);
+    const all = (items: DockItem[]) => [
+      ...items.flatMap((i) => (i.kind === 'screen' ? [i.id] : [])),
+      ...homeScreenTiles(items, strip),
+    ];
+    // Default: Wallet, Exchange, Feed, Chat in the dock, none on Home.
+    expect(homeScreenTiles(defaultDock(false), strip)).toEqual([]);
+    // Remove Wallet: it is a Home tile (first), and still exactly once overall.
+    let items = removeFromDock(defaultDock(false), { kind: 'screen', id: 'wallet' });
+    expect(homeScreenTiles(items, strip)).toEqual(['wallet']);
+    expect(all(items).filter((id) => id === 'wallet')).toHaveLength(1);
+    // Add it back from Home: off the Home grid again.
+    const r = addToDock(items, { kind: 'screen', id: 'wallet' }, false);
+    expect(r.ok).toBe(true);
+    items = r.items;
+    expect(homeScreenTiles(items, strip)).toEqual([]);
+    // Every default screen is somewhere, whatever is removed.
+    for (const i of defaultDock(false)) {
+      const less = removeFromDock(defaultDock(false), i);
+      expect(new Set(all(less))).toEqual(new Set(['wallet', 'exchange', 'feed', 'chat']));
+    }
+    // Apps: in the dock, Home leaves them out; removed, they come back (dockAppUrls).
+    const withApp = [...removeFromDock(defaultDock(false), { kind: 'screen', id: 'chat' }), app(1)];
+    expect(dockAppUrls(withApp).has(app(1).kind === 'app' ? 'https://app1.example' : '')).toBe(true);
+    expect(dockAppUrls(removeFromDock(withApp, app(1))).size).toBe(0);
+  });
+
+  test('store: Apps stands in for Exchange, and is a Home tile when off the dock', () => {
+    const strip = stripFor(true, false);
+    expect(homeScreenTiles(defaultDock(true), strip)).toEqual([]);
+    const less = removeFromDock(defaultDock(true), { kind: 'screen', id: 'apps' });
+    expect(homeScreenTiles(less, strip)).toEqual(['apps']);
+    expect(homeScreenTiles(less, strip)).not.toContain('exchange');
   });
 
   test('store build: Exchange is dropped from a saved dock and cannot be added', () => {

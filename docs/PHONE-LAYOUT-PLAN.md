@@ -333,6 +333,12 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - **Hold on the dock's big b is back:** tap = HOME, touch and hold 500 ms = the full /m/agent page (not a sheet), with the composer focused on release where iOS allows. Built for WKWebView: touch events drive it (pointer events only for mouse/pen), no callout/selection, contextmenu blocked, a move over 10 px cancels; a gold ring fills while holding; tap and hold never both fire.
 - **HOME:** a fixed 4 × 6 page (24 slots) filling the space between the top bar and the dock, like an iPhone home page. Empty slots stay empty; more than 24 continue below. Scroll down for Your apps (+ Add app), then Recents (recently opened apps).
 
+
+### 14.3 Round 4 (owner, 7 Oct 2026), now built
+- **Top-bar b:** a solid gold b on its own (no circle); black on the store edition's yellow bar.
+- **iOS-style paging:** the page follows the finger, the neighbour page slides in beside it, rubber band at the ends, snap on release (~280 ms ease-out; commits past 35% of the width or on a flick). Axis locks after 10 px, so vertical scrolling is untouched. Dock and dot taps slide too. Transforms only; reduced motion = no slide. How: the routed page sits in `<PhonePage>` (patched round upstream's `<Routes>`), PhoneShell renders the neighbour from `phone/pager.tsx` in a PeekContext (its TopNav hides; the real bar is portalled to `<body>` so it never moves), and the route changes after the snap. Known limit: the neighbour is mounted for the drag and the page remounts once the route changes (no permanent track yet).
+- **Dock like the iPhone's:** 4 slots plus the fixed centre b. Wallet, Exchange, Feed and Chat (Apps in the store edition) are Home tiles that sit in the dock by default; each is in exactly one place. Touch and hold a dock item › Remove from Dock: it goes back on Home (screens first, apps back into the favourites). Touch and hold a Home tile › Add to Dock; when full, "The dock is full (4)". A dock saved before the limit (up to 12) is kept as it is and not trimmed; adding is refused until it is under 4. Migration rules unchanged.
+
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 
 **Decided shape:** the phone layout ships first. The b button sits in the middle of the dock: one tap = HOME, press and hold = the $b agent listening (like Siri). Speech becomes a request to the agent, which can act.

@@ -612,7 +612,9 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/App.tsx': [
     // Phone layout (src/mobile/phone, behind the Settings › Testing switch): the dock, page swipes and the hold-b
     // agent, mounted once inside the router. Renders nothing while the switch is off.
-    ['<Routes>', '<Suspense fallback={null}><PhoneShell /></Suspense>\n<Routes>'],
+    // PhonePage wraps the routed page so the phone layout can drag it sideways (phone/pager.tsx).
+    ['<Routes>', '<Suspense fallback={null}><PhoneShell /></Suspense>\n<PhonePage><Routes>'],
+    ['</Routes>', '</Routes></PhonePage>'],
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
       "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';",
@@ -623,7 +625,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',

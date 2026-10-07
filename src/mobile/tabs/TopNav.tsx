@@ -1,5 +1,7 @@
 import { routeFor } from './tabs';
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useInPeek } from '../phone/pageEl';
 import { useBackClose } from '../backStack';
 import { useAccountNames } from '../names/accountNames';
 import { AccountList } from '../account/AccountSwitcher';
@@ -44,6 +46,12 @@ const ACCENT = FLIP ? '#010101' : '#F5B800';
 const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
 
 export const TopNav = () => {
+  // A neighbour page shown during a page drag: the real bar is already on screen.
+  if (useInPeek()) return null;
+  return <TopNavBar />;
+};
+
+const TopNavBar = () => {
   const { theme } = useTheme();
   const { chromeStorageService, apiContext, lockWallet } = useServiceContext();
   const phone = usePhoneLayout();
@@ -121,104 +129,108 @@ export const TopNav = () => {
     <>
       {!phone && <AccountStrip />}
       {phone ? (
-        // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
-        // Accounts · Calls · b (the agent, /m/agent) · Media · Settings. No account strip above it.
-        <div
-          className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
-          style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
-        >
-          <button
-            type="button"
-            onClick={() => setDrawer(true)}
-            className="w-9 h-9 flex items-center justify-center bg-transparent"
-            aria-label="Accounts menu"
+        // Portalled to <body> so a page drag (phone/pager.tsx) never moves the bar.
+        createPortal(
+          // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
+          // Accounts · Calls · b (the agent, /m/agent) · Media · Settings. No account strip above it.
+          <div
+            className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
+            style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
           >
-            <Menu size={22} color={ICON} />
-          </button>
-          <button
-            type="button"
-            aria-label="Calls"
-            onClick={() => setCallsOpen(true)}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: RING }}
-          >
-            <Phone size={16} color={ACCENT} />
-          </button>
-          <button
-            type="button"
-            aria-label={X_MARK ? 'bX agent' : 'b agent'}
-            onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
-            aria-pressed={onAgent}
-            className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer"
-            style={{ background: FLIP ? '#010101' : '#F5B800' }}
-          >
-            {FLIP ? (
-              <img src={bGlyph} alt="" width={22} height={22} />
-            ) : (
-              <svg viewBox="23 8 74 100" width={17} height={23} aria-hidden>
-                <mask id="bnavp">
-                  <rect x="0" y="0" width="140" height="140" fill="#fff" />
-                  <circle cx="60" cy="72" r="15" fill="#000" />
-                </mask>
-                <g fill="#010101" mask="url(#bnavp)">
-                  <polygon points="45,12 45,76 27,76 27,30" />
-                  <circle cx="60" cy="72" r="33" />
-                </g>
-              </svg>
+            <button
+              type="button"
+              onClick={() => setDrawer(true)}
+              className="w-9 h-9 flex items-center justify-center bg-transparent"
+              aria-label="Accounts menu"
+            >
+              <Menu size={22} color={ICON} />
+            </button>
+            <button
+              type="button"
+              aria-label="Calls"
+              onClick={() => setCallsOpen(true)}
+              className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              style={{ border: RING }}
+            >
+              <Phone size={16} color={ACCENT} />
+            </button>
+            <button
+              type="button"
+              aria-label={X_MARK ? 'bX agent' : 'b agent'}
+              onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
+              aria-pressed={onAgent}
+              // Owner round 4: a solid gold b on its own, no circle (black on the store edition's yellow bar).
+              className="w-10 h-10 flex items-center justify-center bg-transparent cursor-pointer"
+            >
+              {FLIP ? (
+                <svg viewBox="23 8 74 100" width={21} height={28} aria-hidden>
+                  <mask id="bnavp">
+                    <rect x="0" y="0" width="140" height="140" fill="#fff" />
+                    <circle cx="60" cy="72" r="15" fill="#000" />
+                  </mask>
+                  <g fill="#010101" mask="url(#bnavp)">
+                    <polygon points="45,12 45,76 27,76 27,30" />
+                    <circle cx="60" cy="72" r="33" />
+                  </g>
+                </svg>
+              ) : (
+                <img src={bGlyph} alt="" width={30} height={30} draggable={false} />
+              )}
+            </button>
+            <button
+              type="button"
+              aria-label="Media"
+              onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
+              aria-pressed={onMedia}
+              className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              style={{ border: RING }}
+            >
+              <Play size={16} color={ACCENT} fill={ACCENT} />
+            </button>
+            <button
+              type="button"
+              aria-label="Settings and lock"
+              aria-haspopup="menu"
+              aria-expanded={phoneMenu}
+              onClick={() => setPhoneMenu((v) => !v)}
+              className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              style={{ border: RING }}
+            >
+              <Settings size={16} color={ICON} />
+            </button>
+            {phoneMenu && (
+              <>
+                <div className="fixed inset-0 z-[299]" onClick={() => setPhoneMenu(false)} />
+                <div
+                  role="menu"
+                  className="absolute right-2 top-12 z-[300] w-52 rounded-2xl p-1.5 bg-[#17191E] border border-[#2b2f36] shadow-xl"
+                >
+                  {(
+                    [
+                      [<Settings key="s" size={16} color="#fff" />, 'Settings', () => go()],
+                      [<Lock key="l" size={16} color="#fff" />, 'Lock now', () => void lockWallet()],
+                    ] as const
+                  ).map(([icon, label, run]) => (
+                    <button
+                      key={label}
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setPhoneMenu(false);
+                        run();
+                      }}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-white bg-transparent active:bg-white/5"
+                    >
+                      {icon}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-          </button>
-          <button
-            type="button"
-            aria-label="Media"
-            onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
-            aria-pressed={onMedia}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: RING }}
-          >
-            <Play size={16} color={ACCENT} fill={ACCENT} />
-          </button>
-          <button
-            type="button"
-            aria-label="Settings and lock"
-            aria-haspopup="menu"
-            aria-expanded={phoneMenu}
-            onClick={() => setPhoneMenu((v) => !v)}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: RING }}
-          >
-            <Settings size={16} color={ICON} />
-          </button>
-          {phoneMenu && (
-            <>
-              <div className="fixed inset-0 z-[299]" onClick={() => setPhoneMenu(false)} />
-              <div
-                role="menu"
-                className="absolute right-2 top-12 z-[300] w-52 rounded-2xl p-1.5 bg-[#17191E] border border-[#2b2f36] shadow-xl"
-              >
-                {(
-                  [
-                    [<Settings key="s" size={16} color="#fff" />, 'Settings', () => go()],
-                    [<Lock key="l" size={16} color="#fff" />, 'Lock now', () => void lockWallet()],
-                  ] as const
-                ).map(([icon, label, run]) => (
-                  <button
-                    key={label}
-                    role="menuitem"
-                    type="button"
-                    onClick={() => {
-                      setPhoneMenu(false);
-                      run();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-white bg-transparent active:bg-white/5"
-                  >
-                    {icon}
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+          </div>,
+          document.body,
+        )
       ) : (
         // Five equal slots: Accounts · Calls · b agent · Media · Settings.
         <div

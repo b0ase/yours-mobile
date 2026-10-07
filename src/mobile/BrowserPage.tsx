@@ -4,6 +4,12 @@ import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeFavourites';
+import { useDock } from './phone/dockStore';
+import { dockAppUrls, homeScreenTiles } from './phone/dockModel';
+import { screenById, STRIP, type ScreenId } from './phone/screens';
+import { SCREEN_ICON, screenLabel } from './phone/icons';
+import { PHONE_GO } from './phone/events';
 import bGlyph from './brand/bwallet-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
@@ -102,6 +108,8 @@ type Tile = {
   bapp?: BApp;
   /** One-line tagline for third-party apps (from BSVRadar or the Metanet app store). */
   desc?: string;
+  /** Phone layout: a strip screen shown as a Home tile (Wallet, Exchange, Feed, Chat…), not a web app. */
+  screen?: ScreenId;
 };
 
 const ICON = 'h-[60px] w-[60px] rounded-[16px]';
@@ -114,6 +122,14 @@ const ONE_LINE = 'overflow-hidden text-ellipsis whitespace-nowrap';
 /** Home-screen icon: the site's icon, else a monogram ("b" in gold for bApps). */
 const TileIcon = ({ tile }: { tile: Tile }) => {
   const [failed, setFailed] = useState(false);
+  if (tile.screen) {
+    const Icon = SCREEN_ICON[tile.screen];
+    return (
+      <div className={`${ICON} flex items-center justify-center`} style={{ background: '#17191E' }}>
+        <Icon size={28} color="#FFD24D" />
+      </div>
+    );
+  }
   if (tile.icon && !failed) {
     return (
       <img
@@ -378,7 +394,6 @@ const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) 
 allowFrameUrls(ALL_TILES.filter((t) => !t.bapp?.noFrame).map((t) => t.url));
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
-const FAV_KEY = 'bwallet:favourite-apps';
 // The featured suite: our own bApps, then the ones with their original icons, then Treechat and Twetch.
 const DEFAULT_FAVOURITES = [
   'bChat',
@@ -409,7 +424,8 @@ const HOME_ADDITIONS: { flag: string; name: string }[] = TOKENBLASTER_ENABLED
   ? [{ flag: 'bwallet:home-add:tokenblaster', name: 'TokenBlaster' }]
   : [];
 
-const readFavourites = (): string[] => {
+const readFavourites = (): string[] => mergeFavouriteExtras(readSavedFavourites());
+const readSavedFavourites = (): string[] => {
   try {
     const raw = localStorage.getItem(FAV_KEY);
     if (!raw) return DEFAULT_FAVOURITES;
@@ -470,6 +486,13 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
   const [error, setError] = useState('');
   const [recent, setRecent] = useState(readRecent);
   const [favourites, setFavourites] = useState(readFavourites);
+  // The dock puts an app back on Home when it leaves the dock (phone/homeFavourites.ts).
+  useEffect(() => {
+    const reread = () => setFavourites(readFavourites());
+    window.addEventListener(FAVOURITES_CHANGED, reread);
+    return () => window.removeEventListener(FAVOURITES_CHANGED, reread);
+  }, []);
+  const [dock] = useDock();
   const [info, setInfo] = useState<Tile | null>(null);
   const [page, setPage] = useState(() =>
     only === 'home' ? 0 : only === 'games' ? 3 : only === 'apps' ? 1 : readPage(),
@@ -643,7 +666,9 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
             <AppTile
               key={t.key}
               tile={t}
-              onOpen={() => go(t.url, t.bapp)}
+              onOpen={() =>
+                t.screen ? window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: t.screen })) : go(t.url, t.bapp)
+              }
               onInfo={() => setInfo(t)}
               onArrange={() => {
                 setInfo(null);
@@ -684,7 +709,18 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
               <ArrangeGrid tiles={favouriteTiles} onReorder={reorderHome} onRemove={removeFromHome} />
             </div>
           ) : phone && only === 'home' ? (
-            homePage(favouriteTiles)
+            homePage([
+              ...homeScreenTiles(dock, STRIP).map((id): Tile => {
+                const sc = screenById(id);
+                return {
+                  key: `screen:${id}`,
+                  name: screenLabel(id, sc?.label ?? id),
+                  url: sc?.route ?? '',
+                  screen: id,
+                };
+              }),
+              ...favouriteTiles.filter((t) => !dockAppUrls(dock).has(t.url)),
+            ])
           ) : favouriteTiles.length > 0 ? (
             grid(0, favouriteTiles)
           ) : (
@@ -919,13 +955,13 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
                         </span>
                       )}
                     </div>
-                    <div className={`text-xs text-[#98A2B3] ${ONE_LINE}`}>{hostOf(info.url)}</div>
+                    {!info.screen && <div className={`text-xs text-[#98A2B3] ${ONE_LINE}`}>{hostOf(info.url)}</div>}
                   </div>
                   <button onClick={() => setInfo(null)} aria-label="Close" className="p-1">
                     <X size={20} style={{ color: '#98A2B3' }} />
                   </button>
                 </div>
-                {info.bapp ? (
+                {info.screen ? null : info.bapp ? (
                   <p className="text-sm text-[#D0D5DD] leading-relaxed">{info.bapp.verb}</p>
                 ) : (
                   <>
@@ -935,9 +971,10 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
                 )}
                 <button
                   onClick={() => {
-                    const url = info.url;
+                    const { url, screen } = info;
                     setInfo(null);
-                    go(url);
+                    if (screen) window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: screen }));
+                    else go(url);
                   }}
                   className="rounded-xl py-3 text-sm font-bold"
                   style={{ background: '#FFD24D', color: '#010101' }}
@@ -948,12 +985,14 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
                 {phone && (
                   <button
                     onClick={() => {
-                      const item: DockItem = {
-                        kind: 'app',
-                        url: info.url,
-                        name: info.name,
-                        icon: typeof info.icon === 'string' ? info.icon : undefined,
-                      };
+                      const item: DockItem = info.screen
+                        ? { kind: 'screen', id: info.screen }
+                        : {
+                            kind: 'app',
+                            url: info.url,
+                            name: info.name,
+                            icon: typeof info.icon === 'string' ? info.icon : undefined,
+                          };
                       setInfo(null);
                       window.dispatchEvent(new CustomEvent(PHONE_ADD_TO_DOCK, { detail: item }));
                     }}
@@ -962,13 +1001,15 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
                     <Plus size={15} style={{ color: '#FFD24D' }} /> Add to Dock
                   </button>
                 )}
-                <button
-                  onClick={() => toggleFavourite(info)}
-                  className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
-                >
-                  <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
-                  {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
-                </button>
+                {!info.screen && (
+                  <button
+                    onClick={() => toggleFavourite(info)}
+                    className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                  >
+                    <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
+                    {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
+                  </button>
+                )}
                 {isFavourite(info) && (!only || only === 'home') && (
                   <button
                     onClick={() => {
