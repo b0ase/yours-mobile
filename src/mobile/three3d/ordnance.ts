@@ -38,12 +38,35 @@ export const RARITY_COLOR: Record<Rarity, string> = {
 
 export const storeUrl = (weaponId: string) => `${ORDNANCE_STORE}#${weaponId}`;
 
+/**
+ * The manifest's art and model paths are relative to tokenblaster.lol: its own games load them from the
+ * same origin. We don't. The app's page is capacitor://localhost (iOS) or https://localhost (Android), the
+ * extension's is chrome-extension://…, the web wallet's is web.bwalletx.com, so a relative path pointed at
+ * the wrong origin in every edition: every tile was a broken image (its alt text showing) and every cabinet
+ * an empty room (iPhone, 7 Oct 2026). Resolve against the catalogue's origin; an absolute URL passes through.
+ */
+export const absoluteUrl = (path: string): string => {
+  if (typeof path !== 'string' || !path) return path;
+  try {
+    // Against the site root, as the games resolve them: "art/x.png" is /art/x.png there, not /api/ordnance/art/x.png.
+    return new URL(path, new URL(ORDNANCE_API).origin + '/').href;
+  } catch {
+    return path;
+  }
+};
+
+export const normaliseWeapon = (w: Weapon): Weapon => ({
+  ...w,
+  image: absoluteUrl(w.image),
+  model: absoluteUrl(w.model),
+});
+
 let manifest: Promise<Weapon[]> | null = null;
 /** The 22 guns. Cached for the session; a failed fetch is retried on the next call. */
 export const loadWeapons = (): Promise<Weapon[]> =>
   (manifest ??= fetch(`${ORDNANCE_API}/manifest`)
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`manifest ${r.status}`))))
-    .then((d: { weapons: Weapon[] }) => d.weapons)
+    .then((d: { weapons: Weapon[] }) => (Array.isArray(d?.weapons) ? d.weapons : []).map(normaliseWeapon))
     .catch((e) => {
       manifest = null;
       throw e;
