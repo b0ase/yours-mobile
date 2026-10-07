@@ -6,6 +6,7 @@ import { usePrefs } from '../settings/usePrefs';
 import { loadSession } from '../chat/api';
 import { mentionNames } from './notify';
 import { startNotify, stopNotify } from './engine';
+import { startPots, stopPots } from '../pots/potsEngine';
 
 /**
  * App-wide, renders nothing: keeps the notification poller (engine.ts) running for the unlocked
@@ -39,6 +40,12 @@ const NotifyEngine = () => {
     });
   }, [apiContext, isLocked, addresses, identity.bapId, names, prefs.twetchUserId]);
   useEffect(() => stopNotify, []);
+  // Pots: pay standing orders that are due on open / resume (pots/payDue.ts).
+  useEffect(() => {
+    if (isLocked || !chromeStorageService) return stopPots();
+    startPots({ store: chromeStorageService });
+  }, [isLocked, chromeStorageService]);
+  useEffect(() => stopPots, []);
   return null;
 };
 

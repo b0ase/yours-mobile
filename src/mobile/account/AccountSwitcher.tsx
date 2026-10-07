@@ -1,7 +1,7 @@
 import { accountTag } from './accountSwitch';
 import { Check, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { allAgentsStopped, getAgentAccount, isAgentAccount } from '../agents/agentAccounts';
+import { allAgentsStopped, getAgentAccount, isAgentAccount, isPotAccount } from '../agents/agentAccounts';
 import { AgentBadge } from '../agents/AgentsScreen';
 import { accountNamesFor } from '../names/accountNames';
 import { AccountAvatar } from '../names/AccountAvatar';
@@ -11,7 +11,9 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 export const AgentMark = ({ id }: { id?: string }) =>
-  id && isAgentAccount(id) ? <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} /> : null;
+  id && isAgentAccount(id) ? (
+    <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} label={isPotAccount(getAgentAccount(id)) ? 'POT' : 'AGENT'} />
+  ) : null;
 
 /** Every account as a tappable row. compact = the strip's dropdown (smaller, no address line). */
 export const AccountList = ({

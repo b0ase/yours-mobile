@@ -138,3 +138,34 @@ export const languageOptsFor = (
   store,
   filterStrong: store || prefs.filterStrong,
 });
+
+/**
+ * Pots and standing orders (docs/POTS-SUBSCRIPTIONS-PLAN.md §5). Pots (labelled sub-accounts: fund, name,
+ * cap, Stop/Resume) and standing orders to a person or paymail are P2P transfers, so they are in every build.
+ */
+export const potsEnabled = (_store = STORE_BUILD) => true;
+export const standingOrdersEnabled = (_store = STORE_BUILD) => true;
+
+/**
+ * Subscriptions to apps and services (the own-service payees: bChat, $b agent; later "Subscribe with
+ * bWalletX" requests, the bridge method, link handler and merchant cards): bWalletX only, absent from a
+ * store build even as code (Apple 3.1.1, Play Payments). Literal env check so Vite inlines it and Rollup
+ * drops the dead branches. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const SUBSCRIPTIONS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+export const subscriptionsEnabled = (store = STORE_BUILD) => !store;
+
+/**
+ * The bWalletX 1¢/day billing subscription: never in a store build. Outside one it still needs the signed
+ * remote switch and the user's acceptance (config/remoteConfig.ts), and it is OFF today.
+ */
+export const BILLING_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+export const billingAllowed = (store = STORE_BUILD) => !store;

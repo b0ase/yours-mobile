@@ -17,6 +17,8 @@ export type AgentAccount = {
   createdAt: number;
   /** This account's ghost colour (PixelGhost): its badge on the wallet card and its avatar. Set once. */
   ghostColor?: string;
+  /** 'pot' = a savings pot that pays standing orders (pots/pots.ts). Pots are hidden from the agents list. */
+  kind?: 'agent' | 'pot';
 };
 
 /**
@@ -27,7 +29,8 @@ export const GHOST_COLORS = ['#FF0000', '#FFB8FF', '#00FFFF', '#FFB852', '#2ECC7
 
 export type AgentLogEntry = {
   at: number;
-  /** What the agent did: 'send', 'buy', 'sell', 'list', 'mint', 'sweep', 'fund', 'stop', 'resume'… */
+  /** What the agent did: 'send', 'buy', 'sell', 'list', 'mint', 'sweep', 'fund', 'stop', 'resume', and for pots
+   * 'sub-pay', 'sub-pause', 'sub-resume', 'sub-cancel', 'sub-void', 'topup'… */
   action: string;
   detail: string;
   /** Dollars spent by this action (0 for non-spending actions). */
@@ -74,6 +77,10 @@ export const onAgentsChange = (fn: () => void) => {
 export const listAgentAccounts = (): AgentAccount[] => Object.values(read<Store>(KEY, {}));
 export const getAgentAccount = (id?: string | null): AgentAccount | null => (id ? (read<Store>(KEY, {})[id] ?? null) : null);
 export const isAgentAccount = (id?: string | null) => !!getAgentAccount(id);
+/** A pot (pots/pots.ts) is an agent account with kind 'pot'. */
+export const isPotAccount = (a?: AgentAccount | null) => a?.kind === 'pot';
+/** Agent accounts that are agents, not pots: what the agents list and bApps see. */
+export const listAgentsOnly = (): AgentAccount[] => listAgentAccounts().filter((a) => !isPotAccount(a));
 
 /** An agent account's ghost colour, or null for a person's account. Accounts marked before colours existed
  * get a stable one from their address. */
@@ -89,12 +96,23 @@ export const ghostColorOf = (id?: string | null): string | null => {
 const save = (a: AgentAccount) => write(KEY, { ...read<Store>(KEY, {}), [a.identityAddress]: a });
 
 /** Mark an account as an agent account (Add account › Agent account). */
-export const markAgentAccount = (identityAddress: string, labels: string[] = [], now = Date.now()) => {
+export const markAgentAccount = (
+  identityAddress: string,
+  labels: string[] = [],
+  now = Date.now(),
+  opts: { kind?: 'agent' | 'pot' } = {},
+) => {
   const used = new Set(listAgentAccounts().map((x) => x.ghostColor));
   const ghostColor = GHOST_COLORS.find((c) => !used.has(c)) ?? GHOST_COLORS[listAgentAccounts().length % GHOST_COLORS.length];
   const a: AgentAccount = { identityAddress, labels: cleanLabels(labels), stopped: false, dailyCapUsd: null, createdAt: now, ghostColor };
+  if (opts.kind === 'pot') a.kind = 'pot';
   save(a);
-  appendAgentLog(identityAddress, { at: now, action: 'create', detail: 'Agent account created', usd: 0 });
+  appendAgentLog(identityAddress, {
+    at: now,
+    action: 'create',
+    detail: opts.kind === 'pot' ? 'Pot created' : 'Agent account created',
+    usd: 0,
+  });
   return a;
 };
 
