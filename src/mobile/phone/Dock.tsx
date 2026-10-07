@@ -5,14 +5,14 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { useBackClose } from '../backStack';
 import { isBWalletX } from '../storeBuild';
 import { dockKey, moveInDock, removeFromDock, splitDock, type DockItem } from './dockModel';
-import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
+import { B_HOLD_MS, B_HOLD_SLOP, DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
  * sideways when there are more, with a fade on the side that has more. A sibling of the page, never inside it,
  * so its sideways scroll can't turn into a page swipe (PhoneShell also ignores touches that start here).
- * The big b in the centre: tap = HOME (the app grid). The b agent is "Ask b" in the top bar.
+ * The big b in the centre: tap = HOME (the app grid), touch and hold = the b agent page.
  * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds.
  */
 const GOLD = '#FFD24D';
@@ -26,6 +26,8 @@ type Props = {
   badges: Record<string, string | undefined>;
   onOpen: (item: DockItem) => void;
   onHome: () => void;
+  /** Touch and hold the b: the b agent page. */
+  onAgent: () => void;
   onChange: (items: DockItem[]) => void;
   onAdd: () => void;
   /** Bumped by the shell on a page change: arranging ends. */
@@ -152,41 +154,148 @@ const Tile = ({
 };
 
 /**
- * The big b in the centre (owner, 7 Oct 2026: "I DO like the big b button"). Tap = HOME, the app grid. No hold:
- * the b agent is "Ask b" in the top bar, a full page that handles the keyboard.
+ * The big b in the centre. Tap = HOME (the app grid); touch and hold (B_HOLD_MS) = the b agent page (/m/agent).
+ * iOS WKWebView swallows long presses (callout, selection, contextmenu) and may cancel pointer events, so the
+ * hold runs on touch events where there are any (pointer events only for mouse/pen), the callout and selection
+ * are off, and the press is decided here, not by click: a tap never also holds, a hold never also taps.
+ * A gold ring fills while holding.
  */
-const HomeButton = ({ onHome, disabled }: { onHome: () => void; disabled: boolean }) => (
-  <button
-    type="button"
-    disabled={disabled}
-    aria-label="Home"
-    onClick={onHome}
-    onContextMenu={(e) => e.preventDefault()}
-    className="relative shrink-0 -mt-1 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none active:scale-90 transition-transform disabled:opacity-40"
-    style={{
-      background: FLIP ? '#F5B800' : '#010101',
-      boxShadow: `0 0 0 2px ${FLIP ? '#010101' : GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
-      WebkitTouchCallout: 'none',
-    }}
-  >
-    {FLIP ? (
-      <svg viewBox="23 8 74 100" width={22} height={30} aria-hidden>
-        <mask id="bdock">
-          <rect x="0" y="0" width="140" height="140" fill="#fff" />
-          <circle cx="60" cy="72" r="15" fill="#000" />
-        </mask>
-        <g fill="#010101" mask="url(#bdock)">
-          <polygon points="45,12 45,76 27,76 27,30" />
-          <circle cx="60" cy="72" r="33" />
-        </g>
-      </svg>
-    ) : (
-      <img src={bGlyph} alt="" width={30} height={30} draggable={false} />
-    )}
-  </button>
-);
+const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent: () => void; disabled: boolean }) => {
+  const timer = useRef<number | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const held = useRef(false);
+  const lastTouch = useRef(0);
+  const [pressing, setPressing] = useState(false);
+  const stop = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    start.current = null;
+    setPressing(false);
+  };
+  useEffect(() => stop, []);
+  const begin = (x: number, y: number) => {
+    if (disabled) return;
+    stop();
+    held.current = false;
+    start.current = { x, y };
+    setPressing(true);
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      held.current = true;
+      setPressing(false);
+      navigator.vibrate?.(15);
+      onAgent();
+    }, B_HOLD_MS);
+  };
+  const move = (x: number, y: number) => {
+    const s = start.current;
+    if (s && longPressCancelled(x - s.x, y - s.y, B_HOLD_SLOP)) stop();
+  };
+  const end = () => {
+    const wasPress = start.current !== null;
+    const wasHeld = held.current;
+    stop();
+    held.current = false;
+    if (wasHeld) {
+      // Still inside the user's gesture: iOS lets the composer take focus (and show the keyboard) here.
+      document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();
+      return;
+    }
+    if (wasPress) onHome();
+  };
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label="Home. Touch and hold to ask b"
+      data-testid="dock-b"
+      onTouchStart={(e) => {
+        lastTouch.current = Date.now();
+        const t = e.touches[0];
+        if (e.touches.length === 1 && t) begin(t.clientX, t.clientY);
+      }}
+      onTouchMove={(e) => {
+        const t = e.touches[0];
+        if (t) move(t.clientX, t.clientY);
+      }}
+      onTouchEnd={(e) => {
+        e.preventDefault(); // no synthetic mouse/click after a touch
+        lastTouch.current = Date.now();
+        end();
+      }}
+      onTouchCancel={stop}
+      // Pointer events for mouse and pen only: on touch, WKWebView may cancel them mid-hold.
+      onPointerDown={(e) =>
+        e.pointerType !== 'touch' && Date.now() - lastTouch.current > 800 && begin(e.clientX, e.clientY)
+      }
+      onPointerMove={(e) => e.pointerType !== 'touch' && move(e.clientX, e.clientY)}
+      onPointerUp={(e) => e.pointerType !== 'touch' && Date.now() - lastTouch.current > 800 && end()}
+      onPointerLeave={(e) => e.pointerType !== 'touch' && stop()}
+      onContextMenu={(e) => e.preventDefault()}
+      onClick={(e) => {
+        // Keyboard activation only (Enter/Space have detail 0); touch and mouse are handled above.
+        if (e.detail === 0) onHome();
+      }}
+      className="relative shrink-0 -mt-1 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
+      style={{
+        background: FLIP ? '#F5B800' : '#010101',
+        boxShadow: `0 0 0 2px ${FLIP ? '#010101' : GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
+        transform: pressing ? 'scale(0.94)' : undefined,
+        WebkitTouchCallout: 'none',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+        touchAction: 'none',
+      }}
+    >
+      {pressing && (
+        <svg className="absolute -inset-[5px] pointer-events-none" viewBox="0 0 62 62" aria-hidden>
+          <circle
+            cx="31"
+            cy="31"
+            r="29"
+            fill="none"
+            stroke={FLIP ? '#010101' : GOLD}
+            strokeWidth="3"
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray="100"
+            transform="rotate(-90 31 31)"
+            className="bw-hold-ring"
+            style={{ animationDuration: `${B_HOLD_MS}ms` }}
+          />
+        </svg>
+      )}
+      {FLIP ? (
+        <svg viewBox="23 8 74 100" width={22} height={30} aria-hidden>
+          <mask id="bdock">
+            <rect x="0" y="0" width="140" height="140" fill="#fff" />
+            <circle cx="60" cy="72" r="15" fill="#000" />
+          </mask>
+          <g fill="#010101" mask="url(#bdock)">
+            <polygon points="45,12 45,76 27,76 27,30" />
+            <circle cx="60" cy="72" r="33" />
+          </g>
+        </svg>
+      ) : (
+        <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
+      )}
+    </button>
+  );
+};
 
-export const Dock = ({ items, labels, activeKey, badges, onOpen, onHome, onChange, onAdd, pageKey, dots }: Props) => {
+export const Dock = ({
+  items,
+  labels,
+  activeKey,
+  badges,
+  onOpen,
+  onHome,
+  onAgent,
+  onChange,
+  onAdd,
+  pageKey,
+  dots,
+}: Props) => {
   const reduce = useReducedMotion();
   const [arranging, setArranging] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -317,7 +426,7 @@ export const Dock = ({ items, labels, activeKey, badges, onOpen, onHome, onChang
               </span>
             )}
           </div>
-          <HomeButton onHome={onHome} disabled={arranging} />
+          <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
           <div
             ref={scroller}
             onScroll={measure}
