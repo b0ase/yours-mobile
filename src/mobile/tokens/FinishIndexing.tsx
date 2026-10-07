@@ -45,6 +45,11 @@ export const FinishIndexing = ({
         {money(s.total.totalSats, s.rate)}, most of which is a prepaid deposit with
         the 1Sat indexer, not a fee: it stays as ${ticker}'s balance there and pays for its transfers.
       </p>
+      {s.needs && s.freeNote && (
+        <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>
+          {s.freeNote}
+        </p>
+      )}
       {s.needs ? (
         <div className="flex gap-2">
           <button

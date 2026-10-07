@@ -42,6 +42,11 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
         The 1Sat indexer has stopped validating ${ticker} until its fee balance is topped up, so it can't be
         listed or sent as verified. Paying {money(s.total.totalSats, s.rate)} funds it for every holder.
       </p>
+      {s.needs && s.freeNote && (
+        <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>
+          {s.freeNote}
+        </p>
+      )}
       {s.needs && (
         <button
           type="button"
