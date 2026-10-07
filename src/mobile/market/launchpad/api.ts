@@ -26,6 +26,8 @@ export type BoardCoin = {
 };
 
 export const coinImage = (tokenId: string) => `https://ordfs.network/${tokenId.split('_')[0]}_0`;
+/** TokenBlaster's launch form (src/app/launch/new in tokenblaster.lol). */
+export const launchPage = `${BLASTPAD}/launch/new`;
 export const coinPage = (tokenId: string) => `${BLASTPAD}/launch/${tokenId}`;
 export const wocTx = (txid: string) => `https://whatsonchain.com/tx/${txid}`;
 

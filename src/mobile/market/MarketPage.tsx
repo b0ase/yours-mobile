@@ -40,6 +40,7 @@ import { Blurred, ContentImg, NftCard } from './NftCard';
 import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
+import { TokenLinks } from '../tokens/TokenLinks';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
@@ -876,6 +877,7 @@ const MarketPage = () => {
           />
         )}
       </div>
+      {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
       {ticketPage && (
         <div className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
           {TICKET_COPY}

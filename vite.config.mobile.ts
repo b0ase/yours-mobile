@@ -95,6 +95,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>",
       "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />",
     ],
+    // Token links (website / app / X / Telegram / bChat) under the action buttons, when the issuer set any.
+    [
+      "import { BuyTokenButton, OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';",
+      "import { BuyTokenButton, OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';\nimport { TokenLinks } from '../mobile/tokens/TokenLinks';",
+    ],
+    [
+      '{/* Market chart */}',
+      '<div className="mx-4 mb-3 empty:hidden"><TokenLinks tokenId={token.info.id} sym={token.info.sym} /></div>\n          {/* Market chart */}',
+    ],
   ],
   // Wallet tab: gold "Mint" beside Receive / Send (src/mobile/mint).
   'src/pages/BsvWallet.tsx': [
