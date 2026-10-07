@@ -19,7 +19,14 @@ export const WeaponTile = ({ weapon, onOpen, sub }: { weapon: Weapon; onOpen: ()
     className="relative rounded-xl overflow-hidden bg-[#17191E] text-left p-0"
     style={{ aspectRatio: '1/1', border: `1px solid ${RARITY_COLOR[weapon.rarity]}55` }}
   >
-    <img src={weapon.image} alt={weapon.name} loading="lazy" className="w-full h-full object-cover" />
+    {weapon.image ? (
+      <img src={weapon.image} alt={weapon.name} loading="lazy" className="w-full h-full object-cover" />
+    ) : (
+      // The manifest has no art for any gun now (image: null): an empty <img> made every tile blank.
+      <div className="w-full h-full flex items-center justify-center" style={{ color: RARITY_COLOR[weapon.rarity] }}>
+        <Box size={44} />
+      </div>
+    )}
     <span
       className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
       style={{ background: '#000000aa', color: '#F5B800' }}
