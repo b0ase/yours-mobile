@@ -5,7 +5,15 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeFavourites';
-import { defaultScreens, moveToScreen, removeKey, reorderScreen, screenOf, screenTitle } from './phone/appScreens';
+import {
+  defaultScreens,
+  moveToScreen,
+  removeKey,
+  renameScreen,
+  reorderScreen,
+  screenOf,
+  screenTitle,
+} from './phone/appScreens';
 import {
   getAppScreens,
   REQUIRED_TILES,
@@ -16,7 +24,7 @@ import {
 import { useDock } from './phone/dockStore';
 import { screenById, type ScreenId } from './phone/screens';
 import { SCREEN_ICON, screenLabel } from './phone/icons';
-import { PHONE_GO } from './phone/events';
+import { PHONE_APPS_TOP, PHONE_GO } from './phone/events';
 import { useInPeek } from './phone/pageEl';
 import bGlyph from './brand/bwallet-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
@@ -146,6 +154,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         draggable={false}
         onError={() => setFailed(true)}
         decoding="async"
+        loading="lazy"
         width={60}
         height={60}
         className={`${ICON} object-cover bg-[#17191E]`}
@@ -494,11 +503,17 @@ const BrowserPage = ({
   only: onlyProp,
   header,
   screen,
+  sections,
 }: {
   only?: Only;
   header?: React.ReactNode;
   /** Phone layout app screen index (phone/pager.tsx): Home is 0. */
   screen?: number;
+  /**
+   * Phone layout, round 8 (APPS_PAGED off): every app screen as a section of one vertical page, with sticky
+   * headers; `screen` is then the section to scroll to.
+   */
+  sections?: boolean;
 } = {}) => {
   const phone = usePhoneLayout();
   const navigate = useNavigate();
@@ -518,6 +533,24 @@ const BrowserPage = ({
   const [dock] = useDock();
   const appScreens = useAppScreens();
   const [moving, setMoving] = useState(false);
+  /** Sections mode: which section is being arranged. */
+  const [arrangeIdx, setArrangeIdx] = useState(0);
+  const scrollRef = useRef<HTMLElement>(null);
+  // Sections mode: a route to screen n scrolls to that section; the dock b on Apps scrolls to the top.
+  const reduceScroll = useReducedMotion();
+  useEffect(() => {
+    if (!sections || screen === undefined) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = screen > 0 ? el.querySelector<HTMLElement>(`[data-apps-section="${screen}"]`) : null;
+    el.scrollTo({ top: target ? target.offsetTop : 0, behavior: reduceScroll ? 'auto' : 'smooth' });
+  }, [sections, screen, reduceScroll]);
+  useEffect(() => {
+    if (!sections) return;
+    const top = () => scrollRef.current?.scrollTo({ top: 0, behavior: reduceScroll ? 'auto' : 'smooth' });
+    window.addEventListener(PHONE_APPS_TOP, top);
+    return () => window.removeEventListener(PHONE_APPS_TOP, top);
+  }, [sections, reduceScroll]);
   const [info, setInfo] = useState<Tile | null>(null);
   const [page, setPage] = useState(() =>
     only === 'home' ? 0 : only === 'games' ? 3 : only === 'apps' ? 1 : readPage(),
@@ -680,7 +713,34 @@ const BrowserPage = ({
    * Phone layout HOME (owner, round 3): a fixed 4 × 6 page (24 slots) filling the height between the top bar and
    * the dock, like an iPhone home page. Empty slots stay empty; more than 24 apps continue below it.
    */
-  const homePage = (tiles: Tile[]) => {
+  const homePage = (tiles: Tile[], flow?: { section: number }) => {
+    // Round 8: sections flow (4 columns, natural rows, no filler slots).
+    if (flow)
+      return tiles.length ? (
+        <div className="grid grid-cols-4 gap-x-3 gap-y-5 items-start justify-items-center">
+          {tiles.map((t) => (
+            <AppTile
+              key={t.key}
+              tile={t}
+              onOpen={() =>
+                t.screen
+                  ? window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: t.screen }))
+                  : t.key === AGENT_KEY
+                    ? navigate(t.url)
+                    : go(t.url, t.bapp)
+              }
+              onInfo={() => setInfo(t)}
+              onArrange={() => {
+                setInfo(null);
+                setArrangeIdx(flow.section);
+                setArranging(true);
+              }}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-[12px] text-[#98A2B3] m-0">Empty. Touch and hold an app, then Move to section….</p>
+      );
     const first = tiles.slice(0, HOME_SLOTS);
     const rest = tiles.slice(HOME_SLOTS);
     return (
@@ -738,12 +798,12 @@ const BrowserPage = ({
   const notPlaced = (tiles: Tile[]) => tiles.filter((t) => !placed.has(t.url));
 
   /** Phone layout app screen i: its 4 × 6 grid; Home also has Your apps, Recents and More apps below. */
-  const screenBody = (i: number) => {
+  const screenBody = (i: number, flow = false) => {
     const items = appScreens.screens[i]?.items ?? [];
     const tiles = items.map(keyTile).filter((t): t is Tile => !!t);
     return (
       <>
-        {arranging && tiles.length > 0 ? (
+        {arranging && (!flow || arrangeIdx === i) && tiles.length > 0 ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-[#98A2B3]">Drag to rearrange. Tap − to take it off this screen.</span>
@@ -771,65 +831,91 @@ const BrowserPage = ({
             />
           </div>
         ) : (
-          homePage(tiles)
+          homePage(tiles, flow ? { section: i } : undefined)
         )}
-        {i === 0 && (
-          <>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Your apps</h2>
-                <button
-                  type="button"
-                  onClick={() => setAddingApp(true)}
-                  className="rounded-full px-3 py-1 text-[12px] font-bold border-0"
-                  style={{ background: '#F5B800', color: '#010101' }}
-                >
-                  + Add app
-                </button>
-              </div>
-              {userTiles.length > 0 ? (
-                grid(0, notPlaced(userTiles))
-              ) : (
-                <p className="text-[12px] text-[#98A2B3] m-0">
-                  Add any website, like zanaadu.com. Saved to your wallet.
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
-              {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
-              <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-                {recent.map((url) => (
-                  <button
-                    key={url}
-                    onClick={() => go(url)}
-                    className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
-                  >
-                    <Clock size={11} /> {hostOf(url)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* The catalogue: every app not on a screen or in the dock. Touch and hold to place one. */}
-            {[
-              { label: 'More bApps', tiles: BAPP_TILES },
-              { label: 'More apps', tiles: OTHER_TILES },
-              ...RADAR_SECTIONS.map((g) => ({ label: g.label, tiles: g.tiles })),
-            ]
-              .map((g) => ({ ...g, tiles: notPlaced(g.tiles) }))
-              .filter((g) => g.tiles.length)
-              .map((g) => (
-                <div key={g.label} className="flex flex-col gap-3">
-                  <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
-                  {grid(0, g.tiles)}
-                </div>
-              ))}
-            {note(`Touch and hold an app to add it to the Dock or move it to another screen. ${UNOFFICIAL_NOTICE}`)}
-          </>
-        )}
+        {i === 0 && !flow && homeExtras()}
       </>
     );
   };
+
+  /** Your apps, Recents and the catalogue: under Home (paged) or at the end of the sections page. */
+  const homeExtras = () => (
+    <>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Your apps</h2>
+          <button
+            type="button"
+            onClick={() => setAddingApp(true)}
+            className="rounded-full px-3 py-1 text-[12px] font-bold border-0"
+            style={{ background: '#F5B800', color: '#010101' }}
+          >
+            + Add app
+          </button>
+        </div>
+        {userTiles.length > 0 ? (
+          grid(0, notPlaced(userTiles))
+        ) : (
+          <p className="text-[12px] text-[#98A2B3] m-0">Add any website, like zanaadu.com. Saved to your wallet.</p>
+        )}
+      </div>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
+        {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
+        <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          {recent.map((url) => (
+            <button
+              key={url}
+              onClick={() => go(url)}
+              className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+            >
+              <Clock size={11} /> {hostOf(url)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* The catalogue: every app not on a screen or in the dock. Touch and hold to place one. */}
+      {[
+        { label: 'More bApps', tiles: BAPP_TILES },
+        { label: 'More apps', tiles: OTHER_TILES },
+        ...RADAR_SECTIONS.map((g) => ({ label: g.label, tiles: g.tiles })),
+      ]
+        .map((g) => ({ ...g, tiles: notPlaced(g.tiles) }))
+        .filter((g) => g.tiles.length)
+        .map((g) => (
+          <div key={g.label} className="flex flex-col gap-3">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+            {grid(0, g.tiles)}
+          </div>
+        ))}
+      {note(`Touch and hold an app to add it to the Dock or move it to another section. ${UNOFFICIAL_NOTICE}`)}
+    </>
+  );
+
+  /** Round 8: all app screens as sections of one page, each with a sticky header (tap to rename). */
+  const sectionsBody = () => (
+    <>
+      {appScreens.screens.map((x, i) => (
+        <div key={i} data-apps-section={i} className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const name = window.prompt('Name this section', screenTitle(x, i));
+              if (name !== null) setAppScreens(renameScreen(getAppScreens(), i, name));
+            }}
+            aria-label={`${screenTitle(x, i)}. Tap to rename`}
+            // Solid background, no blur: cheap to keep stuck while scrolling on old iPhones.
+            className="sticky top-0 z-[2] -mx-4 px-4 py-2 text-left text-[12px] font-bold uppercase tracking-wider border-0"
+            style={{ background: '#010101', color: '#FFD24D' }}
+          >
+            {screenTitle(x, i)}
+          </button>
+          {screenBody(i, true)}
+        </div>
+      ))}
+      {homeExtras()}
+    </>
+  );
 
   const note = (text: string) => <p className="text-[10px] leading-relaxed text-[#98A2B3] text-center px-2">{text}</p>;
 
@@ -940,15 +1026,16 @@ const BrowserPage = ({
       {screen !== undefined ? (
         <div className="relative h-full w-full pt-14">
           <section
-            aria-label={screenTitle(appScreens.screens[screen], screen)}
+            ref={scrollRef}
+            aria-label={sections ? 'Apps' : screenTitle(appScreens.screens[screen], screen)}
             className="h-full w-full overflow-y-auto overflow-x-hidden"
             style={{ overscrollBehaviorY: 'contain' }}
           >
             <div
-              className="w-full px-4 pt-4 flex flex-col gap-6"
+              className={`w-full px-4 flex flex-col gap-6 ${sections ? 'pt-0' : 'pt-4'}`}
               style={{ paddingBottom: 'calc(var(--dock-h, 3.75rem) + 2.5rem)' }}
             >
-              {screenBody(screen)}
+              {sections ? sectionsBody() : screenBody(screen)}
             </div>
           </section>
         </div>
@@ -1156,11 +1243,16 @@ const BrowserPage = ({
                       className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
                       aria-expanded={moving}
                     >
-                      {screenOf(appScreens, tileKey(info)) < 0 ? 'Add to a screen…' : 'Move to screen…'}
+                      {screenOf(appScreens, tileKey(info)) < 0
+                        ? `Add to a ${sections ? 'section' : 'screen'}…`
+                        : `Move to ${sections ? 'section' : 'screen'}…`}
                     </button>
                     {moving && (
                       <div className="flex flex-col gap-1 rounded-xl bg-[#101114] p-1" role="menu">
-                        {[...appScreens.screens.map((x, n) => screenTitle(x, n)), 'New screen'].map((title, n) => (
+                        {[
+                          ...appScreens.screens.map((x, n) => screenTitle(x, n)),
+                          sections ? 'New section' : 'New screen',
+                        ].map((title, n) => (
                           <button
                             key={n}
                             role="menuitem"
@@ -1185,7 +1277,7 @@ const BrowserPage = ({
                         }}
                         className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
                       >
-                        Remove from screens
+                        {sections ? 'Remove from sections' : 'Remove from screens'}
                       </button>
                     )}
                   </>

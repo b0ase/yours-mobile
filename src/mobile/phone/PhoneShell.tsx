@@ -12,8 +12,8 @@ import { AddToDockSheet } from './AddToDockSheet';
 import { Dock } from './Dock';
 import { addToDock, dockKey, type DockItem } from './dockModel';
 import { useDock } from './dockStore';
-import { usePhoneLayout } from './flag';
-import { PHONE_ADD_TO_DOCK, PHONE_GO, PHONE_TOAST } from './events';
+import { APPS_PAGED, usePhoneLayout } from './flag';
+import { PHONE_ADD_TO_DOCK, PHONE_APPS_TOP, PHONE_GO, PHONE_TOAST } from './events';
 import { placeFirstFree, renameScreen, screenTitle } from './appScreens';
 import { getAppScreens, setAppScreens, useAppScreens } from './appScreensStore';
 import {
@@ -127,7 +127,11 @@ const Shell = () => {
   goRef.current = go;
   const goScreenRef = useRef(goScreen);
   goScreenRef.current = goScreen;
-  const goHome = () => goScreen(0);
+  const goHome = () => {
+    // Round 8: on the Apps page already, the dock b scrolls it back to the top.
+    if (!APPS_PAGED && curIdx !== null) window.dispatchEvent(new Event(PHONE_APPS_TOP));
+    goScreen(0);
+  };
 
   // A cold start opens on HOME.
   useEffect(() => {
@@ -252,7 +256,7 @@ const Shell = () => {
       // Width read once per drag: no layout reads while the finger moves.
       const w = getPageEl()?.clientWidth ?? window.innerWidth;
       // Pull-to-agent only from a screen scrolled to the very top, and never from the status-bar / top-bar zone.
-      const scroller = document.querySelector(`[data-phone-screen="${here()}"] section`);
+      const scroller = document.querySelector(`[data-phone-screen="${APPS_PAGED ? here() : 0}"] section`);
       const pullOk = p.clientY > PULL_TOP_ZONE && (!scroller || scroller.scrollTop <= 0);
       d = {
         x: p.clientX,
@@ -287,6 +291,7 @@ const Shell = () => {
         frame = requestAnimationFrame(() => showPull(pull));
         return;
       }
+      if (!APPS_PAGED) return void (d = null); // round 8: no sideways paging (kept behind the flag)
       e.preventDefault(); // horizontal: the page moves, not the scroller
       const now = performance.now();
       if (now > d.lt) d.vx = 0.8 * ((p.clientX - d.lx) / (now - d.lt)) + 0.2 * d.vx;
@@ -426,7 +431,7 @@ const Shell = () => {
           onAdd={() => setAdding(true)}
           pageKey={pathname}
           dots={
-            curIdx !== null ? (
+            APPS_PAGED && curIdx !== null ? (
               <PageDots
                 titles={screens.map((x, i) => screenTitle(x, i))}
                 current={dotTarget ?? curIdx}
