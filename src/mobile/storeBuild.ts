@@ -91,8 +91,11 @@ export const MARKET_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
-/** Apps tiles left out of a store build: exchanges / swaps (bApps by name, BSVRadar groups by id). */
-export const STORE_HIDDEN_APPS: readonly string[] = ['bExchange'];
+/**
+ * Apps tiles left out of a store build: exchanges / swaps (bApps by name, BSVRadar groups by id). The data
+ * itself is gated by MARKET_ENABLED in bapps.ts / radarApps.ts, so the name folds to [] in a store build.
+ */
+export const STORE_HIDDEN_APPS: readonly string[] = MARKET_ENABLED ? ['bExchange'] : [];
 export const STORE_HIDDEN_RADAR_GROUPS: readonly string[] = ['market', 'buy'];
 export const appsTileShown = (name: string, store = STORE_BUILD) => !store || !STORE_HIDDEN_APPS.includes(name);
 export const radarGroupShown = (group: string, store = STORE_BUILD) =>

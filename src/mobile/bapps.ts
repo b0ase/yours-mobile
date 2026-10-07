@@ -20,12 +20,12 @@ import app_bpaintIcon from './brand/apps/bpaint.png';
 import app_b3dIcon from './brand/apps/b3d.png';
 import app_bbooksIcon from './brand/apps/bbooks.png';
 import app_bgamesIcon from './brand/apps/bgames.png';
-import app_bexchangeIcon from './brand/apps/bexchange.png';
 import app_beduIcon from './brand/apps/bedu.png';
 import app_bsocialIcon from './brand/apps/bsocial.png';
 import app_bmapsIcon from './brand/apps/bmaps.png';
 import app_bagentsIcon from './brand/apps/bagents.png';
 import { STORE_BUILD } from './storeBuild';
+import { EXCHANGE_BAPPS } from './exchangeAppsX';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
@@ -303,15 +303,8 @@ export const BAPPS: BApp[] = [
     icon: app_bgamesIcon,
     source: suite('bitcoin-gaming'),
   },
-  {
-    name: 'bExchange',
-    url: 'https://bitcoin-exchange-iota.vercel.app',
-    verb: 'Trade tokens across exchanges',
-    group: 'social',
-    status: 'live',
-    icon: app_bexchangeIcon,
-    source: suite('bitcoin-exchange'),
-  },
+  // bWalletX only (exchangeAppsX.ts; a store build has an empty stand-in).
+  ...EXCHANGE_BAPPS,
   {
     name: 'bMaps',
     url: 'https://bitcoin-maps.vercel.app',

@@ -1,4 +1,4 @@
-import { TOKENBLASTER_ENABLED, appsTileShown, radarGroupShown } from './storeBuild';
+import { MARKET_ENABLED, TOKENBLASTER_ENABLED, appsTileShown, radarGroupShown } from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -384,7 +384,8 @@ const DEFAULT_FAVOURITES = [
   'bArt',
   'bPaint',
   'b3D',
-  'bExchange',
+  // bWalletX only: the name is not in a store bundle (MARKET_ENABLED).
+  ...(MARKET_ENABLED ? ['bExchange'] : []),
   'Treechat',
   'Twetch',
 ]

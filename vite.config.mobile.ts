@@ -47,8 +47,14 @@ export const MOBILE_SWAPS: Record<string, string> = {
 // Store builds (ios-store, android-play): the bWalletX-only owner tiles are not in the bundle, icon included.
 const STORE_CHANNEL =
   process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
-if (STORE_CHANNEL)
+if (STORE_CHANNEL) {
   MOBILE_SWAPS[resolve(__dirname, 'src/mobile/ownerAppsX.ts')] = resolve(__dirname, 'src/mobile/ownerAppsX.store.ts');
+  // bExchange and the Markets & collectibles tiles: not in the store bundle, icons included.
+  MOBILE_SWAPS[resolve(__dirname, 'src/mobile/exchangeAppsX.ts')] = resolve(
+    __dirname,
+    'src/mobile/exchangeAppsX.store.ts',
+  );
+}
 const brand = () => sharedBrand(MOBILE_SWAPS);
 
 // All mobile builds: mount the mobile-only tab routes (/m/settings, /m/media,
@@ -537,6 +543,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
                     style={{ width: '100%', margin: 0 }}
                   />`,
     ],
+  ],
+  // Ordinals › List (inherited "Global orderbook" step): bWalletX only. Nothing opens it (ordlock listing is
+  // off upstream), and MARKET_ENABLED folds it to `false` in a store build so its text is not in the bundle.
+  'src/pages/OrdWallet.tsx': [
+    [
+      "import validate from 'bitcoin-address-validation';",
+      "import validate from 'bitcoin-address-validation';\nimport { MARKET_ENABLED } from '../mobile/storeBuild';",
+    ],
+    ['  const listView = (', '  const listView = MARKET_ENABLED && ('],
   ],
   // Settings → Identity: "Get your name" (OpNS search + bind an owned name).
   'src/pages/Settings.tsx': [
