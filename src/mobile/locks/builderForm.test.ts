@@ -33,3 +33,14 @@ describe('New Lock builder', () => {
     expect(valuesEntered({ ...start, usdPer: 'abc', count: '30' })).toBe(false);
   });
 });
+
+describe('start small', () => {
+  test('asks once more only above 0.01 BSV', async () => {
+    const { needsSizeCheck, BIG_LOCK_QUESTION, START_SMALL_NOTE } = await import('./builderForm');
+    expect(needsSizeCheck(1_000_000)).toBe(false);
+    expect(needsSizeCheck(1_000_001)).toBe(true);
+    expect(needsSizeCheck(5_000)).toBe(false);
+    expect(BIG_LOCK_QUESTION).toContain('more than 0.01 BSV');
+    expect(START_SMALL_NOTE).toContain('start small');
+  });
+});

@@ -38,3 +38,9 @@ export function valuesEntered(v: BuilderValues): boolean {
   const per = v.gmode === 'usd' ? positive(v.usdPer) : positive(v.bsvPer);
   return per && (v.until === 'end' || positive(v.count));
 }
+
+/** New feature: start small. Over this, Review asks once more (a soft check, not a cap). */
+export const SMALL_LOCK_SATS = 1_000_000; // 0.01 BSV
+export const START_SMALL_NOTE = 'New feature: start small. Lock only small amounts until it has been out for a while.';
+export const BIG_LOCK_QUESTION = 'This is a new feature. Are you sure you want to lock more than 0.01 BSV?';
+export const needsSizeCheck = (totalSats: number) => totalSats > SMALL_LOCK_SATS;
