@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { Strategy, StrategySpec } from '../agents/strategy';
-import { marketTradingEnabled } from '../storeBuild';
+import { MARKET_ENABLED } from '../storeBuild';
 import { publishStrategy } from './market';
 import { rememberStrategy } from './myStrategies';
 import { publishProblems, sealStrategy, SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
@@ -27,7 +27,7 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  if (!marketTradingEnabled()) return null;
+  if (!MARKET_ENABLED) return null;
   const payTo = account?.addresses.bsvAddress ?? '';
   const sale = { priceUsd: Number(price), copies: Number(copies), payTo };
   const s: Strategy = { ...strategy, spec };

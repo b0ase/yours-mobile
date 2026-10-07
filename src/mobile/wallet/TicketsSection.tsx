@@ -210,7 +210,7 @@ export const TicketsSection = () => {
           <MyTokenListings emptyText="Nothing listed. Tap Sell on a ticket to list it." />
         </>
       )}
-      {selling && <SellSheet target={selling} onClose={() => setSelling(null)} />}
+      {SELL_ENABLED && selling && <SellSheet target={selling} onClose={() => setSelling(null)} />}
     </div>
   );
 };

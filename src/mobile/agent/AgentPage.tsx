@@ -26,7 +26,7 @@ import {
   type PaidBackend,
   type PriceInfo,
 } from './paid';
-import { STORE_BUILD, marketTradingEnabled } from '../storeBuild';
+import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
@@ -137,7 +137,7 @@ const AgentPage = () => {
   const account = chromeStorageService.getCurrentAccountObject().account;
   const accountId = account?.addresses.identityAddress;
   // bWalletX only: in an agent account b may act, within the account's limits and loaded strategy (agents/agentTrade.ts).
-  const system = marketTradingEnabled() ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account') : BWALLET_GUIDE;
+  const system = MARKET_ENABLED ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account') : BWALLET_GUIDE;
   const [prefs, setPrefs] = useAgentPrefs();
   const [keyScreen, setKeyScreen] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -510,7 +510,7 @@ const AgentPage = () => {
           void send();
         }}
       >
-        {marketTradingEnabled() && !input && !busy && (
+        {MARKET_ENABLED && !input && !busy && (
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {QUICK_STARTS.map((q) => (
               <button

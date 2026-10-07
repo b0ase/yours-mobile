@@ -79,6 +79,25 @@ export const STORE_HIDDEN_OWNER_APPS: readonly string[] = TOKENBLASTER_ENABLED ?
 export const ownerAppsFor = <T extends { name: string }>(apps: readonly T[], store = STORE_BUILD): T[] =>
   store ? apps.filter((a) => !STORE_HIDDEN_OWNER_APPS.includes(a.name)) : [...apps];
 
+/**
+ * The Market / Exchange tab and everything that leads to it (Buy / Get PNEEs / Back PNEEs buttons, token pages'
+ * Buy, the Apps tiles for exchanges, swaps, marketplaces and BSV on-ramps): bWalletX only. App Review rejected
+ * the iOS store build under 3.1.5(iii) (exchange functionality without licences, plus EEA / MiCA), so the store
+ * edition has no Market at all, not even view-only. Literal env check so Vite inlines it and Rollup drops the
+ * MarketPage chunk and the gated buttons and data. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const MARKET_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+/** Apps tiles left out of a store build: exchanges / swaps (bApps by name, BSVRadar groups by id). */
+export const STORE_HIDDEN_APPS: readonly string[] = ['bExchange'];
+export const STORE_HIDDEN_RADAR_GROUPS: readonly string[] = ['market', 'buy'];
+export const appsTileShown = (name: string, store = STORE_BUILD) => !store || !STORE_HIDDEN_APPS.includes(name);
+export const radarGroupShown = (group: string, store = STORE_BUILD) =>
+  !store || !STORE_HIDDEN_RADAR_GROUPS.includes(group);
+
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
 export const STORE_ROOM_NOTE = 'Token rooms aren’t available in this version of bWallet.';

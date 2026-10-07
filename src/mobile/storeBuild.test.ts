@@ -200,7 +200,9 @@ describe('store edition text', () => {
   const read = (env: Record<string, string>) => {
     const code =
       "const m = await import('./src/mobile/storeBuild.ts'); console.log(JSON.stringify({ banner: m.handleCardText(false), named: m.handleCardText(true), tokens: m.MY_TOKENS_DESC, note: m.MY_TOKENS_NOTE, agent: m.B_AGENT_DESC, subs: m.SUBSCRIPTIONS_DESC, pots: m.POTS_INTRO, pot: m.POT_NAME_PLACEHOLDER, name: m.APP_NAME }));";
-    const r = Bun.spawnSync(['bun', '-e', code], { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env } });
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
     return JSON.parse(r.stdout.toString()) as Record<string, string>;
   };
   test('store build: no chat rooms, token rooms, paid b agent or app subscriptions', () => {
@@ -225,5 +227,71 @@ describe('store edition text', () => {
     expect(t.banner).toBe('A free handle people can pay, plus your own chat room.');
     expect(t.agent).toBe('How the b agent is paid for');
     expect(t.tokens).toContain('their rooms');
+  });
+});
+
+/** No Market / Exchange in a store build (App Review 3.1.5(iii), 7 Oct 2026). */
+describe('store build has no Market', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const storeEval = (expr: string, env: Record<string, string> = { VITE_STORE_BUILD: '1' }) => {
+    const r = Bun.spawnSync(
+      [
+        'bun',
+        '-e',
+        `const s = await import('./src/mobile/storeBuild.ts'); const t = await import('./src/mobile/tabs/tabs.ts'); console.log(JSON.stringify(${expr}));`,
+      ],
+      {
+        env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+      },
+    );
+    return JSON.parse(r.stdout.toString());
+  };
+  test('MARKET_ENABLED is the inverse of STORE_BUILD, from the same literal env', async () => {
+    const { MARKET_ENABLED } = await import('./storeBuild');
+    expect(MARKET_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'MARKET_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('store tabs: no Market tab, and market ids land on Wallet', () => {
+    const t = storeEval(
+      '{ order: t.TAB_ORDER, tab: t.tabFor("market"), route: t.routeFor("market"), m: s.MARKET_ENABLED }',
+    );
+    expect(t.m).toBe(false);
+    expect(t.order).toEqual(['bsv', 'browser', 'feed', 'chat']);
+    expect(t.tab).toBe('bsv');
+    expect(t.route).toBe('/bsv-wallet');
+    expect(storeEval('t.TAB_ORDER', { VITE_CHANNEL: 'ios-store' })).not.toContain('market');
+  });
+  test('bWalletX keeps the Exchange tab', () => {
+    const t = storeEval('{ order: t.TAB_ORDER, route: t.routeFor("market") }', {});
+    expect(t.order).toContain('market');
+    expect(t.route).toBe('/m/market');
+  });
+  test('the Market route and its chunk are behind MARKET_ENABLED', () => {
+    const r = src('./tabs/MobileRoutes.tsx');
+    expect(r).toMatch(/const MarketPage = MARKET_ENABLED \? lazy\(/);
+    expect(r).toMatch(/\{MarketPage && <Route path="market"/);
+  });
+  test('Buy / Get PNEEs / Back PNEEs entry points are behind MARKET_ENABLED', () => {
+    expect(src('./chat/OpenTokenRoomButton.tsx')).toMatch(/if \(!id \|\| !MARKET_ENABLED\) return null/);
+    expect(src('./wallet/FriendToken.tsx')).toMatch(/!MARKET_ENABLED \? null/);
+    const cards = src('./wallet/DefaultTokenCards.tsx');
+    expect(cards).toMatch(/PNEE_TOKEN_ID && MARKET_ENABLED/);
+    expect(cards).toMatch(/MARKET_ENABLED && backing/);
+    expect(src('./radarApps.ts')).toMatch(/const BUY_APPS[^=]*= MARKET_ENABLED\s*\?/);
+  });
+  test('Apps tab: no exchange / swap tiles or market / on-ramp groups in a store build', async () => {
+    const { appsTileShown, radarGroupShown } = await import('./storeBuild');
+    expect(appsTileShown('bExchange', true)).toBe(false);
+    expect(appsTileShown('bChat', true)).toBe(true);
+    expect(appsTileShown('bExchange', false)).toBe(true);
+    expect(radarGroupShown('market', true)).toBe(false);
+    expect(radarGroupShown('buy', true)).toBe(false);
+    expect(radarGroupShown('social', true)).toBe(true);
+    expect(radarGroupShown('market', false)).toBe(true);
   });
 });

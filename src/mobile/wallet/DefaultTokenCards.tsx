@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { marketTradingEnabled } from '../storeBuild';
+import { MARKET_ENABLED } from '../storeBuild';
 import { useNavigate } from 'react-router-dom';
 import { routeFor } from '../tabs/tabs';
 import { getBsv21Balances } from '@1sat/actions';
@@ -72,7 +72,7 @@ export const DefaultTokenCards = () => {
 
   return (
     <>
-      {backing && <BackPneeSheet onClose={() => setBacking(false)} />}
+      {MARKET_ENABLED && backing && <BackPneeSheet onClose={() => setBacking(false)} />}
       <AssetRow
         icon={PNEE_ICON}
         ticker="PNEEs · USD¢"
@@ -82,14 +82,14 @@ export const DefaultTokenCards = () => {
         showPointer={false}
         subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
         // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
-        // Store build: the Market is view-only, so there is nothing to get PNEEs from.
+        // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
         action={
-          PNEE_TOKEN_ID && marketTradingEnabled()
+          PNEE_TOKEN_ID && MARKET_ENABLED
             ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') }
             : undefined
         }
         // Back PNEEs sits left of Get PNEEs, same size and line (owner, 6 Oct 2026).
-        secondaryAction={{ label: 'Back PNEEs', onClick: () => setBacking(true) }}
+        secondaryAction={MARKET_ENABLED ? { label: 'Back PNEEs', onClick: () => setBacking(true) } : undefined}
       />
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (

@@ -1,3 +1,4 @@
+import { MARKET_ENABLED } from './storeBuild';
 import r_3dordiio from './brand/apps/radar/3dordiio.png';
 import r_zoide from './brand/apps/radar/zoide.png';
 import r_mintpage from './brand/apps/radar/mintpage.png';
@@ -675,77 +676,6 @@ const BSVRADAR_APPS: Omit<RadarApp, 'source'>[] = [
     icon: r_wwwpaymetoolcom,
   },
   {
-    name: 'Orange Gateway',
-    url: 'https://orangegateway.com',
-    desc: 'Buy and sell Bitcoin BSV easily',
-    group: 'buy',
-    icon: r_orange_gateway,
-  },
-  {
-    name: 'Beymo App',
-    url: 'https://www.beymo.app',
-    desc: 'Buy and sell BSV peer-to-peer',
-    group: 'buy',
-    icon: r_beymo_app,
-  },
-  {
-    name: 'Onramp.money',
-    url: 'https://onramp.money/',
-    desc: 'Trade 480+ cryptos instantly worldwide',
-    group: 'buy',
-    icon: r_buy_sell_swap_crypto_instantly,
-  },
-  {
-    name: 'Alchemy Pay',
-    url: 'https://ramp.alchemypay.org/?crypto=BCHSV&fiat=EUR&network=BCHSV#/index',
-    desc: 'Buy BSV with your credit card',
-    group: 'buy',
-    icon: r_alchemy_pay,
-  },
-  {
-    name: 'Buy BSV',
-    url: 'https://ramp.bsvblockchain.tech/',
-    desc: 'Buy BSV instantly',
-    group: 'buy',
-    icon: r_buy_bsv,
-  },
-  { name: 'cex.io', url: 'https://cex.io/buysell', desc: 'Buy BSV with credit card', group: 'buy', icon: r_cexio },
-  {
-    name: 'ChangeNOW',
-    url: 'https://changenow.io/currencies/bitcoin-sv?from=eur&to=bsv&fiatMode=true&amount=100',
-    desc: 'Instant BSV exchange at best rates',
-    group: 'buy',
-    icon: r_exchange_bitcoin_sv_at_the_best_price,
-  },
-  {
-    name: 'Coinify',
-    url: 'https://www.mycoinify.com/trade/?targetPage=buy&defaultCryptoCurrency=BSV',
-    desc: 'Buy and sell crypto with ease',
-    group: 'buy',
-    icon: r_coinify,
-  },
-  {
-    name: 'Guardarian',
-    url: 'https://guardarian.com/buy-bsv',
-    desc: 'Buy BSV online with low fees',
-    group: 'buy',
-    icon: r_guardarian,
-  },
-  {
-    name: 'LCX',
-    url: 'https://lcx.com/en/trade/BSV-EUR',
-    desc: 'Buy BSV with EUR on orderbook',
-    group: 'buy',
-    icon: r_liberty_crypto_exchange_lcx,
-  },
-  {
-    name: 'Onramper',
-    url: 'https://www.onramper.com/buy',
-    desc: 'Buy BSV with local ease',
-    group: 'buy',
-    icon: r_onramper,
-  },
-  {
     name: 'BananaBlocks',
     url: 'https://bananablocks.com/',
     desc: 'Explore the Bitcoin SV blockchain',
@@ -1029,8 +959,85 @@ const METANET_APPS: RadarApp[] = [
   },
 ];
 
+/** BSV on-ramps / exchanges (the hidden 'buy' group): bWalletX only, not in a store bundle even as data. */
+const BUY_APPS: Omit<RadarApp, 'source'>[] = MARKET_ENABLED
+  ? [
+      {
+        name: 'Orange Gateway',
+        url: 'https://orangegateway.com',
+        desc: 'Buy and sell Bitcoin BSV easily',
+        group: 'buy',
+        icon: r_orange_gateway,
+      },
+      {
+        name: 'Beymo App',
+        url: 'https://www.beymo.app',
+        desc: 'Buy and sell BSV peer-to-peer',
+        group: 'buy',
+        icon: r_beymo_app,
+      },
+      {
+        name: 'Onramp.money',
+        url: 'https://onramp.money/',
+        desc: 'Trade 480+ cryptos instantly worldwide',
+        group: 'buy',
+        icon: r_buy_sell_swap_crypto_instantly,
+      },
+      {
+        name: 'Alchemy Pay',
+        url: 'https://ramp.alchemypay.org/?crypto=BCHSV&fiat=EUR&network=BCHSV#/index',
+        desc: 'Buy BSV with your credit card',
+        group: 'buy',
+        icon: r_alchemy_pay,
+      },
+      {
+        name: 'Buy BSV',
+        url: 'https://ramp.bsvblockchain.tech/',
+        desc: 'Buy BSV instantly',
+        group: 'buy',
+        icon: r_buy_bsv,
+      },
+      { name: 'cex.io', url: 'https://cex.io/buysell', desc: 'Buy BSV with credit card', group: 'buy', icon: r_cexio },
+      {
+        name: 'ChangeNOW',
+        url: 'https://changenow.io/currencies/bitcoin-sv?from=eur&to=bsv&fiatMode=true&amount=100',
+        desc: 'Instant BSV exchange at best rates',
+        group: 'buy',
+        icon: r_exchange_bitcoin_sv_at_the_best_price,
+      },
+      {
+        name: 'Coinify',
+        url: 'https://www.mycoinify.com/trade/?targetPage=buy&defaultCryptoCurrency=BSV',
+        desc: 'Buy and sell crypto with ease',
+        group: 'buy',
+        icon: r_coinify,
+      },
+      {
+        name: 'Guardarian',
+        url: 'https://guardarian.com/buy-bsv',
+        desc: 'Buy BSV online with low fees',
+        group: 'buy',
+        icon: r_guardarian,
+      },
+      {
+        name: 'LCX',
+        url: 'https://lcx.com/en/trade/BSV-EUR',
+        desc: 'Buy BSV with EUR on orderbook',
+        group: 'buy',
+        icon: r_liberty_crypto_exchange_lcx,
+      },
+      {
+        name: 'Onramper',
+        url: 'https://www.onramper.com/buy',
+        desc: 'Buy BSV with local ease',
+        group: 'buy',
+        icon: r_onramper,
+      },
+    ]
+  : [];
+
 export const RADAR_APPS: RadarApp[] = [
   ...OWNER_APPS,
-  ...BSVRADAR_APPS.map((a): RadarApp => ({ ...a, source: 'bsvradar' })),
+  ...[...BSVRADAR_APPS, ...BUY_APPS].map((a): RadarApp => ({ ...a, source: 'bsvradar' })),
   ...METANET_APPS,
 ];

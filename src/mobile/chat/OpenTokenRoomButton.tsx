@@ -3,6 +3,7 @@ import { MessageCircle, ShoppingCart } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom, requestMarketToken } from './nav';
+import { MARKET_ENABLED } from '../storeBuild';
 import { tokenKey } from './tokenRooms';
 
 /**
@@ -47,7 +48,7 @@ export const OpenTokenRoomButton = ({
 /** Token page "Buy": that token's page in bWalletX's own Market tab (not the external 1Sat site). */
 export const BuyTokenButton = ({ kind = 'bsv21', id }: { kind?: 'bsv21' | 'coll'; id: string | undefined }) => {
   const { handleSelect } = useBottomMenu();
-  if (!id) return null;
+  if (!id || !MARKET_ENABLED) return null;
   return (
     <button
       type="button"

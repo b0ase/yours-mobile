@@ -642,7 +642,7 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />
-      {selling && token && (
+      {SELL_ENABLED && selling && token && (
         <SellSheet
           target={{ tokenId: token.info.id, symbol: getTokenName(token.info), dec: token.info.dec, heldRaw: maxAmount }}
           onClose={() => setSelling(false)}

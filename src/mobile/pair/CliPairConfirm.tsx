@@ -1,4 +1,4 @@
-import { APP_NAME } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../storeBuild';
 import { useState } from 'react';
 import { Terminal } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -27,7 +27,7 @@ export const CliPairConfirm = ({
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
   const agent = isAgentAccount(id);
-  const [trade, setTrade] = useState(true);
+  const [trade, setTrade] = useState(MARKET_ENABLED);
   const [send, setSend] = useState(false);
   const [days, setDays] = useState(7);
   // Minting works on any account (e.g. the owner's main one), within the limits set here.
@@ -113,6 +113,7 @@ export const CliPairConfirm = ({
       <div className="mt-4 flex w-full flex-col gap-2">
         {toggle(true, () => {}, 'See balances, prices and activity', 'Always on')}
         {agent &&
+          MARKET_ENABLED &&
           toggle(
             trade,
             setTrade,

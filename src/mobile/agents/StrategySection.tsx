@@ -14,7 +14,7 @@ import {
 import { saveTextFile } from './saveText';
 import { PublishStrategy } from '../strategies/PublishStrategy';
 import { myStrategies } from '../strategies/myStrategies';
-import { marketTradingEnabled } from '../storeBuild';
+import { MARKET_ENABLED } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
 
 const GOLD = '#F5B800';
@@ -118,7 +118,7 @@ export const StrategySection = ({ id }: { id: string }) => {
           <button type="button" onClick={() => void download(loaded)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
             Save file
           </button>
-          {marketTradingEnabled() && isCurrent && (
+          {MARKET_ENABLED && isCurrent && (
             <button type="button" onClick={() => setPublishing(true)} className={`${btn} flex-1`} style={{ background: '#F5B80022', color: GOLD }}>
               Sell
             </button>

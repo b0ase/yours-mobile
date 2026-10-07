@@ -1,4 +1,4 @@
-import { TOKENBLASTER_ENABLED } from './storeBuild';
+import { TOKENBLASTER_ENABLED, appsTileShown, radarGroupShown } from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -151,18 +151,23 @@ const bappTile = (a: BApp): Tile => ({
 });
 
 // Featured first (bChat, bMovies, bMusic, bMint, bWriter), then the rest by group.
-const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id)).map(bappTile);
+// Store build: no exchange / swap tiles (storeBuild.ts STORE_HIDDEN_APPS, App Review 3.1.5(iii)).
+const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id))
+  .filter((a) => appsTileShown(a.name))
+  .map(bappTile);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
 const bareHost = (url: string) => hostOf(url).replace(/^www\./, '');
 const OTHER_HOSTS = new Set(OTHER_TILES.map((t) => bareHost(t.url)));
-const RADAR_SECTIONS = RADAR_GROUPS.map((g) => ({
-  label: g.label,
-  tiles: RADAR_APPS.filter((a) => a.group === g.id && !OTHER_HOSTS.has(bareHost(a.url))).map(
-    (a): Tile => ({ key: `r:${a.url}`, name: a.name, url: a.url, icon: a.icon, desc: a.desc }),
-  ),
-})).filter((g) => g.tiles.length > 0);
+const RADAR_SECTIONS = RADAR_GROUPS.filter((g) => radarGroupShown(g.id))
+  .map((g) => ({
+    label: g.label,
+    tiles: RADAR_APPS.filter((a) => a.group === g.id && !OTHER_HOSTS.has(bareHost(a.url))).map(
+      (a): Tile => ({ key: `r:${a.url}`, name: a.name, url: a.url, icon: a.icon, desc: a.desc }),
+    ),
+  }))
+  .filter((g) => g.tiles.length > 0);
 // Games get their own page (owner, 5 Oct 2026); Other apps shows the rest.
 const GAME_TILES = RADAR_SECTIONS.find((g) => g.label === 'Games')?.tiles ?? [];
 const OTHER_SECTIONS = RADAR_SECTIONS.filter((g) => g.label !== 'Games');
@@ -447,7 +452,12 @@ const BrowserPage = () => {
   // Apps › Add app: the user's own sites, saved to the wallet (apps/userApps.ts).
   const userApps = useUserApps();
   const [addingApp, setAddingApp] = useState(false);
-  const userTiles: Tile[] = userApps.apps.map((a) => ({ key: `u:${a.url}`, name: a.name, url: a.url, icon: appIconFor(a.url) }));
+  const userTiles: Tile[] = userApps.apps.map((a) => ({
+    key: `u:${a.url}`,
+    name: a.name,
+    url: a.url,
+    icon: appIconFor(a.url),
+  }));
   // Bumped when the switch moves to a page, so that page's grid replays a gentle zoom.
   const [replay, setReplay] = useState<{ page: number; n: number }>({ page: -1, n: 0 });
   const pager = useRef<HTMLDivElement>(null);

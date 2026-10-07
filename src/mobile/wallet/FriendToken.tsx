@@ -5,6 +5,7 @@ import { asMenuItem } from '../tabs/tabs';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { requestChatRoom, requestMarketToken } from '../chat/nav';
+import { MARKET_ENABLED } from '../storeBuild';
 import { tokenKey } from '../chat/tokenRooms';
 import { normId, personalKey, personalTicker } from '../names/personalToken';
 import type { Contact } from '../chat/contacts';
@@ -87,7 +88,7 @@ export const FriendToken = ({ c, held }: { c: Contact; held: Bsv21Balance[] }) =
         >
           Room
         </button>
-      ) : (
+      ) : !MARKET_ENABLED ? null : (
         <button
           type="button"
           className={btn}

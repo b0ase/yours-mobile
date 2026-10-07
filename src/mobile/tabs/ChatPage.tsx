@@ -30,7 +30,7 @@ import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
 import { onRoomTicker, takeRoomTicker } from '../chat/segmentNav';
 import { RoomBell } from '../push/RoomBell';
-import { APP_NAME, STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED, STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -739,7 +739,7 @@ const LockedRoom = ({
           ? `You hold ${amountLabel(heldRaw, gate)}.`
           : 'Holding the token is your membership.'}
       </p>
-      {ROOMS && (
+      {MARKET_ENABLED && ROOMS && (
         <button
           onClick={onBuy}
           className="mt-2 w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2"
@@ -1614,7 +1614,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const buy = (key: string) => {
     const ref = parseTokenKey(key);
     setLocked(null);
-    if (!ref) return;
+    if (!ref || !MARKET_ENABLED) return;
     requestMarketToken(ref);
     handleSelect(asMenuItem('market'));
   };
@@ -1969,13 +1969,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     <p className="text-xs mt-1" style={{ color: MUTED }}>
                       Buy a token in Market to join its chatroom.
                     </p>
-                    <button
-                      onClick={() => handleSelect(asMenuItem('market'))}
-                      className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
-                      style={{ background: GOLD, color: '#1a1300' }}
-                    >
-                      <ShoppingCart size={15} /> {marketLabel()}
-                    </button>
+                    {MARKET_ENABLED && (
+                      <button
+                        onClick={() => handleSelect(asMenuItem('market'))}
+                        className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
+                        style={{ background: GOLD, color: '#1a1300' }}
+                      >
+                        <ShoppingCart size={15} /> {marketLabel()}
+                      </button>
+                    )}
                   </div>
                 )}
                 {entries && entries.length > 0 && tokenOther.length === 0 && (

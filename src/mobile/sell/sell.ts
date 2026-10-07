@@ -10,7 +10,7 @@
  * BSV-21 only, behind `SELL_ENABLED` (true in the mobile build, see vite.config.mobile.ts).
  */
 import { BSV21, OrdLock, OrdLockV2 } from '@1sat/templates';
-import { bcorpFeeAddress, marketTradingEnabled } from '../storeBuild';
+import { MARKET_ENABLED, bcorpFeeAddress } from '../storeBuild';
 import { LockingScript, Script } from '@bsv/sdk';
 
 declare const __BWALLET_SELL__: boolean | undefined;
@@ -24,7 +24,7 @@ declare const __TICKET_RESALE_FEE_RATE__: string | undefined;
 // existing listings still work. Re-enable on a v2 token listing.
 const SELL_PAUSED = false;
 export const SELL_ENABLED =
-  !SELL_PAUSED && marketTradingEnabled() && typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
+  !SELL_PAUSED && MARKET_ENABLED && typeof __BWALLET_SELL__ !== 'undefined' && __BWALLET_SELL__ === true;
 
 // ── ticket resale fee (owner: 0 by default; NOT the general 1% Market fee) ──
 

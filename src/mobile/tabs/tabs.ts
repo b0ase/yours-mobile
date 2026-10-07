@@ -1,4 +1,5 @@
 import type { MenuItems } from '../../contexts/BottomMenuContext';
+import { MARKET_ENABLED } from '../storeBuild';
 
 /**
  * Mobile tab ids. Upstream's MenuItems plus the mobile-only Market, Feed and Chat tabs; the
@@ -13,7 +14,10 @@ export type MobileTab = MenuItems | 'market' | 'feed' | 'chat';
 export const TAB_TAP = 'bwallet:tab-tap';
 
 /** Bottom bar order, left to right: Wallet · Market · Apps · Feed · Chat (Wallet first and the default tab; Apps in the centre). */
-export const TAB_ORDER: MobileTab[] = ['bsv', 'market', 'browser', 'feed', 'chat'];
+// Store build: no Market tab at all (storeBuild.ts MARKET_ENABLED).
+export const TAB_ORDER: MobileTab[] = MARKET_ENABLED
+  ? ['bsv', 'market', 'browser', 'feed', 'chat']
+  : ['bsv', 'browser', 'feed', 'chat'];
 
 export const asMenuItem = (tab: MobileTab) => tab as MenuItems;
 
@@ -27,6 +31,7 @@ export const tabFor = (selected: string | null): MobileTab => {
     case 'settings':
       return 'settings';
     case 'market':
+      return MARKET_ENABLED ? 'market' : 'bsv';
     case 'browser':
     case 'feed':
     case 'chat':
@@ -45,7 +50,7 @@ export const routeFor = (selected: string | null): string | null => {
     case 'media':
       return '/m/media';
     case 'market':
-      return '/m/market';
+      return MARKET_ENABLED ? '/m/market' : '/bsv-wallet';
     case 'browser':
       return '/browser';
     case 'feed':
