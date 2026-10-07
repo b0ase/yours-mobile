@@ -22,7 +22,11 @@ import {
   type LocalInfo,
   type RangePreset,
 } from './txHistory';
-import { fetchAccountTxs, fetchDailyRates, fetchLocalInfo, type Progress } from './txHistoryFetch';
+import { fetchAccountTxs, fetchDailyRates, fetchLocalInfo, fetchTokenSymbols, type Progress } from './txHistoryFetch';
+import { CATEGORIES, assetText, classifyEvent, filterCategory, findListings, type Category } from './historyEvents';
+import { ownOutputs, type RawTx } from './txHistory';
+import { appsByTxid, loadConnectionLog } from './connectionLog';
+import { ConnectionsView } from './ConnectionsView';
 import { statementHtml } from './txStatement';
 
 const BG = '#0d0e11';
@@ -62,24 +66,41 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
   const [preset, setPreset] = useState<RangePreset>('30d');
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [shown, setShown] = useState(100);
+  const [category, setCategory] = useState<Category | 'all'>('all');
+  const [view, setView] = useState<'tx' | 'connections'>('tx');
 
   const load = useCallback(async () => {
     setError('');
     setProgress({ phase: 'Starting', done: 0, total: 1 });
     try {
       const key = apiContext.wocApiKey || undefined;
-      const [txs, local] = await Promise.all([
-        fetchAccountTxs(addresses, key, setProgress),
+      const [local, connLog] = await Promise.all([
         fetchLocalInfo(apiContext.wallet?.listActions?.bind(apiContext.wallet) as Parameters<typeof fetchLocalInfo>[0]),
+        loadConnectionLog(),
       ]);
+      // The wallet's own action log adds txs the address index can miss (inscription outputs).
+      const txs = await fetchAccountTxs(addresses, key, setProgress, local.keys());
       // Pots and agent accounts: unlabelled outgoing payments are pot payments / agent spend.
       const kind = getAgentAccount(addrs?.identityAddress)?.kind;
       const now = Date.now();
-      let rows = buildRows(txs, new Set(addresses), local as Map<string, LocalInfo>, now);
+      const own = new Set(addresses);
+      let rows = buildRows(txs, own, local as Map<string, LocalInfo>, now);
       if (kind)
         rows = rows.map((r) =>
           r.direction === 'out' && r.label === 'send' ? { ...r, label: kind === 'pot' ? 'pot payment' : 'agent spend' } : r,
         );
+      // History v2: token / NFT / game / subscription / app events (historyEvents.ts).
+      const byId = new Map<string, RawTx>(txs.map((t) => [t.txid, t]));
+      const prev = ownOutputs([...byId.values()], own);
+      const ctx = { own, prev, listings: findListings([...byId.values()], prev), appByTxid: appsByTxid(connLog), accountKind: kind };
+      rows = rows.map((r) => classifyEvent(r, byId.get(r.txid), local.get(r.txid), ctx));
+      // Txs only the action log knew about that move nothing on these addresses (BRC-100 derived keys) are noise here.
+      rows = rows.filter((r) => r.amountSats !== 0 || r.feeSats !== 0 || r.asset || r.direction === 'self');
+      setProgress({ phase: 'Token names', done: 0, total: 1 });
+      const ids = [...new Set(rows.map((r) => (r.asset?.kind === 'token' && !r.asset.symbol ? r.asset.id : '')).filter(Boolean))];
+      const syms = ids.length ? await fetchTokenSymbols(ids) : new Map<string, string>();
+      if (syms.size)
+        rows = rows.map((r) => (r.asset && syms.has(r.asset.id) ? { ...r, asset: { ...r.asset, symbol: syms.get(r.asset.id) } } : r));
       setProgress({ phase: 'Prices', done: 1, total: 1 });
       const oldest = rows.length ? Math.min(...rows.map((r) => r.time)) : now;
       const [daily, current] = await Promise.all([
@@ -99,7 +120,10 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
   }, [load]);
 
   const range = useMemo(() => rangeFor(preset, data?.at ?? Date.now(), custom), [preset, custom, data?.at]);
-  const rows = useMemo(() => (data ? filterRange(data.rows, range) : []), [data, range]);
+  const rows = useMemo(
+    () => (data ? filterCategory(filterRange(data.rows, range) as (HistoryRow & { category: Category })[], category) : []),
+    [data, range, category],
+  );
   const sum = totals(rows);
   const bal = data ? balances(data.rows, range) : null;
   const stem = fileStem(accountName, range);
@@ -111,8 +135,9 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
       addresses,
       range,
       rows,
-      opening: bal?.opening ?? null,
-      closing: bal?.closing ?? null,
+      // A category-filtered statement has no meaningful account balance.
+      opening: category === 'all' ? (bal?.opening ?? null) : null,
+      closing: category === 'all' ? (bal?.closing ?? null) : null,
       autoPrint: !isNative,
     });
     if (!isNative) {
@@ -156,6 +181,30 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
         </button>
       </div>
 
+      <div className="flex gap-2 px-4 pt-3" role="tablist" aria-label="History view">
+        {(
+          [
+            ['tx', 'Transactions'],
+            ['connections', 'Connections'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => setView(id)}
+            className="flex-1 py-2 rounded-xl text-sm font-semibold border-0 cursor-pointer"
+            style={{ background: view === id ? '#fff' : CARD, color: view === id ? '#000' : '#fff' }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'connections' ? (
+        <ConnectionsView rows={data?.rows ?? []} />
+      ) : (
       <div className="flex-1 overflow-y-auto px-4 pb-8" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
         {progress && (
           <div className="mt-4" aria-live="polite">
@@ -194,6 +243,27 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
             </button>
           ))}
         </div>
+        <div className="flex gap-2 mt-2 overflow-x-auto pb-1" role="group" aria-label="Category">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              aria-pressed={category === c.id}
+              onClick={() => {
+                setCategory(c.id);
+                setShown(100);
+              }}
+              className="px-3 py-1 rounded-full text-xs cursor-pointer whitespace-nowrap"
+              style={{
+                background: category === c.id ? '#fff' : 'transparent',
+                color: category === c.id ? '#000' : MUTED,
+                border: `1px solid ${category === c.id ? '#fff' : LINE}`,
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
         {preset === 'custom' && (
           <div className="flex gap-2 mt-2 text-xs items-center" style={{ color: MUTED }}>
             <label className="flex flex-col gap-1">
@@ -229,7 +299,9 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
         </div>
         {bal && (
           <div className="text-xs mt-2" style={{ color: MUTED }}>
-            {sum.count} transactions · opening {fmtBsv(bal.opening)} · closing {fmtBsv(bal.closing)}
+            {sum.count} transactions
+            {/* Opening / closing are for the whole account, so only beside the unfiltered list. */}
+            {category === 'all' && ` · opening ${fmtBsv(bal.opening)} · closing ${fmtBsv(bal.closing)}`}
           </div>
         )}
 
@@ -258,6 +330,7 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
           )}
         </div>
       </div>
+      )}
     </div>,
     document.body,
   );
@@ -287,6 +360,12 @@ const Row = ({ r }: { r: HistoryRow }) => {
             {usd ? ` · $${usd}${r.usdRateIsCurrent ? ' (current rate)' : ''}` : ''}
           </span>
         </div>
+        {(r.asset || r.app) && (
+          <div className="text-xs mt-1 break-all" style={{ color: '#fff' }}>
+            {r.asset && <span>{assetText(r.asset)} </span>}
+            {r.app && <span style={{ color: MUTED }}>{r.asset ? '· ' : ''}via {r.app}</span>}
+          </div>
+        )}
         {(r.feeSats > 0 || r.counterparty || r.note) && (
           <div className="text-xs mt-1 break-all" style={{ color: MUTED }}>
             {r.feeSats > 0 && <span>Fee {fmtSats(r.feeSats)} </span>}

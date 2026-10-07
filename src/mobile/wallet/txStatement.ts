@@ -1,5 +1,6 @@
 /** Printable statement (HTML; the user prints it to PDF). No libraries. */
 import { bsvString, netOf, totals, usdValue, type HistoryRow, type Range } from './txHistory';
+import { assetText } from './historyEvents';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
@@ -27,7 +28,8 @@ export const statementHtml = (opts: {
     .map(
       (r) => `<tr>
 <td>${esc(new Date(r.time).toLocaleString())}</td>
-<td>${esc(r.label)}</td>
+<td>${esc(r.label)}${r.asset ? `<br><small>${esc(assetText(r.asset))}</small>` : ''}${r.app ? `<br><small>via ${esc(r.app)}</small>` : ''}</td>
+<td>${esc(r.category ?? '')}</td>
 <td>${esc(r.direction)}</td>
 <td class="n">${bsvString(r.amountSats)}</td>
 <td class="n">${r.feeSats || ''}</td>
@@ -59,11 +61,11 @@ th{background:#f4f4f4}.n{text-align:right;white-space:nowrap}.m{font-family:ui-m
 <span>Net</span><b>${bsvString(t.netSats)} BSV</b><span></span>
 <span>Closing balance</span><b>${bal(opts.closing)}</b><span></span>
 </div>
-<table><thead><tr><th>Date</th><th>Label</th><th>Dir</th><th class="n">Amount BSV</th><th class="n">Fee sats</th><th class="n">USD</th><th class="n">Net BSV</th><th>Counterparty</th><th>Txid</th></tr></thead>
+<table><thead><tr><th>Date</th><th>Label</th><th>Category</th><th>Dir</th><th class="n">Amount BSV</th><th class="n">Fee sats</th><th class="n">USD</th><th class="n">Net BSV</th><th>Counterparty</th><th>Txid</th></tr></thead>
 <tbody>
-${body || '<tr><td colspan="9">No transactions in this period.</td></tr>'}
+${body || '<tr><td colspan="10">No transactions in this period.</td></tr>'}
 </tbody></table>
-<p class="sub">* USD at the current rate (no price for that day). Amounts from the Bitcoin SV blockchain via WhatsOnChain. Balances cover the BSV on this account's addresses.</p>
+<p class="sub">* USD at the current rate (no price for that day). Amounts from the Bitcoin SV blockchain via WhatsOnChain. Balances cover the BSV on this account's addresses. Token and NFT types are worked out from the transactions and the wallet's own records; check them before relying on them. Not tax advice.</p>
 ${opts.autoPrint ? '<script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>' : ''}
 </body></html>`;
 };
