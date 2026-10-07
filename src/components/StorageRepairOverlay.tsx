@@ -94,7 +94,9 @@ export const StorageRepairOverlay = () => {
   const subtitle = running
     ? 'This can take a few minutes'
     : success
-      ? 'Local and remote storage match'
+      ? record?.rescan?.stale.length
+        ? `Local and remote storage match. ${record.rescan.stale.length} already-spent output${record.rescan.stale.length === 1 ? '' : 's'} marked spent`
+        : 'Local and remote storage match'
       : 'Nothing was removed from your wallet';
   const color = running || success ? ACCENT : FAIL;
 
