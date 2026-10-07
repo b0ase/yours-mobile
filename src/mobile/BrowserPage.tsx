@@ -3,7 +3,9 @@ import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Clock, Github, Globe, Search, Star, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import bGlyph from './brand/bwallet-glyph.svg';
+import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { AddAppSheet } from './apps/AddAppSheet';
@@ -158,6 +160,9 @@ const bappTile = (a: BApp): Tile => ({
 const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id))
   .filter((a) => appsTileShown(a.name))
   .map(bappTile);
+/** The b agent as an Apps tile (owner, 7 Oct 2026): opens /m/agent, the same as "Ask b" in the top bar. */
+const AGENT_KEY = 'sys:agent';
+const AGENT_TILE: Tile = { key: AGENT_KEY, name: 'b agent', url: '/m/agent', icon: bGlyph };
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
@@ -453,6 +458,7 @@ type Only = 'home' | 'apps' | 'games';
 
 const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.ReactNode } = {}) => {
   const phone = usePhoneLayout();
+  const navigate = useNavigate();
   const only: Only | undefined = onlyProp ?? (phone ? 'apps' : undefined);
   const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
@@ -599,8 +605,8 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
           <AppTile
             key={t.key}
             tile={t}
-            onOpen={() => go(t.url, t.bapp)}
-            onInfo={() => setInfo(t)}
+            onOpen={() => (t.key === AGENT_KEY ? navigate(t.url) : go(t.url, t.bapp))}
+            onInfo={() => (t.key === AGENT_KEY ? navigate(t.url) : setInfo(t))}
             onArrange={
               i === 0
                 ? () => {
@@ -683,8 +689,10 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
     if (i === 1) {
       return (
         <>
-          {grid(1, notHome(BAPP_TILES))}
-          {note(`Touch and hold an app for details. Grey dot = demo. ${UNOFFICIAL_NOTICE}`)}
+          {grid(1, [AGENT_TILE, ...notHome(BAPP_TILES)])}
+          {note(
+            `Touch and hold an app for details${phone ? ' or to add it to the Dock' : ''}. Grey dot = demo. ${UNOFFICIAL_NOTICE}`,
+          )}
         </>
       );
     }
@@ -891,14 +899,8 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
                 >
                   Open
                 </button>
-                <button
-                  onClick={() => toggleFavourite(info)}
-                  className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
-                >
-                  <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
-                  {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
-                </button>
-                {phone && only === 'home' && isFavourite(info) && (
+                {/* Phone layout: any app can go in the dock (owner, 7 Oct 2026). */}
+                {phone && (
                   <button
                     onClick={() => {
                       const item: DockItem = {
@@ -910,11 +912,18 @@ const BrowserPage = ({ only: onlyProp, header }: { only?: Only; header?: React.R
                       setInfo(null);
                       window.dispatchEvent(new CustomEvent(PHONE_ADD_TO_DOCK, { detail: item }));
                     }}
-                    className="rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                    className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
                   >
-                    Add to Dock
+                    <Plus size={15} style={{ color: '#FFD24D' }} /> Add to Dock
                   </button>
                 )}
+                <button
+                  onClick={() => toggleFavourite(info)}
+                  className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
+                >
+                  <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
+                  {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
+                </button>
                 {isFavourite(info) && (!only || only === 'home') && (
                   <button
                     onClick={() => {

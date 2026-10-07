@@ -5,8 +5,6 @@
 /** A press becomes a long-press only if the finger stays within this many px (so a scroll never triggers it). */
 export const LONG_PRESS_SLOP = 8;
 export const DOCK_LONG_PRESS_MS = 500;
-/** Holding the b this long opens the agent sheet; a shorter press is a tap (HOME). */
-export const B_HOLD_MS = 450;
 
 export const longPressCancelled = (dx: number, dy: number, slop = LONG_PRESS_SLOP) => Math.hypot(dx, dy) > slop;
 

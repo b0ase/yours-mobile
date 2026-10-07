@@ -12,7 +12,6 @@ import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Spark
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { screenForPath } from '../phone/screens';
 import { screenLabel } from '../phone/icons';
-import { PHONE_AGENT } from '../phone/events';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AgentToolsSheet } from '../agents/AgentToolsSheet';
 import bGlyph from '../brand/bwallet-glyph.svg';
@@ -124,36 +123,71 @@ export const TopNav = () => {
     <>
       <AccountStrip />
       {phone ? (
-        // Phone layout (test switch): Accounts · screen title · Settings/Lock. The b lives in the dock.
+        // Phone layout (test switch, owner 7 Oct 2026): one compact row. Left: Accounts + the page title.
+        // Centre: "Ask b" (the agent page; a pill, not a second b glyph, so it doesn't read as the dock's big b,
+        // which is Home). Right: Calls · Media · Settings/Lock.
         <div
-          className="grid grid-cols-[3rem_1fr_3rem] items-center fixed top-0 w-full z-10 px-2 h-14"
+          className="grid grid-cols-[1fr_auto_1fr] items-center fixed top-0 w-full z-10 px-2 h-14 gap-1"
           style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
+          <div className="flex items-center min-w-0 gap-0.5">
+            <button
+              type="button"
+              onClick={() => setDrawer(true)}
+              className="shrink-0 w-9 h-9 flex items-center justify-center bg-transparent"
+              aria-label="Accounts menu"
+            >
+              <Menu size={22} color={ICON} />
+            </button>
+            <span className="min-w-0 truncate text-[15px] font-bold" style={{ color: ICON }} data-testid="page-title">
+              {(() => {
+                const s = screenForPath(pathname);
+                return s ? screenLabel(s.id, s.label) : '';
+              })()}
+            </span>
+          </div>
           <button
             type="button"
-            onClick={() => setDrawer(true)}
-            className="w-9 h-9 flex items-center justify-center bg-transparent"
-            aria-label="Accounts menu"
+            aria-label={X_MARK ? 'Ask bX agent' : 'Ask b'}
+            onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
+            aria-pressed={onAgent}
+            className="h-8 rounded-full px-3 flex items-center gap-1 text-[13px] font-bold cursor-pointer"
+            style={{ border: RING, color: ACCENT, background: onAgent ? `${ACCENT}22` : 'transparent' }}
           >
-            <Menu size={22} color={ICON} />
+            <Sparkles size={13} color={ACCENT} /> Ask b
           </button>
-          <span className="text-center text-[15px] font-bold truncate" style={{ color: ICON }}>
-            {(() => {
-              const s = screenForPath(pathname);
-              return s ? screenLabel(s.id, s.label) : '';
-            })()}
-          </span>
-          <button
-            type="button"
-            aria-label="Settings and lock"
-            aria-haspopup="menu"
-            aria-expanded={phoneMenu}
-            onClick={() => setPhoneMenu((v) => !v)}
-            className="justify-self-end w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: RING }}
-          >
-            <Settings size={16} color={ICON} />
-          </button>
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              aria-label="Calls"
+              onClick={() => setCallsOpen(true)}
+              className="w-8 h-8 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              style={{ border: RING }}
+            >
+              <Phone size={15} color={ACCENT} />
+            </button>
+            <button
+              type="button"
+              aria-label="Media"
+              onClick={() => (onMedia ? navigate(-1) : navigate('/m/media'))}
+              aria-pressed={onMedia}
+              className="w-8 h-8 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              style={{ border: RING }}
+            >
+              <Play size={15} color={ACCENT} fill={ACCENT} />
+            </button>
+            <button
+              type="button"
+              aria-label="Settings and lock"
+              aria-haspopup="menu"
+              aria-expanded={phoneMenu}
+              onClick={() => setPhoneMenu((v) => !v)}
+              className="w-8 h-8 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              style={{ border: RING }}
+            >
+              <Settings size={15} color={ICON} />
+            </button>
+          </div>
           {phoneMenu && (
             <>
               <div className="fixed inset-0 z-[299]" onClick={() => setPhoneMenu(false)} />
@@ -165,13 +199,6 @@ export const TopNav = () => {
                   [
                     [<Settings key="s" size={16} color="#fff" />, 'Settings', () => go()],
                     [<Lock key="l" size={16} color="#fff" />, 'Lock now', () => void lockWallet()],
-                    [
-                      <Sparkles key="b" size={16} color="#fff" />,
-                      'Ask b',
-                      () => window.dispatchEvent(new Event(PHONE_AGENT)),
-                    ],
-                    [<Phone key="c" size={16} color="#fff" />, 'Calls', () => setCallsOpen(true)],
-                    [<Play key="m" size={16} color="#fff" />, 'Media', () => navigate('/m/media')],
                   ] as const
                 ).map(([icon, label, run]) => (
                   <button

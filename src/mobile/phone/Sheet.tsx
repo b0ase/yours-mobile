@@ -1,12 +1,18 @@
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
+import { useKeyboardInset } from '../ui/keyboardInset';
 
-/** A bottom sheet over everything (Back closes it). */
+/** A bottom sheet over everything (Back closes it). Rides above the iOS keyboard when one is open. */
 export const Sheet = ({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) => {
   useBackClose(true, onClose);
+  const keyboard = useKeyboardInset();
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[150] flex items-end"
+      style={{ background: 'rgba(0,0,0,0.6)', paddingBottom: keyboard }}
+      onClick={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"

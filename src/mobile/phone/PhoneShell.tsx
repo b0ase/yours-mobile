@@ -9,12 +9,11 @@ import { indexingEnabled } from '../storeBuild';
 import { TAB_TAP } from '../tabs/tabs';
 import { setWalletKind } from '../wallet/walletKind';
 import { AddToDockSheet } from './AddToDockSheet';
-import { AgentOverlay } from './AgentOverlay';
 import { Dock } from './Dock';
 import { addToDock, dockKey, type DockItem } from './dockModel';
 import { useDock } from './dockStore';
 import { usePhoneLayout } from './flag';
-import { PHONE_ADD_TO_DOCK, PHONE_AGENT, PHONE_TOAST } from './events';
+import { PHONE_ADD_TO_DOCK, PHONE_TOAST } from './events';
 import { classifySwipe } from './gesture';
 import { PageDots } from './PageDots';
 import { backGoesHome, setPhoneBack } from './phoneBack';
@@ -64,7 +63,6 @@ const Shell = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { pairLink, clearPairLink } = useAppServices();
   const [dock, setDock] = useDock();
-  const [agentOpen, setAgentOpen] = useState(false);
   const [sendReceive, setSendReceive] = useState(false);
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -152,9 +150,8 @@ const Shell = () => {
     };
   }, [pathname]);
 
-  // Others (top-bar menu "Ask b", HOME's app details "Add to Dock") reach the shell by event.
+  // Others (an app's details "Add to Dock") reach the shell by event.
   useEffect(() => {
-    const ask = () => setAgentOpen(true);
     const add = (e: Event) => {
       const r = addToDock(dock, (e as CustomEvent<DockItem>).detail);
       if (r.ok) setDock(r.items);
@@ -169,11 +166,9 @@ const Shell = () => {
       );
     };
     const say = (e: Event) => setToast((e as CustomEvent<string>).detail);
-    window.addEventListener(PHONE_AGENT, ask);
     window.addEventListener(PHONE_ADD_TO_DOCK, add);
     window.addEventListener(PHONE_TOAST, say);
     return () => {
-      window.removeEventListener(PHONE_AGENT, ask);
       window.removeEventListener(PHONE_ADD_TO_DOCK, add);
       window.removeEventListener(PHONE_TOAST, say);
     };
@@ -218,7 +213,6 @@ const Shell = () => {
           badges={badges}
           onOpen={open}
           onHome={goHome}
-          onAgent={() => setAgentOpen(true)}
           onChange={setDock}
           onAdd={() => setAdding(true)}
           pageKey={pathname}
@@ -233,15 +227,6 @@ const Shell = () => {
         >
           {toast}
         </div>
-      )}
-      {agentOpen && (
-        <AgentOverlay
-          onClose={() => setAgentOpen(false)}
-          onExpand={() => {
-            setAgentOpen(false);
-            navigate('/m/agent');
-          }}
-        />
       )}
       {sendReceive && <SendReceiveSheet onPick={walletAction} onClose={() => setSendReceive(false)} />}
       {adding && (

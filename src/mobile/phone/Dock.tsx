@@ -5,14 +5,14 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { useBackClose } from '../backStack';
 import { isBWalletX } from '../storeBuild';
 import { dockKey, moveInDock, removeFromDock, splitDock, type DockItem } from './dockModel';
-import { B_HOLD_MS, DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
+import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
  * sideways when there are more, with a fade on the side that has more. A sibling of the page, never inside it,
  * so its sideways scroll can't turn into a page swipe (PhoneShell also ignores touches that start here).
- * The b: tap = HOME, press and hold = the b agent sheet.
+ * The big b in the centre: tap = HOME (the app grid). The b agent is "Ask b" in the top bar.
  * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds.
  */
 const GOLD = '#FFD24D';
@@ -26,7 +26,6 @@ type Props = {
   badges: Record<string, string | undefined>;
   onOpen: (item: DockItem) => void;
   onHome: () => void;
-  onAgent: () => void;
   onChange: (items: DockItem[]) => void;
   onAdd: () => void;
   /** Bumped by the shell on a page change: arranging ends. */
@@ -59,6 +58,8 @@ const Tile = ({
   onRemove: () => void;
 }) => {
   const Icon = itemIcon(item);
+  const isApp = item.kind === 'app';
+  const [iconFailed, setIconFailed] = useState(false);
   const timer = useRef<number | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const fired = useRef(false);
@@ -100,16 +101,27 @@ const Tile = ({
         style={{ WebkitTouchCallout: 'none' }}
       >
         <span
-          className="relative flex h-10 w-10 items-center justify-center rounded-2xl"
-          style={{
-            background: picked ? `${GOLD}33` : active ? '#2b2f36' : '#17191E',
-            border: `1px solid ${picked ? GOLD : '#2b2f36'}`,
-          }}
+          className={`relative flex h-10 w-10 items-center justify-center ${isApp ? 'rounded-[11px]' : 'rounded-2xl'}`}
+          style={
+            isApp
+              ? // Apps look like their Apps-page tile: the icon fills the rounded square (BrowserPage TileIcon).
+                { background: '#17191E', boxShadow: picked ? `0 0 0 2px ${GOLD}` : undefined }
+              : {
+                  background: picked ? `${GOLD}33` : active ? '#2b2f36' : '#17191E',
+                  border: `1px solid ${picked ? GOLD : '#2b2f36'}`,
+                }
+          }
         >
-          {item.kind === 'app' && item.icon ? (
-            <img src={item.icon} alt="" className="h-7 w-7 rounded-lg" />
+          {isApp && item.icon && !iconFailed ? (
+            <img
+              src={item.icon}
+              alt=""
+              draggable={false}
+              onError={() => setIconFailed(true)}
+              className="h-10 w-10 rounded-[11px] object-cover"
+            />
           ) : (
-            <Icon size={20} color={active ? GOLD : '#F2F2F0'} />
+            <Icon size={isApp ? 18 : 20} color={isApp || active ? GOLD : '#F2F2F0'} />
           )}
           {badge && (
             <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-[#F04438] text-[9px] font-bold text-white flex items-center justify-center">
@@ -139,84 +151,42 @@ const Tile = ({
   );
 };
 
-const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent: () => void; disabled: boolean }) => {
-  const timer = useRef<number | null>(null);
-  const held = useRef(false);
-  const [pressing, setPressing] = useState(false);
-  const clear = () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = null;
-    setPressing(false);
-  };
-  useEffect(
-    () => () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    },
-    [],
-  );
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      aria-label="Home. Press and hold to ask b"
-      onPointerDown={() => {
-        held.current = false;
-        setPressing(true);
-        timer.current = window.setTimeout(() => {
-          held.current = true;
-          timer.current = null;
-          setPressing(false);
-          navigator.vibrate?.(15);
-          onAgent();
-        }, B_HOLD_MS);
-      }}
-      onPointerUp={clear}
-      onPointerCancel={clear}
-      onPointerLeave={clear}
-      onContextMenu={(e) => e.preventDefault()}
-      onClick={() => {
-        if (held.current) return void (held.current = false);
-        onHome();
-      }}
-      className="relative shrink-0 -mt-1 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
-      style={{
-        background: FLIP ? '#F5B800' : '#010101',
-        boxShadow: `0 0 0 2px ${FLIP ? '#010101' : GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
-        transform: pressing ? 'scale(0.92)' : undefined,
-        WebkitTouchCallout: 'none',
-      }}
-    >
-      {FLIP ? (
-        <svg viewBox="23 8 74 100" width={22} height={30} aria-hidden>
-          <mask id="bdock">
-            <rect x="0" y="0" width="140" height="140" fill="#fff" />
-            <circle cx="60" cy="72" r="15" fill="#000" />
-          </mask>
-          <g fill="#010101" mask="url(#bdock)">
-            <polygon points="45,12 45,76 27,76 27,30" />
-            <circle cx="60" cy="72" r="33" />
-          </g>
-        </svg>
-      ) : (
-        <img src={bGlyph} alt="" width={30} height={30} draggable={false} />
-      )}
-    </button>
-  );
-};
+/**
+ * The big b in the centre (owner, 7 Oct 2026: "I DO like the big b button"). Tap = HOME, the app grid. No hold:
+ * the b agent is "Ask b" in the top bar, a full page that handles the keyboard.
+ */
+const HomeButton = ({ onHome, disabled }: { onHome: () => void; disabled: boolean }) => (
+  <button
+    type="button"
+    disabled={disabled}
+    aria-label="Home"
+    onClick={onHome}
+    onContextMenu={(e) => e.preventDefault()}
+    className="relative shrink-0 -mt-1 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none active:scale-90 transition-transform disabled:opacity-40"
+    style={{
+      background: FLIP ? '#F5B800' : '#010101',
+      boxShadow: `0 0 0 2px ${FLIP ? '#010101' : GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
+      WebkitTouchCallout: 'none',
+    }}
+  >
+    {FLIP ? (
+      <svg viewBox="23 8 74 100" width={22} height={30} aria-hidden>
+        <mask id="bdock">
+          <rect x="0" y="0" width="140" height="140" fill="#fff" />
+          <circle cx="60" cy="72" r="15" fill="#000" />
+        </mask>
+        <g fill="#010101" mask="url(#bdock)">
+          <polygon points="45,12 45,76 27,76 27,30" />
+          <circle cx="60" cy="72" r="33" />
+        </g>
+      </svg>
+    ) : (
+      <img src={bGlyph} alt="" width={30} height={30} draggable={false} />
+    )}
+  </button>
+);
 
-export const Dock = ({
-  items,
-  labels,
-  activeKey,
-  badges,
-  onOpen,
-  onHome,
-  onAgent,
-  onChange,
-  onAdd,
-  pageKey,
-  dots,
-}: Props) => {
+export const Dock = ({ items, labels, activeKey, badges, onOpen, onHome, onChange, onAdd, pageKey, dots }: Props) => {
   const reduce = useReducedMotion();
   const [arranging, setArranging] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -347,7 +317,7 @@ export const Dock = ({
               </span>
             )}
           </div>
-          <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
+          <HomeButton onHome={onHome} disabled={arranging} />
           <div
             ref={scroller}
             onScroll={measure}

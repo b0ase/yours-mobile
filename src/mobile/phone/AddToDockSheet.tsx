@@ -3,7 +3,7 @@ import { addable, DOCK_MAX, type DockItem } from './dockModel';
 import { itemIcon, itemLabel } from './icons';
 import type { Screen } from './screens';
 
-/** Arrange › Add: screens and Send/Receive not in the dock yet. Apps are added from HOME (an app's details › Add to Dock). */
+/** Arrange › Add: screens and Send/Receive not in the dock yet. Apps are added from Apps or HOME (touch and hold › Add to Dock). */
 export const AddToDockSheet = ({
   items,
   strip,
@@ -48,7 +48,7 @@ export const AddToDockSheet = ({
           })}
         </div>
       )}
-      <p className="text-[11px] text-[#98A2B3]">To add an app: on Home, touch and hold it, then Add to Dock.</p>
+      <p className="text-[11px] text-[#98A2B3]">To add an app: on Apps or Home, touch and hold it, then Add to Dock.</p>
       <button onClick={onClose} className="py-2 text-sm text-[#98A2B3] bg-transparent border-0">
         Close
       </button>
