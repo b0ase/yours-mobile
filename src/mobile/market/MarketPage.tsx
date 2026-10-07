@@ -37,6 +37,7 @@ import {
 import { categoryOf, listingsIn, nftFeed, type Feed as BaseFeed, type NftCategory, type NftListing } from './classify';
 import { onSafetyChange, refreshSafety, reportItem, safety } from './safety';
 import { Blurred, ContentImg, NftCard } from './NftCard';
+import { groupCollections } from './groupCollections';
 import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
@@ -517,6 +518,12 @@ const MarketPage = () => {
   };
 
   const shownNfts = feed && view !== 'collections' ? listingsIn(feed.items, view).filter(nftSafe) : [];
+  // 3D: collapse repetitive collections (e.g. "Kowry Glider (12)") and rank them after one-offs; tap to expand.
+  const [expanded3d, setExpanded3d] = useState<ReadonlySet<string>>(() => new Set());
+  const cells =
+    view === '3d'
+      ? groupCollections(shownNfts, expanded3d)
+      : shownNfts.map((n) => ({ item: n, key: null as string | null, count: 1, label: n.name }));
   const nftGrid = (
     <section className="flex flex-col gap-2">
       {feed === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading NFT listings…</p>}
@@ -525,35 +532,45 @@ const MarketPage = () => {
         <p className="text-xs text-[#98A2B3] text-center py-8">Nothing listed here right now.</p>
       )}
       <div className="grid grid-cols-2 gap-2">
-        {shownNfts.map((n) => (
-          <NftCard
-            key={n.outpoint}
-            item={n}
-            onPlay={() => playPreview(n)}
-            onOpen={() => {
-              // Documents open as-is from ORDFS in the dApp browser (no in-app viewer for PDF / Office).
-              if (n.category === 'documents') return void openDappBrowser(contentUrls(n.origin)[0]);
-              if (n.category === 'video') pauseAudio();
-              setPreview(n);
-            }}
-            onReport={() =>
-              setReporting({ outpoint: n.outpoint, origin: n.origin, collectionId: n.collectionId, name: n.name })
-            }
-            onBuy={() =>
-              setPending({
-                room: { ref: { kind: 'coll', id: n.collectionId ?? '', key: '' }, title: n.collectionName ?? 'NFT' },
-                listing: {
-                  outpoint: n.outpoint,
-                  priceSats: n.priceSats,
-                  amount: null,
-                  label: n.name,
-                  origin: n.origin,
-                  seller: n.seller,
-                  buyable: n.buyable,
-                },
-              })
-            }
-          />
+        {cells.map(({ item: n, key: gk, count, label }) => (
+          <div key={n.outpoint} className="flex flex-col gap-1 min-w-0">
+            <NftCard
+              item={n}
+              onPlay={() => playPreview(n)}
+              onOpen={() => {
+                // Documents open as-is from ORDFS in the dApp browser (no in-app viewer for PDF / Office).
+                if (n.category === 'documents') return void openDappBrowser(contentUrls(n.origin)[0]);
+                if (n.category === 'video') pauseAudio();
+                setPreview(n);
+              }}
+              onReport={() =>
+                setReporting({ outpoint: n.outpoint, origin: n.origin, collectionId: n.collectionId, name: n.name })
+              }
+              onBuy={() =>
+                setPending({
+                  room: { ref: { kind: 'coll', id: n.collectionId ?? '', key: '' }, title: n.collectionName ?? 'NFT' },
+                  listing: {
+                    outpoint: n.outpoint,
+                    priceSats: n.priceSats,
+                    amount: null,
+                    label: n.name,
+                    origin: n.origin,
+                    seller: n.seller,
+                    buyable: n.buyable,
+                  },
+                })
+              }
+            />
+            {gk && count > 1 && (
+              <button
+                type="button"
+                onClick={() => setExpanded3d((prev) => new Set(prev).add(gk))}
+                className={`text-[11px] text-[#98A2B3] bg-[#17191E] border border-[#2b2f36] rounded-full px-2 py-1 ${ELLIPSIS}`}
+              >
+                {label} · show all
+              </button>
+            )}
+          </div>
         ))}
       </div>
       {feed?.partial && <p className="text-[10px] text-[#667085] text-center">Still loading…</p>}
@@ -1133,14 +1150,18 @@ const MarketPage = () => {
         ) : view === 'collections' ? (
           trending
         ) : view === '3d' ? (
-          // Market › 3D: the GLB / glTF / USDZ listings on the 1Sat order book, then the 1Sat Ordnance catalogue.
+          // Market › 3D (owner, 8 Oct 2026): Featured (1Sat Ordnance) first, then the rest of the 3D order book.
           <>
-            {nftGrid}
             {OrdnanceGrid && (
-              <Suspense fallback={null}>
-                <OrdnanceGrid />
-              </Suspense>
+              <>
+                <h3 className="m-0 text-sm font-semibold text-white">Featured</h3>
+                <Suspense fallback={null}>
+                  <OrdnanceGrid />
+                </Suspense>
+                <h3 className="m-0 mt-2 text-sm font-semibold text-white">More 3D</h3>
+              </>
             )}
+            {nftGrid}
           </>
         ) : (
           nftGrid

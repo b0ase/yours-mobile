@@ -70,7 +70,7 @@ export const OrdnanceGrid = () => {
   if (!weapons) return <p className="text-xs text-center py-8 text-[#98A2B3]">Loading 3D NFTs…</p>;
 
   return (
-    <div className="flex flex-col gap-2 pb-24">
+    <div className="flex flex-col gap-2">
       <p className="m-0 text-xs text-[#98A2B3]">
         1Sat Ordnance by tokenblaster.lol: game guns as 1Sat NFTs. Owning one unlocks it in Double-O Satoshi and the Arena.
       </p>
