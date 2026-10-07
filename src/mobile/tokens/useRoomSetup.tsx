@@ -85,13 +85,15 @@ export const useRoomSetup = (
       lineItems={
         quote
           ? [
-              { address: 'Deposit (1Sat)', amount: money(quote.indexSats, rate) },
+              // Exact sats for every part, so what is shown is what is signed.
+              { address: 'Deposit (1Sat)', amount: moneyWithSats(quote.indexSats, rate) },
               // SendConfirmation truncates labels over 16 characters: keep them short.
-              ...(quote.feeSats > 0 ? [{ address: 'Setup (bCorp)', amount: money(quote.feeSats, rate) }] : []),
+              ...(quote.feeSats > 0 ? [{ address: 'Setup (bCorp)', amount: moneyWithSats(quote.feeSats, rate) }] : []),
+              { address: 'Network fee', amount: moneyWithSats(quote.networkSats, rate) },
             ]
           : []
       }
-      total={`~${moneyWithSats(quote?.totalSats ?? 0, rate)}`}
+      total={moneyWithSats(quote?.totalSats ?? 0, rate)}
       isProcessing={busy}
       onConfirm={() => quote && void pay(quote)}
       onCancel={() => !busy && setConfirming(false)}

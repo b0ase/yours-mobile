@@ -26,6 +26,15 @@ export const INDEX_FEE = 1_000; // sats per token output, to the token's Gorilla
  */
 export const INDEX_THRESHOLD = 10_000_000; // GorillaPool includes a token once its fund reaches this (exactly)
 export const INDEX_LAUNCH = INDEX_THRESHOLD + 1_000; // plus the network fee of forwarding it, so the fund lands at ≥ 0.1 BSV
+/**
+ * Client-side money-safety constants (validate.ts), not in tokenblaster's curve.ts but agreed with it:
+ * these, HOUSE_BPS / ROUTE_BPS / INDEX_FEE above and the /api/launch/trade output order must stay in
+ * step with tokenblaster.lol src/lib/launch/curve.ts and route.ts. Change only together.
+ * HOUSE_ADDRESS is tokenblaster's public NEXT_PUBLIC_TB_HOUSE_ADDRESS (where the 0.70% goes).
+ */
+export const HOUSE_ADDRESS = '192nuX6cz81MH3T2gwsam3FxYoDrvzDYpU';
+/** Index-fund output per trade: at most 5 token outputs' worth (route.ts: min(owed, 5 × INDEX_FEE)). */
+export const MAX_INDEX_FEE = 5 * INDEX_FEE;
 export const MIN_BUY = 10_000; // sats (0.0001 BSV)
 export const MAX_BUY = 2_000_000_000; // sats (20 BSV)
 

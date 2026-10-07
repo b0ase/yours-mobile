@@ -27,7 +27,8 @@ import {
   quoteBuy,
   quoteSell,
 } from './curve';
-import { trade } from './client';
+import { cancelTrade, executeTrade, prepareTrade, type PreparedTrade } from './client';
+import { describeRow } from './validate';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const GOLD = '#FFD24D';
@@ -164,9 +165,16 @@ const CoinSheet = ({
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [done, setDone] = useState<{ txid: string; graduated: boolean } | null>(null);
-  // Real money: the first tap only asks; nothing is signed until Confirm.
-  const [confirming, setConfirming] = useState(false);
-  useEffect(() => setConfirming(false), [amount, side, slip]);
+  // Real money: the first tap fetches and checks the server's plan; nothing is signed until Confirm,
+  // and the confirmation lists the plan's checked outputs (what is actually signed).
+  const [prepared, setPrepared] = useState<PreparedTrade | null>(null);
+  const dropPlan = useCallback(() => {
+    setPrepared((p) => {
+      if (p) void cancelTrade(p);
+      return null;
+    });
+  }, []);
+  useEffect(dropPlan, [amount, side, slip, dropPlan]);
   useBackClose(!busy, onClose);
 
   const id = coin.token_id;
@@ -200,9 +208,12 @@ const CoinSheet = ({
   const sellBlocked = side === 'sell' && indexed === false;
   const ready = !!q && q.tokens > 0n && !tooSmall && !tooBig && !overHeld && !sellBlocked && !busy;
 
-  const go = async () => {
+  const routeAddress = (() => {
+    const r = coin.route as { kind?: string; address?: string } | null;
+    return r?.kind === 'creator' ? (r.address ?? coin.creator) : null;
+  })();
+  const quote = async () => {
     if (!ready) return;
-    setConfirming(false);
     setBusy(true);
     setError('');
     setDone(null);
@@ -211,15 +222,34 @@ const CoinSheet = ({
       const address = account?.addresses.bsvAddress ?? '';
       if (!address) throw new Error('No active account.');
       const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
-      const r = await trade(
-        { client: apiContext.wallet, address, publicKey },
-        { id, sym: coin.sym, icon: coinImage(id).replace('https://ordfs.network/', '') },
-        side,
-        amt,
-        sold,
-        slip,
-        setStatus,
+      setPrepared(
+        await prepareTrade(
+          { client: apiContext.wallet, address, publicKey },
+          { id, sym: coin.sym, icon: coinImage(id).replace('https://ordfs.network/', ''), routeAddress },
+          side,
+          amt,
+          sold,
+          slip,
+          setStatus,
+        ),
       );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setStatus('');
+    }
+  };
+
+  const go = async () => {
+    const p = prepared;
+    if (!p) return;
+    setPrepared(null);
+    setBusy(true);
+    setError('');
+    setDone(null);
+    try {
+      const r = await executeTrade(p, setStatus);
       setDone(r);
       setAmount('');
       refresh();
@@ -379,29 +409,41 @@ const CoinSheet = ({
           </div>
         )}
 
-        {confirming && q ? (
+        {prepared ? (
           <div
             className="flex flex-col gap-2 rounded-xl p-3 border"
             style={{ background: '#0F1013', borderColor: GOLD }}
           >
             <p className="text-sm text-white m-0 leading-snug">
-              {side === 'buy'
-                ? `Buy ${exactTokens(q.tokens)} $${coin.sym} for ${exactBsv(q.userSats)} (${money(Number(q.userSats), rate)}), curve fees included?`
-                : `Sell ${exactTokens(q.tokens)} $${coin.sym} for ${exactBsv(q.userSats)} (${money(Number(q.userSats), rate)}) after curve fees?`}
+              {prepared.side === 'buy'
+                ? `Buy ${exactTokens(prepared.checked.quote.tokens)} $${coin.sym} for ${exactBsv(prepared.checked.quote.userSats)} (${money(Number(prepared.checked.quote.userSats), rate)}), curve fees included?`
+                : `Sell ${exactTokens(prepared.checked.quote.tokens)} $${coin.sym} for ${exactBsv(prepared.checked.quote.userSats)} (${money(Number(prepared.checked.quote.userSats), rate)}) after curve fees?`}
             </p>
-            <p className="text-xs text-white m-0">
-              {side === 'buy'
-                ? `You get at least ${exactTokens((q.tokens * BigInt(10_000 - slip)) / BigInt(10_000))} $${coin.sym} or nothing is spent.`
-                : `You get at least ${exactBsv((q.userSats * BigInt(10_000 - slip)) / BigInt(10_000))} or nothing is spent.`}
-            </p>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-[#98A2B3]">This transaction pays exactly (checked against the curve):</span>
+              {prepared.checked.rows.map((r, i) => (
+                <div key={i} className="flex justify-between gap-2 text-[11px]">
+                  <span className="text-[#98A2B3]">{r.what}</span>
+                  <span className="text-white text-right break-all">{describeRow(r, coin.sym)}</span>
+                </div>
+              ))}
+              {prepared.side === 'sell' && (
+                <div className="flex justify-between gap-2 text-[11px]">
+                  <span className="text-[#98A2B3]">Your BSV from the sale</span>
+                  <span className="text-white text-right break-all">
+                    {describeRow({ what: '', to: prepared.w.address, sats: Number(prepared.checked.quote.userSats) }, coin.sym)}
+                  </span>
+                </div>
+              )}
+            </div>
             <p className="text-[11px] text-[#98A2B3] m-0">
-              One real BSV transaction from this account, plus a few hundred sats network fee. Max slippage {slip / 100}
-              %: if the price moves further, it is refused and nothing is spent. Trades are final.
+              From this account: the pool inputs above are the pool&apos;s; your wallet adds its own coins, the
+              index fee and a few hundred sats network fee. Trades are final. The quote holds for about a minute.
             </p>
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setConfirming(false)}
+                onClick={dropPlan}
                 className="flex-1 h-11 rounded-xl text-sm font-semibold bg-[#2b2f36] text-white"
               >
                 Cancel
@@ -420,7 +462,7 @@ const CoinSheet = ({
           <button
             type="button"
             disabled={!ready}
-            onClick={() => setConfirming(true)}
+            onClick={() => void quote()}
             className="h-12 rounded-xl text-sm font-bold disabled:opacity-40"
             style={{ background: GOLD, color: '#010101' }}
           >
