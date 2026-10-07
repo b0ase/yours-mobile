@@ -901,3 +901,29 @@ body,
   background: #2a2205;
   border-color: #ffd24d;
 }
+
+/* No sideways wobble (owner, 7 Oct 2026). The page never pans horizontally: html/body clip x, and
+   vertical scrollers (overflow-y-auto) hide their x overflow, which overflow-y:auto would otherwise make
+   pannable. Sideways rows (overflow-x-auto chips, the dock, the pager) set overflow-x themselves and still
+   scroll inside themselves. scripts/overflow-audit.ts sets data-overflow-audit to measure the real layout. */
+html:not([data-overflow-audit]),
+html:not([data-overflow-audit]) body {
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
+html:not([data-overflow-audit]) [class*='overflow-y-auto']:not([class*='overflow-x-']) {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+/* iOS WebKit gives date/time inputs an intrinsic width that ignores width:100% and min-width:0, so two in
+   a row push past the screen (the New Lock builder's wobble). Native appearance off lets them shrink. */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+}

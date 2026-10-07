@@ -82,6 +82,7 @@
     "build:mobile:store": "VITE_STORE_BUILD=1 pnpm build:mobile",
     "build:web": "vite build -c vite.config.web.ts",
     "preview:web": "vite preview -c vite.config.web.ts --port 4781 --strictPort",
+    "test:overflow": "bun scripts/overflow-audit.ts",
     "preview:mobile": "vite preview -c vite.config.mobile.ts --port 4780 --strictPort",
     "test:mobile-smoke": "tsx scripts/mobile-smoke.ts",
     "cap:sync": "pnpm build:mobile && cap sync",
