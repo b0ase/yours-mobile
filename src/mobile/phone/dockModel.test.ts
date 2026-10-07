@@ -4,7 +4,9 @@ import {
   addToDock,
   cleanDock,
   DEFAULT_DOCK,
+  defaultDock,
   DOCK_MAX,
+  OLD_DEFAULT_DOCK,
   moveInDock,
   normaliseDock,
   removeFromDock,
@@ -17,18 +19,44 @@ import { stripFor } from './screens';
 const app = (n: number): DockItem => ({ kind: 'app', url: `https://app${n}.example`, name: `App ${n}` });
 
 describe('phone dock model', () => {
-  test('default: Wallet · Send/Receive · (b) · Chat · Feed, Wallet leftmost', () => {
-    expect(normaliseDock(null, false)).toEqual([...DEFAULT_DOCK]);
+  test('default: Wallet · Exchange · (b) · Feed · Chat, Wallet leftmost (the safeguard: Send/Receive is on Wallet)', () => {
+    expect(normaliseDock(null, false)).toEqual(defaultDock(false));
     expect(DEFAULT_DOCK[0]).toEqual({ kind: 'screen', id: 'wallet' });
-    const { left, right } = splitDock(DEFAULT_DOCK);
+    const { left, right } = splitDock(defaultDock(false));
     expect(left).toEqual([
       { kind: 'screen', id: 'wallet' },
-      { kind: 'action', id: 'sendReceive' },
+      { kind: 'screen', id: 'exchange' },
     ]);
     expect(right).toEqual([
-      { kind: 'screen', id: 'chat' },
       { kind: 'screen', id: 'feed' },
+      { kind: 'screen', id: 'chat' },
     ]);
+  });
+
+  test('store default: Wallet · Apps · (b) · Feed · Chat, no Exchange', () => {
+    const d = normaliseDock(null, true);
+    expect(d).toEqual([
+      { kind: 'screen', id: 'wallet' },
+      { kind: 'screen', id: 'apps' },
+      { kind: 'screen', id: 'feed' },
+      { kind: 'screen', id: 'chat' },
+    ]);
+    expect(d).not.toContainEqual({ kind: 'screen', id: 'exchange' });
+  });
+
+  test('migration: a saved dock equal to the old default becomes the new default', () => {
+    const saved = serialiseDock([...OLD_DEFAULT_DOCK]);
+    expect(normaliseDock(saved, false)).toEqual(defaultDock(false));
+    expect(normaliseDock(saved, true)).toEqual(defaultDock(true));
+  });
+
+  test('migration: a customised dock is never touched', () => {
+    const reordered = [OLD_DEFAULT_DOCK[1], OLD_DEFAULT_DOCK[0], OLD_DEFAULT_DOCK[2], OLD_DEFAULT_DOCK[3]];
+    expect(normaliseDock(serialiseDock(reordered), false)).toEqual(reordered);
+    const plusApp = [...OLD_DEFAULT_DOCK, app(1)];
+    expect(normaliseDock(serialiseDock(plusApp), false)).toEqual(plusApp);
+    const fewer = OLD_DEFAULT_DOCK.slice(0, 3);
+    expect(normaliseDock(serialiseDock(fewer), false)).toEqual(fewer);
   });
 
   test('corrupt or wrong-version JSON falls back to the default', () => {
@@ -100,7 +128,7 @@ describe('phone dock model', () => {
   });
 
   test('add sheet offers only what is not in the dock, from the build strip', () => {
-    const choices = addable(DEFAULT_DOCK, stripFor(true, false));
+    const choices = addable(defaultDock(true), stripFor(true, false));
     expect(choices).not.toContainEqual({ kind: 'screen', id: 'wallet' });
     expect(choices).not.toContainEqual({ kind: 'screen', id: 'exchange' });
     expect(choices).toContainEqual({ kind: 'screen', id: 'games' });

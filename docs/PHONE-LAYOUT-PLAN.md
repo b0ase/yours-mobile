@@ -312,10 +312,21 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 
 ## 14. Owner decisions (7 Oct 2026)
 - No extra button row: Android already has system nav buttons, so we don't duplicate them. Follow the iPhone ethos, "the best interface is no interface".
-- The **b** sits in the **middle of the dock** itself. Tap = HOME, hold = agent overlay (Variant B).
+- The **b** sits in the **middle of the dock** itself. Tap = HOME, ~~hold = agent overlay (Variant B)~~ (no hold since §14.1; the agent is Ask b in the top bar).
 - **Wallet is the main app**: leftmost dock slot by default, like the iPhone's Phone app.
-- Default dock: Wallet · Send/Receive · **b** · Chat · Feed. Agent is no longer a dock tile, because b covers it. The scrolling extras sit beyond the visible slots.
+- ~~Default dock: Wallet · Send/Receive · **b** · Chat · Feed.~~ (superseded, §14.1) Agent is no longer a dock tile, because b covers it. The scrolling extras sit beyond the visible slots.
 - Still plan only; build the b button first when the owner says go.
+
+### 14.1 First feedback on the iPhone preview (7 Oct 2026), now built
+- **Top bar is back, one compact row (h-14):** Accounts chooser + the page title (left) · **Ask b** (centre) · Calls · Media · Settings/Lock (right). The Settings menu keeps only Settings and Lock now.
+- **The b agent moves to the top bar centre** as an "Ask b" pill that opens the full /m/agent page (it handles the keyboard). A pill rather than a second b glyph, so it doesn't read as the dock's big b, which is Home.
+- **The big raised gold b stays in the dock centre** ("I DO like the big b button"). Tap = HOME, the app grid. No hold any more: holding b on iOS was swallowed by WKWebView, and the hold-b sheet sat under the keyboard. The hold-b sheet (AgentOverlay) is removed.
+- **A "b agent" tile** is first in the Apps grid; it opens /m/agent too.
+- **Default dock: Wallet · Exchange · ( b ) · Feed · Chat.** Exchange replaces Send/Receive, which lives on the Wallet page. **Store builds: Wallet · Apps · ( b ) · Feed · Chat** (no Exchange).
+- **Migration:** a saved dock that equals the old default exactly (Wallet · Send/Receive · Chat · Feed) becomes the new default. A dock the user changed in any way is never touched.
+- **HOME is just the app grid**, like an iPhone home screen: no balance card, no Send/Receive ("it spoils the effect"). The safeguard is now Wallet as the leftmost dock item by default, and Send/Receive on the Wallet page.
+- **Apps in the dock:** touch and hold any app on Apps or Home › **Add to Dock** (shown for every app, right under Open). Dock app items use the Apps-page tile style (the icon fills the rounded square).
+- **Keyboard:** the /m/agent page and phone sheets lift above the iOS keyboard (ui/keyboardInset.ts).
 
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 

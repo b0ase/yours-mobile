@@ -1,34 +1,32 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { ServiceContext, type ServiceContextProps } from '../../contexts/ServiceContext';
-import { HomeHeader } from './HomeHeader';
-
-const services = {
-  chromeStorageService: { getCurrentAccountObject: () => ({ account: { addresses: { identityAddress: 'id' } } }) },
-  apiContext: undefined,
-} as unknown as ServiceContextProps;
+import { defaultDock, normaliseDock } from './dockModel';
 
 describe('HOME', () => {
-  test('always shows the balance and Send / Receive (the safeguard for an empty dock)', () => {
-    const html = renderToStaticMarkup(
-      createElement(
-        ServiceContext.Provider,
-        { value: services },
-        createElement(HomeHeader, { onAction: () => undefined }),
-      ),
-    );
-    expect(html).toContain('Balance');
-    expect(html).toContain('Send');
-    expect(html).toContain('Receive');
+  test('HOME is just the app grid: no balance card, no Send / Receive (owner: "it spoils the effect")', () => {
+    const src = readFileSync(join(import.meta.dir, 'HomeScreen.tsx'), 'utf8');
+    expect(src).not.toContain('header=');
+    expect(src).not.toMatch(/SendReceive|Balance/);
   });
 
-  test('the HOME screen renders that header unconditionally (not from the dock)', () => {
-    const src = readFileSync(join(import.meta.dir, 'HomeScreen.tsx'), 'utf8');
-    expect(src).toContain('header={<HomeHeader');
-    expect(src).not.toMatch(/useDock|dockStore/);
+  test('the safeguard: Wallet (with Send / Receive) is the leftmost dock item by default, every build', () => {
+    for (const store of [false, true]) {
+      expect(defaultDock(store)[0]).toEqual({ kind: 'screen', id: 'wallet' });
+      expect(normaliseDock(null, store)[0]).toEqual({ kind: 'screen', id: 'wallet' });
+    }
+  });
+
+  test('the dock b is Home only (no hold); the agent is Ask b in the top bar and a tile in Apps', () => {
+    const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
+    expect(dock).toContain('aria-label="Home"');
+    expect(dock).not.toMatch(/onAgent|B_HOLD_MS/);
+    const top = readFileSync(join(import.meta.dir, '../tabs/TopNav.tsx'), 'utf8');
+    expect(top).toContain('Ask b');
+    expect(top).toContain("aria-label=\"Calls\"");
+    expect(top).toContain("aria-label=\"Media\"");
+    const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
+    expect(apps).toContain('[AGENT_TILE, ...notHome(BAPP_TILES)]');
   });
 
   test('the phone layout is off by default', () => {

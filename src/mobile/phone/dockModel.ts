@@ -5,7 +5,7 @@ import { SCREENS, type ScreenId } from './screens';
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14). Pure state helpers, unit-tested.
  * The b button is not an item: it always sits in the middle of the dock. Wallet is the leftmost slot by default,
- * like the iPhone's Phone app. An empty dock is allowed (HOME always shows the balance and Send/Receive).
+ * like the iPhone's Phone app (the safeguard: Send/Receive is on the Wallet page). An empty dock is allowed.
  */
 export type DockAction = 'sendReceive';
 export type DockItem =
@@ -19,12 +19,28 @@ export const DOCK_MAX = 12;
 export const DOCK_LEFT = 2;
 export const DOCK_KEY = 'bwallet:dock:v1';
 
-export const DEFAULT_DOCK: readonly DockItem[] = [
+/**
+ * Default dock (owner, 7 Oct 2026 feedback): Wallet · Exchange · ( b ) · Feed · Chat. Send/Receive lives on the
+ * Wallet page, so Exchange takes its slot. A store build has no Exchange: Apps takes the slot instead.
+ */
+export const defaultDock = (store = STORE_BUILD): DockItem[] => [
+  { kind: 'screen', id: 'wallet' },
+  { kind: 'screen', id: store ? 'apps' : 'exchange' },
+  { kind: 'screen', id: 'feed' },
+  { kind: 'screen', id: 'chat' },
+];
+export const DEFAULT_DOCK: readonly DockItem[] = defaultDock();
+
+/** The first default (5.1.8x previews): a saved dock exactly equal to it is moved to the new default. */
+export const OLD_DEFAULT_DOCK: readonly DockItem[] = [
   { kind: 'screen', id: 'wallet' },
   { kind: 'action', id: 'sendReceive' },
   { kind: 'screen', id: 'chat' },
   { kind: 'screen', id: 'feed' },
 ];
+
+const isOldDefault = (items: readonly DockItem[]) =>
+  items.length === OLD_DEFAULT_DOCK.length && items.every((i, n) => sameItem(i, OLD_DEFAULT_DOCK[n]));
 
 const ACTIONS: readonly DockAction[] = ['sendReceive'];
 const SCREEN_IDS = new Set<string>(SCREENS.map((s) => s.id));
@@ -59,16 +75,22 @@ export const cleanDock = (items: readonly unknown[], store = STORE_BUILD): DockI
   return dockItemsFor(out, store).slice(0, DOCK_MAX);
 };
 
-/** Saved JSON → the dock. Missing or corrupt → the default; a saved empty dock stays empty. */
+/**
+ * Saved JSON → the dock. Missing or corrupt → the default; a saved empty dock stays empty. A saved dock that is
+ * exactly the old default (never customised) becomes the new default; any other saved dock is left alone.
+ */
 export const normaliseDock = (raw: string | null, store = STORE_BUILD): DockItem[] => {
-  if (raw == null) return cleanDock(DEFAULT_DOCK, store);
+  const fallback = () => cleanDock(defaultDock(store), store);
+  if (raw == null) return fallback();
   try {
     const parsed: unknown = JSON.parse(raw);
     const items = (parsed as Partial<DockState> | null)?.items;
-    if (!parsed || (parsed as DockState).v !== 1 || !Array.isArray(items)) return cleanDock(DEFAULT_DOCK, store);
-    return cleanDock(items, store);
+    if (!parsed || (parsed as DockState).v !== 1 || !Array.isArray(items)) return fallback();
+    const clean = cleanDock(items, store);
+    if (isOldDefault(clean) && clean.length === items.length) return fallback();
+    return clean;
   } catch {
-    return cleanDock(DEFAULT_DOCK, store);
+    return fallback();
   }
 };
 
