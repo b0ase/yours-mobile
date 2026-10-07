@@ -69,3 +69,11 @@ test('normOutpoint treats txid_0 and txid.0 alike', () => {
   expect(normOutpoint('ab.0')).toBe('ab_0');
   expect(normOutpoint('ab_0')).toBe('ab_0');
 });
+
+test('the live manifest has image: null and absolute models: both survive normalising', () => {
+  const w = normaliseWeapon(
+    weapon({ image: null, model: 'https://www.tokenblaster.lol/arena/models/guns/pnee-shotgun.glb' }),
+  );
+  expect(w.image).toBeNull();
+  expect(w.model).toBe('https://www.tokenblaster.lol/arena/models/guns/pnee-shotgun.glb');
+});

@@ -34,7 +34,7 @@ import {
   type Listing,
   type RoomMarket,
 } from './indexer';
-import { categoryOf, nftFeed, type Feed as BaseFeed, type NftCategory, type NftListing } from './classify';
+import { categoryOf, listingsIn, nftFeed, type Feed as BaseFeed, type NftCategory, type NftListing } from './classify';
 import { onSafetyChange, refreshSafety, reportItem, safety } from './safety';
 import { Blurred, ContentImg, NftCard } from './NftCard';
 import { thumbOrFullUrls } from './thumbs';
@@ -128,6 +128,10 @@ const TRADING = marketTradingEnabled();
 // Curve coins load on demand and only outside a store build: CURVE_COINS_ENABLED folds to false there
 // and Rollup drops ./launchpad/* entirely (code, strings and sourcemap sources).
 const CurvePanel = CURVE_COINS_ENABLED ? lazy(loadCurvePanel) : null;
+// three.js viewer for a 3D (GLB) listing: same gate as the 3D tab, so three.js stays out of a store build.
+const ModelPreview = TOKENBLASTER_ENABLED
+  ? lazy(() => import('../three3d/Cabinet').then((m) => ({ default: m.ModelPreview })))
+  : null;
 // 1Sat Ordnance (tokenblaster.lol) 3D catalogue: bWalletX only, dropped from a store build.
 const OrdnanceGrid = TOKENBLASTER_ENABLED
   ? lazy(() => import('../three3d/OrdnanceGrid').then((m) => ({ default: m.OrdnanceGrid })))
@@ -182,7 +186,7 @@ const MarketPage = () => {
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [strategiesOpen, setStrategiesOpen] = useState(false);
   // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
-  const [panel, setPanel] = useState<'contracts' | 'bonds' | '3d' | null>(null);
+  const [panel, setPanel] = useState<'contracts' | 'bonds' | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
@@ -239,7 +243,7 @@ const MarketPage = () => {
               nft: 0,
               unclassified: 0,
               blocked: 0,
-              counts: { music: 0, video: 0, images: 0, documents: 0 },
+              counts: { music: 0, video: 0, images: 0, documents: 0, '3d': 0 },
             },
             partial: true,
           }),
@@ -254,7 +258,7 @@ const MarketPage = () => {
           nft: 0,
           unclassified: 0,
           blocked: 0,
-          counts: { music: 0, video: 0, images: 0, documents: 0 },
+          counts: { music: 0, video: 0, images: 0, documents: 0, '3d': 0 },
         },
       });
     }
@@ -417,7 +421,7 @@ const MarketPage = () => {
       : []),
     ...(TRADING && TOKENBLASTER_ENABLED
       ? [
-          { id: '3d', label: '3D', kind: 'nfts' as Kind },
+          { id: '3d', label: '3D', kind: 'nfts' as Kind, view: '3d' as View },
         ]
       : []),
   ];
@@ -440,7 +444,7 @@ const MarketPage = () => {
             onClick={() => {
               if (c.soon) return;
               setStrategiesOpen(c.id === 'strategies');
-              setPanel(c.id === 'contracts' || c.id === 'bonds' || c.id === '3d' ? c.id : null);
+              setPanel(c.id === 'contracts' || c.id === 'bonds' ? c.id : null);
               setKind(c.kind);
               if (c.token) setTokenFilter(c.token);
               if (c.view) setView(c.view);
@@ -494,7 +498,7 @@ const MarketPage = () => {
     );
   };
 
-  const shownNfts = feed?.items.filter((n) => n.category === view && nftSafe(n)) ?? [];
+  const shownNfts = feed && view !== 'collections' ? listingsIn(feed.items, view).filter(nftSafe) : [];
   const nftGrid = (
     <section className="flex flex-col gap-2">
       {feed === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading NFT listings…</p>}
@@ -1037,10 +1041,6 @@ const MarketPage = () => {
           mineView
         ) : strategiesOpen && !room ? (
           <StrategiesMarket />
-        ) : panel === '3d' && !room && OrdnanceGrid ? (
-          <Suspense fallback={null}>
-            <OrdnanceGrid />
-          </Suspense>
         ) : panel && !room ? (
           <ContractsMarket filter={panel === 'bonds' ? 'bond' : undefined} />
         ) : room ? (
@@ -1111,6 +1111,16 @@ const MarketPage = () => {
           )
         ) : view === 'collections' ? (
           trending
+        ) : view === '3d' ? (
+          // Market › 3D: the GLB / glTF / USDZ listings on the 1Sat order book, then the 1Sat Ordnance catalogue.
+          <>
+            {nftGrid}
+            {OrdnanceGrid && (
+              <Suspense fallback={null}>
+                <OrdnanceGrid />
+              </Suspense>
+            )}
+          </>
         ) : (
           nftGrid
         )}
@@ -1132,6 +1142,12 @@ const MarketPage = () => {
             {preview.category === 'video' && (
               <video src={contentUrls(preview.origin)[0]} controls playsInline className="max-w-full max-h-full" />
             )}
+            {preview.category === '3d' &&
+              (ModelPreview ? (
+                <Suspense fallback={null}>
+                  <ModelPreview url={contentUrls(preview.origin)[0]} />
+                </Suspense>
+              ) : null)}
             {preview.category === 'images' && (
               <ContentImg
                 outpoint={preview.origin}

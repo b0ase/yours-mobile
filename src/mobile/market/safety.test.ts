@@ -30,7 +30,7 @@ describe('categoryOf', () => {
     expect(categoryOf('application/octet-stream', { app: 'other' })).toBeNull();
   });
   test('everything else is unclassifiable (hidden)', () => {
-    for (const t of ['application/json', 'application/bsv-20', 'model/gltf-binary', '', null, undefined, 'image/'])
+    for (const t of ['application/json', 'application/bsv-20', '', null, undefined, 'image/'])
       expect(categoryOf(t)).toBeNull();
   });
 });

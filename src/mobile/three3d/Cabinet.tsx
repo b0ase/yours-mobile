@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ShieldCheck, X } from 'lucide-react';
 import * as THREE from 'three';
@@ -175,6 +175,41 @@ const ModelView = ({ weapon, onError }: { weapon: Weapon; onError: () => void })
   );
 };
 
+/** Any GLB / glTF inscription (Market › 3D listing): the same spinning viewer, no tint, flip or rim colour. */
+export const ModelPreview = ({ url }: { url: string }) => {
+  const [failed, setFailed] = useState(false);
+  const weapon = useMemo<Weapon>(
+    () => ({
+      id: url,
+      name: '',
+      rarity: 'common',
+      tagline: '',
+      description: '',
+      edition: 0,
+      priceSats: 0,
+      model: url,
+      modelBase: '',
+      tint: '',
+      image: null,
+      flip: false,
+      roll: 0,
+      spin: null,
+    }),
+    [url],
+  );
+  return (
+    <div className="relative w-full h-full">
+      {failed ? (
+        <div className="absolute inset-0 flex items-center justify-center text-xs" style={{ color: MUTED }}>
+          Couldn&apos;t load the 3D model.
+        </div>
+      ) : (
+        <ModelView weapon={weapon} onError={() => setFailed(true)} />
+      )}
+    </div>
+  );
+};
+
 const usd = (sats: number) => {
   const rate = cachedExchangeRate();
   return rate > 0 ? `$${((sats / 1e8) * rate).toFixed(2)}` : `${(sats / 1e8).toLocaleString()} BSV`;
@@ -206,7 +241,13 @@ export const Cabinet = ({ weapon, owned, onClose }: { weapon: Weapon; owned?: bo
         style={{ background: `radial-gradient(ellipse at 50% 55%, ${glow}22, transparent 65%)` }}
       >
         {failed ? (
-          <img src={weapon.image} alt={weapon.name} className="w-full h-full object-contain p-8" />
+          weapon.image ? (
+            <img src={weapon.image} alt={weapon.name} className="w-full h-full object-contain p-8" />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center text-xs" style={{ color: MUTED }}>
+              Couldn&apos;t load the 3D model.
+            </div>
+          )
         ) : (
           <ModelView weapon={weapon} onError={() => setFailed(true)} />
         )}

@@ -5,11 +5,13 @@ import { documentLabel, isWriterDocument } from '../media/media';
 /**
  * NFT listing categories for the Market tab, by inscription content type:
  * audio/* → music, video/* → video, image/* (incl. svg, gif, webp) → images, PDF / text / Markdown /
- * HTML / RTF / Office or a bWriter MAP app → documents (media/media.ts documentLabel).
+ * HTML / RTF / Office or a bWriter MAP app → documents (media/media.ts documentLabel), model/* (glTF / GLB,
+ * USDZ) → 3d. 3D used to fall through to "unclassifiable", so Market › 3D never saw the ~100 GLB listings
+ * on the order book (Kowry, Based Frogs, Dragons...: owner, 7 Oct 2026).
  * Anything else (json, unknown) is not shown — "unclassifiable is hidden".
  * The 1sat-stack listing search has no content-type filter, so this runs client-side over the feed.
  */
-export type NftCategory = 'music' | 'video' | 'images' | 'documents';
+export type NftCategory = 'music' | 'video' | 'images' | 'documents' | '3d';
 
 export function categoryOf(
   contentType: string | null | undefined,
@@ -19,9 +21,14 @@ export function categoryOf(
   if (/^audio\/[a-z0-9.+-]+$/.test(t)) return 'music';
   if (/^video\/[a-z0-9.+-]+$/.test(t)) return 'video';
   if (/^image\/[a-z0-9.+-]+$/.test(t)) return 'images';
+  if (/^model\/[a-z0-9.+-]+$/.test(t)) return '3d';
   if (documentLabel(t) || (t && isWriterDocument(map))) return 'documents';
   return null;
 }
+
+/** The listings a Market category tile shows (Music, Video, Images, Documents, 3D). */
+export const listingsIn = <T extends { category: NftCategory }>(items: readonly T[], category: NftCategory): T[] =>
+  items.filter((n) => n.category === category);
 
 /** Content type from an ORDFS HEAD request (fallback when the indexer has none). Cached for the session. */
 export const headContentType = (outpoint: string): Promise<string | null> =>
@@ -117,7 +124,7 @@ export const nftFeed = (limit = 300, onPartial?: (items: NftListing[]) => void):
       nft: 0,
       unclassified: 0,
       blocked: 0,
-      counts: { music: 0, video: 0, images: 0, documents: 0 },
+      counts: { music: 0, video: 0, images: 0, documents: 0, '3d': 0 },
     };
     const seen = new Set<string>();
     const mapped = await mapLimit(rows, 16, async (r): Promise<NftListing | null> => {

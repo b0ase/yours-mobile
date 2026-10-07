@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { EyeOff, FileText, Flag, Music, Play } from 'lucide-react';
+import { Box, EyeOff, FileText, Flag, Music, Play } from 'lucide-react';
 import { documentLabel } from '../media/media';
 import { contentUrls } from './indexer';
 import { cachedThumb, loadThumb, thumbUrl } from './thumbs';
@@ -148,7 +148,7 @@ export type CardItem = {
   outpoint: string;
   origin: string;
   name: string;
-  category: 'music' | 'video' | 'images' | 'documents';
+  category: 'music' | 'video' | 'images' | 'documents' | '3d';
   /** Shown as the type badge on document tiles (PDF, TXT, DOCX...). */
   contentType?: string;
   collectionId: string | null;
@@ -222,6 +222,19 @@ export const NftCard = ({
               style={{ background: '#2b2f36', color: '#FFD24D' }}
             >
               {documentLabel(item.contentType) ?? 'DOC'}
+            </span>
+          </div>
+        )}
+        {item.category === '3d' && (
+          // GLB / glTF: no thumbnail (the model is the content). Tap opens the spinning viewer.
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 text-center">
+            <Box size={34} style={{ color: '#F5B800' }} />
+            <span className="text-[11px] font-semibold text-white line-clamp-2 break-words">{item.name}</span>
+            <span
+              className="rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
+              style={{ background: '#2b2f36', color: '#F5B800' }}
+            >
+              3D
             </span>
           </div>
         )}

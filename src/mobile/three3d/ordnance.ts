@@ -20,7 +20,8 @@ export type Weapon = {
   model: string;
   modelBase: string;
   tint: string;
-  image: string;
+  /** Tile art. null in the live manifest since 7 Oct 2026 (the models are the art): tiles fall back to an icon. */
+  image: string | null;
   /** Per-model display hints from the manifest (tokenblaster.lol 47e1089); older manifests omit them. */
   tintAmount?: number;
   flip?: boolean;
@@ -45,11 +46,11 @@ export const storeUrl = (weaponId: string) => `${ORDNANCE_STORE}#${weaponId}`;
  * the wrong origin in every edition: every tile was a broken image (its alt text showing) and every cabinet
  * an empty room (iPhone, 7 Oct 2026). Resolve against the catalogue's origin; an absolute URL passes through.
  */
-export const absoluteUrl = (path: string): string => {
+export const absoluteUrl = <T extends string | null>(path: T): T => {
   if (typeof path !== 'string' || !path) return path;
   try {
     // Against the site root, as the games resolve them: "art/x.png" is /art/x.png there, not /api/ordnance/art/x.png.
-    return new URL(path, new URL(ORDNANCE_API).origin + '/').href;
+    return new URL(path, new URL(ORDNANCE_API).origin + '/').href as T;
   } catch {
     return path;
   }
