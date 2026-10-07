@@ -483,10 +483,138 @@ body,
   cursor: pointer;
 }
 .bw-wcard-sig {
+  position: relative;
   background: repeating-linear-gradient(-45deg, #efe9da 0 6px, #e6dfcc 6px 12px);
   border-radius: 4px;
-  padding: 0 8px;
+  padding: 0 24px 0 8px;
   overflow: hidden;
+  min-height: 28px;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+.bw-wcard-sig.has-drawn {
+  padding: 1px 24px 1px 4px;
+}
+.bw-wcard-sig-drawn {
+  display: block;
+  width: 100%;
+  height: 30px;
+  pointer-events: none;
+}
+.bw-wcard-sig-pen {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+
+/* Signature pad (src/mobile/signature) */
+.bw-sigpad {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.78);
+}
+.bw-sigpad-sheet {
+  width: min(100%, 760px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #121214;
+  border: 1px solid rgba(255, 210, 77, 0.22);
+  border-radius: 16px;
+  padding: 14px;
+  color: #f2f2f0;
+}
+.bw-sigpad-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.bw-sigpad-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 1;
+  max-height: 60vh;
+  border-radius: 6px;
+  background: repeating-linear-gradient(-45deg, #efe9da 0 6px, #e6dfcc 6px 12px);
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: crosshair;
+  overflow: hidden;
+}
+.bw-sigpad-box svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.bw-sigpad-x {
+  position: absolute;
+  left: 8px;
+  bottom: 18%;
+  right: 8px;
+  border-bottom: 1px solid rgba(27, 42, 90, 0.35);
+  color: rgba(27, 42, 90, 0.5);
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+}
+.bw-sigpad-note {
+  margin: 0;
+  font-size: 11px;
+  color: #8e8e89;
+}
+.bw-sigpad-btns {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  gap: 8px;
+}
+.bw-sigpad-btns button,
+.bw-sigpad-menu button {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f2f2f0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.bw-sigpad-btns button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.bw-sigpad-btns .is-primary {
+  color: #000;
+  background: linear-gradient(135deg, #ffd24d, #eab300);
+  border: 0;
+}
+.bw-sigpad-menu {
+  width: min(100%, 360px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #121214;
+  border-radius: 16px;
+  padding: 14px;
+}
+.bw-sigpad-menu .is-danger {
+  color: #ff6b6b;
 }
 .bw-wcard-sig-name {
   font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', 'Bradley Hand', cursive;

@@ -1,6 +1,6 @@
 import * as qr from 'qrcode';
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { Check, Copy, Loader2, RefreshCw } from 'lucide-react';
+import { Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
@@ -16,6 +16,7 @@ import { useBackedUp } from '../backup/useBackedUp';
 import { ghostColorOf, onAgentsChange } from '../agents/agentAccounts';
 import { PixelGhost } from '../agents/PixelGhost';
 import { requestBackupThen } from '../backup/backupState';
+import { useCardSignature } from '../signature/useCardSignature';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -132,6 +133,7 @@ export const WalletCard = ({
     }
   };
   const stop = (e: MouseEvent) => e.stopPropagation();
+  const sig = useCardSignature(id);
 
   return (
     <div className="bw-wcard-wrap">
@@ -296,8 +298,31 @@ export const WalletCard = ({
                 <span>{shortAddr(receiveAddress)}</span>
                 <Copy size={13} color="#98A2B3" />
               </button>
-              <div className="bw-wcard-sig">
-                <span className="bw-wcard-sig-name">{t.tag || account?.name || ''}</span>
+              <div
+                className={`bw-wcard-sig${sig.svgPath ? ' has-drawn' : ''}`}
+                role="img"
+                aria-label={sig.svgPath ? 'Your drawn signature. Press and hold to change it.' : 'Signature strip. Press and hold to sign.'}
+                {...sig.pressHandlers}
+              >
+                {sig.svgPath ? (
+                  <svg className="bw-wcard-sig-drawn" viewBox={sig.viewBox} preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+                    <path d={sig.svgPath} fill="#1b2a5a" />
+                  </svg>
+                ) : (
+                  <span className="bw-wcard-sig-name">{t.tag || account?.name || ''}</span>
+                )}
+                <button
+                  type="button"
+                  className="bw-wcard-sig-pen"
+                  aria-label={sig.svgPath ? 'Change signature' : 'Draw signature'}
+                  title={sig.svgPath ? 'Change signature' : 'Draw signature'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    sig.open();
+                  }}
+                >
+                  <PenLine size={13} color="#5a6380" />
+                </button>
               </div>
               <span className="bw-wcard-sig-line">Signed by identity key</span>
               <span className="bw-wcard-sig-line" title={id}>
@@ -308,6 +333,7 @@ export const WalletCard = ({
         </div>
       </div>
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
+      {sig.ui}
     </div>
   );
 };
