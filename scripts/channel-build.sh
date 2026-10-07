@@ -103,6 +103,8 @@ else
   VERSION=$(sed -nE 's/.*MARKETING_VERSION = ([^;]+);.*/\1/p' ios/App/App.xcodeproj/project.pbxproj | head -1)
   OVR=(PRODUCT_BUNDLE_IDENTIFIER="$APP_ID" BWALLET_DISPLAY_NAME="$NAME" BWALLET_CHANNEL="$CH" DEVELOPMENT_TEAM="$TEAM"
     ASSETCATALOG_COMPILER_APPICON_NAME="$ICON")
+  # App Store build: iPhone only (no iPad screenshots / review on iPad). ios-private keeps the project's setting.
+  [[ $CH == ios-store ]] && OVR+=(TARGETED_DEVICE_FAMILY=1)
   XB=(xcodebuild -project ios/App/App.xcodeproj -scheme App -allowProvisioningUpdates)
   # Full xcodebuild output goes to a log; on failure print its error lines (-quiet can fail silently).
   xb() {
