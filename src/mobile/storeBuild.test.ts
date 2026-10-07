@@ -194,3 +194,36 @@ describe('pots and subscriptions: pots + person standing orders everywhere, serv
     expect(src('./pots/pots.ts')).toMatch(/OWN_SERVICE_PAYEES[^=]*= SUBSCRIPTIONS_ENABLED\s*\?/);
   });
 });
+
+/** The store-edition wording, read from a fresh process with the store env (STORE_BUILD is fixed at import). */
+describe('store edition text', () => {
+  const read = (env: Record<string, string>) => {
+    const code =
+      "const m = await import('./src/mobile/storeBuild.ts'); console.log(JSON.stringify({ banner: m.handleCardText(false), named: m.handleCardText(true), tokens: m.MY_TOKENS_DESC, note: m.MY_TOKENS_NOTE, agent: m.B_AGENT_DESC, subs: m.SUBSCRIPTIONS_DESC, pots: m.POTS_INTRO, pot: m.POT_NAME_PLACEHOLDER, name: m.APP_NAME }));";
+    const r = Bun.spawnSync(['bun', '-e', code], { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env } });
+    return JSON.parse(r.stdout.toString()) as Record<string, string>;
+  };
+  test('store build: no chat rooms, token rooms, paid b agent or app subscriptions', () => {
+    const t = read({ VITE_STORE_BUILD: '1' });
+    expect(t.name).toBe('bWallet');
+    expect(t.banner).toBe('A free handle people can pay.');
+    expect(t.named).toBe('A free handle people can pay.');
+    expect(t.agent).toBe('Use your own AI key');
+    expect(t.tokens).not.toMatch(/room/i);
+    expect(t.note).not.toMatch(/room/i);
+    expect(t.subs).toBe('Regular payments to people, from pots you fill');
+    expect(t.pots).not.toMatch(/subscri/i);
+    expect(t.pot).not.toMatch(/bChat/);
+    expect(Object.values(t).join(' ')).not.toMatch(/chat room|bWalletX|paid for|\$1|Buy BSV|trad/i);
+  });
+  test('ios-store channel gets the same text', () => {
+    expect(read({ VITE_CHANNEL: 'ios-store' }).agent).toBe('Use your own AI key');
+  });
+  test('bWalletX wording is unchanged', () => {
+    const t = read({});
+    expect(t.name).toBe('bWalletX');
+    expect(t.banner).toBe('A free handle people can pay, plus your own chat room.');
+    expect(t.agent).toBe('How the b agent is paid for');
+    expect(t.tokens).toContain('their rooms');
+  });
+});

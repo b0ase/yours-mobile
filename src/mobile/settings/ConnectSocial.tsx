@@ -15,7 +15,7 @@ import { showOnWallet } from '../tokens/indexFund';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
 import { moneyNow } from '../money/money';
-import { paidFeaturesEnabled } from '../storeBuild';
+import { PAID_FEATURES_ENABLED, paidFeaturesEnabled } from '../storeBuild';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -113,8 +113,9 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
             <Check size={36} color="#2ecc71" />
             <p className="mt-3 text-lg font-bold text-white">{claimed} is yours</p>
             <p className="mt-2 text-sm" style={{ color: '#98A2B3' }}>
-              This is now your wallet's name. Your token and chat room are named after it. For a different name,
-              add another account.
+              {PAID_FEATURES_ENABLED
+                ? "This is now your wallet's name. Your token and chat room are named after it. For a different name, add another account."
+                : "This is now your wallet's name. For a different name, add another account."}
             </p>
             {paidFeaturesEnabled() && ticker && !tokenMsg.includes('minted') && (
               <div className="mt-6 flex items-center gap-3">

@@ -169,3 +169,29 @@ export const BILLING_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
 export const billingAllowed = (store = STORE_BUILD) => !store;
+
+/**
+ * User-visible text that differs in the store edition, which has no personal token / room, token rooms, paid
+ * b agent or app/service subscriptions. Written as `STORE_BUILD ? … : …` on constants so Rollup folds them and
+ * the bWalletX wording is not in the store bundle (storeBuild.test.ts checks both editions).
+ */
+export const handleCardText = (hasName: boolean): string =>
+  STORE_BUILD
+    ? 'A free handle people can pay.'
+    : hasName
+      ? 'Your personal token and a chat room only holders can enter.'
+      : 'A free handle people can pay, plus your own chat room.';
+export const MY_TOKENS_DESC = STORE_BUILD
+  ? "Tokens this account has minted: list the ones that aren't listed yet"
+  : "This account's tokens and their rooms: set up the ones that aren't listed yet";
+export const MY_TOKENS_NOTE = STORE_BUILD
+  ? 'Listing a token shows it in other wallets and the Market. You confirm the price before anything is sent.'
+  : 'Setting up a token’s room lists it in other wallets and the Market and opens its chat room. You confirm the price before anything is sent.';
+export const B_AGENT_DESC = STORE_BUILD ? 'Use your own AI key' : 'How the b agent is paid for';
+export const SUBSCRIPTIONS_DESC = STORE_BUILD
+  ? 'Regular payments to people, from pots you fill'
+  : 'Regular payments from pots you fill';
+export const POTS_INTRO = STORE_BUILD
+  ? 'Put money aside in a pot and set up regular payments from it to a person or paymail. The pot balance is the most they can ever take. Payments go out when you open the app on or after each date; pause any time.'
+  : 'Put money aside in a pot and set up subscriptions (regular payments) from it. The pot balance is the most they can ever take. Payments go out when you open the app on or after each date; pause any time.';
+export const POT_NAME_PLACEHOLDER = STORE_BUILD ? 'Name (e.g. Rent, Savings)' : 'Name (e.g. Rent, bChat)';

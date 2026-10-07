@@ -28,7 +28,16 @@ import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
-import { isBWalletX, languageSettingsEnabled, potsEnabled, socialLoginEnabled } from '../storeBuild';
+import {
+  B_AGENT_DESC,
+  MY_TOKENS_DESC,
+  MY_TOKENS_NOTE,
+  isBWalletX,
+  languageSettingsEnabled,
+  potsEnabled,
+  socialLoginEnabled,
+  SUBSCRIPTIONS_DESC,
+} from '../storeBuild';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -350,10 +359,7 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
               onDone={() => void recheckPendingIndexing(apiContext, identityAddress)}
             />
           ))}
-          <Note>
-            Setting up a token’s room lists it in other wallets and the Market and opens its chat room. You confirm the
-            price before anything is sent.
-          </Note>
+          <Note>{MY_TOKENS_NOTE}</Note>
         </>
       ) : (
         <Note>Tokens you mint in bWallet show here.</Note>
@@ -465,7 +471,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           <Row
             icon={<Coins size={16} />}
             label="My tokens"
-            description="This account's tokens and their rooms: set up the ones that aren't listed yet"
+            description={MY_TOKENS_DESC}
             onClick={() => setScreen('tokens')}
             isFirst
             isLast
@@ -520,7 +526,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                 <Row
                   icon={<PiggyBank size={16} />}
                   label="Subscriptions"
-                  description="Regular payments from pots you fill"
+                  description={SUBSCRIPTIONS_DESC}
                   onClick={() => setScreen('pots')}
                 />
               </>
@@ -540,7 +546,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             <Row
               icon={<Sparkles size={16} />}
               label="b agent"
-              description="How the b agent is paid for"
+              description={B_AGENT_DESC}
               onClick={() => setScreen('bagent')}
             />
             <Divider />

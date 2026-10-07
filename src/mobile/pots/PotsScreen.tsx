@@ -14,6 +14,7 @@ import { startPotCreate } from '../agents/agentCreate';
 import { getPot, isLowFunds, listPots, listSubs, onPotsChange, potCovers } from './pots';
 import { potBalanceSats } from './potSend';
 import { SubscriptionCard } from './SubscriptionCard';
+import { POTS_INTRO } from '../storeBuild';
 import { AddOrderSheet, CreatePotSheet } from './CreatePotSheet';
 
 const GOLD = '#F5B800';
@@ -113,8 +114,7 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
       <Header title="Subscriptions" onBack={onClose} />
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <p className="text-sm m-0" style={{ color: MUTED }}>
-          Put money aside in a pot and set up subscriptions (regular payments) from it. The pot balance is the most they can ever
-          take. Payments go out when you open the app on or after each date; pause any time.
+          {POTS_INTRO}
         </p>
         {pots.length === 0 && (
           <p className="text-sm text-center py-6 m-0" style={{ color: MUTED }}>

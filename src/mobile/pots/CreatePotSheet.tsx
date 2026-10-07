@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
 import { parseUsdInput } from '../money/money';
-import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { POT_NAME_PLACEHOLDER, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { OWN_SERVICE_PAYEES, addSubscription, subProblem, type NewSub, type Period } from './pots';
 import { reschedulePotReminders } from './notifyPots';
 
@@ -39,7 +39,7 @@ export const CreatePotSheet = ({ onClose, onCreate }: { onClose: () => void; onC
         A pot is a separate account with its own keys. Subscriptions pay from it, and whatever you put in it is the
         most they can ever take. Pause or empty it any time.
       </p>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Rent, bChat)" maxLength={32} className={input} style={field} />
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder={POT_NAME_PLACEHOLDER} maxLength={32} className={input} style={field} />
       <button
         type="button"
         disabled={!name.trim()}

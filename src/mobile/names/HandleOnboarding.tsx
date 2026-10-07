@@ -4,6 +4,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { accountNamesFor } from './accountNames';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
+import { PAID_FEATURES_ENABLED, handleCardText } from '../storeBuild';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 import { recoverPersonalLink } from './claimPersonal';
 import {
@@ -96,7 +97,7 @@ export const HandleOnboarding = () => {
   if (open) return <HandleFlow onClose={close} />;
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
-  if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom), dismissed, open)) return null;
+  if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom || !PAID_FEATURES_ENABLED), dismissed, open)) return null;
   return (
     <div
       className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
@@ -116,9 +117,7 @@ export const HandleOnboarding = () => {
           {hasName ? 'Open your $name room' : 'Get your $name'}
         </div>
         <div className="text-[11px]" style={{ color: '#98A2B3' }}>
-          {hasName
-            ? 'Your personal token and a chat room only holders can enter.'
-            : 'A free handle people can pay, plus your own chat room.'}
+          {handleCardText(hasName)}
         </div>
       </div>
       <button
