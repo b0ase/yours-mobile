@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, EyeOff, FileText, Flag, Music, Play } from 'lucide-react';
 import { documentLabel } from '../media/media';
 import { contentUrls } from './indexer';
 import { cachedThumb, loadThumb, thumbUrl } from './thumbs';
-import { MARKET_ENABLED } from '../storeBuild';
+import { MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+
+// Rendered stills of GLB listings (one shared offscreen renderer); three.js loads only when a 3D tile shows.
+const ModelThumb = TOKENBLASTER_ENABLED ? lazy(() => import('../three3d/ModelThumb')) : null;
 
 /** True once the element has come within `margin` of the viewport (sticky). */
 function useNearViewport<T extends Element>(margin = '400px') {
@@ -158,6 +161,48 @@ export type CardItem = {
   buyable: boolean;
 };
 
+const Box3dPlaceholder = ({ name }: { name: string }) => (
+  <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 text-center">
+    <Box size={34} style={{ color: '#F5B800' }} />
+    <span className="text-[11px] font-semibold text-white line-clamp-2 break-words">{name}</span>
+    <span
+      className="rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
+      style={{ background: '#2b2f36', color: '#F5B800' }}
+    >
+      3D
+    </span>
+  </div>
+);
+
+/**
+ * GLB / glTF tile: the collection's own preview image if it has one, else a rendered still of the model
+ * (owner, 7 Oct 2026: the tiles were only a Box icon). The Box stays as the fallback. Tap opens the viewer.
+ */
+const Model3dTile = ({ item }: { item: CardItem }) => {
+  const fallback = <Box3dPlaceholder name={item.name} />;
+  const url = contentUrls(item.origin)[0];
+  const body = item.collectionIcon ? (
+    <Thumb outpoint={item.collectionIcon} alt={item.name} className="w-full h-full object-cover" />
+  ) : ModelThumb && url ? (
+    <Suspense fallback={<Shimmer />}>
+      <ModelThumb url={url} cacheKey={item.origin} fallback={fallback} alt={item.name} />
+    </Suspense>
+  ) : (
+    fallback
+  );
+  return (
+    <div className="relative w-full h-full">
+      {body}
+      <span
+        className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
+        style={{ background: '#000000aa', color: '#F5B800' }}
+      >
+        <Box size={10} /> 3D
+      </span>
+    </div>
+  );
+};
+
 export const NftCard = ({
   item,
   onBuy,
@@ -225,19 +270,7 @@ export const NftCard = ({
             </span>
           </div>
         )}
-        {item.category === '3d' && (
-          // GLB / glTF: no thumbnail (the model is the content). Tap opens the spinning viewer.
-          <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 text-center">
-            <Box size={34} style={{ color: '#F5B800' }} />
-            <span className="text-[11px] font-semibold text-white line-clamp-2 break-words">{item.name}</span>
-            <span
-              className="rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
-              style={{ background: '#2b2f36', color: '#F5B800' }}
-            >
-              3D
-            </span>
-          </div>
-        )}
+        {item.category === '3d' && <Model3dTile item={item} />}
         {(item.category === 'music' || item.category === 'video') && (
           <button
             aria-label={item.category === 'music' ? 'Play preview' : 'Preview video'}
