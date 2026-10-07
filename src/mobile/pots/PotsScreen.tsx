@@ -79,7 +79,7 @@ const PotRow = ({ id, onOpen, rate }: { id: string; onOpen: () => void; rate: nu
         </div>
         <div className="text-[11px]" style={{ color: MUTED }}>
           {sats === null ? '…' : rate > 0 ? `$${((sats / 1e8) * rate).toFixed(2)}` : `${sats.toLocaleString()} sats`}
-          {live.length ? ` · ${live.length} standing order${live.length === 1 ? '' : 's'}` : ''}
+          {live.length ? ` · ${live.length} subscription${live.length === 1 ? '' : 's'}` : ''}
           {live.length && covers !== null ? ` · covers ${covers >= 99 ? '99+' : covers} payments` : ''}
         </div>
       </div>
@@ -110,10 +110,10 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
 
   return createPortal(
     <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
-      <Header title="Pots" onBack={onClose} />
+      <Header title="Subscriptions" onBack={onClose} />
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <p className="text-sm m-0" style={{ color: MUTED }}>
-          Put money aside in a pot and set standing orders to pay from it. The pot balance is the most they can ever
+          Put money aside in a pot and set up subscriptions (regular payments) from it. The pot balance is the most they can ever
           take. Payments go out when you open the app on or after each date; pause any time.
         </p>
         {pots.length === 0 && (
@@ -214,7 +214,7 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
         </div>
 
         <div className="flex items-center justify-between pt-1">
-          <span className="text-sm font-bold text-white">Standing orders</span>
+          <span className="text-sm font-bold text-white">Subscriptions</span>
           <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1 text-xs font-bold bg-transparent border-0" style={{ color: GOLD }}>
             <Plus size={14} /> Add
           </button>

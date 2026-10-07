@@ -328,7 +328,7 @@ export const addSubscription = (n: NewSub, bsvUsd: number, now = Date.now()): Su
   });
   const a = getAgentAccount(n.potId);
   if (a && a.dailyCapUsd === null) setAgentDailyCap(n.potId, defaultDailyCap(listSubs(n.potId), bsvUsd));
-  appendAgentLog(n.potId, { at: now, action: 'sub-create', detail: `Standing order to ${n.payee.name}`, usd: 0 });
+  appendAgentLog(n.potId, { at: now, action: 'sub-create', detail: `Subscription to ${n.payee.name}`, usd: 0 });
   return s;
 };
 

@@ -36,7 +36,7 @@ export const CreatePotSheet = ({ onClose, onCreate }: { onClose: () => void; onC
   return (
     <Sheet title="New pot" onClose={onClose}>
       <p className="text-xs m-0" style={{ color: MUTED }}>
-        A pot is a separate account with its own keys. Standing orders pay from it, and whatever you put in it is the
+        A pot is a separate account with its own keys. Subscriptions pay from it, and whatever you put in it is the
         most they can ever take. Pause or empty it any time.
       </p>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Rent, bChat)" maxLength={32} className={input} style={field} />
@@ -117,7 +117,7 @@ export const AddOrderSheet = ({
   };
 
   return (
-    <Sheet title={`Standing order from ${potName}`} onClose={onClose}>
+    <Sheet title={`Subscription from ${potName}`} onClose={onClose}>
       {SUBSCRIPTIONS_ENABLED && OWN_SERVICE_PAYEES.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           {[{ service: '', name: 'A person' }, ...OWN_SERVICE_PAYEES].map((p) => (

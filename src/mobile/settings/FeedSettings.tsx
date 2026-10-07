@@ -37,6 +37,8 @@ import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
 import { PushSettings } from '../push/PushSettings';
+import { onPushState, pushEnabled, setPushEnabled } from '../push/register';
+import { loadSession } from '../chat/api';
 import { TesterSettings } from '../testers/TesterSettings';
 import { testersEnabled } from '../testers/checkin';
 import { PairedSitesList } from '../pair/PairedSitesList';
@@ -92,9 +94,9 @@ type Props = {
   Divider: ComponentType;
   /**
    * Settings is split into "This account" (keys, names, tokens: differ per account) and "All accounts (wallet)"
-   * (device / app preferences). Unset renders both.
+   * (device / app preferences). 'notify' is the Notifications row at the top of "All accounts". Unset renders all.
    */
-  part?: 'account' | 'wallet';
+  part?: 'account' | 'wallet' | 'notify';
 };
 
 const FEEDS: { id: DefaultFeed; label: string }[] = [
@@ -360,9 +362,53 @@ const MyTokensScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
+/**
+ * Settings main page: one Notifications row. The switch is push on/off for this device (the same master switch
+ * as the Notifications page); tapping the row opens that page (categories, previews, quiet hours).
+ */
+const NotificationsRow = ({
+  Row,
+  Toggle: T,
+  onOpen,
+}: {
+  Row: ComponentType<RowProps>;
+  Toggle: typeof Toggle;
+  onOpen: () => void;
+}) => {
+  const [on, setOn] = useState(pushEnabled());
+  const [busy, setBusy] = useState(false);
+  useEffect(() => onPushState(() => setOn(pushEnabled())), []);
+  const flip = async (v: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const ok = await setPushEnabled(v, loadSession());
+      // Blocked by the phone / browser: the Notifications page says why and how to fix it.
+      if (v && !ok) onOpen();
+    } catch {
+      onOpen();
+    } finally {
+      setOn(pushEnabled());
+      setBusy(false);
+    }
+  };
+  return (
+    <Row
+      icon={<BellRing size={16} />}
+      label="Notifications"
+      description="Rooms, DMs and payments; previews, quiet hours"
+      right={<T label="Notifications" on={on} onChange={(v) => void flip(v)} />}
+      onClick={onOpen}
+      isFirst
+      isLast
+    />
+  );
+};
+
 export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
-  const acct = part !== 'wallet';
-  const wal = part !== 'account';
+  const acct = !part || part === 'account';
+  const wal = !part || part === 'wallet';
+  const notif = !part || part === 'notify';
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
     | 'bookmarks'
@@ -377,7 +423,12 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'social'
     | 'agents'
     | 'pots'
-    | 'push'
+    | 'notifications'
+    | 'feed'
+    | 'payments'
+    | 'indexing'
+    | 'bagent'
+    | 'websites'
     | null
   >(null);
   const rate = useBsvUsd();
@@ -441,8 +492,151 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           />
         </Section>
       )}
+      {notif && (
+        <Section title="Notifications">
+          <NotificationsRow Toggle={Toggle} Row={Row} onOpen={() => setScreen('notifications')} />
+        </Section>
+      )}
       {wal && (
         <>
+          <Section title="General">
+            <Row
+              icon={<Newspaper size={16} />}
+              label="Feed"
+              description="Default feed, autoplay, backgrounds, language"
+              onClick={() => setScreen('feed')}
+              isFirst
+            />
+            <Divider />
+            <Row
+              icon={<Zap size={16} />}
+              label="Payments"
+              description="One-click pay and paid likes"
+              onClick={() => setScreen('payments')}
+            />
+            {potsEnabled() && (
+              <>
+                <Divider />
+                <Row
+                  icon={<PiggyBank size={16} />}
+                  label="Subscriptions"
+                  description="Regular payments from pots you fill"
+                  onClick={() => setScreen('pots')}
+                />
+              </>
+            )}
+            {isBWalletX() && (
+              <>
+                <Divider />
+                <Row
+                  icon={<Bot size={16} />}
+                  label="Agent accounts"
+                  description="Accounts your AI agents can use, with their own budget"
+                  onClick={() => setScreen('agents')}
+                />
+              </>
+            )}
+            <Divider />
+            <Row
+              icon={<Sparkles size={16} />}
+              label="b agent"
+              description="How the b agent is paid for"
+              onClick={() => setScreen('bagent')}
+            />
+            <Divider />
+            <Row
+              icon={<Coins size={16} />}
+              label="Token indexing"
+              description="One-tap fee for your own tokens"
+              onClick={() => setScreen('indexing')}
+            />
+            {IS_EXTENSION && (
+              <>
+                <Divider />
+                <Row
+                  icon={<Globe size={16} />}
+                  label="Websites"
+                  description="Which wallet sites connect to"
+                  onClick={() => setScreen('websites')}
+                />
+              </>
+            )}
+            <Divider />
+            <Row
+              icon={<LockKeyhole size={16} />}
+              label="Change password"
+              description="One password unlocks every account"
+              onClick={() => setScreen('password')}
+              isLast
+            />
+          </Section>
+          {testersEnabled() && (
+            <Section title="Testing">
+              <TesterSettings />
+            </Section>
+          )}
+          <Section title="Privacy">
+            <Row
+              icon={<Bookmark size={16} />}
+              label="Bookmarks"
+              description="Posts you saved on this device"
+              onClick={() => setScreen('bookmarks')}
+              isFirst
+            />
+            <Divider />
+            <Row
+              icon={<Ban size={16} />}
+              label="Blocked & muted"
+              description="Unblock or unmute accounts"
+              onClick={() => setScreen('hidden')}
+              isLast
+            />
+          </Section>
+          {
+            <Section title="Connections">
+              {/* One tap to the camera (owner, 6 Oct 2026: couldn't find how to link the CLI to an agent account). */}
+              <Row
+                icon={<ScanLine size={16} />}
+                label={IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect'}
+                description={
+                  IS_EXTENSION
+                    ? 'Pair the bWalletX CLI or an AI assistant (MCP): paste the link from bwalletx login'
+                    : 'Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code'
+                }
+                onClick={() => setScreen('scan')}
+                isFirst
+              />
+              <Divider />
+              <Row
+                icon={<Globe size={16} />}
+                label="Paired computers & websites"
+                description="What's connected to this account, and what each may do"
+                onClick={() => setScreen('paired')}
+                isLast
+              />
+            </Section>
+          }
+          <Section title="Help & safety">
+            <Row
+              icon={<FileText size={16} />}
+              label="Terms of use"
+              isFirst
+              description="Zero tolerance for objectionable content and abusive users"
+              onClick={() => setScreen('terms')}
+            />
+            <Divider />
+            <Row
+              icon={<Mail size={16} />}
+              label="Contact and reports"
+              description={SUPPORT_EMAIL}
+              onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
+              isLast
+            />
+          </Section>
+        </>
+      )}
+      {screen === 'feed' && (
+        <Screen title="Feed" onBack={() => setScreen(null)}>
           <Section title="Feed">
             <Row icon={<Newspaper size={16} />} label="Default feed" description="What the Feed opens to" isFirst />
             <div className="px-4 pb-3 pl-12">
@@ -507,6 +701,10 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               {FILTER_NOTE}
             </Note>
           </div>
+        </Screen>
+      )}
+      {screen === 'payments' && (
+        <Screen title="Payments" onBack={() => setScreen(null)}>
           <Section title="Payments">
             <Row
               icon={<Zap size={16} />}
@@ -558,56 +756,10 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               />
             </div>
           </Section>
-          {potsEnabled() && (
-            <Section title="Pots">
-              <Row
-                icon={<PiggyBank size={16} />}
-                label="Pots and standing orders"
-                description="Money set aside in its own pot, with regular payments from it. Pause any time."
-                onClick={() => setScreen('pots')}
-                isFirst
-                isLast
-              />
-            </Section>
-          )}
-          {isBWalletX() && (
-            <Section title="Agents">
-              <Row
-                icon={<Bot size={16} />}
-                label="Agent accounts"
-                description="Accounts your AI agents can use, with their own budget. Stop, fund, sweep back."
-                onClick={() => setScreen('agents')}
-                isFirst
-                isLast
-              />
-            </Section>
-          )}
-          {IS_EXTENSION && (
-            <Section title="Websites">
-              <Row
-                icon={<Globe size={16} />}
-                label="Be the wallet websites connect to"
-                description={
-                  takeCwi
-                    ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
-                    : 'Another wallet (e.g. Yours) answers sites without a picker'
-                }
-                right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}
-                isFirst
-                isLast
-              />
-            </Section>
-          )}
-          <Section title="Security">
-            <Row
-              icon={<LockKeyhole size={16} />}
-              label="Change password"
-              description="One password unlocks every account (no old password needed while unlocked)"
-              onClick={() => setScreen('password')}
-              isFirst
-              isLast
-            />
-          </Section>
+        </Screen>
+      )}
+      {screen === 'indexing' && (
+        <Screen title="Token indexing" onBack={() => setScreen(null)}>
           <Section title="Token indexing">
             <Row
               icon={<Zap size={16} />}
@@ -629,21 +781,43 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               />
             </div>
           </Section>
-          <Section title="Notifications">
+        </Screen>
+      )}
+      {screen === 'bagent' && (
+        <Screen title="b agent" onBack={() => setScreen(null)}>
+          <AgentSettings Section={Section} Row={Row} Divider={Divider} />
+        </Screen>
+      )}
+      {screen === 'websites' && (
+        <Screen title="Websites" onBack={() => setScreen(null)}>
+          <Section title="Websites">
             <Row
-              icon={<BellRing size={16} />}
-              label="Push notifications"
-              description="Rooms and DMs while the app is closed, previews, quiet hours"
-              onClick={() => setScreen('push')}
+              icon={<Globe size={16} />}
+              label="Be the wallet websites connect to"
+              description={
+                takeCwi
+                  ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
+                  : 'Another wallet (e.g. Yours) answers sites without a picker'
+              }
+              right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}
               isFirst
+              isLast
             />
+          </Section>
+        </Screen>
+      )}
+      {screen === 'notifications' && (
+        <Screen title="Notifications" onBack={() => setScreen(null)}>
+          <PushSettings Toggle={Toggle} />
+          <Section title="In the app">
             {CATEGORIES.map((c) => (
               <div key={c}>
-                <Divider />
+                {c !== CATEGORIES[0] && <Divider />}
                 <Row
                   icon={<Bell size={16} />}
                   label={CATEGORY_LABELS[c].label}
                   description={CATEGORY_LABELS[c].description}
+                  isFirst={c === CATEGORIES[0]}
                   right={
                     <Toggle
                       label={CATEGORY_LABELS[c].label}
@@ -676,71 +850,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               isLast
             />
           </Section>
-          {testersEnabled() && (
-            <Section title="Testing">
-              <TesterSettings />
-            </Section>
-          )}
-          <AgentSettings Section={Section} Row={Row} Divider={Divider} />
-          <Section title="Privacy">
-            <Row
-              icon={<Bookmark size={16} />}
-              label="Bookmarks"
-              description="Posts you saved on this device"
-              onClick={() => setScreen('bookmarks')}
-              isFirst
-            />
-            <Divider />
-            <Row
-              icon={<Ban size={16} />}
-              label="Blocked & muted"
-              description="Unblock or unmute accounts"
-              onClick={() => setScreen('hidden')}
-              isLast
-            />
-          </Section>
-          {
-            <Section title="Connections">
-              {/* One tap to the camera (owner, 6 Oct 2026: couldn't find how to link the CLI to an agent account). */}
-              <Row
-                icon={<ScanLine size={16} />}
-                label={IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect'}
-                description={
-                  IS_EXTENSION
-                    ? 'Pair the bWalletX CLI or an AI assistant (MCP): paste the link from bwalletx login'
-                    : 'Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code'
-                }
-                onClick={() => setScreen('scan')}
-                isFirst
-              />
-              <Divider />
-              <Row
-                icon={<Globe size={16} />}
-                label="Paired computers & websites"
-                description="What's connected to this account, and what each may do"
-                onClick={() => setScreen('paired')}
-                isLast
-              />
-            </Section>
-          }
-          <Section title="Help & safety">
-            <Row
-              icon={<FileText size={16} />}
-              label="Terms of use"
-              isFirst
-              description="Zero tolerance for objectionable content and abusive users"
-              onClick={() => setScreen('terms')}
-            />
-            <Divider />
-            <Row
-              icon={<Mail size={16} />}
-              label="Contact and reports"
-              description={SUPPORT_EMAIL}
-              onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
-              isLast
-            />
-          </Section>
-        </>
+        </Screen>
       )}
       {screen === 'terms' && <TermsScreen onBack={() => setScreen(null)} />}
       {screen === 'delete' && <DeleteAccountScreen onBack={() => setScreen(null)} />}
@@ -751,11 +861,6 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
-      {screen === 'push' && (
-        <Screen title="Push notifications" onBack={() => setScreen(null)}>
-          <PushSettings Toggle={Toggle} />
-        </Screen>
-      )}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
           <PairedSitesList onScan={() => setScreen('scan')} />
