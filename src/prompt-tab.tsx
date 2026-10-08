@@ -21,6 +21,7 @@ import { GroupedPermissionRequestPage } from './pages/requests/GroupedPermission
 import { OneSatPermissionRequestPage } from './pages/requests/OneSatPermissionRequest';
 import { PermissionRequestPage } from './pages/requests/PermissionRequest';
 import { UsbCheckRequestPage } from './pages/requests/UsbCheckRequest';
+import { BundleSheet, type BundlePayload } from './pages/requests/BundleSheet';
 import type { OneSatPromptStorageEntry } from './services/oneSatPrompt';
 import { sendMessageAsync } from './utils/chromeHelpers';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
@@ -36,6 +37,7 @@ type PromptScreen =
   | { kind: 'waiting' }
   | { kind: 'unlock' }
   | { kind: 'permission'; requestID: string; payload: PermissionRequest & { requestID: string } }
+  | { kind: 'bundle'; requestID: string; payload: BundlePayload }
   | { kind: 'groupedPermission'; requestID: string; payload: GroupedPermissionRequest }
   | { kind: 'counterpartyPermission'; requestID: string; payload: CounterpartyPermissionRequest }
   | { kind: 'oneSatPermission'; requestID: string; payload: OneSatPromptStorageEntry }
@@ -58,8 +60,26 @@ const PromptApp = () => {
     }
   };
 
+  const screenRef = useRef<PromptScreen>(screen);
+  screenRef.current = screen;
+
   const loadPrompt = useCallback(async (kind: PromptKind, requestID: string) => {
     clearWaitingTimer();
+    // A request joined the sheet that is already showing: refresh it in place so the user's ticks stay.
+    const cur = screenRef.current;
+    if (kind === 'bundle' && cur.kind === 'bundle' && cur.requestID === requestID) {
+      try {
+        const res = await sendMessageAsync<{ success: boolean; data?: BundlePayload }>({
+          action: 'GET_PROMPT_PAYLOAD',
+          kind,
+          requestID,
+        });
+        if (res?.success && res.data) setScreen({ kind: 'bundle', requestID, payload: res.data });
+      } catch {
+        /* keep showing what we have */
+      }
+      return;
+    }
     setScreen({ kind: 'loading' });
     let res: { success: boolean; data?: unknown } | undefined;
     try {
@@ -188,6 +208,9 @@ const PromptApp = () => {
         {screen.kind === 'unlock' && <UnlockWallet onUnlock={() => void advance()} />}
         {screen.kind === 'permission' && (
           <PermissionRequestPage request={screen.payload} onResponse={() => void advance()} />
+        )}
+        {screen.kind === 'bundle' && (
+          <BundleSheet key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'groupedPermission' && (
           <GroupedPermissionRequestPage request={screen.payload} onResponse={() => void advance()} />

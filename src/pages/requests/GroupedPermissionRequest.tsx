@@ -36,7 +36,8 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const [certChecked, setCertChecked] = useState<boolean[]>(() =>
     (permissions.certificateAccess ?? []).map(() => true),
   );
-  const [spendingChecked, setSpendingChecked] = useState(false);
+  // Ticked by default (owner, 9 Oct 2026): connecting sets the app's allowance in the same tap.
+  const [spendingChecked, setSpendingChecked] = useState(true);
 
   useEffect(() => {
     handleSelect('bsv');
@@ -129,7 +130,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
         </p>
       </Show>
 
-      {/* Spending authorization — shown separately above the list, default unchecked */}
+      {/* Spending authorization — shown separately above the list, ticked by default */}
       <Show when={!!permissions.spendingAuthorization}>
         <motion.div
           className="w-full rounded-2xl px-4 py-3 mb-3"

@@ -1,6 +1,7 @@
 export type PromptKind =
   | 'unlock'
   | 'permission'
+  | 'bundle'
   | 'groupedPermission'
   | 'counterpartyPermission'
   | 'oneSatPermission'

@@ -48,6 +48,13 @@ import {
   initOneSatPromptBridge,
 } from './services/oneSatPrompt';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
+import {
+  allowanceSats,
+  DEFAULT_ALLOWANCE_USD,
+  PermissionBundler,
+  type BundleRequest,
+} from './services/permissionBundle';
+import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -492,6 +499,17 @@ const pendingPermissionRequests = new Map<
   }
 >();
 
+// One sheet per action (docs/ONE-SHEET-PERMISSIONS.md): single permission requests from one site are
+// merged into one bundle and shown as one sheet. Each request stays in pendingPermissionRequests and is
+// still answered through the manager's grantPermission / denyPermission.
+type BundledRequest = PermissionRequest & { requestID: string };
+const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>({
+  onReady: (bundle) => showPromptUi('bundle', bundle.id),
+  // A request joined an open sheet: the sheet reloads its payload ("+1 more").
+  onUpdate: (bundle) => notifyPromptUpdated('bundle', bundle.id),
+});
+let notifyPromptUpdated: (kind: PromptKind, requestID: string) => void = () => undefined;
+
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
   resolve: (wallet: WalletInterface) => void;
@@ -615,6 +633,10 @@ const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
   switch (kind) {
     case 'permission':
       return requestID ? pendingPermissionRequests.get(requestID)?.request : undefined;
+    case 'bundle': {
+      const bundle = requestID ? permissionBundler.get(requestID) : undefined;
+      return bundle ? { bundleID: bundle.id, originator: bundle.originator, items: bundle.items } : undefined;
+    }
     case 'groupedPermission':
       return requestID ? pendingGroupedPermissionRequests.get(requestID)?.request : undefined;
     case 'counterpartyPermission':
@@ -633,6 +655,11 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   // A key check is holding up a call that already passed permission: first.
   const usbCheck = pendingUsbChecks.keys().next();
   if (!usbCheck.done) return { kind: 'usbCheck', requestID: usbCheck.value };
+  const bundle = permissionBundler.list()[0];
+  if (bundle) {
+    permissionBundler.flush(bundle.id); // the sheet is asking now: no need to wait out the merge window
+    return { kind: 'bundle', requestID: bundle.id };
+  }
   const permission = pendingPermissionRequests.keys().next();
   if (!permission.done) return { kind: 'permission', requestID: permission.value };
   const grouped = pendingGroupedPermissionRequests.keys().next();
@@ -724,7 +751,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
   return new Promise((resolve, reject) => {
     pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-    showPromptUi('permission', request.requestID);
+    permissionBundler.add(request as BundledRequest & BundleRequest);
   });
 };
 
@@ -815,6 +842,10 @@ if (isInServiceWorker) {
     chrome.runtime.sendMessage({ action: 'SHOW_PROMPT', kind, requestID }).catch(() => {
       // No listener (window still booting); it reads its URL params on mount
     });
+  };
+
+  notifyPromptUpdated = (kind, requestID) => {
+    notifyPromptWindow(kind, requestID);
   };
 
   showPromptUi = (kind, requestID) => {
@@ -934,6 +965,8 @@ if (isInServiceWorker) {
       CWIEventName.GET_VERSION,
       // Permission responses from popup
       'PERMISSION_RESPONSE',
+      'BUNDLE_PERMISSION_RESPONSE',
+      'GET_BUNDLE_ALLOWANCE',
       'GROUPED_PERMISSION_RESPONSE',
       'COUNTERPARTY_PERMISSION_RESPONSE',
       'ONE_SAT_PERMISSION_RESPONSE',
@@ -1014,6 +1047,21 @@ if (isInServiceWorker) {
         // Permission responses from popup UI
         case 'PERMISSION_RESPONSE':
           return processPermissionResponse(message as { requestID: string; granted: boolean; expiry?: number });
+        case 'BUNDLE_PERMISSION_RESPONSE':
+          return processBundlePermissionResponse(
+            message as {
+              bundleID: string;
+              decisions: Record<string, boolean>;
+              allowanceUsd?: number;
+              remember?: boolean;
+            },
+            sendResponse,
+          );
+        case 'GET_BUNDLE_ALLOWANCE':
+          getBundleAllowance((message as { originator: string }).originator)
+            .then((data) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: true, data }))
+            .catch((error) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: false, error: String(error) }));
+          return true;
         case 'GROUPED_PERMISSION_RESPONSE':
           return processGroupedPermissionResponse(
             message as { requestID: string; granted: Partial<GroupedPermissions> | null; expiry?: number },
@@ -1886,6 +1934,7 @@ if (isInServiceWorker) {
     }
 
     pendingPermissionRequests.delete(response.requestID);
+    permissionBundler.removeRequest(response.requestID);
 
     if (response.granted) {
       // Grant the permission through the manager
@@ -1914,6 +1963,98 @@ if (isInServiceWorker) {
     }
 
     closeDappPopupIfNoUi();
+    return true;
+  };
+
+  /** USD per BSV from the wallet's price cache, if it has one. */
+  const cachedUsdPerBsv = async (): Promise<number | undefined> => {
+    // Callback form: the phone build's chrome shim may not return a promise.
+    const r = await new Promise<Record<string, unknown>>((res) =>
+      chrome.storage.local.get('exchangeRateCache', (v) => res(v ?? {})),
+    );
+    const rate = (r?.exchangeRateCache as { rate?: number } | undefined)?.rate;
+    return typeof rate === 'number' && rate > 0 ? rate : undefined;
+  };
+
+  /** What the sheet needs for the allowance line: the price, and whether the site already has an allowance. */
+  const getBundleAllowance = async (originator: string) => {
+    const usdPerBsv = await cachedUsdPerBsv();
+    let existingSats: number | undefined;
+    const store = accountContext?.permissionStore;
+    if (store && originator) {
+      const grant = await store.findGrant({ type: 'spending', originator: normalizeOriginator(originator) });
+      const live = grant && (grant.expiry === 0 || grant.expiry * 1000 > Date.now());
+      if (live && grant.authorizedAmount != null) existingSats = grant.authorizedAmount;
+    }
+    return { usdPerBsv, existingSats, defaultUsd: DEFAULT_ALLOWANCE_USD };
+  };
+
+  /**
+   * The answer to one sheet. Each request is still granted or denied through the manager, exactly as the
+   * one-prompt-per-permission flow did. A ticked allowance is stored as the site's monthly spending grant
+   * (the same record a manifest's grouped grant writes), so later payments under it need no sheet.
+   */
+  const processBundlePermissionResponse = (
+    response: { bundleID: string; decisions: Record<string, boolean>; allowanceUsd?: number; remember?: boolean },
+    sendResponse: CallbackResponse,
+  ) => {
+    const bundle = permissionBundler.get(response.bundleID);
+    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {});
+    if (!bundle || !result) {
+      sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
+      return true;
+    }
+    const remember = response.remember !== false;
+    // Not remembered: the grants last this visit (an hour), then the site asks again.
+    const expiry = remember ? 0 : Math.floor(Date.now() / 1000) + 3600;
+    const wallet = accountContext?.wallet;
+
+    const work = (async () => {
+      const usd = Number(response.allowanceUsd ?? 0);
+      if (result.granted.length > 0 && usd > 0 && accountContext?.permissionStore) {
+        const sats = allowanceSats(usd, await cachedUsdPerBsv());
+        if (sats > 0) {
+          await accountContext.permissionStore.putGrant({
+            key: { type: 'spending', originator: normalizeOriginator(bundle.originator) },
+            expiry,
+            grantedAt: Date.now(),
+            authorizedAmount: sats,
+            reason: `Up to $${usd} a month without asking`,
+          });
+        }
+      }
+      await Promise.all([
+        ...result.granted.map(async (r) => {
+          const pending = pendingPermissionRequests.get(r.requestID);
+          pendingPermissionRequests.delete(r.requestID);
+          if (!pending) return;
+          try {
+            if (!wallet) throw new Error('Wallet is locked');
+            await wallet.grantPermission({ requestID: r.requestID, expiry });
+            pending.resolve();
+          } catch (error) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        }),
+        ...result.denied.map(async (r) => {
+          const pending = pendingPermissionRequests.get(r.requestID);
+          pendingPermissionRequests.delete(r.requestID);
+          if (!pending) return;
+          try {
+            await wallet?.denyPermission(r.requestID);
+          } finally {
+            pending.reject(new Error('Permission denied by user'));
+          }
+        }),
+      ]);
+    })();
+
+    work
+      .catch((error) => console.error('[background] bundle response failed:', error))
+      .finally(() => {
+        sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: true });
+        closeDappPopupIfNoUi();
+      });
     return true;
   };
 
@@ -3192,6 +3333,7 @@ if (isInServiceWorker) {
         pending.reject(new Error('User dismissed the request'));
       }
       pendingPermissionRequests.clear();
+      permissionBundler.clear();
 
       for (const [requestID, pending] of pendingGroupedPermissionRequests) {
         accountContext?.wallet.denyGroupedPermission(requestID).catch(console.error);
