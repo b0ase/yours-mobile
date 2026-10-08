@@ -1,15 +1,26 @@
 /**
  * Wallet › Airdrops: tokens and NFTs that arrived unsolicited (inbox.ts). Keep / Hide per item. Nothing in
- * here renders inscription markup or opens issuer links: NFTs show a resized image or a placeholder that
+ * here renders inscription markup or opens issuer links (notes are React text, links never clickable): NFTs show a resized image or a placeholder that
  * previews in a fully sandboxed iframe (no scripts, opaque origin) only on tap.
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Coins, FileCode, Gift, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { Coins, FileCode, Flag, Gift, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { asMenuItem } from '../tabs/tabs';
+import { avatarFor } from '../chat/avatars';
+import { requestChatRoom } from '../chat/nav';
+import { requestDm } from '../chat/segmentNav';
+import { tokenKey } from '../chat/tokenRooms';
+import { safeName } from '../feed/language';
 import { IssuerBadge } from '../issuer/IssuerBadge';
+import { useIssuer } from '../issuer/useIssuer';
+import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
+import { ReportSheet } from '../ugc/UgcSheets';
 import { thumbUrl } from '../market/thumbs';
 import { hide, keep, markSeen, type AirdropItem } from './inbox';
+import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
 import { useAirdrops } from './useAirdrops';
 
 const CARD = '#17191E';
@@ -62,55 +73,198 @@ const NftThumb = ({ id }: { id: string }) => {
   );
 };
 
-const Row = ({ item, onKeep, onHide }: { item: AirdropItem; onKeep: () => void; onHide: () => void }) => (
-  <div className="flex items-center gap-3 rounded-xl px-3 py-3" style={{ background: CARD }}>
-    {item.asset.kind === 'nft' ? (
-      <NftThumb id={item.asset.id} />
-    ) : (
-      <div className="w-12 h-12 rounded-lg bg-[#2b2f36] flex items-center justify-center shrink-0">
-        <Coins size={18} color={MUTED} />
-      </div>
-    )}
-    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-      <div className="text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
-        {item.asset.kind === 'nft'
-          ? 'NFT'
-          : `${item.asset.qty ? `${Number(item.asset.qty).toLocaleString()} ` : ''}$${item.asset.symbol ?? short(item.asset.id)}`}
-      </div>
-      {item.asset.kind === 'token' ? (
-        <IssuerBadge tokenId={item.asset.id} compact />
-      ) : (
-        <span className="text-[11px]" style={{ color: MUTED }}>
-          Unverified sender
-        </span>
-      )}
-      <span className="text-[10px]" style={{ color: '#667085' }}>
-        {item.from ? `From ${short(item.from)} · ` : ''}
-        {new Date(item.time).toLocaleDateString()}
+/** The issuer: avatar + $handle (verified badge for tokens) or a short address. */
+const useIssuerName = (item: AirdropItem) => {
+  const info = useIssuer(item.asset.kind === 'token' ? item.asset.id : null);
+  const handle = info?.status === 'verified' && info.handle ? info.handle.replace(/^\$/, '') : null;
+  return {
+    handle,
+    verified: info?.status === 'verified',
+    label: handle ? `$${safeName(handle)}` : short(item.from || item.issuer),
+  };
+};
+
+const Avatar = ({ handle }: { handle: string | null }) => {
+  const url = handle ? avatarFor(handle) : null;
+  const [bad, setBad] = useState(false);
+  if (url && !bad)
+    return <img src={url} alt="" onError={() => setBad(true)} className="w-9 h-9 rounded-full object-cover shrink-0" />;
+  return (
+    <div className="w-9 h-9 rounded-full bg-[#2b2f36] flex items-center justify-center shrink-0 text-sm font-bold text-white">
+      {handle ? handle[0].toUpperCase() : '?'}
+    </div>
+  );
+};
+
+/** The note as plain text: React text nodes only, links shown but never clickable. */
+const NoteBody = ({ text, issuerKept, label }: { text: string; issuerKept: boolean; label: string }) => {
+  const v = noteView(text, { issuerKept, store: STORE_BUILD });
+  const [open, setOpen] = useState(!v.collapsed);
+  const [reveal, setReveal] = useState(false);
+  if (v.language === 'hide-final')
+    return (
+      <p className="text-[11px] italic m-0" style={{ color: MUTED }}>
+        Note hidden by the language filter.
+      </p>
+    );
+  if (!open)
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-left text-[11px] underline"
+        style={{ color: MUTED }}
+      >
+        Note from {label}: show
+      </button>
+    );
+  const blurred = v.language === 'blur' && !reveal;
+  return (
+    <div
+      className="rounded-lg px-3 py-2 text-[13px] leading-snug text-white whitespace-pre-wrap break-words"
+      style={{ background: '#22252c' }}
+    >
+      <span style={blurred ? { filter: 'blur(5px)', userSelect: 'none' } : undefined}>
+        {noteSegments(text).map((seg, n) =>
+          seg.link ? (
+            <span key={n} style={{ color: '#9fb3c8' }} title="Links in notes are never opened by the wallet">
+              {seg.text}
+            </span>
+          ) : (
+            <span key={n}>{seg.text}</span>
+          ),
+        )}
       </span>
+      {blurred && (
+        <button
+          type="button"
+          onClick={() => setReveal(true)}
+          className="block text-[11px] underline mt-1"
+          style={{ color: MUTED }}
+        >
+          Strong language: show anyway
+        </button>
+      )}
     </div>
-    <div className="flex flex-col gap-1 shrink-0">
-      <button
-        type="button"
-        onClick={onKeep}
-        className="rounded-lg px-3 py-1 text-xs font-bold"
-        style={{ background: GOLD, color: '#010101' }}
-      >
-        Keep
-      </button>
-      <button
-        type="button"
-        onClick={onHide}
-        className="rounded-lg px-3 py-1 text-xs font-semibold bg-[#2b2f36] text-white"
-      >
-        Hide
-      </button>
+  );
+};
+
+const Row = ({
+  item,
+  issuerKept,
+  onKeep,
+  onHide,
+  onLeave,
+}: {
+  item: AirdropItem;
+  issuerKept: boolean;
+  onKeep: () => void;
+  onHide: () => void;
+  onLeave: () => void;
+}) => {
+  const { handleSelect } = useBottomMenu();
+  const who = useIssuerName(item);
+  const [reporting, setReporting] = useState(false);
+  const symbol = item.asset.kind === 'token' ? item.asset.symbol : undefined;
+  const reply = () => {
+    if (!who.handle) return;
+    requestDm(who.handle, replyDraft(symbol));
+    handleSelect(asMenuItem('chat'));
+    onLeave();
+  };
+  const roomKey = item.asset.kind === 'token' && tokenRoomsEnabled() ? tokenKey('bsv21', item.asset.id) : null;
+  const room = roomKey
+    ? () => {
+        requestChatRoom(roomKey);
+        handleSelect(asMenuItem('chat'));
+        onLeave();
+      }
+    : null;
+  const small = 'rounded-lg px-2.5 py-1 text-xs font-semibold bg-[#2b2f36] text-white';
+  return (
+    <div className="flex flex-col gap-2 rounded-xl px-3 py-3" style={{ background: CARD }}>
+      <div className="flex items-center gap-2">
+        <Avatar handle={who.handle} />
+        <div className="min-w-0 flex-1 flex flex-col">
+          <span className="text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
+            {who.label}
+          </span>
+          {item.asset.kind === 'token' ? (
+            <IssuerBadge tokenId={item.asset.id} compact />
+          ) : (
+            <span className="text-[11px]" style={{ color: MUTED }}>
+              Unverified sender
+            </span>
+          )}
+        </div>
+        <span className="text-[10px] shrink-0" style={{ color: '#667085' }}>
+          {new Date(item.time).toLocaleDateString()}
+        </span>
+      </div>
+      {item.note && <NoteBody text={item.note} issuerKept={issuerKept} label={who.label} />}
+      <div className="flex items-center gap-3">
+        {item.asset.kind === 'nft' ? (
+          <NftThumb id={item.asset.id} />
+        ) : (
+          <div className="w-12 h-12 rounded-lg bg-[#2b2f36] flex items-center justify-center shrink-0">
+            <Coins size={18} color={MUTED} />
+          </div>
+        )}
+        <div className="min-w-0 flex-1 text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
+          {item.asset.kind === 'nft'
+            ? 'NFT'
+            : `${item.asset.qty ? `${Number(item.asset.qty).toLocaleString()} ` : ''}$${item.asset.symbol ?? short(item.asset.id)}`}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={onKeep}
+          className="rounded-lg px-3 py-1 text-xs font-bold"
+          style={{ background: GOLD, color: '#010101' }}
+        >
+          Keep
+        </button>
+        <button type="button" onClick={onHide} className={small}>
+          Hide
+        </button>
+        {who.handle && (
+          <button type="button" onClick={reply} className={small}>
+            Reply
+          </button>
+        )}
+        {room && (
+          <button type="button" onClick={room} className={small}>
+            Open room
+          </button>
+        )}
+        <button type="button" onClick={() => setReporting(true)} className={small} aria-label="Report issuer">
+          <Flag size={12} />
+        </button>
+      </div>
+      {reporting && (
+        <ReportSheet
+          title={`Report ${who.label}`}
+          report={{
+            kind: 'user',
+            target: who.handle ? `$${who.handle}` : item.issuer,
+            content: item.note,
+            details: `airdrop tx ${item.txid}; issuer ${item.issuer}`,
+          }}
+          onClose={() => setReporting(false)}
+          onSent={() => {
+            setReporting(false);
+            onHide();
+          }}
+        />
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 export const AirdropsInbox = ({ onClose }: { onClose: () => void }) => {
-  const { visible, state, loading, error, refresh, update } = useAirdrops();
+  const { items, visible, state, loading, error, refresh, update } = useAirdrops();
+  const known = keptIssuers(items, state.kept);
   useBackClose(true, onClose);
   // Opening the inbox clears the badge (items stay listed until Keep or Hide).
   useEffect(() => update((s) => markSeen(s)), [update]);
@@ -159,6 +313,8 @@ export const AirdropsInbox = ({ onClose }: { onClose: () => void }) => {
           <Row
             key={i.key}
             item={i}
+            issuerKept={known.has(i.issuer)}
+            onLeave={onClose}
             onKeep={() => update((s) => keep(s, i.key))}
             onHide={() => update((s) => hide(s, i))}
           />
