@@ -128,6 +128,14 @@ export class SpaceMedia {
     this.reattach(handle);
   }
 
+  /** Audio level 0..1 for a handle (LiveKit's smoothed participant level), read by the stage tiles' meters. */
+  levelOf(handle: string): number {
+    const room = this.room;
+    if (!room) return 0;
+    const who = handle === this.me ? room.localParticipant : room.getParticipantByIdentity(handle);
+    return who?.audioLevel ?? 0;
+  }
+
   get canPublish() {
     return !!this.room?.localParticipant.permissions?.canPublish;
   }

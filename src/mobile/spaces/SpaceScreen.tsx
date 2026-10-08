@@ -29,6 +29,7 @@ import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
 import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
+import { LevelBars } from './LevelBars';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import {
   audienceCount,
@@ -82,7 +83,9 @@ const StageTile = ({
   me,
   big,
   onTap,
+  micOff = false,
 }: {
+  micOff?: boolean;
   p: Participant;
   video: boolean;
   speaking: boolean;
@@ -138,6 +141,7 @@ const StageTile = ({
         className="absolute left-2 bottom-2 right-2 flex items-center gap-1 text-[12px] text-white"
         style={{ textShadow: '0 1px 3px #000' }}
       >
+        <LevelBars read={() => media.levelOf(p.handle)} speaking={speaking} muted={micOff} />
         <span className="truncate">${p.handle}</span>
         {p.role === 'host' && (
           <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
@@ -529,6 +533,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
           media={media}
           video={videos.includes(p.handle)}
           speaking={speakers.includes(p.handle)}
+          micOff={p.handle === me.replace(/^\$/, '').toLowerCase() && !micOn}
           big={tiles.length <= 1}
           onTap={isHost && p.role === 'speaker' ? () => setMenuFor(p) : null}
         />
