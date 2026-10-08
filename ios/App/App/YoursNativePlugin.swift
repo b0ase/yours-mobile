@@ -647,7 +647,10 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
     /// Bar back: native history, else the page's own history (single-page apps), else close the
     /// browser and return to the wallet (same as ×).
     @objc private func goBack() {
-        if webView.canGoBack { return webView.goBack() }
+        if webView.canGoBack {
+            webView.goBack()
+            return
+        }
         let before = webView.url
         webView.evaluateJavaScript("history.length > 1 ? (history.back(), true) : false") { [weak self] result, _ in
             guard let self = self else { return }
