@@ -278,7 +278,7 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 - The one-tap **Standard launch** path stays first and unchanged.
 - **Advanced** is collapsed by default. Each option gets one plain-language line, for example "Gentle: the price climbs more slowly as people buy" and "Buyback: part of each fee buys and burns your token", plus a live preview chart (`CurveSlider`).
 - The returns-wording filter (section 1) also applies to option labels and issuer text.
-- The coin page has an "Launch settings" block listing the preset and its parameters, the fee mix, buyback settings and buyer locks. It also shows the signed `launch_msg` with "Verify" (signature by `creator_key`) and the launch txid.
+- The coin page has a "Launch settings" block listing the preset and its parameters, the fee mix, buyback settings and buyer locks. It also shows the signed `launch_msg` with "Verify" (signature by `creator_key`) and the launch txid.
 - bWalletX's coin sheet shows the same block in a compact form.
 
 ### 6.7 Phases and effort
