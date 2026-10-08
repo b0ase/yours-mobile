@@ -390,9 +390,12 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
       } catch (e) {
         if (!live) return;
         const msg =
-          e instanceof ChatApiError && e.status === 403
-            ? 'You need to hold this room’s token to join its space.'
-            : errText(e);
+          // 403 not_host: bit-sign lets only the token issuer or a room admin start a space.
+          e instanceof ChatApiError && e.status === 403 && (e.data as { code?: unknown } | null)?.code === 'not_host'
+            ? errText(e)
+            : e instanceof ChatApiError && e.status === 403
+              ? 'You need to hold this room’s token to join its space.'
+              : errText(e);
         setError(msg);
         setPhase('error');
         void media.close();

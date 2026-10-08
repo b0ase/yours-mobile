@@ -21,7 +21,7 @@ Related: `docs/CALLS-VIDEO-PLAN.md` (phases 3–6 there are folded into this pla
 
 **bit-sign addition (on `main`, commit `432bcbc4`).** `POST rooms/[ticker]/space { action: 'step_down' }`: a speaker returns to the audience. It only moves you down, only acts on yourself, and never applies to the host. It syncs the SFU permission like a host demotion. This is what "Decline" calls. Gates passed: typecheck, eslint 0, `pnpm test` (226 suites), `pnpm build`.
 
-**Who may start.** The wallet offers "Start" to the token's issuer (`issuerChallenge().youAreIssuer`) and to the room creator. bit-sign itself still lets any member start a space, and bChat web does too. To enforce the rule server-side, add the check to `startOrJoinSpace` when no space is live (Phase 2, ~0.5 day).
+**Who may start.** Only the token's issuer (personal rooms: their owner) or a room admin, **enforced in bit-sign** (`main` `99cc1648`, `isRoomAdmin` rule, selftest `space-host-rule`) for the wallet and bChat web alike. Any member may still join a live space. Others get 403 `not_host`: "Only the token issuer or a room admin can start a space." The wallet only offers Start to the issuer or room creator and shows that message if refused.
 
 **Transport.** The wallet joins only `sfu` spaces. A `mesh` space (a server without LiveKit) shows "Join it from bChat on the web".
 
@@ -105,7 +105,7 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 | Phase | Scope | Estimate |
 |---|---|---|
 | 1 ✅ | Tile, page, in-room banner, full-screen Stage view, hands, bring on stage / decline (bit-sign `step_down`), mic/camera, chat panel, landscape, store-hidden | built (device QA pending) |
-| 2 | Server-side host rule, `GET /spaces/live` list endpoint, "X is live" push, kick/mute/report, Meeting mode (migration + grid) | 1–1.5 weeks |
+| 2 | `GET /spaces/live` list endpoint, "X is live" push, kick/mute/report, Meeting mode (migration + grid) | 1–1.5 weeks |
 | 3 | Paid tickets (sats/tokens, burn), creator KYC gate | 1 week |
 | 4 | Paid speakers (bids on hands, host-paid fees) | 3–4 days |
 | 5 | Per-minute metering for streams (cap, grace, cut-off, short TTL) | 1.5–2 weeks |
@@ -121,3 +121,13 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 5. **Recording default**: off unless the host turns it on (recommended)? Should replays be inscribed or stored?
 6. **Infrastructure**: approve a dedicated LiveKit box (~€30–60/month) before promoting video streams?
 7. **Meeting mode cap**: is 25 right? Should it be available in DMs and group chats as well as token rooms?
+
+## 9. Owner decisions (8 Oct)
+
+1. **Who may start**: the token issuer or a room admin only, enforced on the server for the wallet and bChat web. Done (bit-sign `99cc1648`).
+2. **Store edition**: bSpaces stays hidden in store builds.
+3. **Tickets**: on top of holding the token. Paid to the **host** by default; burn is optional.
+4. **Paid speakers**: both listener bids on raised hands and host-paid appearance fees.
+5. **Recording**: off by default. Replays are stored; on-chain inscription is optional (host's choice).
+6. **Infrastructure**: a dedicated LiveKit box only once we start promoting video, not now.
+7. **Meeting mode**: cap of 25. DMs and group chats come later.
