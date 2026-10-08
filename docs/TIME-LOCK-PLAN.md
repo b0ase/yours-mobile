@@ -259,6 +259,54 @@ BEEF to them), a claim path in their wallet for a lock it did not create, and a 
 Shipping before all of that works would lock coins the recipient cannot find. Plan it with BRC-100 output
 delivery (internalizeAction into the recipient's lock basket).
 
+## 13. Top-ups, cascades and sealed cascades (owner approved 8 Oct 2026, plan only)
+
+Three extensions of a lock: money can flow **into** a lock over time (top-ups), and **out of** a lock into other locks (cascades), either run by the wallet or enforced by the chain (sealed cascades).
+
+### 13.1 Top-ups (wallet-run)
+- Every lock gets a **deposit address**: a key derived per lock from the account (BRC-42, invoice `lock-deposit/<lockId>`), shown with a QR code and a copy button on the lock's page. It can also be a paymail alias later (`pension.$b0ase`).
+- When BSV arrives at a deposit address, the wallet locks it **under that lock's rules**:
+  - date locks: added to the same unlock height;
+  - curve/payout locks: spread across the **remaining** periods by the same curve, re-using `splitByWeights`/`mergeSmall` (§10). Pieces already unlocked are unaffected.
+- **Recurring top-up**: "pay £50/month into Pension from my balance" goes through the pots/pre-signed payments machinery (memory: pots and subscriptions), so it runs while the app is closed where pots already do.
+- **When the wallet is offline**: deposits just wait at the deposit address (spendable by the owner, not yet locked). On the next open they are locked, with a receipt. The page says this plainly: "Top-ups are locked when your wallet next opens."
+- Receipts (§5) list each top-up with its own lock txid.
+
+### 13.2 Cascades (wallet-run)
+- A lock can name **children**: when a piece unlocks, the wallet claims it and re-locks it into one or more other locks, split by percentages. Example: Savings unlocks 10% a month → 50% to Allowance (weekly, linear), 50% to Pension (until 2040).
+- **Tree, not a loop**: the cascade graph must be acyclic (validated on save) with a depth limit of 4.
+- **Fees and dust**: each hop costs a transaction. A child share under the dust/fee floor is merged or paid to the owner instead. The preview shows "N hops/year ≈ X sats in fees".
+- **Gift/allowance children** (§12): a child can be a gift lock to someone else's key, e.g. "10% of each Savings unlock goes into my daughter's allowance lock". This is how a parent funds an allowance from their own savings automatically.
+- **Wallet-run caveat**: cascades only fire when a wallet with the account is open (phone, extension, web). If no one opens it, the piece simply unlocks to the owner and waits; nothing is lost. Optional later: a bit-sign "keeper" that holds no keys but sends a push ("3 cascades ready, tap to run").
+- The cascade plan lives with the lock plan (localStorage, plus encrypted backup to the account when backups land). Like the schedule, the coins never depend on it.
+
+### 13.3 Sealed cascades (covenant-enforced)
+- The lockup script (§1) already uses OP_PUSH_TX: it reads the spending transaction's preimage to check nLockTime. The same technique can **check the outputs**, by comparing `hashOutputs` in the preimage with the hash of the required outputs.
+- A **sealed cascade lock** is spendable only:
+  - after its unlock height, **and**
+  - into exactly the child outputs fixed at creation: the next lock scripts (with their own heights and keys) and the split amounts (percentages of the input, minus a fee allowance capped in the script).
+- Result: nobody, including the owner, can divert the money out of the cascade early. Pensions, trusts and "can't touch it until 2040, then it pays monthly" become enforced by consensus, with no app or company needed.
+- **Design points**:
+  - Children are **committed by hash** when created, so the whole tree is fixed up front. Top-ups into a sealed lock create new sealed outputs with the same tree.
+  - **Fee handling**: a fee input is added by the spender (SIGHASH_ALL|ANYONECANPAY on the covenant input), or a small fixed fee is deducted inside the script. Pick one after testnet tests.
+  - **Escape hatch, optional and chosen at creation**: a much later "release to owner" path (e.g. +10 years) so a mistake in the tree doesn't trap funds forever. Off by default for trusts, on by default for personal use.
+  - **Anyone can trigger**: since the outputs are fixed, any party (the owner, the recipient, a bit-sign keeper) can broadcast the cascade step once the height passes. It's safe because the money can only go where the script says.
+- **Build requirements**: a new sCrypt contract, compiled and pinned like LOCKUP_PREFIX/SUFFIX (never hand-edited); unit tests with the `@bsv/sdk` interpreter; a testnet run of a 3-level tree; and an **independent review** of the compiled script before any mainnet use. Small amounts only at launch, the same "start small" rule as Lock BSV.
+
+### 13.4 Phases
+| # | What | Effort |
+|---|---|---|
+| T1 | Deposit address per lock + top-ups locked on wallet open, receipts | S–M |
+| T2 | Recurring top-ups via pots | S after T1 |
+| T3 | Wallet-run cascades (children, % splits, acyclic check, fee preview), including gift-lock children | M |
+| T4 | Sealed cascade contract: design, sCrypt, interpreter tests | M–L |
+| T5 | Testnet tree run, independent review, then mainnet with limits | M |
+| T6 | Token versions of all of the above, after the token-lock indexer gate (LAUNCH-SOCIAL-PLAN §4) | M |
+
+**Order**: T1 → §12 gift locks → T3 → T2 → T4 → T5 → T6. Gift locks come before cascades, so cascades can feed allowances.
+
+**Copy**: "Top up any lock." "Cascades: when money unlocks, send it on into other locks automatically." "Sealed: enforced by Bitcoin itself, so even you can't break it early." Never "yield", "returns" or "interest".
+
 ## Open questions for the owner
 
 Questions 1–5 were answered on 7 Oct (section 8). The inheritance questions are in section 9.
