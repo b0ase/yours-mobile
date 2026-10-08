@@ -25,6 +25,10 @@ import { useChatIdentity } from './useChatIdentity';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { asMenuItem } from '../tabs/tabs';
 import { requestIdentityMap } from '../settings/signIns';
+import { LiveTicker } from './live/LiveTicker';
+import { noteBalance, useLive } from './live/liveBus';
+import { displayedSats, refreshDelay } from './live/liveLogic';
+import { useCountUp } from './live/useCountUp';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -43,6 +47,8 @@ export type WalletCardProps = {
   refreshing?: boolean;
   /** Balance hidden (privacy): the card shows a neutral gold so its colour does not reveal the balance. */
   balanceHidden?: boolean;
+  /** USD per BSV, so an optimistic spend moves the dollar figure too (live/). 0 or absent: dollars follow the fetch. */
+  rate?: number;
 };
 
 const SIG_HINT_KEY = 'bwallet.cardSigHintSeen';
@@ -61,9 +67,6 @@ const markSigHintSeen = () => {
   }
 };
 
-// Every 20 s while the wallet is on screen, so purchases and incoming coins appear quickly (owner, 6 Oct 2026).
-const AUTO_REFRESH_MS = 20_000;
-
 /**
  * Wallet home balance as a premium membership card (not a payment card: no card number, chip, date
  * or network logo). Front: b mark, dollars first with sats below, the $handle where a cardholder name
@@ -81,21 +84,70 @@ export const WalletCard = ({
   onRefresh,
   refreshing = false,
   balanceHidden = false,
+  rate = 0,
 }: WalletCardProps) => {
-  // Balances otherwise only load once (owner, 4 Oct 2026: 1 BSV arrived but the card never moved).
+  // Live balance (owner, 8 Oct 2026: "see my balance ticking down as I pay … or ticking up as I'm paid").
+  // Spends the wallet just signed come off at once; the next fetch reconciles (live/liveBus.ts).
+  const live = useLive();
+  const sessionsOpen = Object.keys(live.sessions).length;
+  const known = view === 'amount';
+  useEffect(() => {
+    if (known) noteBalance(sats);
+  }, [sats, known]);
+  const pendingSats = sats - displayedSats(sats, live.pending);
+  const shownSats = known ? sats - pendingSats : sats;
+  const count = useCountUp(shownSats, known);
+  const animSats = known ? count.value : sats;
+  const animUsd = rate > 0 ? usd + ((animSats - sats) * rate) / 100_000_000 : usd;
+
+  // Quiet refresh: every 5 s while something is happening (a spend, a live session, just opened), else every
+  // 20 s; never while hidden (balances otherwise only loaded once: owner, 4 Oct 2026). Battery/rate: the fast
+  // lane lasts two minutes after the last activity, and each refresh is skipped while one is in flight.
+  const refreshRef = useRef(onRefresh);
+  refreshRef.current = onRefresh;
+  const activityRef = useRef(live.lastActivityAt);
+  activityRef.current = live.lastActivityAt;
+  const sessionsRef = useRef(sessionsOpen);
+  sessionsRef.current = sessionsOpen;
   useEffect(() => {
     if (!onRefresh) return;
-    const quiet = () => document.visibilityState === 'visible' && onRefresh(false);
-    const t = setInterval(quiet, AUTO_REFRESH_MS);
+    let timer: number | null = null;
+    const visible = () => document.visibilityState === 'visible';
+    const plan = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      const d = refreshDelay({
+        visible: visible(),
+        lastActivityAt: activityRef.current,
+        now: Date.now(),
+        liveSessions: sessionsRef.current,
+      });
+      if (d !== null)
+        timer = window.setTimeout(() => {
+          refreshRef.current?.(false);
+          plan();
+        }, d);
+    };
+    const quiet = () => {
+      if (visible()) refreshRef.current?.(false);
+      plan();
+    };
+    plan();
     document.addEventListener('visibilitychange', quiet);
     window.addEventListener('focus', quiet);
     return () => {
-      clearInterval(t);
+      if (timer !== null) window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', quiet);
       window.removeEventListener('focus', quiet);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!onRefresh]);
+  // After a spend, fetch once shortly after so the card settles on the real number (fee included).
+  useEffect(() => {
+    if (!live.pending.length) return;
+    const t = window.setTimeout(() => refreshRef.current?.(false), 1_500);
+    return () => window.clearTimeout(t);
+  }, [live.pending.length]);
   const { chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
@@ -321,17 +373,18 @@ export const WalletCard = ({
             ) : (
               <>
                 <span
-                  className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}`}
+                  key={`flash-${count.flashKey}`}
+                  className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}${count.dir && count.flashKey ? ` bw-live-flash-${count.dir}` : ''}`}
                   title={syncing ? 'Syncing…' : 'Balance'}
                   style={(() => {
                     // Same size as the $ balance; long amounts shrink to stay on one line.
-                    const len = (unit === 'usd' ? formatUSD(usd) : cardBsv(sats)).length;
+                    const len = (unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)).length;
                     return len > 11
                       ? { fontSize: `clamp(18px, ${Math.min(10, 120 / len).toFixed(2)}vw, 42px)` }
                       : undefined;
                   })()}
                 >
-                  {unit === 'usd' ? formatUSD(usd) : cardBsv(sats)}
+                  {unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
                   {syncing && <Loader2 size={16} className="animate-spin bw-wcard-sync" color="#8e8e89" />}
                   {onRefresh && !syncing && (
                     <button
@@ -350,7 +403,8 @@ export const WalletCard = ({
                     </button>
                   )}
                 </span>
-                <span className="bw-wcard-sats">{unit === 'usd' ? cardSats(sats) : formatUSD(usd)}</span>
+                <span className="bw-wcard-sats">{unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}</span>
+                <LiveTicker hidden={balanceHidden} />
               </>
             )}
             {!hintSeen && !sig.svgPath && (
