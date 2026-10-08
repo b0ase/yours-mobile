@@ -33,6 +33,19 @@ html:root {
   text-align: center;
 }
 
+/* TopNav's tool bar is portalled to <body> (fixed, top 0), outside #root: put it under the banner,
+   not behind it (owner, 8 Oct 2026). */
+html body > .grid.grid-cols-5.fixed.top-0 {
+  /* Beats the inline top: var(--wallet-inset-top) (safe area + account strip). */
+  top: calc(var(--web-banner-height) + var(--wallet-inset-top)) !important;
+}
+
+/* Wallet page: the card first, then price · Buy BSV · History, as on iPhone/Android/extension. */
+.pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
+  order: -1;
+  margin-bottom: 12px;
+}
+
 html body #root {
   /* The banner already clears the notch; leave room for the account strip only. */
   padding-top: var(--account-strip-height);

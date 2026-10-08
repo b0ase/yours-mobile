@@ -1,3 +1,4 @@
+import { resolve } from 'path';
 import { defineConfig, mergeConfig, type Plugin } from 'vite';
 import baseConfig from './vite.config.base';
 import { brand, bcorpText, bcorpColours, EXTENSION_TEXT } from './vite.brand';
@@ -34,5 +35,7 @@ export default mergeConfig(
       extensionCss(),
     ],
     define: { ...MOBILE_DEFINES, __BWALLET_EXTENSION__: 'true' },
+    // Extension only: the tab that asks for mic/camera (the side panel can't show Chrome's prompt).
+    build: { rollupOptions: { input: { 'permissions-tab': resolve(__dirname, 'permissions.html') } } },
   }),
 );
