@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { canOpenSettings, deniedText, isPermissionDenied, toMediaPlatform } from './mediaPermission';
+import {
+  canAllowInTab,
+  canOpenSettings,
+  deniedText,
+  isPermissionDenied,
+  needsTabGrant,
+  toMediaPlatform,
+} from './mediaPermission';
 
 describe('mediaPermission', () => {
   test('iOS points at iPhone Settings › Apps › bWallet', () => {
@@ -30,5 +37,24 @@ describe('mediaPermission', () => {
     expect(isPermissionDenied({ name: 'PermissionDeniedError' })).toBe(true);
     expect(isPermissionDenied(new DOMException('x', 'NotFoundError'))).toBe(false);
     expect(isPermissionDenied(null)).toBe(false);
+  });
+});
+
+describe('extension platform', () => {
+  test('the extension gets "Allow in a tab", not browser-lock instructions', () => {
+    expect(toMediaPlatform('web', true)).toBe('extension');
+    expect(canAllowInTab('extension')).toBe(true);
+    expect(canAllowInTab('web')).toBe(false);
+    expect(canOpenSettings('extension')).toBe(false);
+    expect(deniedText('mic', 'extension')).toMatch(/Allow in a tab/);
+    expect(deniedText('mic', 'extension')).not.toMatch(/lock icon/);
+  });
+  test('opens the tab only in the extension and only when not granted', () => {
+    expect(needsTabGrant('extension', 'prompt')).toBe(true);
+    expect(needsTabGrant('extension', 'denied')).toBe(true);
+    expect(needsTabGrant('extension', 'unknown')).toBe(true);
+    expect(needsTabGrant('extension', 'granted')).toBe(false);
+    expect(needsTabGrant('web', 'prompt')).toBe(false);
+    expect(needsTabGrant('ios', 'denied')).toBe(false);
   });
 });
