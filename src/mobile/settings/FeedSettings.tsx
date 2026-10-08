@@ -33,7 +33,7 @@ import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
 import { isNative } from '../native';
-import { SIGNINS_OPEN_EVENT, signInRow, takeSignInsRequest } from './signIns';
+import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
 import { IdentityMap } from './IdentityMap';
@@ -503,6 +503,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     window.addEventListener(SIGNINS_OPEN_EVENT, open);
     return () => window.removeEventListener(SIGNINS_OPEN_EVENT, open);
   }, [acct]);
+  // Long-press on the wallet card's identity line opens the Identity map (settings/signIns.ts).
+  useEffect(() => {
+    if (takeIdentityMapRequest()) setScreen('idmap');
+    const open = () => takeIdentityMapRequest() && setScreen('idmap');
+    window.addEventListener(IDMAP_OPEN_EVENT, open);
+    return () => window.removeEventListener(IDMAP_OPEN_EVENT, open);
+  }, []);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
   const [takeCwi, setTakeCwiState] = useState(true);

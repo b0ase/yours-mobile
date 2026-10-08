@@ -251,3 +251,16 @@ export const avatarHue = (seed: string) => {
   for (const c of seed) h = (h * 31 + c.charCodeAt(0)) % 360;
   return h;
 };
+
+/** bit-sign marks admin-only events (e.g. "left — no longer holds the gate token") with this audience. */
+export const ADMIN_AUDIENCE = 'admins';
+
+/**
+ * Drops rows only room admins may see (`event_payload.audience === 'admins'`) unless the viewer
+ * is the room admin / issuer. bit-sign already filters its poll; this keeps any other feed
+ * (realtime, cached pages) from leaking them.
+ */
+export const visibleMessages = <M extends Pick<ChatMessage, 'event_payload'>>(
+  rows: M[],
+  viewerIsAdmin: boolean,
+): M[] => (viewerIsAdmin ? rows : rows.filter((m) => m.event_payload?.audience !== ADMIN_AUDIENCE));

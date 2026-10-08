@@ -1,6 +1,6 @@
 import * as qr from 'qrcode';
 import { createPortal } from 'react-dom';
-import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useContext, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -22,6 +22,9 @@ import { cardGoldLevel } from './cardGold';
 import { saveSession } from '../chat/api';
 import { identityLine } from './identityLine';
 import { useChatIdentity } from './useChatIdentity';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
+import { asMenuItem } from '../tabs/tabs';
+import { requestIdentityMap } from '../settings/signIns';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -167,8 +170,41 @@ export const WalletCard = ({
   const chat = useChatIdentity(id);
   const idLine = identityLine(chat.handle, chat.identityKey);
   const [mismatchOpen, setMismatchOpen] = useState(false);
+  // Long-press the identity line: Settings › Identity map. Tap still copies the key.
+  const selectTab = useContext(BottomMenuContext)?.handleSelect;
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const clearPress = () => {
+    if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+  const openIdMap = () => {
+    longPressed.current = true;
+    selectTab?.(asMenuItem('settings'));
+    requestIdentityMap();
+  };
+  const idLinePress = {
+    onTouchStart: () => {
+      clearPress();
+      longPressed.current = false;
+      pressTimer.current = window.setTimeout(openIdMap, 550);
+    },
+    onTouchEnd: clearPress,
+    onTouchMove: clearPress,
+    onContextMenu: (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearPress();
+      openIdMap();
+    },
+  };
+  useEffect(() => clearPress, []);
   const copyKey = (e: MouseEvent) => {
     e.stopPropagation();
+    if (longPressed.current) {
+      longPressed.current = false;
+      return;
+    }
     if (!chat.identityKey) return;
     navigator.clipboard
       ?.writeText(chat.identityKey)
@@ -253,8 +289,9 @@ export const WalletCard = ({
                   type="button"
                   className="bw-wcard-idtext"
                   onClick={copyKey}
-                  aria-label="Copy identity key"
-                  title={chat.identityKey || undefined}
+                  {...idLinePress}
+                  aria-label="Copy identity key. Long-press for the identity map"
+                  title={chat.identityKey ? `${chat.identityKey} (hold for identity map)` : 'Hold for identity map'}
                 >
                   {idLine.text}
                 </button>

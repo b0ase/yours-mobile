@@ -40,3 +40,23 @@ export const signInRow = (s: SignInItem, locale?: string) => {
     : d.toLocaleString(locale ?? 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   return { title: `${deviceName(s.device)}${s.newAccount ? ' · new account' : ''}`, when };
 };
+
+/** Settings › Identity map, opened by a long-press on the wallet card's identity line. */
+export const IDMAP_OPEN_EVENT = 'bwallet:open-idmap';
+let idmapPending = false;
+
+export const requestIdentityMap = () => {
+  idmapPending = true;
+  try {
+    window.dispatchEvent(new Event(IDMAP_OPEN_EVENT));
+  } catch {
+    /* no window (tests) */
+  }
+};
+
+/** True once per request: Settings calls it on mount and on the event. */
+export const takeIdentityMapRequest = () => {
+  const p = idmapPending;
+  idmapPending = false;
+  return p;
+};

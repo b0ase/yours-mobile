@@ -140,6 +140,7 @@ import {
   roomTitle,
   threadItems,
   timeLabel,
+  visibleMessages,
   type ChatMessage,
   type ChatRoom,
 } from '../chat/messages';
@@ -335,6 +336,8 @@ const Conversation = ({
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
   useBackClose(true, onBack);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Admin-only events (event_payload.audience === 'admins') are for the room admin / issuer only.
+  const viewerIsAdmin = !!onBans || String((room as { created_by_handle?: unknown }).created_by_handle ?? '') === me;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hasMore, setHasMore] = useState<boolean | null>(null);
@@ -388,7 +391,7 @@ const Conversation = ({
       .latestPage(room.ticker)
       .then((p) => {
         if (!live) return;
-        setMessages(mergeMessages([], p.messages));
+        setMessages(mergeMessages([], visibleMessages(p.messages, viewerIsAdmin)));
         setHasMore(p.hasMore);
         setHiddenBefore(p.hiddenBefore ?? null);
         setError('');
@@ -399,7 +402,7 @@ const Conversation = ({
     return () => {
       live = false;
     };
-  }, [client, room.ticker, fail]);
+  }, [client, room.ticker, fail, viewerIsAdmin]);
 
   const poll = useCallback(() => {
     const cursor = latestCursor(messages);
@@ -407,13 +410,14 @@ const Conversation = ({
     client
       .since(room.ticker, cursor)
       .then((fresh) => {
-        if (!fresh.length) return;
-        setMessages((cur) => mergeMessages(cur, fresh));
+        const shown = visibleMessages(fresh, viewerIsAdmin);
+        if (!shown.length) return;
+        setMessages((cur) => mergeMessages(cur, shown));
         void client.markRead(room.ticker).catch(() => {});
       })
       .catch(() => {});
     void client.whoIsTyping(room.ticker).then(setTyping);
-  }, [client, room.ticker, messages, online]);
+  }, [client, room.ticker, messages, online, viewerIsAdmin]);
   usePoll(poll, THREAD_POLL_MS, !loading);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
@@ -456,12 +460,12 @@ const Conversation = ({
     client
       .page(room.ticker, { before })
       .then((p) => {
-        setMessages((cur) => mergeMessages(cur, p.messages));
+        setMessages((cur) => mergeMessages(cur, visibleMessages(p.messages, viewerIsAdmin)));
         setHasMore(p.hasMore);
       })
       .catch(fail)
       .finally(() => setLoadingOlder(false));
-  }, [client, room.ticker, messages, hasMore, loadingOlder, fail]);
+  }, [client, room.ticker, messages, hasMore, loadingOlder, fail, viewerIsAdmin]);
 
   // Keep position when older messages are prepended; otherwise follow the bottom.
   useLayoutEffect(() => {
