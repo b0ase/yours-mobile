@@ -208,3 +208,17 @@ export const collectPaymailInbox = async (
   if (done.length) await postJson(f, api('ack'), await signRequest(wallet, 'ack', { references: done.join(',') }));
   return { collected: done.length, satoshis };
 };
+
+/**
+ * Why the paymail can't be changed to `alias`, or null if it can. Mirrors the paymail server's
+ * rule (site/lib/paymail.js `register`, owner 4 Oct 2026): a wallet whose name is a verified
+ * X / Google name (`b0asex.x`) can't also take a plain name, so offering "Change to <plain>"
+ * only to have the server refuse it is wrong. A plain name still renames freely.
+ */
+export const nameChangeBlocked = (current: string | null | undefined, alias: string): string | null => {
+  const now = (current ?? '').split('@')[0];
+  if (!now || !alias || now === alias) return null;
+  if (!SOCIAL_ALIAS_RE.test(now) || SOCIAL_ALIAS_RE.test(alias)) return null;
+  const via = now.endsWith('.x') ? 'X' : 'Google';
+  return `Your name is $${now}, verified with ${via}. A wallet with a verified name keeps it, so it can't switch to a plain name. To use ${alias}, add another account.`;
+};
