@@ -95,7 +95,19 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>",
       "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />",
     ],
+    // Token links (website / app / X / Telegram / bChat) under the action buttons, when the issuer set any.
+    [
+      "import { BuyTokenButton, OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';",
+      "import { BuyTokenButton, OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';\nimport { TokenLinks } from '../mobile/tokens/TokenLinks';",
+    ],
+    [
+      '{/* Market chart */}',
+      '<div className="mx-4 mb-3 empty:hidden"><TokenLinks tokenId={token.info.id} sym={token.info.sym} /></div>\n          {/* Market chart */}',
+    ],
   ],
+  // Inscription HTML/SVG: an explicitly empty sandbox (no scripts, opaque origin); upstream's "true" only
+  // worked because it is not a valid token (security audit, 8 Oct 2026).
+  'src/components/Ordinal.tsx': [['sandbox="true"', 'sandbox=""']],
   // Wallet tab: gold "Mint" beside Receive / Send (src/mobile/mint).
   'src/pages/BsvWallet.tsx': [
     [
@@ -145,6 +157,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '          Receive Assets\n        </h2>\n      </div>',
       '          Receive Assets\n        </h2>\n      </div>\n<ReceiveName identityAddress={identityAddress} />',
     ],
+    // Receive › Payments | Airdrops: the airdrop address (account's ordinals address) with QR + copy.
+    [
+      "import { ReceiveName } from '../mobile/names/MyNameBadge';",
+      "import { ReceiveName } from '../mobile/names/MyNameBadge';\nimport { ReceiveTabs } from '../mobile/airdrops/ReceiveTabs';\nimport { AirdropsRow } from '../mobile/airdrops/AirdropsRow';",
+    ],
+    [
+      '<ReceiveName identityAddress={identityAddress} />',
+      '<ReceiveName identityAddress={identityAddress} />\n<ReceiveTabs />',
+    ],
     // "Choose your handle" after create / restore, else a dismissible "Get your $name" card (src/mobile/names).
     [
       "import { CreditsRow } from '../mobile/credits/CreditsRow';",
@@ -153,7 +174,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
     [
       '</SectionBoundary>\n        </motion.div>',
-      '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>\n<SectionBoundary name="Sweep"><SweepPrompt /></SectionBoundary>',
+      '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>\n<SectionBoundary name="Sweep"><SweepPrompt /></SectionBoundary>\n<SectionBoundary name="Airdrops"><AirdropsRow /></SectionBoundary>',
     ],
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).

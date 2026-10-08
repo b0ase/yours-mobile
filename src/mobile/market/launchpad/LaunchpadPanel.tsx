@@ -5,12 +5,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getBsv21Balances } from '@1sat/actions';
-import { Coins, X } from 'lucide-react';
+import { Coins, Rocket, X } from 'lucide-react';
+import { TokenLinks } from '../../tokens/TokenLinks';
 import { useBackClose } from '../../backStack';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { money, useBsvUsd } from '../../money/money';
 import { openDappBrowser } from '../../dappBrowser';
-import { big, change24, coinImage, coinPage, fetchCoin, fetchCoins, sortBoard, wocTx, type BoardCoin } from './api';
+import { big, change24, coinImage, coinPage, launchPage, fetchCoin, fetchCoins, sortBoard, wocTx, type BoardCoin } from './api';
 import {
   HOUSE_BPS,
   MAX_BUY,
@@ -83,6 +84,15 @@ export const LaunchpadPanel = () => {
 
   return (
     <section className="flex flex-col gap-2">
+      {/* "Launch your own coin is the point" (owner, 8 Oct 2026): TokenBlaster's launch form, in the in-app
+          browser where the wallet is connected (dappBrowser.ts). */}
+      <button
+        type="button"
+        onClick={() => void openDappBrowser(launchPage)}
+        className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
+      >
+        <Rocket size={16} /> Launch your own coin
+      </button>
       {coins === null && !error && <p className="text-xs text-[#98A2B3] text-center py-8">Loading BlastPad coins…</p>}
       {error && (
         <div className="flex flex-col items-center gap-3 py-8">
@@ -300,6 +310,7 @@ const CoinSheet = ({
           </button>
         </div>
         {coin.description && <p className="text-xs text-[#98A2B3] m-0 leading-relaxed">{coin.description}</p>}
+        <TokenLinks tokenId={id} sym={coin.sym} extra={coin} />
 
         <div className="flex flex-col gap-1.5 rounded-xl p-3" style={{ background: '#0F1013' }}>
           {row('Market cap', money(marketCap(sold), rate))}

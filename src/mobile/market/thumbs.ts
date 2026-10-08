@@ -62,7 +62,9 @@ export function loadThumb(url: string): Promise<string | null> {
     const cache = await openCache();
     try {
       const stored = await cache?.match(url);
-      if (stored) {
+      // SVG never becomes a wallet-origin blob: URL (it could run script if ever opened as a document);
+      // the card falls back to a remote <img>.
+      if (stored && !isSvg(stored.headers.get('content-type'))) {
         const obj = URL.createObjectURL(await stored.blob());
         memory.set(url, obj);
         return obj;
@@ -73,9 +75,10 @@ export function loadThumb(url: string): Promise<string | null> {
     await slot();
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-      if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return null;
+      const type = res.headers.get('content-type') ?? '';
+      if (!res.ok || !type.startsWith('image/') || isSvg(type)) return null;
       const blob = await res.blob();
-      if (!blob.size) return null;
+      if (!blob.size || isSvg(blob.type)) return null;
       void cache?.put(url, new Response(blob, { headers: { 'content-type': blob.type } })).catch(() => undefined);
       const obj = URL.createObjectURL(blob);
       memory.set(url, obj);
@@ -89,3 +92,6 @@ export function loadThumb(url: string): Promise<string | null> {
   inflight.set(url, p);
   return p;
 }
+
+/** image/svg+xml (any parameters, any case). */
+export const isSvg = (type: string | null | undefined) => /^image\/svg/i.test((type ?? '').trim());

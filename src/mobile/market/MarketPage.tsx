@@ -41,6 +41,7 @@ import { groupCollections } from './groupCollections';
 import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
+import { TokenLinks } from '../tokens/TokenLinks';
 import { onTokenNav, takeMarketToken } from '../chat/nav';
 import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
@@ -893,6 +894,7 @@ const MarketPage = () => {
           />
         )}
       </div>
+      {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
       {ticketPage && (
         <div className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
           {TICKET_COPY}
@@ -907,7 +909,7 @@ const MarketPage = () => {
       )}
       <div className="text-[11px] text-[#98A2B3]">
         {room.ref.kind === 'bsv21' && isPersonalTokenId(room.ref.id, personalLinks)
-          ? "Personal token · holding one opens its holders' room. Not an investment, no dividends."
+          ? "Personal token · holding one opens its holders' room. Not an investment; issuers may reward holders with airdrops."
           : `Floor ${market?.floorLabel ?? '—'} · ${market?.live ?? 0} live · ${market?.buyableCount ?? 0} buyable in-app`}
       </div>
       {market === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading listings…</p>}

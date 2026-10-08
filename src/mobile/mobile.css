@@ -945,3 +945,7 @@ select optgroup {
   color: #fff;
   background-color: #1a1a1a;
 }
+/* Receive › Airdrops tab (src/mobile/airdrops/ReceiveTabs.tsx): hide the payment QR and copy row after it. */
+.bw-rcv-airdrop ~ * {
+  display: none !important;
+}
