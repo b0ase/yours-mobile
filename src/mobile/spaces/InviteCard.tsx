@@ -71,10 +71,16 @@ export const InviteCard = ({
           parseSpaceState(await client.space(got.ticker), me);
           if (live) setAccess('member');
         } catch (e) {
-          if (live) setAccess(e instanceof ChatApiError && (e.status === 403 || e.status === 402) ? 'locked' : 'member');
+          if (live)
+            setAccess(e instanceof ChatApiError && (e.status === 403 || e.status === 402) ? 'locked' : 'member');
         }
       } catch (e) {
-        if (live) setError(e instanceof ChatApiError && e.status === 404 ? 'This invite isn’t available.' : String((e as Error)?.message ?? e));
+        if (live)
+          setError(
+            e instanceof ChatApiError && e.status === 404
+              ? 'This invite isn’t available.'
+              : String((e as Error)?.message ?? e),
+          );
       }
     })();
     return () => {
@@ -110,8 +116,7 @@ export const InviteCard = ({
               </div>
             </>
           ) : (
-            !error &&
-            !expired && <Radio size={20} color={GOLD} className="mt-2 animate-pulse" />
+            !error && !expired && <Radio size={20} color={GOLD} className="mt-2 animate-pulse" />
           )}
           {expired && (
             <>

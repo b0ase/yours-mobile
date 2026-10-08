@@ -160,7 +160,10 @@ export const WalletCard = ({
   const stop = (e: MouseEvent) => e.stopPropagation();
   const sig = useCardSignature(id);
   // More golden as the BSV balance grows (cardGold.ts); drives --gold in mobile.css.
-  const gold = cardGoldLevel(sats / 100_000_000, { hidden: balanceHidden, known: view !== 'unknown' && view !== 'spinner' });
+  const gold = cardGoldLevel(sats / 100_000_000, {
+    hidden: balanceHidden,
+    known: view !== 'unknown' && view !== 'spinner',
+  });
 
   return (
     <div className="bw-wcard-wrap">
@@ -332,13 +335,13 @@ export const WalletCard = ({
                 <span>{shortAddr(receiveAddress)}</span>
                 <Copy size={13} color="#98A2B3" />
               </button>
-              <span className="bw-wcard-sig-cap">
-                AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}
-              </span>
+              <span className="bw-wcard-sig-cap">AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}</span>
               <div
                 className={`bw-wcard-sig${sig.svgPath ? ' has-drawn' : ''}`}
                 role="img"
-                aria-label={sig.svgPath ? 'Your drawn signature. Tap Edit to change it.' : 'Signature strip. Tap to sign.'}
+                aria-label={
+                  sig.svgPath ? 'Your drawn signature. Tap Edit to change it.' : 'Signature strip. Tap to sign.'
+                }
                 {...sig.pressHandlers}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -346,7 +349,12 @@ export const WalletCard = ({
                 }}
               >
                 {sig.svgPath ? (
-                  <svg className="bw-wcard-sig-drawn" viewBox={sig.viewBox} preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+                  <svg
+                    className="bw-wcard-sig-drawn"
+                    viewBox={sig.viewBox}
+                    preserveAspectRatio="xMinYMid meet"
+                    aria-hidden="true"
+                  >
                     <path d={sig.svgPath} fill="#1b2a5a" />
                   </svg>
                 ) : (

@@ -92,13 +92,18 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
             key={k}
             onClick={() => setExpiry(k)}
             className="rounded-full px-3 py-1 text-xs font-semibold"
-            style={k === expiry ? { background: GOLD, color: '#010101' } : { border: `1px solid ${LINE}`, color: '#fff' }}
+            style={
+              k === expiry ? { background: GOLD, color: '#010101' } : { border: `1px solid ${LINE}`, color: '#fff' }
+            }
           >
             {label}
           </button>
         ))}
       </div>
-      <div className="mt-3 flex items-center gap-2 rounded-xl px-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+      <div
+        className="mt-3 flex items-center gap-2 rounded-xl px-3"
+        style={{ background: PANEL, border: `1px solid ${LINE}` }}
+      >
         <span className="text-xs" style={{ color: MUTED }}>
           Max uses
         </span>
@@ -157,7 +162,9 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
               {i.state === 'ok' && (
                 <>
                   <button
-                    onClick={() => void copyLink(i.url).then((r) => onNote(r === 'copied' ? 'Invite link copied.' : i.url))}
+                    onClick={() =>
+                      void copyLink(i.url).then((r) => onNote(r === 'copied' ? 'Invite link copied.' : i.url))
+                    }
                     className="p-1.5"
                     aria-label="Copy invite link"
                   >

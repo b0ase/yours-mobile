@@ -621,7 +621,9 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvit
       if (r === 'copied') setNote('Space page link copied.');
       if (r === 'failed') setNote(page.url);
     } catch (e) {
-      setNote(e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e));
+      setNote(
+        e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e),
+      );
     } finally {
       setSharing(false);
     }

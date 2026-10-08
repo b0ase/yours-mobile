@@ -16,7 +16,10 @@ const MCP_CONFIG = `{
 const Code = ({ text }: { text: string }) => {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="relative rounded-xl p-3 pr-10 font-mono text-[12px] whitespace-pre-wrap break-all" style={{ background: '#17191E', color: '#E4E7EC' }}>
+    <div
+      className="relative rounded-xl p-3 pr-10 font-mono text-[12px] whitespace-pre-wrap break-all"
+      style={{ background: '#17191E', color: '#E4E7EC' }}
+    >
       {text}
       <button
         type="button"
@@ -62,8 +65,8 @@ export const AgentToolsSheet = ({ onClose }: { onClose: () => void }) => {
       </div>
       <div className="flex-1 overflow-y-auto px-4 pb-10 flex flex-col gap-4">
         <p className="m-0 text-sm" style={{ color: '#D0D5DD' }}>
-          Let scripts and AI assistants (Claude, Cursor and others) use a bWalletX <b>agent account</b>. Keys stay on this
-          phone: the computer asks, and this wallet approves within the limits you set when pairing.
+          Let scripts and AI assistants (Claude, Cursor and others) use a bWalletX <b>agent account</b>. Keys stay on
+          this phone: the computer asks, and this wallet approves within the limits you set when pairing.
         </p>
         <div className="flex flex-col gap-2">
           <div className="text-sm font-bold text-white">1. Make an agent account</div>
@@ -74,8 +77,8 @@ export const AgentToolsSheet = ({ onClose }: { onClose: () => void }) => {
         <div className="flex flex-col gap-2">
           <div className="text-sm font-bold text-white">2. Pair the command line</div>
           <p className="m-0 text-xs" style={{ color: MUTED }}>
-            On your computer (Node 20+), run this, then on this phone open the agent account › Settings › Paired websites
-            › Scan to connect.
+            On your computer (Node 20+), run this, then on this phone open the agent account › Settings › Paired
+            websites › Scan to connect.
           </p>
           <Code text="npx bwalletx login --account phone" />
           <Code text="npx bwalletx balance --account phone" />

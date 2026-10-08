@@ -3,7 +3,13 @@ import { pendingBQuestions } from './avatars';
 
 const now = Date.parse('2026-10-06T08:00:00Z');
 const at = (sAgo: number) => new Date(now - sAgo * 1000).toISOString();
-const msg = (id: string, author: string, body: string, sAgo: number, extra = {}) => ({ id, author_handle: author, body, created_at: at(sAgo), ...extra });
+const msg = (id: string, author: string, body: string, sAgo: number, extra = {}) => ({
+  id,
+  author_handle: author,
+  body,
+  created_at: at(sAgo),
+  ...extra,
+});
 
 describe('pendingBQuestions', () => {
   test('a fresh /b question with no answer is waiting', () => {
@@ -14,7 +20,10 @@ describe('pendingBQuestions', () => {
     expect(pendingBQuestions([msg('q', 'ann', '/b how?', 5), answer], now).size).toBe(0);
   });
   test('bare /b counts; /bob and ordinary messages do not', () => {
-    const got = pendingBQuestions([msg('1', 'a', '/b', 1), msg('2', 'a', '/bob hi', 1), msg('3', 'a', 'hello', 1)], now);
+    const got = pendingBQuestions(
+      [msg('1', 'a', '/b', 1), msg('2', 'a', '/bob hi', 1), msg('3', 'a', 'hello', 1)],
+      now,
+    );
     expect([...got]).toEqual(['1']);
   });
   test('gives up after 90 seconds', () => {

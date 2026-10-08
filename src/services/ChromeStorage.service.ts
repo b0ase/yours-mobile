@@ -568,7 +568,8 @@ export class ChromeStorageService {
       JSON.parse(plain);
       const sealed = await encrypt(plain, newKey);
       // Prove the new blob opens with the new key before anything is written.
-      if ((await decrypt(sealed, newKey)) !== plain) throw new Error('Password change check failed; nothing was changed');
+      if ((await decrypt(sealed, newKey)) !== plain)
+        throw new Error('Password change check failed; nothing was changed');
       next[id] = { ...acct, encryptedKeys: sealed };
     }
     await this.set({ accounts: next, salt } as Partial<ChromeStorageObject>);

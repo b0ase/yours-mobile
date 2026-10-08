@@ -64,7 +64,12 @@ describe('mentions', () => {
     expect(applyMention('hey @al', 'alice')).toBe('hey $alice ');
   });
   test('suggests recent authors, not me or $b', () => {
-    const ms = [msg({ author_handle: 'alice' }), msg({ author_handle: 'b' }), msg({ author_handle: 'albert' }), msg({ author_handle: 'me' })];
+    const ms = [
+      msg({ author_handle: 'alice' }),
+      msg({ author_handle: 'b' }),
+      msg({ author_handle: 'albert' }),
+      msg({ author_handle: 'me' }),
+    ];
     expect(mentionSuggestions(ms, 'al', 'me')).toEqual(['albert', 'alice']);
   });
 });

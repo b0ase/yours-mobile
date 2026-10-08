@@ -36,10 +36,17 @@ export const CreatePotSheet = ({ onClose, onCreate }: { onClose: () => void; onC
   return (
     <Sheet title="New pot" onClose={onClose}>
       <p className="text-xs m-0" style={{ color: MUTED }}>
-        A pot is a separate account with its own keys. Subscriptions pay from it, and whatever you put in it is the
-        most they can ever take. Pause or empty it any time.
+        A pot is a separate account with its own keys. Subscriptions pay from it, and whatever you put in it is the most
+        they can ever take. Pause or empty it any time.
       </p>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder={POT_NAME_PLACEHOLDER} maxLength={32} className={input} style={field} />
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={POT_NAME_PLACEHOLDER}
+        maxLength={32}
+        className={input}
+        style={field}
+      />
       <button
         type="button"
         disabled={!name.trim()}
@@ -126,7 +133,10 @@ export const AddOrderSheet = ({
               type="button"
               onClick={() => setService(p.service)}
               className="rounded-full px-3 py-1.5 text-xs font-bold border-0"
-              style={{ background: service === p.service ? GOLD : LINE, color: service === p.service ? '#000' : '#fff' }}
+              style={{
+                background: service === p.service ? GOLD : LINE,
+                color: service === p.service ? '#000' : '#fff',
+              }}
             >
               {p.name}
             </button>
@@ -135,11 +145,33 @@ export const AddOrderSheet = ({
       )}
       {!svc && (
         <>
-          <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="Paymail or address" className={input} style={field} autoCapitalize="off" autoCorrect="off" />
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Name (optional)" maxLength={32} className={input} style={field} />
+          <input
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="Paymail or address"
+            className={input}
+            style={field}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Name (optional)"
+            maxLength={32}
+            className={input}
+            style={field}
+          />
         </>
       )}
-      <input value={usd} onChange={(e) => setUsd(e.target.value)} placeholder="Amount in $" inputMode="decimal" className={input} style={field} />
+      <input
+        value={usd}
+        onChange={(e) => setUsd(e.target.value)}
+        placeholder="Amount in $"
+        inputMode="decimal"
+        className={input}
+        style={field}
+      />
       <div className="flex gap-2 flex-wrap">
         {PERIODS.map(([p, l]) => (
           <button
@@ -157,7 +189,14 @@ export const AddOrderSheet = ({
         First payment
         <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={input} style={field} />
       </label>
-      <input value={max} onChange={(e) => setMax(e.target.value.replace(/\D/g, ''))} placeholder="Number of payments (blank = until stopped)" inputMode="numeric" className={input} style={field} />
+      <input
+        value={max}
+        onChange={(e) => setMax(e.target.value.replace(/\D/g, ''))}
+        placeholder="Number of payments (blank = until stopped)"
+        inputMode="numeric"
+        className={input}
+        style={field}
+      />
       <p className="text-xs m-0" style={{ color: MUTED }}>
         Paid when you open the app on or after each date. At most{' '}
         {balanceUsd !== null ? `$${balanceUsd.toFixed(2)}` : 'the pot balance'} can ever be taken: the pot balance.
@@ -168,7 +207,12 @@ export const AddOrderSheet = ({
           {error}
         </div>
       )}
-      <button type="button" onClick={save} className="rounded-xl py-3 font-bold border-0" style={{ background: GOLD, color: '#000' }}>
+      <button
+        type="button"
+        onClick={save}
+        className="rounded-xl py-3 font-bold border-0"
+        style={{ background: GOLD, color: '#000' }}
+      >
         Set up
       </button>
     </Sheet>

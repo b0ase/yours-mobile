@@ -86,7 +86,12 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       else {
         // Skip the older periods; pay only the most recent `cap`.
         s = saveSub({ ...s, periodIndex: s.periodIndex + plan.missed - cap });
-        appendAgentLog(s.potId, { at: now, action: 'sub-skip', detail: `Skipped ${plan.missed - cap} missed payments to ${s.payee.name}`, usd: 0 });
+        appendAgentLog(s.potId, {
+          at: now,
+          action: 'sub-skip',
+          detail: `Skipped ${plan.missed - cap} missed payments to ${s.payee.name}`,
+          usd: 0,
+        });
         plan = dueItems(s, now, cap);
       }
     }
@@ -111,13 +116,25 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
     }
     let signed: { rawTx: string; txid: string };
     try {
-      signed = await deps.sign(s.potId, Array.from({ length: count }, () => ({ address, sats })));
+      signed = await deps.sign(
+        s.potId,
+        Array.from({ length: count }, () => ({ address, sats })),
+      );
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       out.push(fail(s, m, deps, /not enough|insufficient/i.test(m)));
       continue;
     }
-    const p: PendingPayment = { subId: s.id, potId: s.potId, periodIndex: s.periodIndex, count, dueTimes: plan.due, ...signed, usd, at: now };
+    const p: PendingPayment = {
+      subId: s.id,
+      potId: s.potId,
+      periodIndex: s.periodIndex,
+      count,
+      dueTimes: plan.due,
+      ...signed,
+      usd,
+      at: now,
+    };
     savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
     out.push(await settlePending(s, p, deps, now));
   }

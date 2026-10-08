@@ -30,7 +30,10 @@ export const WeaponTile = ({ weapon, onOpen, sub }: { weapon: Weapon; onOpen: ()
         opts={{ tint: weapon.tint, tintAmount: weapon.tintAmount ?? 0.22, turn: weapon.flip ? Math.PI : 0 }}
         alt={weapon.name}
         fallback={
-          <div className="w-full h-full flex items-center justify-center" style={{ color: RARITY_COLOR[weapon.rarity] }}>
+          <div
+            className="w-full h-full flex items-center justify-center"
+            style={{ color: RARITY_COLOR[weapon.rarity] }}
+          >
             <Box size={44} />
           </div>
         }
@@ -72,7 +75,8 @@ export const OrdnanceGrid = () => {
   return (
     <div className="flex flex-col gap-2">
       <p className="m-0 text-xs text-[#98A2B3]">
-        1Sat Ordnance by tokenblaster.lol: game guns as 1Sat NFTs. Owning one unlocks it in Double-O Satoshi and the Arena.
+        1Sat Ordnance by tokenblaster.lol: game guns as 1Sat NFTs. Owning one unlocks it in Double-O Satoshi and the
+        Arena.
       </p>
       <div className="grid grid-cols-2 gap-2">
         {weapons.map((w) => (

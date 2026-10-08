@@ -41,7 +41,9 @@ export const SettingsAccountHeader = () => {
           <span className="truncate text-sm font-bold text-white">{names.displayName || 'This account'}</span>
           <AgentMark id={id} />
         </span>
-        {accounts.length > 1 && <ChevronDown size={16} color={MUTED} style={{ transform: open ? 'rotate(180deg)' : '' }} />}
+        {accounts.length > 1 && (
+          <ChevronDown size={16} color={MUTED} style={{ transform: open ? 'rotate(180deg)' : '' }} />
+        )}
       </button>
       {open && (
         <div className="mt-1 rounded-xl overflow-hidden p-1" style={{ background: '#101114' }} role="listbox">

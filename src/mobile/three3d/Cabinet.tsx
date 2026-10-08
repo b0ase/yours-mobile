@@ -56,7 +56,8 @@ const loadError = (err: unknown): string => {
   const msg = err instanceof Error ? err.message : String(err ?? '');
   const ext = /extension "?([A-Z0-9_]+)"?/i.exec(msg)?.[1];
   if (ext) return `This model uses ${ext}, which the viewer can't decode yet.`;
-  if (/fetch|network|load failed|status/i.test(msg)) return "Couldn't download the 3D model. Check your connection and try again.";
+  if (/fetch|network|load failed|status/i.test(msg))
+    return "Couldn't download the 3D model. Check your connection and try again.";
   return "Couldn't load the 3D model.";
 };
 

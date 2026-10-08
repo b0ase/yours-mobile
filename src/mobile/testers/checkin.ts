@@ -29,8 +29,21 @@ export function cleanLink(s: string): string | null {
 }
 export const shouldCheckIn = (link: string | null, last: string | null, today: string) => !!link && last !== today;
 
-const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
-const set = (k: string, v: string | null) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private storage */ } };
+const get = (k: string) => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+};
+const set = (k: string, v: string | null) => {
+  try {
+    if (v === null) localStorage.removeItem(k);
+    else localStorage.setItem(k, v);
+  } catch {
+    /* private storage */
+  }
+};
 
 export function installId(): string {
   let id = get(TESTER_INSTALL_KEY);
@@ -43,7 +56,13 @@ export function installId(): string {
 }
 export const testerLink = () => get(TESTER_LINK_KEY);
 export type TesterStatus = { day: number; of: number; counted: number; playVerified: boolean } | { error: string };
-export const lastStatus = (): TesterStatus | null => { try { return JSON.parse(get(TESTER_STATUS_KEY) ?? 'null'); } catch { return null; } };
+export const lastStatus = (): TesterStatus | null => {
+  try {
+    return JSON.parse(get(TESTER_STATUS_KEY) ?? 'null');
+  } catch {
+    return null;
+  }
+};
 export function setTesterLink(v: string | null) {
   set(TESTER_LINK_KEY, v);
   set(TESTER_LAST_KEY, null);
@@ -51,7 +70,11 @@ export function setTesterLink(v: string | null) {
 }
 
 async function installer(): Promise<string | null> {
-  try { return (await YoursNative.installerPackage()).installer ?? null; } catch { return null; }
+  try {
+    return (await YoursNative.installerPackage()).installer ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Send today's check-in if linked and not yet sent today. Returns the server's answer, or null if skipped. */
@@ -65,10 +88,17 @@ export async function checkIn(force = false, f: typeof fetch = fetch): Promise<T
     const r = await f(`${PUSH_ORIGIN}/v1/testers/checkin`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ installId: installId(), link, installer: await installer(), version: typeof __MOBILE_VERSION__ === 'string' ? __MOBILE_VERSION__ : null }),
+      body: JSON.stringify({
+        installId: installId(),
+        link,
+        installer: await installer(),
+        version: typeof __MOBILE_VERSION__ === 'string' ? __MOBILE_VERSION__ : null,
+      }),
     });
     const j = await r.json().catch(() => ({}));
-    const s: TesterStatus = r.ok ? { day: j.day, of: j.of, counted: j.counted, playVerified: !!j.playVerified } : { error: j.error || `Error ${r.status}` };
+    const s: TesterStatus = r.ok
+      ? { day: j.day, of: j.of, counted: j.counted, playVerified: !!j.playVerified }
+      : { error: j.error || `Error ${r.status}` };
     if (r.ok) set(TESTER_LAST_KEY, today);
     set(TESTER_STATUS_KEY, JSON.stringify(s));
     return s;

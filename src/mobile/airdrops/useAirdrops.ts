@@ -37,7 +37,10 @@ export const useAirdrops = () => {
   );
   useEffect(() => refresh(false), [refresh]);
 
-  const update = useCallback((f: (s: InboxState) => InboxState) => saveInbox(account, f(loadInbox(account))), [account]);
+  const update = useCallback(
+    (f: (s: InboxState) => InboxState) => saveInbox(account, f(loadInbox(account))),
+    [account],
+  );
   return {
     items,
     visible: visibleItems(items, state),

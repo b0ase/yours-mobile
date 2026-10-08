@@ -22,7 +22,12 @@ const ISSUER = PrivateKey.fromRandom().toAddress();
 const burn: MessageCharge = { unit: 'token', tokenId: TOKEN, amount: '5', to: 'burn' };
 const toIssuer: MessageCharge = { unit: 'token', tokenId: TOKEN, amount: '5', to: ISSUER };
 const sats: MessageCharge = { unit: 'sats', amount: '100', to: ISSUER };
-const charge = (charges: MessageCharge[], exempt = false): SpendCharge => ({ rule: 'R1', charges, unenforced: null, exempt });
+const charge = (charges: MessageCharge[], exempt = false): SpendCharge => ({
+  rule: 'R1',
+  charges,
+  unenforced: null,
+  exempt,
+});
 
 /** Decode a BSV-21 inscription JSON from an output script, if any. */
 const bsv21Of = (hex: string): { op?: string; id?: string; amt?: string } | null => {
@@ -41,12 +46,24 @@ describe('room spend: commitment', () => {
   test('bytes match bit-sign (room-spend.ts commitmentScript)', () => {
     // Reference produced by bit-sign's commitmentScript for the same input (8 Oct 2026).
     expect(sha256Hex('gm')).toBe('a474219e5e9503c84d59500bb1bda3d9ade81e52d9fa1c234278770892a6dd74');
-    expect(commitmentScript({ room: 'CHAT', author: 'alice', body: sha256Hex('gm'), rule: '2026-10-08T10:00:00.000Z' }).toHex()).toBe(
+    expect(
+      commitmentScript({
+        room: 'CHAT',
+        author: 'alice',
+        body: sha256Hex('gm'),
+        rule: '2026-10-08T10:00:00.000Z',
+      }).toHex(),
+    ).toBe(
       '006a223150755161374b36324d694b43747373534c4b79316b683536575755374d745552350353455403617070056243686174047479706508726f6f6d5f70617904726f6f6d044348415406617574686f7205616c69636504626f647940613437343231396535653935303363383464353935303062623162646133643961646538316535326439666131633233343237383737303839326136646437340472756c6518323032362d31302d30385431303a30303a30302e3030305a',
     );
   });
   test('commitmentFor normalises ticker, handle and trims the text', () => {
-    expect(commitmentFor('$CHAT', '$Alice', '  gm  ', 'R1')).toEqual({ room: 'CHAT', author: 'alice', body: sha256Hex('gm'), rule: 'R1' });
+    expect(commitmentFor('$CHAT', '$Alice', '  gm  ', 'R1')).toEqual({
+      room: 'CHAT',
+      author: 'alice',
+      body: sha256Hex('gm'),
+      rule: 'R1',
+    });
   });
 });
 
@@ -70,31 +87,45 @@ describe('room spend: the tx builder includes the payment', () => {
   });
   test('message and payment end up in one transaction', () => {
     const tx = new Transaction();
-    for (const o of paymentOutputs([burn, sats], c)) tx.addOutput({ lockingScript: Script.fromHex(o.lockingScript), satoshis: o.satoshis });
+    for (const o of paymentOutputs([burn, sats], c))
+      tx.addOutput({ lockingScript: Script.fromHex(o.lockingScript), satoshis: o.satoshis });
     const parsed = Transaction.fromHex(tx.toHex());
     expect(parsed.outputs.length).toBe(3);
     expect(parsed.outputs.some((o) => bsv21Of(o.lockingScript.toHex())?.op === 'burn')).toBe(true);
-    expect(parsed.outputs.some((o) => o.lockingScript.toHex() === new P2PKH().lock(ISSUER).toHex() && o.satoshis === 100)).toBe(true);
+    expect(
+      parsed.outputs.some((o) => o.lockingScript.toHex() === new P2PKH().lock(ISSUER).toHex() && o.satoshis === 100),
+    ).toBe(true);
   });
 });
 
 describe('room spend: confirm and caps', () => {
-  test('always asks by default', () => expect(needsConfirm(charge([burn]), { autoUnderRaw: '', sessionCapRaw: '' }, BigInt(0))).toBe(true));
-  test("don't ask under N", () => expect(needsConfirm(charge([burn]), { autoUnderRaw: '5', sessionCapRaw: '' }, BigInt(0))).toBe(false));
-  test('above N asks', () => expect(needsConfirm(charge([burn]), { autoUnderRaw: '4', sessionCapRaw: '' }, BigInt(0))).toBe(true));
-  test('session cap reached asks', () => expect(needsConfirm(charge([burn]), { autoUnderRaw: '5', sessionCapRaw: '12' }, BigInt(10))).toBe(true));
-  test('mixed units always ask', () => expect(needsConfirm(charge([burn, sats]), { autoUnderRaw: '1000', sessionCapRaw: '' }, BigInt(0))).toBe(true));
+  test('always asks by default', () =>
+    expect(needsConfirm(charge([burn]), { autoUnderRaw: '', sessionCapRaw: '' }, BigInt(0))).toBe(true));
+  test("don't ask under N", () =>
+    expect(needsConfirm(charge([burn]), { autoUnderRaw: '5', sessionCapRaw: '' }, BigInt(0))).toBe(false));
+  test('above N asks', () =>
+    expect(needsConfirm(charge([burn]), { autoUnderRaw: '4', sessionCapRaw: '' }, BigInt(0))).toBe(true));
+  test('session cap reached asks', () =>
+    expect(needsConfirm(charge([burn]), { autoUnderRaw: '5', sessionCapRaw: '12' }, BigInt(10))).toBe(true));
+  test('mixed units always ask', () =>
+    expect(needsConfirm(charge([burn, sats]), { autoUnderRaw: '1000', sessionCapRaw: '' }, BigInt(0))).toBe(true));
   test('issuer is exempt', () => expect(mustPay(charge([burn], true))).toBe(false));
   test('cost line', () => expect(costLine(charge([burn]), 'X', 0)).toBe('This message costs 5 $X, burned'));
 });
 
 describe('room spend: parsing the server', () => {
   test('spend_charge parsed; malformed refused', () => {
-    expect(parseSpendCharge({ rule: 'R1', charges: [burn, sats], unenforced: null, exempt: false })?.charges.length).toBe(2);
-    expect(parseSpendCharge({ rule: 'R1', charges: [{ unit: 'token', amount: '0', to: 'burn', tokenId: TOKEN }] })).toBeNull();
+    expect(
+      parseSpendCharge({ rule: 'R1', charges: [burn, sats], unenforced: null, exempt: false })?.charges.length,
+    ).toBe(2);
+    expect(
+      parseSpendCharge({ rule: 'R1', charges: [{ unit: 'token', amount: '0', to: 'burn', tokenId: TOKEN }] }),
+    ).toBeNull();
   });
   test('lookup carries spendCharge; older server → null', () => {
-    expect(parseLookup({ key: `bsv21:${TOKEN}`, spend_charge: { rule: '', charges: [burn] } })?.spendCharge?.charges[0]).toEqual(burn);
+    expect(
+      parseLookup({ key: `bsv21:${TOKEN}`, spend_charge: { rule: '', charges: [burn] } })?.spendCharge?.charges[0],
+    ).toEqual(burn);
     expect(parseLookup({ key: `bsv21:${TOKEN}` })?.spendCharge).toBeNull();
   });
   test('sats rule and version kept; enforcement only per message', () => {
@@ -124,7 +155,9 @@ describe('room spend: the wallet never broadcasts', () => {
   });
   test('a server refusal releases the signed tx (abortAction), so nothing is spent', async () => {
     const aborted: string[] = [];
-    const ctx = { wallet: { abortAction: async (a: { reference: string }) => void aborted.push(a.reference) } } as never;
+    const ctx = {
+      wallet: { abortAction: async (a: { reference: string }) => void aborted.push(a.reference) },
+    } as never;
     await releasePayment(ctx, 'cd'.repeat(32));
     expect(aborted).toEqual(['cd'.repeat(32)]);
   });

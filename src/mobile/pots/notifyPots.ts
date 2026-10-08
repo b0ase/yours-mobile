@@ -87,6 +87,8 @@ export const notifyLowFunds = (potId: string, potName: string, covers: number, n
   }
   void notifyPot(
     `${potName} pot is running low`,
-    covers === 0 ? 'It can’t cover the next payment. Top it up to keep it going.' : 'It covers only the next payment. Top it up.',
+    covers === 0
+      ? 'It can’t cover the next payment. Top it up to keep it going.'
+      : 'It covers only the next payment. Top it up.',
   );
 };

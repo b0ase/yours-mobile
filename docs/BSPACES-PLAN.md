@@ -6,16 +6,16 @@ Related: `docs/CALLS-VIDEO-PLAN.md` (phases 3–6 there are folded into this pla
 
 ## 1. Phase 1: what is built (branch `feat/bspaces`)
 
-| Piece | Where |
-|---|---|
-| Apps tile "bSpaces" next to b agent → `/m/spaces` | `BrowserPage.tsx` (`SYS_TILES`), `brand/bspaces-glyph.svg` |
-| bSpaces page: live spaces across your token rooms (Join), and rooms you run (Go live) | `spaces/SpacesPage.tsx` |
-| "Live now" banner with Join inside a token room; "Start a bSpace" for the token's issuer or the room admin | `spaces/LiveBanner.tsx`, mounted in `tabs/ChatPage.tsx` Conversation |
-| Full-screen Space view: stage tiles (video, or an avatar with a gold speaking ring), host badge, audience count, live clock; raise or lower hand; host hand queue with "Bring on stage" and "Move to audience"; mute, camera, flip, leave or end; chat slide-up (side panel in landscape) | `spaces/SpaceScreen.tsx` |
-| Invited on stage → "Join with mic", "Join with mic and camera", or "Decline, stay in the audience" (the OS asks for mic/camera permission on accept) | `SpaceScreen.tsx`, `model.ts` `myChange` |
-| LiveKit media: adaptive stream, dynacast, simulcast, active speakers, permission changes release devices | `spaces/media.ts` |
-| Pure model with tests (parse, stage, hands, role-change detection, who may host) | `spaces/model.ts`, `model.test.ts` |
-| Client calls | `chat/api.ts` `space`, `spaceAction`, `spaceToken` |
+| Piece                                                                                                                                                                                                                                                                                     | Where                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Apps tile "bSpaces" next to b agent → `/m/spaces`                                                                                                                                                                                                                                         | `BrowserPage.tsx` (`SYS_TILES`), `brand/bspaces-glyph.svg`           |
+| bSpaces page: live spaces across your token rooms (Join), and rooms you run (Go live)                                                                                                                                                                                                     | `spaces/SpacesPage.tsx`                                              |
+| "Live now" banner with Join inside a token room; "Start a bSpace" for the token's issuer or the room admin                                                                                                                                                                                | `spaces/LiveBanner.tsx`, mounted in `tabs/ChatPage.tsx` Conversation |
+| Full-screen Space view: stage tiles (video, or an avatar with a gold speaking ring), host badge, audience count, live clock; raise or lower hand; host hand queue with "Bring on stage" and "Move to audience"; mute, camera, flip, leave or end; chat slide-up (side panel in landscape) | `spaces/SpaceScreen.tsx`                                             |
+| Invited on stage → "Join with mic", "Join with mic and camera", or "Decline, stay in the audience" (the OS asks for mic/camera permission on accept)                                                                                                                                      | `SpaceScreen.tsx`, `model.ts` `myChange`                             |
+| LiveKit media: adaptive stream, dynacast, simulcast, active speakers, permission changes release devices                                                                                                                                                                                  | `spaces/media.ts`                                                    |
+| Pure model with tests (parse, stage, hands, role-change detection, who may host)                                                                                                                                                                                                          | `spaces/model.ts`, `model.test.ts`                                   |
+| Client calls                                                                                                                                                                                                                                                                              | `chat/api.ts` `space`, `spaceAction`, `spaceToken`                   |
 
 **Token gate.** No new gate. Every space route in bit-sign is behind `isRoomMember(..., 'conversation')`, which for a token room is the holding check. `/space/token` mints the LiveKit token only for a member who has joined, with publish rights read from their participant row. A non-holder gets 403 → "You need to hold this room's token to join its space."
 
@@ -26,6 +26,7 @@ Related: `docs/CALLS-VIDEO-PLAN.md` (phases 3–6 there are folded into this pla
 **Transport.** The wallet joins only `sfu` spaces. A `mesh` space (a server without LiveKit) shows "Join it from bChat on the web".
 
 **Store edition: hidden.** `BSPACES_ENABLED` is a literal env flag, the same pattern as `TOKENBLASTER_ENABLED`. The tile, the `/m/spaces` route chunk and the in-room banner are all left out of `build:mobile:store` (verified: no bSpaces strings in the store bundle). Reasons:
+
 1. Spaces live in token rooms, which store builds do not have (`tokenRoomsEnabled`).
 2. Live video to an audience needs Apple 1.2 / Play UGC moderation in-stream (report, block, host kick), which is Phase 2.
 3. Paid tickets and paid speakers would fall under 3.1.1, and live streams to many viewers are not covered by the 3.1.3(d) person-to-person exception.
@@ -59,6 +60,7 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 ## 4. Metering, recording, moderation, KYC
 
 **Per-minute metering** (paid watching, paid calls; from CALLS-VIDEO-PLAN §2d):
+
 - Rate `{ asset, amountRaw, per: 'minute' }`, and a viewer **spend cap** chosen on join.
 - BSV is paid in 1-minute intervals signed by the wallet in the background (BSV-21 also per minute, since each transfer pays an indexer fee). bit-sign keeps a session ledger `(space_id, handle, seq, txid)`, idempotent per seq.
 - **Grace**: one interval + 10 s. Past that, bit-sign demotes (for speakers) or removes the participant and calls `removeParticipant`. **Short LiveKit TTL** (about 2 intervals) re-minted only while paid up, so a stalled client cannot stay in.
@@ -67,11 +69,13 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 - Estimate: **1.5–2 weeks** (shared with paid calls).
 
 **Recording and replays.**
+
 - `space-recording.ts` already does per-speaker TrackEgress. Add a consent step: "This space is recorded" on join, and a clear second consent when brought on stage. A speaker who declines stays a listener.
 - Replays are stored as files on Hetzner (or object storage), listed under the room. Optional: **inscribe** a manifest (hash + URL + speakers) on chain. Inscribing the media itself costs about 50 sat/kB, so ~£ per hour of audio; only on the host's request.
 - Estimate: **3–4 days**.
 
 **Moderation.**
+
 - Host: kick (`removeParticipant` + ban from the space), mute a speaker (server-side `mutePublishedTrack`), end.
 - Listener: report the space or a speaker (`api/bitsign/report`), block.
 - **Age-gating**: rooms flagged adult require a $401 identity strength ≥ 2 with an age attestation before join.
@@ -85,11 +89,13 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 **Today.** LiveKit runs on the main Hetzner box (8 vCPU AMD EPYC-Rome, 15 GB RAM), shared with Supabase Postgres and other services. Measured 8 Oct 2026 00:49 UTC: load average ≈ 3.7–4.0 (about 50%), ~8 GB RAM available, LiveKit idle.
 
 **Rough capacity on that box** (LiveKit is mostly bandwidth and packet forwarding; these are estimates, to be load-tested):
+
 - Audio-only stage, 300 listeners: ~0.5–1 core, ~15–20 Mbit/s egress. **Fine today.**
 - Video stage, 2 speakers at 720p simulcast to 300 viewers: ~1.5–3 cores, ~150–300 Mbit/s egress, peaking near 1 Gbit/s if everyone takes the high layer. This **competes with Postgres** and risks the database's latency.
 - Meeting mode, 25 people on camera: 25 × 24 subscriptions; adaptive stream keeps most at low layers. ~2 cores per meeting, so one or two at a time.
 
 **Recommendation.**
+
 1. Now: keep audio spaces on the shared box. Cap concurrent video spaces at 2 in config. Set LiveKit CPU limits (cgroup/docker) so Postgres always wins.
 2. Before video livestreams are promoted: **move LiveKit to its own box**. A Hetzner CCX23 (4 dedicated vCPU, 16 GB, 20 TB traffic) is about €30/month; CCX33 (8 dedicated vCPU) is about €60/month. Same datacentre, TURN on 443. Prices are approximate; check current Hetzner pricing.
 3. Bursty or global audiences: **LiveKit Cloud**, billed per participant-minute and bandwidth. Use it for big one-off events, not the base load. Compare current pricing with the CCX box at the expected minutes.
@@ -102,15 +108,15 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 
 ## 7. Phases
 
-| Phase | Scope | Estimate |
-|---|---|---|
-| 1 ✅ | Tile, page, in-room banner, full-screen Stage view, hands, bring on stage / decline (bit-sign `step_down`), mic/camera, chat panel, landscape, store-hidden | built (device QA pending) |
-| 2 | `GET /spaces/live` list endpoint, "X is live" push, kick/mute/report, Meeting mode (migration + grid) | 1–1.5 weeks |
-| 3 | Paid tickets (sats/tokens, burn), creator KYC gate | 1 week |
-| 4 | Paid speakers (bids on hands, host-paid fees) | 3–4 days |
-| 5 | Per-minute metering for streams (cap, grace, cut-off, short TTL) | 1.5–2 weeks |
-| 6 | Recording consent, replays (store, optional inscription), age-gating | 1 week |
-| 7 | Dedicated LiveKit box, load test; HLS for large audiences | 2–3 days + later |
+| Phase | Scope                                                                                                                                                       | Estimate                  |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| 1 ✅  | Tile, page, in-room banner, full-screen Stage view, hands, bring on stage / decline (bit-sign `step_down`), mic/camera, chat panel, landscape, store-hidden | built (device QA pending) |
+| 2     | `GET /spaces/live` list endpoint, "X is live" push, kick/mute/report, Meeting mode (migration + grid)                                                       | 1–1.5 weeks               |
+| 3     | Paid tickets (sats/tokens, burn), creator KYC gate                                                                                                          | 1 week                    |
+| 4     | Paid speakers (bids on hands, host-paid fees)                                                                                                               | 3–4 days                  |
+| 5     | Per-minute metering for streams (cap, grace, cut-off, short TTL)                                                                                            | 1.5–2 weeks               |
+| 6     | Recording consent, replays (store, optional inscription), age-gating                                                                                        | 1 week                    |
+| 7     | Dedicated LiveKit box, load test; HLS for large audiences                                                                                                   | 2–3 days + later          |
 
 ## 8. Owner decisions needed
 
@@ -133,6 +139,7 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 7. **Meeting mode**: cap of 25. DMs and group chats come later.
 
 ## Revenue model (owner approved, 8 Oct 2026)
+
 - Audio Spaces: free (current server handles ~300).
 - Video Spaces: host pays per viewer-minute from a pot (bandwidth cost + margin; rate set after measuring the server).
 - Platform fee: 5% of paid tickets, paid-speaker bids and per-minute charges, taken in the same transaction and shown before payment. Hosts keep 95%.
@@ -145,11 +152,11 @@ A host (or the room admin) shares a Space; any member of a token room can share 
 
 ### The two URLs (plus the room page)
 
-| URL | What | Lifetime | Who makes it |
-|---|---|---|---|
-| `/s/<slug>` | **Space page**: one per Space. Advert / LIVE / ended now; the replay later (see Recordings below). | Permanent | Host or room admin (created lazily on first share) |
-| `/i/<code>` | **Invite**: to a Space or to a room. Expiry 1h / 24h / **7d (default)** / 30d / never, optional max uses, revocable. | Ephemeral | Space: host or room admin. Room: any member |
-| `/r/<ticker>` | **Room page**: token rooms and discoverable rooms only (a private group answers "not found"). Name, members, entry rule, real price, **"Buy 1 $X and enter"**. | Permanent | Nobody: it exists for every public room |
+| URL           | What                                                                                                                                                           | Lifetime  | Who makes it                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------- |
+| `/s/<slug>`   | **Space page**: one per Space. Advert / LIVE / ended now; the replay later (see Recordings below).                                                             | Permanent | Host or room admin (created lazily on first share) |
+| `/i/<code>`   | **Invite**: to a Space or to a room. Expiry 1h / 24h / **7d (default)** / 30d / never, optional max uses, revocable.                                           | Ephemeral | Space: host or room admin. Room: any member        |
+| `/r/<ticker>` | **Room page**: token rooms and discoverable rooms only (a private group answers "not found"). Name, members, entry rule, real price, **"Buy 1 $X and enter"**. | Permanent | Nobody: it exists for every public room            |
 
 - **Slug**: 10 characters (`a–z, 2–9`, no `0 o 1 l i`) from SHA-256 of the space id (a random uuid). Same space, same slug, always, so lazy creation is idempotent; nobody can walk slugs. Stored in `bit_sign_space_pages`.
 - **Code**: 10 random characters, same alphabet, `bit_sign_space_invites` (with `expires_at`, `max_uses`, `uses`, `revoked_at`).
@@ -160,19 +167,19 @@ A host (or the room admin) shares a Space; any member of a token room can share 
 
 ### API (bit-sign)
 
-| Method | Path | Auth |
-|---|---|---|
-| POST | `/api/bitsign/rooms/<ticker>/space/page` `{ space_id? }` → `{ page }` | session + member; host or room admin |
-| POST | `/api/bitsign/rooms/<ticker>/space/invite` `{ expires_in?, max_uses?, space_id? }` → `{ invite, managed }` | session + member; host or room admin |
-| GET | `/api/bitsign/rooms/<ticker>/space/invite?space_id=` → `{ invites }` (with uses) | host or room admin |
-| DELETE | `/api/bitsign/rooms/<ticker>/space/invite?code=` (revoke) | host or room admin |
-| POST | `/api/bitsign/rooms/<ticker>/room-invite` `{ expires_in?, max_uses? }` | session + member |
-| GET | `/api/bitsign/rooms/<ticker>/room-invite` | your own; the room admin sees all |
-| DELETE | `/api/bitsign/rooms/<ticker>/room-invite?code=` | whoever made it, or the room admin |
-| GET | `/api/bitsign/space-invites/<code>` → `{ invite: { state, target, … } }` | public, records nothing |
-| POST | `/api/bitsign/space-invites/<code>/use` | public, counts one use |
-| GET | `/api/bitsign/space-pages/<slug>` · `/api/bitsign/room-pages/<ticker>` | public |
-| GET | `/api/og/space/<slug>` · `/api/og/space-invite/<code>` · `/api/og/room-page/<ticker>` | public PNG |
+| Method | Path                                                                                                       | Auth                                 |
+| ------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| POST   | `/api/bitsign/rooms/<ticker>/space/page` `{ space_id? }` → `{ page }`                                      | session + member; host or room admin |
+| POST   | `/api/bitsign/rooms/<ticker>/space/invite` `{ expires_in?, max_uses?, space_id? }` → `{ invite, managed }` | session + member; host or room admin |
+| GET    | `/api/bitsign/rooms/<ticker>/space/invite?space_id=` → `{ invites }` (with uses)                           | host or room admin                   |
+| DELETE | `/api/bitsign/rooms/<ticker>/space/invite?code=` (revoke)                                                  | host or room admin                   |
+| POST   | `/api/bitsign/rooms/<ticker>/room-invite` `{ expires_in?, max_uses? }`                                     | session + member                     |
+| GET    | `/api/bitsign/rooms/<ticker>/room-invite`                                                                  | your own; the room admin sees all    |
+| DELETE | `/api/bitsign/rooms/<ticker>/room-invite?code=`                                                            | whoever made it, or the room admin   |
+| GET    | `/api/bitsign/space-invites/<code>` → `{ invite: { state, target, … } }`                                   | public, records nothing              |
+| POST   | `/api/bitsign/space-invites/<code>/use`                                                                    | public, counts one use               |
+| GET    | `/api/bitsign/space-pages/<slug>` · `/api/bitsign/room-pages/<ticker>`                                     | public                               |
+| GET    | `/api/og/space/<slug>` · `/api/og/space-invite/<code>` · `/api/og/room-page/<ticker>`                      | public PNG                           |
 
 "Room admin" is `isRoomAdmin` (creator, or the issuer in a token room). "Host" is that Space's host.
 
@@ -223,11 +230,13 @@ Hosts must not be encouraged to invite strangers to Spaces until moderation land
 2. Merge bit-sign `feat/space-invites` (main auto-deploys).
 3. **Domain: bchatx.com is the base.** On the site that serves bchatx.com add two (three) rewrites to bit-sign, then set `SPACE_INVITE_BASE_URL=https://bchatx.com` on bit-sign:
    ```json
-   { "rewrites": [
-     { "source": "/s/:slug",   "destination": "https://www.bit-sign.online/s/:slug" },
-     { "source": "/i/:code",   "destination": "https://www.bit-sign.online/i/:code" },
-     { "source": "/r/:ticker", "destination": "https://www.bit-sign.online/r/:ticker" }
-   ] }
+   {
+     "rewrites": [
+       { "source": "/s/:slug", "destination": "https://www.bit-sign.online/s/:slug" },
+       { "source": "/i/:code", "destination": "https://www.bit-sign.online/i/:code" },
+       { "source": "/r/:ticker", "destination": "https://www.bit-sign.online/r/:ticker" }
+     ]
+   }
    ```
    The page assets (`/_next/*`, `/bwalletx-logo.svg`) must also reach bit-sign: either add `{ "source": "/_next/:path*", "destination": "https://www.bit-sign.online/_next/:path*" }` and the logo, or point bchatx.com's domain at the bit-sign Vercel project and keep only those paths there. The card images use bit-sign's own URL (`NEXT_PUBLIC_APP_URL`), so unfurls work through the rewrite. Note: through an external rewrite the client IP bit-sign sees may be the proxy's; if so, uses fall back to counting per User-Agent until the domain is served by bit-sign directly. The same rewrites on bwalletx.com (`bwalletx-site`) keep old links working.
 4. Universal / app links (optional): `/s/*`, `/i/*`, `/r/*` in bchatx.com's apple-app-site-association and assetlinks, plus `applinks:bchatx.com` and an Android `autoVerify` filter. Until then the https links open the web page, whose buttons open the app.
@@ -236,18 +245,21 @@ Hosts must not be encouraged to invite strangers to Spaces until moderation land
 ## Recordings, replays and public Space pages (owner, 8 Oct 2026, plan only)
 
 **Recording** (needs LiveKit on its own server first; egress is CPU-heavy):
+
 - Only the host can start it. Everyone sees a red ● REC badge, and joiners see "This Space is being recorded". Stage speakers are told before recording starts. Recording consent is required before this ships.
 - Output: an audio/video file stored on our storage (Hetzner or object storage), linked to the Space.
 
 **After the event, the issuer chooses what happens to each recording:**
+
 1. **Private** (default): only the issuer can see it.
 2. **Released to the room**: holders, i.e. anyone who meets the room's gate, can watch it as a replay card in the room timeline.
 3. **Public**: anyone can watch it on the Space's public page.
 4. **Paid**: watching costs a price (BSV priced in dollars, MNEE or a token), paid wallet to wallet, the same rails as bPhone and per-message charges. Holders can optionally watch free.
 5. **Deleted**: the file is removed from our storage; the card shows "Recording removed".
-The issuer can change this at any time. Each change is logged.
+   The issuer can change this at any time. Each change is logged.
 
 **Public Space pages** (e.g. `bchatx.com/s/<slug>` or `/<room>/spaces`):
+
 - **Before:** advertise scheduled Spaces (title, host, time, entry price, an "Add to calendar" button, invite and ticket claim).
 - **During:** LIVE badge, with "Join in bWalletX" for a token-gated Space, or a public watch-only stream if the issuer allows it.
 - **After:** a replay, if released (free, gated or paid), plus a summary or highlights.
@@ -262,6 +274,7 @@ The issuer can change this at any time. Each change is logged.
 **Today:** the roles are host, speaker and listener. The host invites or demotes speakers. There is **no stage cap** (the server doesn't limit speakers), no co-host, no handoff and no moderators. A host who leaves leaves the Space hostless.
 
 **Plan:**
+
 - **Stage cap:** 8 on stage by default (host + 7) and 13 at most, enforced by the server. Video tiles: show up to 4 cameras at once, with the rest as audio tiles. This keeps phones and the SFU sane.
 - **Roles:** host > co-host > moderator > speaker > listener.
   - **Co-host** (up to 2): everything the host can do except remove the host or end the Space. A co-host keeps the Space running if the host drops.

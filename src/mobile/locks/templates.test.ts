@@ -15,16 +15,32 @@ describe('lock templates', () => {
       expect(v.label.length).toBeGreaterThan(0);
       const at = v.unlockOn ?? new Date(NOW.getTime() + (v.startInDays ?? 30) * 86_400_000);
       expect(
-        valuesEntered({ kind: v.kind, gmode: v.gmode ?? 'usd', until: 'count', amountBsv: v.amountBsv ?? '', usdPer: v.usdPer ?? '', bsvPer: v.bsvPer ?? '', pct: '', count: String(v.count ?? '') }),
+        valuesEntered({
+          kind: v.kind,
+          gmode: v.gmode ?? 'usd',
+          until: 'count',
+          amountBsv: v.amountBsv ?? '',
+          usdPer: v.usdPer ?? '',
+          bsvPer: v.bsvPer ?? '',
+          pct: '',
+          count: String(v.count ?? ''),
+        }),
       ).toBe(true);
       let r;
       if (v.kind === 'once') r = buildOnce(sats(v.amountBsv), at, NOW, H);
       else {
         const curve: Curve | undefined = v.curve
-          ? { kind: v.curve.kind, steepness: v.curve.steep ? Number(v.curve.steep) : undefined, pcts: v.curve.custom ? (parsePcts(v.curve.custom) ?? []) : undefined }
+          ? {
+              kind: v.curve.kind,
+              steepness: v.curve.steep ? Number(v.curve.steep) : undefined,
+              pcts: v.curve.custom ? (parsePcts(v.curve.custom) ?? []) : undefined,
+            }
           : undefined;
         const common = { start: at, frequency: v.frequency!, customDays: v.customDays, count: v.count, curve };
-        r = v.gmode === 'usd' ? buildGradual({ ...common, usdPerPayout: Number(v.usdPer), rate: 50, bufferPct: 20 }, NOW, H) : buildGradual({ ...common, perPayoutSats: sats(v.bsvPer) }, NOW, H);
+        r =
+          v.gmode === 'usd'
+            ? buildGradual({ ...common, usdPerPayout: Number(v.usdPer), rate: 50, bufferPct: 20 }, NOW, H)
+            : buildGradual({ ...common, perPayoutSats: sats(v.bsvPer) }, NOW, H);
       }
       expect(r.error).toBeUndefined();
       expect(r.pieces.length).toBeGreaterThan(0);
@@ -33,7 +49,18 @@ describe('lock templates', () => {
 
   test('coupons: regular pieces and a larger final piece', () => {
     const v = TEMPLATES.find((t) => t.id === 'coupons')!.values(NOW);
-    const r = buildGradual({ start: NOW, frequency: 'custom', customDays: 91, count: 8, perPayoutSats: sats(v.bsvPer), curve: { kind: 'custom', pcts: parsePcts(v.curve!.custom!)! } }, NOW, H);
+    const r = buildGradual(
+      {
+        start: NOW,
+        frequency: 'custom',
+        customDays: 91,
+        count: 8,
+        perPayoutSats: sats(v.bsvPer),
+        curve: { kind: 'custom', pcts: parsePcts(v.curve!.custom!)! },
+      },
+      NOW,
+      H,
+    );
     const a = r.pieces.map((p) => p.sats);
     expect(new Set(a.slice(0, 7)).size).toBe(1);
     expect(a[7]).toBeGreaterThan(a[0] * 10);
@@ -58,7 +85,11 @@ describe('lock templates', () => {
   });
 
   test('no interest, yield or returns wording in template copy', () => {
-    const text = [TEMPLATE_NOTE, TEMPLATE_CONFIRM, ...TEMPLATES.flatMap((t) => [t.name, t.blurb, t.values(NOW).label])].join(' ');
+    const text = [
+      TEMPLATE_NOTE,
+      TEMPLATE_CONFIRM,
+      ...TEMPLATES.flatMap((t) => [t.name, t.blurb, t.values(NOW).label]),
+    ].join(' ');
     expect(FORBIDDEN_WORDS.test(text)).toBe(false);
     expect(FORBIDDEN_WORDS.test('8% yield')).toBe(true);
   });

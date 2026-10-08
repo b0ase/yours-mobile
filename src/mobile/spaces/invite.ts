@@ -133,7 +133,8 @@ const pageOf = (d: Record<string, unknown>): SpacePage | RoomPage | null => {
     const slug = str(d.slug);
     return isSpaceSlug(slug) ? { ...base, kind: 'space', slug, host: str(d.host) || null } : null;
   }
-  if (d.kind === 'room') return { ...base, kind: 'room', members: typeof d.members === 'number' ? d.members : null, host: null };
+  if (d.kind === 'room')
+    return { ...base, kind: 'room', members: typeof d.members === 'number' ? d.members : null, host: null };
   return null;
 };
 

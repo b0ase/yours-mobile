@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BIG_LOCK_QUESTION, EMPTY_AMOUNTS, PLACEHOLDERS, PREVIEW_LABEL, PREVIEW_NOTE, START_SMALL_NOTE, needsSizeCheck, valuesEntered } from './builderForm';
+import {
+  BIG_LOCK_QUESTION,
+  EMPTY_AMOUNTS,
+  PLACEHOLDERS,
+  PREVIEW_LABEL,
+  PREVIEW_NOTE,
+  START_SMALL_NOTE,
+  needsSizeCheck,
+  valuesEntered,
+} from './builderForm';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Check, Plus, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -32,10 +41,27 @@ import {
   type PercentResult,
   type ScheduleResult,
 } from './schedule';
-import { claimMatured, createLock, freshRate, loadPlans, relock, savePlans, syncClaimed, walletLockOutpoints } from './lockApi';
+import {
+  claimMatured,
+  createLock,
+  freshRate,
+  loadPlans,
+  relock,
+  savePlans,
+  syncClaimed,
+  walletLockOutpoints,
+} from './lockApi';
 import { verifyLockTx, type VerifyResult } from './verify';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
-import { CURVE_NAMES, DEFAULT_S_STEEPNESS, DEFAULT_STEEPNESS, curveLabel, parsePcts, type Curve, type CurveKind } from './curves';
+import {
+  CURVE_NAMES,
+  DEFAULT_S_STEEPNESS,
+  DEFAULT_STEEPNESS,
+  curveLabel,
+  parsePcts,
+  type Curve,
+  type CurveKind,
+} from './curves';
 
 /**
  * /m/lock — the phone top bar's Lock BSV button (docs/TIME-LOCK-PLAN.md).
@@ -62,8 +88,17 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
     {children}
   </label>
 );
-const inputCls = 'w-full min-w-0 rounded-xl px-3 py-2 text-sm text-white bg-[#0d0e11] border border-[#2b2f36] outline-none focus:border-[#F5B800]';
-const Seg = <T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) => (
+const inputCls =
+  'w-full min-w-0 rounded-xl px-3 py-2 text-sm text-white bg-[#0d0e11] border border-[#2b2f36] outline-none focus:border-[#F5B800]';
+const Seg = <T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: [T, string][];
+  onChange: (v: T) => void;
+}) => (
   <div className="flex rounded-xl p-1 gap-1" style={{ background: '#0d0e11', border: `1px solid ${LINE}` }}>
     {options.map(([v, l]) => (
       <button
@@ -86,7 +121,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const acct = chromeStorageService.getCurrentAccountObject().account;
   const account = acct?.addresses.identityAddress ?? '';
   const names = useAccountNames(account, acct?.name ?? '', acct?.settings?.socialProfile?.displayName ?? '');
-  const [view, setView] = useState<View>(initialVerify != null ? { kind: 'verify', tx: initialVerify } : { kind: 'list' });
+  const [view, setView] = useState<View>(
+    initialVerify != null ? { kind: 'verify', tx: initialVerify } : { kind: 'list' },
+  );
   useBackClose(true, () => (view.kind === 'list' ? navigate(-1) : setView({ kind: 'list' })));
 
   const [height, setHeight] = useState(0);
@@ -194,14 +231,52 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       ...(until === 'count' ? { count: Number(count) } : { end: fromDayInput(end) }),
     };
     if (gmode === 'percent')
-      return buildPercent({ totalSats: bsvToSats(amountBsv), pct: Number(pct), base, start: common.start, frequency, customDays: Number(customDays) }, now, height);
-    if (gmode === 'usd') return buildGradual({ ...common, usdPerPayout: Number(usdPer), rate, bufferPct: Number(buffer), curve }, now, height);
+      return buildPercent(
+        {
+          totalSats: bsvToSats(amountBsv),
+          pct: Number(pct),
+          base,
+          start: common.start,
+          frequency,
+          customDays: Number(customDays),
+        },
+        now,
+        height,
+      );
+    if (gmode === 'usd')
+      return buildGradual(
+        { ...common, usdPerPayout: Number(usdPer), rate, bufferPct: Number(buffer), curve },
+        now,
+        height,
+      );
     return buildGradual({ ...common, perPayoutSats: bsvToSats(bsvPer), curve }, now, height);
-  }, [height, entered, kind, amountBsv, unlockOn, start, frequency, customDays, until, count, end, gmode, pct, base, usdPer, rate, buffer, bsvPer, curve]);
+  }, [
+    height,
+    entered,
+    kind,
+    amountBsv,
+    unlockOn,
+    start,
+    frequency,
+    customDays,
+    until,
+    count,
+    end,
+    gmode,
+    pct,
+    base,
+    usdPer,
+    rate,
+    buffer,
+    bsvPer,
+    curve,
+  ]);
   const curved = kind === 'gradual' && gmode !== 'percent' && curve.kind !== 'linear';
 
-  const surplusTo: SurplusTo = surplusPick ?? (schedule?.pieces.length ? defaultSurplusTo(schedule.pieces, height) : 'next');
-  const mode: LockMode = kind === 'once' ? 'date' : gmode === 'usd' ? 'usd-target' : gmode === 'percent' ? 'percent' : 'bsv';
+  const surplusTo: SurplusTo =
+    surplusPick ?? (schedule?.pieces.length ? defaultSurplusTo(schedule.pieces, height) : 'next');
+  const mode: LockMode =
+    kind === 'once' ? 'date' : gmode === 'usd' ? 'usd-target' : gmode === 'percent' ? 'percent' : 'bsv';
   const ok = entered && schedule && !schedule.error && schedule.pieces.length > 0;
 
   const doLock = async () => {
@@ -209,23 +284,43 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setBusy(true);
     try {
       const pr = schedule as PercentResult;
-      await createLock(apiContext, account, {
-        label: label.trim() || (kind === 'once' ? `Unlock ${fmtDate(schedule.pieces[0].date)}` : 'Payouts'),
-        mode,
-        pieces: schedule.pieces.map((p, i) => ({ height: p.height, sats: p.sats, usdTarget: p.usdTarget, tail: pr.tail && i === schedule.pieces.length - 1 })),
-        usdPerPayout: gmode === 'usd' && kind === 'gradual' ? Number(usdPer) : undefined,
-        bufferPct: gmode === 'usd' && kind === 'gradual' ? Number(buffer) : undefined,
-        pct: mode === 'percent' ? Number(pct) : undefined,
-        base: mode === 'percent' ? base : undefined,
-        frequency,
-        customDays: Number(customDays),
-        pendingAmounts: pr.tail ? (percentAmounts(bsvToSats(amountBsv), Number(pct), base) as number[]).slice(MAX_PIECES - 1) : undefined,
-        surplusTo: mode === 'usd-target' ? surplusTo : undefined,
-        curve: curved ? curve : undefined,
-        receipt: receipt
-          ? { identity: { handle: names.handle || undefined, paymail: names.paymail || undefined, idKey: acct?.pubKeys?.identityPubKey, address: account }, rate }
-          : undefined,
-      }, chromeStorageService);
+      await createLock(
+        apiContext,
+        account,
+        {
+          label: label.trim() || (kind === 'once' ? `Unlock ${fmtDate(schedule.pieces[0].date)}` : 'Payouts'),
+          mode,
+          pieces: schedule.pieces.map((p, i) => ({
+            height: p.height,
+            sats: p.sats,
+            usdTarget: p.usdTarget,
+            tail: pr.tail && i === schedule.pieces.length - 1,
+          })),
+          usdPerPayout: gmode === 'usd' && kind === 'gradual' ? Number(usdPer) : undefined,
+          bufferPct: gmode === 'usd' && kind === 'gradual' ? Number(buffer) : undefined,
+          pct: mode === 'percent' ? Number(pct) : undefined,
+          base: mode === 'percent' ? base : undefined,
+          frequency,
+          customDays: Number(customDays),
+          pendingAmounts: pr.tail
+            ? (percentAmounts(bsvToSats(amountBsv), Number(pct), base) as number[]).slice(MAX_PIECES - 1)
+            : undefined,
+          surplusTo: mode === 'usd-target' ? surplusTo : undefined,
+          curve: curved ? curve : undefined,
+          receipt: receipt
+            ? {
+                identity: {
+                  handle: names.handle || undefined,
+                  paymail: names.paymail || undefined,
+                  idKey: acct?.pubKeys?.identityPubKey,
+                  address: account,
+                },
+                rate,
+              }
+            : undefined,
+        },
+        chromeStorageService,
+      );
       addSnackbar('Locked. It cannot be undone.', 'success');
       setTyped('');
       setView({ kind: 'list' });
@@ -240,7 +335,13 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   // ── claim + dollar payouts ──
   const totals = aggregate(plans, height);
   const [payouts, setPayouts] = useState<
-    { plan: LockPlan; lines: string[]; relock?: { height: number; sats: number; usdTarget?: number; extend?: boolean }; batch?: ReturnType<typeof resplitTail> }[] | null
+    | {
+        plan: LockPlan;
+        lines: string[];
+        relock?: { height: number; sats: number; usdTarget?: number; extend?: boolean };
+        batch?: ReturnType<typeof resplitTail>;
+      }[]
+    | null
   >(null);
 
   const claim = async () => {
@@ -260,7 +361,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
         for (const x of ready) {
           if (x.tail && p.pendingAmounts?.length) {
             batch = resplitTail(p.pendingAmounts, x.height, p.frequency ?? 'daily', p.customDays);
-            lines.push(`${fmtBsv(p.pendingAmounts[0])} payout. The remaining ${p.pendingAmounts.length - 1} payouts were held in one lock and are now in your wallet.`);
+            lines.push(
+              `${fmtBsv(p.pendingAmounts[0])} payout. The remaining ${p.pendingAmounts.length - 1} payouts were held in one lock and are now in your wallet.`,
+            );
             continue;
           }
           if (p.mode !== 'usd-target' || !x.usdTarget) {
@@ -268,19 +371,34 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             continue;
           }
           const r = payoutFor(x.sats, x.usdTarget, todays, target != null);
-          if (r.kind === 'wait') lines.push(`${fmtBsv(x.sats)} claimed. ${r.reason} The full piece is in your wallet as BSV.`);
+          if (r.kind === 'wait')
+            lines.push(`${fmtBsv(x.sats)} claimed. ${r.reason} The full piece is in your wallet as BSV.`);
           else if (r.kind === 'short') {
             x.paidUsd = r.paidUsd;
             lines.push(`Paid ${fmtUsd(r.paidUsd)} of ${fmtUsd(r.targetUsd)} (${fmtBsv(r.paySats)})`);
           } else {
             x.paidUsd = r.paidUsd;
             surplus += r.surplusSats;
-            lines.push(`Paid ${fmtUsd(r.paidUsd)} (${fmtBsv(r.paySats)})${r.relock ? `, surplus ${fmtBsv(r.surplusSats)}` : ''}`);
+            lines.push(
+              `Paid ${fmtUsd(r.paidUsd)} (${fmtBsv(r.paySats)})${r.relock ? `, surplus ${fmtBsv(r.surplusSats)}` : ''}`,
+            );
           }
         }
-        out.push({ plan: p, lines, relock: surplus && target != null ? { height: target, sats: surplus, usdTarget: p.usdPerPayout, extend: p.surplusTo === 'extend' } : undefined, batch: batch?.pieces.length ? batch : undefined });
+        out.push({
+          plan: p,
+          lines,
+          relock:
+            surplus && target != null
+              ? { height: target, sats: surplus, usdTarget: p.usdPerPayout, extend: p.surplusTo === 'extend' }
+              : undefined,
+          batch: batch?.pieces.length ? batch : undefined,
+        });
       }
-      savePlans(account, loadPlans(account, chromeStorageService).map((p) => before.find((b) => b.id === p.id) ?? p), chromeStorageService);
+      savePlans(
+        account,
+        loadPlans(account, chromeStorageService).map((p) => before.find((b) => b.id === p.id) ?? p),
+        chromeStorageService,
+      );
       setPayouts(out);
       await refresh();
     } catch (e) {
@@ -293,7 +411,14 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const doRelock = async (planId: string, piece: { height: number; sats: number; usdTarget?: number }) => {
     setBusy(true);
     try {
-      await relock(apiContext, account, planId, [{ vout: 0, height: piece.height, sats: piece.sats, usdTarget: piece.usdTarget }], undefined, chromeStorageService);
+      await relock(
+        apiContext,
+        account,
+        planId,
+        [{ vout: 0, height: piece.height, sats: piece.sats, usdTarget: piece.usdTarget }],
+        undefined,
+        chromeStorageService,
+      );
       addSnackbar('Surplus re-locked', 'success');
       setPayouts((ps) => ps?.map((x) => (x.plan.id === planId ? { ...x, relock: undefined } : x)) ?? null);
       await refresh();
@@ -334,7 +459,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
 
   const header = (title: string, back: () => void) => (
     <div className="flex items-center gap-2 px-4 pt-3">
-      <button aria-label="Back" onClick={back} className="w-9 h-9 flex items-center justify-center rounded-full" style={{ border: `1px solid ${LINE}` }}>
+      <button
+        aria-label="Back"
+        onClick={back}
+        className="w-9 h-9 flex items-center justify-center rounded-full"
+        style={{ border: `1px solid ${LINE}` }}
+      >
         <ArrowLeft size={16} color="#fff" />
       </button>
       <h1 className="text-lg font-extrabold text-white">{title}</h1>
@@ -352,7 +482,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
         {header('Lock BSV', () => navigate(-1))}
         <div className="px-4 flex flex-col gap-3">
           <div className={card} style={cardStyle}>
-            <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>Total locked</div>
+            <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+              Total locked
+            </div>
             <div className="text-3xl font-extrabold text-white">{fmtBsv(totals.locked)}</div>
             <div className="text-xs" style={{ color: MUTED }}>
               {totals.count} lock{totals.count === 1 ? '' : 's'}
@@ -360,7 +492,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               {est(totals.locked)}
             </div>
             {totals.ready > 0 && (
-              <button disabled={busy} onClick={() => void claim()} className={btn} style={{ background: GOLD, color: '#1a1300' }}>
+              <button
+                disabled={busy}
+                onClick={() => void claim()}
+                className={btn}
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
                 Claim {fmtBsv(totals.ready)} ready now
               </button>
             )}
@@ -377,10 +514,16 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                   {p.batch && (
                     <div className="flex flex-col gap-2 mt-1">
                       <span>
-                        Lock the next {p.batch.pieces.length} payouts ({fmtBsv(p.batch.pieces.reduce((a, x) => a + x.sats, 0))}) on the same schedule? This
-                        is a new lock and cannot be undone.
+                        Lock the next {p.batch.pieces.length} payouts (
+                        {fmtBsv(p.batch.pieces.reduce((a, x) => a + x.sats, 0))}) on the same schedule? This is a new
+                        lock and cannot be undone.
                       </span>
-                      <button disabled={busy} className={btn} style={{ background: GOLD, color: '#1a1300' }} onClick={() => void doBatch(p.plan.id, p.batch!)}>
+                      <button
+                        disabled={busy}
+                        className={btn}
+                        style={{ background: GOLD, color: '#1a1300' }}
+                        onClick={() => void doBatch(p.plan.id, p.batch!)}
+                      >
                         Lock next payouts
                       </button>
                     </div>
@@ -389,14 +532,27 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                     <div className="flex flex-col gap-2 mt-1">
                       <span>
                         Re-lock the extra {fmtBsv(p.relock.sats)}{' '}
-                        {p.relock.extend ? `as a new payout after your last one (block ${p.relock.height})` : `into your next payout (block ${p.relock.height})`}? This is a new lock and
-                        cannot be undone. Or keep it in your wallet.
+                        {p.relock.extend
+                          ? `as a new payout after your last one (block ${p.relock.height})`
+                          : `into your next payout (block ${p.relock.height})`}
+                        ? This is a new lock and cannot be undone. Or keep it in your wallet.
                       </span>
                       <div className="flex gap-2">
-                        <button disabled={busy} className={`${btn} flex-1`} style={{ background: GOLD, color: '#1a1300' }} onClick={() => void doRelock(p.plan.id, p.relock!)}>
+                        <button
+                          disabled={busy}
+                          className={`${btn} flex-1`}
+                          style={{ background: GOLD, color: '#1a1300' }}
+                          onClick={() => void doRelock(p.plan.id, p.relock!)}
+                        >
                           Re-lock surplus
                         </button>
-                        <button className={`${btn} flex-1 text-white`} style={{ border: `1px solid ${LINE}` }} onClick={() => setPayouts((ps) => ps?.map((x) => (x === p ? { ...x, relock: undefined } : x)) ?? null)}>
+                        <button
+                          className={`${btn} flex-1 text-white`}
+                          style={{ border: `1px solid ${LINE}` }}
+                          onClick={() =>
+                            setPayouts((ps) => ps?.map((x) => (x === p ? { ...x, relock: undefined } : x)) ?? null)
+                          }
+                        >
                           Keep in wallet
                         </button>
                       </div>
@@ -406,7 +562,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               ))}
             </div>
           )}
-          <button onClick={() => setView({ kind: 'new' })} className={`${btn} flex items-center justify-center gap-2`} style={{ background: GOLD, color: '#1a1300' }}>
+          <button
+            onClick={() => setView({ kind: 'new' })}
+            className={`${btn} flex items-center justify-center gap-2`}
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
             <Plus size={16} /> New lock
           </button>
           {plans.length === 0 && (
@@ -422,14 +582,18 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               <div key={p.id} className={card} style={cardStyle}>
                 <div className="flex justify-between gap-2">
                   <span className="text-sm font-bold text-white truncate">{p.label}</span>
-                  <span className="text-xs font-bold" style={{ color: s.status === 'Ready to claim' ? GOLD : MUTED }}>{s.status}</span>
+                  <span className="text-xs font-bold" style={{ color: s.status === 'Ready to claim' ? GOLD : MUTED }}>
+                    {s.status}
+                  </span>
                 </div>
                 <div className="text-xs" style={{ color: MUTED }}>
                   {modeLabel(p)} · {pieceTxt} · {fmtBsv(total)} locked at start
                 </div>
                 <div className="text-xs text-white">
                   Still locked {fmtBsv(s.locked)}
-                  {s.next ? ` · next ≈ block ${s.next} (${fmtDate(new Date(Date.now() + (s.next - height) * 600_000))})` : ''}
+                  {s.next
+                    ? ` · next ≈ block ${s.next} (${fmtDate(new Date(Date.now() + (s.next - height) * 600_000))})`
+                    : ''}
                 </div>
                 {p.pieces.some((x) => x.paidUsd != null) && (
                   <div className="text-xs" style={{ color: MUTED }}>
@@ -440,13 +604,25 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                       .join(' · ')}
                   </div>
                 )}
-                <button className="text-xs text-left" style={{ color: GOLD }} onClick={() => { setTxInput(p.txids[0]); setView({ kind: 'verify', tx: p.txids[0] }); void runVerify(p.txids[0]); }}>
+                <button
+                  className="text-xs text-left"
+                  style={{ color: GOLD }}
+                  onClick={() => {
+                    setTxInput(p.txids[0]);
+                    setView({ kind: 'verify', tx: p.txids[0] });
+                    void runVerify(p.txids[0]);
+                  }}
+                >
                   Verify on chain
                 </button>
               </div>
             );
           })}
-          <button className="text-xs py-2 flex items-center gap-1 justify-center" style={{ color: MUTED }} onClick={() => setView({ kind: 'verify' })}>
+          <button
+            className="text-xs py-2 flex items-center gap-1 justify-center"
+            style={{ color: MUTED }}
+            onClick={() => setView({ kind: 'verify' })}
+          >
             <ShieldCheck size={14} /> Verify any lock
           </button>
         </div>
@@ -458,14 +634,24 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       <>
         {header('New lock', () => setView({ kind: 'list' }))}
         <div className="px-4 flex flex-col gap-3">
-          <div className="rounded-2xl p-3 text-xs font-semibold flex gap-2" style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}>
+          <div
+            className="rounded-2xl p-3 text-xs font-semibold flex gap-2"
+            style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}
+          >
             <AlertTriangle size={14} className="shrink-0 mt-0.5" /> {START_SMALL_NOTE}
           </div>
           <Field label="Name (only you see this)">
-            <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Savings 2027" />
+            <input
+              className={inputCls}
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Savings 2027"
+            />
           </Field>
           <div className="flex flex-col gap-2">
-            <div className="text-xs" style={{ color: MUTED }}>Templates (fill in example values when tapped)</div>
+            <div className="text-xs" style={{ color: MUTED }}>
+              Templates (fill in example values when tapped)
+            </div>
             <div className="flex flex-wrap gap-2">
               {TEMPLATES.map((t) => (
                 <button
@@ -473,49 +659,99 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                   type="button"
                   onClick={() => applyTemplate(t)}
                   className="rounded-full px-3 py-1.5 text-xs font-semibold"
-                  style={{ border: `1px solid ${templateUsed === t.id ? GOLD : LINE}`, color: templateUsed === t.id ? GOLD : '#fff', background: templateUsed === t.id ? '#2a1d00' : PANEL }}
+                  style={{
+                    border: `1px solid ${templateUsed === t.id ? GOLD : LINE}`,
+                    color: templateUsed === t.id ? GOLD : '#fff',
+                    background: templateUsed === t.id ? '#2a1d00' : PANEL,
+                  }}
                 >
                   {t.name}
                 </button>
               ))}
             </div>
             {templateUsed && (
-              <div className="rounded-2xl p-3 text-xs flex flex-col gap-2" style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}>
+              <div
+                className="rounded-2xl p-3 text-xs flex flex-col gap-2"
+                style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}
+              >
                 <span className="font-bold">{TEMPLATE_NOTE}</span>
                 <span style={{ color: '#F2F2F0' }}>{TEMPLATES.find((t) => t.id === templateUsed)?.blurb}</span>
                 <label className="flex items-center gap-2" style={{ color: '#F2F2F0' }}>
-                  <input type="checkbox" checked={templateChecked} onChange={(e) => setTemplateChecked(e.target.checked)} /> {TEMPLATE_CONFIRM}
+                  <input
+                    type="checkbox"
+                    checked={templateChecked}
+                    onChange={(e) => setTemplateChecked(e.target.checked)}
+                  />{' '}
+                  {TEMPLATE_CONFIRM}
                 </label>
               </div>
             )}
           </div>
-          <Seg value={kind} onChange={setKind} options={[['gradual', 'Gradual payouts'], ['once', 'One unlock date']]} />
+          <Seg
+            value={kind}
+            onChange={setKind}
+            options={[
+              ['gradual', 'Gradual payouts'],
+              ['once', 'One unlock date'],
+            ]}
+          />
           {kind === 'once' ? (
             <>
               <Field label="Amount (BSV)">
-                <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.amountBsv} value={amountBsv} onChange={(e) => setAmountBsv(e.target.value)} />
+                <input
+                  className={inputCls}
+                  inputMode="decimal"
+                  placeholder={PLACEHOLDERS.amountBsv}
+                  value={amountBsv}
+                  onChange={(e) => setAmountBsv(e.target.value)}
+                />
               </Field>
               <Field label="Unlock on (approximate)">
-                <input className={inputCls} type="date" value={unlockOn} onChange={(e) => setUnlockOn(e.target.value)} />
+                <input
+                  className={inputCls}
+                  type="date"
+                  value={unlockOn}
+                  onChange={(e) => setUnlockOn(e.target.value)}
+                />
               </Field>
             </>
           ) : (
             <>
-              <Seg value={gmode} onChange={setGmode} options={[['usd', '$ per payout'], ['bsv', 'BSV per payout'], ['percent', '% of lock']]} />
+              <Seg
+                value={gmode}
+                onChange={setGmode}
+                options={[
+                  ['usd', '$ per payout'],
+                  ['bsv', 'BSV per payout'],
+                  ['percent', '% of lock'],
+                ]}
+              />
               {gmode === 'usd' && (
                 <>
                   <div className="flex gap-2">
                     <Field label="Dollars per payout (target)">
-                      <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.usdPer} value={usdPer} onChange={(e) => setUsdPer(e.target.value)} />
+                      <input
+                        className={inputCls}
+                        inputMode="decimal"
+                        placeholder={PLACEHOLDERS.usdPer}
+                        value={usdPer}
+                        onChange={(e) => setUsdPer(e.target.value)}
+                      />
                     </Field>
                     <Field label="Buffer %">
-                      <input className={inputCls} inputMode="numeric" value={buffer} onChange={(e) => setBuffer(e.target.value)} />
+                      <input
+                        className={inputCls}
+                        inputMode="numeric"
+                        value={buffer}
+                        onChange={(e) => setBuffer(e.target.value)}
+                      />
                     </Field>
                   </div>
                   <p className="text-[11px]" style={{ color: MUTED }}>
-                    You lock BSV, not dollars. Each piece is sized at today&apos;s price ({rate > 0 ? fmtUsd(rate) : 'unavailable'}) plus the buffer. When a
-                    piece unlocks, your wallet pays out the target at that day&apos;s price; a surplus can be re-locked, a shortfall pays the
-                    whole piece. Dollar amounts are targets, not guarantees.
+                    You lock BSV, not dollars. Each piece is sized at today&apos;s price (
+                    {rate > 0 ? fmtUsd(rate) : 'unavailable'}) plus the buffer. When a piece unlocks, your wallet pays
+                    out the target at that day&apos;s price; a surplus can be re-locked, a shortfall pays the whole
+                    piece. Dollar amounts are targets, not guarantees.
                   </p>
                   <Field label="Extra goes to">
                     <Seg
@@ -528,27 +764,53 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                     />
                   </Field>
                   <p className="text-[11px]" style={{ color: MUTED }}>
-                    If BSV goes up, the extra can make your next payment bigger, or make your payouts last longer. You approve each re-lock.
+                    If BSV goes up, the extra can make your next payment bigger, or make your payouts last longer. You
+                    approve each re-lock.
                     {surplusPick == null ? ' (Set automatically: longer than a year extends.)' : ''}
                   </p>
                 </>
               )}
               {gmode === 'bsv' && (
                 <Field label="BSV per payout">
-                  <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.bsvPer} value={bsvPer} onChange={(e) => setBsvPer(e.target.value)} />
+                  <input
+                    className={inputCls}
+                    inputMode="decimal"
+                    placeholder={PLACEHOLDERS.bsvPer}
+                    value={bsvPer}
+                    onChange={(e) => setBsvPer(e.target.value)}
+                  />
                 </Field>
               )}
               {gmode === 'percent' && (
                 <>
                   <div className="flex gap-2">
                     <Field label="Amount (BSV)">
-                      <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.amountBsv} value={amountBsv} onChange={(e) => setAmountBsv(e.target.value)} />
+                      <input
+                        className={inputCls}
+                        inputMode="decimal"
+                        placeholder={PLACEHOLDERS.amountBsv}
+                        value={amountBsv}
+                        onChange={(e) => setAmountBsv(e.target.value)}
+                      />
                     </Field>
                     <Field label="% per payout">
-                      <input className={inputCls} inputMode="decimal" placeholder={PLACEHOLDERS.pct} value={pct} onChange={(e) => setPct(e.target.value)} />
+                      <input
+                        className={inputCls}
+                        inputMode="decimal"
+                        placeholder={PLACEHOLDERS.pct}
+                        value={pct}
+                        onChange={(e) => setPct(e.target.value)}
+                      />
                     </Field>
                   </div>
-                  <Seg value={base} onChange={setBase} options={[['original', '% of original'], ['remaining', '% of remaining']]} />
+                  <Seg
+                    value={base}
+                    onChange={setBase}
+                    options={[
+                      ['original', '% of original'],
+                      ['remaining', '% of remaining'],
+                    ]}
+                  />
                   <p className="text-[11px]" style={{ color: MUTED }}>
                     {base === 'original'
                       ? 'The same amount every time; it ends after 100 ÷ X payouts.'
@@ -561,7 +823,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                   <input className={inputCls} type="date" value={start} onChange={(e) => setStart(e.target.value)} />
                 </Field>
                 <Field label="Every">
-                  <select className={inputCls} value={frequency} onChange={(e) => setFrequency(e.target.value as Frequency)}>
+                  <select
+                    className={inputCls}
+                    value={frequency}
+                    onChange={(e) => setFrequency(e.target.value as Frequency)}
+                  >
                     <option value="daily">Day</option>
                     <option value="weekly">Week</option>
                     <option value="monthly">Month</option>
@@ -570,15 +836,33 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </Field>
                 {frequency === 'custom' && (
                   <Field label="Days">
-                    <input className={inputCls} inputMode="numeric" value={customDays} onChange={(e) => setCustomDays(e.target.value)} />
+                    <input
+                      className={inputCls}
+                      inputMode="numeric"
+                      value={customDays}
+                      onChange={(e) => setCustomDays(e.target.value)}
+                    />
                   </Field>
                 )}
               </div>
               {gmode !== 'percent' && (
                 <>
-                  <Seg value={until} onChange={setUntil} options={[['count', 'Number of payouts'], ['end', 'End date']]} />
+                  <Seg
+                    value={until}
+                    onChange={setUntil}
+                    options={[
+                      ['count', 'Number of payouts'],
+                      ['end', 'End date'],
+                    ]}
+                  />
                   {until === 'count' ? (
-                    <input className={inputCls} inputMode="numeric" placeholder={PLACEHOLDERS.count} value={count} onChange={(e) => setCount(e.target.value)} />
+                    <input
+                      className={inputCls}
+                      inputMode="numeric"
+                      placeholder={PLACEHOLDERS.count}
+                      value={count}
+                      onChange={(e) => setCount(e.target.value)}
+                    />
                   ) : (
                     <input className={inputCls} type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
                   )}
@@ -611,7 +895,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 <span>{PREVIEW_LABEL}</span>
                 <span>{fmtBsv(schedule!.totalSats)}</span>
               </div>
-              <div className="text-[11px] font-semibold" style={{ color: GOLD }}>{PREVIEW_NOTE}</div>
+              <div className="text-[11px] font-semibold" style={{ color: GOLD }}>
+                {PREVIEW_NOTE}
+              </div>
               <div className="text-xs" style={{ color: MUTED }}>
                 {schedule!.pieces.length} lock output{schedule!.pieces.length === 1 ? '' : 's'}
                 {est(schedule!.totalSats)}
@@ -620,11 +906,19 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               </div>
               {kind === 'gradual' && (
                 <div className="text-xs text-white">
-                  Nothing unlocks before ≈ {fmtDate(schedule!.pieces[0].date)} (block {schedule!.pieces[0].height}). Then{' '}
-                  {schedule!.pieces.length > 1 ? `${frequency === 'custom' ? `every ${customDays} days` : frequency} until ≈ ${fmtDate(schedule!.pieces[schedule!.pieces.length - 1].date)}` : 'that is the only payout'}.
+                  Nothing unlocks before ≈ {fmtDate(schedule!.pieces[0].date)} (block {schedule!.pieces[0].height}).
+                  Then{' '}
+                  {schedule!.pieces.length > 1
+                    ? `${frequency === 'custom' ? `every ${customDays} days` : frequency} until ≈ ${fmtDate(schedule!.pieces[schedule!.pieces.length - 1].date)}`
+                    : 'that is the only payout'}
+                  .
                 </div>
               )}
-              {schedule!.warning && <div className="text-xs" style={{ color: GOLD }}>{schedule!.warning}</div>}
+              {schedule!.warning && (
+                <div className="text-xs" style={{ color: GOLD }}>
+                  {schedule!.warning}
+                </div>
+              )}
               {kind === 'gradual' && schedule!.pieces.length > 1 && (
                 <div className="flex flex-col gap-1">
                   <div className="text-[11px]" style={{ color: MUTED }}>
@@ -653,7 +947,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                         <td>{fmtDate(p.date)}</td>
                         <td className="text-right">{p.height}</td>
                         {mode === 'usd-target' && curved && <td className="text-right">{fmtUsd(p.usdTarget ?? 0)}</td>}
-                        <td className="text-right">{(p.sats / 1e8).toFixed(8).replace(/0+$/, '').replace(/\.$/, '')}</td>
+                        <td className="text-right">
+                          {(p.sats / 1e8).toFixed(8).replace(/0+$/, '').replace(/\.$/, '')}
+                        </td>
                         <td className="text-right">{rate > 0 ? fmtUsd(satsToUsd(p.sats, rate)) : '–'}</td>
                       </tr>
                     ))}
@@ -661,26 +957,36 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </table>
               </div>
               <p className="text-[11px]" style={{ color: MUTED }}>
-                Dates are estimates: the lock is set to a block height, about 144 blocks a day. USD is at today&apos;s price and will change.
+                Dates are estimates: the lock is set to a block height, about 144 blocks a day. USD is at today&apos;s
+                price and will change.
               </p>
             </div>
           )}
           <label className="flex items-start gap-3 rounded-2xl p-3" style={cardStyle}>
             <input type="checkbox" className="mt-1" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} />
             <span className="text-xs" style={{ color: MUTED }}>
-              <span className="text-white font-semibold">Mint a public receipt</span> (an NFT in the same transaction). It is public and
-              permanent: anyone can see it and verify the lock at bwalletx.com/lock/verify. It shows the amount, its USD value at lock time, the
-              schedule and target, and your {names.handle ? `handle ${names.handle}, ` : ''}paymail and identity key, for good.
+              <span className="text-white font-semibold">Mint a public receipt</span> (an NFT in the same transaction).
+              It is public and permanent: anyone can see it and verify the lock at bwalletx.com/lock/verify. It shows
+              the amount, its USD value at lock time, the schedule and target, and your{' '}
+              {names.handle ? `handle ${names.handle}, ` : ''}paymail and identity key, for good.
             </span>
           </label>
           {sizeAsk && ok ? (
             <div className={card} style={{ background: '#2a1d00', border: `1px solid ${GOLD}` }}>
               <p className="text-sm text-white font-semibold">{BIG_LOCK_QUESTION}</p>
               <div className="flex gap-2">
-                <button className={`${btn} flex-1`} style={{ background: '#2b2f36', color: '#fff' }} onClick={() => setSizeAsk(false)}>
+                <button
+                  className={`${btn} flex-1`}
+                  style={{ background: '#2b2f36', color: '#fff' }}
+                  onClick={() => setSizeAsk(false)}
+                >
                   Make it smaller
                 </button>
-                <button className={`${btn} flex-1`} style={{ background: GOLD, color: '#1a1300' }} onClick={() => (setSizeAsk(false), setView({ kind: 'confirm' }))}>
+                <button
+                  className={`${btn} flex-1`}
+                  style={{ background: GOLD, color: '#1a1300' }}
+                  onClick={() => (setSizeAsk(false), setView({ kind: 'confirm' }))}
+                >
                   Yes, continue
                 </button>
               </div>
@@ -709,18 +1015,32 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             </div>
             <ul className="text-xs text-white flex flex-col gap-2 list-disc pl-4">
               <li>
-                {fmtBsv(schedule?.totalSats ?? 0)} will be locked on the Bitcoin SV blockchain. <b>Nobody can unlock it early: not you, not bWalletX, not support.</b>
+                {fmtBsv(schedule?.totalSats ?? 0)} will be locked on the Bitcoin SV blockchain.{' '}
+                <b>Nobody can unlock it early: not you, not bWalletX, not support.</b>
               </li>
-              <li>Unlock dates are approximate. The lock opens at a block height; blocks come about every 10 minutes on average.</li>
+              <li>
+                Unlock dates are approximate. The lock opens at a block height; blocks come about every 10 minutes on
+                average.
+              </li>
               <li>The locked asset is BSV. Its dollar value will go up and down while it is locked.</li>
               <li>Only your 12 words can claim it. Lose them and the locks are lost for good.</li>
               {receipt && <li>The public receipt links your identity to this amount, permanently.</li>}
             </ul>
           </div>
           <Field label="Type LOCK to confirm">
-            <input className={inputCls} autoCapitalize="characters" value={typed} onChange={(e) => setTyped(e.target.value.toUpperCase())} />
+            <input
+              className={inputCls}
+              autoCapitalize="characters"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value.toUpperCase())}
+            />
           </Field>
-          <button disabled={busy || typed !== 'LOCK' || !ok} onClick={() => void doLock()} className={btn} style={{ background: GOLD, color: '#1a1300' }}>
+          <button
+            disabled={busy || typed !== 'LOCK' || !ok}
+            onClick={() => void doLock()}
+            className={btn}
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
             {busy ? 'Locking…' : `Lock ${fmtBsv(schedule?.totalSats ?? 0)}`}
           </button>
         </div>
@@ -732,12 +1052,21 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
         {header('Verify a lock', () => setView({ kind: 'list' }))}
         <div className="px-4 flex flex-col gap-3">
           <Field label="Lock transaction id">
-            <input className={inputCls} value={txInput} onChange={(e) => setTxInput(e.target.value)} placeholder="64 hex characters" />
+            <input
+              className={inputCls}
+              value={txInput}
+              onChange={(e) => setTxInput(e.target.value)}
+              placeholder="64 hex characters"
+            />
           </Field>
           <button onClick={() => void runVerify()} className={btn} style={{ background: GOLD, color: '#1a1300' }}>
             Check on chain
           </button>
-          {vErr && <p className="text-xs" style={{ color: '#F97066' }}>{vErr}</p>}
+          {vErr && (
+            <p className="text-xs" style={{ color: '#F97066' }}>
+              {vErr}
+            </p>
+          )}
           {verified && <VerifyCard r={verified} />}
         </div>
       </>
@@ -745,14 +1074,18 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   }
 
   return (
-    <div className="w-full h-full flex flex-col overflow-y-auto overflow-x-hidden overscroll-x-none pb-44" style={{ background: '#010101' }}>
+    <div
+      className="w-full h-full flex flex-col overflow-y-auto overflow-x-hidden overscroll-x-none pb-44"
+      style={{ background: '#010101' }}
+    >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
     </div>
   );
 };
 
-const modeLabel = (p: LockPlan) => baseModeLabel(p) + (p.curve && p.curve.kind !== 'linear' ? ` · ${curveLabel(p.curve)}` : '');
+const modeLabel = (p: LockPlan) =>
+  baseModeLabel(p) + (p.curve && p.curve.kind !== 'linear' ? ` · ${curveLabel(p.curve)}` : '');
 const baseModeLabel = (p: LockPlan) =>
   p.mode === 'date'
     ? 'Unlock on a date'
@@ -812,12 +1145,18 @@ const CurvePicker = (p: {
     )}
     {p.kind === 'custom' && (
       <Field label="% per payout, comma separated (must add up to 100)">
-        <textarea className={inputCls} rows={2} placeholder="e.g. 10, 20, 30, 40" value={p.custom} onChange={(e) => p.onCustom(e.target.value)} />
+        <textarea
+          className={inputCls}
+          rows={2}
+          placeholder="e.g. 10, 20, 30, 40"
+          value={p.custom}
+          onChange={(e) => p.onCustom(e.target.value)}
+        />
       </Field>
     )}
     <p className="text-[11px]" style={{ color: MUTED }}>
-      {CURVE_HINT[p.kind]} The total is the same as {p.usd ? 'the dollars per payout' : 'the BSV per payout'} × the number of payouts; the curve only moves it
-      between dates.
+      {CURVE_HINT[p.kind]} The total is the same as {p.usd ? 'the dollars per payout' : 'the BSV per payout'} × the
+      number of payouts; the curve only moves it between dates.
     </p>
   </div>
 );
@@ -829,10 +1168,26 @@ const Bars = ({ values }: { values: number[] }) => {
   const H = 48;
   const bw = W / values.length;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-12" role="img" aria-label="Payout amounts over time">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="w-full h-12"
+      role="img"
+      aria-label="Payout amounts over time"
+    >
       {values.map((v, i) => {
         const h = Math.max(1, (v / max) * H);
-        return <rect key={i} x={i * bw + bw * 0.1} y={H - h} width={Math.max(0.5, bw * 0.8)} height={h} rx={Math.min(2, bw * 0.2)} fill={GOLD} />;
+        return (
+          <rect
+            key={i}
+            x={i * bw + bw * 0.1}
+            y={H - h}
+            width={Math.max(0.5, bw * 0.8)}
+            height={h}
+            rx={Math.min(2, bw * 0.2)}
+            fill={GOLD}
+          />
+        );
       })}
     </svg>
   );
@@ -842,11 +1197,20 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
   <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
     <div className="flex justify-between">
       <span className="text-sm font-bold text-white">{r.status}</span>
-      <span className="text-xs" style={{ color: MUTED }}>{fmtBsv(r.totalSats)}</span>
+      <span className="text-xs" style={{ color: MUTED }}>
+        {fmtBsv(r.totalSats)}
+      </span>
     </div>
-    <div className="text-xs flex items-center gap-1" style={{ color: r.receipt ? (r.receiptValid ? '#32D583' : '#F97066') : MUTED }}>
-      {r.receipt ? (r.receiptValid ? <Check size={14} /> : <AlertTriangle size={14} />) : null}
-      {r.receipt ? (r.receiptValid ? 'Receipt matches the lock outputs' : 'Receipt does NOT match the chain') : 'No receipt in this transaction'}
+    <div
+      className="text-xs flex items-center gap-1"
+      style={{ color: r.receipt ? (r.receiptValid ? '#32D583' : '#F97066') : MUTED }}
+    >
+      {r.receipt ? r.receiptValid ? <Check size={14} /> : <AlertTriangle size={14} /> : null}
+      {r.receipt
+        ? r.receiptValid
+          ? 'Receipt matches the lock outputs'
+          : 'Receipt does NOT match the chain'
+        : 'No receipt in this transaction'}
     </div>
     {r.description && <div className="text-xs text-white">{r.description}</div>}
     {r.receipt && (
@@ -855,7 +1219,9 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
       </div>
     )}
     {r.problems.map((p, i) => (
-      <div key={i} className="text-xs" style={{ color: '#F97066' }}>{p}</div>
+      <div key={i} className="text-xs" style={{ color: '#F97066' }}>
+        {p}
+      </div>
     ))}
     <table className="w-full text-[11px] text-white">
       <tbody>
@@ -864,7 +1230,9 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
             <td className="py-1">#{l.vout}</td>
             <td>block {l.height}</td>
             <td className="text-right">{fmtBsv(l.sats)}</td>
-            <td className="text-right" style={{ color: l.spent ? MUTED : '#32D583' }}>{l.spent ? 'claimed' : l.matured ? 'unlocked' : 'locked'}</td>
+            <td className="text-right" style={{ color: l.spent ? MUTED : '#32D583' }}>
+              {l.spent ? 'claimed' : l.matured ? 'unlocked' : 'locked'}
+            </td>
           </tr>
         ))}
       </tbody>

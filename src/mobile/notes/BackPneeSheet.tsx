@@ -37,25 +37,26 @@ export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
           </button>
         </div>
         <p className="text-sm m-0" style={{ color: '#D0D5DD' }}>
-          Every PNEE is a cent backed by BSV that someone locked in a vault. Backers are those people: you lock BSV and create
-          new PNEE against it, like a MakerDAO vault creates DAI.
+          Every PNEE is a cent backed by BSV that someone locked in a vault. Backers are those people: you lock BSV and
+          create new PNEE against it, like a MakerDAO vault creates DAI.
         </p>
         <Box title="How it works">
-          Lock BSV in your own vault and mint PNEE up to a tenth of its value (10x collateral: $10 of BSV backs $1 of PNEE).
-          The BSV stays yours. To unlock it, hand back the PNEE you minted.
+          Lock BSV in your own vault and mint PNEE up to a tenth of its value (10x collateral: $10 of BSV backs $1 of
+          PNEE). The BSV stays yours. To unlock it, hand back the PNEE you minted.
         </Box>
         <Box title="What you get">
-          <b>Spendable cents without selling your BSV.</b> Pay with the PNEE you mint, or sell them to people who want digital
-          cents. <b>You keep BSV&apos;s upside:</b> if BSV rises, your vault is worth more and can back more PNEE. <b>Sell at a
-          premium:</b> when buyers pay a little over a cent on the Exchange, the difference is yours.
+          <b>Spendable cents without selling your BSV.</b> Pay with the PNEE you mint, or sell them to people who want
+          digital cents. <b>You keep BSV&apos;s upside:</b> if BSV rises, your vault is worth more and can back more
+          PNEE. <b>Sell at a premium:</b> when buyers pay a little over a cent on the Exchange, the difference is yours.
         </Box>
         <Box title="What it costs and risks">
-          No interest and no yearly fee. If BSV falls so far that your vault drops below 150% (an 85% fall from 10x), anyone can
-          repay its PNEE and take your BSV at a 10% discount: you keep what&apos;s left. PNEEs are new and in a small
-          mainnet pilot; back only what you can afford to lose.
+          No interest and no yearly fee. If BSV falls so far that your vault drops below 150% (an 85% fall from 10x),
+          anyone can repay its PNEE and take your BSV at a 10% discount: you keep what&apos;s left. PNEEs are new and in
+          a small mainnet pilot; back only what you can afford to lose.
         </Box>
         <div className="rounded-xl p-3 text-xs" style={{ background: '#F5B80014', color: GOLD }}>
-          Opening a vault from the wallet is coming after the pilot. Today the first vault is run by bCorp; see bwalletx.com/pnee.
+          Opening a vault from the wallet is coming after the pilot. Today the first vault is run by bCorp; see
+          bwalletx.com/pnee.
         </div>
       </div>
     </div>,

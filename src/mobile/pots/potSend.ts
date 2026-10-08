@@ -108,5 +108,6 @@ const REFUSED = new Set(['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFO
  */
 export const broadcastRaw = async (rawTx: string): Promise<void> => {
   const r = await svc().submitToStack(Utils.toArray(rawTx, 'hex'));
-  if (REFUSED.has(r.txStatus)) throw new Error(`Payment refused by the network (${r.txStatus}${r.extraInfo ? `: ${r.extraInfo}` : ''})`);
+  if (REFUSED.has(r.txStatus))
+    throw new Error(`Payment refused by the network (${r.txStatus}${r.extraInfo ? `: ${r.extraInfo}` : ''})`);
 };

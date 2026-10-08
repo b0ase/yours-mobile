@@ -208,7 +208,9 @@ export const isLowFunds = (covers: number) => covers < 2;
  * catch-up still fits while a buggy loop can't drain the pot in a day.
  */
 export const defaultDailyCap = (subs: Subscription[], bsvUsd: number): number | null => {
-  const amounts = subs.filter((s) => s.status !== 'cancelled' && s.status !== 'ended').map((s) => amountUsd(s.amount, bsvUsd));
+  const amounts = subs
+    .filter((s) => s.status !== 'cancelled' && s.status !== 'ended')
+    .map((s) => amountUsd(s.amount, bsvUsd));
   const max = Math.max(0, ...amounts);
   return max > 0 ? Math.round(max * MAX_CATCH_UP * 110) / 100 : null;
 };
@@ -237,7 +239,8 @@ export const subscriptionsUnlocked = (
 // ── Store ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const listPots = (): Pot[] => Object.values(read<Record<string, Pot>>(POTS, {}));
-export const getPot = (id?: string | null): Pot | null => (id ? (read<Record<string, Pot>>(POTS, {})[id] ?? null) : null);
+export const getPot = (id?: string | null): Pot | null =>
+  id ? (read<Record<string, Pot>>(POTS, {})[id] ?? null) : null;
 export const listSubs = (potId?: string): Subscription[] =>
   Object.values(read<Record<string, Subscription>>(SUBS, {})).filter((s) => !potId || s.potId === potId);
 export const getSub = (id: string): Subscription | null => read<Record<string, Subscription>>(SUBS, {})[id] ?? null;
@@ -371,7 +374,13 @@ export const advanced = (s: Subscription, count: number): Subscription => {
 };
 
 export const formatPeriod = (p: Period) =>
-  typeof p === 'object' ? `every ${Math.round(p.seconds / 3600)}h` : ({ day: 'daily', week: 'weekly', month: 'monthly', year: 'yearly' } as const)[p];
+  typeof p === 'object'
+    ? `every ${Math.round(p.seconds / 3600)}h`
+    : ({ day: 'daily', week: 'weekly', month: 'monthly', year: 'yearly' } as const)[p];
 
 export const formatAmount = (a: Subscription['amount']) =>
-  a.currency === 'USD' ? `$${a.value.toFixed(2)}` : a.currency === 'SAT' ? `${a.value.toLocaleString()} sats` : `${a.value} PNEE`;
+  a.currency === 'USD'
+    ? `$${a.value.toFixed(2)}`
+    : a.currency === 'SAT'
+      ? `${a.value.toLocaleString()} sats`
+      : `${a.value} PNEE`;

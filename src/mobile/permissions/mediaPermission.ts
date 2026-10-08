@@ -20,7 +20,8 @@ const LABEL: Record<MediaKind, string> = { mic: 'Microphone', camera: 'Camera' }
 
 export function deniedText(kind: MediaKind, platform: MediaPlatform): string {
   const what = LABEL[kind];
-  if (platform === 'ios') return `${what} is off for bWallet. Turn it on in iPhone Settings › Apps › bWallet › ${what}.`;
+  if (platform === 'ios')
+    return `${what} is off for bWallet. Turn it on in iPhone Settings › Apps › bWallet › ${what}.`;
   if (platform === 'android')
     return `${what} is off for bWallet. Turn it on in Android Settings › Apps › bWallet › Permissions.`;
   return `${what} is blocked for this site. Allow it in your browser’s site settings (the lock icon next to the address).`;

@@ -39,8 +39,8 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
       style={{ background: '#17191E', border: '1px solid #3a2f0c' }}
     >
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
-        The 1Sat indexer has stopped validating ${ticker} until its fee balance is topped up, so it can't be
-        listed or sent as verified. Paying {money(s.total.totalSats, s.rate)} funds it for every holder.
+        The 1Sat indexer has stopped validating ${ticker} until its fee balance is topped up, so it can't be listed or
+        sent as verified. Paying {money(s.total.totalSats, s.rate)} funds it for every holder.
       </p>
       {s.needs && s.freeNote && (
         <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>

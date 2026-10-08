@@ -51,7 +51,9 @@ function brandManifest() {
   manifest.side_panel = { default_path: 'index.html' };
   manifest.permissions = [...new Set([...manifest.permissions, 'sidePanel'])];
   // 1Sat overlay submit sends an x-topics header api.1sat.app's CORS rejects; host access skips CORS.
-  manifest.host_permissions = [...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*', ...BAPP_HOSTS])];
+  manifest.host_permissions = [
+    ...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*', ...BAPP_HOSTS]),
+  ];
   manifest.icons = iconSet;
   // Fixed extension ID (owner, 4 Oct 2026): each build is loaded from its own versioned folder
   // (dist/bwalletx-extension-<version>); without a key Chrome derives the ID from the folder path,

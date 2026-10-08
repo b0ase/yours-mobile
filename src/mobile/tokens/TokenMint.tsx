@@ -72,7 +72,8 @@ export const TokenMint = ({
 
   const review = () => {
     // Hard block at sign time while returns wording is present (returnsWording.ts).
-    const err = validateToken(form) ?? (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null);
+    const err =
+      validateToken(form) ?? (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null);
     setError(err ?? '');
     if (!err) setConfirming(true);
   };

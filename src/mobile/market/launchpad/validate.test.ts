@@ -78,7 +78,7 @@ function honest(side: 'buy' | 'sell', amount: bigint, opts: { reserve?: boolean 
   };
   return { plan, ctx, q };
 }
-const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const BUY = BigInt(1_000_000);
 const SELL = BigInt(10_000_000);
 
@@ -116,36 +116,55 @@ describe('validatePlan: refuses malicious plans', () => {
     bad('buy', (p) => p.outputs.push({ script: p2pkh(addr()), sats: 50_000, what: 'tip' }), /unexpected output/));
   test('extra output on a sell', () =>
     bad('sell', (p) => p.outputs.push({ script: p2pkh(addr()), sats: 1, what: 'x' }), /unexpected output/));
-  test('inflated house fee', () =>
-    bad('buy', (p) => (p.outputs[3].sats += 10_000), /output 3/));
+  test('inflated house fee', () => bad('buy', (p) => (p.outputs[3].sats += 10_000), /output 3/));
   test('house fee to another address', () =>
     bad('buy', (p) => (p.outputs[3].script = p2pkh(addr())), /wrong script or recipient/));
   test('route fee to another address', () =>
     bad('sell', (p) => (p.outputs[3].script = p2pkh(addr())), /wrong script or recipient/));
   test('inflated index fee (over the cap)', () =>
-    bad('buy', (p) => {
-      p.outputs[5].sats = 50_000;
-      p.quote.indexFee = 50_000;
-    }, /index fee is too high/));
+    bad(
+      'buy',
+      (p) => {
+        p.outputs[5].sats = 50_000;
+        p.quote.indexFee = 50_000;
+      },
+      /index fee is too high/,
+    ));
   test('index fee not as quoted', () => bad('buy', (p) => (p.outputs[5].sats = 4000), /index fee output/));
   test('inflated BSV into the pool', () => bad('buy', (p) => (p.outputs[2].sats += 100_000), /output 2/));
   test('wrong token amount to the buyer', () =>
-    bad('buy', (p) => {
-      const q = BigInt(p.quote.tokens) / BigInt(2);
-      p.outputs[0].script = bsv21(COIN, q, BUY_TO).toHex();
-    }, /fewer tokens than your minimum/));
+    bad(
+      'buy',
+      (p) => {
+        const q = BigInt(p.quote.tokens) / BigInt(2);
+        p.outputs[0].script = bsv21(COIN, q, BUY_TO).toHex();
+      },
+      /fewer tokens than your minimum/,
+    ));
   test('slightly fewer tokens (within slippage) still not the curve amount', () =>
-    bad('buy', (p) => {
-      p.outputs[0].script = bsv21(COIN, BigInt(p.quote.tokens) - BigInt(1), BUY_TO).toHex();
-    }, /output 0 does not send the tokens to your wallet/));
+    bad(
+      'buy',
+      (p) => {
+        p.outputs[0].script = bsv21(COIN, BigInt(p.quote.tokens) - BigInt(1), BUY_TO).toHex();
+      },
+      /output 0 does not send the tokens to your wallet/,
+    ));
   test('wrong token id', () =>
-    bad('buy', (p) => {
-      p.outputs[0].script = bsv21(`${'cd'.repeat(32)}_0`, BigInt(p.quote.tokens), BUY_TO).toHex();
-    }, /not this coin/));
+    bad(
+      'buy',
+      (p) => {
+        p.outputs[0].script = bsv21(`${'cd'.repeat(32)}_0`, BigInt(p.quote.tokens), BUY_TO).toHex();
+      },
+      /not this coin/,
+    ));
   test('tokens to another recipient', () =>
-    bad('buy', (p) => {
-      p.outputs[0].script = bsv21(COIN, BigInt(p.quote.tokens), addr()).toHex();
-    }, /not send the tokens to your wallet/));
+    bad(
+      'buy',
+      (p) => {
+        p.outputs[0].script = bsv21(COIN, BigInt(p.quote.tokens), addr()).toHex();
+      },
+      /not send the tokens to your wallet/,
+    ));
   test('short sell payout (pool keeps more BSV)', () => bad('sell', (p) => (p.outputs[1].sats += 50_000), /output 1/));
   test('quote mismatch (tokens)', () =>
     bad('buy', (p) => (p.quote.tokens = (BigInt(p.quote.tokens) + BigInt(1)).toString()), /quote \(tokens\)/));
@@ -154,8 +173,7 @@ describe('validatePlan: refuses malicious plans', () => {
   test('board sold faked low: on-chain fill worse than the slippage limit', () =>
     bad('buy', (_p, c) => (c.boardSold = BigInt(0)), /slippage/));
   test('pool input sats misreported', () => bad('sell', (p) => (p.inputs[1].sats += 1), /pool input 1/));
-  test('pool input is the user own coin', () =>
-    bad('sell', (_p, c) => (c.mine = [RESERVE_ADDR]), /your own BSV/));
+  test('pool input is the user own coin', () => bad('sell', (_p, c) => (c.mine = [RESERVE_ADDR]), /your own BSV/));
   test('different coin', () => bad('buy', (p) => (p.tokenId = `${'cd'.repeat(32)}_0`), /different coin/));
   test('other side', () => bad('buy', (p) => (p.side = 'sell'), /other side/));
   test('missing output', () => bad('sell', (p) => p.outputs.splice(2, 1), /output 2|output 3/));
@@ -205,7 +223,14 @@ describe('trade() refuses a malicious server plan before the wallet signs anythi
         throw new Error('should not be reached');
       },
     } as unknown as WalletInterface;
-    const err = await trade({ client, address: ME, publicKey: pub }, { id: COIN, sym: 'TEST', routeAddress: ROUTE_ADDR }, 'buy', BUY, SOLD, 300).then(
+    const err = await trade(
+      { client, address: ME, publicKey: pub },
+      { id: COIN, sym: 'TEST', routeAddress: ROUTE_ADDR },
+      'buy',
+      BUY,
+      SOLD,
+      300,
+    ).then(
       () => null,
       (e: Error) => e,
     );

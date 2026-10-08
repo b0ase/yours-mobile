@@ -64,7 +64,9 @@ export const ReactionChips = ({
 }) => {
   const self = me.replace(/^\$/, '').toLowerCase();
   return (
-    <div className={`flex flex-wrap gap-1 -mt-[6px] relative z-[1] ${mine ? 'justify-end pr-2' : 'justify-start pl-[44px]'}`}>
+    <div
+      className={`flex flex-wrap gap-1 -mt-[6px] relative z-[1] ${mine ? 'justify-end pr-2' : 'justify-start pl-[44px]'}`}
+    >
       {list.map((r) => {
         const minePick = r.handles.includes(self);
         return (
@@ -116,14 +118,21 @@ export const ReactionBar = ({
     >
       <div
         className="w-full max-w-md rounded-t-3xl px-4 pt-4"
-        style={{ background: '#0d0e10', borderTop: `1px solid ${LINE}`, paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+        style={{
+          background: '#0d0e10',
+          borderTop: `1px solid ${LINE}`,
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <p className="text-xs mb-3 line-clamp-2" style={{ color: MUTED }}>
           {preview}
         </p>
         {onReact && (
-          <div className="flex justify-between mb-3 rounded-full px-2 py-1" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+          <div
+            className="flex justify-between mb-3 rounded-full px-2 py-1"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          >
             {QUICK_REACTIONS.map((e) => (
               <button
                 key={e}
@@ -138,9 +147,7 @@ export const ReactionBar = ({
           </div>
         )}
         <div className="flex flex-col gap-2">
-          {onReply && (
-            <Row onClick={onReply} icon={<CornerUpLeft size={16} />} label="Reply" />
-          )}
+          {onReply && <Row onClick={onReply} icon={<CornerUpLeft size={16} />} label="Reply" />}
           {onShare && <Row onClick={onShare} icon={<Share2 size={16} />} label="Share to room" gold />}
           {onMore && <Row onClick={onMore} icon={<MoreHorizontal size={16} />} label="Report, block…" />}
         </div>
@@ -149,7 +156,17 @@ export const ReactionBar = ({
     document.body,
   );
 
-const Row = ({ onClick, icon, label, gold }: { onClick: () => void; icon: React.ReactNode; label: string; gold?: boolean }) => (
+const Row = ({
+  onClick,
+  icon,
+  label,
+  gold,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  gold?: boolean;
+}) => (
   <button
     type="button"
     onClick={onClick}
@@ -161,7 +178,10 @@ const Row = ({ onClick, icon, label, gold }: { onClick: () => void; icon: React.
 );
 
 export const ReplyPreview = ({ reply, onCancel }: { reply: ReplyRef; onCancel: () => void }) => (
-  <div className="flex items-center gap-2 px-3 pt-2 shrink-0" style={{ background: '#0b0b0b', borderTop: `1px solid ${LINE}` }}>
+  <div
+    className="flex items-center gap-2 px-3 pt-2 shrink-0"
+    style={{ background: '#0b0b0b', borderTop: `1px solid ${LINE}` }}
+  >
     <CornerUpLeft size={16} color={GOLD} />
     <div className="flex-1 min-w-0 pl-2 text-[12px]" style={{ borderLeft: `3px solid ${GOLD}` }}>
       <div className="font-semibold" style={{ color: GOLD }}>
@@ -177,8 +197,19 @@ export const ReplyPreview = ({ reply, onCancel }: { reply: ReplyRef; onCancel: (
   </div>
 );
 
-export const MentionPicker = ({ handles, avatar, onPick }: { handles: string[]; avatar: (h: string) => React.ReactNode; onPick: (h: string) => void }) => (
-  <div className="px-3 pt-2 shrink-0 flex flex-col gap-1" style={{ background: '#0b0b0b', borderTop: `1px solid ${LINE}` }}>
+export const MentionPicker = ({
+  handles,
+  avatar,
+  onPick,
+}: {
+  handles: string[];
+  avatar: (h: string) => React.ReactNode;
+  onPick: (h: string) => void;
+}) => (
+  <div
+    className="px-3 pt-2 shrink-0 flex flex-col gap-1"
+    style={{ background: '#0b0b0b', borderTop: `1px solid ${LINE}` }}
+  >
     {handles.map((h) => (
       <button
         key={h}
@@ -195,7 +226,11 @@ export const MentionPicker = ({ handles, avatar, onPick }: { handles: string[]; 
 
 export const TypingRow = ({ label }: { label: string }) =>
   label ? (
-    <div className="px-4 pb-1 text-[12px] italic shrink-0 flex items-center gap-2" style={{ color: MUTED }} aria-live="polite">
+    <div
+      className="px-4 pb-1 text-[12px] italic shrink-0 flex items-center gap-2"
+      style={{ color: MUTED }}
+      aria-live="polite"
+    >
       <span className="inline-flex gap-[3px]">
         {[0, 1, 2].map((i) => (
           <span
@@ -208,4 +243,3 @@ export const TypingRow = ({ label }: { label: string }) =>
       {label}
     </div>
   ) : null;
-

@@ -4,3 +4,40 @@ ios/
 dist/
 pnpm-lock.yaml
 site/pnpm-lock.yaml
+
+# Byte-identical to bit-sign (hash pinned in src/mobile/feed/language.test.ts): never reformat.
+src/mobile/feed/language-lists.json
+src/mobile/feed/language.ts
+
+# Patched at build time by exact-string swaps (MOBILE_TEXT in vite.config.mobile.ts, BCORP/EXTENSION text in vite.brand.ts).
+# Reformatting them breaks the matches and the build; keep them as written.
+src/App.tsx
+src/background.ts
+src/components/AssetRow.tsx
+src/components/BackupPromo.tsx
+src/components/Bsv21TokensList.tsx
+src/components/Ordinal.tsx
+src/components/ProviderPicker.tsx
+src/components/SendBsv21View.tsx
+src/components/SyncingBlocks.tsx
+src/components/TopNav.tsx
+src/components/UnlockWallet.tsx
+src/components/UpgradeNotification.tsx
+src/components/YoursIcon.tsx
+src/components/storageProviders.ts
+src/content.ts
+src/hooks/useIdentity.ts
+src/pages/BsvWallet.tsx
+src/pages/OrdWallet.tsx
+src/pages/Settings.tsx
+src/pages/onboarding/CreateAccount.tsx
+src/pages/onboarding/ImportAccount.tsx
+src/pages/onboarding/MasterRestore.tsx
+src/pages/onboarding/RestoreAccount.tsx
+src/pages/requests/UsbCheckRequest.tsx
+src/pages/usb/AddFlow.tsx
+src/pages/usb/EnrollFlow.tsx
+src/pages/usb/RepickFlow.tsx
+src/pages/usb/RestoreFlow.tsx
+src/pages/usb/UsbFlow.tsx
+src/services/usbBackup.ts

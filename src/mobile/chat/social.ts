@@ -58,7 +58,9 @@ export const optimisticReaction = (target: string, emoji: string, me: string, mi
 
 export const replyOf = (m: ChatMessage): ReplyRef | null => {
   const r = (m.event_payload as { reply_to?: Partial<ReplyRef> } | null | undefined)?.reply_to;
-  return r && typeof r.id === 'string' ? { id: r.id, author: r.author ?? null, snippet: String(r.snippet ?? '') } : null;
+  return r && typeof r.id === 'string'
+    ? { id: r.id, author: r.author ?? null, snippet: String(r.snippet ?? '') }
+    : null;
 };
 
 export const replyRefFor = (m: ChatMessage): ReplyRef => ({
@@ -68,7 +70,8 @@ export const replyRefFor = (m: ChatMessage): ReplyRef => ({
 });
 
 /** A private $b row (question or answer) only I can see. */
-export const isPrivateB = (m: ChatMessage) => Boolean((m.event_payload as { agent_private?: boolean } | null)?.agent_private);
+export const isPrivateB = (m: ChatMessage) =>
+  Boolean((m.event_payload as { agent_private?: boolean } | null)?.agent_private);
 export const isShared = (m: ChatMessage) => Boolean((m.event_payload as { shared?: boolean } | null)?.shared);
 /** Server-only ids (`ephemeral:…`, e.g. /b help): nothing can be done to them. */
 // One definition (messages.ts, from feat/lounge-bot); re-exported for chat-ux callers.

@@ -40,7 +40,11 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
       className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-left cursor-pointer outline-none transition-colors duration-150 bg-[#17191E] hover:bg-[#1f2128]"
       style={style}
     >
-      {busy ? <Loader2 size={16} className="animate-spin" color="#98A2B3" /> : <SearchCheck size={16} color="#98A2B3" />}
+      {busy ? (
+        <Loader2 size={16} className="animate-spin" color="#98A2B3" />
+      ) : (
+        <SearchCheck size={16} color="#98A2B3" />
+      )}
       <span className="text-sm font-semibold" style={{ color: '#98A2B3' }}>
         {busy ? 'Refreshing…' : 'Refresh token balances'}
       </span>

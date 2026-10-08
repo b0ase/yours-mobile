@@ -30,7 +30,15 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { getPageEl, hasLanded, prewarmPages, setLanded } from './pageEl';
 import { PageDots } from './PageDots';
 import { backGoesHome, setPhoneBack } from './phoneBack';
-import { appIndexForPath, coldStartRedirect, appScreenRoute, pageForPath, screenById, STRIP, type Screen } from './screens';
+import {
+  appIndexForPath,
+  coldStartRedirect,
+  appScreenRoute,
+  pageForPath,
+  screenById,
+  STRIP,
+  type Screen,
+} from './screens';
 import { SendReceiveSheet } from './SendReceiveSheet';
 import { useAppServices } from './useAppServices';
 import { requestWalletAction, type WalletAction } from './walletAction';

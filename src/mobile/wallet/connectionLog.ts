@@ -32,7 +32,11 @@ export type ConnectionLog = Record<string, ConnectionEntry>;
 export { isGameHost } from './gameHosts';
 import { isGameHost } from './gameHosts';
 
-const clean = (o: string) => o.replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 253);
+const clean = (o: string) =>
+  o
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .slice(0, 253);
 
 /** Record one call. Returns a new log (pure). */
 export const recordCall = (log: ConnectionLog, originator: string, method: string, now = Date.now()): ConnectionLog => {
@@ -51,7 +55,12 @@ export const recordPayment = (log: ConnectionLog, originator: string, p: AppPaym
   if (e.payments.some((x) => x.txid === p.txid)) return log;
   return {
     ...log,
-    [host]: { ...e, lastSeen: Math.max(e.lastSeen, p.at), payments: [p, ...e.payments].slice(0, MAX_PAYMENTS), spentSats: e.spentSats + Math.max(0, p.sats) },
+    [host]: {
+      ...e,
+      lastSeen: Math.max(e.lastSeen, p.at),
+      payments: [p, ...e.payments].slice(0, MAX_PAYMENTS),
+      spentSats: e.spentSats + Math.max(0, p.sats),
+    },
   };
 };
 
@@ -65,17 +74,29 @@ const prune = (log: ConnectionLog): ConnectionLog => {
 /** txid → app, for History labelling. */
 export const appsByTxid = (log: ConnectionLog) => {
   const m = new Map<string, { app: string; game?: boolean }>();
-  for (const e of Object.values(log)) for (const p of e.payments) m.set(p.txid, { app: e.originator, game: isGameHost(e.originator) });
+  for (const e of Object.values(log))
+    for (const p of e.payments) m.set(p.txid, { app: e.originator, game: isGameHost(e.originator) });
   return m;
 };
 
 /** Sats an app's createAction sends to outputs (what it asked the wallet to pay). */
 export const requestedSats = (outputs: { satoshis?: number }[] | undefined) =>
-  (outputs ?? []).reduce((s, o) => s + (typeof o.satoshis === 'number' && o.satoshis > 0 && o.satoshis < 2_099_999_999_999_999 ? o.satoshis : 0), 0);
+  (outputs ?? []).reduce(
+    (s, o) =>
+      s + (typeof o.satoshis === 'number' && o.satoshis > 0 && o.satoshis < 2_099_999_999_999_999 ? o.satoshis : 0),
+    0,
+  );
 
 // ─── Merge for the Connections view ─────────────────────────────────────────
 
-export type PermissionGrant = { type?: string; originator?: string; authorizedAmount?: number; expiry?: number; protocol?: string; basketName?: string };
+export type PermissionGrant = {
+  type?: string;
+  originator?: string;
+  authorizedAmount?: number;
+  expiry?: number;
+  protocol?: string;
+  basketName?: string;
+};
 export type PermissionGroup = { originator: string; permissions: PermissionGrant[] };
 
 export type ConnectionRow = {
@@ -102,7 +123,12 @@ const hostOf = (o: string) => {
 };
 
 /** Merge the recorded log, the BRC-100 grants and the account's history into one row per app (pure). */
-export const mergeConnections = (log: ConnectionLog, groups: PermissionGroup[], rows: HistoryRow[], seen: string[] = []): ConnectionRow[] => {
+export const mergeConnections = (
+  log: ConnectionLog,
+  groups: PermissionGroup[],
+  rows: HistoryRow[],
+  seen: string[] = [],
+): ConnectionRow[] => {
   const m = new Map<string, ConnectionRow>();
   const get = (host: string) => {
     let r = m.get(host);
@@ -125,7 +151,8 @@ export const mergeConnections = (log: ConnectionLog, groups: PermissionGroup[], 
     for (const p of g.permissions) {
       const t = p.type ?? 'other';
       r.grants[t] = (r.grants[t] ?? 0) + 1;
-      if (t === 'spending' && typeof p.authorizedAmount === 'number') r.spendLimitSats = (r.spendLimitSats ?? 0) + p.authorizedAmount;
+      if (t === 'spending' && typeof p.authorizedAmount === 'number')
+        r.spendLimitSats = (r.spendLimitSats ?? 0) + p.authorizedAmount;
     }
   }
   for (const x of rows)
@@ -142,7 +169,10 @@ export const mergeConnections = (log: ConnectionLog, groups: PermissionGroup[], 
 
 // ─── Storage (chrome.storage.local; no-ops where it is missing) ──────────────
 
-type Area = { get: (k: string) => Promise<Record<string, unknown>>; set: (v: Record<string, unknown>) => Promise<void> };
+type Area = {
+  get: (k: string) => Promise<Record<string, unknown>>;
+  set: (v: Record<string, unknown>) => Promise<void>;
+};
 const area = (): Area | null => {
   const c = (globalThis as { chrome?: { storage?: { local?: Area } } }).chrome;
   return c?.storage?.local ?? null;
@@ -198,7 +228,8 @@ export const deviceAppHosts = (entries: [string, string | null][]): string[] => 
     if (k.startsWith('bwallet.appLayout.')) out.add(hostOf(k.slice('bwallet.appLayout.'.length)));
     if (k === 'bwallet:recent-sites' && v)
       try {
-        for (const u of JSON.parse(v) as unknown[]) if (typeof u === 'string' && /^https?:\/\//.test(u)) out.add(hostOf(u));
+        for (const u of JSON.parse(v) as unknown[])
+          if (typeof u === 'string' && /^https?:\/\//.test(u)) out.add(hostOf(u));
       } catch {
         /* not ours to fix */
       }

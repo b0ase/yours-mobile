@@ -11,15 +11,7 @@ const reducedMotion = () =>
  * so only this meter re-renders. Muted: flat bars and a mic-off icon. Reduced motion: a static
  * indicator (full bars while speaking, flat otherwise).
  */
-export function LevelBars({
-  read,
-  speaking,
-  muted,
-}: {
-  read: () => number;
-  speaking: boolean;
-  muted: boolean;
-}) {
+export function LevelBars({ read, speaking, muted }: { read: () => number; speaking: boolean; muted: boolean }) {
   const [level, setLevel] = useState(0);
   const readRef = useRef(read);
   readRef.current = read;

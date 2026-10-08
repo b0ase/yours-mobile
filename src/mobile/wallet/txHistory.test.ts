@@ -34,14 +34,24 @@ const tx = (txid: string, time: number, vin: RawTx['vin'], vout: [number, string
 // A: someone pays us 10,000 sats.  B: we send 6,000 to 1Bob, change 3,900, fee 100.
 // C: self-transfer from pay to ord (1 sat) with change, fee 50.  D: someone pays our identity address.
 const A = tx('a'.repeat(64), T0, [{ txid: 'x'.repeat(64), vout: 0 }], [[10_000, PAY]]);
-const B = tx('b'.repeat(64), T0 + 86400, [{ txid: A.txid, vout: 0 }], [
-  [6_000, '1Bob'],
-  [3_900, PAY],
-]);
-const C = tx('c'.repeat(64), T0 + 2 * 86400, [{ txid: B.txid, vout: 1 }], [
-  [1, ORD],
-  [3_849, PAY],
-]);
+const B = tx(
+  'b'.repeat(64),
+  T0 + 86400,
+  [{ txid: A.txid, vout: 0 }],
+  [
+    [6_000, '1Bob'],
+    [3_900, PAY],
+  ],
+);
+const C = tx(
+  'c'.repeat(64),
+  T0 + 2 * 86400,
+  [{ txid: B.txid, vout: 1 }],
+  [
+    [1, ORD],
+    [3_849, PAY],
+  ],
+);
 const D = tx('d'.repeat(64), T0 + 3 * 86400, [{ txid: 'y'.repeat(64), vout: 3 }], [[500, ID]]);
 
 const rows = buildRows([A, B, C, C, D], own, new Map(), 0);
@@ -63,10 +73,18 @@ describe('direction classification across own addresses', () => {
     expect(byId('c')).toMatchObject({ direction: 'self', amountSats: 0, feeSats: 50, counterparty: '' });
   });
   test('partly funded by others (fee unknown): net change', () => {
-    const E = tx('e'.repeat(64), T0, [{ txid: A.txid, vout: 0 }, { txid: 'z'.repeat(64), vout: 0 }], [
-      [1, ORD],
-      [20_000, '1Seller'],
-    ]);
+    const E = tx(
+      'e'.repeat(64),
+      T0,
+      [
+        { txid: A.txid, vout: 0 },
+        { txid: 'z'.repeat(64), vout: 0 },
+      ],
+      [
+        [1, ORD],
+        [20_000, '1Seller'],
+      ],
+    );
     const r = buildRows([A, E], own, new Map(), 0).find((x) => x.txid === E.txid);
     expect(r).toMatchObject({ direction: 'out', amountSats: -9_999, feeSats: 0 });
   });
@@ -150,7 +168,9 @@ describe('CSV', () => {
     );
     expect(lines.length).toBe(rows.length + 2); // header + rows + trailing empty
     const b = lines.find((l) => l.includes('b'.repeat(64))) as string;
-    expect(b).toContain(',out,-6000,-0.00006000,100,0.00,50.00,1Bob,send,USD at current rate,"My, ""main"" acct",900000,5');
+    expect(b).toContain(
+      ',out,-6000,-0.00006000,100,0.00,50.00,1Bob,send,USD at current rate,"My, ""main"" acct",900000,5',
+    );
   });
   test('bsvString', () => {
     expect(bsvString(123_456_789)).toBe('1.23456789');
@@ -164,7 +184,14 @@ describe('CSV', () => {
 
 describe('statement', () => {
   test('escapes and summarises', () => {
-    const html = statementHtml({ account: '<x>', addresses: [PAY], range: { from: null, to: null }, rows, opening: 0, closing: 4350 });
+    const html = statementHtml({
+      account: '<x>',
+      addresses: [PAY],
+      range: { from: null, to: null },
+      rows,
+      opening: 0,
+      closing: 4350,
+    });
     expect(html).toContain('&lt;x&gt;');
     expect(html).toContain('0.00004350 BSV');
     expect(html).not.toContain('window.print');

@@ -60,7 +60,9 @@ describe('parsePage / parseSpaceInvite', () => {
     expect(p.kind === 'room' && p.members).toBe(12);
   });
   test('reads an invite and its state', () => {
-    const inv = parseSpaceInvite({ invite: { code: 'abcdefgh23', url: 'u', state: 'used_up', expires_at: null, target: space } })!;
+    const inv = parseSpaceInvite({
+      invite: { code: 'abcdefgh23', url: 'u', state: 'used_up', expires_at: null, target: space },
+    })!;
     expect(inv.state).toBe('used_up');
     expect(inv.target.kind).toBe('space');
   });

@@ -66,7 +66,14 @@ export const useAvatars = (client: BchatClient, handles: (string | null | undefi
 
 /** `/b` questions still waiting for $b: asked in the last 90 s with no $b reply pointing at them. */
 export const pendingBQuestions = (
-  messages: { id: string; body: string | null; created_at: string; author_handle: string | null; event_payload?: Record<string, unknown> | null; pending?: boolean }[],
+  messages: {
+    id: string;
+    body: string | null;
+    created_at: string;
+    author_handle: string | null;
+    event_payload?: Record<string, unknown> | null;
+    pending?: boolean;
+  }[],
   now = Date.now(),
 ): Set<string> => {
   const answered = new Set(

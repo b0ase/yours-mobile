@@ -7,7 +7,12 @@ import { claimPaymail } from '../names/paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { SocialSignIn } from '../social/SocialSignIn';
 import { clearSocial, onSocialChange, socialProof } from '../social/socialLogin';
-import { deployPersonalToken, openPersonalRoom, PERSONAL_FEE_ESTIMATE_SATS, PERSONAL_NETWORK_FEE_SATS } from '../names/claimPersonal';
+import {
+  deployPersonalToken,
+  openPersonalRoom,
+  PERSONAL_FEE_ESTIMATE_SATS,
+  PERSONAL_NETWORK_FEE_SATS,
+} from '../names/claimPersonal';
 import { DEFAULT_SUPPLY, personalTicker, rememberPersonal } from '../names/personalToken';
 import { setPaymail } from '../names/accountName';
 import { adoptSocialAvatar } from '../names/socialAvatar';
@@ -189,8 +194,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
           <>
             <p className="text-sm text-center mt-4 mb-5" style={{ color: '#98A2B3' }}>
               Prove your X account or Gmail address to get a verified name like{' '}
-              <span className="text-white">yourname.x@{BWALLET_PAYMAIL_DOMAIN}</span>. It becomes this wallet's name, token
-              and chat room.
+              <span className="text-white">yourname.x@{BWALLET_PAYMAIL_DOMAIN}</span>. It becomes this wallet's name,
+              token and chat room.
             </p>
             <SocialSignIn onProfile={() => setProof(socialProof())} />
             {proof?.profile.alias && (

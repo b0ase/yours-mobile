@@ -81,12 +81,14 @@ export function scheduleLine(r: Receipt): string {
   const last = r.schedule[n - 1]?.height;
   if (n === 1) return `Unlocks at block ${first}`;
   if (r.curve) return `${n} payouts, blocks ${first}–${last}`;
-  const per = r.mode === 'usd-target' && r.usdPerPayout ? `${fmtUsd(r.usdPerPayout)} target` : fmtBsv(r.schedule[0].sats);
+  const per =
+    r.mode === 'usd-target' && r.usdPerPayout ? `${fmtUsd(r.usdPerPayout)} target` : fmtBsv(r.schedule[0].sats);
   return `${n} payouts of ${per}, blocks ${first}–${last}`;
 }
 
 /** "curve: back-loaded ×2", or '' for a linear schedule. */
-export const curveText = (r: Pick<Receipt, 'curve'>): string => (r.curve && r.curve.kind !== 'linear' ? `curve: ${curveLabel(r.curve)}` : '');
+export const curveText = (r: Pick<Receipt, 'curve'>): string =>
+  r.curve && r.curve.kind !== 'linear' ? `curve: ${curveLabel(r.curve)}` : '';
 
 /** The verifier's one-line description of what a receipt claims. */
 export const describeReceipt = (r: Receipt): string => [modeText(r), curveText(r)].filter(Boolean).join(' · ');

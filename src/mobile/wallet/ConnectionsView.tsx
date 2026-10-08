@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Globe } from 'lucide-react';
 import { bsvString, type HistoryRow } from './txHistory';
-import { loadConnectionLog, mergeConnections, readDeviceAppHosts, type ConnectionLog, type ConnectionRow, type PermissionGroup as Group } from './connectionLog';
+import {
+  loadConnectionLog,
+  mergeConnections,
+  readDeviceAppHosts,
+  type ConnectionLog,
+  type ConnectionRow,
+  type PermissionGroup as Group,
+} from './connectionLog';
 
 const CARD = '#17191E';
 const LINE = '#2b2f36';
@@ -17,7 +24,12 @@ const send = async <T,>(msg: Msg): Promise<{ success: boolean; data?: T; error?:
 };
 
 const when = (t?: number) => (t ? new Date(t).toLocaleString() : '');
-const GRANT_NAMES: Record<string, string> = { protocol: 'keys/signing', basket: 'data access', spending: 'spending', certificate: 'identity' };
+const GRANT_NAMES: Record<string, string> = {
+  protocol: 'keys/signing',
+  basket: 'data access',
+  spending: 'spending',
+  certificate: 'identity',
+};
 
 /** History › Connections: every site or app that used the wallet, what it may do, and what it spent. */
 export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
@@ -29,7 +41,10 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [l, g] = await Promise.all([loadConnectionLog(), send<{ groups: Group[] }>({ action: 'PERMISSIONS_LIST_ALL' }).catch(() => null)]);
+    const [l, g] = await Promise.all([
+      loadConnectionLog(),
+      send<{ groups: Group[] }>({ action: 'PERMISSIONS_LIST_ALL' }).catch(() => null),
+    ]);
     setLog(l);
     setGroups(g?.success ? (g.data?.groups ?? []) : []);
     setLoading(false);
@@ -45,7 +60,10 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
     if (!window.confirm(`Revoke everything ${r.host} may do? It will have to ask again next time.`)) return;
     setBusy(r.host);
     setError('');
-    const res = await send({ action: 'PERMISSIONS_REVOKE_ALL', originator: r.originator }).catch((e) => ({ success: false, error: String(e) }));
+    const res = await send({ action: 'PERMISSIONS_REVOKE_ALL', originator: r.originator }).catch((e) => ({
+      success: false,
+      error: String(e),
+    }));
     if (!res.success) setError(res.error || 'Could not revoke');
     setBusy('');
     await load();
@@ -54,7 +72,8 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
   return (
     <div className="flex-1 overflow-y-auto px-4" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
       <p className="text-xs mt-4" style={{ color: MUTED }}>
-        Sites and apps that have used this wallet, what they may do, and what you paid them. Calls and payments are recorded from this version on; earlier use shows only as permissions.
+        Sites and apps that have used this wallet, what they may do, and what you paid them. Calls and payments are
+        recorded from this version on; earlier use shows only as permissions.
       </p>
       {error && (
         <div className="text-sm mt-2" style={{ color: RED }}>
@@ -78,21 +97,31 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
               <Globe size={16} style={{ color: MUTED }} />
               <span className="text-sm font-semibold flex-1 min-w-0 truncate">{r.host}</span>
               {r.game && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ border: `1px solid ${LINE}`, color: MUTED }}>
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full"
+                  style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                >
                   game
                 </span>
               )}
             </div>
             <div className="text-xs mt-1" style={{ color: MUTED }}>
-              {r.lastSeen ? `Last used ${when(r.lastSeen)} · first ${when(r.firstSeen)}` : 'Not used since logging began'}
+              {r.lastSeen
+                ? `Last used ${when(r.lastSeen)} · first ${when(r.firstSeen)}`
+                : 'Not used since logging began'}
             </div>
             <div className="text-xs mt-1" style={{ color: MUTED }}>
-              {r.calls} {r.calls === 1 ? 'call' : 'calls'} · {r.payments} {r.payments === 1 ? 'payment' : 'payments'} · spent {bsvString(r.spentSats).replace(/\.?0+$/, '')} BSV
-              {r.spendLimitSats !== undefined && ` · allowance ${bsvString(r.spendLimitSats).replace(/\.?0+$/, '')} BSV`}
+              {r.calls} {r.calls === 1 ? 'call' : 'calls'} · {r.payments} {r.payments === 1 ? 'payment' : 'payments'} ·
+              spent {bsvString(r.spentSats).replace(/\.?0+$/, '')} BSV
+              {r.spendLimitSats !== undefined &&
+                ` · allowance ${bsvString(r.spendLimitSats).replace(/\.?0+$/, '')} BSV`}
             </div>
             {Object.keys(r.grants).length > 0 && (
               <div className="text-xs mt-1" style={{ color: '#fff' }}>
-                Allowed: {Object.entries(r.grants).map(([t, n]) => `${GRANT_NAMES[t] ?? t}${n > 1 ? ` ×${n}` : ''}`).join(', ')}
+                Allowed:{' '}
+                {Object.entries(r.grants)
+                  .map(([t, n]) => `${GRANT_NAMES[t] ?? t}${n > 1 ? ` ×${n}` : ''}`)
+                  .join(', ')}
               </div>
             )}
             {r.originator && (

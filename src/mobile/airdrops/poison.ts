@@ -11,7 +11,11 @@ export type PoisonData = { suspects: string[]; sentTo: string[] };
 
 /** Same first and last EDGE characters, but a different address. */
 export const looksLike = (a: string, b: string) =>
-  a !== b && a.length > 2 * EDGE && b.length > 2 * EDGE && a.slice(0, EDGE) === b.slice(0, EDGE) && a.slice(-EDGE) === b.slice(-EDGE);
+  a !== b &&
+  a.length > 2 * EDGE &&
+  b.length > 2 * EDGE &&
+  a.slice(0, EDGE) === b.slice(0, EDGE) &&
+  a.slice(-EDGE) === b.slice(-EDGE);
 
 /** The warning to show for `recipient`, or null. */
 export const poisonWarning = (recipient: string, d: PoisonData): string | null => {
@@ -43,7 +47,10 @@ export const poisonDataFrom = (
 const KEY = (account: string) => `bw-poison:${account}`;
 export const savePoisonData = (account: string, d: PoisonData) => {
   try {
-    localStorage.setItem(KEY(account), JSON.stringify({ suspects: d.suspects.slice(0, 300), sentTo: d.sentTo.slice(0, 2000) }));
+    localStorage.setItem(
+      KEY(account),
+      JSON.stringify({ suspects: d.suspects.slice(0, 300), sentTo: d.sentTo.slice(0, 2000) }),
+    );
   } catch {
     /* ignore */
   }

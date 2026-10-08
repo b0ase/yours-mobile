@@ -28,9 +28,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 /** Pad pixels → the 1000 × 250 box, clamped. */
 export const normalisePoints = (pts: SigPoint[], w: number, h: number): SigPoint[] =>
-  w > 0 && h > 0
-    ? pts.map(([x, y, p]) => [clamp((x * SIG_W) / w, 0, SIG_W), clamp((y * SIG_H) / h, 0, SIG_H), p])
-    : [];
+  w > 0 && h > 0 ? pts.map(([x, y, p]) => [clamp((x * SIG_W) / w, 0, SIG_W), clamp((y * SIG_H) / h, 0, SIG_H), p]) : [];
 
 /** Ramer–Douglas–Peucker on x/y; keeps first and last points. */
 export const simplifyPoints = (pts: SigPoint[], tolerance: number): SigPoint[] => {
@@ -73,9 +71,7 @@ export const polygonToPath = (outline: number[][]): string => {
 
 /** Outline of one already-normalised stroke. Dots (one point) still draw. */
 export const strokeOutline = (stroke: SigStroke): number[][] =>
-  stroke.points.length
-    ? getStroke(stroke.points, { ...STROKE_OPTS, simulatePressure: !stroke.pen, last: true })
-    : [];
+  stroke.points.length ? getStroke(stroke.points, { ...STROKE_OPTS, simulatePressure: !stroke.pen, last: true }) : [];
 
 /** Normalised strokes → one path string, with no size cap. */
 export const strokesToPath = (strokes: SigStroke[], outlineTol = 0.6): string =>

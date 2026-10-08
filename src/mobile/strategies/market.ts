@@ -14,10 +14,18 @@ import { openStrategy, parseEnvelope, proofMessage, STRATEGY_CONTENT_TYPE, type 
 
 export const STRATEGIES_API = 'https://www.bwallet.space/api/strategies';
 
-export type Listing = { origin: string; envelope: Omit<Envelope, 'iv' | 'ciphertext'>; sold: number; createdAt: string };
+export type Listing = {
+  origin: string;
+  envelope: Omit<Envelope, 'iv' | 'ciphertext'>;
+  sold: number;
+  createdAt: string;
+};
 
 const api = async <T>(init?: RequestInit, query = ''): Promise<T> => {
-  const r = await fetch(`${STRATEGIES_API}${query}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  const r = await fetch(`${STRATEGIES_API}${query}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+  });
   const j = (await r.json().catch(() => ({}))) as T & { error?: string };
   if (!r.ok) throw new Error(j.error || `Key service answered ${r.status}`);
   return j;
@@ -25,11 +33,19 @@ const api = async <T>(init?: RequestInit, query = ''): Promise<T> => {
 
 export const listStrategies = () => api<{ strategies: Listing[] }>().then((r) => r.strategies);
 export const getStrategy = (origin: string) =>
-  api<{ strategy: { origin: string; envelope: Envelope; sold: number } }>(undefined, `?origin=${encodeURIComponent(origin)}`).then((r) => r.strategy);
+  api<{ strategy: { origin: string; envelope: Envelope; sold: number } }>(
+    undefined,
+    `?origin=${encodeURIComponent(origin)}`,
+  ).then((r) => r.strategy);
 
 type Out = { outpoint: string; tags?: string[]; customInstructions?: string; spendable?: boolean };
 const outputs = async (ctx: OneSatContext): Promise<Out[]> => {
-  const res = await ctx.wallet.listOutputs({ basket: ONESAT_BASKET, includeTags: true, includeCustomInstructions: true, limit: 500 });
+  const res = await ctx.wallet.listOutputs({
+    basket: ONESAT_BASKET,
+    includeTags: true,
+    includeCustomInstructions: true,
+    limit: 500,
+  });
   return (res.outputs as Out[]).filter((o) => o.spendable !== false && o.outpoint);
 };
 const norm = (op: string) => op.replace('.', '_');
@@ -54,7 +70,8 @@ export const prove = async (ctx: OneSatContext, action: 'publish' | 'unlock', ou
   return { message, pubkey_hex: publicKey, signature: Utils.toHex(signature) };
 };
 
-const mintEnvelope = (ctx: OneSatContext, env: Envelope) => mintJson(ctx, env, STRATEGY_CONTENT_TYPE, { app: 'bwalletx', type: 'strategy', name: env.name });
+const mintEnvelope = (ctx: OneSatContext, env: Envelope) =>
+  mintJson(ctx, env, STRATEGY_CONTENT_TYPE, { app: 'bwalletx', type: 'strategy', name: env.name });
 
 /** Inscribe a JSON envelope to this wallet and return the new copy's outpoint. Exact bytes = JSON.stringify(obj). */
 export const mintJson = async (ctx: OneSatContext, obj: unknown, contentType: string, map: Record<string, string>) => {
@@ -64,7 +81,9 @@ export const mintJson = async (ctx: OneSatContext, obj: unknown, contentType: st
   if (!res.txid || res.error) throw new Error(res.error || 'Mint failed');
   // The copy is this tx's 1-sat output with our content type (don't assume its index).
   for (let i = 0; i < 5; i++) {
-    const o = (await outputs(ctx)).find((x) => norm(x.outpoint).startsWith(`${res.txid}_`) && x.tags?.includes(`type:${contentType}`));
+    const o = (await outputs(ctx)).find(
+      (x) => norm(x.outpoint).startsWith(`${res.txid}_`) && x.tags?.includes(`type:${contentType}`),
+    );
     if (o) return norm(o.outpoint);
     await new Promise((r) => setTimeout(r, 1500));
   }
@@ -83,7 +102,11 @@ export const publishStrategy = async (ctx: OneSatContext, env: Envelope, key: st
 export const priceSats = (env: Pick<Envelope, 'sale'>, bsvUsd: number) => Math.ceil((env.sale.priceUsd / bsvUsd) * 1e8);
 
 /** Buy a copy: pay the author + the market fee and mint the buyer's copy in one transaction, then unlock it. */
-export const buyStrategy = async (ctx: OneSatContext, origin: string, bsvUsd: number): Promise<{ outpoint: string; strategy: Strategy }> => {
+export const buyStrategy = async (
+  ctx: OneSatContext,
+  origin: string,
+  bsvUsd: number,
+): Promise<{ outpoint: string; strategy: Strategy }> => {
   if (!(bsvUsd > 0)) throw new Error('No BSV price right now; try again shortly.');
   const { envelope, sold } = await getStrategy(origin);
   if (sold >= envelope.sale.copies) throw new Error('Sold out');
@@ -96,7 +119,10 @@ export const buyStrategy = async (ctx: OneSatContext, origin: string, bsvUsd: nu
 /** Decrypt a copy this wallet holds. */
 export const unlockStrategy = async (ctx: OneSatContext, outpoint: string): Promise<Strategy> => {
   const proof = await prove(ctx, 'unlock', outpoint);
-  const { key, origin } = await api<{ key: string; origin: string }>({ method: 'POST', body: JSON.stringify({ action: 'unlock', outpoint, ...proof }) });
+  const { key, origin } = await api<{ key: string; origin: string }>({
+    method: 'POST',
+    body: JSON.stringify({ action: 'unlock', outpoint, ...proof }),
+  });
   const env = parseEnvelope((await getStrategy(origin)).envelope);
   if (!env) throw new Error('Bad strategy envelope');
   return openStrategy(env, key);

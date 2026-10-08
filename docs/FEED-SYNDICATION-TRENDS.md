@@ -18,10 +18,10 @@ Status: research and design, 6 Oct 2026. For: owner decisions marked **DECIDE**.
 
 ### Are they live? Yes, both (checked 5 Oct 2026)
 
-| App | Status | Evidence |
-| --- | --- | --- |
-| **Twetch** | Live again. Shut down June 2024; relaunched as an invite-only beta in July 2026 with old accounts and assets recoverable. | CoinGeek, 21 Jul 2026. Twetch's public API returned a post created at the moment of testing (5 Oct 2026). |
-| **Treechat** | Live and the most active. | The bmap feed (the indexer the wallet reads) returned 94 of the latest 100 posts as `app=treechat`; newest about 9 Sep 2026. app.treechat.com loads. |
+| App          | Status                                                                                                                    | Evidence                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Twetch**   | Live again. Shut down June 2024; relaunched as an invite-only beta in July 2026 with old accounts and assets recoverable. | CoinGeek, 21 Jul 2026. Twetch's public API returned a post created at the moment of testing (5 Oct 2026).                                            |
+| **Treechat** | Live and the most active.                                                                                                 | The bmap feed (the indexer the wallet reads) returned 94 of the latest 100 posts as `app=treechat`; newest about 9 Sep 2026. app.treechat.com loads. |
 
 ### Are the posts on chain? Yes, readable without their permission
 
@@ -79,12 +79,12 @@ So the owner's question is mostly answered: this is already built. The decision 
 
 ### Hardening (the only real work)
 
-| Task | Why | Effort |
-| --- | --- | --- |
-| Read Twetch from chain too (bmap or JungleBus filter `app=twetch`, falling back to Twetch's API) | Twetch's API is a private API on a beta service; bmap has a Twetch gap after block 843k, so JungleBus may be the better source for the missing window | 1 to 2 days |
-| Per-source kill switch (remote JSON, like the safety blocklist) | Lets us switch off one source within minutes if it misbehaves or asks us to | 0.5 day |
-| Feed health check (alert if a source returns nothing for 24h) | Both sources have disappeared before | 0.5 day |
-| Note on the About screen: "Posts from Treechat and Twetch are public on-chain data, shown with credit" | Transparency | 1 hour |
+| Task                                                                                                   | Why                                                                                                                                                   | Effort      |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Read Twetch from chain too (bmap or JungleBus filter `app=twetch`, falling back to Twetch's API)       | Twetch's API is a private API on a beta service; bmap has a Twetch gap after block 843k, so JungleBus may be the better source for the missing window | 1 to 2 days |
+| Per-source kill switch (remote JSON, like the safety blocklist)                                        | Lets us switch off one source within minutes if it misbehaves or asks us to                                                                           | 0.5 day     |
+| Feed health check (alert if a source returns nothing for 24h)                                          | Both sources have disappeared before                                                                                                                  | 0.5 day     |
+| Note on the About screen: "Posts from Treechat and Twetch are public on-chain data, shown with credit" | Transparency                                                                                                                                          | 1 hour      |
 
 ### Verdict: syndicate, yes
 
@@ -109,13 +109,13 @@ content or media.
 
 **Sources, in build order:**
 
-| # | Source | How | Curation | Effort |
-| --- | --- | --- | --- | --- |
-| 1 | **Owner-curated links** (SlopCore, a topic, a site, a token, a post) | A small JSON file served from our own server, same pattern as the market blocklist: remote list, cached 1h, bundled fallback. Each item: `title`, `url`, `blurb`, `kind`, optional `expires`. | Manual (owner) | 1 day |
-| 2 | **Hot tokens and NFT collections on 1Sat** | The wallet already queries GorillaPool/1sat market data (`market/indexer.ts`, `tokenBoard`). Show the top 5 by 24h volume or sales. | Automatic, through the safety filter | 1 day |
-| 3 | **Popular posts on chain** | The "Most locked" leaderboard already exists (`feed/leaderboard.ts`): reuse its top 3 for 1D. | Automatic, through the safety filter | 0.5 day |
-| 4 | **Hot chat rooms** | `HotRoom` data already exists in the market code. | Automatic | 0.5 day |
-| 5 | **X trends** | Only through the xAI/Grok search API: paid, server-side, needs a key. X's own API is not free for this. Cache once a day on our server; show 3 to 5 topics as text with an "X" badge. | Server-side, then owner approves | 2 to 3 days plus running cost. Defer. |
+| #   | Source                                                               | How                                                                                                                                                                                           | Curation                             | Effort                                |
+| --- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------- |
+| 1   | **Owner-curated links** (SlopCore, a topic, a site, a token, a post) | A small JSON file served from our own server, same pattern as the market blocklist: remote list, cached 1h, bundled fallback. Each item: `title`, `url`, `blurb`, `kind`, optional `expires`. | Manual (owner)                       | 1 day                                 |
+| 2   | **Hot tokens and NFT collections on 1Sat**                           | The wallet already queries GorillaPool/1sat market data (`market/indexer.ts`, `tokenBoard`). Show the top 5 by 24h volume or sales.                                                           | Automatic, through the safety filter | 1 day                                 |
+| 3   | **Popular posts on chain**                                           | The "Most locked" leaderboard already exists (`feed/leaderboard.ts`): reuse its top 3 for 1D.                                                                                                 | Automatic, through the safety filter | 0.5 day                               |
+| 4   | **Hot chat rooms**                                                   | `HotRoom` data already exists in the market code.                                                                                                                                             | Automatic                            | 0.5 day                               |
+| 5   | **X trends**                                                         | Only through the xAI/Grok search API: paid, server-side, needs a key. X's own API is not free for this. Cache once a day on our server; show 3 to 5 topics as text with an "X" badge.         | Server-side, then owner approves     | 2 to 3 days plus running cost. Defer. |
 
 **How it is curated:** the owner-curated list always shows first and wins. Automatic rows fill the rest and are
 labelled ("Hot on 1Sat", "Most locked today"). The owner can pin or hide an automatic item by adding its id to the
@@ -147,12 +147,12 @@ strip on All, so it is seen but easy to dismiss.
 
 ### Effort summary
 
-| Piece | Effort |
-| --- | --- |
-| Twetch/Treechat hardening (chain read for Twetch, kill switch, health check, About note) | 2 to 3 days |
-| Trends v1 (curated JSON, strip UI, filter, Report/hide, SlopCore item) | 1 to 1.5 days |
-| Trends v1.5 (hot 1Sat tokens, most-locked posts, hot rooms) | 1 to 2 days |
-| X trends via Grok (deferred) | 2 to 3 days plus running cost |
+| Piece                                                                                    | Effort                        |
+| ---------------------------------------------------------------------------------------- | ----------------------------- |
+| Twetch/Treechat hardening (chain read for Twetch, kill switch, health check, About note) | 2 to 3 days                   |
+| Trends v1 (curated JSON, strip UI, filter, Report/hide, SlopCore item)                   | 1 to 1.5 days                 |
+| Trends v1.5 (hot 1Sat tokens, most-locked posts, hot rooms)                              | 1 to 2 days                   |
+| X trends via Grok (deferred)                                                             | 2 to 3 days plus running cost |
 
 ## Open questions (**DECIDE**)
 

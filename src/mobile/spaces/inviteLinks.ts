@@ -62,7 +62,10 @@ const roomKey = (page: RoomPage | null) => {
  * (entry rule, Buy in the Market) to anyone else, so "buy to enter" reuses that flow.
  */
 const openRoom = async (ticker: string, go: (path: string) => void) => {
-  const page = await client().roomPage(ticker).then(parsePage).catch(() => null);
+  const page = await client()
+    .roomPage(ticker)
+    .then(parsePage)
+    .catch(() => null);
   const key = roomKey(page?.kind === 'room' ? page : null);
   if (key) requestChatRoom(key);
   go('/m/chat');
@@ -80,7 +83,11 @@ export const useSpaceInviteLinks = (enabled = true) => {
       if (link.kind === 'room') return void openRoom(link.ticker, navigate);
       // An invite: what it opens is only known from the server.
       void (async () => {
-        const inv = parseSpaceInvite(await client().openInvite(link.code).catch(() => null));
+        const inv = parseSpaceInvite(
+          await client()
+            .openInvite(link.code)
+            .catch(() => null),
+        );
         if (inv?.target.kind === 'room') {
           if (ROOM_LINKS) await openRoom(inv.target.ticker, navigate);
           return;

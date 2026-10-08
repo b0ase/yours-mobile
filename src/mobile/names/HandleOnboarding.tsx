@@ -97,7 +97,8 @@ export const HandleOnboarding = () => {
   if (open) return <HandleFlow onClose={close} />;
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
-  if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom || !PAID_FEATURES_ENABLED), dismissed, open)) return null;
+  if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom || !PAID_FEATURES_ENABLED), dismissed, open))
+    return null;
   return (
     <div
       className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"

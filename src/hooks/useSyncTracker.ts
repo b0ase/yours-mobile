@@ -65,10 +65,11 @@ export const useSyncTracker = () => {
           }
           // Armed once per sync, not re-armed by each 'start': the 20 s auto-sync sends a new 'start' before the
           // 30 s window ends, which kept the card's sync spinner going for good (owner, 6 Oct 2026).
-          if (!stuckTimeoutRef.current) stuckTimeoutRef.current = setTimeout(() => {
-            console.warn('[syncTracker] No `complete` received within safety window — stopping spinner.');
-            finishSync();
-          }, SYNC_STUCK_TIMEOUT_MS);
+          if (!stuckTimeoutRef.current)
+            stuckTimeoutRef.current = setTimeout(() => {
+              console.warn('[syncTracker] No `complete` received within safety window — stopping spinner.');
+              finishSync();
+            }, SYNC_STUCK_TIMEOUT_MS);
           break;
 
         case 'progress':

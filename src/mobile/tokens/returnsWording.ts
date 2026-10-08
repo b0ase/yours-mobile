@@ -5,7 +5,8 @@
  * "yield sign") are not flagged. A filter, not legal review (docs/LAUNCH-SOCIAL-PLAN.md).
  */
 export const RETURNS_WARNING = 'Avoid promising returns. Consider describing airdrops or room access instead.';
-export const RETURNS_BLOCK = 'Remove wording that promises returns before publishing. Describe airdrops or room access instead.';
+export const RETURNS_BLOCK =
+  'Remove wording that promises returns before publishing. Describe airdrops or room access instead.';
 
 const PATTERNS: RegExp[] = [
   /\bprofits?\b(?!\s+and\s+loss)/i,

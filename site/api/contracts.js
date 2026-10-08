@@ -30,7 +30,12 @@ async function db(path, init = {}) {
   if (!base || !key) throw new Error('unconfigured');
   return fetch(`${base.replace(/\/$/, '')}/rest/v1/${path}`, {
     ...init,
-    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
   });
 }
 const rows = async (path) => {
@@ -53,13 +58,21 @@ const at = (origin) => K.envelopeAt(origin, K.chain, CONTRACT_TYPE, parseContrac
 async function list(req, res) {
   const origin = K.normOutpoint(new URL(req.url, 'http://x').searchParams.get('origin'));
   const [all, copies] = await Promise.all([
-    rows(`bwallet_contracts?select=origin,envelope,body,created_at${origin ? `&origin=eq.${origin}` : ''}&order=created_at.desc&limit=200`),
+    rows(
+      `bwallet_contracts?select=origin,envelope,body,created_at${origin ? `&origin=eq.${origin}` : ''}&order=created_at.desc&limit=200`,
+    ),
     rows('bwallet_contract_copies?select=contract_origin'),
   ]);
   const sold = new Map();
   for (const c of copies) sold.set(c.contract_origin, (sold.get(c.contract_origin) || 0) + 1);
   // `body` = the exact inscribed text: buyers inscribe it byte for byte, so their copy's hash matches.
-  const out = all.map((c) => ({ origin: c.origin, envelope: c.envelope, body: c.body, sold: sold.get(c.origin) || 0, createdAt: c.created_at }));
+  const out = all.map((c) => ({
+    origin: c.origin,
+    envelope: c.envelope,
+    body: c.body,
+    sold: sold.get(c.origin) || 0,
+    createdAt: c.created_at,
+  }));
   if (origin) return out[0] ? send(res, 200, { contract: out[0] }) : send(res, 404, { error: 'Not found' });
   return send(res, 200, { contracts: out });
 }
@@ -77,13 +90,20 @@ async function proven(b, action) {
 async function publish(b, res) {
   const p = await proven(b, 'publish');
   if (p.error) return send(res, p.error[0], { error: p.error[1] });
-  if (p.outpoint !== ((await K.chain.origin(p.outpoint)) || p.outpoint)) return send(res, 400, { error: 'Publish from the newly minted copy' });
+  if (p.outpoint !== ((await K.chain.origin(p.outpoint)) || p.outpoint))
+    return send(res, 400, { error: 'Publish from the newly minted copy' });
   const a = await at(p.outpoint);
   if (!a) return send(res, 400, { error: 'That output isn’t a contract inscription' });
   const r = await db('bwallet_contracts', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ origin: p.outpoint, body_hash: a.bodyHash, body: a.body, envelope: a.env, author_address: p.address }),
+    body: JSON.stringify({
+      origin: p.outpoint,
+      body_hash: a.bodyHash,
+      body: a.body,
+      envelope: a.env,
+      author_address: p.address,
+    }),
   });
   if (r.status === 409) return send(res, 409, { error: 'Already published' });
   if (!r.ok) return send(res, 500, { error: 'Could not save' });
@@ -106,7 +126,8 @@ async function claim(b, res) {
     if (sale.priceUsd > 0) {
       const rate = await K.chain.bsvUsd();
       if (!(rate > 0)) return send(res, 503, { error: 'No BSV price right now; try again shortly' });
-      if (paid < Math.floor((sale.priceUsd / rate) * 1e8 * K.PRICE_TOLERANCE)) return send(res, 402, { error: 'This copy wasn’t paid for' });
+      if (paid < Math.floor((sale.priceUsd / rate) * 1e8 * K.PRICE_TOLERANCE))
+        return send(res, 402, { error: 'This copy wasn’t paid for' });
     }
     const sold = (await rows(`bwallet_contract_copies?select=origin&contract_origin=eq.${c.origin}`)).length;
     if (sold >= sale.copies) return send(res, 410, { error: 'Sold out' });
@@ -124,7 +145,10 @@ module.exports = async function handler(req, res) {
   try {
     if (req.method === 'GET') return await list(req, res);
     if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
-    const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+    const ip =
+      String(req.headers['x-forwarded-for'] || '')
+        .split(',')[0]
+        .trim() || 'unknown';
     if (limited(ip)) return send(res, 429, { error: 'Too many requests' });
     const b = await readBody(req);
     if (b.action === 'publish') return await publish(b, res);

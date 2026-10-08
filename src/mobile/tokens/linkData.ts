@@ -114,8 +114,11 @@ export const parseUtility = (...sources: unknown[]): string | null => {
     if (!src || typeof src !== 'object') continue;
     const v = (src as Record<string, unknown>).utility;
     if (typeof v !== 'string') continue;
-    // eslint-disable-next-line no-control-regex
-    const t = v.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
+    const t = v
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (t) return t.length > UTILITY_MAX ? `${t.slice(0, UTILITY_MAX - 1)}…` : t;
   }
   return null;

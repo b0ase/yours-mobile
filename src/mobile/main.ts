@@ -103,8 +103,7 @@ worker.addEventListener('message', (e) => {
     // runtime.sendMessage waited forever (owner, 6 Oct 2026: balance, tokens and sync all timing out).
     console.error('[background worker] failed to start:', e.data.message);
     hub.markBackgroundReady();
-  }
-  else if (e.data?.t === 'console') console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
+  } else if (e.data?.t === 'console') console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
 worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });

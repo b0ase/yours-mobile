@@ -21,10 +21,16 @@
     <meta property="og:image" content="https://www.bwallet.space/og-home.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Browse BSV tokens, music, video, images and documents in bWallet. For buying and selling, see the bWalletX Exchange." />
+    <meta
+      property="og:image:alt"
+      content="Browse BSV tokens, music, video, images and documents in bWallet. For buying and selling, see the bWalletX Exchange."
+    />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="bWallet Market: Strategies" />
-    <meta name="twitter:description" content="Browse strategies: programs for agent accounts, written by users and published as encrypted NFTs. See each one’s spec." />
+    <meta
+      name="twitter:description"
+      content="Browse strategies: programs for agent accounts, written by users and published as encrypted NFTs. See each one’s spec."
+    />
     <meta name="twitter:image" content="https://www.bwallet.space/og-home.png" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/logo.svg" type="image/svg+xml" />
@@ -38,34 +44,141 @@
     />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="preload" as="image" href="/media/hero-poster.jpg" />
-      <style>
-      .topbar { background: #F5B800 !important; backdrop-filter: none; }
-      .topbar .brand span, .topbar nav a { color: #010101 !important; }
-      .topbar nav a:hover, .topbar nav a[aria-current='page'] { color: #000 !important; text-decoration: underline; }
-      .topbar .dl-btn { background: #010101 !important; color: #F5B800 !important; box-shadow: none !important; }
-      .topbar .nav-cta .web-btn { color: #010101 !important; border-color: #010101 !important; }
-      .section-nav { background: #F5B800; }
-      .section-nav a { background: rgba(0,0,0,0.08) !important; color: #010101 !important; border-color: rgba(0,0,0,0.15) !important; }
-      .ext { max-width: 760px; margin: 0 auto; padding: 120px 20px 80px; }
-      .ext h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); margin: 18px 0 10px; }
-      .ext h2 { margin: 48px 0 10px; font-size: 1.5rem; }
-      .ext p, .ext li { line-height: 1.65; }
-      .box { background: #101114; border: 1px solid #ffffff12; border-radius: 16px; padding: 18px 20px; margin: 16px 0; }
-      .box h3 { margin: 0 0 6px; font-size: 1rem; }
-      .box p { margin: 0; color: #a7adb8; }
-      .ext .small { color: #8a8a86; font-size: 0.85rem; }
-      .ext .row { display: flex; gap: 12px; flex-wrap: wrap; margin: 26px 0; }
-          .cmp { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.92rem; }
-      .cmp th, .cmp td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #ffffff14; vertical-align: top; }
-      .cmp th { color: #fff; font-size: 0.95rem; }
-      .cmp td:first-child { color: #a7adb8; }
-          .card { background: #101114; border: 1px solid #ffffff12; border-radius: 16px; padding: 18px 20px; margin: 14px 0; }
-      .card .top { display: flex; gap: 12px; align-items: baseline; }
-      .card h3 { margin: 0; font-size: 1.1rem; flex: 1; }
-      .meta { color: #a7adb8; font-size: 0.88rem; margin: 6px 0 10px; }
-      .spec { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; font-size: 0.88rem; }
-      .spec dt { color: #8a8a86; } .spec dd { margin: 0; }
-      @media (max-width: 520px) { .spec { grid-template-columns: 1fr; } .spec dt { margin-top: 6px; } }
+    <style>
+      .topbar {
+        background: #f5b800 !important;
+        backdrop-filter: none;
+      }
+      .topbar .brand span,
+      .topbar nav a {
+        color: #010101 !important;
+      }
+      .topbar nav a:hover,
+      .topbar nav a[aria-current='page'] {
+        color: #000 !important;
+        text-decoration: underline;
+      }
+      .topbar .dl-btn {
+        background: #010101 !important;
+        color: #f5b800 !important;
+        box-shadow: none !important;
+      }
+      .topbar .nav-cta .web-btn {
+        color: #010101 !important;
+        border-color: #010101 !important;
+      }
+      .section-nav {
+        background: #f5b800;
+      }
+      .section-nav a {
+        background: rgba(0, 0, 0, 0.08) !important;
+        color: #010101 !important;
+        border-color: rgba(0, 0, 0, 0.15) !important;
+      }
+      .ext {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 120px 20px 80px;
+      }
+      .ext h1 {
+        font-size: clamp(2.2rem, 6vw, 3.4rem);
+        margin: 18px 0 10px;
+      }
+      .ext h2 {
+        margin: 48px 0 10px;
+        font-size: 1.5rem;
+      }
+      .ext p,
+      .ext li {
+        line-height: 1.65;
+      }
+      .box {
+        background: #101114;
+        border: 1px solid #ffffff12;
+        border-radius: 16px;
+        padding: 18px 20px;
+        margin: 16px 0;
+      }
+      .box h3 {
+        margin: 0 0 6px;
+        font-size: 1rem;
+      }
+      .box p {
+        margin: 0;
+        color: #a7adb8;
+      }
+      .ext .small {
+        color: #8a8a86;
+        font-size: 0.85rem;
+      }
+      .ext .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 26px 0;
+      }
+      .cmp {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 16px 0;
+        font-size: 0.92rem;
+      }
+      .cmp th,
+      .cmp td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #ffffff14;
+        vertical-align: top;
+      }
+      .cmp th {
+        color: #fff;
+        font-size: 0.95rem;
+      }
+      .cmp td:first-child {
+        color: #a7adb8;
+      }
+      .card {
+        background: #101114;
+        border: 1px solid #ffffff12;
+        border-radius: 16px;
+        padding: 18px 20px;
+        margin: 14px 0;
+      }
+      .card .top {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 1.1rem;
+        flex: 1;
+      }
+      .meta {
+        color: #a7adb8;
+        font-size: 0.88rem;
+        margin: 6px 0 10px;
+      }
+      .spec {
+        display: grid;
+        grid-template-columns: 150px 1fr;
+        gap: 4px 12px;
+        font-size: 0.88rem;
+      }
+      .spec dt {
+        color: #8a8a86;
+      }
+      .spec dd {
+        margin: 0;
+      }
+      @media (max-width: 520px) {
+        .spec {
+          grid-template-columns: 1fr;
+        }
+        .spec dt {
+          margin-top: 6px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -73,34 +186,84 @@
     <header class="topbar">
       <div class="wrap topbar-in">
         <a class="brand" href="/"><img src="/logo.svg" alt="" width="34" height="30" /><span>bWallet</span></a>
-        <nav aria-label="Pages"><a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a><a href="https://bwalletx.com/friends">Rooms &amp; tokens</a><a href="https://bwalletx.com">Get bWalletX &rarr;</a></nav>
-        <span class="nav-cta"><a class="dl-btn" href="/get">Download</a><a class="web-btn" href="https://bwalletx.com">bWalletX &rarr;</a></span>
+        <nav aria-label="Pages">
+          <a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a
+          ><a href="https://bwalletx.com/friends">Rooms &amp; tokens</a
+          ><a href="https://bwalletx.com">Get bWalletX &rarr;</a>
+        </nav>
+        <span class="nav-cta"
+          ><a class="dl-btn" href="/get">Download</a
+          ><a class="web-btn" href="https://bwalletx.com">bWalletX &rarr;</a></span
+        >
       </div>
     </header>
     <script src="/nav.js" data-edition="store"></script>
     <main class="ext">
       <h1>Market &rsaquo; Strategies</h1>
-      <p class="lede">Strategies are programs for agent accounts, written by users and published as encrypted NFTs. Here you can browse them and compare their specs.</p>
-      <div class="box"><p>Strategies are programs written and sold by users. bWallet doesn&rsquo;t review, rate or recommend them.</p></div>
+      <p class="lede">
+        Strategies are programs for agent accounts, written by users and published as encrypted NFTs. Here you can
+        browse them and compare their specs.
+      </p>
+      <div class="box">
+        <p>Strategies are programs written and sold by users. bWallet doesn&rsquo;t review, rate or recommend them.</p>
+      </div>
       <div id="list"><p class="small">Loading strategies&hellip;</p></div>
       <p class="small">The file format is public: <a href="https://bwalletx.com/strategies/spec">strategy spec</a>.</p>
     </main>
     <script>
       (function () {
         var el = document.getElementById('list');
-        var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-        var LABELS = [['trades', 'What it trades'], ['risk', 'Seller\u2019s risk rating'], ['spends', 'Most it will spend'], ['often', 'How often it acts'], ['stops', 'When it stops'], ['needs', 'Needs']];
-        fetch('/api/strategies').then(function (r) { return r.json(); }).then(function (j) {
-          var xs = (j && j.strategies) || [];
-          if (!xs.length) { el.innerHTML = '<p class="small">No strategies published yet.</p>'; return; }
-          el.innerHTML = xs.map(function (x) {
-            var e = x.envelope;
-            var spec = LABELS.map(function (l) { return '<dt>' + l[1] + '</dt><dd>' + esc(e.spec[l[0]]) + '</dd>'; }).join('');
-            return '<div class="card"><div class="top"><h3>' + esc(e.name) + ' <span class="small">v' + esc(e.version) + '</span></h3></div>' +
-              '<div class="meta">by ' + esc(e.author.name || String(e.author.address).slice(0, 10)) + ' &middot; ' + new Date(x.createdAt).toLocaleDateString() + '</div>' +
-              (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '<dl class="spec">' + spec + '</dl></div>';
-          }).join('');
-        }).catch(function () { el.innerHTML = '<p class="small">Couldn\u2019t load strategies right now.</p>'; });
+        var esc = function (s) {
+          return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+          });
+        };
+        var LABELS = [
+          ['trades', 'What it trades'],
+          ['risk', 'Seller\u2019s risk rating'],
+          ['spends', 'Most it will spend'],
+          ['often', 'How often it acts'],
+          ['stops', 'When it stops'],
+          ['needs', 'Needs'],
+        ];
+        fetch('/api/strategies')
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (j) {
+            var xs = (j && j.strategies) || [];
+            if (!xs.length) {
+              el.innerHTML = '<p class="small">No strategies published yet.</p>';
+              return;
+            }
+            el.innerHTML = xs
+              .map(function (x) {
+                var e = x.envelope;
+                var spec = LABELS.map(function (l) {
+                  return '<dt>' + l[1] + '</dt><dd>' + esc(e.spec[l[0]]) + '</dd>';
+                }).join('');
+                return (
+                  '<div class="card"><div class="top"><h3>' +
+                  esc(e.name) +
+                  ' <span class="small">v' +
+                  esc(e.version) +
+                  '</span></h3></div>' +
+                  '<div class="meta">by ' +
+                  esc(e.author.name || String(e.author.address).slice(0, 10)) +
+                  ' &middot; ' +
+                  new Date(x.createdAt).toLocaleDateString() +
+                  '</div>' +
+                  (e.description ? '<p>' + esc(e.description) + '</p>' : '') +
+                  '<dl class="spec">' +
+                  spec +
+                  '</dl></div>'
+                );
+              })
+              .join('');
+          })
+          .catch(function () {
+            el.innerHTML = '<p class="small">Couldn\u2019t load strategies right now.</p>';
+          });
       })();
     </script>
   </body>

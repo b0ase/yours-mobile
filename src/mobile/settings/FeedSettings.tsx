@@ -249,7 +249,9 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
             <ListRow
               key={p.txid}
               title={safeName(p.author.name)}
-              sub={isSlur(p.text) ? 'Post hidden: offensive language' : p.text || `${p.media?.length ?? 0} attachment(s)`}
+              sub={
+                isSlur(p.text) ? 'Post hidden: offensive language' : p.text || `${p.media?.length ?? 0} attachment(s)`
+              }
               action="Remove"
               onAction={() => {
                 setItems((b) => toggleSyncedBookmark(b, p));

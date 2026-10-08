@@ -122,12 +122,10 @@ export const fetchDailyRates = async (fromSec: number, toSec: number, apiKey?: s
   return out;
 };
 
-type ListActions = (args: {
-  labels: string[];
-  includeLabels?: boolean;
-  limit?: number;
-  offset?: number;
-}) => Promise<{ totalActions: number; actions: { txid: string; description?: string; labels?: string[]; satoshis?: number }[] }>;
+type ListActions = (args: { labels: string[]; includeLabels?: boolean; limit?: number; offset?: number }) => Promise<{
+  totalActions: number;
+  actions: { txid: string; description?: string; labels?: string[]; satoshis?: number }[];
+}>;
 
 /** Every action the wallet logged (description + labels), by txid. Never throws. */
 export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
@@ -137,7 +135,11 @@ export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
     for (let offset = 0; offset < 100_000; offset += 1000) {
       const r = await listActions({ labels: [], includeLabels: true, limit: 1000, offset });
       for (const a of r.actions)
-        m.set(a.txid, { description: a.description, labels: a.labels, ...(typeof a.satoshis === 'number' ? { satoshis: a.satoshis } : {}) });
+        m.set(a.txid, {
+          description: a.description,
+          labels: a.labels,
+          ...(typeof a.satoshis === 'number' ? { satoshis: a.satoshis } : {}),
+        });
       if (r.actions.length < 1000 || offset + 1000 >= r.totalActions) break;
     }
   } catch {
@@ -177,9 +179,17 @@ export const fetchAccountTxs = async (
 ) => {
   const all = new Set<string>(extraTxids);
   for (let i = 0; i < addresses.length; i++) {
-    onProgress({ phase: `Finding transactions (address ${i + 1} of ${addresses.length})`, done: i, total: addresses.length });
+    onProgress({
+      phase: `Finding transactions (address ${i + 1} of ${addresses.length})`,
+      done: i,
+      total: addresses.length,
+    });
     const ids = await addressTxids(addresses[i], apiKey, (n) =>
-      onProgress({ phase: `Finding transactions (address ${i + 1} of ${addresses.length}: ${n})`, done: i, total: addresses.length }),
+      onProgress({
+        phase: `Finding transactions (address ${i + 1} of ${addresses.length}: ${n})`,
+        done: i,
+        total: addresses.length,
+      }),
     );
     ids.forEach((t) => all.add(t));
   }

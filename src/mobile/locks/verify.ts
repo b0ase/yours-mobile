@@ -10,7 +10,14 @@ import { Lock } from '@1sat/templates';
 import { Transaction } from '@bsv/sdk';
 import { describeReceipt, parseReceipt, type Receipt } from './receipt';
 
-export type VerifiedLock = { vout: number; height: number; sats: number; address: string; spent: boolean; matured: boolean };
+export type VerifiedLock = {
+  vout: number;
+  height: number;
+  sats: number;
+  address: string;
+  spent: boolean;
+  matured: boolean;
+};
 export type VerifyStatus = 'Locked' | 'Partly claimed' | 'Fully claimed' | 'No locks';
 export type VerifyResult = {
   txid: string;
@@ -33,7 +40,14 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
   tx.outputs.forEach((o, vout) => {
     const d = Lock.decode(o.lockingScript);
     if (d && (o.satoshis ?? 0) > 0) {
-      locks.push({ vout, height: d.until, sats: o.satoshis ?? 0, address: d.address, spent: spent.has(vout), matured: d.until <= height });
+      locks.push({
+        vout,
+        height: d.until,
+        sats: o.satoshis ?? 0,
+        address: d.address,
+        spent: spent.has(vout),
+        matured: d.until <= height,
+      });
       return;
     }
     receipt ??= parseReceipt(o.lockingScript);
@@ -51,13 +65,20 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
         if (l.address !== r.lockAddress) problems.push(`Output ${s.vout} is locked to a different key.`);
       }
     }
-    if (r.schedule.length !== locks.length) problems.push(`The receipt lists ${r.schedule.length} locks; the transaction has ${locks.length}.`);
+    if (r.schedule.length !== locks.length)
+      problems.push(`The receipt lists ${r.schedule.length} locks; the transaction has ${locks.length}.`);
     const sum = r.schedule.reduce((a, s) => a + s.sats, 0);
     if (sum !== r.amountSats) problems.push('The receipt total does not add up.');
   }
   const spentN = locks.filter((l) => l.spent).length;
   const status: VerifyStatus =
-    locks.length === 0 ? 'No locks' : spentN === 0 ? 'Locked' : spentN === locks.length ? 'Fully claimed' : 'Partly claimed';
+    locks.length === 0
+      ? 'No locks'
+      : spentN === 0
+        ? 'Locked'
+        : spentN === locks.length
+          ? 'Fully claimed'
+          : 'Partly claimed';
   return {
     txid,
     locks,

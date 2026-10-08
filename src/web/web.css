@@ -8,7 +8,8 @@
 html:root {
   --web-banner-height: 34px;
   --wallet-height: calc(
-    100dvh - var(--web-banner-height) - env(safe-area-inset-top) - var(--account-strip-height) - env(safe-area-inset-bottom)
+    100dvh - var(--web-banner-height) - env(safe-area-inset-top) - var(--account-strip-height) -
+      env(safe-area-inset-bottom)
   );
 }
 

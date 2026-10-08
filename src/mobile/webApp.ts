@@ -33,7 +33,12 @@ const currentIosEnv = (): IosEnv => {
   } catch {
     /* no matchMedia */
   }
-  return { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints, standalone };
+  return {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+    standalone,
+  };
 };
 
 /** Web app (not the native apps, not the extension): the wallet lives only in this browser. */

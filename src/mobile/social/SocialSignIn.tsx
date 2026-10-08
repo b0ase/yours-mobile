@@ -128,30 +128,33 @@ export const SocialSignIn = ({
     return (
       <div className="w-[92%] mb-4">
         <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: '#17191E' }}>
-        {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
-        <div className="flex-1 min-w-0 text-left">
-          <div className="text-sm font-semibold text-white flex items-center gap-1">
-            {profile.provider === 'x' ? `@${profile.name}` : profile.name}
-            <BadgeCheck size={14} color="#F5B800" />
+          {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
+          <div className="flex-1 min-w-0 text-left">
+            <div className="text-sm font-semibold text-white flex items-center gap-1">
+              {profile.provider === 'x' ? `@${profile.name}` : profile.name}
+              <BadgeCheck size={14} color="#F5B800" />
+            </div>
+            <div className="text-[11px]" style={{ color: '#98A2B3' }}>
+              {profile.alias ? `Your name will be ${profile.alias}` : 'Verified'}
+            </div>
           </div>
-          <div className="text-[11px]" style={{ color: '#98A2B3' }}>
-            {profile.alias ? `Your name will be ${profile.alias}` : 'Verified'}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={clearSocial}
-          className="text-xs bg-transparent border-0"
-          style={{ color: '#98A2B3' }}
-        >
-          Remove
-        </button>
+          <button
+            type="button"
+            onClick={clearSocial}
+            className="text-xs bg-transparent border-0"
+            style={{ color: '#98A2B3' }}
+          >
+            Remove
+          </button>
         </div>
         {taken && onRestore ? (
-          <div className="mt-2 rounded-xl px-3 py-2.5 text-left text-xs" style={{ background: '#2B2F36', color: '#E7E7E7' }}>
-            <b>{taken}</b> is already linked to a wallet with its own 12-word recovery phrase. If you have it, enter it next:
-            a new account would get new keys and couldn't use this name. The words stay on this phone, encrypted with your
-            wallet password.
+          <div
+            className="mt-2 rounded-xl px-3 py-2.5 text-left text-xs"
+            style={{ background: '#2B2F36', color: '#E7E7E7' }}
+          >
+            <b>{taken}</b> is already linked to a wallet with its own 12-word recovery phrase. If you have it, enter it
+            next: a new account would get new keys and couldn't use this name. The words stay on this phone, encrypted
+            with your wallet password.
             <button
               type="button"
               onClick={onRestore}

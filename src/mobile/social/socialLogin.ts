@@ -19,7 +19,14 @@ import { YoursNative } from '../native';
  */
 
 export type SocialProvider = 'x' | 'google';
-type Pending = { provider: SocialProvider; secret: string; at: number; ticket?: string; profile?: SocialProfile; claimed?: boolean };
+type Pending = {
+  provider: SocialProvider;
+  secret: string;
+  at: number;
+  ticket?: string;
+  profile?: SocialProfile;
+  claimed?: boolean;
+};
 
 const KEY = 'bwallet.social';
 const TTL_MS = 10 * 60_000;
@@ -61,7 +68,8 @@ const post = async <T>(op: string, body: unknown): Promise<T> => {
   if (!r.ok) throw new Error(j.error || `Sign-in failed (${r.status})`);
   return j;
 };
-const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
+const hex = (b: ArrayBuffer | Uint8Array) =>
+  Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 
 export async function startSocial(provider: SocialProvider): Promise<void> {
   lastError = '';
@@ -96,10 +104,16 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
   // "Open bWalletX" link did nothing. The session returns the bwalletx:// URL the return page navigates to.
   if (Capacitor.getPlatform() === 'ios') {
     try {
-      const { url: back } = await YoursNative.authSession({ url, scheme: 'bwalletx', httpsHost: 'www.bwallet.space', httpsPath: '/social' });
+      const { url: back } = await YoursNative.authSession({
+        url,
+        scheme: 'bwalletx',
+        httpsHost: 'www.bwallet.space',
+        httpsPath: '/social',
+      });
       await receiveSocialUrl(back);
     } catch (e) {
-      lastError = (e as { code?: string })?.code === 'cancelled' ? '' : e instanceof Error ? e.message : 'Sign-in failed';
+      lastError =
+        (e as { code?: string })?.code === 'cancelled' ? '' : e instanceof Error ? e.message : 'Sign-in failed';
       write(null);
     }
     return;
@@ -111,7 +125,9 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
 const RETURN = 'https://www.bwallet.space/social';
 const WEB_RETURN = 'https://web.bwalletx.com/';
 const isReturn = (url: string) =>
-  url.startsWith(RETURN) || url.startsWith('bwalletx://social') || (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
+  url.startsWith(RETURN) ||
+  url.startsWith('bwalletx://social') ||
+  (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
 
 /** A return URL (universal link, bwalletx://, or the extension's tab): keep the ticket, fetch the profile. */
 export async function receiveSocialUrl(url: string): Promise<void> {
@@ -149,7 +165,12 @@ export function socialProof(): { profile: SocialProfile; ticket: string; secret:
 
 // Web wallet: back from the provider in this tab with #p=…&t=… (or #error=…). Take it, then clear the address
 // bar so the ticket isn't left in history or re-read on reload.
-if (!Capacitor.isNativePlatform() && !IS_EXTENSION && typeof location !== 'undefined' && location.href.startsWith(WEB_RETURN)) {
+if (
+  !Capacitor.isNativePlatform() &&
+  !IS_EXTENSION &&
+  typeof location !== 'undefined' &&
+  location.href.startsWith(WEB_RETURN)
+) {
   const here = location.href;
   if (isReturn(here)) {
     history.replaceState(null, '', location.pathname + location.search);

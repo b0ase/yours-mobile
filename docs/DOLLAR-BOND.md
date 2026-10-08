@@ -28,18 +28,18 @@ with BSV scripts and launched from the smart wallet.
 
 ## Parameters (starting points, to tune on testnet)
 
-| Parameter | Start | Notes |
-| --- | --- | --- |
-| Minimum ratio to mint | 200% | BSV is volatile; start conservative |
-| Liquidation ratio | 150% | Below this, anyone can liquidate |
-| Liquidation discount | 10% | The keeper's reward |
-| Stability fee | 2% a year | Paid in bonds when closing; the bond's yield |
-| Minimum vault | $50 | Keeps dust vaults out |
+| Parameter             | Start     | Notes                                        |
+| --------------------- | --------- | -------------------------------------------- |
+| Minimum ratio to mint | 200%      | BSV is volatile; start conservative          |
+| Liquidation ratio     | 150%      | Below this, anyone can liquidate             |
+| Liquidation discount  | 10%       | The keeper's reward                          |
+| Stability fee         | 2% a year | Paid in bonds when closing; the bond's yield |
+| Minimum vault         | $50       | Keeps dust vaults out                        |
 
 ## The parts
 
-- **Vault script.** A covenant (sCrypt-style) holding the BSV. Spend paths: *close* (owner signs + burns
-  the vault's bonds), *top up* (owner adds BSV), *liquidate* (anyone, with a signed price showing the ratio
+- **Vault script.** A covenant (sCrypt-style) holding the BSV. Spend paths: _close_ (owner signs + burns
+  the vault's bonds), _top up_ (owner adds BSV), _liquidate_ (anyone, with a signed price showing the ratio
   is below the line, and burning the vault's bonds).
 - **Bond token.** A BSV-21 token whose mint is only valid in the same transaction that opens or increases
   a vault, and whose burn is checked by the vault's close / liquidate paths.

@@ -42,8 +42,8 @@ export const FinishIndexing = ({
       </div>
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
         Setting up lists ${ticker} in other wallets and the Market and opens its chat room. One payment of about{' '}
-        {money(s.total.totalSats, s.rate)}, most of which is a prepaid deposit with
-        the 1Sat indexer, not a fee: it stays as ${ticker}'s balance there and pays for its transfers.
+        {money(s.total.totalSats, s.rate)}, most of which is a prepaid deposit with the 1Sat indexer, not a fee: it
+        stays as ${ticker}'s balance there and pays for its transfers.
       </p>
       {s.needs && s.freeNote && (
         <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>

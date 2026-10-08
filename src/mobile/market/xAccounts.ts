@@ -18,7 +18,9 @@ export const xAccounts = (): Promise<XAccount[]> =>
       // bWalletX's own record: paymail names registered with Continue with X (pay server).
       const r = await fetch(`${BWALLET_PAYMAIL_API}/api/paymail/social?provider=all`);
       if (!r.ok) return [];
-      const { accounts } = (await r.json()) as { accounts: { name: string | null; alias: string; kind?: XAccount['kind'] }[] };
+      const { accounts } = (await r.json()) as {
+        accounts: { name: string | null; alias: string; kind?: XAccount['kind'] }[];
+      };
       const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()));
       const out: XAccount[] = [];
       for (let i = 0; i < accounts.length; i += 6) {

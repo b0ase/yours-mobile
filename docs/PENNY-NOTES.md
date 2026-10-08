@@ -20,14 +20,14 @@ Penny Notes are backed by BSV you can see on chain.
 
 ## Parameters (start)
 
-| | |
-| --- | --- |
-| Unit | 1¢ |
-| Minimum ratio to mint | 1000% (10x) |
-| Liquidation ratio | 150% |
-| Liquidation discount | 10% |
-| Fee | 0% (notes are cash; a small mint fee for bCorp is optional) |
-| Minimum vault | $0.50 |
+|                       |                                                             |
+| --------------------- | ----------------------------------------------------------- |
+| Unit                  | 1¢                                                          |
+| Minimum ratio to mint | 1000% (10x)                                                 |
+| Liquidation ratio     | 150%                                                        |
+| Liquidation discount  | 10%                                                         |
+| Fee                   | 0% (notes are cash; a small mint fee for bCorp is optional) |
+| Minimum vault         | $0.50                                                       |
 
 All are per-vault constructor values: changing them doesn't change the contract code.
 

@@ -111,7 +111,15 @@ export const errorCode = (e: unknown): string | null => {
  * Codes after which re-asking with the same quoteId + txid can never succeed: stop retrying and say so plainly.
  * `quote_used` = bit-sign answered but the answer never arrived (until bit-sign returns the stored answer on retry).
  */
-export const FINAL_CODES = new Set(['quote_used', 'no_quote', 'quote_paid_other', 'txid_used', 'quote_expired', 'bad_quote', 'bad_txid']);
+export const FINAL_CODES = new Set([
+  'quote_used',
+  'no_quote',
+  'quote_paid_other',
+  'txid_used',
+  'quote_expired',
+  'bad_quote',
+  'bad_txid',
+]);
 
 export const finalText = (code: string) =>
   code === 'quote_used'

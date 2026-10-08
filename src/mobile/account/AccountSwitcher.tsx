@@ -12,7 +12,10 @@ const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}
 
 export const AgentMark = ({ id }: { id?: string }) =>
   id && isAgentAccount(id) ? (
-    <AgentBadge stopped={getAgentAccount(id)?.stopped || allAgentsStopped()} label={isPotAccount(getAgentAccount(id)) ? 'POT' : 'AGENT'} />
+    <AgentBadge
+      stopped={getAgentAccount(id)?.stopped || allAgentsStopped()}
+      label={isPotAccount(getAgentAccount(id)) ? 'POT' : 'AGENT'}
+    />
   ) : null;
 
 /** Every account as a tappable row. compact = the strip's dropdown (smaller, no address line). */

@@ -53,7 +53,12 @@ const LockCoin = ({ color, accent }: { color: string; accent: string }) => (
     <rect x="3" y="11" width="13" height="10" rx="2" stroke={color} strokeWidth="2" />
     <path d="M6 11V7.5a3.5 3.5 0 0 1 7 0V11" stroke={color} strokeWidth="2" strokeLinecap="round" />
     <circle cx="17.5" cy="16.5" r="5.5" fill={accent} stroke="#010101" strokeWidth="1" />
-    <path d="M17.5 13.6v5.8M16 14.9h2.2a1 1 0 0 1 0 1.6h-1.4a1 1 0 0 0 0 1.6H19" stroke="#010101" strokeWidth="1.1" strokeLinecap="round" />
+    <path
+      d="M17.5 13.6v5.8M16 14.9h2.2a1 1 0 0 1 0 1.6h-1.4a1 1 0 0 0 0 1.6H19"
+      stroke="#010101"
+      strokeWidth="1.1"
+      strokeLinecap="round"
+    />
   </svg>
 );
 

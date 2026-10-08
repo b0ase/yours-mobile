@@ -23,7 +23,10 @@ const LINE = '#2b2f36';
 const CARD = '#17191E';
 
 const download = (l: Loaded) =>
-  saveTextFile(`${l.strategy.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${l.strategy.version}.json`, JSON.stringify(l.strategy, null, 2));
+  saveTextFile(
+    `${l.strategy.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-v${l.strategy.version}.json`,
+    JSON.stringify(l.strategy, null, 2),
+  );
 
 /**
  * Agent account › Strategy (SMART-WALLET-SPEC.md §3): load a strategy file (pick or paste), see its goals
@@ -71,7 +74,11 @@ export const StrategySection = ({ id }: { id: string }) => {
           </span>
           <span
             className="text-[9px] font-bold rounded px-1.5 py-0.5"
-            style={{ background: live ? '#12B76A22' : '#F5B80022', color: live ? '#6CE9A6' : GOLD, letterSpacing: '0.05em' }}
+            style={{
+              background: live ? '#12B76A22' : '#F5B80022',
+              color: live ? '#6CE9A6' : GOLD,
+              letterSpacing: '0.05em',
+            }}
           >
             {live ? 'LIVE' : 'PAPER'}
           </span>
@@ -98,7 +105,12 @@ export const StrategySection = ({ id }: { id: string }) => {
           </div>
         )}
         {live ? (
-          <button type="button" onClick={() => setStrategyMode(id, 'paper')} className={btn} style={{ background: '#F5B80022', color: GOLD }}>
+          <button
+            type="button"
+            onClick={() => setStrategyMode(id, 'paper')}
+            className={btn}
+            style={{ background: '#F5B80022', color: GOLD }}
+          >
             Back to paper
           </button>
         ) : (
@@ -112,18 +124,38 @@ export const StrategySection = ({ id }: { id: string }) => {
           </button>
         )}
         <div className="flex gap-2">
-          <button type="button" onClick={() => setEditing(true)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={`${btn} flex-1`}
+            style={{ background: LINE, color: '#fff' }}
+          >
             Load another
           </button>
-          <button type="button" onClick={() => void download(loaded)} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
+          <button
+            type="button"
+            onClick={() => void download(loaded)}
+            className={`${btn} flex-1`}
+            style={{ background: LINE, color: '#fff' }}
+          >
             Save file
           </button>
           {MARKET_ENABLED && isCurrent && (
-            <button type="button" onClick={() => setPublishing(true)} className={`${btn} flex-1`} style={{ background: '#F5B80022', color: GOLD }}>
+            <button
+              type="button"
+              onClick={() => setPublishing(true)}
+              className={`${btn} flex-1`}
+              style={{ background: '#F5B80022', color: GOLD }}
+            >
               Sell
             </button>
           )}
-          <button type="button" onClick={() => unloadStrategy(id)} className={`${btn} flex-1`} style={{ background: LINE, color: '#FDA29B' }}>
+          <button
+            type="button"
+            onClick={() => unloadStrategy(id)}
+            className={`${btn} flex-1`}
+            style={{ background: LINE, color: '#FDA29B' }}
+          >
             Unload
           </button>
         </div>
@@ -135,8 +167,8 @@ export const StrategySection = ({ id }: { id: string }) => {
     <div className={section} style={{ background: CARD }}>
       <div className="text-sm font-bold text-white">Load strategy</div>
       <div className="text-xs" style={{ color: MUTED }}>
-        A strategy is a file of goals for the agent and rules the wallet enforces: which tokens, how much per trade and per
-        day, buy and sell prices, when to stop. It starts on paper (pretend money) until you choose Run live.
+        A strategy is a file of goals for the agent and rules the wallet enforces: which tokens, how much per trade and
+        per day, buy and sell prices, when to stop. It starts on paper (pretend money) until you choose Run live.
       </div>
       <input
         ref={file}
@@ -171,7 +203,13 @@ export const StrategySection = ({ id }: { id: string }) => {
         <div className="text-xs flex flex-col gap-1" style={{ color: MUTED }}>
           Your strategies (bought or published):
           {Object.entries(myStrategies()).map(([op, m]) => (
-            <button key={op} type="button" onClick={() => (loadStrategy(id, m.strategy, 'paper'), setEditing(false))} className="text-left text-sm font-bold border-0 bg-transparent p-0" style={{ color: GOLD }}>
+            <button
+              key={op}
+              type="button"
+              onClick={() => (loadStrategy(id, m.strategy, 'paper'), setEditing(false))}
+              className="text-left text-sm font-bold border-0 bg-transparent p-0"
+              style={{ color: GOLD }}
+            >
               {m.strategy.name} v{m.strategy.version} → Load on paper
             </button>
           ))}
@@ -195,12 +233,22 @@ export const StrategySection = ({ id }: { id: string }) => {
       )}
       <div className="flex gap-2">
         {text.trim() && (
-          <button type="button" onClick={() => load(text)} className={`${btn} flex-1`} style={{ background: GOLD, color: '#000' }}>
+          <button
+            type="button"
+            onClick={() => load(text)}
+            className={`${btn} flex-1`}
+            style={{ background: GOLD, color: '#000' }}
+          >
             Load on paper
           </button>
         )}
         {editing && (
-          <button type="button" onClick={() => (setEditing(false), setErrors([]))} className={`${btn} flex-1`} style={{ background: LINE, color: '#fff' }}>
+          <button
+            type="button"
+            onClick={() => (setEditing(false), setErrors([]))}
+            className={`${btn} flex-1`}
+            style={{ background: LINE, color: '#fff' }}
+          >
             Cancel
           </button>
         )}

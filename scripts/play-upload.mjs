@@ -67,17 +67,35 @@ try {
     if (!tracks.length) console.log('(no tracks yet)');
   } else {
     const files = readdirSync('dist');
-    const aab = files.includes(`bwallet-${VERSION}-play.aab`) ? `bwallet-${VERSION}-play.aab` : files.find((f) => /^bwallet-.*-play\.aab$/.test(f));
+    const aab = files.includes(`bwallet-${VERSION}-play.aab`)
+      ? `bwallet-${VERSION}-play.aab`
+      : files.find((f) => /^bwallet-.*-play\.aab$/.test(f));
     if (!aab) throw new Error('no dist/bwallet-*-play.aab: run bash scripts/channel-build.sh android-play');
     console.log(`▸ uploading dist/${aab}`);
-    const bundle = await call('POST', `${UPLOAD}/edits/${edit}/bundles?uploadType=media`, readFileSync(join('dist', aab)), {
-      'content-type': 'application/octet-stream',
-    });
+    const bundle = await call(
+      'POST',
+      `${UPLOAD}/edits/${edit}/bundles?uploadType=media`,
+      readFileSync(join('dist', aab)),
+      {
+        'content-type': 'application/octet-stream',
+      },
+    );
     console.log(`  versionCode ${bundle.versionCode}`);
-    await call('PUT', `${API}/edits/${edit}/tracks/${TRACK}`, JSON.stringify({
-      track: TRACK,
-      releases: [{ name: `${VERSION} (${bundle.versionCode})`, versionCodes: [String(bundle.versionCode)], status: 'completed' }],
-    }), { 'content-type': 'application/json' });
+    await call(
+      'PUT',
+      `${API}/edits/${edit}/tracks/${TRACK}`,
+      JSON.stringify({
+        track: TRACK,
+        releases: [
+          {
+            name: `${VERSION} (${bundle.versionCode})`,
+            versionCodes: [String(bundle.versionCode)],
+            status: 'completed',
+          },
+        ],
+      }),
+      { 'content-type': 'application/json' },
+    );
     // While another track is in review, Play refuses to auto-send changes ("Changes cannot be sent for review
     // automatically"). Then commit without sending: fine for internal; for other tracks send them in Publishing overview.
     try {
@@ -85,7 +103,8 @@ try {
     } catch (e) {
       if (!/sent for review automatically|changesNotSentForReview/i.test(String(e))) throw e;
       await call('POST', `${API}/edits/${edit}:commit?changesNotSentForReview=true`);
-      if (TRACK !== 'internal') console.log('! committed without sending for review: send it in Play Console › Publishing overview');
+      if (TRACK !== 'internal')
+        console.log('! committed without sending for review: send it in Play Console › Publishing overview');
     }
     console.log(`✓ ${VERSION} (${bundle.versionCode}) released to ${TRACK}`);
   }

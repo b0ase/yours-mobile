@@ -71,7 +71,12 @@ const PotRow = ({ id, onOpen, rate }: { id: string; onOpen: () => void; rate: nu
   const covers = sats !== null && rate > 0 ? potCovers(subs, sats, rate) : null;
   if (!pot) return null;
   return (
-    <button type="button" onClick={onOpen} className="flex items-center gap-3 rounded-2xl p-3 border-0 text-left cursor-pointer" style={{ background: CARD }}>
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex items-center gap-3 rounded-2xl p-3 border-0 text-left cursor-pointer"
+      style={{ background: CARD }}
+    >
       <PixelGhost color={ghostColorOf(id) ?? GOLD} size={24} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
@@ -122,7 +127,12 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
           </p>
         )}
         {pots.map((p) => (
-          <PotRow key={p.identityAddress} id={p.identityAddress} rate={rate} onOpen={() => setOpen(p.identityAddress)} />
+          <PotRow
+            key={p.identityAddress}
+            id={p.identityAddress}
+            rate={rate}
+            onOpen={() => setOpen(p.identityAddress)}
+          />
         ))}
         <button
           type="button"
@@ -179,7 +189,11 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
             <PixelGhost color={ghostColorOf(id) ?? GOLD} size={28} />
             <div className="flex-1">
               <div className="text-xl font-bold text-white">
-                {balanceUsd !== null ? `$${balanceUsd.toFixed(2)}` : sats !== null ? `${sats.toLocaleString()} sats` : '…'}
+                {balanceUsd !== null
+                  ? `$${balanceUsd.toFixed(2)}`
+                  : sats !== null
+                    ? `${sats.toLocaleString()} sats`
+                    : '…'}
               </div>
               {covers !== null && subs.some((s) => s.status === 'active' || s.status === 'lowFunds') && (
                 <div className="text-xs" style={{ color: isLowFunds(covers) ? '#FDB022' : MUTED }}>
@@ -187,7 +201,9 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
                 </div>
               )}
             </div>
-            {covers !== null && isLowFunds(covers) && subs.some((s) => s.status === 'active' || s.status === 'lowFunds') && <LowBadge />}
+            {covers !== null &&
+              isLowFunds(covers) &&
+              subs.some((s) => s.status === 'active' || s.status === 'lowFunds') && <LowBadge />}
           </div>
         </div>
 
@@ -208,14 +224,22 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
               className="relative h-6 w-11 rounded-full shrink-0 border-0"
               style={{ background: agent.stopped ? '#F04438' : LINE }}
             >
-              <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ left: agent.stopped ? 22 : 2 }} />
+              <span
+                className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+                style={{ left: agent.stopped ? 22 : 2 }}
+              />
             </button>
           </div>
         </div>
 
         <div className="flex items-center justify-between pt-1">
           <span className="text-sm font-bold text-white">Subscriptions</span>
-          <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1 text-xs font-bold bg-transparent border-0" style={{ color: GOLD }}>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 text-xs font-bold bg-transparent border-0"
+            style={{ color: GOLD }}
+          >
             <Plus size={14} /> Add
           </button>
         </div>
@@ -270,7 +294,12 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
                   {e.txid && (
                     <>
                       {' · '}
-                      <a href={`https://whatsonchain.com/tx/${e.txid}`} target="_blank" rel="noreferrer" style={{ color: GOLD }}>
+                      <a
+                        href={`https://whatsonchain.com/tx/${e.txid}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: GOLD }}
+                      >
                         {e.txid.slice(0, 8)}…
                       </a>
                     </>
@@ -281,7 +310,15 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
           </div>
         )}
       </div>
-      {adding && <AddOrderSheet potId={id} potName={pot.name} balanceUsd={balanceUsd} bsvUsd={rate} onClose={() => setAdding(false)} />}
+      {adding && (
+        <AddOrderSheet
+          potId={id}
+          potName={pot.name}
+          balanceUsd={balanceUsd}
+          bsvUsd={rate}
+          onClose={() => setAdding(false)}
+        />
+      )}
     </div>,
     document.body,
   );

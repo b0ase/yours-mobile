@@ -10,17 +10,27 @@ import { mintJson, prove } from '../strategies/market';
 import { CONTRACT_CONTENT_TYPE, type ContractEnvelope } from './contractNft';
 
 export const CONTRACTS_API = 'https://www.bwallet.space/api/contracts';
-export type ContractListing = { origin: string; envelope: ContractEnvelope; body: string; sold: number; createdAt: string };
+export type ContractListing = {
+  origin: string;
+  envelope: ContractEnvelope;
+  body: string;
+  sold: number;
+  createdAt: string;
+};
 
 const api = async <T>(init?: RequestInit, query = ''): Promise<T> => {
-  const r = await fetch(`${CONTRACTS_API}${query}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  const r = await fetch(`${CONTRACTS_API}${query}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+  });
   const j = (await r.json().catch(() => ({}))) as T & { error?: string };
   if (!r.ok) throw new Error(j.error || `Contracts catalogue answered ${r.status}`);
   return j;
 };
 
 export const listContracts = () => api<{ contracts: ContractListing[] }>().then((r) => r.contracts);
-export const getContract = (origin: string) => api<{ contract: ContractListing }>(undefined, `?origin=${encodeURIComponent(origin)}`).then((r) => r.contract);
+export const getContract = (origin: string) =>
+  api<{ contract: ContractListing }>(undefined, `?origin=${encodeURIComponent(origin)}`).then((r) => r.contract);
 
 const MAP = (env: ContractEnvelope) => ({ app: 'bwalletx', type: 'contract', name: env.contract.name });
 
@@ -40,7 +50,8 @@ export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope)
   return outpoint;
 };
 
-export const contractPriceSats = (env: ContractEnvelope, bsvUsd: number) => (env.sale.priceUsd > 0 ? Math.ceil((env.sale.priceUsd / bsvUsd) * 1e8) : 0);
+export const contractPriceSats = (env: ContractEnvelope, bsvUsd: number) =>
+  env.sale.priceUsd > 0 ? Math.ceil((env.sale.priceUsd / bsvUsd) * 1e8) : 0;
 
 /** Buy a copy: mint the exact published text, paying the author (and the 1% fee) in the same transaction. */
 export const buyContract = async (ctx: OneSatContext, origin: string, bsvUsd: number) => {
@@ -48,7 +59,10 @@ export const buyContract = async (ctx: OneSatContext, origin: string, bsvUsd: nu
   if (c.sold >= c.envelope.sale.copies) throw new Error('Sold out');
   const sats = contractPriceSats(c.envelope, bsvUsd);
   if (c.envelope.sale.priceUsd > 0 && !(bsvUsd > 0)) throw new Error('No BSV price right now; try again shortly.');
-  const paying = sats > 0 ? withFeeOutput(withFeeOutput(ctx, marketFeeSats(sats), marketFeeAddress()), sats, c.envelope.sale.payTo) : ctx;
+  const paying =
+    sats > 0
+      ? withFeeOutput(withFeeOutput(ctx, marketFeeSats(sats), marketFeeAddress()), sats, c.envelope.sale.payTo)
+      : ctx;
   const outpoint = await mintJson(paying, c.body, CONTRACT_CONTENT_TYPE, MAP(c.envelope));
   await claimContract(ctx, outpoint);
   return outpoint;
@@ -57,5 +71,8 @@ export const buyContract = async (ctx: OneSatContext, origin: string, bsvUsd: nu
 /** Register a copy this wallet holds with the catalogue (counts it as sold; idempotent). */
 export const claimContract = async (ctx: OneSatContext, outpoint: string) => {
   const proof = await prove(ctx, 'unlock', outpoint);
-  return api<{ ok: boolean; contract: string; original: boolean }>({ method: 'POST', body: JSON.stringify({ action: 'claim', outpoint, ...proof }) });
+  return api<{ ok: boolean; contract: string; original: boolean }>({
+    method: 'POST',
+    body: JSON.stringify({ action: 'claim', outpoint, ...proof }),
+  });
 };

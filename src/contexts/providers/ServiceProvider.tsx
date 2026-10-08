@@ -16,7 +16,9 @@ const initializeServices = async (onUsbRemoved: () => void) => {
   const all = await chromeStorageService.getAndSetStorage();
   try {
     const bytes = JSON.stringify(all ?? {}).length;
-    console.info(`[startup] storage read ${Math.round(performance.now() - t0)} ms, ${Object.keys(all ?? {}).length} keys, ~${Math.round(bytes / 1024)} KB`);
+    console.info(
+      `[startup] storage read ${Math.round(performance.now() - t0)} ms, ${Object.keys(all ?? {}).length} keys, ~${Math.round(bytes / 1024)} KB`,
+    );
   } catch {
     /* size is diagnostics only */
   }

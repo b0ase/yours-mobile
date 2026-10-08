@@ -11,7 +11,18 @@ import { useBackClose } from '../../backStack';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { money, useBsvUsd } from '../../money/money';
 import { openDappBrowser } from '../../dappBrowser';
-import { big, change24, coinImage, coinPage, launchPage, fetchCoin, fetchCoins, sortBoard, wocTx, type BoardCoin } from './api';
+import {
+  big,
+  change24,
+  coinImage,
+  coinPage,
+  launchPage,
+  fetchCoin,
+  fetchCoins,
+  sortBoard,
+  wocTx,
+  type BoardCoin,
+} from './api';
 import {
   HOUSE_BPS,
   MAX_BUY,
@@ -431,7 +442,9 @@ const CoinSheet = ({
                 : `Sell ${exactTokens(prepared.checked.quote.tokens)} $${coin.sym} for ${exactBsv(prepared.checked.quote.userSats)} (${money(Number(prepared.checked.quote.userSats), rate)}) after curve fees?`}
             </p>
             <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-[#98A2B3]">This transaction pays exactly (checked against the curve):</span>
+              <span className="text-[11px] text-[#98A2B3]">
+                This transaction pays exactly (checked against the curve):
+              </span>
               {prepared.checked.rows.map((r, i) => (
                 <div key={i} className="flex justify-between gap-2 text-[11px]">
                   <span className="text-[#98A2B3]">{r.what}</span>
@@ -442,14 +455,17 @@ const CoinSheet = ({
                 <div className="flex justify-between gap-2 text-[11px]">
                   <span className="text-[#98A2B3]">Your BSV from the sale</span>
                   <span className="text-white text-right break-all">
-                    {describeRow({ what: '', to: prepared.w.address, sats: Number(prepared.checked.quote.userSats) }, coin.sym)}
+                    {describeRow(
+                      { what: '', to: prepared.w.address, sats: Number(prepared.checked.quote.userSats) },
+                      coin.sym,
+                    )}
                   </span>
                 </div>
               )}
             </div>
             <p className="text-[11px] text-[#98A2B3] m-0">
-              From this account: the pool inputs above are the pool&apos;s; your wallet adds its own coins, the
-              index fee and a few hundred sats network fee. Trades are final. The quote holds for about a minute.
+              From this account: the pool inputs above are the pool&apos;s; your wallet adds its own coins, the index
+              fee and a few hundred sats network fee. Trades are final. The quote holds for about a minute.
             </p>
             <div className="flex gap-2">
               <button

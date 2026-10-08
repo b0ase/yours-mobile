@@ -18,7 +18,11 @@ const { isPairLink, onPairLink, takePairLink } = await import('./links');
 
 describe('isPairLink', () => {
   test('accepts the pairing links bit-sign and bWalletX produce', () => {
-    expect(isPairLink('https://www.bwallet.space/pair?v=1&r=relay.bwallet.space&c=abc&k=02aa&o=https%3A%2F%2Fbit-sign.online&e=1')).toBe(true);
+    expect(
+      isPairLink(
+        'https://www.bwallet.space/pair?v=1&r=relay.bwallet.space&c=abc&k=02aa&o=https%3A%2F%2Fbit-sign.online&e=1',
+      ),
+    ).toBe(true);
     expect(isPairLink('https://bwallet.space/pair?v=1')).toBe(true);
   });
   test('rejects other hosts and paths', () => {

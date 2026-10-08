@@ -161,23 +161,61 @@ export function validatePlan(plan: TradePlan, ctx: PlanContext): CheckedPlan {
   const want: Want[] = [];
   if (side === 'buy') {
     const to = ctx.buyAddress!;
-    want.push({ script: bsv21(coinId, q.tokens, to).toHex(), sats: BigInt(1), what: 'Tokens to you', to, tokens: q.tokens });
+    want.push({
+      script: bsv21(coinId, q.tokens, to).toHex(),
+      sats: BigInt(1),
+      what: 'Tokens to you',
+      to,
+      tokens: q.tokens,
+    });
     const rest = poolTokens - q.tokens;
     if (rest < BigInt(0)) refuse('the pool does not hold that many tokens.');
     if (rest > BigInt(0))
-      want.push({ script: bsv21(coinId, rest, tokenAddr!).toHex(), sats: BigInt(1), what: 'Rest of the tokens back to the pool', to: tokenAddr!, tokens: rest });
+      want.push({
+        script: bsv21(coinId, rest, tokenAddr!).toHex(),
+        sats: BigInt(1),
+        what: 'Rest of the tokens back to the pool',
+        to: tokenAddr!,
+        tokens: rest,
+      });
     const addr = reserveAddr ?? null;
     if (!addr && reserve !== BigInt(0)) refuse('the pool’s BSV is missing.');
-    want.push({ script: addr ? p2pkhHex(addr) : null, sats: reserve + q.curveSats, what: 'BSV into the pool', to: addr ?? '' });
+    want.push({
+      script: addr ? p2pkhHex(addr) : null,
+      sats: reserve + q.curveSats,
+      what: 'BSV into the pool',
+      to: addr ?? '',
+    });
   } else {
-    want.push({ script: bsv21(coinId, poolTokens + q.tokens, tokenAddr!).toHex(), sats: BigInt(1), what: 'Your tokens into the pool', to: tokenAddr!, tokens: poolTokens + q.tokens });
+    want.push({
+      script: bsv21(coinId, poolTokens + q.tokens, tokenAddr!).toHex(),
+      sats: BigInt(1),
+      what: 'Your tokens into the pool',
+      to: tokenAddr!,
+      tokens: poolTokens + q.tokens,
+    });
     if (reserve < q.curveSats) refuse('the pool holds less BSV than this sell pays.');
-    want.push({ script: p2pkhHex(reserveAddr!), sats: reserve - q.curveSats, what: 'The pool’s BSV after paying you', to: reserveAddr! });
+    want.push({
+      script: p2pkhHex(reserveAddr!),
+      sats: reserve - q.curveSats,
+      what: 'The pool’s BSV after paying you',
+      to: reserveAddr!,
+    });
   }
   if (q.houseFee > BigInt(0))
-    want.push({ script: p2pkhHex(HOUSE_ADDRESS), sats: q.houseFee, what: 'TokenBlaster fee (0.70%)', to: HOUSE_ADDRESS });
+    want.push({
+      script: p2pkhHex(HOUSE_ADDRESS),
+      sats: q.houseFee,
+      what: 'TokenBlaster fee (0.70%)',
+      to: HOUSE_ADDRESS,
+    });
   if (q.routeFee > BigInt(0))
-    want.push({ script: ctx.routeAddress ? p2pkhHex(ctx.routeAddress) : null, sats: q.routeFee, what: 'Coin route fee (0.30%)', to: ctx.routeAddress ?? '' });
+    want.push({
+      script: ctx.routeAddress ? p2pkhHex(ctx.routeAddress) : null,
+      sats: q.routeFee,
+      what: 'Coin route fee (0.30%)',
+      to: ctx.routeAddress ?? '',
+    });
 
   const outs = plan.outputs;
   const rows: PlanRow[] = [];
@@ -222,8 +260,7 @@ export function validatePlan(plan: TradePlan, ctx: PlanContext): CheckedPlan {
   const net = outSum - tok.sats - reserve;
   if (side === 'buy' && net > amount + BigInt(indexFee) + ALLOWANCE)
     refuse(`the trade would take ${exactBsv(net)} from your wallet, more than ${exactBsv(amount)} + index fee.`);
-  if (side === 'sell' && -net + BigInt(indexFee) < q.userSats)
-    refuse('the pool does not release your payout.');
+  if (side === 'sell' && -net + BigInt(indexFee) < q.userSats) refuse('the pool does not release your payout.');
   return { quote: q, sold, indexFee, net, rows };
 }
 
@@ -245,4 +282,6 @@ export function checkSellPayout(
 }
 
 export const describeRow = (r: PlanRow, sym: string) =>
-  r.tokens !== undefined ? `${exactTokens(r.tokens)} $${sym} → ${short(r.to)}` : `${exactBsv(BigInt(r.sats))} → ${r.to ? short(r.to) : '?'}`;
+  r.tokens !== undefined
+    ? `${exactTokens(r.tokens)} $${sym} → ${short(r.to)}`
+    : `${exactBsv(BigInt(r.sats))} → ${r.to ? short(r.to) : '?'}`;

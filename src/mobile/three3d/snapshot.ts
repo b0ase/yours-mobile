@@ -178,18 +178,17 @@ export const snapshot = (url: string, opts: SnapshotOpts = {}, key = url): Promi
   if (failed.has(key)) return Promise.reject(new Error('failed before'));
   const running = inflight.get(key);
   if (running) return running;
-  const p = idbGet(key).then(
-    (blob) =>
-      blob
-        ? (() => {
-            const u = URL.createObjectURL(blob);
-            mem.set(key, u);
-            return u;
-          })()
-        : new Promise<string>((ok, no) => {
-            queue.push({ key, url, opts, ok, no });
-            void pump();
-          }),
+  const p = idbGet(key).then((blob) =>
+    blob
+      ? (() => {
+          const u = URL.createObjectURL(blob);
+          mem.set(key, u);
+          return u;
+        })()
+      : new Promise<string>((ok, no) => {
+          queue.push({ key, url, opts, ok, no });
+          void pump();
+        }),
   );
   inflight.set(key, p);
   void p.finally(() => inflight.delete(key)).catch(() => undefined);

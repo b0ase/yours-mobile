@@ -15,14 +15,20 @@ const PRICE_TOLERANCE = 0.85;
 const OUTPOINT = /^[0-9a-f]{64}_\d{1,6}$/;
 
 const proofMessage = (action, outpoint, ts) => `bwalletx strategy ${action}: ${outpoint}: ${ts}`;
-const normOutpoint = (s) => String(s || '').trim().replace('.', '_').toLowerCase();
+const normOutpoint = (s) =>
+  String(s || '')
+    .trim()
+    .replace('.', '_')
+    .toLowerCase();
 
 /** Address of a valid signature over `message`, or an error. */
 function verifyProof(action, outpoint, p, now = Date.now()) {
   const prefix = `bwalletx strategy ${action}: ${outpoint}: `;
-  if (typeof p.message !== 'string' || !p.message.startsWith(prefix)) return { ok: false, error: 'Proof does not match this request' };
+  if (typeof p.message !== 'string' || !p.message.startsWith(prefix))
+    return { ok: false, error: 'Proof does not match this request' };
   const ts = Number(p.message.slice(prefix.length));
-  if (!Number.isFinite(ts) || Math.abs(now - ts) > PROOF_WINDOW_MS) return { ok: false, error: 'Proof expired; try again' };
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > PROOF_WINDOW_MS)
+    return { ok: false, error: 'Proof expired; try again' };
   try {
     const pub = PublicKey.fromString(String(p.pubkey_hex || '').trim());
     const sig = Signature.fromDER(String(p.signature || '').trim(), 'hex');
@@ -36,7 +42,13 @@ function verifyProof(action, outpoint, p, now = Date.now()) {
 function p2pkhAddress(script) {
   const c = script.chunks;
   for (let i = 0; i + 4 < c.length; i++) {
-    if (c[i].op === 0x76 && c[i + 1].op === 0xa9 && c[i + 2].data?.length === 20 && c[i + 3].op === 0x88 && c[i + 4].op === 0xac)
+    if (
+      c[i].op === 0x76 &&
+      c[i + 1].op === 0xa9 &&
+      c[i + 2].data?.length === 20 &&
+      c[i + 3].op === 0x88 &&
+      c[i + 4].op === 0xac
+    )
       return Utils.toBase58Check(c[i + 2].data);
   }
   return null;
@@ -49,7 +61,8 @@ function inscriptionOf(script) {
     if (!c[i].data || Utils.toUTF8(c[i].data) !== 'ord') continue;
     let type = '';
     let j = i + 1;
-    for (; j + 1 < c.length && c[j].op !== 0; j += 2) if (c[j].op === 0x51) type = c[j + 1].data ? Utils.toUTF8(c[j + 1].data) : '';
+    for (; j + 1 < c.length && c[j].op !== 0; j += 2)
+      if (c[j].op === 0x51) type = c[j + 1].data ? Utils.toUTF8(c[j + 1].data) : '';
     const body = [];
     for (j += 1; j < c.length && c[j].op !== 0x68; j++) if (c[j].data) body.push(...c[j].data);
     return { type, body: Utils.toUTF8(body) };
@@ -71,7 +84,15 @@ function parseEnvelope(text) {
 }
 
 /** Public part of an envelope (no ciphertext) for listings. */
-const publicEnvelope = (e) => ({ name: e.name, version: e.version, description: e.description, spec: e.spec, author: e.author, sale: e.sale, keyHash: e.keyHash });
+const publicEnvelope = (e) => ({
+  name: e.name,
+  version: e.version,
+  description: e.description,
+  spec: e.spec,
+  author: e.author,
+  sale: e.sale,
+  keyHash: e.keyHash,
+});
 
 // ---- content-key encryption at rest (STRATEGY_KEY_SECRET, Vercel env only) ----
 const secretKey = () => {
@@ -95,7 +116,10 @@ function openKey(sealed) {
 // ---- chain access (injectable for tests) ----
 const chain = {
   async tx(txid) {
-    for (const url of [`${ONESAT}/beef/${txid}/tx`, `https://junglebus.gorillapool.io/v1/transaction/get/${txid}/bin`]) {
+    for (const url of [
+      `${ONESAT}/beef/${txid}/tx`,
+      `https://junglebus.gorillapool.io/v1/transaction/get/${txid}/bin`,
+    ]) {
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(10_000) });
         if (!r.ok) continue;
@@ -119,13 +143,17 @@ const chain = {
     return !!rows?.[0]?.spendTxid;
   },
   async origin(outpoint) {
-    const r = await fetch(`${ONESAT}/ordfs/metadata/${outpoint.replace('_', '.')}:-2`, { signal: AbortSignal.timeout(10_000) });
+    const r = await fetch(`${ONESAT}/ordfs/metadata/${outpoint.replace('_', '.')}:-2`, {
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!r.ok) return null;
     const m = await r.json().catch(() => null);
     return m?.origin ? normOutpoint(m.origin) : null;
   },
   async bsvUsd() {
-    const r = await fetch('https://api.whatsonchain.com/v1/bsv/main/exchangerate', { signal: AbortSignal.timeout(8_000) });
+    const r = await fetch('https://api.whatsonchain.com/v1/bsv/main/exchangerate', {
+      signal: AbortSignal.timeout(8_000),
+    });
     const j = await r.json();
     return Number(j.rate) || 0;
   },
@@ -151,11 +179,14 @@ async function envelopeAt(origin, c = chain, type = CONTENT_TYPE, parse = parseE
   const ins = out && inscriptionOf(out.lockingScript);
   if (!ins || ins.type !== type) return null;
   const env = parse(ins.body);
-  return env ? { env, tx, body: ins.body, bodyHash: require('node:crypto').createHash('sha256').update(ins.body).digest('hex') } : null;
+  return env
+    ? { env, tx, body: ins.body, bodyHash: require('node:crypto').createHash('sha256').update(ins.body).digest('hex') }
+    : null;
 }
 
 /** Sats the origin transaction paid to `address`. */
-const paidTo = (tx, address) => tx.outputs.reduce((s, o) => s + (p2pkhAddress(o.lockingScript) === address && o.satoshis > 1 ? o.satoshis : 0), 0);
+const paidTo = (tx, address) =>
+  tx.outputs.reduce((s, o) => s + (p2pkhAddress(o.lockingScript) === address && o.satoshis > 1 ? o.satoshis : 0), 0);
 
 module.exports = {
   CONTENT_TYPE,

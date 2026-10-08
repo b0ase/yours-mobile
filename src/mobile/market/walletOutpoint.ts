@@ -89,9 +89,15 @@ export const purchaseContext = <C extends { wallet: W }, W extends WalletLike>(c
     get(target, prop, receiver) {
       if (prop === 'createAction')
         return async (args: CreateArgs, originator?: string) => {
-          const r = (await target.createAction(withUnlockRoom(args, outpoint) as never, originator)) as { txid?: string } | undefined;
+          const r = (await target.createAction(withUnlockRoom(args, outpoint) as never, originator)) as
+            | { txid?: string }
+            | undefined;
           // History › Connections: the in-wallet Market calls the wallet from the page, not via background.ts.
-          logInWalletApp('1sat.market', 'createAction', r?.txid ? { txid: r.txid, sats: 0, description: args.description?.slice(0, 120) } : undefined);
+          logInWalletApp(
+            '1sat.market',
+            'createAction',
+            r?.txid ? { txid: r.txid, sats: 0, description: args.description?.slice(0, 120) } : undefined,
+          );
           return r;
         };
       const v = Reflect.get(target, prop, receiver);

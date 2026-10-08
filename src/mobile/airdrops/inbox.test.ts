@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { badgeCount, emptyInbox, hide, isUnsolicited, keep, loadInbox, markSeen, saveInbox, toItems, visibleItems } from './inbox';
+import {
+  badgeCount,
+  emptyInbox,
+  hide,
+  isUnsolicited,
+  keep,
+  loadInbox,
+  markSeen,
+  saveInbox,
+  toItems,
+  visibleItems,
+} from './inbox';
 import { looksLike, poisonDataFrom, poisonWarning } from './poison';
 import type { HistoryRow } from '../wallet/txHistory';
 

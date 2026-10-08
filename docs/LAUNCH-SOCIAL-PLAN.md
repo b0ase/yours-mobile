@@ -31,16 +31,16 @@ Status: plan only (8 Oct 2026). Phase 1 (below) is built on `feat/launch-and-lin
 
 ### Fields
 
-| Field | Type | Notes |
-|---|---|---|
-| `website` | https URL | The project's site |
-| `app` | https URL | The app or product the token is used in |
-| `x` | handle or https x.com URL | |
-| `telegram` | handle or https t.me URL | Includes `.gram` names when Telegram resolves them to t.me |
-| `bchat` | https URL to a bChat room | Defaults to the token's own room when absent |
-| `description` | text, 400 chars or fewer | |
-| `logo` | outpoint or ORDFS path | Usually the deploy `icon` |
-| `utility` | text, 160 chars or fewer | Issuer's statement, shown as "Issuer says:" |
+| Field         | Type                      | Notes                                                      |
+| ------------- | ------------------------- | ---------------------------------------------------------- |
+| `website`     | https URL                 | The project's site                                         |
+| `app`         | https URL                 | The app or product the token is used in                    |
+| `x`           | handle or https x.com URL |                                                            |
+| `telegram`    | handle or https t.me URL  | Includes `.gram` names when Telegram resolves them to t.me |
+| `bchat`       | https URL to a bChat room | Defaults to the token's own room when absent               |
+| `description` | text, 400 chars or fewer  |                                                            |
+| `logo`        | outpoint or ORDFS path    | Usually the deploy `icon`                                  |
+| `utility`     | text, 160 chars or fewer  | Issuer's statement, shown as "Issuer says:"                |
 
 Deliberately excluded: `company`, equity, shares, investors, dividends, yield. Readers must ignore these fields if they appear.
 
@@ -155,6 +155,7 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
 ## 5. Airdrops (phase 1 built)
 
 ### Airdrop address
+
 - Every account already has one: `addresses.ordAddress`, the account's ordinals address. It already receives tokens and NFTs.
   - Paymail's ordinals destination is set from it (`names/GetYourName.tsx` → `claimPaymail(..., { ordAddress })`).
   - History scans it (`wallet/HistoryScreen.tsx`).
@@ -162,6 +163,7 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
 - `useAirdropAddress()` (`airdrops/useAirdrops.ts`) exposes the address for the planned public profile page (`bwalletx.com/bchat/u/<name>`). The page should show the airdrop address next to the pay QR.
 
 ### Inbox (`src/mobile/airdrops/`)
+
 - **Unsolicited**: a History v2 row of type `transfer-in`, meaning a 1-sat token or NFT output paid to one of our addresses by a transaction we didn't fund, with no wallet action record of our own. A purchase, mint, launch, swap or recovery always has an action record. The rule is in `isUnsolicited`, with tests.
 - **Data**: the same History pipeline, without prices. It refreshes at most every 10 minutes in the background, and Refresh forces it. Results are cached per account in localStorage.
 - **Badge**: counts items newer than the last time the inbox was opened that aren't kept or hidden. It sits on a Wallet "Airdrops" row under Send / Receive / Mint.
@@ -179,6 +181,7 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
 - **Store edition**: the inbox stays, because tokens are viewable in store builds. It has no trading or links, and the room line on token pages stays gated.
 
 ### Inscription rendering audit (8 Oct 2026)
+
 - Every place inscription content is displayed was checked: upstream `Ordinal.tsx`, `NftDetail`, `MediaViewer`, market `NftCard` / `thumbs.ts`, 3D snapshots, the History statement, bApp frames and the feed.
 - Untrusted HTML or SVG is never rendered in the wallet origin. It goes in `<img>`, or in an iframe with an empty sandbox on a remote origin. There is no `innerHTML`, `srcdoc` or `dangerouslySetInnerHTML` of inscription content.
 - No `postMessage` handler trusts inscription frames. BappFrameHost checks `e.source` and `e.origin` against the bApp session and an allowlist. The hub and dApp bridge don't use window messages.
@@ -187,6 +190,7 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
   - `thumbs.ts` no longer turns SVG into wallet-origin `blob:` URLs. It falls back to a remote `<img>`, with a test.
 
 ### Placement: top-bar b or the Wallet dock badge?
+
 - **(a)** The top-bar icon becomes a gift / inbox icon with a badge, and the $b agent moves to dock hold, pull-down and the Apps tile.
   - Pros: airdrops are visible from every tab, with a familiar inbox pattern.
   - Cons: it demotes the agent, which is a paid feature outside store builds, and agent users lose a one-tap entry.
@@ -198,11 +202,13 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
 ## 6. Advanced launch options (TokenBlaster, plan only)
 
 Today the curve is fixed:
+
 - Constant product on virtual reserves: V0 = 1 BSV, T0 = 1.073B, supply 1B.
 - Graduation at 793.1M sold.
 - Minimum buy 10k sats, maximum buy 20 BSV.
 
 Fees are 0.70% house plus a 0.30% route. The route is chosen once at launch and can't be changed afterwards. It is one of:
+
 - creator;
 - split across 2–10 wallets;
 - holders: BSV paid pro-rata to holders of 100k tokens or more, about every 10 minutes;
@@ -212,14 +218,15 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 
 ### 6.1 Curve presets (named, not free-form)
 
-| Preset | V0 / T0 | Graduates at | Effect |
-|---|---|---|---|
-| Standard (today) | 1 BSV / 1.073B | 793.1M sold | Unchanged |
-| Gentle | 2 BSV / 1.073B | 793.1M | Lower slope: price rises more slowly per BSV in |
-| Steep | 0.5 BSV / 1.073B | 793.1M | Early buyers move the price more |
-| Late graduation | 1 BSV / 1.073B | 900M | More of the supply is sold on the curve before graduating |
+| Preset           | V0 / T0          | Graduates at | Effect                                                    |
+| ---------------- | ---------------- | ------------ | --------------------------------------------------------- |
+| Standard (today) | 1 BSV / 1.073B   | 793.1M sold  | Unchanged                                                 |
+| Gentle           | 2 BSV / 1.073B   | 793.1M       | Lower slope: price rises more slowly per BSV in           |
+| Steep            | 0.5 BSV / 1.073B | 793.1M       | Early buyers move the price more                          |
+| Late graduation  | 1 BSV / 1.073B   | 900M         | More of the supply is sold on the curve before graduating |
 
 **Bounds** so that no preset can trap buyers:
+
 - The starting price is between 0.25× and 4× Standard.
 - Graduation is between 700M and 900M sold.
 - The BSV reserve at graduation must at least cover selling every curve token back. For a constant product curve this always holds, so the check is mainly against rounding.
@@ -228,6 +235,7 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 - Unit tests run every preset through the existing curve test suite.
 
 **Per-coin parameters**:
+
 - The quote code, the trade validator, proof-of-reserves (`validate.ts`, and the wallet's `launchpad/curve.ts`) and the board's market cap all read `{V0, T0, grad}` from the coin instead of from constants.
 - The parameters go into the signed `launch_msg` as `curve: <preset>@v1 V0=… T0=… grad=…`, so they can't change.
 - The wallet's own quote check must use the coin's parameters. If they're missing, it falls back to Standard; unknown presets are refused.
@@ -283,14 +291,14 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 
 ### 6.7 Phases and effort
 
-| # | What | Effort |
-|---|---|---|
-| A1 | Parameter-driven curve in TokenBlaster and bWalletX (quote, validator, proof-of-reserves, board), still Standard only | M (4–5 days) |
-| A2 | Presets with bounds and tests, `launch_msg` v2, coin page "Launch settings" | S–M (3 days) |
-| A3 | Retire the holders route; holder airdrops via the buy-and-airdrop vault job | M (1 week) |
-| A4 | Fee mix (multi-route vault accounting) | M (4 days) |
-| A5 | Buyback settings | S (1–2 days) |
-| A6 | Buyer locks (after the TokenLock indexer test) | M–L |
+| #   | What                                                                                                                  | Effort       |
+| --- | --------------------------------------------------------------------------------------------------------------------- | ------------ |
+| A1  | Parameter-driven curve in TokenBlaster and bWalletX (quote, validator, proof-of-reserves, board), still Standard only | M (4–5 days) |
+| A2  | Presets with bounds and tests, `launch_msg` v2, coin page "Launch settings"                                           | S–M (3 days) |
+| A3  | Retire the holders route; holder airdrops via the buy-and-airdrop vault job                                           | M (1 week)   |
+| A4  | Fee mix (multi-route vault accounting)                                                                                | M (4 days)   |
+| A5  | Buyback settings                                                                                                      | S (1–2 days) |
+| A6  | Buyer locks (after the TokenLock indexer test)                                                                        | M–L          |
 
 **Order**: A3 (policy, cheap while no coin uses the holders route) → A1 → A2 → A5 → A4 → A6.
 
@@ -338,12 +346,12 @@ Milestones are releases tied to events rather than dates. Each milestone tranche
 
 ### 7.3 Phases (additions to 6.7)
 
-| # | What | Effort |
-|---|---|---|
-| A7 | Tranches: shared curve maths, launch-form preview chart, signed schedule, custodial vault releases | M (1 week) |
-| A8 | Tranches as on-chain TokenLock outputs (after the indexer gate) | M |
-| A9 | Milestones (c): graduation, holders and members conditions with deadline release or burn | M |
-| A10 | Milestones (b): bit-sign m-of-n witness attestations | M–L |
+| #   | What                                                                                               | Effort     |
+| --- | -------------------------------------------------------------------------------------------------- | ---------- |
+| A7  | Tranches: shared curve maths, launch-form preview chart, signed schedule, custodial vault releases | M (1 week) |
+| A8  | Tranches as on-chain TokenLock outputs (after the indexer gate)                                    | M          |
+| A9  | Milestones (c): graduation, holders and members conditions with deadline release or burn           | M          |
+| A10 | Milestones (b): bit-sign m-of-n witness attestations                                               | M–L        |
 
 **Updated order**: A3 → A1 → A2 → A7 → A5 → A4 → A8 / A6 (after the indexer gate) → A9 → A10.
 
@@ -364,10 +372,12 @@ One airdrop that arrives in steps instead of all at once. This extends phase 9 (
 - **Sender UX**: the launch-form style preview shows the total cost up front: tokens, plus fees per recipient per step. Merge steps under the dust or indexer-fee floor (`mergeSmall`), and cap recipients × steps so fees stay sane. The sender sees "N recipients × M steps = K outputs, fee ≈ X" before signing.
 
 #### Phase A: fixed cascade (trustless; build first)
+
 - Every step is pre-signed and broadcast at send time as locked outputs to each recipient. Nothing depends on us after sending.
 - Every recipient gets every step whatever they do.
 
 #### Phase B: "hold to keep" (and optional activity weighting)
+
 - A later step only pays recipients who still hold ≥ the minimum balance at the step height. Forfeited shares either **return to the sender** or are **shared out among the remaining eligible recipients** (chosen and signed at send time).
 - Optional weighting toward people who are active in the room or Spaces (Sybil caveat as in 7.2(c): minimum balance or $401-strength members).
 - This can't be pre-signed, because eligibility is only known at the step height. The steps are held in a vault (the sender's funds in a TokenBlaster/bit-sign vault, or a 2-of-2 between vault and sender). At each height the vault snapshots holders and releases the steps.
@@ -376,30 +386,32 @@ One airdrop that arrives in steps instead of all at once. This extends phase 9 (
 - The signed cascade message (the recipient rule, schedule, forfeit route and snapshot rule) is published, so anyone can recompute who should have received each step.
 
 #### Copy
+
 "Airdrop in 4 steps over 90 days." "Hold to keep: later steps go to people who still hold $X." Never "rewards", "yield" or "returns".
 
 #### Phases (additions)
-| # | What | Effort |
-|---|---|---|
+
+| #   | What                                                                                                     | Effort     |
+| --- | -------------------------------------------------------------------------------------------------------- | ---------- |
 | A11 | Cascade A for BSV: schedule picker, pre-signed Lock BSV steps, inbox cascade card, unlock push and claim | M (1 week) |
-| A12 | Cascade A for tokens (after the token-lock indexer gate) | S after A8 |
-| A13 | Cascade B: hold-to-keep vault, snapshots, forfeit route, nLockTime fallback, published rules | M–L |
+| A12 | Cascade A for tokens (after the token-lock indexer gate)                                                 | S after A8 |
+| A13 | Cascade B: hold-to-keep vault, snapshots, forfeit route, nLockTime fallback, published rules             | M–L        |
 
 **Order**: A11 can come straight after the 5.1.86 fixes (it only needs Lock BSV and the inbox). A12 waits for the indexer gate. A13 comes after A9, because it shares the holder-snapshot logic.
 
 ## 8. Phases
 
-| # | What | Size | Risk |
-|---|---|---|---|
-| 1 | Built: launch button, profile lines (room, utility, links), safe link opener | done | low |
-| 2 | TokenBlaster form fields and signed `launch_msg` fields, plus API output and the returns-wording filter | S (2–3 days) | low |
-| 3 | Profile inscription standard, bit-sign cache API, wallet reads the cache | M (1 week) | medium: schema adoption |
-| 4 | Verification badges (DNS or well-known, and $401 X/Telegram) | M | low |
-| 5 | Public user pages `bwalletx.com/<handle>` (SSR, OG, opt-in, reserved words) | M | medium: privacy, collisions |
-| 6 | TokenLock template plus a mainnet indexer test, then personal token locks in Locks | M | **high: indexer support unproven** |
-| 7 | Creator vesting at launch on TokenBlaster | M | medium: curve economics |
-| 8 | Social airdrops (followers, holders, room), with limits | M–L | medium: abuse, fees |
-| 9 | Locked airdrops (per-recipient locks) | S after 6 and 8 | medium |
+| #   | What                                                                                                    | Size            | Risk                               |
+| --- | ------------------------------------------------------------------------------------------------------- | --------------- | ---------------------------------- |
+| 1   | Built: launch button, profile lines (room, utility, links), safe link opener                            | done            | low                                |
+| 2   | TokenBlaster form fields and signed `launch_msg` fields, plus API output and the returns-wording filter | S (2–3 days)    | low                                |
+| 3   | Profile inscription standard, bit-sign cache API, wallet reads the cache                                | M (1 week)      | medium: schema adoption            |
+| 4   | Verification badges (DNS or well-known, and $401 X/Telegram)                                            | M               | low                                |
+| 5   | Public user pages `bwalletx.com/<handle>` (SSR, OG, opt-in, reserved words)                             | M               | medium: privacy, collisions        |
+| 6   | TokenLock template plus a mainnet indexer test, then personal token locks in Locks                      | M               | **high: indexer support unproven** |
+| 7   | Creator vesting at launch on TokenBlaster                                                               | M               | medium: curve economics            |
+| 8   | Social airdrops (followers, holders, room), with limits                                                 | M–L             | medium: abuse, fees                |
+| 9   | Locked airdrops (per-recipient locks)                                                                   | S after 6 and 8 | medium                             |
 
 **Recommended order**: 2 → 3 → 6 (the de-risking test early, in parallel) → 5 → 4 → 7 → 8 → 9.
 

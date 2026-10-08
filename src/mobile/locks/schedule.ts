@@ -127,7 +127,8 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
   let amounts: number[];
   let usdTarget: number | undefined;
   if (g.usdPerPayout != null) {
-    if (!(g.rate && g.rate > 0)) return fail('The BSV price is unavailable, so dollar targets cannot be sized. Use BSV amounts or try again.');
+    if (!(g.rate && g.rate > 0))
+      return fail('The BSV price is unavailable, so dollar targets cannot be sized. Use BSV amounts or try again.');
     if (!(g.usdPerPayout > 0)) return fail('Enter a dollar amount per payout.');
     const buffer = Math.max(0, g.bufferPct ?? DEFAULT_BUFFER_PCT);
     const each = usdToSats(g.usdPerPayout * (1 + buffer / 100), g.rate);
@@ -140,7 +141,9 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
     if (!Number.isInteger(g.totalSats) || g.totalSats < 1) return fail('Enter an amount to lock.');
     if (g.perPayoutSats) {
       // Total at a fixed rate: full pieces, the last one gets what is left.
-      amounts = dates.map((_, i) => Math.min(g.perPayoutSats as number, (g.totalSats as number) - i * (g.perPayoutSats as number)));
+      amounts = dates.map((_, i) =>
+        Math.min(g.perPayoutSats as number, (g.totalSats as number) - i * (g.perPayoutSats as number)),
+      );
     } else amounts = splitEven(g.totalSats, dates.length);
   } else return fail('Enter an amount.');
   // A last piece too small to be worth claiming folds into the one before it.
@@ -150,7 +153,9 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
     amounts[amounts.length - 1] += tail;
   }
   if (amounts.some((a) => a < MIN_PIECE_SATS))
-    return fail(`Each payout must be at least ${MIN_PIECE_SATS.toLocaleString()} sats, or claiming it costs more than it is worth.`);
+    return fail(
+      `Each payout must be at least ${MIN_PIECE_SATS.toLocaleString()} sats, or claiming it costs more than it is worth.`,
+    );
   const pieces: Piece[] = [];
   let prev = currentHeight;
   for (let i = 0; i < dates.length; i++) {
@@ -173,7 +178,8 @@ function buildCurved(g: GradualInput, curve: Curve, dates: Date[], now: Date, cu
   let sats: number[];
   let targets: number[] | undefined;
   if (g.usdPerPayout != null) {
-    if (!(g.rate && g.rate > 0)) return fail('The BSV price is unavailable, so dollar targets cannot be sized. Use BSV amounts or try again.');
+    if (!(g.rate && g.rate > 0))
+      return fail('The BSV price is unavailable, so dollar targets cannot be sized. Use BSV amounts or try again.');
     if (!(g.usdPerPayout > 0)) return fail('Enter a dollar amount per payout.');
     const buffer = Math.max(0, g.bufferPct ?? DEFAULT_BUFFER_PCT);
     const cents = splitByWeights(Math.round(g.usdPerPayout * 100) * dates.length, w);
@@ -186,7 +192,9 @@ function buildCurved(g: GradualInput, curve: Curve, dates: Date[], now: Date, cu
   }
   const m = mergeSmall(sats, MIN_PIECE_SATS);
   if (!m.amounts.length || m.amounts.some((a) => a < MIN_PIECE_SATS))
-    return fail(`Each payout must be at least ${MIN_PIECE_SATS.toLocaleString()} sats, or claiming it costs more than it is worth.`);
+    return fail(
+      `Each payout must be at least ${MIN_PIECE_SATS.toLocaleString()} sats, or claiming it costs more than it is worth.`,
+    );
   // Dollar targets follow their sats: a merged piece carries the targets folded into it.
   let mergedTargets: number[] | undefined;
   if (targets) {
@@ -206,18 +214,27 @@ function buildCurved(g: GradualInput, curve: Curve, dates: Date[], now: Date, cu
   m.idx.forEach((di, k) => {
     const h = Math.max(prev + 1, heightForDate(dates[di], now, currentHeight));
     prev = h;
-    pieces.push({ height: h, sats: m.amounts[k], date: dateForHeight(h, now, currentHeight), ...(mergedTargets ? { usdTarget: mergedTargets[k] } : {}) });
+    pieces.push({
+      height: h,
+      sats: m.amounts[k],
+      date: dateForHeight(h, now, currentHeight),
+      ...(mergedTargets ? { usdTarget: mergedTargets[k] } : {}),
+    });
   });
   const res = checkSpan(pieces, currentHeight);
   if (res.error) return res;
   return m.merged
-    ? { ...res, warning: `${m.merged} payout${m.merged === 1 ? ' was' : 's were'} under ${MIN_PIECE_SATS.toLocaleString()} sats on the ${curveLabel(curve)} curve and ${m.merged === 1 ? 'was' : 'were'} merged into the next.` }
+    ? {
+        ...res,
+        warning: `${m.merged} payout${m.merged === 1 ? ' was' : 's were'} under ${MIN_PIECE_SATS.toLocaleString()} sats on the ${curveLabel(curve)} curve and ${m.merged === 1 ? 'was' : 'were'} merged into the next.`,
+      }
     : res;
 }
 
 /** One unlock date for the whole amount. */
 export function buildOnce(sats: number, unlockAt: Date, now: Date, currentHeight: number): ScheduleResult {
-  if (!Number.isInteger(sats) || sats < MIN_PIECE_SATS) return fail(`Lock at least ${MIN_PIECE_SATS.toLocaleString()} sats.`);
+  if (!Number.isInteger(sats) || sats < MIN_PIECE_SATS)
+    return fail(`Lock at least ${MIN_PIECE_SATS.toLocaleString()} sats.`);
   if (unlockAt.getTime() <= now.getTime()) return fail('Choose a date in the future.');
   const h = heightForDate(unlockAt, now, currentHeight);
   return checkSpan([{ height: h, sats, date: dateForHeight(h, now, currentHeight) }], currentHeight);
@@ -272,10 +289,17 @@ export type Payout =
  * What a matured dollar-target piece pays at today's `rate`. A surplus below MIN_PIECE_SATS is not
  * worth a new lock and stays in the wallet with the payout; so does any surplus when no later piece is left.
  */
-export function payoutFor(pieceSats: number, targetUsd: number, rate: number | null | undefined, hasLaterPiece: boolean): Payout {
-  if (!(rate && rate > 0 && Number.isFinite(rate))) return { kind: 'wait', reason: 'The BSV price is unavailable right now.' };
+export function payoutFor(
+  pieceSats: number,
+  targetUsd: number,
+  rate: number | null | undefined,
+  hasLaterPiece: boolean,
+): Payout {
+  if (!(rate && rate > 0 && Number.isFinite(rate)))
+    return { kind: 'wait', reason: 'The BSV price is unavailable right now.' };
   const need = usdToSats(targetUsd, rate);
-  if (pieceSats < need) return { kind: 'short', paySats: pieceSats, paidUsd: round2(satsToUsd(pieceSats, rate)), targetUsd };
+  if (pieceSats < need)
+    return { kind: 'short', paySats: pieceSats, paidUsd: round2(satsToUsd(pieceSats, rate)), targetUsd };
   const surplus = pieceSats - need;
   const relock = hasLaterPiece && surplus >= MIN_PIECE_SATS;
   return {
@@ -294,7 +318,8 @@ export function fmtBsv(sats: number): string {
   if (sats >= 100_000) return `${Number((sats / 1e8).toFixed(8)).toString()} BSV`;
   return `${sats.toLocaleString('en-US')} sats`;
 }
-export const fmtUsd = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const fmtUsd = (n: number) =>
+  `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // ── percentage payouts ──────────────────────────────────────────────────────
 
@@ -317,7 +342,8 @@ export type PercentInput = {
 
 /** Every piece amount of a percentage schedule (may be thousands long; see foldTail). */
 export function percentAmounts(totalSats: number, pct: number, base: PercentBase): number[] | string {
-  if (!Number.isInteger(totalSats) || totalSats < MIN_PIECE_SATS) return `Lock at least ${MIN_PIECE_SATS.toLocaleString()} sats.`;
+  if (!Number.isInteger(totalSats) || totalSats < MIN_PIECE_SATS)
+    return `Lock at least ${MIN_PIECE_SATS.toLocaleString()} sats.`;
   if (!(pct > 0 && pct <= 100)) return 'Enter a percentage between 0 and 100.';
   const out: number[] = [];
   if (base === 'original') {
@@ -386,13 +412,30 @@ export function buildPercent(p: PercentInput, now: Date, currentHeight: number):
   const span = checkSpan(pieces, currentHeight);
   if (span.error) return { ...span, periods };
   const totalSats = span.totalSats;
-  return { pieces, totalSats, periods, end: endDate, tail, warning: tail ? `Payouts after #${MAX_PIECES - 1} are held in one lock that the wallet re-splits when it matures.` : undefined };
+  return {
+    pieces,
+    totalSats,
+    periods,
+    end: endDate,
+    tail,
+    warning: tail
+      ? `Payouts after #${MAX_PIECES - 1} are held in one lock that the wallet re-splits when it matures.`
+      : undefined,
+  };
 }
 
 // ── many locks per account ──────────────────────────────────────────────────
 
 export type LockMode = 'date' | 'bsv' | 'usd-target' | 'percent';
-export type PlanPiece = { vout: number; height: number; sats: number; usdTarget?: number; tail?: boolean; paidUsd?: number; claimed?: boolean };
+export type PlanPiece = {
+  vout: number;
+  height: number;
+  sats: number;
+  usdTarget?: number;
+  tail?: boolean;
+  paidUsd?: number;
+  claimed?: boolean;
+};
 export type LockPlan = {
   id: string;
   label: string;
@@ -417,7 +460,10 @@ export type LockPlan = {
 
 export type PlanStatus = 'Locked' | 'Ready to claim' | 'Partly claimed' | 'Finished';
 
-export function planStatus(p: LockPlan, height: number): { status: PlanStatus; locked: number; ready: number; next?: number } {
+export function planStatus(
+  p: LockPlan,
+  height: number,
+): { status: PlanStatus; locked: number; ready: number; next?: number } {
   let locked = 0;
   let ready = 0;
   let next: number | undefined;
@@ -452,13 +498,24 @@ export function aggregate(plans: LockPlan[], height: number) {
 
 /** Blocks between payouts (monthly ≈ 30.44 days). */
 export const periodBlocks = (f: Frequency, customDays = 1) =>
-  f === 'daily' ? BLOCKS_PER_DAY : f === 'weekly' ? BLOCKS_PER_DAY * 7 : f === 'monthly' ? 4383 : BLOCKS_PER_DAY * Math.max(1, Math.floor(customDays));
+  f === 'daily'
+    ? BLOCKS_PER_DAY
+    : f === 'weekly'
+      ? BLOCKS_PER_DAY * 7
+      : f === 'monthly'
+        ? 4383
+        : BLOCKS_PER_DAY * Math.max(1, Math.floor(customDays));
 
 /**
  * A matured percent tail: `pending[0]` is today's payout (stays in the wallet), the rest is re-locked
  * as the next batch from `tailHeight`, again at most MAX_PIECES outputs with a new tail if needed.
  */
-export function resplitTail(pending: number[], tailHeight: number, f: Frequency, customDays = 1): { pieces: PlanPiece[]; pendingAmounts: number[] } {
+export function resplitTail(
+  pending: number[],
+  tailHeight: number,
+  f: Frequency,
+  customDays = 1,
+): { pieces: PlanPiece[]; pendingAmounts: number[] } {
   const rest = pending.slice(1);
   const step = periodBlocks(f, customDays);
   const n = Math.min(rest.length, MAX_PIECES);
@@ -485,7 +542,10 @@ export const defaultSurplusTo = (pieces: { height: number }[], currentHeight: nu
   (pieces[pieces.length - 1]?.height ?? 0) - currentHeight > BLOCKS_PER_DAY * 365 ? 'extend' : 'next';
 
 /** Height for a re-locked surplus, or null when it should stay in the wallet. */
-export function surplusHeight(p: Pick<LockPlan, 'pieces' | 'surplusTo' | 'frequency' | 'customDays'>, height: number): number | null {
+export function surplusHeight(
+  p: Pick<LockPlan, 'pieces' | 'surplusTo' | 'frequency' | 'customDays'>,
+  height: number,
+): number | null {
   const open = p.pieces.filter((x) => !x.claimed && x.height > height).sort((a, b) => a.height - b.height);
   if ((p.surplusTo ?? 'next') === 'next') return open[0]?.height ?? null;
   const last = Math.max(height, ...p.pieces.map((x) => x.height));

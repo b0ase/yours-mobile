@@ -8,7 +8,8 @@ const CONTRACT_FORMAT = 'bwalletx.contract-nft/1';
 function parseContractEnvelope(text) {
   try {
     const o = JSON.parse(text);
-    if (o?.format !== CONTRACT_FORMAT || !o.contract || typeof o.contract !== 'object' || !o.sale || !o.author) return null;
+    if (o?.format !== CONTRACT_FORMAT || !o.contract || typeof o.contract !== 'object' || !o.sale || !o.author)
+      return null;
     if (o.contract.format !== 'bwalletx.contract/1' || typeof o.contract.name !== 'string') return null;
     const price = Number(o.sale.priceUsd);
     const copies = Number(o.sale.copies);

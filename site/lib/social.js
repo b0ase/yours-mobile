@@ -46,7 +46,9 @@ const sha256Hex = (s) => crypto.createHash('sha256').update(String(s), 'utf8').d
 
 /** X @B0aseX → `b0asex.x`; their.name+t@gmail.com → `theirname.gmail`; anything else null. */
 function socialAliasFor(provider, name) {
-  const n = String(name || '').trim().toLowerCase();
+  const n = String(name || '')
+    .trim()
+    .toLowerCase();
   if (provider === 'x') return /^[a-z0-9_]{1,15}$/.test(n) ? `${n.replace(/_/g, '-')}.x` : null;
   const m = n.match(/^([a-z0-9.+_-]+)@(gmail|googlemail)\.com$/);
   if (!m) return null;
@@ -61,7 +63,14 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
   const a = Buffer.from(t.vh, 'hex');
   const b = Buffer.from(sha256Hex(secret || ''), 'hex');
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  return { provider: t.p, id: t.id, name: t.name, display: t.d || null, avatar: t.a || null, alias: socialAliasFor(t.p, t.name) };
+  return {
+    provider: t.p,
+    id: t.id,
+    name: t.name,
+    display: t.d || null,
+    avatar: t.a || null,
+    alias: socialAliasFor(t.p, t.name),
+  };
 }
 
 // Where the browser lands after the provider. A fixed list, never a caller-supplied URL (no open redirect).
@@ -93,7 +102,8 @@ function start({ provider, verifier_hash: vh, return_to }, env = process.env, no
     }).toString();
     return [200, { authorizeUrl: u.toString() }];
   }
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return [503, { error: 'Google sign-in is not configured yet' }];
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET)
+    return [503, { error: 'Google sign-in is not configured yet' }];
   const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   u.search = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -110,9 +120,11 @@ function start({ provider, verifier_hash: vh, return_to }, env = process.env, no
 /** Provider callback → the redirect URL for the browser (always to the return page). */
 async function callback(provider, q, env = process.env, f = fetch, now = Date.now()) {
   const st = open(q.state, env);
-  if (!st || st.p !== provider || !(st.e > now)) return returnUrl({ error: 'That sign-in has expired. Please try again.' });
+  if (!st || st.p !== provider || !(st.e > now))
+    return returnUrl({ error: 'That sign-in has expired. Please try again.' });
   const to = st.r === 'web' || st.r === 'testers' ? st.r : 'app';
-  if (q.error || !q.code) return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
+  if (q.error || !q.code)
+    return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
   try {
     let user;
     if (provider === 'x') {
@@ -122,14 +134,24 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
           'Content-Type': 'application/x-www-form-urlencoded',
           Authorization: 'Basic ' + Buffer.from(`${env.X_CLIENT_ID}:${env.X_CLIENT_SECRET}`).toString('base64'),
         },
-        body: new URLSearchParams({ grant_type: 'authorization_code', code: q.code, redirect_uri: redirectUri('x', env), code_verifier: st.v }),
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: q.code,
+          redirect_uri: redirectUri('x', env),
+          code_verifier: st.v,
+        }),
       }).then((r) => r.json());
       if (!tok.access_token) throw new Error(tok.error_description || tok.error || 'X token exchange failed');
       const me = await f('https://api.x.com/2/users/me?user.fields=profile_image_url', {
         headers: { Authorization: `Bearer ${tok.access_token}` },
       }).then((r) => r.json());
       if (!me.data?.id) throw new Error('Could not read the X account');
-      user = { id: me.data.id, name: me.data.username, d: me.data.name, a: me.data.profile_image_url?.replace('_normal.', '_400x400.') };
+      user = {
+        id: me.data.id,
+        name: me.data.username,
+        d: me.data.name,
+        a: me.data.profile_image_url?.replace('_normal.', '_400x400.'),
+      };
     } else {
       const tok = await f('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -150,7 +172,18 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
       if (!u.id || !u.email || u.verified_email !== true) throw new Error('Google did not confirm that email address');
       user = { id: String(u.id), name: u.email, d: u.name, a: u.picture };
     }
-    const ticket = seal({ p: provider, id: user.id, name: String(user.name).trim().toLowerCase(), d: user.d, a: user.a, vh: st.vh, e: now + TTL_MS }, env);
+    const ticket = seal(
+      {
+        p: provider,
+        id: user.id,
+        name: String(user.name).trim().toLowerCase(),
+        d: user.d,
+        a: user.a,
+        vh: st.vh,
+        e: now + TTL_MS,
+      },
+      env,
+    );
     return returnUrl({ p: provider, name: user.name, t: ticket }, to);
   } catch (e) {
     return returnUrl({ error: e instanceof Error ? e.message : 'Sign-in failed' }, to);

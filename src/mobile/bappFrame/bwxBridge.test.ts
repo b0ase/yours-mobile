@@ -95,7 +95,13 @@ describe('handleBwx', () => {
     const { deps } = setup([agent('a1', { dailyCapUsd: 5 }), agent('a2', { stopped: true })]);
     const r = (await handleBwx('agents.list', {}, deps)) as { agents: Record<string, unknown>[]; allStopped: boolean };
     expect(r.allStopped).toBe(false);
-    expect(r.agents[0]).toMatchObject({ id: 'a1', name: 'Agent a1', balanceUsd: 12.5, spentTodayUsd: 3.5, isCurrent: true });
+    expect(r.agents[0]).toMatchObject({
+      id: 'a1',
+      name: 'Agent a1',
+      balanceUsd: 12.5,
+      spentTodayUsd: 3.5,
+      isCurrent: true,
+    });
     expect(r.agents[1]).toMatchObject({ id: 'a2', stopped: true, balanceUsd: null, isCurrent: false });
   });
 
@@ -103,7 +109,8 @@ describe('handleBwx', () => {
     const { deps } = setup([agent('a1')]);
     expect(await handleBwx('agents.log', { id: 'a1', limit: 1 }, deps)).toHaveLength(1);
     expect(await handleBwx('agents.log', { id: 'a1' }, deps)).toHaveLength(2);
-    for (const limit of [0, 201, 1.5, '5']) await expect(handleBwx('agents.log', { id: 'a1', limit }, deps)).rejects.toThrow();
+    for (const limit of [0, 201, 1.5, '5'])
+      await expect(handleBwx('agents.log', { id: 'a1', limit }, deps)).rejects.toThrow();
     await expect(handleBwx('agents.log', { id: 'nope' }, deps)).rejects.toThrow('Unknown agent account');
     await expect(handleBwx('agents.log', { id: 5 }, deps)).rejects.toThrow();
   });

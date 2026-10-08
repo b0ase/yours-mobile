@@ -2,7 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import fixtures from './fixtures/marketTxs.json';
 import { Lock } from '@1sat/templates';
 import { PrivateKey } from '@bsv/sdk';
-import { assetText, classifyEvent, filterCategory, findListings, isOrdLock, isTimeLock, parseBsv20, parseInscription, trailingP2pkh } from './historyEvents';
+import {
+  assetText,
+  classifyEvent,
+  filterCategory,
+  findListings,
+  isOrdLock,
+  isTimeLock,
+  parseBsv20,
+  parseInscription,
+  trailingP2pkh,
+} from './historyEvents';
 import { buildRows, ownOutputs, toCsv, type LocalInfo, type RawTx } from './txHistory';
 import { toRawTx, type WocTx } from './txHistoryFetch';
 import { appsByTxid, isGameHost, mergeConnections, recordCall, recordPayment, requestedSats } from './connectionLog';
@@ -27,11 +37,20 @@ const funding = (inputs: RawTx['vin'], address: string, sats = 50_000): RawTx[] 
     time: 1_700_000_000,
     confirmations: 100,
     vin: [{ txid: '0'.repeat(64), vout: 0 }],
-    vout: Array.from({ length: Math.max(...vouts) + 1 }, (_, n) => ({ n, sats: vouts.includes(n) ? sats : 0, addresses: vouts.includes(n) ? [address] : [] })),
+    vout: Array.from({ length: Math.max(...vouts) + 1 }, (_, n) => ({
+      n,
+      sats: vouts.includes(n) ? sats : 0,
+      addresses: vouts.includes(n) ? [address] : [],
+    })),
   }));
 };
 
-const run = (txs: RawTx[], own: string[], local = new Map<string, LocalInfo>(), appByTxid?: Map<string, { app: string; game?: boolean }>) => {
+const run = (
+  txs: RawTx[],
+  own: string[],
+  local = new Map<string, LocalInfo>(),
+  appByTxid?: Map<string, { app: string; game?: boolean }>,
+) => {
   const ownSet = new Set(own);
   const rows = buildRows(txs, ownSet, local, 0);
   const byId = new Map(txs.map((t) => [t.txid, t]));
@@ -66,7 +85,12 @@ describe('token buy and sell (BSV-21 market)', () => {
     const n = TOKEN_BUY.vin.length - 1;
     const fund = funding(TOKEN_BUY.vin.slice(1), buyerPay, Math.ceil((outs + 100 - 1) / n));
     const row = run([TOKEN_BUY, ...fund], [buyerOrd, buyerPay]).find((r) => r.txid === TOKEN_BUY.txid)!;
-    expect(row).toMatchObject({ category: 'token', type: 'buy', direction: 'out', asset: { kind: 'token', id: NPG, qty: '204' } });
+    expect(row).toMatchObject({
+      category: 'token',
+      type: 'buy',
+      direction: 'out',
+      asset: { kind: 'token', id: NPG, qty: '204' },
+    });
     // Paid at least the 20,400,000 sat price (plus market fee) out of the account.
     expect(-row.amountSats).toBeGreaterThanOrEqual(20_400_000);
     expect(-row.amountSats).toBeLessThan(20_700_000);
@@ -78,7 +102,13 @@ describe('token buy and sell (BSV-21 market)', () => {
     const list = rows.find((r) => r.txid === TOKEN_LIST.txid)!;
     const sale = rows.find((r) => r.txid === TOKEN_BUY.txid)!;
     expect(list).toMatchObject({ category: 'token', type: 'list', asset: { id: NPG, qty: '204' } });
-    expect(sale).toMatchObject({ category: 'token', type: 'sell', direction: 'in', amountSats: 20_400_000, asset: { id: NPG, qty: '204' } });
+    expect(sale).toMatchObject({
+      category: 'token',
+      type: 'sell',
+      direction: 'in',
+      amountSats: 20_400_000,
+      asset: { id: NPG, qty: '204' },
+    });
   });
 });
 
@@ -95,37 +125,78 @@ describe('NFT buy and sell (OrdLock market)', () => {
     const fund = funding(NFT_LIST.vin, 'ord-holder', 1);
     const rows = run([NFT_LIST, NFT_BUY, ...fund], ['ord-holder', payout]);
     expect(rows.find((r) => r.txid === NFT_LIST.txid)).toMatchObject({ category: 'nft', type: 'list' });
-    expect(rows.find((r) => r.txid === NFT_BUY.txid)).toMatchObject({ category: 'nft', type: 'sell', amountSats: 21_800, asset: { id: `${NFT_LIST.vin[8].txid}_${NFT_LIST.vin[8].vout}` } });
+    expect(rows.find((r) => r.txid === NFT_BUY.txid)).toMatchObject({
+      category: 'nft',
+      type: 'sell',
+      amountSats: 21_800,
+      asset: { id: `${NFT_LIST.vin[8].txid}_${NFT_LIST.vin[8].vout}` },
+    });
     // 1Sat ordinal theory: output 8 of the bulk listing carries the sat of input 8, so the sale keeps the id the NFT was bought under.
   });
 });
 
 describe('local records, apps, games, pots', () => {
   const pay = (txid: string, to: string, sats: number): RawTx[] => [
-    { txid: 'f'.repeat(64), time: 1, confirmations: 9, vin: [{ txid: '1'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 100_000, addresses: ['1Me'] }] },
-    { txid, time: 2, confirmations: 9, vin: [{ txid: 'f'.repeat(64), vout: 0 }], vout: [{ n: 0, sats, addresses: [to] }, { n: 1, sats: 100_000 - sats - 50, addresses: ['1Me'] }] },
+    {
+      txid: 'f'.repeat(64),
+      time: 1,
+      confirmations: 9,
+      vin: [{ txid: '1'.repeat(64), vout: 0 }],
+      vout: [{ n: 0, sats: 100_000, addresses: ['1Me'] }],
+    },
+    {
+      txid,
+      time: 2,
+      confirmations: 9,
+      vin: [{ txid: 'f'.repeat(64), vout: 0 }],
+      vout: [
+        { n: 0, sats, addresses: [to] },
+        { n: 1, sats: 100_000 - sats - 50, addresses: ['1Me'] },
+      ],
+    },
   ];
   test('a payment a game asked for is a game payment', () => {
     const id = 'a'.repeat(64);
     const apps = appsByTxid(recordPayment({}, 'bitcoin-gaming.vercel.app', { at: 1, txid: id, sats: 500 }));
     const row = run(pay(id, '1Game', 500), ['1Me'], new Map(), apps).find((r) => r.txid === id)!;
-    expect(row).toMatchObject({ category: 'game', type: 'payment', app: 'bitcoin-gaming.vercel.app', label: 'game payment' });
+    expect(row).toMatchObject({
+      category: 'game',
+      type: 'payment',
+      app: 'bitcoin-gaming.vercel.app',
+      label: 'game payment',
+    });
   });
   test('other apps are app payments', () => {
     const id = 'b'.repeat(64);
     const apps = appsByTxid(recordPayment({}, 'shop.example', { at: 1, txid: id, sats: 900 }));
-    expect(run(pay(id, '1Shop', 900), ['1Me'], new Map(), apps).find((r) => r.txid === id)).toMatchObject({ category: 'app', app: 'shop.example' });
+    expect(run(pay(id, '1Shop', 900), ['1Me'], new Map(), apps).find((r) => r.txid === id)).toMatchObject({
+      category: 'app',
+      app: 'shop.example',
+    });
   });
   test('wallet description "Purchase N tokens" with a token label', () => {
     const id = 'c'.repeat(64);
-    const local = new Map([[id, { description: 'Purchase 50 tokens for 1000 sats', labels: [`p bsv21 token ${NPG}`] }]]);
-    expect(run(pay(id, '1Seller', 1000), ['1Me'], local).find((r) => r.txid === id)).toMatchObject({ category: 'token', type: 'buy', asset: { id: NPG, qty: '50' } });
+    const local = new Map([
+      [id, { description: 'Purchase 50 tokens for 1000 sats', labels: [`p bsv21 token ${NPG}`] }],
+    ]);
+    expect(run(pay(id, '1Seller', 1000), ['1Me'], local).find((r) => r.txid === id)).toMatchObject({
+      category: 'token',
+      type: 'buy',
+      asset: { id: NPG, qty: '50' },
+    });
   });
   test('pot payments are subscriptions; bChat tips are social; plain sends are payments', () => {
     const p = 'd'.repeat(64);
-    expect(run(pay(p, '1X', 10), ['1Me'], new Map([[p, { description: 'Pot: bChat subscription' }]])).find((r) => r.txid === p)?.category).toBe('subscription');
+    expect(
+      run(pay(p, '1X', 10), ['1Me'], new Map([[p, { description: 'Pot: bChat subscription' }]])).find(
+        (r) => r.txid === p,
+      )?.category,
+    ).toBe('subscription');
     const q = 'e'.repeat(64);
-    expect(run(pay(q, '1X', 10), ['1Me']).find((r) => r.txid === q)).toMatchObject({ category: 'payment', type: 'send' });
+    expect(run(pay(q, '1X', 10), ['1Me']).find((r) => r.txid === q)).toMatchObject({
+      category: 'payment',
+      type: 'send',
+    });
   });
   test('category filter and CSV columns', () => {
     const id = 'a'.repeat(64);
@@ -146,11 +217,29 @@ describe('app labels', () => {
   test('"game: round 12 won" files a payment under Games and shows the note', () => {
     const id = '9'.repeat(64);
     const txs: RawTx[] = [
-      { txid: 'f'.repeat(64), time: 1, confirmations: 9, vin: [{ txid: '1'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 10_000, addresses: ['1Me'] }] },
-      { txid: id, time: 2, confirmations: 9, vin: [{ txid: 'f'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 500, addresses: ['1G'] }, { n: 1, sats: 9_450, addresses: ['1Me'] }] },
+      {
+        txid: 'f'.repeat(64),
+        time: 1,
+        confirmations: 9,
+        vin: [{ txid: '1'.repeat(64), vout: 0 }],
+        vout: [{ n: 0, sats: 10_000, addresses: ['1Me'] }],
+      },
+      {
+        txid: id,
+        time: 2,
+        confirmations: 9,
+        vin: [{ txid: 'f'.repeat(64), vout: 0 }],
+        vout: [
+          { n: 0, sats: 500, addresses: ['1G'] },
+          { n: 1, sats: 9_450, addresses: ['1Me'] },
+        ],
+      },
     ];
     const local = new Map([[id, { description: 'game: round 12 won' }]]);
-    expect(run(txs, ['1Me'], local).find((r) => r.txid === id)).toMatchObject({ category: 'game', appNote: 'round 12 won' });
+    expect(run(txs, ['1Me'], local).find((r) => r.txid === id)).toMatchObject({
+      category: 'game',
+      appNote: 'round 12 won',
+    });
   });
 });
 
@@ -161,7 +250,12 @@ describe('connections log', () => {
     l = recordPayment(l, 'bitcoin-gaming.vercel.app', { at: 30, txid: 't1', sats: 700 });
     l = recordPayment(l, 'bitcoin-gaming.vercel.app', { at: 31, txid: 't1', sats: 700 });
     const e = l['bitcoin-gaming.vercel.app'];
-    expect(e).toMatchObject({ firstSeen: 10, lastSeen: 30, spentSats: 700, calls: { createAction: 1, getPublicKey: 1 } });
+    expect(e).toMatchObject({
+      firstSeen: 10,
+      lastSeen: 30,
+      spentSats: 700,
+      calls: { createAction: 1, getPublicKey: 1 },
+    });
     expect(e.payments).toHaveLength(1);
   });
   test('requested sats ignore the send-all sentinel', () => {
@@ -174,16 +268,43 @@ describe('connections log', () => {
     expect(isGameHost('shop.example')).toBe(false);
   });
   test('merge log + BRC-100 grants + history spend', () => {
-    const l = recordPayment(recordCall({}, 'app.example', 'createAction', 5), 'app.example', { at: 6, txid: 'x', sats: 1 });
+    const l = recordPayment(recordCall({}, 'app.example', 'createAction', 5), 'app.example', {
+      at: 6,
+      txid: 'x',
+      sats: 1,
+    });
     const rows = mergeConnections(
       l,
       [
-        { originator: 'app.example', permissions: [{ type: 'spending', authorizedAmount: 10_000 }, { type: 'protocol' }] },
+        {
+          originator: 'app.example',
+          permissions: [{ type: 'spending', authorizedAmount: 10_000 }, { type: 'protocol' }],
+        },
         { originator: 'old.example', permissions: [{ type: 'basket' }] },
       ],
-      [{ txid: 'x', time: 6, direction: 'out', amountSats: -1000, feeSats: 20, counterparty: '', label: '', note: '', confirmations: 1, app: 'app.example' }],
+      [
+        {
+          txid: 'x',
+          time: 6,
+          direction: 'out',
+          amountSats: -1000,
+          feeSats: 20,
+          counterparty: '',
+          label: '',
+          note: '',
+          confirmations: 1,
+          app: 'app.example',
+        },
+      ],
     );
-    expect(rows[0]).toMatchObject({ host: 'app.example', calls: 1, payments: 1, spentSats: 1020, spendLimitSats: 10_000, grants: { spending: 1, protocol: 1 } });
+    expect(rows[0]).toMatchObject({
+      host: 'app.example',
+      calls: 1,
+      payments: 1,
+      spentSats: 1020,
+      spendLimitSats: 10_000,
+      grants: { spending: 1, protocol: 1 },
+    });
     expect(rows[1]).toMatchObject({ host: 'old.example', calls: 0, grants: { basket: 1 } });
   });
 });
@@ -198,8 +319,23 @@ describe('Locks category (time-locks)', () => {
   });
   test('lock and claim rows land in Locks', () => {
     const me = PrivateKey.fromRandom().toAddress();
-    const lockTx: RawTx = { txid: 'a'.repeat(64), time: 1_700_000_100, confirmations: 1, vin: [{ txid: 'f'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 10_000, addresses: [], script: lockHex }, { n: 1, sats: 39_000, addresses: [me] }] };
-    const claimTx: RawTx = { txid: 'b'.repeat(64), time: 1_700_000_200, confirmations: 1, vin: [{ txid: 'a'.repeat(64), vout: 0 }], vout: [{ n: 0, sats: 9_800, addresses: [me] }] };
+    const lockTx: RawTx = {
+      txid: 'a'.repeat(64),
+      time: 1_700_000_100,
+      confirmations: 1,
+      vin: [{ txid: 'f'.repeat(64), vout: 0 }],
+      vout: [
+        { n: 0, sats: 10_000, addresses: [], script: lockHex },
+        { n: 1, sats: 39_000, addresses: [me] },
+      ],
+    };
+    const claimTx: RawTx = {
+      txid: 'b'.repeat(64),
+      time: 1_700_000_200,
+      confirmations: 1,
+      vin: [{ txid: 'a'.repeat(64), vout: 0 }],
+      vout: [{ n: 0, sats: 9_800, addresses: [me] }],
+    };
     const local = new Map<string, LocalInfo>([
       ['a'.repeat(64), { description: 'Lock BSV in 1 output(s)' } as LocalInfo],
       ['b'.repeat(64), { description: 'Unlock 1 lock(s)' } as LocalInfo],

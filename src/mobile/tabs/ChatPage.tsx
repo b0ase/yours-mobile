@@ -425,7 +425,12 @@ const Conversation = ({
     const mineNow = (reactions.get(m.id) ?? []).some((r) => r.emoji === emoji && r.handles.includes(normHandle(me)));
     setMessages((cur) => cur.concat(optimisticReaction(m.id, emoji, me, mineNow)));
     client.react(room.ticker, m.id, emoji).catch((e) => {
-      setMessages((cur) => cur.filter((x) => !(x.pending && x.event_type === 'reaction' && (x.event_payload as { target?: string })?.target === m.id)));
+      setMessages((cur) =>
+        cur.filter(
+          (x) =>
+            !(x.pending && x.event_type === 'reaction' && (x.event_payload as { target?: string })?.target === m.id),
+        ),
+      );
       fail(e);
     });
   };
@@ -531,7 +536,10 @@ const Conversation = ({
         // Any other unstored reply (/b help, Lounge commands) never matches the optimistic copy: drop it.
         setMessages((cur) => {
           if (saved && isEphemeral(saved)) return settleEphemeral(cur, localId, saved);
-          const rest = saved && normHandle(saved.author_handle ?? '') !== normHandle(me) ? cur.filter((m) => m.localId !== localId) : cur;
+          const rest =
+            saved && normHandle(saved.author_handle ?? '') !== normHandle(me)
+              ? cur.filter((m) => m.localId !== localId)
+              : cur;
           return saved ? mergeMessages(rest, [saved]) : rest;
         });
       })
@@ -774,18 +782,23 @@ const Conversation = ({
                   )}
                   <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
                   {isPrivateB(it.message) && (
-                    <div className="text-[11px] mt-1 flex items-center gap-2" style={{ color: it.mine ? '#5c4800' : MUTED }}>
+                    <div
+                      className="text-[11px] mt-1 flex items-center gap-2"
+                      style={{ color: it.mine ? '#5c4800' : MUTED }}
+                    >
                       <Lock size={11} /> Only you can see this
-                      {normHandle(it.message.author_handle ?? '') === 'b' && !isEphemeral(it.message) && !isShared(it.message) && (
-                        <button
-                          type="button"
-                          onClick={() => shareB(it.message)}
-                          className="font-semibold underline"
-                          style={{ color: GOLD }}
-                        >
-                          Share to room
-                        </button>
-                      )}
+                      {normHandle(it.message.author_handle ?? '') === 'b' &&
+                        !isEphemeral(it.message) &&
+                        !isShared(it.message) && (
+                          <button
+                            type="button"
+                            onClick={() => shareB(it.message)}
+                            className="font-semibold underline"
+                            style={{ color: GOLD }}
+                          >
+                            Share to room
+                          </button>
+                        )}
                       {isShared(it.message) && <span>· shared</span>}
                     </div>
                   )}
@@ -956,7 +969,10 @@ const Conversation = ({
                 }
           }
           onShare={
-            isPrivateB(acting) && normHandle(acting.author_handle ?? '') === 'b' && !isEphemeral(acting) && !isShared(acting)
+            isPrivateB(acting) &&
+            normHandle(acting.author_handle ?? '') === 'b' &&
+            !isEphemeral(acting) &&
+            !isShared(acting)
               ? () => {
                   shareB(acting);
                   setActing(null);
@@ -1181,9 +1197,10 @@ const InviteSheet = ({
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [short, setShort] = useState(false);
-  const [sending, setSending] = useState<{ token: { isConfirmed: boolean; info: Bsv21Balance }; amountInput: string } | null>(
-    null,
-  );
+  const [sending, setSending] = useState<{
+    token: { isConfirmed: boolean; info: Bsv21Balance };
+    amountInput: string;
+  } | null>(null);
   const [sentTo, setSentTo] = useState('');
   const [note, setNote] = useState('');
   const symbol = entry.gate.symbol;
@@ -1199,7 +1216,9 @@ const InviteSheet = ({
   };
   const shareRoom = async () => {
     // An invite link if the server has them on, else the permanent room page.
-    const inv = parseSpaceInvite(await client.createRoomInvite(ticker, { expires_in: DEFAULT_EXPIRY }).catch(() => null));
+    const inv = parseSpaceInvite(
+      await client.createRoomInvite(ticker, { expires_in: DEFAULT_EXPIRY }).catch(() => null),
+    );
     const url = inv?.url || (await roomPage());
     if (!url) return setNote('The room link isn’t available yet.');
     const r = await shareLink({ title: roomName, text: `Join ${roomName}`, url });
@@ -1342,7 +1361,11 @@ const InviteSheet = ({
         </button>
         {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
         {note && (
-          <button onClick={() => setNote('')} className="mt-3 w-full text-left text-xs break-all" style={{ color: MUTED }}>
+          <button
+            onClick={() => setNote('')}
+            className="mt-3 w-full text-left text-xs break-all"
+            style={{ color: MUTED }}
+          >
             {note}
           </button>
         )}

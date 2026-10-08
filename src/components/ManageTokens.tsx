@@ -41,15 +41,24 @@ export const ManageTokens = (props: ManageTokensProps) => {
   const handleToggleShown = async (tokenId: string) => {
     const show = !isShown(tokenId);
     const favs = show
-      ? favoriteTokens.includes(tokenId) ? favoriteTokens : favoriteTokens.concat(tokenId)
+      ? favoriteTokens.includes(tokenId)
+        ? favoriteTokens
+        : favoriteTokens.concat(tokenId)
       : favoriteTokens.filter((id) => id !== tokenId);
-    const hidden = show ? hiddenTokens.filter((id) => id !== tokenId) : hiddenTokens.includes(tokenId) ? hiddenTokens : hiddenTokens.concat(tokenId);
+    const hidden = show
+      ? hiddenTokens.filter((id) => id !== tokenId)
+      : hiddenTokens.includes(tokenId)
+        ? hiddenTokens
+        : hiddenTokens.concat(tokenId);
     setFavoriteTokens(favs);
     setHiddenTokens(hidden);
     const { account, selectedAccount } = chromeStorageService.getCurrentAccountObject();
     if (!account || !selectedAccount) return;
     const update: Partial<ChromeStorageObject['accounts']> = {
-      [selectedAccount]: { ...account, settings: { ...account.settings, favoriteTokens: favs, hiddenTokens: hidden } as typeof account.settings },
+      [selectedAccount]: {
+        ...account,
+        settings: { ...account.settings, favoriteTokens: favs, hiddenTokens: hidden } as typeof account.settings,
+      },
     };
     await chromeStorageService.updateNested('accounts', update);
   };
@@ -188,7 +197,11 @@ export const ManageTokens = (props: ManageTokensProps) => {
                         }}
                       />
                     </motion.button>
-                    <ToggleSwitch on={!!t?.id && isShown(t.id)} theme={theme} onChange={() => t?.id && handleToggleShown(t.id)} />
+                    <ToggleSwitch
+                      on={!!t?.id && isShown(t.id)}
+                      theme={theme}
+                      onChange={() => t?.id && handleToggleShown(t.id)}
+                    />
                   </div>
                 </motion.div>
               );

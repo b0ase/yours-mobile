@@ -21,10 +21,16 @@ const memStore = () => {
       aliases.delete(a);
     },
     appsStore: new Map(),
-    getApps: async function (k) { return this.appsStore.get(k) ?? []; },
-    setApps: async function (k, a) { this.appsStore.set(k, a); },
+    getApps: async function (k) {
+      return this.appsStore.get(k) ?? [];
+    },
+    setApps: async function (k, a) {
+      this.appsStore.set(k, a);
+    },
     listSocial: async (kind) =>
-      [...aliases.values()].filter((r) => (r.kind ?? 'plain') === kind).map((r) => ({ alias: r.alias, display_name: r.display_name ?? null })),
+      [...aliases.values()]
+        .filter((r) => (r.kind ?? 'plain') === kind)
+        .map((r) => ({ alias: r.alias, display_name: r.display_name ?? null })),
     listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
@@ -123,7 +129,14 @@ describe('register', () => {
     expect((await h.register({}, await u.sign('register', { alias: 'b0asex.x' })))[0]).toBe(403);
     allowed.set('b0asex.x', 'ticket-b0asex');
     const social = { ticket: 'ticket-b0asex', secret: 's' };
-    expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social: { ticket: 'other', secret: 's' } }))[0]).toBe(403);
+    expect(
+      (
+        await h.register(
+          {},
+          { ...(await v.sign('register', { alias: 'b0asex.x' })), social: { ticket: 'other', secret: 's' } },
+        )
+      )[0],
+    ).toBe(403);
     const [s, r] = await h.register({}, { ...(await u.sign('register', { alias: 'b0asex.x' })), social });
     expect(s).toBe(200);
     expect(r.paymail).toBe('b0asex.x@pay.test');
@@ -134,11 +147,20 @@ describe('register', () => {
     const w = user();
     expect((await h.register({}, await w.sign('register', { alias: 'wplain' })))[0]).toBe(200);
     allowed.set('w-x.x', 'ticket-w');
-    expect((await h.register({}, { ...(await w.sign('register', { alias: 'w-x.x' })), social: { ticket: 'ticket-w', secret: 's' } }))[0]).toBe(200);
+    expect(
+      (
+        await h.register(
+          {},
+          { ...(await w.sign('register', { alias: 'w-x.x' })), social: { ticket: 'ticket-w', secret: 's' } },
+        )
+      )[0],
+    ).toBe(200);
     expect(store.aliases.has('wplain')).toBe(true);
     expect(store.aliases.get('w-x.x').kind).toBe('x');
     // Its owner can update the profile (e.g. publish a photo) without a fresh X sign-in; the name is kept.
-    expect((await h.register({}, await w.sign('register', { alias: 'w-x.x', avatar: 'https://img.test/a.png' })))[0]).toBe(200);
+    expect(
+      (await h.register({}, await w.sign('register', { alias: 'w-x.x', avatar: 'https://img.test/a.png' })))[0],
+    ).toBe(200);
     expect(store.aliases.get('w-x.x').avatar).toBe('https://img.test/a.png');
     // Nobody else can, without proof.
     expect((await h.register({}, await v.sign('register', { alias: 'w-x.x' })))[0]).toBe(403);
@@ -159,8 +181,12 @@ describe('register', () => {
     // Apps › Add app: signed save and load, https only.
     const apps = JSON.stringify([{ url: 'https://zanaadu.com', name: 'Zanaadu' }]);
     expect((await h.appsPut({}, await w.sign('apps-put', { apps })))[0]).toBe(200);
-    expect((await h.appsGet({}, await w.sign('apps-get', {})))[1].apps).toEqual([{ url: 'https://zanaadu.com/', name: 'Zanaadu' }]);
-    expect((await h.appsPut({}, await w.sign('apps-put', { apps: JSON.stringify([{ url: 'http://x.com' }]) })))[0]).toBe(400);
+    expect((await h.appsGet({}, await w.sign('apps-get', {})))[1].apps).toEqual([
+      { url: 'https://zanaadu.com/', name: 'Zanaadu' },
+    ]);
+    expect(
+      (await h.appsPut({}, await w.sign('apps-put', { apps: JSON.stringify([{ url: 'http://x.com' }]) })))[0],
+    ).toBe(400);
     // Unlink: only the owner can, and the next name becomes main.
     expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(404);
     expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(200);

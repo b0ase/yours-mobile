@@ -1261,8 +1261,9 @@ const LockSheet = ({
   return (
     <Sheet title="Lock BSV to back this post" onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back <AuthorName name={post.author.name} className="" />'s post with your own coins. Nothing is sent to anyone: the BSV is locked in
-        your wallet, and the post shows how much is locked behind it.
+        Back <AuthorName name={post.author.name} className="" />
+        's post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how
+        much is locked behind it.
       </p>
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
       <div className="flex gap-2">

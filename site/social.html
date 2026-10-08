@@ -12,7 +12,10 @@
         margin: 0;
         background: #000;
         color: #e4e7ec;
-        font: 16px/1.6 system-ui, -apple-system, sans-serif;
+        font:
+          16px/1.6 system-ui,
+          -apple-system,
+          sans-serif;
       }
       main {
         max-width: 440px;
@@ -41,7 +44,7 @@
            works with a secret that stayed in the app. -->
       <h1 id="h">You're signed in</h1>
       <p id="m">Go back to bWalletX to finish creating your wallet. You can close this page.</p>
-      <p><a id="open" href="#" style="display:none;color:#f5b800;font-weight:600">Open bWalletX</a></p>
+      <p><a id="open" href="#" style="display: none; color: #f5b800; font-weight: 600">Open bWalletX</a></p>
     </main>
     <script>
       var q = new URLSearchParams(location.hash.slice(1));
@@ -59,7 +62,8 @@
         document.getElementById('h').textContent = 'Sign-in did not finish';
         var m = document.getElementById('m');
         m.className = 'err';
-        m.textContent = q.get('error') === 'cancelled' ? 'You cancelled. Go back to bWalletX to try again.' : q.get('error');
+        m.textContent =
+          q.get('error') === 'cancelled' ? 'You cancelled. Go back to bWalletX to try again.' : q.get('error');
       }
     </script>
   </body>

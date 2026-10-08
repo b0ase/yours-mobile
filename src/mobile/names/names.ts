@@ -143,7 +143,8 @@ export type Capabilities = Record<string, string | boolean>;
 export const getCapabilities = async (f: Fetch, domain: string): Promise<Capabilities> => {
   const host = await discoverHost(f, domain);
   let doc = await tryJson<BsvaliasDoc>(f, `https://${host}/.well-known/bsvalias`);
-  if (!doc?.capabilities && host !== domain) doc = await tryJson<BsvaliasDoc>(f, `https://${domain}/.well-known/bsvalias`);
+  if (!doc?.capabilities && host !== domain)
+    doc = await tryJson<BsvaliasDoc>(f, `https://${domain}/.well-known/bsvalias`);
   if (!doc?.capabilities) throw new ResolveError(`${domain} doesn't host paymail`);
   return doc.capabilities as Capabilities;
 };
@@ -218,7 +219,10 @@ export const resolveOpns = async (f: Fetch, name: string): Promise<Resolved> => 
     const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
     const origin = str(o?.outpoint);
     if (!origin) throw new ResolveError(`No one has the name "${name}"`);
-    const latest = await tryJson<Inscription>(f, `${SERVICES.inscriptionLatest}/${origin.replace('.', '_')}/latest?script=false`);
+    const latest = await tryJson<Inscription>(
+      f,
+      `${SERVICES.inscriptionLatest}/${origin.replace('.', '_')}/latest?script=false`,
+    );
     owner = str(latest?.owner);
     pubkey ??= str(latest?.data?.map?.['opns.idKey']);
     if (!owner) throw new ResolveError(`Couldn't locate the owner of "${name}"`);
@@ -327,9 +331,7 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
     const price = Number(latest?.data?.list?.price);
     const latestOutpoint = str(latest?.outpoint);
     const listing =
-      price > 0 && !latest?.spend && latestOutpoint
-        ? { outpoint: latestOutpoint.replace('_', '.'), price }
-        : undefined;
+      price > 0 && !latest?.spend && latestOutpoint ? { outpoint: latestOutpoint.replace('_', '.'), price } : undefined;
     return {
       status: 'taken',
       name,

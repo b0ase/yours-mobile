@@ -1,5 +1,9 @@
 /** Share a link: the native share sheet where there is one, else the clipboard. Must start in a tap. */
-export const shareLink = async (p: { title: string; text: string; url: string }): Promise<'shared' | 'copied' | 'failed'> => {
+export const shareLink = async (p: {
+  title: string;
+  text: string;
+  url: string;
+}): Promise<'shared' | 'copied' | 'failed'> => {
   if (typeof navigator !== 'undefined' && navigator.share) {
     try {
       await navigator.share(p);

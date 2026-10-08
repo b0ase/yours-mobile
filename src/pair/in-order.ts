@@ -9,8 +9,10 @@
 export function inOrder<T>(handle: (frame: T) => Promise<void> | void): (frame: T) => void {
   let queue: Promise<void> = Promise.resolve();
   return (frame: T) => {
-    queue = queue.then(() => handle(frame)).catch(() => {
-      /* one bad frame must not stop the rest */
-    });
+    queue = queue
+      .then(() => handle(frame))
+      .catch(() => {
+        /* one bad frame must not stop the rest */
+      });
   };
 }
