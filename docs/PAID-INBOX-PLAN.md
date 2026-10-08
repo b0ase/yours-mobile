@@ -26,7 +26,9 @@ Owner idea, 8 Oct 2026. Plan only. Builds on the Airdrops inbox (5.1.85, top-bar
 - Pure social: no pot, no prize, nobody "wins". Each payment is a normal send, and either side can stop at any time.
 - Copy: "Loop", "Send it back", "Streak". Never "returns", "yield" or "profit".
 
-## 5. The escalation game ("split or steal"), GATED: legal advice first
+## 5. Split-or-steal as a building block, GATED: legal advice first
+
+Owner (8 Oct): don't advertise it as a game. It's a general mechanic that other apps (bApps) can use: advice, negotiation, adult (under CherryX, never the X family), games. bWalletX provides the primitive: a two-party escalating pot with split/steal, commit–reveal, custody and timeouts. Apps decide how to present it. **Note: what triggers regulation is the mechanic, not the name. Calling it something other than a game doesn't change whether money staked for a prize counts as gambling, so the legal gate below still applies to every use.**
 - Idea: each round the stake grows and goes into a shared pot. At any point either player can **steal** the pot (the defector takes everything) or both **split**.
 - **Regulatory risk:** real-money stakes in a game with a prize may count as gambling or a prize competition (UK Gambling Act 2005; Apple 5.3 / Google real-money gaming policies; payment and on-ramp partners such as Ramp). Classification depends on the details (chance vs skill, stake, prize).
 - **Rules:**
