@@ -13,6 +13,7 @@ import { MAX_ICON_BYTES, TICKET_BLOCKED, suggestTicker } from '../tickets/ticket
 import { deployToken, openTokenRoom, type MintedToken } from './mintToken';
 import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } from './token';
 import { money, moneyWithSats } from '../money/money';
+import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -70,7 +71,8 @@ export const TokenMint = ({
   };
 
   const review = () => {
-    const err = validateToken(form);
+    // Hard block at sign time while returns wording is present (returnsWording.ts).
+    const err = validateToken(form) ?? (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null);
     setError(err ?? '');
     if (!err) setConfirming(true);
   };
@@ -235,6 +237,11 @@ export const TokenMint = ({
         maxLength={1000}
         onChange={(e) => set('description')(e.target.value)}
       />
+      {hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) && (
+        <p className="text-xs m-0" style={{ color: '#FFD24D' }}>
+          {RETURNS_WARNING}
+        </p>
+      )}
 
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {money(cost.networkSats, exchangeRate)}

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { Input } from '../../components/Input';
 import type { Theme } from '../../theme.types';
+import { loadPoisonData, poisonWarning } from '../airdrops/poison';
+import { useServiceContext } from '../../hooks/useServiceContext';
 import { destinationFor, parseRecipient, resolveRecipient, VIA_LABEL, type Resolved } from './names';
 
 /**
@@ -28,6 +30,10 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style }:
   >({ s: 'idle' });
   const seq = useRef(0);
   const lastOut = useRef(value);
+  // Address-poisoning defence (airdrops/poison.ts): data saved by the last History / Airdrops scan.
+  const { chromeStorageService } = useServiceContext();
+  const acct = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  const poison = acct ? poisonWarning(text, loadPoisonData(acct)) : null;
 
   const emit = (v: string) => {
     lastOut.current = v;
@@ -151,6 +157,11 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style }:
             </div>
           );
         })()}
+      {poison && (
+        <div role="alert" className="text-xs mt-2 p-2 rounded-lg" style={{ background: '#2a1408', color: '#FEC84B' }}>
+          {poison}
+        </div>
+      )}
     </div>
   );
 };

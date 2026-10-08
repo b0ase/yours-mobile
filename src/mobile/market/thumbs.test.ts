@@ -16,3 +16,11 @@ test('thumbOrFullUrls falls back to full content hosts', () => {
   expect(urls.slice(1).every((u) => u.endsWith(`/content/${OP}`))).toBe(true);
   expect(thumbOrFullUrls('bad')).toEqual([]);
 });
+
+test('isSvg matches svg content types only', async () => {
+  const { isSvg } = await import('./thumbs');
+  expect(isSvg('image/svg+xml')).toBe(true);
+  expect(isSvg('Image/SVG+XML; charset=utf-8')).toBe(true);
+  expect(isSvg('image/png')).toBe(false);
+  expect(isSvg(null)).toBe(false);
+});

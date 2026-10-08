@@ -59,7 +59,14 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
 
 - Never imply ownership, profit share, dividends, returns or "investment". Our own copy says "token", "room", "use in the app" and "Issuer says".
 - The launch form shows issuers a warning: "Don't promise returns, profits or a share of a company. Tokens that do may be securities and are not allowed here."
-- The launch form blocks `utility` text that matches an obvious return or equity word list (dividend, profit share, equity, shares in, guaranteed return, APY, ROI, invest). It shows a soft warning first and blocks on retry. This is a filter, not legal review.
+- Issuers reward holders with **airdrops**. Our copy and suggestions talk about airdrops and room access, never earnings, dividends or returns.
+- Returns-wording filter (built: `src/mobile/tokens/returnsWording.ts`, with tests):
+  - It matches whole words, case-insensitively: profit(s), profit-sharing, return(s), dividend(s), yield, APY, APR, guaranteed, invest/investment/investor, passive income, ROI, "10x gains" and "to the moon".
+  - It ignores look-alikes such as "returns policy", "free returns", "yield sign", "profit and loss" and "reinvestigate".
+  - While the user types, it shows a **soft warning**: "Avoid promising returns. Consider describing airdrops or room access instead."
+  - On publish or sign, it **hard-blocks** while that wording is present.
+  - Wired into Mint › Token (name and description) now. TokenBlaster's form and the profile `utility` field should import the same list; copy it as-is into tokenblaster.lol.
+  - This is a filter, not legal review.
 - UK financial-promotion rules (FSMA s21) are the biggest exposure for "returns" language shown to UK users. The filter plus attribution is a mitigation, not a clearance. Get legal sign-off before promoting launches.
 
 ## 2. Launch flow: "launch something with it"
@@ -145,7 +152,50 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
 - Airdrops of tokens that the issuer markets with returns could be financial promotions.
 - Keep the copy rules in section 1.
 
-## 5. Phases
+## 5. Airdrops (phase 1 built)
+
+### Airdrop address
+- Every account already has one: `addresses.ordAddress`, the account's ordinals address. It already receives tokens and NFTs.
+  - Paymail's ordinals destination is set from it (`names/GetYourName.tsx` → `claimPaymail(..., { ordAddress })`).
+  - History scans it (`wallet/HistoryScreen.tsx`).
+- Receive now has **Payments | Airdrops** tabs. Airdrops shows "Airdrop address" with a QR code and a copy button (`airdrops/ReceiveTabs.tsx`).
+- `useAirdropAddress()` (`airdrops/useAirdrops.ts`) exposes the address for the planned public profile page (`bwalletx.com/bchat/u/<name>`). The page should show the airdrop address next to the pay QR.
+
+### Inbox (`src/mobile/airdrops/`)
+- **Unsolicited**: a History v2 row of type `transfer-in`, meaning a 1-sat token or NFT output paid to one of our addresses by a transaction we didn't fund, with no wallet action record of our own. A purchase, mint, launch, swap or recovery always has an action record. The rule is in `isUnsolicited`, with tests.
+- **Data**: the same History pipeline, without prices. It refreshes at most every 10 minutes in the background, and Refresh forces it. Results are cached per account in localStorage.
+- **Badge**: counts items newer than the last time the inbox was opened that aren't kept or hidden. It sits on a Wallet "Airdrops" row under Send / Receive / Mint.
+- **Per item**:
+  - **Keep** marks the item reviewed. The token or NFT already shows in the normal Tokens / NFTs views.
+  - **Hide** removes the item and hides everything else from that issuer: the token ID for tokens, the sending address for NFTs.
+  - Option: "only show airdrops from issuers I've kept before".
+  - A follow-graph filter ("people I follow") needs bit-sign's follow API and is phase 2.
+- **Safety**:
+  - Token items show the issuer badge ("Unverified issuer" when unsigned), and NFT items say "Unverified sender".
+  - The inbox never shows issuer links. Those appear only on token pages, behind a confirmation step.
+  - Standing warning: "Never interact with a token that asks you to visit a site and enter your recovery words."
+  - NFTs show a resized image from the 1sat image service. Anything that isn't an image (HTML, SVG, JS) shows a "tap to preview" placeholder. A tap opens an `<iframe sandbox="">` on ordfs.network, with no scripts and an opaque origin.
+- **Address poisoning** (`airdrops/poison.ts`): when you type a recipient on Send, the wallet warns if the address is, or looks like (same first and last 4 characters), an address that sent you dust (1,000 sats or less) or an unsolicited token or NFT, and you've never sent to it.
+- **Store edition**: the inbox stays, because tokens are viewable in store builds. It has no trading or links, and the room line on token pages stays gated.
+
+### Inscription rendering audit (8 Oct 2026)
+- Every place inscription content is displayed was checked: upstream `Ordinal.tsx`, `NftDetail`, `MediaViewer`, market `NftCard` / `thumbs.ts`, 3D snapshots, the History statement, bApp frames and the feed.
+- Untrusted HTML or SVG is never rendered in the wallet origin. It goes in `<img>`, or in an iframe with an empty sandbox on a remote origin. There is no `innerHTML`, `srcdoc` or `dangerouslySetInnerHTML` of inscription content.
+- No `postMessage` handler trusts inscription frames. BappFrameHost checks `e.source` and `e.origin` against the bApp session and an allowlist. The hub and dApp bridge don't use window messages.
+- Two hardening changes were made:
+  - Upstream `Ordinal.tsx` `sandbox="true"` became `sandbox=""` (via a `vite.config.mobile.ts` patch).
+  - `thumbs.ts` no longer turns SVG into wallet-origin `blob:` URLs. It falls back to a remote `<img>`, with a test.
+
+### Placement: top-bar b or the Wallet dock badge?
+- **(a)** The top-bar icon becomes a gift / inbox icon with a badge, and the $b agent moves to dock hold, pull-down and the Apps tile.
+  - Pros: airdrops are visible from every tab, with a familiar inbox pattern.
+  - Cons: it demotes the agent, which is a paid feature outside store builds, and agent users lose a one-tap entry.
+- **(b)** Keep the b. Put the airdrop badge on the Wallet dock icon, plus the Airdrops row in Wallet (built).
+  - Pros: no change to agent habits, the badge lives where the assets are, and it costs one dock-badge hook.
+  - Cons: less prominent from other tabs.
+- **Recommendation: (b) now.** Airdrops are sporadic and the inbox is new. Measure how often people open it, and switch to (a) if airdrops become a daily driver. Revisit when launch airdrops (section 4) ship.
+
+## 6. Phases
 
 | # | What | Size | Risk |
 |---|---|---|---|

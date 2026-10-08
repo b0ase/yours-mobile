@@ -892,7 +892,7 @@ const MarketPage = () => {
       )}
       <div className="text-[11px] text-[#98A2B3]">
         {room.ref.kind === 'bsv21' && isPersonalTokenId(room.ref.id, personalLinks)
-          ? "Personal token · holding one opens its holders' room. Not an investment, no dividends."
+          ? "Personal token · holding one opens its holders' room. Not an investment; issuers may reward holders with airdrops."
           : `Floor ${market?.floorLabel ?? '—'} · ${market?.live ?? 0} live · ${market?.buyableCount ?? 0} buyable in-app`}
       </div>
       {market === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading listings…</p>}

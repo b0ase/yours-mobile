@@ -901,3 +901,8 @@ body,
   background: #2a2205;
   border-color: #ffd24d;
 }
+
+/* Receive › Airdrops tab (src/mobile/airdrops/ReceiveTabs.tsx): hide the payment QR and copy row after it. */
+.bw-rcv-airdrop ~ * {
+  display: none !important;
+}
