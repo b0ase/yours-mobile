@@ -1,6 +1,6 @@
-/** Top-bar Airdrops button (replaces the centred b): gift icon + unread badge; opens the Airdrops inbox. */
+/** Top-bar Airdrops button (replaces the centred b): mailbox icon + unread badge; opens the Airdrops inbox. */
 import { lazy, Suspense, useState } from 'react';
-import { Gift } from 'lucide-react';
+import { Mailbox } from 'lucide-react';
 import { useAirdrops } from './useAirdrops';
 
 const Inbox = lazy(() => import('./AirdropsInbox').then((m) => ({ default: m.AirdropsInbox })));
@@ -17,7 +17,7 @@ export const AirdropsNavButton = ({ color, ring }: { color: string; ring: string
         className="relative w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
         style={{ border: ring }}
       >
-        <Gift size={16} color={color} />
+        <Mailbox size={16} color={color} />
         {badge > 0 && (
           <span
             aria-hidden
