@@ -28,6 +28,9 @@ import { useBackClose } from '../backStack';
 import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
+import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
+import { LevelBars } from './LevelBars';
+import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import {
   audienceCount,
   audienceLine,
@@ -80,7 +83,9 @@ const StageTile = ({
   me,
   big,
   onTap,
+  micOff = false,
 }: {
+  micOff?: boolean;
   p: Participant;
   video: boolean;
   speaking: boolean;
@@ -136,6 +141,7 @@ const StageTile = ({
         className="absolute left-2 bottom-2 right-2 flex items-center gap-1 text-[12px] text-white"
         style={{ textShadow: '0 1px 3px #000' }}
       >
+        <LevelBars read={() => media.levelOf(p.handle)} speaking={speaking} muted={micOff} />
         <span className="truncate">${p.handle}</span>
         {p.role === 'host' && (
           <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
@@ -327,6 +333,10 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
   const [chatOpen, setChatOpen] = useState(false);
   const [menuFor, setMenuFor] = useState<Participant | null>(null);
   const [note, setNote] = useState('');
+  // A denied mic/camera stays on screen (with Open Settings) until fixed or dismissed.
+  const [denied, setDenied] = useState<MediaKind | null>(null);
+  const refused = (kind: MediaKind, e: unknown, other: string) =>
+    isPermissionDenied(e) ? setDenied(kind) : setNote(`${other} (${e instanceof Error ? e.message : String(e)})`);
   const [, tick] = useState(0);
   const landscape = useLandscape();
   const left = useRef(false);
@@ -406,7 +416,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
           await media
             .setMic(true)
             .then(() => setMicOn(true))
-            .catch(() => setNote('Microphone not allowed. Turn it on in Settings to speak.'));
+            .catch((e) => refused('mic', e, 'Couldn’t start the microphone.'));
         }
       } catch (e) {
         if (!live) return;
@@ -473,16 +483,16 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
     try {
       await media.setMic(!micOn);
       setMicOn(!micOn);
-    } catch {
-      setNote('Microphone not allowed. Check Settings.');
+    } catch (e) {
+      refused('mic', e, 'Couldn’t start the microphone.');
     }
   };
   const toggleCam = async () => {
     try {
       await media.setCamera(!camOn, facing);
       setCamOn(!camOn);
-    } catch {
-      setNote('Camera not allowed. Check Settings.');
+    } catch (e) {
+      refused('camera', e, 'Couldn’t start the camera.');
     }
   };
   const flip = async () => {
@@ -495,8 +505,8 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
     try {
       await media.setMic(true);
       setMicOn(true);
-    } catch {
-      setNote('Microphone not allowed. You’re on stage muted.');
+    } catch (e) {
+      refused('mic', e, 'Couldn’t start the microphone. You’re on stage muted.');
     }
     if (withCamera) await toggleCam();
   };
@@ -523,6 +533,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
           media={media}
           video={videos.includes(p.handle)}
           speaking={speakers.includes(p.handle)}
+          micOff={p.handle === me.replace(/^\$/, '').toLowerCase() && !micOn}
           big={tiles.length <= 1}
           onTap={isHost && p.role === 'speaker' ? () => setMenuFor(p) : null}
         />
@@ -705,6 +716,26 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
         >
           {note}
         </button>
+      )}
+
+      {denied && (
+        <MediaPermissionNote
+          kind={denied}
+          // Back from Settings: try again so the user can speak without rejoining.
+          onRetry={() =>
+            onStage &&
+            void (denied === 'mic' ? media.setMic(true) : media.setCamera(true, facing))
+              .then(() => {
+                if (denied === 'mic') setMicOn(true);
+                else setCamOn(true);
+                setDenied(null);
+              })
+              .catch(() => undefined)
+          }
+          onDismiss={() => setDenied(null)}
+          className="absolute left-4 right-4 rounded-xl px-4 py-3 text-sm text-left"
+          style={{ bottom: 110, background: '#1d1e23', color: '#fff', zIndex: 11 }}
+        />
       )}
 
       {invited && (

@@ -20,10 +20,10 @@ import { requestDm } from '../chat/segmentNav';
 import { useContacts } from '../chat/useContacts';
 import { Avatar, ContactRow, SourceBadges } from '../chat/ContactViews';
 import { filterContacts, type Contact } from '../chat/contacts';
-import { resolveCallee } from './peer';
+import { resolveCallee, verifyCaller } from './peer';
 import { blockCaller, dial, listBlocked, unblockCaller } from './store';
 import { useCalls } from './useCalls';
-import { busy, formatDuration, shortKey, type ServerCall } from './machine';
+import { busy, formatDuration, isShortKey, shortKey, type ServerCall } from './machine';
 import type { BlockEntry } from './api';
 import { addFriend, isFriend, refreshFriends } from './friends';
 import {
@@ -262,13 +262,15 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
     if (inCall) return;
     const k = known(c.peer_key);
     if (k) return callKey(c.peer_key, k.name);
-    const label = c.peer_label ?? shortKey(c.peer_key);
-    // A label we placed (outgoing) we resolved ourselves; an incoming claim is not verified.
-    void dial({
-      key: c.peer_key,
-      label: c.direction === 'outgoing' ? label : shortKey(c.peer_key),
-      verified: c.direction === 'outgoing',
-    });
+    // A label we placed (outgoing) we resolved ourselves. An incoming claim is checked (the name
+    // must resolve to this key) so a call back shows the NAME, not "02cbe7…6ed8".
+    if (c.direction === 'outgoing' && c.peer_label && !isShortKey(c.peer_label)) {
+      void dial({ key: c.peer_key, label: c.peer_label, verified: true });
+      return;
+    }
+    void verifyCaller((u, i) => fetch(u, i), c.peer_key, c.peer_label).then((peer) =>
+      dial(peer.verified ? peer : { key: c.peer_key, label: shortKey(c.peer_key), verified: false }),
+    );
   };
   const block = async (c: ServerCall) => {
     await blockCaller(c.peer_key, c.peer_label ?? undefined).catch((e) => setProblem(String(e?.message ?? e)));

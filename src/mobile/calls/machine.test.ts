@@ -295,3 +295,11 @@ describe('bPhone: priced calls', () => {
     ).toBe('dialing');
   });
 });
+
+describe('isShortKey', () => {
+  test('a shortened key is not a name', async () => {
+    const { isShortKey, shortKey } = await import('./machine');
+    expect(isShortKey(shortKey('02cbe7d893a7515c726c9f069cdd56d379662c7634a4ba8eaf2279fcea76686ed8'))).toBe(true);
+    expect(isShortKey('richardwboase.gmail@bwalletx.com')).toBe(false);
+  });
+});

@@ -213,3 +213,43 @@ describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
     expect(bareName('alice@bwallet.space', '')).toBe('alice@bwallet.space');
   });
 });
+
+describe('$name: our paymail (bwalletx.com) first, then HandCash', () => {
+  const OURS = {
+    capabilities: {
+      pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
+      '2a40af698840': 'https://pay.bwallet.space/api/p2p/{alias}@{domain.tld}',
+      '5c55a7fdb7bb': 'https://pay.bwallet.space/api/beef/{alias}@{domain.tld}',
+    },
+  };
+  const KEY = '02cbe7d893a7515c726c9f069cdd56d379662c7634a4ba8eaf2279fcea76686ed8';
+
+  test('$richardwboase.gmail resolves at bwalletx.com', async () => {
+    const { f, calls } = mock({
+      'https://dns.google.com/resolve?name=_bsvalias._tcp.bwalletx.com': { Status: 3 },
+      'https://bwalletx.com/.well-known/bsvalias': OURS,
+      'https://pay.bwallet.space/api/paymail/id/richardwboase.gmail@bwalletx.com': { pubkey: KEY },
+    });
+    const r = await resolveRecipient(f, parseRecipient('$richardwboase.gmail'), 'bwalletx.com');
+    expect(r).toMatchObject({ input: '$richardwboase.gmail', target: 'richardwboase.gmail@bwalletx.com', pubkey: KEY });
+    expect(calls.some((c) => c.includes('handcash'))).toBe(false);
+  });
+
+  test('a $name we do not know falls back to HandCash', async () => {
+    const { f } = mock({
+      'https://dns.google.com/resolve?name=_bsvalias._tcp.bwalletx.com': { Status: 3 },
+      'https://bwalletx.com/.well-known/bsvalias': OURS,
+      'https://pay.bwallet.space/api/paymail/id/': 404,
+      'https://dns.google.com/resolve?name=_bsvalias._tcp.handcash.io': SRV,
+      'https://cloud.handcash.io/.well-known/bsvalias': HC_CAPS,
+      'https://cloud.handcash.io/api/bsvalias/id/': { pubkey: '02ab' },
+    });
+    const r = await resolveRecipient(f, parseRecipient('$boase'), 'bwalletx.com');
+    expect(r).toMatchObject({ target: 'boase@handcash.io', pubkey: '02ab' });
+  });
+
+  test('$name@domain is accepted as the paymail', () => {
+    expect(parseRecipient('$b0asex.x@bwalletX.com')).toEqual({ kind: 'paymail', paymail: 'b0asex.x@bwalletx.com' });
+    expect(parseRecipient('$bad@x').kind).toBe('invalid');
+  });
+});
