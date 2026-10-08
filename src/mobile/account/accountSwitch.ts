@@ -4,6 +4,7 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { getPersonalLink } from '../names/personalToken';
 import { identityRowText } from '../names/identityText';
 import { setChatAccount } from '../chat/chatAccount';
+import { markAccountUsed } from './accountMenu';
 
 /**
  * Account switching, shared by the account drawer (TopNav), the account strip above it and Settings.
@@ -25,6 +26,8 @@ export const useAccountSwitch = (onSame?: () => void) => {
       await chromeStorageService.switchAccount(identityAddress);
       // Act as the new account at once (before the reload): no request may reuse the old session.
       setChatAccount(identityAddress);
+      // Recent accounts sort first in the switcher (accountMenu.ts).
+      markAccountUsed(identityAddress);
     } catch (err) {
       console.error('[accounts] account switch failed:', err);
       setIsSwitchingAccount(false);
