@@ -122,7 +122,8 @@ export const mergeMessages = (current: ChatMessage[], incoming: ChatMessage[]): 
 /** Newest server timestamp in a list (the `since` cursor for polling). */
 export const latestCursor = (messages: ChatMessage[]): string | null => {
   let best: string | null = null;
-  for (const m of messages) if (!m.pending && (!best || ts(m.created_at) > ts(best))) best = m.created_at;
+  for (const m of messages)
+    if (!m.pending && !m.id.startsWith('ephemeral:') && (!best || ts(m.created_at) > ts(best))) best = m.created_at;
   return best;
 };
 
