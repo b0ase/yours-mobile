@@ -243,3 +243,6 @@ editions; phase 2 agent tools in bWalletX only.
 8. Gains in b's answers at all while Gains is beta, or only a link to History › Gains?
 9. Airdrop inbox lands from `feat/launch-and-links`: merge before phase 1, or ship b without airdrops first?
 10. Retention for the audit log and "What b saw" history (e.g. 90 days, local only)?
+
+## Owner decisions (8 Oct 2026)
+All recommendations accepted: Haiku 4.5 default, Sonnet 5.5 optional, no Opus; paid mode may use tools with summaries passed through and never stored; free no-key mode is the default; pause and Stop all are one tap with no biometric; b may propose at most a 2x limit raise per step; closed-app alerts are sent by the CLI (no address-watching server yet); signed CLI reports are advisory at first; b links to Gains while it is in beta rather than summarising it; merge the airdrop inbox before phase 1; audit log kept for 1 year.
