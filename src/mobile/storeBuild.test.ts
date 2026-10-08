@@ -419,5 +419,7 @@ describe('BSPACES_ENABLED: bSpaces is bWalletX only', () => {
       "BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null",
     );
     expect(src('./tabs/ChatPage.tsx')).toMatch(/BSPACES_ENABLED && entry/);
+    // The Chat tab's Spaces filter: chips and list both behind the flag.
+    expect(src('./tabs/ChatPage.tsx').match(/BSPACES_ENABLED && ROOMS && handle && rooms/g)?.length).toBe(2);
   });
 });

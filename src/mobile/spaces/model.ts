@@ -143,3 +143,16 @@ export const elapsed = (startedAt: string, now = Date.now()): string => {
   const ss = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 };
+
+/**
+ * The Chat tab's Spaces filter: rooms whose space is on, live ones first (bit-sign has no scheduled
+ * spaces yet, so every row is live today), then the biggest audience, then the most recent start.
+ */
+export const roomsWithSpaces = <T extends { state: SpaceState }>(rows: T[]): T[] =>
+  rows
+    .filter((r) => r.state.space)
+    .sort(
+      (a, b) =>
+        audienceCount(b.state) - audienceCount(a.state) ||
+        (b.state.space?.startedAt ?? '').localeCompare(a.state.space?.startedAt ?? ''),
+    );

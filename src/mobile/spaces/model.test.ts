@@ -7,6 +7,7 @@ import {
   myChange,
   parseSpaceState,
   parseSpaceToken,
+  roomsWithSpaces,
   stageOf,
   supportedTransport,
 } from './model';
@@ -99,5 +100,18 @@ describe('token, transport, hosting', () => {
     expect(elapsed('2026-10-08T10:00:00Z', t0 + 65_000)).toBe('1:05');
     expect(elapsed('2026-10-08T10:00:00Z', t0 + 3_725_000)).toBe('1:02:05');
     expect(elapsed('bad', t0)).toBe('');
+  });
+});
+
+describe('roomsWithSpaces', () => {
+  test('drops rooms without a space, biggest audience then newest first', () => {
+    const none = { k: 'none', state: parseSpaceState({ space: null }, 'a') };
+    const small = { k: 'small', state: parseSpaceState(raw([P('a', 'host')]), 'a') };
+    const big = { k: 'big', state: parseSpaceState(raw([P('a', 'host'), P('b', 'listener')]), 'a') };
+    const newer = {
+      k: 'newer',
+      state: parseSpaceState(raw([P('a', 'host')], { started_at: '2026-10-08T11:00:00Z' }), 'a'),
+    };
+    expect(roomsWithSpaces([none, small, newer, big]).map((r) => r.k)).toEqual(['big', 'newer', 'small']);
   });
 });
