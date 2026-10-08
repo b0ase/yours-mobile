@@ -9,6 +9,7 @@
  * wallet's view here only decides what to SHOW. See docs/TOKEN-ROOMS.md.
  */
 import type { ChatRoom } from './messages';
+import { parseSpendCharge, type SpendCharge } from './roomSpend';
 
 export type TokenKind = 'bsv21' | 'coll';
 
@@ -41,8 +42,10 @@ export interface TokenRoomLookup {
   member?: boolean;
   /** Present when the room is someone's personal-token room. */
   personal?: { name: string; by: string; tokenId: string | null } | null;
-  /** Issuer-set spend rule (stated; bit-sign does not enforce it on chain). */
+  /** Issuer-set spend rule. Per message: enforced by bit-sign. Minute / hour / day: shown only. */
   spend?: RoomSpendRule | null;
+  /** What a message costs me here (bit-sign `spend_charge`); absent on older servers. */
+  spendCharge?: SpendCharge | null;
   /** Who administers the room: the token's issuer, once claimed. */
   issuer?: { address: string | null; handle: string | null; claimed: boolean } | null;
   youAreIssuer?: boolean;
@@ -52,24 +55,40 @@ export interface RoomSpendRule {
   amountRaw: string;
   per: 'message' | 'minute' | 'hour' | 'day';
   to: 'issuer' | 'burn';
+  /** Default: the room token. 'sats': per message, to the issuer. */
+  unit?: 'token' | 'sats';
+  /** Rule version (ISO), set by bit-sign when saved. */
+  since?: string;
 }
+
+/** Only per-message rules are enforced (phase 2: per minute / hour / day). */
+export const spendEnforced = (s: RoomSpendRule | null | undefined): boolean => s?.per === 'message';
+export const SPEND_ENFORCED_NOTE = 'Enforced: every message carries its payment.';
+export const SPEND_COMING_NOTE = 'Shown to members; enforcement coming.';
 
 const PERS = ['message', 'minute', 'hour', 'day'] as const;
 
 export const parseSpend = (v: unknown): RoomSpendRule | null => {
   if (!v || typeof v !== 'object') return null;
-  const o = v as { amountRaw?: unknown; per?: unknown; to?: unknown };
+  const o = v as { amountRaw?: unknown; per?: unknown; to?: unknown; unit?: unknown; since?: unknown };
   if (typeof o.amountRaw !== 'string' || !/^\d+$/.test(o.amountRaw) || /^0+$/.test(o.amountRaw)) return null;
   if (!PERS.includes(o.per as RoomSpendRule['per'])) return null;
   if (o.to !== 'issuer' && o.to !== 'burn') return null;
-  return { amountRaw: o.amountRaw, per: o.per as RoomSpendRule['per'], to: o.to };
+  return {
+    amountRaw: o.amountRaw,
+    per: o.per as RoomSpendRule['per'],
+    to: o.to,
+    ...(o.unit === 'sats' ? { unit: 'sats' as const } : {}),
+    ...(typeof o.since === 'string' ? { since: o.since } : {}),
+  };
 };
 
 /** "Spend 5 $ACME per message, burned" — a member-facing summary of the rule. */
 export const spendLabel = (s: RoomSpendRule | null | undefined, symbol: string, dec: number): string => {
   if (!s) return 'No spend to chat';
   const where = s.to === 'burn' ? 'burned' : 'to the issuer';
-  return `Spend ${formatRaw(s.amountRaw, dec)} $${symbol} per ${s.per}, ${where}`;
+  const amt = s.unit === 'sats' ? `${s.amountRaw} sats` : `${formatRaw(s.amountRaw, dec)} $${symbol}`;
+  return `Spend ${amt} per ${s.per}, ${where}`;
 };
 
 export type EntryStatus =
@@ -214,6 +233,7 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
     member?: unknown;
     personal?: unknown;
     spend?: unknown;
+    spend_charge?: unknown;
     issuer?: { address?: unknown; handle?: unknown; claimed?: unknown } | null;
     you_are_issuer?: unknown;
   };
@@ -230,6 +250,7 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
     member: d.member === true,
     personal: asPersonal(d.personal),
     spend: parseSpend(d.spend),
+    spendCharge: parseSpendCharge(d.spend_charge),
     issuer: d.issuer
       ? {
           address: typeof d.issuer.address === 'string' ? d.issuer.address : null,

@@ -19,6 +19,9 @@ import {
   formatRaw,
   parseLookup,
   spendLabel,
+  spendEnforced,
+  SPEND_ENFORCED_NOTE,
+  SPEND_COMING_NOTE,
   toRawAmount,
   type RoomSpendRule,
   type TokenRoomEntry,
@@ -114,7 +117,7 @@ export const RoomSettingsSheet = ({
   const [name, setName] = useState('');
   const [spendAmt, setSpendAmt] = useState('');
   const [per, setPer] = useState<RoomSpendRule['per']>('message');
-  const [to, setTo] = useState<RoomSpendRule['to']>('burn');
+  const [to, setTo] = useState<RoomSpendRule['to'] | 'sats'>('burn');
 
   const load = useCallback(async () => {
     setError('');
@@ -128,10 +131,10 @@ export const RoomSettingsSheet = ({
       const g = l?.gate ?? entry.gate;
       setMin(formatRaw(g.minRaw, dec));
       setName(l?.room?.name ?? '');
-      setSpendAmt(l?.spend ? formatRaw(l.spend.amountRaw, dec) : '');
+      setSpendAmt(l?.spend ? (l.spend.unit === 'sats' ? l.spend.amountRaw : formatRaw(l.spend.amountRaw, dec)) : '');
       if (l?.spend) {
         setPer(l.spend.per);
-        setTo(l.spend.to);
+        setTo(l.spend.unit === 'sats' ? 'sats' : l.spend.to);
       }
       // Can this wallet sign for the issuer address? Only then is the claim offered.
       if (ch.issuerAddress && !ch.youAreIssuer) {
@@ -180,9 +183,16 @@ export const RoomSettingsSheet = ({
         if (!minRaw) throw new Error('Minimum must be a positive amount');
         let spend: RoomSpendRule | null = null;
         if (spendAmt.trim() && spendAmt.trim() !== '0') {
-          const amountRaw = toRawAmount(spendAmt, dec);
-          if (!amountRaw) throw new Error('Spend must be a positive amount');
-          spend = { amountRaw, per, to };
+          if (to === 'sats') {
+            if (per !== 'message') throw new Error('Sats are charged per message');
+            const sats = toRawAmount(spendAmt, 0);
+            if (!sats) throw new Error('Spend must be a whole number of sats');
+            spend = { amountRaw: sats, per, to: 'issuer', unit: 'sats' };
+          } else {
+            const amountRaw = toRawAmount(spendAmt, dec);
+            if (!amountRaw) throw new Error('Spend must be a positive amount');
+            spend = { amountRaw, per, to };
+          }
         }
         await client.updateRoomSettings(ticker, {
           min: formatRaw(minRaw, dec),
@@ -218,6 +228,11 @@ export const RoomSettingsSheet = ({
         <>
           <Row label="To enter" value={`Hold ${amountLabel(gate.minRaw, gate)}`} />
           <Row label="To chat" value={spendLabel(look.spend, symbol, dec)} />
+          {look.spend && (
+            <p className="text-xs mt-1" style={{ color: MUTED }}>
+              {spendEnforced(look.spend) ? SPEND_ENFORCED_NOTE : SPEND_COMING_NOTE}
+            </p>
+          )}
           <Row label="Admin" value={issuerLine} />
           <p className="text-xs mt-3" style={{ color: MUTED }}>
             Only the token's issuer can change these rules.
@@ -276,21 +291,25 @@ export const RoomSettingsSheet = ({
                 style={{ background: PANEL, border: `1px solid ${LINE}` }}
               >
                 <option value="message">per message</option>
-                <option value="minute">per minute</option>
-                <option value="hour">per hour</option>
-                <option value="day">per day</option>
+                <option value="minute">per minute (coming)</option>
+                <option value="hour">per hour (coming)</option>
+                <option value="day">per day (coming)</option>
               </select>
               <select
                 value={to}
-                onChange={(e) => setTo(e.target.value as RoomSpendRule['to'])}
+                onChange={(e) => setTo(e.target.value as RoomSpendRule['to'] | 'sats')}
                 className="rounded-xl px-2 text-sm text-white"
                 style={{ background: PANEL, border: `1px solid ${LINE}` }}
               >
                 <option value="burn">burned</option>
-                <option value="issuer">to you</option>
+                <option value="issuer">{`$${symbol} to you`}</option>
+                <option value="sats">sats to you</option>
               </select>
             </div>
-            <p className="mt-1">Shown to members as the room's rule.</p>
+            <p className="mt-1">
+              {per === 'message' ? SPEND_ENFORCED_NOTE : SPEND_COMING_NOTE}
+              {' '}You never pay to post in your own room.
+            </p>
           </div>
           <button
             onClick={save}
