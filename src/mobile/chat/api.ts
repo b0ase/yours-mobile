@@ -232,7 +232,12 @@ export class BchatClient {
 
   /** What a returned ticket proves (name, photo, alias), without binding anything. */
   async socialPreview(ticket: string, secret: string): Promise<SocialProfile> {
-    return this.call<SocialProfile>('POST', '/api/bitsign/wallet/social/claim', { ticket, secret, preview: true }, false);
+    return this.call<SocialProfile>(
+      'POST',
+      '/api/bitsign/wallet/social/claim',
+      { ticket, secret, preview: true },
+      false,
+    );
   }
 
   /** Record the verified X / Google name on this wallet's account; returns the alias it may now use. */
@@ -307,6 +312,23 @@ export class BchatClient {
 
   async markRead(ticker: string): Promise<void> {
     await this.call('POST', `${BchatClient.path(ticker)}/read`, {});
+  }
+
+  // ── bSpaces (docs/BSPACES-PLAN.md): the room's live space. Same member gate as the thread. ──
+
+  /** The room's live space: `{ space, participants, me }`, or `{ space: null }`. */
+  async space(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space`);
+  }
+
+  /** join | heartbeat | leave | end | hand | role | step_down (bit-sign rooms/[ticker]/space). */
+  async spaceAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
+  }
+
+  /** LiveKit join token. The server mints it from your participant row, never from the request. */
+  async spaceToken(ticker: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
   }
 
   // ── Token rooms (docs/TOKEN-ROOMS.md) ──

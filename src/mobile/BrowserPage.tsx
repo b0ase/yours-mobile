@@ -1,4 +1,11 @@
-import { MARKET_ENABLED, STORE_BUILD, TOKENBLASTER_ENABLED, appsTileShown, radarGroupShown } from './storeBuild';
+import {
+  BSPACES_ENABLED,
+  MARKET_ENABLED,
+  STORE_BUILD,
+  TOKENBLASTER_ENABLED,
+  appsTileShown,
+  radarGroupShown,
+} from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -27,6 +34,7 @@ import { SCREEN_ICON, screenLabel } from './phone/icons';
 import { PHONE_APPS_TOP, PHONE_GO } from './phone/events';
 import { useInPeek } from './phone/pageEl';
 import bGlyph from './brand/bwallet-glyph.svg';
+import bspacesGlyph from './brand/bspaces-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
@@ -206,6 +214,12 @@ const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id))
 /** The b agent as an Apps tile (owner, 7 Oct 2026): opens /m/agent, the same as "Ask b" in the top bar. */
 const AGENT_KEY = 'sys:agent';
 const AGENT_TILE: Tile = { key: AGENT_KEY, name: 'b agent', url: '/m/agent', icon: bGlyph };
+/** bSpaces (docs/BSPACES-PLAN.md): live audio/video spaces in your token rooms. bWalletX only (no token rooms in a store build). */
+const BSPACES_KEY = 'sys:bspaces';
+const BSPACES_TILE: Tile = { key: BSPACES_KEY, name: 'bSpaces', url: '/m/spaces', icon: bspacesGlyph };
+const SYS_TILES: Tile[] = BSPACES_ENABLED ? [AGENT_TILE, BSPACES_TILE] : [AGENT_TILE];
+/** Wallet screens rather than web apps: they open by route. */
+const isSys = (t: Tile) => t.key.startsWith('sys:');
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
@@ -711,8 +725,8 @@ const BrowserPage = ({
           <AppTile
             key={t.key}
             tile={t}
-            onOpen={() => (t.key === AGENT_KEY ? navigate(t.url) : go(t.url, t.bapp))}
-            onInfo={() => (t.key === AGENT_KEY ? navigate(t.url) : setInfo(t))}
+            onOpen={() => (isSys(t) ? navigate(t.url) : go(t.url, t.bapp))}
+            onInfo={() => (isSys(t) ? navigate(t.url) : setInfo(t))}
             onArrange={
               i === 0
                 ? () => {
@@ -743,7 +757,7 @@ const BrowserPage = ({
               onOpen={() =>
                 t.screen
                   ? window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: t.screen }))
-                  : t.key === AGENT_KEY
+                  : isSys(t)
                     ? navigate(t.url)
                     : go(t.url, t.bapp)
               }
@@ -775,7 +789,7 @@ const BrowserPage = ({
               onOpen={() =>
                 t.screen
                   ? window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: t.screen }))
-                  : t.key === AGENT_KEY
+                  : isSys(t)
                     ? navigate(t.url)
                     : go(t.url, t.bapp)
               }
@@ -800,7 +814,8 @@ const BrowserPage = ({
 
   /** A tile key (phone/appScreens.ts) → its tile. */
   const keyTile = (k: string): Tile | null => {
-    if (k === AGENT_KEY) return AGENT_TILE;
+    const sys = SYS_TILES.find((t) => t.key === k);
+    if (sys) return sys;
     if (k.startsWith('screen:')) {
       const id = k.slice(7) as ScreenId;
       const sc = screenById(id);
@@ -808,7 +823,7 @@ const BrowserPage = ({
     }
     return ALL_TILES.find((t) => t.url === k) ?? userTiles.find((t) => t.url === k) ?? null;
   };
-  const tileKey = (t: Tile) => (t.key === AGENT_KEY ? AGENT_KEY : t.screen ? `screen:${t.screen}` : t.url);
+  const tileKey = (t: Tile) => (isSys(t) ? t.key : t.screen ? `screen:${t.screen}` : t.url);
   const placed = new Set([
     ...appScreens.screens.flatMap((x) => x.items),
     ...dock.flatMap((i) => (i.kind === 'app' ? [i.url] : [])),
@@ -1004,7 +1019,7 @@ const BrowserPage = ({
     if (i === 1) {
       return (
         <>
-          {grid(1, [AGENT_TILE, ...notHome(BAPP_TILES)])}
+          {grid(1, [...SYS_TILES, ...notHome(BAPP_TILES)])}
           {note(
             `Touch and hold an app for details${phone ? ' or to add it to the Dock' : ''}. Grey dot = demo. ${UNOFFICIAL_NOTICE}`,
           )}
