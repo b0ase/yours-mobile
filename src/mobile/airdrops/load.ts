@@ -33,8 +33,8 @@ export const refreshAirdrops = (
     const rows = buildRows(txs, own, local, Date.now()).map((r) => classifyEvent(r, byId.get(r.txid), local.get(r.txid), ctx));
     let items = toItems(rows, (t) => local.has(t));
     const ids = [...new Set(items.map((i) => (i.asset.kind === 'token' && !i.asset.symbol ? i.asset.id : '')).filter(Boolean))];
-    const syms = ids.length ? await fetchTokenSymbols(ids) : new Map<string, string>();
-    items = items.map((i) => (syms.has(i.asset.id) ? { ...i, asset: { ...i.asset, symbol: syms.get(i.asset.id) } } : i));
+    const syms = ids.length ? await fetchTokenSymbols(ids) : new Map<string, { sym?: string; dec?: number }>();
+    items = items.map((i) => (syms.get(i.asset.id)?.sym ? { ...i, asset: { ...i.asset, symbol: syms.get(i.asset.id)?.sym } } : i));
     savePoisonData(account, poisonDataFrom(rows));
     saveItems(account, items, Date.now());
   })().finally(() => running.delete(account));
