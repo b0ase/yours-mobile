@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
+import { useSpaceInviteLinks } from '../spaces/inviteLinks';
 
 /**
  * The top bar's non-visual duties, mounted ONCE by PhoneShell in the phone layout (TopNav is mounted inside every
@@ -19,6 +20,7 @@ export const useAppServices = () => {
     show();
     return onPairLink(show);
   }, []);
+  useSpaceInviteLinks();
   useEffect(() => {
     initPairing();
   }, []);

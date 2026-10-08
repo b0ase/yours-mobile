@@ -338,7 +338,53 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
   }
 
-  // ── Token rooms (docs/TOKEN-ROOMS.md) ──
+  /** The live space's permanent page `/s/<slug>` (host or room admin only). `{ page }`. */
+  async spacePageLink(ticker: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/page`, {});
+  }
+
+  /** A new invite `/i/<code>` to the live space (host or room admin only). `{ invite, managed }`. */
+  async createSpaceInvite(ticker: string, opts: { expires_in: string; max_uses?: number }): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/invite`, opts);
+  }
+
+  /** The live space's invites with uses (host or room admin only). `{ invites }`. */
+  async spaceInvites(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/invite`);
+  }
+
+  async revokeSpaceInvite(ticker: string, code: string): Promise<unknown> {
+    return this.call('DELETE', `${BchatClient.path(ticker)}/space/invite?code=${encodeURIComponent(code)}`);
+  }
+
+  /** A new room invite `/i/<code>` (any member; it grants nothing). `{ invite, managed }`. */
+  async createRoomInvite(ticker: string, opts: { expires_in: string; max_uses?: number }): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/room-invite`, opts);
+  }
+
+  /** Your room invites (the room admin sees all). `{ invites }`. */
+  async roomInvites(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/room-invite`);
+  }
+
+  async revokeRoomInvite(ticker: string, code: string): Promise<unknown> {
+    return this.call('DELETE', `${BchatClient.path(ticker)}/room-invite?code=${encodeURIComponent(code)}`);
+  }
+
+  /** Open an invite: counts one use for this visitor and answers `{ invite }` (no session needed). */
+  async openInvite(code: string): Promise<unknown> {
+    return this.call('POST', `/api/bitsign/space-invites/${encodeURIComponent(code)}/use`, {}, !!this.handle);
+  }
+
+  /** A Space's permanent page (public). `{ page }`. */
+  async spacePage(slug: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/space-pages/${encodeURIComponent(slug)}`, undefined, false);
+  }
+
+  /** A room's public page (token / discoverable rooms). `{ page }`. */
+  async roomPage(ticker: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/room-pages/${encodeURIComponent(ticker)}`, undefined, false);
+  }
 
   /** Is there a room for this token key, and am I in it? (GET never joins.) */
   async tokenRoom(key: string): Promise<unknown> {

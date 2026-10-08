@@ -17,11 +17,20 @@ import {
   ShoppingCart,
   Trophy,
   UserPlus,
+  Copy,
+  Share2,
   WifiOff,
   X,
   Loader2,
 } from 'lucide-react';
-import { sendBsv, sendBsv21 } from '@1sat/actions';
+import { getBsv21Balances, sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { SendBsv21View } from '../../components/SendBsv21View';
+import { NameInput } from '../names/NameInput';
+import { useTheme } from '../../hooks/useTheme';
+import { InviteLinksPanel } from '../chat/InviteLinksPanel';
+import { copyLink, shareLink } from '../chat/shareLink';
+import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
+import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
@@ -948,38 +957,83 @@ const LockedRoom = ({
 );
 
 /**
- * Invite = send the room token. Resolves $handle → their proven receive address (bit-sign), then
- * asks the wallet to send exactly the room minimum. Nothing is sent until the user confirms here,
- * and the wallet's own approval for the transaction still applies.
+ * Invite to a token room (owner, 8 Oct 2026). Two ways, both behind token rooms (tokenRoomsEnabled):
+ *
+ * 1. A link. "Copy room page" is the permanent /r/<ticker> page (entry rule, real price, "Buy 1 $X
+ *    and enter"); the invite panel makes an ephemeral /i/<code> with expiry and max uses, and lists
+ *    yours with their uses and Revoke. Opening either without the token shows the room's existing
+ *    get-entry screen; with it, the room.
+ * 2. Send the entry token. The recipient box is the Send screen's own NameInput ($handle, paymail,
+ *    OpNS or address, with the same address-poisoning warning); Next opens the wallet's existing
+ *    BSV-21 send view (SendBsv21View) already filled, whose confirm screen does the send. After a
+ *    send, it offers to share the room link with them too.
  */
 const InviteSheet = ({
   client,
   ticker,
+  roomName,
   entry,
   onClose,
 }: {
   client: BchatClient;
   ticker: string;
+  roomName: string;
   entry: TokenRoomEntry;
   onClose: () => void;
 }) => {
   const { apiContext } = useServiceContext();
-  const { addSnackbar } = useSnackbar();
-  const [input, setInput] = useState('');
-  const [target, setTarget] = useState<{ label: string; address: string } | null>(null);
+  const { theme } = useTheme();
+  const [to, setTo] = useState('');
+  const [amount, setAmount] = useState(() => formatRaw(entry.gate.minRaw, entry.gate.dec));
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const amount = amountLabel(entry.gate.minRaw, entry.gate);
+  const [short, setShort] = useState(false);
+  const [sending, setSending] = useState<{ token: { isConfirmed: boolean; info: Bsv21Balance }; amountInput: string } | null>(
+    null,
+  );
+  const [sentTo, setSentTo] = useState('');
+  const [note, setNote] = useState('');
+  const symbol = entry.gate.symbol;
 
-  const resolve = async () => {
-    const who = parseInvitee(input);
-    if (!who) return setError('Enter a $handle or a BSV address');
+  const roomPage = async () => {
+    const page = parsePage(await client.roomPage(ticker).catch(() => null));
+    return page?.url || '';
+  };
+  const copyRoomPage = async () => {
+    const url = await roomPage();
+    if (!url) return setNote('The room page isn’t available yet.');
+    setNote((await copyLink(url)) === 'copied' ? 'Room link copied.' : url);
+  };
+  const shareRoom = async () => {
+    // An invite link if the server has them on, else the permanent room page.
+    const inv = parseSpaceInvite(await client.createRoomInvite(ticker, { expires_in: DEFAULT_EXPIRY }).catch(() => null));
+    const url = inv?.url || (await roomPage());
+    if (!url) return setNote('The room link isn’t available yet.');
+    const r = await shareLink({ title: roomName, text: `Join ${roomName}`, url });
+    if (r === 'copied') setNote('Room link copied.');
+    if (r === 'failed') setNote(url);
+  };
+  const createInvite = useCallback(
+    (opts: { expires_in: string; max_uses?: number }) => client.createRoomInvite(ticker, opts),
+    [client, ticker],
+  );
+  const listInvites = useCallback(() => client.roomInvites(ticker), [client, ticker]);
+  const revokeInvite = useCallback((code: string) => client.revokeRoomInvite(ticker, code), [client, ticker]);
+
+  const next = async () => {
     setError('');
-    if ('address' in who) return setTarget({ label: `${who.address.slice(0, 8)}…`, address: who.address });
-    setBusy('Looking up…');
+    setShort(false);
+    if (!to) return setError('Enter a $handle, paymail or address, and confirm the name.');
+    const raw = toRawAmount(amount, entry.gate.dec);
+    if (!raw || raw === '0') return setError('Enter an amount.');
+    setBusy('Checking balance…');
     try {
-      const address = await client.inviteAddress(ticker, who.handle);
-      setTarget({ label: `$${who.handle}`, address });
+      const balances = await getBsv21Balances.execute(apiContext, {});
+      const id = (entry.holding.id || '').toLowerCase().replace('.', '_');
+      const info = balances.find((b) => (b.id || '').toLowerCase().replace('.', '_') === id);
+      const held = info ? info.all.confirmed : 0n;
+      if (!info || held < BigInt(raw)) return setShort(true);
+      setSending({ token: { isConfirmed: true, info }, amountInput: amount });
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -987,97 +1041,119 @@ const InviteSheet = ({
     }
   };
 
-  const send = async () => {
-    if (!target) return;
-    setBusy('Sending…');
-    setError('');
-    try {
-      const res = await sendBsv21.execute(apiContext, {
-        tokenId: entry.holding.id,
-        recipients: [{ amount: BigInt(entry.gate.minRaw), destination: { address: target.address } }],
-      });
-      if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
-      const shown = celebrateSend(res, {
-        amount: { kind: 'token', display: amount, ticker: '' },
-        recipients: [target.label],
-        title: 'Invite sent!',
-      });
-      if (!shown) addSnackbar(`Invited ${target.label} — sent ${amount}`, 'success');
-      onClose();
-    } catch (e) {
-      setError(errText(e));
-    } finally {
-      setBusy('');
-    }
-  };
+  if (sending) {
+    return createPortal(
+      <div className="fixed inset-0 z-[160] flex" style={{ background: theme.color.global.walletBackground }}>
+        <SendBsv21View
+          token={sending.token}
+          prefill={{ address: to, amountInput: sending.amountInput }}
+          onBack={(sentAtomic) => {
+            setSending(null);
+            if (sentAtomic && sentAtomic > 0n) setSentTo(to);
+          }}
+        />
+      </div>,
+      document.body,
+    );
+  }
 
   return (
     <Sheet title="Invite to this room" onClose={onClose}>
-      {!target ? (
-        <>
-          <p className="text-xs mb-3" style={{ color: MUTED }}>
-            An invite is the room token: you send {amount} and they're in.
-          </p>
-          <div
-            className="flex items-center gap-2 rounded-2xl px-3"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
-          >
-            <input
-              autoFocus
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && resolve()}
-              placeholder="$handle or address"
-              autoCapitalize="none"
-              autoCorrect="off"
-              className="flex-1 bg-transparent py-3 text-white outline-none"
-            />
+      <div className="max-h-[75vh] overflow-y-auto pb-2">
+        {sentTo ? (
+          <div className="rounded-2xl p-4 mb-4" style={{ background: PANEL, border: `1px solid ${GOLD}` }}>
+            <p className="text-sm text-white font-semibold">Sent. Share the room link with them too?</p>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => void shareRoom()}
+                className="flex-1 rounded-2xl py-2.5 font-bold flex items-center justify-center gap-2"
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
+                <Share2 size={15} /> Share link
+              </button>
+              <button
+                onClick={() => setSentTo('')}
+                className="flex-1 rounded-2xl py-2.5 font-bold text-white"
+                style={{ background: PANEL, border: `1px solid ${LINE}` }}
+              >
+                Done
+              </button>
+            </div>
           </div>
+        ) : null}
+
+        <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: MUTED }}>
+          Room link
+        </div>
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Anyone with the link can see the room and buy {amountLabel(entry.gate.minRaw, entry.gate)} to enter.
+        </p>
+        <div className="flex gap-2 mb-4">
           <button
-            onClick={resolve}
-            disabled={!!busy || !input.trim()}
-            className="w-full mt-4 rounded-2xl py-3 font-bold disabled:opacity-50"
-            style={{ background: GOLD, color: '#1a1300' }}
+            onClick={() => void copyRoomPage()}
+            className="flex-1 rounded-2xl py-2.5 font-semibold flex items-center justify-center gap-2"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
           >
-            {busy || 'Next'}
+            <Copy size={15} /> Copy link
           </button>
-        </>
-      ) : (
-        <>
-          <div className="rounded-2xl p-4 text-sm" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
-            <div className="flex justify-between">
-              <span style={{ color: MUTED }}>Send</span>
-              <span className="text-white font-semibold">{amount}</span>
-            </div>
-            <div className="flex justify-between mt-2">
-              <span style={{ color: MUTED }}>To</span>
-              <span className="text-white font-semibold">{target.label}</span>
-            </div>
-            <div className="text-[11px] mt-2 break-all" style={{ color: MUTED }}>
-              {target.address}
+          <button
+            onClick={() => void shareRoom()}
+            className="flex-1 rounded-2xl py-2.5 font-semibold flex items-center justify-center gap-2"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+          >
+            <Share2 size={15} /> Share
+          </button>
+        </div>
+        <InviteLinksPanel
+          create={createInvite}
+          list={listInvites}
+          revoke={revokeInvite}
+          title={roomName}
+          onNote={setNote}
+        />
+
+        <div className="text-[11px] font-semibold uppercase tracking-wide mt-6 mb-2" style={{ color: MUTED }}>
+          Send token to
+        </div>
+        <NameInput theme={theme} asset="token" value={to} onChange={setTo} placeholder="$handle, paymail or address" />
+        <div
+          className="mt-2 flex items-center gap-2 rounded-2xl px-3"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        >
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            inputMode="decimal"
+            className="flex-1 bg-transparent py-3 text-white outline-none"
+            aria-label="Amount"
+          />
+          <span className="text-sm font-semibold" style={{ color: GOLD }}>
+            ${symbol}
+          </span>
+        </div>
+        {short ? (
+          <div className="mt-3">
+            <p className="text-sm text-[#F97066]">You don’t hold enough ${symbol}.</p>
+            <div className="mt-2 flex gap-2">
+              <BuyTokenButton kind={entry.holding.kind === 'coll' ? 'coll' : 'bsv21'} id={entry.holding.id} />
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
-            <button
-              onClick={() => setTarget(null)}
-              disabled={!!busy}
-              className="flex-1 rounded-2xl py-3 font-bold text-white"
-              style={{ background: PANEL }}
-            >
-              Back
-            </button>
-            <button
-              onClick={send}
-              disabled={!!busy}
-              className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {busy || `Send ${amount}`}
-            </button>
-          </div>
-        </>
-      )}
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        ) : null}
+        <button
+          onClick={() => void next()}
+          disabled={!!busy || !to}
+          className="w-full mt-3 rounded-2xl py-3 font-bold disabled:opacity-50"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          {busy || 'Next'}
+        </button>
+        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {note && (
+          <button onClick={() => setNote('')} className="mt-3 w-full text-left text-xs break-all" style={{ color: MUTED }}>
+            {note}
+          </button>
+        )}
+      </div>
     </Sheet>
   );
 };
@@ -2352,7 +2428,13 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         />
       )}
       {inviting && open?.entry && (
-        <InviteSheet client={client} ticker={open.room.ticker} entry={open.entry} onClose={() => setInviting(false)} />
+        <InviteSheet
+          client={client}
+          ticker={open.room.ticker}
+          roomName={roomTitle(open.room, handle ?? '')}
+          entry={open.entry}
+          onClose={() => setInviting(false)}
+        />
       )}
     </div>
   );

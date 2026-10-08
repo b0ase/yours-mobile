@@ -20,6 +20,7 @@ import { isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
+import { useSpaceInviteLinks } from '../spaces/inviteLinks';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 import { useTheme } from '../../hooks/useTheme';
@@ -79,6 +80,8 @@ const TopNavBar = () => {
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
+  // Space invite links (spaces/inviteLinks.ts); PhoneShell owns them in the phone layout.
+  useSpaceInviteLinks(!phoneLayoutOn());
   useEffect(() => {
     if (phoneLayoutOn()) return;
     const show = () => {
