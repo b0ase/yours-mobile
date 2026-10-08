@@ -1,15 +1,25 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import {
   Ban,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Grid3x3,
   Loader2,
   MessageCircle,
   Phone,
   PhoneIncoming,
   PhoneMissed,
   PhoneOutgoing,
+  Search,
+  Star,
+  Store,
   Trash2,
   UserPlus,
+  Users,
   Video,
+  X,
 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -19,12 +29,14 @@ import { bareName } from '../names/names';
 import { requestDm } from '../chat/segmentNav';
 import { useContacts } from '../chat/useContacts';
 import { Avatar, ContactRow, SourceBadges } from '../chat/ContactViews';
-import { filterContacts, type Contact } from '../chat/contacts';
+import { type Contact } from '../chat/contacts';
 import { resolveCallee, verifyCaller } from './peer';
 import { blockCaller, dial, listBlocked, unblockCaller } from './store';
 import { useCalls } from './useCalls';
 import { busy, formatDuration, isShortKey, shortKey, type ServerCall } from './machine';
 import type { BlockEntry } from './api';
+import { fetchDirectory, loadMyProfile, type PeerBPhone } from './bphone';
+import { rateShort, type BPhoneProfile } from './rateCard';
 import { addFriend, isFriend, refreshFriends } from './friends';
 import {
   asFavourite,
@@ -35,6 +47,9 @@ import {
   loadHidden,
   parseDial,
   phoneTabsFor,
+  RECENTS_FILTERS,
+  searchCalls,
+  searchEmpty,
   saveFavourites,
   saveHidden,
   toggleFavourite,
@@ -45,6 +60,7 @@ import {
 } from './phone';
 
 const GOLD = '#F5B800';
+const GREEN = '#22c55e';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 // bPhone screens are bWalletX only: the store bundle carries neither (Rollup drops the dead branch).
 const BPhoneSettings = PAID_CALLS_ENABLED ? lazy(() => import('./BPhoneSettings')) : null;
@@ -79,16 +95,6 @@ const Icon = ({ c }: { c: ServerCall }) => {
     <PhoneOutgoing size={16} color="#98A2B3" />
   );
 };
-
-const Pill = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) => (
-  <button
-    onClick={onClick}
-    className="flex-1 rounded-full px-2 py-[6px] text-[12px] font-bold"
-    style={on ? { background: GOLD, color: '#1a1300' } : { color: '#8a8f98' }}
-  >
-    {children}
-  </button>
-);
 
 /** Press-and-hold (or right-click) on a row. */
 const useLongPress = (fn: () => void, ms = 550) => {
@@ -165,29 +171,123 @@ const RecentRow = ({
   );
 };
 
+/** The yellow card on top: my own bPhone rate and whether I'm listed. Opens bPhone settings. */
+const BPhoneCard = ({ profile, onOpen }: { profile: BPhoneProfile | null; onOpen: () => void }) => {
+  const rate = profile?.rate ?? null;
+  const listed = !!profile?.listing.listed;
+  return (
+    <button
+      onClick={onOpen}
+      aria-label="bPhone settings"
+      className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 text-left"
+      style={{ background: `linear-gradient(135deg, ${GOLD} 0%, #FFD24D 100%)`, color: '#1a1300' }}
+    >
+      <span
+        className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+        style={{ background: '#1a1300' }}
+      >
+        <Phone size={17} color={GOLD} />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[11px] font-bold uppercase tracking-[0.08em] opacity-70">bPhone</span>
+        <span className={`block text-[15px] font-bold ${CLIP}`}>
+          {profile === null ? 'Loading…' : rate ? `Your rate: ${rateShort(rate)}` : 'Free calls · set a price'}
+        </span>
+      </span>
+      {rate && (
+        <span
+          className="shrink-0 rounded-full px-2 py-[3px] text-[11px] font-bold flex items-center gap-1"
+          style={{ background: '#1a1300', color: listed ? GREEN : '#a3a8b1' }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: listed ? GREEN : '#5b6069' }} />
+          {listed ? 'On' : 'Off'}
+        </span>
+      )}
+      <ChevronRight size={18} className="shrink-0 opacity-70" />
+    </button>
+  );
+};
+
+const GroupTitle = ({ children }: { children: ReactNode }) => (
+  <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#6b7079] pt-2 pb-1">{children}</div>
+);
+
+const TAB_ICON = { recents: Clock, contacts: Users, services: Store, keypad: Grid3x3 } as const;
+
+/** The bottom tab bar inside Calls. Keypad is the green round button on the far right. */
+const TabBar = ({ tab, onTab }: { tab: PhoneTab; onTab: (t: PhoneTab) => void }) => (
+  <nav
+    role="tablist"
+    aria-label="Calls"
+    className="sticky bottom-0 z-10 -mx-4 px-4 pt-2 pb-2 flex items-center gap-1 border-t border-[#1f2127]"
+    style={{ background: 'rgba(13,14,17,0.96)', backdropFilter: 'blur(8px)' }}
+  >
+    {TABS.map((t) => {
+      const I = TAB_ICON[t.id];
+      const on = tab === t.id;
+      if (t.id === 'keypad')
+        return (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={on}
+            aria-label="Keypad"
+            onClick={() => onTab(t.id)}
+            className="shrink-0 ml-1 w-12 h-12 rounded-full flex items-center justify-center"
+            style={{
+              background: GREEN,
+              boxShadow: on ? `0 0 0 3px rgba(34,197,94,0.3)` : '0 4px 14px rgba(34,197,94,0.25)',
+            }}
+          >
+            <I size={20} color="#04210f" />
+          </button>
+        );
+      return (
+        <button
+          key={t.id}
+          role="tab"
+          aria-selected={on}
+          onClick={() => onTab(t.id)}
+          className="flex-1 min-w-0 flex flex-col items-center gap-[2px] py-1"
+          style={{ color: on ? GOLD : '#6b7079' }}
+        >
+          <I size={19} />
+          <span className="text-[11px] font-semibold">{t.label}</span>
+        </button>
+      );
+    })}
+  </nav>
+);
+
 /**
- * Calls as a phone: Favourites | Recents | Contacts | Dial (calls/phone.ts). Used by the Chat
- * tab's Calls segment (feed/ChatSegments.tsx) and by the phone sheet in the top bar, which passes
- * `onLeave` so Message / Pay can close it on their way to another tab.
+ * Calls as a phone (calls/phone.ts): the bPhone card and one search box on top, then Recents |
+ * Contacts | Services | Keypad from a bottom tab bar. Used by the Chat tab's Calls segment
+ * (feed/ChatSegments.tsx) and by the phone sheet in the top bar, which passes `onLeave` so
+ * Message / Pay can close it on their way to another tab. Store build: no card, no Services.
  */
 export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
   const { recent, ready, error, call } = useCalls();
-  const { chromeStorageService } = useServiceContext();
+  const { chromeStorageService, apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const owner = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? 'default';
   const contacts = useContacts();
   const [favs, setFavs] = useState<Favourite[]>(() => loadFavourites(owner));
   const [hidden, setHidden] = useState<Set<string>>(() => loadHidden(owner));
-  const [tab, setTab] = useState<PhoneTab>(() => (loadFavourites(owner).length ? 'favourites' : 'recents'));
+  const [tab, setTab] = useState<PhoneTab>('recents');
   const [filter, setFilter] = useState<RecentsFilter>('all');
+  const [filterMenu, setFilterMenu] = useState(false);
   const [query, setQuery] = useState('');
   const [input, setInput] = useState('');
   const [resolving, setResolving] = useState(false);
   const [problem, setProblem] = useState('');
   const [blocks, setBlocks] = useState<BlockEntry[] | null>(null);
-  const [showBlocks, setShowBlocks] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [settings, setSettings] = useState(false);
+  const [mine, setMine] = useState<BPhoneProfile | null>(null);
+  const [services, setServices] = useState<PeerBPhone[] | null>(null);
+  const [servicesError, setServicesError] = useState('');
   const inCall = busy(call);
+  const wallet = apiContext?.wallet;
 
   useEffect(() => {
     setFavs(loadFavourites(owner));
@@ -197,11 +297,34 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
     if (ready) void refreshFriends().catch(() => undefined);
   }, [ready]);
   useEffect(() => {
-    if (showBlocks)
+    if (filter === 'blocked')
       void listBlocked()
         .then(setBlocks)
         .catch(() => setBlocks([]));
-  }, [showBlocks]);
+  }, [filter]);
+  // bPhone: my own card and the Services directory (bWalletX only; the store build never asks).
+  useEffect(() => {
+    if (!PAID_CALLS_ENABLED || !wallet || settings) return;
+    let live = true;
+    void (async () => {
+      const { publicKey } = await wallet.getPublicKey({ identityKey: true });
+      const p = await loadMyProfile((u, i) => fetch(u, i), publicKey.toLowerCase());
+      if (live) setMine(p);
+    })().catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [wallet, settings]);
+  useEffect(() => {
+    if (!PAID_CALLS_ENABLED) return;
+    let live = true;
+    fetchDirectory((u, i) => fetch(u, i))
+      .then((l) => live && setServices(l))
+      .catch((e) => live && setServicesError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const setAndSaveFavs = (next: Favourite[]) => {
     setFavs(next);
@@ -219,6 +342,13 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
   };
   const callKey = (key: string, label: string, video = false) => {
     if (!inCall) void dial({ key, label, verified: true }, { video });
+  };
+  const switchTab = (t: PhoneTab) => {
+    setTab(t);
+    setEditing(false);
+    setProblem('');
+    setQuery('');
+    setFilterMenu(false);
   };
 
   const resolveInput = async () => {
@@ -274,289 +404,404 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
   };
   const block = async (c: ServerCall) => {
     await blockCaller(c.peer_key, c.peer_label ?? undefined).catch((e) => setProblem(String(e?.message ?? e)));
-    if (showBlocks) setBlocks(await listBlocked());
+    if (filter === 'blocked') setBlocks(await listBlocked());
   };
 
   const recents = useMemo(() => visibleRecents(recent, filter, hidden), [recent, filter, hidden]);
   const suggestions = useMemo(() => dialSuggestions(contacts, input), [contacts, input]);
+  const results = useMemo(
+    () =>
+      searchCalls(query, {
+        contacts,
+        recents: visibleRecents(recent, 'all', hidden),
+        services: PAID_CALLS_ENABLED ? (services ?? []) : [],
+        nameOf,
+      }),
+    // nameOf reads contacts, already a dependency
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query, contacts, recent, hidden, services],
+  );
+  const favIds = new Set(favs.map((f) => f.id));
+  const spinner = <Loader2 size={20} className="animate-spin self-center" color="#98A2B3" />;
+
+  const recentRow = (c: ServerCall) => (
+    <RecentRow
+      key={c.id}
+      c={c}
+      name={nameOf(c)}
+      inCall={inCall}
+      editing={editing}
+      onCall={() => callBack(c)}
+      onDelete={() => hide(c.id)}
+      onAdd={
+        isFriend(c.peer_key)
+          ? null
+          : () =>
+              void addFriend({ key: c.peer_key, name: c.peer_label ?? shortKey(c.peer_key) }).catch((e) =>
+                setProblem(e instanceof Error ? e.message : String(e)),
+              )
+      }
+      onBlock={c.direction === 'incoming' ? () => void block(c) : null}
+    />
+  );
+  const contactRow = (c: Contact) => (
+    <ContactRow
+      key={c.id}
+      c={c}
+      busy={false}
+      onMessage={(x) => x.handle && message(x.handle)}
+      onRemove={null}
+      fav={{
+        on: isFavourite(favs, c.id),
+        toggle: () => setAndSaveFavs(toggleFavourite(favs, asFavourite(c))),
+      }}
+      onLeave={onLeave}
+    />
+  );
+
+  if (settings && BPhoneSettings)
+    return (
+      <div className="w-full px-4 flex flex-col gap-3">
+        <button
+          onClick={() => setSettings(false)}
+          className="self-start flex items-center gap-1 text-[13px] font-semibold"
+          style={{ color: GOLD }}
+        >
+          <ChevronLeft size={16} /> Calls
+        </button>
+        <Suspense fallback={spinner}>
+          <BPhoneSettings onLeave={onLeave} />
+        </Suspense>
+      </div>
+    );
 
   return (
-    <div className="w-full px-4 flex flex-col gap-3">
-      <div role="tablist" className="flex rounded-full p-[3px] bg-[#121316] border border-[#1f2127] overflow-x-auto">
-        {TABS.map((t) => (
-          <Pill
-            key={t.id}
-            on={tab === t.id}
-            onClick={() => {
-              setTab(t.id);
-              setEditing(false);
-              setProblem('');
-            }}
-          >
-            {t.label}
-          </Pill>
-        ))}
-      </div>
+    <div className="w-full px-4 flex flex-col gap-3 min-h-full">
+      {PAID_CALLS_ENABLED && <BPhoneCard profile={wallet ? mine : EMPTY_CARD} onOpen={() => setSettings(true)} />}
+
+      <label className="flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5">
+        <Search size={16} color="#6b7079" className="shrink-0" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={PAID_CALLS_ENABLED ? 'Search people and services' : 'Search people'}
+          aria-label={PAID_CALLS_ENABLED ? 'Search people and services' : 'Search people'}
+          autoCapitalize="none"
+          autoCorrect="off"
+          className="flex-1 min-w-0 bg-transparent text-sm text-white outline-none placeholder:text-[#6b7079]"
+        />
+        {query && (
+          <button aria-label="Clear search" onClick={() => setQuery('')} className="p-0.5">
+            <X size={15} color="#8a8f98" />
+          </button>
+        )}
+      </label>
+
       {problem && <p className="text-xs text-[#ff6b6b]">{problem}</p>}
       {inCall && <p className="text-xs text-[#98A2B3]">You are on a call.</p>}
 
-      {tab === 'favourites' && (
-        <div className="flex flex-col">
-          {favs.length > 0 && (
-            <button className="self-end text-xs text-[#8a8f98] underline" onClick={() => setEditing((v) => !v)}>
-              {editing ? 'Done' : 'Edit'}
-            </button>
-          )}
-          {favs.length === 0 && (
-            <p className="text-sm text-[#98A2B3] text-center py-8">
-              No favourites yet. Star someone in Contacts to pin them here.
-            </p>
-          )}
-          {favs.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 py-2 border-b border-[#1f2127]">
-              <Avatar title={f.name} src={f.avatar} size={40} />
-              <button
-                className="flex-1 min-w-0 text-left"
-                disabled={editing || inCall || !f.identityKey}
-                onClick={() => f.identityKey && callKey(f.identityKey, f.name)}
-              >
-                <div className={`text-sm font-semibold text-white ${CLIP}`}>{bareName(f.name)}</div>
-                <div className="text-[11px] text-[#98A2B3]">{f.handle ? `$${f.handle}` : ''}</div>
-              </button>
-              {editing ? (
-                <button
-                  aria-label={`Remove ${f.name} from favourites`}
-                  className="p-2"
-                  onClick={() => setAndSaveFavs(favs.filter((x) => x.id !== f.id))}
-                >
-                  <Trash2 size={16} color="#ff6b6b" />
-                </button>
-              ) : (
-                <>
-                  {f.handle && (
-                    <button aria-label={`Message ${f.name}`} className="p-2" onClick={() => message(f.handle!)}>
-                      <MessageCircle size={16} color={GOLD} />
-                    </button>
-                  )}
-                  {f.identityKey && (
-                    <button
-                      aria-label={`Call ${f.name}`}
-                      className="p-2"
-                      disabled={inCall}
-                      onClick={() => callKey(f.identityKey!, f.name)}
-                    >
-                      <Phone size={16} color={GOLD} />
-                    </button>
-                  )}
-                  {f.identityKey && (
-                    <button
-                      aria-label={`Video call ${f.name}`}
-                      className="p-2"
-                      disabled={inCall}
-                      onClick={() => callKey(f.identityKey!, f.name, true)}
-                    >
-                      <Video size={16} color={GOLD} />
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'recents' && (
-        <>
-          <div className="flex items-center gap-2">
-            <div className="flex w-40 rounded-full p-[3px] bg-[#121316] border border-[#1f2127]">
-              <Pill on={filter === 'all'} onClick={() => setFilter('all')}>
-                All
-              </Pill>
-              <Pill on={filter === 'missed'} onClick={() => setFilter('missed')}>
-                Missed
-              </Pill>
-            </div>
-            <span className="flex-1" />
-            <button className="text-xs text-[#8a8f98] underline" onClick={() => setShowBlocks((v) => !v)}>
-              {showBlocks ? 'Hide blocked' : 'Blocked'}
-            </button>
-            <button className="text-xs text-[#8a8f98] underline" onClick={() => setEditing((v) => !v)}>
-              {editing ? 'Done' : 'Edit'}
-            </button>
-          </div>
-
-          {showBlocks && (
-            <div className="rounded-xl border border-[#2b2f36] p-2">
-              {blocks === null ? (
-                <Loader2 size={16} className="animate-spin" color="#98A2B3" />
-              ) : blocks.length === 0 ? (
-                <p className="text-xs text-[#98A2B3] px-1">Nobody blocked.</p>
-              ) : (
-                blocks.map((b) => (
-                  <div key={b.key} className="flex items-center justify-between px-1 py-2">
-                    <span className={`text-sm text-white ${CLIP}`}>
-                      {b.label ? bareName(b.label) : shortKey(b.key)}
-                    </span>
-                    <button
-                      className="text-xs text-[#F5B800]"
-                      onClick={async () => {
-                        await unblockCaller(b.key).catch(() => undefined);
-                        setBlocks(await listBlocked());
-                      }}
-                    >
-                      Unblock
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {!ready && !error && (
-            <div className="flex justify-center py-8">
-              <Loader2 size={20} className="animate-spin" color="#98A2B3" />
-            </div>
-          )}
-          {error && !ready && <p className="text-xs text-[#ff6b6b]">Calls unavailable: {error}</p>}
-          {ready && recents.length === 0 && (
-            <p className="text-sm text-[#98A2B3] text-center py-8">
-              {filter === 'missed' ? 'No missed calls.' : 'No calls yet. Use Dial to call a bWallet user by name.'}
-            </p>
-          )}
+      <div className="flex-1 flex flex-col">
+        {query.trim() ? (
           <div className="flex flex-col">
-            {recents.map((c) => (
-              <RecentRow
-                key={c.id}
-                c={c}
-                name={nameOf(c)}
-                inCall={inCall}
-                editing={editing}
-                onCall={() => callBack(c)}
-                onDelete={() => hide(c.id)}
-                onAdd={
-                  isFriend(c.peer_key)
-                    ? null
-                    : () =>
-                        void addFriend({ key: c.peer_key, name: c.peer_label ?? shortKey(c.peer_key) }).catch((e) =>
-                          setProblem(e instanceof Error ? e.message : String(e)),
-                        )
-                }
-                onBlock={c.direction === 'incoming' ? () => void block(c) : null}
-              />
-            ))}
+            {searchEmpty(results) && (
+              <p className="text-sm text-[#98A2B3] text-center py-8">Nothing found for “{query.trim()}”.</p>
+            )}
+            {results.people.length > 0 && (
+              <>
+                <GroupTitle>People</GroupTitle>
+                <ul>{results.people.map(contactRow)}</ul>
+              </>
+            )}
+            {results.recents.length > 0 && (
+              <>
+                <GroupTitle>Recents</GroupTitle>
+                {results.recents.map(recentRow)}
+              </>
+            )}
+            {results.services.length > 0 && (
+              <>
+                <GroupTitle>Services</GroupTitle>
+                {results.services.map((p) => {
+                  const name = bareName(p.name ?? p.paymail ?? '') || p.key.slice(0, 10);
+                  return (
+                    <button
+                      key={p.key}
+                      className="flex items-center gap-3 py-2 border-b border-[#1f2127] text-left"
+                      onClick={() => switchTab('services')}
+                    >
+                      <Avatar title={name} src={p.avatar} size={40} />
+                      <span className="flex-1 min-w-0">
+                        <span className={`block text-sm font-semibold text-white ${CLIP}`}>{name}</span>
+                        <span className={`block text-[11px] text-[#98A2B3] ${CLIP}`}>{p.profile.listing.title}</span>
+                      </span>
+                      <span className="text-[13px] font-bold shrink-0" style={{ color: GOLD }}>
+                        {p.profile.rate ? rateShort(p.profile.rate) : 'Free'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
-          {recents.length > 0 && (
-            <p className="text-[10px] text-[#5b6069] text-center">Hold a call to delete it from this device.</p>
-          )}
-        </>
-      )}
+        ) : (
+          <>
+            {tab === 'recents' && (
+              <>
+                <div className="relative flex items-center gap-2 pb-1">
+                  <button
+                    onClick={() => setFilterMenu((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={filterMenu}
+                    className="flex items-center gap-1 rounded-full px-3 py-[5px] text-[12px] font-semibold border border-[#2b2f36] text-white"
+                  >
+                    {RECENTS_FILTERS.find((x) => x.id === filter)?.label}
+                    <ChevronDown size={14} color="#8a8f98" />
+                  </button>
+                  {filterMenu && (
+                    <div
+                      role="menu"
+                      className="absolute left-0 top-full mt-1 z-20 w-36 rounded-xl border border-[#2b2f36] bg-[#17191E] py-1 shadow-xl"
+                    >
+                      {RECENTS_FILTERS.map((x) => (
+                        <button
+                          key={x.id}
+                          role="menuitemradio"
+                          aria-checked={filter === x.id}
+                          onClick={() => {
+                            setFilter(x.id);
+                            setFilterMenu(false);
+                            setEditing(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-[13px]"
+                          style={{ color: filter === x.id ? GOLD : '#fff' }}
+                        >
+                          {x.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <span className="flex-1" />
+                  {filter !== 'blocked' && recents.length > 0 && (
+                    <button className="text-xs text-[#8a8f98] underline" onClick={() => setEditing((v) => !v)}>
+                      {editing ? 'Done' : 'Edit'}
+                    </button>
+                  )}
+                </div>
 
-      {tab === 'contacts' && (
-        <>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search contacts"
-            className="rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
-          />
-          {contacts.length === 0 && (
-            <p className="text-sm text-[#98A2B3] text-center py-8">
-              No contacts yet. Calls friends, people you follow in Feed and bChat contacts appear here.
-            </p>
-          )}
-          <ul>
-            {filterContacts(contacts, query).map((c) => (
-              <ContactRow
-                key={c.id}
-                c={c}
-                busy={false}
-                onMessage={(x) => x.handle && message(x.handle)}
-                onRemove={null}
-                fav={{
-                  on: isFavourite(favs, c.id),
-                  toggle: () => setAndSaveFavs(toggleFavourite(favs, asFavourite(c))),
-                }}
-                onLeave={onLeave}
-              />
-            ))}
-          </ul>
-        </>
-      )}
+                {filter === 'blocked' ? (
+                  blocks === null ? (
+                    spinner
+                  ) : blocks.length === 0 ? (
+                    <p className="text-sm text-[#98A2B3] text-center py-8">Nobody blocked.</p>
+                  ) : (
+                    blocks.map((b) => (
+                      <div key={b.key} className="flex items-center justify-between py-3 border-b border-[#1f2127]">
+                        <span className={`text-sm text-white ${CLIP}`}>
+                          {b.label ? bareName(b.label) : shortKey(b.key)}
+                        </span>
+                        <button
+                          className="text-xs font-semibold"
+                          style={{ color: GOLD }}
+                          onClick={async () => {
+                            await unblockCaller(b.key).catch(() => undefined);
+                            setBlocks(await listBlocked());
+                          }}
+                        >
+                          Unblock
+                        </button>
+                      </div>
+                    ))
+                  )
+                ) : (
+                  <>
+                    {!ready && !error && <div className="flex justify-center py-8">{spinner}</div>}
+                    {error && !ready && <p className="text-xs text-[#ff6b6b]">Calls unavailable: {error}</p>}
+                    {ready && recents.length === 0 && (
+                      <p className="text-sm text-[#98A2B3] text-center py-8">
+                        {filter === 'missed'
+                          ? 'No missed calls.'
+                          : 'No calls yet. Use the keypad to call a bWallet user by name.'}
+                      </p>
+                    )}
+                    <div className="flex flex-col">{recents.map(recentRow)}</div>
+                    {recents.length > 0 && (
+                      <p className="text-[10px] text-[#5b6069] text-center pt-2">
+                        Hold a call to delete it from this device.
+                      </p>
+                    )}
+                  </>
+                )}
+              </>
+            )}
 
-      {tab === 'experts' && Directory && (
-        <Suspense fallback={<Loader2 size={20} className="animate-spin self-center" color="#98A2B3" />}>
-          <Directory onLeave={onLeave} />
-        </Suspense>
-      )}
+            {tab === 'contacts' && (
+              <>
+                {favs.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <GroupTitle>
+                        <span className="inline-flex items-center gap-1">
+                          <Star size={11} fill={GOLD} color={GOLD} /> Favourites
+                        </span>
+                      </GroupTitle>
+                      <button className="text-xs text-[#8a8f98] underline" onClick={() => setEditing((v) => !v)}>
+                        {editing ? 'Done' : 'Edit'}
+                      </button>
+                    </div>
+                    {favs.map((f) => (
+                      <div key={f.id} className="flex items-center gap-3 py-2 border-b border-[#1f2127]">
+                        <Avatar title={f.name} src={f.avatar} size={40} />
+                        <button
+                          className="flex-1 min-w-0 text-left"
+                          disabled={editing || inCall || !f.identityKey}
+                          onClick={() => f.identityKey && callKey(f.identityKey, f.name)}
+                        >
+                          <div className={`text-sm font-semibold text-white ${CLIP}`}>{bareName(f.name)}</div>
+                          <div className="text-[11px] text-[#98A2B3]">{f.handle ? `$${f.handle}` : ''}</div>
+                        </button>
+                        {editing ? (
+                          <button
+                            aria-label={`Remove ${f.name} from favourites`}
+                            className="p-2"
+                            onClick={() => setAndSaveFavs(favs.filter((x) => x.id !== f.id))}
+                          >
+                            <Trash2 size={16} color="#ff6b6b" />
+                          </button>
+                        ) : (
+                          <>
+                            {f.handle && (
+                              <button
+                                aria-label={`Message ${f.name}`}
+                                className="p-2"
+                                onClick={() => message(f.handle!)}
+                              >
+                                <MessageCircle size={16} color={GOLD} />
+                              </button>
+                            )}
+                            {f.identityKey && (
+                              <button
+                                aria-label={`Call ${f.name}`}
+                                className="p-2"
+                                disabled={inCall}
+                                onClick={() => callKey(f.identityKey!, f.name)}
+                              >
+                                <Phone size={16} color={GOLD} />
+                              </button>
+                            )}
+                            {f.identityKey && (
+                              <button
+                                aria-label={`Video call ${f.name}`}
+                                className="p-2"
+                                disabled={inCall}
+                                onClick={() => callKey(f.identityKey!, f.name, true)}
+                              >
+                                <Video size={16} color={GOLD} />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    <GroupTitle>All contacts</GroupTitle>
+                  </>
+                )}
+                {contacts.length === 0 && (
+                  <p className="text-sm text-[#98A2B3] text-center py-8">
+                    No contacts yet. Calls friends, people you follow in Feed and bChat contacts appear here. Star
+                    someone to pin them to the top.
+                  </p>
+                )}
+                <ul>{contacts.filter((c) => !favIds.has(c.id)).map(contactRow)}</ul>
+              </>
+            )}
 
-      {tab === 'bphone' && BPhoneSettings && (
-        <Suspense fallback={<Loader2 size={20} className="animate-spin self-center" color="#98A2B3" />}>
-          <BPhoneSettings onLeave={onLeave} />
-        </Suspense>
-      )}
+            {tab === 'services' && Directory && (
+              <Suspense fallback={spinner}>
+                <Directory
+                  list={services}
+                  error={servicesError}
+                  onListServices={() => setSettings(true)}
+                  onLeave={onLeave}
+                />
+              </Suspense>
+            )}
 
-      {tab === 'dial' && (
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
-            <input
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                setProblem('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && void callName()}
-              placeholder="$handle, paymail, name or @number"
-              autoCapitalize="none"
-              autoCorrect="off"
-              className="flex-1 min-w-0 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-3 text-sm text-white outline-none"
-            />
-            <button
-              onClick={() => void callName()}
-              disabled={!input.trim() || resolving || inCall}
-              aria-label="Call"
-              className="w-12 rounded-xl flex items-center justify-center disabled:opacity-40"
-              style={{ background: GOLD }}
-            >
-              {resolving ? (
-                <Loader2 size={18} className="animate-spin" color="#1a1300" />
-              ) : (
-                <Phone size={18} color="#1a1300" />
-              )}
-            </button>
-            <button
-              onClick={() => void callName(true)}
-              disabled={!input.trim() || resolving || inCall}
-              aria-label="Video call"
-              className="w-12 rounded-xl flex items-center justify-center border border-[#2b2f36] disabled:opacity-40"
-            >
-              <Video size={18} color={GOLD} />
-            </button>
-            <button
-              onClick={() => void addName()}
-              disabled={!input.trim() || resolving}
-              aria-label="Add to friends"
-              className="w-12 rounded-xl flex items-center justify-center border border-[#2b2f36] disabled:opacity-40"
-            >
-              <UserPlus size={18} color={GOLD} />
-            </button>
-          </div>
-          {suggestions.map((c) => (
-            <button
-              key={c.id}
-              className="flex items-center gap-3 py-2 text-left"
-              disabled={inCall}
-              onClick={() => c.identityKey && callKey(c.identityKey, c.name)}
-            >
-              <Avatar title={c.name} src={c.avatar} size={36} />
-              <span className={`flex-1 min-w-0 text-sm text-white ${CLIP}`}>{bareName(c.name)}</span>
-              <SourceBadges c={c} />
-              <Phone size={15} color={GOLD} />
-            </button>
-          ))}
-        </div>
-      )}
+            {tab === 'keypad' && (
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    value={input}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      setProblem('');
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && void callName()}
+                    placeholder="$handle, paymail, name or @number"
+                    aria-label="Who to call"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="flex-1 min-w-0 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-3 text-sm text-white outline-none"
+                  />
+                  <button
+                    onClick={() => void callName()}
+                    disabled={!input.trim() || resolving || inCall}
+                    aria-label="Call"
+                    className="w-12 shrink-0 rounded-xl flex items-center justify-center disabled:opacity-40"
+                    style={{ background: GREEN }}
+                  >
+                    {resolving ? (
+                      <Loader2 size={18} className="animate-spin" color="#04210f" />
+                    ) : (
+                      <Phone size={18} color="#04210f" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => void callName(true)}
+                    disabled={!input.trim() || resolving || inCall}
+                    aria-label="Video call"
+                    className="w-12 shrink-0 rounded-xl flex items-center justify-center border border-[#2b2f36] disabled:opacity-40"
+                  >
+                    <Video size={18} color={GOLD} />
+                  </button>
+                  <button
+                    onClick={() => void addName()}
+                    disabled={!input.trim() || resolving}
+                    aria-label="Add to friends"
+                    className="w-12 shrink-0 rounded-xl flex items-center justify-center border border-[#2b2f36] disabled:opacity-40"
+                  >
+                    <UserPlus size={18} color={GOLD} />
+                  </button>
+                </div>
+                {suggestions.map((c) => (
+                  <button
+                    key={c.id}
+                    className="flex items-center gap-3 py-2 text-left"
+                    disabled={inCall}
+                    onClick={() => c.identityKey && callKey(c.identityKey, c.name)}
+                  >
+                    <Avatar title={c.name} src={c.avatar} size={36} />
+                    <span className={`flex-1 min-w-0 text-sm text-white ${CLIP}`}>{bareName(c.name)}</span>
+                    <SourceBadges c={c} />
+                    <Phone size={15} color={GREEN} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <TabBar tab={tab} onTab={switchTab} />
     </div>
   );
+};
+
+/** No wallet unlocked yet (or a preview): show the free state rather than a spinner. */
+const EMPTY_CARD: BPhoneProfile = {
+  v: 1,
+  rate: null,
+  listing: { listed: false, title: '', about: '', category: 'other', hours: [], timezone: 'UTC', booking: false },
+  updatedAt: 0,
 };
 
 export default CallsList;

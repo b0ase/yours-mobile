@@ -34,7 +34,22 @@ export interface PeerBPhone {
   paymail: string | null;
   name: string | null;
   avatar: string | null;
+  /** Checks the server vouches for (optional; older servers send none). */
+  verified?: Verified;
 }
+
+/** Badges a listing may carry: X / Google sign-in linked, and KYC Verified. */
+export interface Verified {
+  x: boolean;
+  google: boolean;
+  kyc: boolean;
+}
+export const parseVerified = (raw: unknown): Verified | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const v = { x: r.x === true, google: r.google === true, kyc: r.kyc === true };
+  return v.x || v.google || v.kyc ? v : undefined;
+};
 
 export const bphoneEnabled = () => paymailEnabled();
 
@@ -136,7 +151,14 @@ export const fetchDirectory = async (f: Fetch, category?: Category | null): Prom
   const j = (await r.json()) as { listings?: unknown[] };
   const out: PeerBPhone[] = [];
   for (const raw of j.listings ?? []) {
-    const l = raw as { key?: unknown; profile?: unknown; paymail?: unknown; name?: unknown; avatar?: unknown };
+    const l = raw as {
+      key?: unknown;
+      profile?: unknown;
+      paymail?: unknown;
+      name?: unknown;
+      avatar?: unknown;
+      verified?: unknown;
+    };
     if (typeof l.key !== 'string') continue;
     out.push({
       key: l.key,
@@ -144,6 +166,7 @@ export const fetchDirectory = async (f: Fetch, category?: Category | null): Prom
       paymail: typeof l.paymail === 'string' ? l.paymail : null,
       name: typeof l.name === 'string' ? l.name : null,
       avatar: typeof l.avatar === 'string' ? l.avatar : null,
+      verified: parseVerified(l.verified),
     });
   }
   return out;
