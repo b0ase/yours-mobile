@@ -347,6 +347,46 @@ Milestones are releases tied to events rather than dates. Each milestone tranche
 
 **Updated order**: A3 → A1 → A2 → A7 → A5 → A4 → A8 / A6 (after the indexer gate) → A9 → A10.
 
+### 7.4 Cascading timelocked airdrops
+
+One airdrop that arrives in steps instead of all at once. This extends phase 9 (locked airdrops) from one lock per recipient to a schedule per recipient.
+
+- **Shape**: the sender picks the recipients (holders, room members, followers or a list), the total, and a schedule: N steps on a curve from `curves.ts` (linear, front-loaded, back-loaded, cliff + linear, step every K). Example: 25% now, then 25% at +30, +60 and +90 days.
+- **Step 1** is a normal airdrop and lands in the inbox at once.
+- **Later steps** are time-locked outputs per recipient, unlocking at each step's height:
+  - BSV airdrops: Lock BSV outputs (live today).
+  - Token airdrops: TokenLock outputs, so they sit behind **the same token-lock indexer gate** (section 4, TIME-LOCK-PLAN). Before that gate passes, there is no custodial fallback for airdrops: ship BSV-only cascades first.
+- **Inbox UX** (the airdrops inbox and the new top-bar inbox button):
+  - One card per cascade: "2,500 $X received · next 2,500 unlocks 12 Nov (in 30 days) · 3 of 4 steps left".
+  - A mini bar chart of the steps (the same chart as the lock curves), with received and pending steps marked.
+  - Keep/hide applies to the whole cascade. The address-poisoning warning and the returns-wording filter apply as for any airdrop.
+  - When a step unlocks: a push ("Your next $X airdrop step unlocked") and one-tap claim. Auto-claim is an option in Settings.
+- **Sender UX**: the launch-form style preview shows the total cost up front: tokens, plus fees per recipient per step. Merge steps under the dust or indexer-fee floor (`mergeSmall`), and cap recipients × steps so fees stay sane. The sender sees "N recipients × M steps = K outputs, fee ≈ X" before signing.
+
+#### Phase A: fixed cascade (trustless; build first)
+- Every step is pre-signed and broadcast at send time as locked outputs to each recipient. Nothing depends on us after sending.
+- Every recipient gets every step whatever they do.
+
+#### Phase B: "hold to keep" (and optional activity weighting)
+- A later step only pays recipients who still hold ≥ the minimum balance at the step height. Forfeited shares either **return to the sender** or are **shared out among the remaining eligible recipients** (chosen and signed at send time).
+- Optional weighting toward people who are active in the room or Spaces (Sybil caveat as in 7.2(c): minimum balance or $401-strength members).
+- This can't be pre-signed, because eligibility is only known at the step height. The steps are held in a vault (the sender's funds in a TokenBlaster/bit-sign vault, or a 2-of-2 between vault and sender). At each height the vault snapshots holders and releases the steps.
+  - Fallback: a nLockTime path returns any unreleased step to the sender after a deadline, so nothing is stuck if we disappear.
+  - The UI labels it "custodial schedule · rules enforced by bWalletX", like the 7.1 fallback.
+- The signed cascade message (the recipient rule, schedule, forfeit route and snapshot rule) is published, so anyone can recompute who should have received each step.
+
+#### Copy
+"Airdrop in 4 steps over 90 days." "Hold to keep: later steps go to people who still hold $X." Never "rewards", "yield" or "returns".
+
+#### Phases (additions)
+| # | What | Effort |
+|---|---|---|
+| A11 | Cascade A for BSV: schedule picker, pre-signed Lock BSV steps, inbox cascade card, unlock push and claim | M (1 week) |
+| A12 | Cascade A for tokens (after the token-lock indexer gate) | S after A8 |
+| A13 | Cascade B: hold-to-keep vault, snapshots, forfeit route, nLockTime fallback, published rules | M–L |
+
+**Order**: A11 can come straight after the 5.1.86 fixes (it only needs Lock BSV and the inbox). A12 waits for the indexer gate. A13 comes after A9, because it shares the holder-snapshot logic.
+
 ## 8. Phases
 
 | # | What | Size | Risk |
