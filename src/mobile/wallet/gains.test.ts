@@ -200,8 +200,9 @@ describe('ledger from History rows', () => {
     const d = computeGains(buildLedger([buy, sell], price, day).events, 'hmrc').filter((x) => x.asset !== 'BSV');
     expect(d[0]).toMatchObject({ proceeds: 12, cost: 5, gain: 7 });
     const csv = gainsCsv(d, { uk: true, currency: 'GBP', method: 'HMRC share pooling' });
-    expect(csv.split('\r\n')[0]).toBe(
-      '﻿tax_year,date_of_disposal,asset,asset_id,quantity,currency,disposal_proceeds,allowable_cost,gain_or_loss,matching,acquisition_dates,txids,notes',
+    expect(csv.split('\r\n')[0]).toBe('﻿Beta: figures may be incomplete. Check against your own records.');
+    expect(csv.split('\r\n')[1]).toBe(
+      'tax_year,date_of_disposal,asset,asset_id,quantity,currency,disposal_proceeds,allowable_cost,gain_or_loss,matching,acquisition_dates,txids,notes',
     );
     expect(csv).toContain('2026-27,2026-08-01,$T,token:T_0,100,GBP,12.00,5.00,7.00,s104,');
     expect(csv).toContain('not tax advice');

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download } from 'lucide-react';
 import { usePrefs } from '../settings/usePrefs';
 import { saveTextFile } from '../agents/saveText';
-import { computeGains, dayIn, NOT_TAX_ADVICE, taxYearOf, totalsByAsset, type Disposal } from './gains';
+import { computeGains, dayIn, GAINS_BETA, NOT_TAX_ADVICE, taxYearOf, totalsByAsset, type Disposal } from './gains';
 import { assetKeyOf, buildLedger, gainsCsv, loadOverrides, saveOverrides, type Overrides } from './taxLedger';
 import { dayKey, nearestPrevious, type HistoryRow } from './txHistory';
 import { usdPerGbp, type DayRates } from './fiatRates';
@@ -95,7 +95,10 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
 
   return (
     <div className="flex-1 overflow-y-auto px-4" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-      <p className="text-xs mt-4" style={{ color: MUTED }}>
+      <p role="note" className="text-xs mt-4 rounded-xl p-3 font-semibold" style={{ border: '1px solid #f5b301', color: '#f5b301' }}>
+        {GAINS_BETA}
+      </p>
+      <p className="text-xs mt-3" style={{ color: MUTED }}>
         {uk
           ? 'UK rules: HMRC share pooling (same day, then 30 days, then the section 104 pool), in pounds, tax year 6 April to 5 April.'
           : 'First in, first out, in US dollars, calendar year.'}{' '}

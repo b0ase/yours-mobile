@@ -1,4 +1,5 @@
 import { IssuerBadge } from '../issuer/IssuerBadge';
+import { logInWalletApp } from '../wallet/connectionLog';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
@@ -1422,6 +1423,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setAuthError('');
     try {
       const s = await client.signIn(walletSigner(apiContext));
+      logInWalletApp('bitcoinchat.online', 'signIn');
       saveSession(s);
       setHandle(s.handle);
     } catch (e) {

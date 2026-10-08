@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Globe } from 'lucide-react';
 import { bsvString, type HistoryRow } from './txHistory';
-import { loadConnectionLog, mergeConnections, type ConnectionLog, type ConnectionRow, type PermissionGroup as Group } from './connectionLog';
+import { loadConnectionLog, mergeConnections, readDeviceAppHosts, type ConnectionLog, type ConnectionRow, type PermissionGroup as Group } from './connectionLog';
 
 const CARD = '#17191E';
 const LINE = '#2b2f36';
@@ -38,7 +38,7 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
     void load();
   }, [load]);
 
-  const list = useMemo(() => mergeConnections(log, groups, rows), [log, groups, rows]);
+  const list = useMemo(() => mergeConnections(log, groups, rows, readDeviceAppHosts()), [log, groups, rows]);
 
   const revoke = async (r: ConnectionRow) => {
     if (!r.originator) return;

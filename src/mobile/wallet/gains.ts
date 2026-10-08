@@ -219,6 +219,9 @@ export const totalsByAsset = (ds: Disposal[]): AssetTotal[] => {
   return [...m.values()].sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
 };
 
+/** Shown until the owner has checked Gains against real data (owner, 8 Oct 2026). Remove only on his say-so. */
+export const GAINS_BETA = 'Beta: figures may be incomplete. Check against your own records.';
+
 export const NOT_TAX_ADVICE =
   'This is a record of your wallet activity to help you or your accountant. It is not tax advice. Check the figures, and ask a tax adviser if you’re unsure.';
 

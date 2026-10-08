@@ -22,9 +22,10 @@ import {
   type LocalInfo,
   type RangePreset,
 } from './txHistory';
-import { fetchAccountTxs, fetchDailyRates, fetchLocalInfo, fetchTokenSymbols, type Progress } from './txHistoryFetch';
-import { CATEGORIES, assetText, classifyEvent, filterCategory, findListings, type Category } from './historyEvents';
-import { ownOutputs, type RawTx } from './txHistory';
+import { fetchAccountTxs, fetchDailyRates, fetchLocalInfo, fetchTokenSymbols, fetchTxs, type Progress } from './txHistoryFetch';
+import { CATEGORIES, assetText, classifyEvent, filterCategory, findListings, historyLooksIncomplete, type Category } from './historyEvents';
+import { missingParents, ownOutputs, type RawTx } from './txHistory';
+import { loadLastBalance } from './balanceLoad';
 import { appsByTxid, loadConnectionLog } from './connectionLog';
 import { ConnectionsView } from './ConnectionsView';
 import { GainsView } from './GainsView';
@@ -86,7 +87,14 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
       const kind = getAgentAccount(addrs?.identityAddress)?.kind;
       const now = Date.now();
       const own = new Set(addresses);
-      let rows = buildRows(txs, own, local as Map<string, LocalInfo>, now);
+      // Wallet-funded txs spend coins on the wallet's derived keys: load those parents for the fee.
+      const parents = missingParents(txs, local as Map<string, LocalInfo>);
+      const extra = new Map<string, number>();
+      if (parents.length) {
+        setProgress({ phase: 'Fees', done: 0, total: parents.length });
+        for (const t of await fetchTxs(parents.slice(0, 2000), key)) for (const o of t.vout) extra.set(`${t.txid}:${o.n}`, o.sats);
+      }
+      let rows = buildRows(txs, own, local as Map<string, LocalInfo>, now, extra);
       if (kind)
         rows = rows.map((r) =>
           r.direction === 'out' && r.label === 'send' ? { ...r, label: kind === 'pot' ? 'pot payment' : 'agent spend' } : r,
@@ -99,10 +107,14 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
       // Txs only the action log knew about that move nothing on these addresses (BRC-100 derived keys) are noise here.
       rows = rows.filter((r) => r.amountSats !== 0 || r.feeSats !== 0 || r.asset || r.direction === 'self');
       setProgress({ phase: 'Token names', done: 0, total: 1 });
-      const ids = [...new Set(rows.map((r) => (r.asset?.kind === 'token' && !r.asset.symbol ? r.asset.id : '')).filter(Boolean))];
-      const syms = ids.length ? await fetchTokenSymbols(ids) : new Map<string, string>();
+      // Symbols and decimals (so "89131856" reads "0.89131856", as in the token list).
+      const ids = [...new Set(rows.map((r) => (r.asset?.kind === 'token' ? r.asset.id : '')).filter(Boolean))];
+      const syms = ids.length ? await fetchTokenSymbols(ids) : new Map<string, { sym?: string; dec?: number }>();
       if (syms.size)
-        rows = rows.map((r) => (r.asset && syms.has(r.asset.id) ? { ...r, asset: { ...r.asset, symbol: syms.get(r.asset.id) } } : r));
+        rows = rows.map((r) => {
+          const t = r.asset ? syms.get(r.asset.id) : undefined;
+          return r.asset && t ? { ...r, asset: { ...r.asset, symbol: r.asset.symbol ?? t.sym, dec: r.asset.dec ?? t.dec } } : r;
+        });
       setProgress({ phase: 'Prices', done: 1, total: 1 });
       const oldest = rows.length ? Math.min(...rows.map((r) => r.time)) : now;
       const [daily, current] = await Promise.all([
@@ -129,6 +141,14 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
   );
   const sum = totals(rows);
   const bal = data ? balances(data.rows, range) : null;
+  // Only a range that runs to now can be checked against the wallet's balance.
+  const incomplete =
+    !!data &&
+    historyLooksIncomplete(
+      sum,
+      range.to === null || range.to >= data.at - 60_000 ? (bal?.closing ?? null) : null,
+      category === 'all' ? loadLastBalance(addrs?.identityAddress) : null,
+    );
   const stem = fileStem(accountName, range);
 
   const exportCsv = () => void saveTextFile(`${stem}.csv`, toCsv(rows, accountName), 'text/csv;charset=utf-8');
@@ -303,6 +323,11 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
             </div>
           ))}
         </div>
+        {incomplete && (
+          <div role="status" className="text-xs mt-2 rounded-lg p-2" style={{ color: GOLD, border: `1px solid ${GOLD}` }}>
+            History may be incomplete. Pull to refresh or run Repair Sync (Settings &gt; Troubleshooting).
+          </div>
+        )}
         {bal && (
           <div className="text-xs mt-2" style={{ color: MUTED }}>
             {sum.count} transactions

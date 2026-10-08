@@ -35,7 +35,31 @@ export type Asset = {
   symbol?: string;
   /** Raw token amount as inscribed (no decimals applied) for tokens; 1 for an NFT. */
   qty?: string;
+  /** Token decimals (from the indexer), so the amount reads as in the token list. */
+  dec?: number;
 };
+
+/** Raw token units → the amount the token list shows ("89131856", 8 → "0.89131856"). */
+export const tokenAmount = (qty: string | undefined, dec: number | undefined): string => {
+  if (!qty || !/^\d+$/.test(qty) || !dec || dec <= 0) return qty ?? '';
+  const p = qty.padStart(dec + 1, '0');
+  const frac = p.slice(-dec).replace(/0+$/, '');
+  const whole = p.slice(0, -dec).replace(/^0+(?=\d)/, '');
+  return frac ? `${whole}.${frac}` : whole;
+};
+
+/**
+ * True when the list can't be the whole story: rows exist yet nothing moved, or (for a range ending now, all
+ * categories) the closing balance is far from the wallet's actual balance. The UI then says so instead of £0.00.
+ */
+export const historyLooksIncomplete = (
+  t: { inSats: number; outSats: number; feeSats: number; count: number },
+  closing: number | null,
+  actualBalance: number | null,
+  tolerance = 1000,
+) =>
+  (t.count > 0 && t.inSats === 0 && t.outSats === 0 && t.feeSats === 0) ||
+  (closing !== null && actualBalance !== null && Math.abs(closing - actualBalance) > tolerance);
 
 export const CATEGORIES: { id: Category | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -236,14 +260,28 @@ export const appLabelOf = (local: LocalInfo | undefined): { game: boolean; text:
 const ownAddr = (o: RawTx['vout'][number], own: Set<string>) =>
   o.addresses.some((a) => own.has(a)) || (!!o.script && own.has(trailingP2pkh(o.script) ?? ''));
 
+/**
+ * The built-in app behind a wallet action, from its description (for actions made before the Connections log, and
+ * by apps that call the wallet from the page). Hosts match what logInWalletApp records.
+ */
+export const inWalletAppOf = (local: LocalInfo | undefined): string | undefined => {
+  const d = local?.description ?? '';
+  if (/TokenBlaster curve/i.test(d) || local?.labels?.includes('tokenblaster')) return 'tokenblaster';
+  if (/^(Purchase \d+ tokens? for|Purchase ordinal|Fund OrdLock purchase|List (ordinal|OpNS)|Cancel .*listing)/i.test(d)) return '1sat.market';
+  return undefined;
+};
+
 /** Local record text → event (wallet action descriptions from @1sat/actions and our own code). */
-const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'token' | 'nft'; qty?: string; id?: string } | null => {
+const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'token' | 'nft'; qty?: string; id?: string; dec?: number } | null => {
   if (!local) return null;
   const d = local.description ?? '';
   const labels = local.labels ?? [];
   const tokenLabel = labels.map((l) => l.match(/^(?:p bsv21 token |bsv21 |bsv20 )(\S+)/)?.[1]).find(Boolean);
   let m: RegExpMatchArray | null;
   if ((m = d.match(/^Purchase (\d+) tokens? for/i))) return { type: 'buy', kind: 'token', qty: m[1], id: tokenLabel };
+  // TokenBlaster curve (market/launchpad/client.ts): the amount is already in whole tokens.
+  if ((m = d.match(/^(Buy|Sell) ([\d.,]+) \$\S+ (?:on|to) the TokenBlaster curve/i)))
+    return { type: m[1].toLowerCase() === 'buy' ? 'buy' : 'sell', kind: 'token', qty: m[2].replace(/,/g, ''), id: tokenLabel, dec: 0 };
   if (/^(Purchase ordinal|Fund OrdLock purchase)/i.test(d)) return { type: 'buy', kind: 'nft' };
   if (/^List (ordinal|OpNS)/i.test(d)) return { type: 'list', kind: tokenLabel ? 'token' : 'nft', id: tokenLabel };
   if (/^Cancel .*listing/i.test(d)) return { type: 'cancel', kind: tokenLabel ? 'token' : 'nft', id: tokenLabel };
@@ -257,7 +295,8 @@ const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'tok
 
 /** Add category / type / asset / app to a row (txHistory.classify did direction and amounts). */
 export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: LocalInfo | undefined, ctx: EventContext): ClassifiedRow => {
-  const app = ctx.appByTxid?.get(row.txid);
+  const inWallet = inWalletAppOf(local);
+  const app = ctx.appByTxid?.get(row.txid) ?? (inWallet ? { app: inWallet } : undefined);
   const appLabel = appLabelOf(local);
   const base = (category: Category, type: EventType, asset?: Asset): ClassifiedRow => ({
     ...row,
@@ -322,7 +361,10 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
 
   const loc = fromLocal(local);
   if (loc?.kind) {
-    const asset: Asset | undefined = loc.id || loc.qty ? { kind: loc.kind, id: loc.id ?? '', qty: loc.qty, symbol: loc.id ? ctx.symbols?.get(loc.id) : undefined } : undefined;
+    const asset: Asset | undefined =
+      loc.id || loc.qty
+        ? { kind: loc.kind, id: loc.id ?? '', qty: loc.qty, symbol: loc.id ? ctx.symbols?.get(loc.id) : undefined, ...(loc.dec !== undefined ? { dec: loc.dec } : {}) }
+        : undefined;
     return base(loc.kind, loc.type, asset);
   }
 
@@ -347,5 +389,5 @@ export const assetText = (a: Asset | undefined) => {
   if (!a) return '';
   if (a.kind === 'nft') return `NFT ${a.id.length > 20 ? `${a.id.slice(0, 8)}…${a.id.slice(-4)}` : a.id}`;
   const name = a.symbol ? (a.symbol.startsWith('$') ? a.symbol : `$${a.symbol}`) : a.id ? `${a.id.slice(0, 8)}…` : 'tokens';
-  return `${a.qty ?? ''} ${name}`.trim();
+  return `${tokenAmount(a.qty, a.dec)} ${name}`.trim();
 };
