@@ -52,6 +52,20 @@ import {
   type TokenRoomEntry,
   type TokenRoomLookup,
 } from '../chat/tokenRooms';
+import {
+  costLine,
+  loadPrefs,
+  mustPay,
+  needsConfirm,
+  payForMessage,
+  recordSpent,
+  releasePayment,
+  savePrefs,
+  spentThisSession,
+  totalRaw,
+  type SpendCharge,
+} from '../chat/roomSpend';
+import { formatRaw, toRawAmount } from '../chat/tokenRooms';
 import { addToInviteList, inviteLine, inviteState, loadInviteList } from '../chat/invites';
 import { knownPersonal, rememberPersonal, tickerLabel } from '../names/personalToken';
 import { retryPersonalRoom } from '../names/claimPersonal';
@@ -278,6 +292,25 @@ const Conversation = ({
   const prependAnchor = useRef<number | null>(null);
   const localSeq = useRef(0);
 
+  // Priced token rooms (chat/roomSpend.ts): what a message costs me, asked of bit-sign on open.
+  // Store builds never open token rooms (ROOMS), so this never runs there.
+  const { apiContext } = useServiceContext();
+  const [charge, setCharge] = useState<SpendCharge | null>(null);
+  const [confirmSend, setConfirmSend] = useState<{ text: string; existing?: ChatMessage } | null>(null);
+  /** A payment already made for an optimistic message: a retry reuses it (bit-sign is idempotent per txid). */
+  const paidFor = useRef(new Map<string, { beef: string; rule: string; txid: string }>());
+  const entryKey = entry?.key ?? null;
+  const loadCharge = useCallback(() => {
+    if (!ROOMS || !entryKey) return;
+    void client
+      .tokenRoom(entryKey)
+      .then(parseLookup)
+      .then((l) => setCharge(l?.spendCharge ?? null))
+      .catch(() => {});
+  }, [client, entryKey]);
+  useEffect(loadCharge, [loadCharge]);
+  const chargeDec = (c: SpendCharge) => (c.charges.every((x) => x.unit === 'sats') ? 0 : entry?.gate.dec ?? 0);
+
   const fail = useCallback(
     (e: unknown) => {
       if (e instanceof ChatApiError && e.status === 401) return onAuthLost();
@@ -358,6 +391,15 @@ const Conversation = ({
   const send = (text: string, existing?: ChatMessage) => {
     const body = text.trim();
     if (!body) return;
+    const prior = existing?.localId ? paidFor.current.get(existing.localId) : undefined;
+    if (!prior && mustPay(charge) && entryKey && needsConfirm(charge, loadPrefs(entryKey), spentThisSession(entryKey))) {
+      setConfirmSend({ text: body, existing });
+      return;
+    }
+    post(body, existing, prior ? null : mustPay(charge) ? charge : null);
+  };
+
+  const post = (body: string, existing: ChatMessage | undefined, pay: SpendCharge | null) => {
     const localId = existing?.localId ?? `l${Date.now()}-${++localSeq.current}`;
     const optimistic: ChatMessage = {
       id: `local:${localId}`,
@@ -371,11 +413,34 @@ const Conversation = ({
     stickToBottom.current = true;
     setMessages((cur) => cur.filter((m) => m.localId !== localId).concat(optimistic));
     if (!existing) setDraft('');
-    client
-      .send(room.ticker, body)
-      .then((saved) => setMessages((cur) => (saved ? mergeMessages(cur, [saved]) : cur)))
+    const go = async () => {
+      let spend = paidFor.current.get(localId);
+      if (!spend && pay && entryKey) {
+        const p = await payForMessage(apiContext, { ticker: room.ticker, handle: me, text: body, charge: pay });
+        spend = { beef: p.beef, rule: pay.rule, txid: p.txid };
+        paidFor.current.set(localId, spend);
+      }
+      const saved = await client.send(room.ticker, body, spend && { beef: spend.beef, rule: spend.rule });
+      // Spent only now: bit-sign broadcast it and stored the message.
+      if (spend && pay && entryKey) recordSpent(entryKey, totalRaw(pay));
+      return saved;
+    };
+    go()
+      .then((saved) => {
+        paidFor.current.delete(localId);
+        setMessages((cur) => (saved ? mergeMessages(cur, [saved]) : cur));
+      })
       .catch((e) => {
         setMessages((cur) => cur.map((m) => (m.localId === localId ? { ...m, failed: true } : m)));
+        // Priced room: needs payment (402) or the price changed (409). Say so; refresh the price.
+        if (e instanceof ChatApiError && (e.status === 402 || e.status === 409)) {
+          // Refused before broadcast: nothing was spent. Release the signed tx; the next send re-signs.
+          const signed = paidFor.current.get(localId);
+          paidFor.current.delete(localId);
+          if (signed) void releasePayment(apiContext, signed.txid);
+          setError(e.message);
+          loadCharge();
+        } else if (!(e instanceof ChatApiError) && pay) setError(errText(e));
         if (e instanceof ChatApiError && e.status === 401) onAuthLost();
         const refusal = e instanceof ChatApiError && e.status === 403 ? parseGateRefusal(e.data) : null;
         if (refusal) onLocked(refusal);
@@ -632,6 +697,11 @@ const Conversation = ({
               <div>Just /b shows what it can do.</div>
             </div>
           )}
+          {mustPay(charge) && (
+            <div className="px-4 pt-1 text-[11px] shrink-0" style={{ color: MUTED, background: '#0b0b0b' }}>
+              {costLine(charge, entry?.gate.symbol ?? '', chargeDec(charge))}
+            </div>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -682,12 +752,105 @@ const Conversation = ({
           </form>
         </>
       )}
+      {confirmSend && mustPay(charge) && entryKey && (
+        <PayToPostSheet
+          roomKey={entryKey}
+          charge={charge}
+          symbol={entry?.gate.symbol ?? ''}
+          dec={chargeDec(charge)}
+          onCancel={() => setConfirmSend(null)}
+          onPay={() => {
+            const c = confirmSend;
+            setConfirmSend(null);
+            post(c.text, c.existing, charge);
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
 };
 
 // ───────────────────────────── Sheets ─────────────────────────────
+
+/** "This message costs 5 $X, burned" — with a per-room "don't ask again under N" and a session cap. */
+const PayToPostSheet = ({
+  roomKey,
+  charge,
+  symbol,
+  dec,
+  onPay,
+  onCancel,
+}: {
+  roomKey: string;
+  charge: SpendCharge;
+  symbol: string;
+  dec: number;
+  onPay: () => void;
+  onCancel: () => void;
+}) => {
+  const prefs = loadPrefs(roomKey);
+  const unit = dec === 0 && charge.charges.every((x) => x.unit === 'sats') ? 'sats' : `$${symbol}`;
+  const [auto, setAuto] = useState(!!prefs.autoUnderRaw);
+  const [under, setUnder] = useState(formatRaw(prefs.autoUnderRaw || totalRaw(charge).toString(), dec));
+  const [cap, setCap] = useState(prefs.sessionCapRaw ? formatRaw(prefs.sessionCapRaw, dec) : '');
+  const [err, setErr] = useState('');
+  const pay = () => {
+    if (auto) {
+      const u = toRawAmount(under, dec);
+      const c = cap.trim() ? toRawAmount(cap, dec) : '';
+      if (!u || c === null) return setErr('Enter positive amounts');
+      savePrefs(roomKey, { autoUnderRaw: u, sessionCapRaw: c });
+    } else savePrefs(roomKey, { autoUnderRaw: '', sessionCapRaw: '' });
+    onPay();
+  };
+  const spent = spentThisSession(roomKey);
+  return (
+    <Sheet title="Pay to post" onClose={onCancel}>
+      <p className="text-sm text-white mb-2">{costLine(charge, symbol, dec)}.</p>
+      <p className="text-xs mb-3" style={{ color: MUTED }}>
+        The payment and your message go in one transaction. Spent here this session: {formatRaw(spent.toString(), dec)} {unit}.
+      </p>
+      <label className="flex items-center gap-2 text-xs mb-2" style={{ color: MUTED }}>
+        <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+        Don't ask again in this room for messages up to
+      </label>
+      {auto && (
+        <div className="flex flex-col gap-2 mb-3">
+          <input
+            value={under}
+            onChange={(e) => setUnder(e.target.value)}
+            inputMode="decimal"
+            aria-label={`Up to (${unit})`}
+            className="rounded-xl px-3 py-2 text-sm text-white outline-none"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          />
+          <input
+            value={cap}
+            onChange={(e) => setCap(e.target.value)}
+            inputMode="decimal"
+            placeholder={`Ask again after spending this much this session (${unit}, optional)`}
+            className="rounded-xl px-3 py-2 text-sm text-white outline-none"
+            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+          />
+        </div>
+      )}
+      {err && (
+        <p className="text-xs mb-2" style={{ color: '#f87171' }}>
+          {err}
+        </p>
+      )}
+      <div className="flex gap-2 pb-4">
+        <button onClick={onCancel} className="flex-1 rounded-2xl py-3 text-white" style={{ background: PANEL }}>
+          Cancel
+        </button>
+        <button onClick={pay} className="flex-1 rounded-2xl py-3 font-bold" style={{ background: GOLD, color: '#1a1300' }}>
+          Pay and send
+        </button>
+      </div>
+    </Sheet>
+  );
+};
 
 const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => {
   useBackClose(true, onClose);

@@ -73,6 +73,7 @@ export interface RoomSpendRule {
   amountRaw: string;
   per: SpendPer;
   to: 'issuer' | 'burn';
+  unit?: 'token' | 'sats';
 }
 export interface IssuerChallenge {
   roomKey: string;
@@ -294,8 +295,13 @@ export class BchatClient {
     return { messages: all.slice(-Math.max(limit, 200)), hasMore: null };
   }
 
-  async send(ticker: string, body: string): Promise<ChatMessage | null> {
-    const r = await this.call<{ message?: ChatMessage }>('POST', `${BchatClient.path(ticker)}/messages`, { body });
+  /** `spend`: a priced room's payment (chat/roomSpend.ts), the message and payment in one tx. */
+  async send(ticker: string, body: string, spend?: { beef: string; rule: string }): Promise<ChatMessage | null> {
+    const r = await this.call<{ message?: ChatMessage }>(
+      'POST',
+      `${BchatClient.path(ticker)}/messages`,
+      spend ? { body, spend } : { body },
+    );
     return r.message ?? null;
   }
 
