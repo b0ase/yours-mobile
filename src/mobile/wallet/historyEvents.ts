@@ -266,7 +266,7 @@ const ownAddr = (o: RawTx['vout'][number], own: Set<string>) =>
  */
 export const inWalletAppOf = (local: LocalInfo | undefined): string | undefined => {
   const d = local?.description ?? '';
-  if (/TokenBlaster curve/i.test(d) || local?.labels?.includes('tokenblaster')) return 'tokenblaster';
+  if (/tokenblaster curve/i.test(d) || local?.labels?.includes('tokenblaster')) return 'tokenblaster';
   if (/^(Purchase \d+ tokens? for|Purchase ordinal|Fund OrdLock purchase|List (ordinal|OpNS)|Cancel .*listing)/i.test(d)) return '1sat.market';
   return undefined;
 };
@@ -280,7 +280,7 @@ const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'tok
   let m: RegExpMatchArray | null;
   if ((m = d.match(/^Purchase (\d+) tokens? for/i))) return { type: 'buy', kind: 'token', qty: m[1], id: tokenLabel };
   // TokenBlaster curve (market/launchpad/client.ts): the amount is already in whole tokens.
-  if ((m = d.match(/^(Buy|Sell) ([\d.,]+) \$\S+ (?:on|to) the TokenBlaster curve/i)))
+  if ((m = d.match(/^(Buy|Sell) ([\d.,]+) \$\S+ (?:on|to) the tokenblaster curve/i)))
     return { type: m[1].toLowerCase() === 'buy' ? 'buy' : 'sell', kind: 'token', qty: m[2].replace(/,/g, ''), id: tokenLabel, dec: 0 };
   if (/^(Purchase ordinal|Fund OrdLock purchase)/i.test(d)) return { type: 'buy', kind: 'nft' };
   if (/^List (ordinal|OpNS)/i.test(d)) return { type: 'list', kind: tokenLabel ? 'token' : 'nft', id: tokenLabel };

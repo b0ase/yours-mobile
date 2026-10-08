@@ -10,7 +10,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom } from '../chat/nav';
 import { tokenKey } from '../chat/tokenRooms';
-import { tokenRoomsEnabled } from '../storeBuild';
+import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { fetchDeployJson, parseLinks, parseUtility, type LinkKind, type TokenLink } from './linkData';
 
 const XMark = () => (
@@ -56,7 +56,7 @@ export const TokenLinks = ({
   // The issuer's own on-chain deploy fields lead; a launchpad's API fills gaps.
   const links = parseLinks(deploy, extra);
   const utility = parseUtility(deploy, extra);
-  const key = tokenId && room && tokenRoomsEnabled() ? tokenKey('bsv21', tokenId.replace('.', '_')) : null;
+  const key = !STORE_BUILD && tokenId && room && tokenRoomsEnabled() ? tokenKey('bsv21', tokenId.replace('.', '_')) : null;
   if (!links.length && !utility && !key) return null;
   const ticker = sym ? `$${sym.replace(/^\$/, '')}` : 'this token';
   return (
