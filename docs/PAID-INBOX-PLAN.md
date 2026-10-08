@@ -44,6 +44,6 @@ Owner (8 Oct): don't advertise it as a game. It's a general mechanic that other 
 | M2 | Price to reach you + sort by paid + friends list + sender quote | M |
 | M3 | Pay to open: escrow with an auto-refund path | M–L |
 | M4 | Friend loops (tally, streaks), with no pot | S |
-| M5 | Split-or-steal with play tokens; real money only after legal advice | M + legal |
+| M5 | (Low priority, owner 8 Oct: "we don't need that necessarily") Split-or-steal primitive; play tokens first; legal advice before real money | M + legal |
 
 **Order**: M1 → M2 → M4 → M3 → M5. Store build: M1–M2 maybe (plain messaging); M3–M5 bWalletX only until reviewed.
