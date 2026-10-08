@@ -12,6 +12,7 @@
  * back to fetch. Both are behind an injectable `Http` for tests.
  */
 import { CapacitorHttp } from '@capacitor/core';
+import { getChatAccount, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
 import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
@@ -93,6 +94,8 @@ export interface ChatSession {
   token: string;
   handle: string;
   address: string;
+  /** The wallet account (identity address) this session was made for; see setChatAccount. */
+  account?: string;
 }
 
 export interface MessagePage {
@@ -138,6 +141,9 @@ export class BchatClient {
   ): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) {
+      // A session made for another account (the wallet switched since) is never reused.
+      const active = getChatAccount();
+      if (this.session?.account && active && this.session.account !== active) this.session = null;
       if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
       headers.Authorization = `Bearer ${this.session.token}`;
     }
@@ -191,7 +197,8 @@ export class BchatClient {
           401,
         );
       }
-      this.session = { token: v.token, handle: v.handle, address };
+      const account = getChatAccount();
+      this.session = { token: v.token, handle: v.handle, address, ...(account ? { account } : {}) };
       return this.session;
     }
     throw new ChatApiError('The wallet signed with an unexpected key', 401);
@@ -658,13 +665,25 @@ export class BchatClient {
   }
 }
 
-// ── Session persistence (per wallet identity) ──
-const KEY = 'bwallet.bchat.session';
+// ── Session persistence (per wallet ACCOUNT) ──
+/**
+ * ⚠ ONE SESSION PER ACCOUNT. This used to be a single global key, so after switching accounts the
+ * new account kept acting with the previous account's bit-sign token: a room created from
+ * richardwboase.gmail was recorded as started by b0asex (8 Oct 2026). Sessions are now stored
+ * under the active account's identity address (set at startup and on every switch by
+ * `setChatAccount`) and carry that account, so a session can never be read by another account.
+ */
+const KEY = LEGACY_SESSION_KEY;
+const keyFor = (account: string) => `${KEY}:${account}`;
+export { setChatAccount, getChatAccount };
 
 export const loadSession = (address?: string): ChatSession | null => {
+  const chatAccount = getChatAccount();
+  if (!chatAccount) return null;
   try {
-    const s = JSON.parse(localStorage.getItem(KEY) || 'null') as ChatSession | null;
+    const s = JSON.parse(localStorage.getItem(keyFor(chatAccount)) || 'null') as ChatSession | null;
     if (!s?.token || !s.handle) return null;
+    if (s.account && s.account !== chatAccount) return null;
     if (address && s.address !== address) return null;
     return s;
   } catch {
@@ -677,8 +696,12 @@ export const SESSION_EVENT = 'bwallet:bchat-session';
 
 export const saveSession = (s: ChatSession | null) => {
   try {
-    if (s) localStorage.setItem(KEY, JSON.stringify(s));
-    else localStorage.removeItem(KEY);
+    const chatAccount = getChatAccount();
+    // No active account yet: nothing to store against (and nothing another account could pick up).
+    if (chatAccount) {
+      if (s) localStorage.setItem(keyFor(chatAccount), JSON.stringify({ ...s, account: chatAccount }));
+      else localStorage.removeItem(keyFor(chatAccount));
+    }
   } catch {
     /* storage unavailable */
   }

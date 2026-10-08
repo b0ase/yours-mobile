@@ -310,6 +310,9 @@ export function formatDuration(ms: number): string {
 
 export const shortKey = (k: string) => `${k.slice(0, 6)}…${k.slice(-4)}`;
 
+/** A label that is only a shortened key ("02cbe7…6ed8"), i.e. no name was known. */
+export const isShortKey = (label: string) => /^0[23][0-9a-f]{4}…[0-9a-f]{4}$/i.test(label.trim());
+
 export const END_TEXT: Record<EndReason, string> = {
   'hung-up': 'Call ended',
   'remote-ended': 'Call ended',

@@ -7,7 +7,9 @@ import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
  * something upstream's send code already understands (a P2PKH address or a paymail).
  *
  *   1ABC…            → address (passed straight through)
- *   $boase           → HandCash handle → boase@handcash.io paymail
+ *   $boase           → our paymail boase@<BWALLET_PAYMAIL_DOMAIN> if it exists, else
+ *                      the HandCash handle boase@handcash.io
+ *   $name@domain     → the paymail name@domain
  *   name@domain.tld  → paymail (bsvalias capability discovery)
  *   satchmo          → our paymail satchmo@<BWALLET_PAYMAIL_DOMAIN> first, else the
  *                      OpNS name (1Sat on-chain name) → current owner address
@@ -41,6 +43,10 @@ export const parseRecipient = (raw: string): Parsed => {
   if (h) {
     const handle = h[1].toLowerCase();
     return { kind: 'handle', handle, paymail: `${handle}@${HANDCASH_DOMAIN}` };
+  }
+  // `$name@domain` is a paymail with a `$` in front: accept it as the paymail.
+  if (s.startsWith('$') && s.includes('@') && PAYMAIL_RE.test(s.slice(1))) {
+    return { kind: 'paymail', paymail: s.slice(1).toLowerCase() };
   }
   if (s.startsWith('$')) return { kind: 'invalid', reason: 'Handles look like $name' };
   if (s.includes('@')) {
@@ -247,6 +253,29 @@ export const resolveBareName = async (
   return resolveOpns(f, name);
 };
 
+/**
+ * A `$name`: OUR paymail (name@<domain>, i.e. bwalletx.com) first, then HandCash. Our own names
+ * ($b0asex.x, $richardwboase.gmail) live at bwalletx.com; dialling one used to go to handcash.io
+ * and fail with "has no identity key". Ours only counts when the server knows the alias (pki
+ * answers with a key), so a HandCash-only $name still reaches HandCash.
+ */
+export const resolveHandle = async (
+  f: Fetch,
+  p: { handle: string; paymail: string },
+  domain: string = BWALLET_PAYMAIL_DOMAIN,
+): Promise<Resolved> => {
+  const input = `$${p.handle}`;
+  if (domain && PAYMAIL_RE.test(`${p.handle}@${domain}`)) {
+    try {
+      const ours = await resolvePaymail(f, `${p.handle}@${domain}`, input);
+      if (ours.pubkey) return ours;
+    } catch {
+      /* not one of ours → HandCash */
+    }
+  }
+  return resolvePaymail(f, p.paymail, input);
+};
+
 export const resolveRecipient = async (
   f: Fetch,
   p: Parsed,
@@ -256,7 +285,7 @@ export const resolveRecipient = async (
     case 'address':
       return { input: p.address, target: p.address, targetKind: 'address', via: 'address', ordAddress: p.address };
     case 'handle':
-      return resolvePaymail(f, p.paymail, `$${p.handle}`);
+      return resolveHandle(f, p, domain);
     case 'paymail':
       return resolvePaymail(f, p.paymail);
     case 'opns':

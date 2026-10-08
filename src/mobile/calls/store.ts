@@ -72,9 +72,22 @@ const dispatch = (e: CallEvent) => {
   const after = reduce(before, e);
   if (after !== before) {
     set({ call: after });
-    if (busy(before) && !busy(after)) void teardown();
+    if (busy(before) && !busy(after)) {
+      void teardown();
+      // ⚠ A LOCAL FAILURE MUST END THE CALL ON THE SERVER TOO. Without this the caller's screen
+      // said "failed" while the server kept the call ringing: the callee answered into an empty
+      // room, the caller's log showed "Outgoing · In progress", and the next dial was refused with
+      // "already on a call" (8 Oct 2026).
+      if (e.type === 'FAIL') endOnServer(callIdOfState(before));
+    }
   }
 };
+
+const callIdOfState = (s: CallState): string | null => ('callId' in s ? s.callId : null);
+
+function endOnServer(id: string | null) {
+  if (client && id) void client.act(id, 'end').catch(() => undefined);
+}
 
 export const getSnapshot = () => snap;
 export const subscribe = (l: Listener) => {
@@ -160,7 +173,7 @@ async function joinMedia(callId: string) {
   const facing = 'facing' in s ? s.facing : 'user';
   media = new CallMedia();
   if (videoEls) media.bindVideo(videoEls.local, videoEls.remote);
-  const { cameraFailed, micDenied, cameraDenied } = await media.connect(
+  const { cameraFailed, micDenied, cameraDenied, micError } = await media.connect(
     t.url,
     t.token,
     {
@@ -180,6 +193,7 @@ async function joinMedia(callId: string) {
     if (!cameraDenied) set({ error: 'Camera unavailable — continuing as a voice call' });
   }
   if (micDenied || cameraDenied) set({ denied: micDenied ? 'mic' : 'camera' });
+  if (micError) set({ error: `Microphone unavailable: ${micError}` });
 }
 
 let videoEls: { local: HTMLVideoElement | null; remote: HTMLVideoElement | null } | null = null;

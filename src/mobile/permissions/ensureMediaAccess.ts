@@ -12,7 +12,12 @@ export async function ensureMediaAccess(kind: MediaKind): Promise<void> {
   // ("AudioSession category is not compatible with audio capture"). Recording needs play-and-record.
   if (kind === 'mic') setAudioSession('play-and-record');
   if (Capacitor.getPlatform() !== 'ios') return;
-  const { granted } = await YoursNative.mediaAccess({ kind });
+  let granted = true;
+  try {
+    ({ granted } = await YoursNative.mediaAccess({ kind }));
+  } catch {
+    // An older native build without mediaAccess: let getUserMedia ask instead of failing the call.
+  }
   if (!granted) throw new DOMException(`${kind} access refused`, 'NotAllowedError');
 }
 

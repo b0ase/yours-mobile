@@ -3,6 +3,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getPersonalLink } from '../names/personalToken';
 import { identityRowText } from '../names/identityText';
+import { setChatAccount } from '../chat/chatAccount';
 
 /**
  * Account switching, shared by the account drawer (TopNav), the account strip above it and Settings.
@@ -22,6 +23,8 @@ export const useAccountSwitch = (onSame?: () => void) => {
     wallet?.close?.();
     try {
       await chromeStorageService.switchAccount(identityAddress);
+      // Act as the new account at once (before the reload): no request may reuse the old session.
+      setChatAccount(identityAddress);
     } catch (err) {
       console.error('[accounts] account switch failed:', err);
       setIsSwitchingAccount(false);
