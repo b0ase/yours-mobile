@@ -3,7 +3,8 @@
  * issuer address from chain). Everyone else sees the room's rules read-only.
  *
  *  - Issuer who hasn't claimed yet, and this wallet holds the issuer key → "Claim admin".
- *  - Claimed issuer → minimum to enter, spend rule, title, cover, bans.
+ *  - Claimed issuer → minimum to enter, spend rule, title, cover, bans, and whether new
+ *    members can see earlier messages (HistoryToggle; saved on its own, not by Save).
  *  - Anyone else → "Room rules" summary.
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -15,6 +16,7 @@ import type { BchatClient, IssuerChallenge } from './api';
 import { issuerCandidates } from './holdings';
 import { findKeyFor, signBsmWith } from './issuerKey';
 import { spendFloorError } from './roomSpend';
+import { HistoryToggle } from './HistoryToggle';
 import {
   amountLabel,
   formatRaw,
@@ -256,6 +258,7 @@ export const RoomSettingsSheet = ({
 
       {look && isIssuer && (
         <div className="flex flex-col gap-3">
+          <HistoryToggle client={client} ticker={ticker} />
           <label className="text-xs" style={{ color: MUTED }}>
             Title
             <input
@@ -310,8 +313,7 @@ export const RoomSettingsSheet = ({
               </select>
             </div>
             <p className="mt-1">
-              {per === 'message' ? SPEND_ENFORCED_NOTE : SPEND_COMING_NOTE}
-              {' '}You never pay to post in your own room.
+              {per === 'message' ? SPEND_ENFORCED_NOTE : SPEND_COMING_NOTE} You never pay to post in your own room.
             </p>
           </div>
           <button

@@ -11,6 +11,7 @@
  * so the WebView's capacitor:// origin never meets CORS. In a browser it falls
  * back to fetch. Both are behind an injectable `Http` for tests.
  */
+import { parseHistorySetting, type HistorySetting, type HistoryVisibility } from './history';
 import { CapacitorHttp } from '@capacitor/core';
 import { getChatAccount, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
 import type { ChatMessage, ChatRoom } from './messages';
@@ -102,6 +103,8 @@ export interface MessagePage {
   messages: ChatMessage[];
   /** null when the server predates paging (no has_more field). */
   hasMore: boolean | null;
+  /** Set when the server floored this reader's history (since_join room; chat/history.ts). */
+  hiddenBefore?: string | null;
 }
 
 const errorOf = (data: unknown, fallback: string) =>
@@ -275,11 +278,15 @@ export class BchatClient {
     const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
     if (opts.before) q.set('before', opts.before);
     else q.set('latest', '1');
-    const r = await this.call<{ messages?: ChatMessage[]; has_more?: boolean }>(
+    const r = await this.call<{ messages?: ChatMessage[]; has_more?: boolean; history_hidden_before?: string | null }>(
       'GET',
       `${BchatClient.path(ticker)}/messages?${q}`,
     );
-    return { messages: r.messages ?? [], hasMore: typeof r.has_more === 'boolean' ? r.has_more : null };
+    return {
+      messages: r.messages ?? [],
+      hasMore: typeof r.has_more === 'boolean' ? r.has_more : null,
+      hiddenBefore: typeof r.history_hidden_before === 'string' ? r.history_hidden_before : null,
+    };
   }
 
   async since(ticker: string, sinceIso: string): Promise<ChatMessage[]> {
@@ -476,6 +483,16 @@ export class BchatClient {
     s: { min?: string; spend?: RoomSpendRule | null; name?: string },
   ): Promise<void> {
     await this.call('PATCH', '/api/bitsign/rooms/token-gated', { ticker, ...s });
+  }
+
+  /** "New members can see earlier messages" (bit-sign rooms/[ticker]/history). Any member may read it. */
+  async historySetting(ticker: string): Promise<HistorySetting> {
+    return parseHistorySetting(await this.call('GET', `${BchatClient.path(ticker)}/history`));
+  }
+
+  /** Room admin only (the issuer in a token room, the owner in an open room); the server enforces it. */
+  async setHistoryVisibility(ticker: string, visibility: HistoryVisibility): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/history`, { history_visibility: visibility });
   }
 
   /** Issuer only (token rooms): set or clear (null) the cover image, an image data URL. */

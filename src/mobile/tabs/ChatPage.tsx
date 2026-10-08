@@ -1,4 +1,5 @@
 import { IssuerBadge } from '../issuer/IssuerBadge';
+import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
 import { logInWalletApp } from '../wallet/connectionLog';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
@@ -309,6 +310,8 @@ const Conversation = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hasMore, setHasMore] = useState<boolean | null>(null);
+  // Set when bit-sign floored this reader's history (since_join room; chat/history.ts).
+  const [hiddenBefore, setHiddenBefore] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState('');
   const scroller = useRef<HTMLDivElement>(null);
@@ -354,6 +357,7 @@ const Conversation = ({
         if (!live) return;
         setMessages(mergeMessages([], p.messages));
         setHasMore(p.hasMore);
+        setHiddenBefore(p.hiddenBefore ?? null);
         setError('');
         void client.markRead(room.ticker).catch(() => {});
       })
@@ -583,6 +587,11 @@ const Conversation = ({
         {loadingOlder && (
           <div className="text-center text-[11px] py-2" style={{ color: MUTED }}>
             Loading earlier messages…
+          </div>
+        )}
+        {showHistoryNote(hiddenBefore) && hasMore !== true && (
+          <div className="text-center text-[11px] py-2" style={{ color: MUTED }}>
+            {HISTORY_HIDDEN_NOTE}
           </div>
         )}
         {hasMore === false && messages.length > 0 && (
@@ -2225,15 +2234,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           </div>
         )}
 
-        {BSPACES_ENABLED && ROOMS && handle && rooms && (
-          <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />
-        )}
+        {BSPACES_ENABLED && ROOMS && handle && rooms && <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />}
         {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
           <SpacesRoomList
             client={client}
             me={handle}
             items={tokenMine.flatMap(({ e }) =>
-              e.room ? [{ key: e.key, ticker: e.room.ticker, title: entryTitle(e, e.room) ?? `$${e.gate.symbol}` }] : [],
+              e.room
+                ? [{ key: e.key, ticker: e.room.ticker, title: entryTitle(e, e.room) ?? `$${e.gate.symbol}` }]
+                : [],
             )}
             onOpen={(key) => {
               const hit = tokenMine.find(({ e }) => e.key === key);
