@@ -23,7 +23,9 @@ import {
   ScanLine,
   EyeOff,
   PiggyBank,
+  ShieldCheck,
 } from 'lucide-react';
+import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { AgentsScreen } from '../agents/AgentsScreen';
@@ -53,6 +55,9 @@ import { PhoneLayoutToggle } from '../phone/PhoneLayoutToggle';
 import { testersEnabled } from '../testers/checkin';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
+
+/** bit-sign's branded Verify-your-identity page (Veriff). Shows only verified / not and the date. */
+const KYC_URL = 'https://bit-sign.online/kyc';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
@@ -468,6 +473,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             description="Get a verified name like yourname.x; it becomes the main name"
             onClick={() => setScreen('social')}
             isFirst
+          />
+          <Divider />
+          <Row
+            icon={<ShieldCheck size={16} />}
+            label="Verify your identity"
+            description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
+            onClick={() => void openDappBrowser(KYC_URL)}
             isLast
           />
         </Section>
