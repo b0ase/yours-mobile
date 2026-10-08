@@ -192,7 +192,13 @@ function matchOutputs(tx, expected) {
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
-function makeHandlers({ store, env = process.env, broadcast, now = () => Date.now(), socialCheck = ticketSocialCheck }) {
+function makeHandlers({
+  store,
+  env = process.env,
+  broadcast,
+  now = () => Date.now(),
+  socialCheck = ticketSocialCheck,
+}) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   const publicAlias = async (handle) => {
@@ -323,10 +329,17 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       // One identity per wallet (owner, 4 Oct 2026): a verified X / Google name always wins, so a
       // wallet that has one can't also take a plain name. Plain-name identities are separate accounts.
       if (kind === 'plain') {
-        const social = (await store.getAliasByKeyKind?.(identityKey, 'x')) || (await store.getAliasByKeyKind?.(identityKey, 'gmail'));
-        if (social) return [409, { error: `This wallet's name is ${handleOf(social.alias)}. Add another account for a different name.` }];
+        const social =
+          (await store.getAliasByKeyKind?.(identityKey, 'x')) ||
+          (await store.getAliasByKeyKind?.(identityKey, 'gmail'));
+        if (social)
+          return [
+            409,
+            { error: `This wallet's name is ${handleOf(social.alias)}. Add another account for a different name.` },
+          ];
       }
-      const mine = kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
+      const mine =
+        kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
       if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) await store.renameAlias(mine.alias, alias);
       const row = await store.upsertAlias({
         kind,
@@ -344,7 +357,8 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
     social: async (q) => {
       const kinds = q.provider === 'all' ? ['x', 'gmail', 'plain'] : [q.provider === 'google' ? 'gmail' : 'x'];
       const rows = [];
-      for (const k of kinds) for (const r of store.listSocial ? await store.listSocial(k) : []) rows.push({ ...r, kind: k });
+      for (const k of kinds)
+        for (const r of store.listSocial ? await store.listSocial(k) : []) rows.push({ ...r, kind: k });
       return [200, { accounts: rows.map((r) => ({ alias: r.alias, name: r.display_name || null, kind: r.kind })) }];
     },
 
@@ -353,11 +367,17 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       if (!PUBKEY_RE.test(key)) return [400, { error: 'invalid-key' }];
       // The wallet's identity: its verified social name wins over an older plain one.
       const row =
-        (await store.getAliasByKeyKind?.(key, 'x')) || (await store.getAliasByKeyKind?.(key, 'gmail')) || (await store.getAliasByKey(key));
+        (await store.getAliasByKeyKind?.(key, 'x')) ||
+        (await store.getAliasByKeyKind?.(key, 'gmail')) ||
+        (await store.getAliasByKey(key));
       if (!row) return [404, { error: 'not-found' }];
       // All names that receive for this wallet, so none is invisible (owner, 4 Oct 2026).
       const all = store.listByKey ? await store.listByKey(key) : [row];
-      const names = all.map((r) => ({ paymail: handleOf(r.alias), kind: r.kind || 'plain', main: r.alias === row.alias }));
+      const names = all.map((r) => ({
+        paymail: handleOf(r.alias),
+        kind: r.kind || 'plain',
+        main: r.alias === row.alias,
+      }));
       return [200, { paymail: handleOf(row.alias), alias: row.alias, names }];
     },
 
@@ -448,9 +468,13 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       const alias = String(body.fields?.alias || '').toLowerCase();
       const key = String(body.identityKey).toLowerCase();
       const row = alias ? await store.getAlias(alias) : null;
-      if (!row || String(row.identity_key).toLowerCase() !== key) return [404, { error: 'That name is not on this wallet' }];
+      if (!row || String(row.identity_key).toLowerCase() !== key)
+        return [404, { error: 'That name is not on this wallet' }];
       if (store.countUncollected && (await store.countUncollected(alias)) > 0)
-        return [409, { error: 'A payment to this name is still arriving. Open the wallet to collect it, then try again.' }];
+        return [
+          409,
+          { error: 'A payment to this name is still arriving. Open the wallet to collect it, then try again.' },
+        ];
       await store.deleteAlias(alias);
       return [200, { unlinked: handleOf(alias) }];
     },
@@ -462,10 +486,145 @@ function makeHandlers({ store, env = process.env, broadcast, now = () => Date.no
       const key = String(body.identityKey).toLowerCase();
       const row = await store.getAliasByKey(key);
       const removed = await store.deleteByKey(key);
+      await store.deleteBphone?.(key);
       return [200, { deleted: true, alias: row ? row.alias : null, ...removed }];
     },
+
+    // ---- bPhone: charge to receive calls (docs/BPHONE-PLAN.md) --------------------------------
+    // The rate card + listing are public (a caller reads them before dialling); writes are signed.
+    // Bookings are between two identity keys; each side reads its own with a signed request.
+    'bphone-get': async (q) => {
+      const key = String(q.key || '').toLowerCase();
+      if (!PUBKEY_RE.test(key)) return [400, { error: 'invalid-key' }];
+      const row = await store.getBphone?.(key);
+      if (!row) return [404, { error: 'not-found' }];
+      return [200, { key, profile: row.profile, ...(await nameOf(key)) }];
+    },
+    'bphone-put': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'bphone-put', now());
+      if (sigErr) return [401, { error: sigErr }];
+      let raw;
+      try {
+        raw = JSON.parse(String(body.fields?.profile || ''));
+      } catch {
+        return [400, { error: 'profile must be JSON' }];
+      }
+      const profile = cleanProfile(raw);
+      if (typeof profile === 'string') return [400, { error: profile }];
+      profile.updatedAt = now();
+      const key = String(body.identityKey).toLowerCase();
+      await store.setBphone(key, profile);
+      return [200, { profile }];
+    },
+    // Who is listed, newest first; ?category= narrows. Only listed profiles, never the unlisted rate cards.
+    'bphone-directory': async (q) => {
+      const category = BPHONE_CATEGORIES.includes(q.category) ? q.category : null;
+      const limit = Math.min(Math.max(Number(q.limit) || 100, 1), 200);
+      const rows = (await store.listBphone?.(category, limit)) ?? [];
+      const listings = [];
+      for (const r of rows)
+        listings.push({ key: r.identity_key, profile: r.profile, ...(await nameOf(r.identity_key)) });
+      return [200, { listings }];
+    },
+    // Ask for a call at a time (the callee's listing must take bookings).
+    'bphone-book': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'bphone-book', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const f = body.fields || {};
+      const callee = String(f.calleeKey || '').toLowerCase();
+      const caller = String(body.identityKey).toLowerCase();
+      if (!PUBKEY_RE.test(callee)) return [400, { error: 'invalid callee' }];
+      if (callee === caller) return [400, { error: 'You cannot book yourself' }];
+      const prof = await store.getBphone?.(callee);
+      if (!prof || prof.profile?.listing?.booking === false)
+        return [404, { error: 'This person does not take bookings' }];
+      const req = cleanBookingRequest(f, now());
+      if (typeof req === 'string') return [400, { error: req }];
+      const open = (await store.listBookings(caller)).filter(
+        (b) => b.status === 'requested' && b.caller_key === caller,
+      );
+      if (open.length >= 20) return [429, { error: 'Too many open requests' }];
+      const calleeName = await nameOf(callee);
+      const row = {
+        id: Utils.toHex(Random(16)),
+        callee_key: callee,
+        caller_key: caller,
+        caller_label: req.callerLabel,
+        callee_label: calleeName.paymail || '',
+        at: req.at,
+        minutes: req.minutes,
+        note: req.note,
+        status: 'requested',
+        rate: prof.profile?.rate ?? null,
+        created_at: new Date(now()).toISOString(),
+        updated_at: new Date(now()).toISOString(),
+      };
+      await store.insertBooking(row);
+      return [200, { booking: bookingOut(row) }];
+    },
+    // Every booking this identity is part of, soonest first.
+    'bphone-bookings': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'bphone-bookings', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const rows = await store.listBookings(key);
+      return [200, { bookings: rows.map(bookingOut).sort((a, b) => Date.parse(a.at) - Date.parse(b.at)) }];
+    },
+    // Callee: confirm / decline / cancel. Caller: cancel. Nothing else moves.
+    'bphone-book-act': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'bphone-book-act', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const f = body.fields || {};
+      const key = String(body.identityKey).toLowerCase();
+      const id = String(f.id || '');
+      const action = String(f.action || '');
+      if (!/^[0-9a-f]{32}$/.test(id)) return [400, { error: 'invalid booking' }];
+      const row = await store.getBooking(id);
+      if (!row) return [404, { error: 'not-found' }];
+      const isCallee = row.callee_key === key;
+      const isCaller = row.caller_key === key;
+      if (!isCallee && !isCaller) return [403, { error: 'Not your booking' }];
+      let status;
+      if (action === 'cancel') status = 'cancelled';
+      else if (isCallee && action === 'confirm' && row.status === 'requested') status = 'confirmed';
+      else if (isCallee && action === 'decline' && row.status === 'requested') status = 'declined';
+      else return [400, { error: `Cannot ${action} a ${row.status} booking` }];
+      if (row.status === 'declined' || row.status === 'cancelled') return [400, { error: `Already ${row.status}` }];
+      const patch = { status, updated_at: new Date(now()).toISOString() };
+      await store.updateBooking(id, patch);
+      return [200, { booking: bookingOut({ ...row, ...patch }) }];
+    },
   };
+
+  /** The paymail + profile name / avatar for a key, for directory rows and bookings ('' when it has none). */
+  async function nameOf(key) {
+    const row =
+      (await store.getAliasByKeyKind?.(key, 'x')) ||
+      (await store.getAliasByKeyKind?.(key, 'gmail')) ||
+      (await store.getAliasByKey(key));
+    return row
+      ? { paymail: handleOf(row.alias), name: row.display_name || null, avatar: row.avatar || null }
+      : { paymail: null, name: null, avatar: null };
+  }
 }
+
+const BPHONE_CATEGORIES = require('./bphone').CATEGORIES;
+const { cleanProfile, cleanBookingRequest } = require('./bphone');
+
+/** A booking row as the wallet reads it (src/mobile/calls/rateCard.ts parseBooking). */
+const bookingOut = (r) => ({
+  id: r.id,
+  calleeKey: r.callee_key,
+  callerKey: r.caller_key,
+  callerLabel: r.caller_label || '',
+  calleeLabel: r.callee_label || '',
+  at: new Date(r.at).toISOString(),
+  minutes: r.minutes,
+  note: r.note || '',
+  status: r.status,
+  rate: r.rate ?? null,
+  createdAt: new Date(r.created_at).toISOString(),
+});
 
 module.exports = {
   socialAliasFor,

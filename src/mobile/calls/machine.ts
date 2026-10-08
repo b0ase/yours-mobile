@@ -2,6 +2,7 @@
  * The phone's view of a 1-to-1 call, as a pure reducer (tested in machine.test.ts).
  *
  *   idle ─DIAL─▶ dialing ─PLACED─▶ ringing-out ─REMOTE(active)─▶ active ─HANGUP/REMOTE(ended)─▶ ended
+ *   idle ─QUOTE─▶ quote ─ACCEPT_QUOTE─▶ dialing (metered, bPhone)   quote ─DECLINE_QUOTE─▶ idle
  *   idle ─RING_IN─▶ incoming ─ACCEPT─▶ connecting ─MEDIA_UP─▶ active
  *                        └─DECLINE / REMOTE(cancelled|missed)─▶ ended
  *   ended ─DISMISS─▶ idle
@@ -10,6 +11,8 @@
  * tracks what the screen should show and refuses events that make no sense in a phase, so a
  * late poll result can never resurrect a call the user already hung up.
  */
+
+import { startMeter, type Meter, type PayNotice, type PayTo, type RateCard } from './rateCard';
 
 export type ServerStatus = 'ringing' | 'active' | 'declined' | 'cancelled' | 'missed' | 'ended';
 
@@ -31,7 +34,18 @@ export interface Peer {
   verified: boolean;
 }
 
-export type EndReason = 'hung-up' | 'remote-ended' | 'declined' | 'missed' | 'cancelled' | 'failed' | 'unavailable';
+export type EndReason =
+  | 'hung-up'
+  | 'remote-ended'
+  | 'declined'
+  | 'missed'
+  | 'cancelled'
+  | 'failed'
+  | 'unavailable'
+  /** bPhone: the callee's phone ended an unpaid call. */
+  | 'unpaid'
+  /** bPhone: the caller's max spend ran out. */
+  | 'cap';
 
 /** Which camera: the selfie one, or the one on the back. */
 export type Facing = 'user' | 'environment';
@@ -48,24 +62,56 @@ export interface VideoState {
   remoteVideo: boolean;
 }
 
+/**
+ * bPhone (rateCard.ts): a priced call carries, on the CALLER's side, the meter it pays with and
+ * where the money goes; on the CALLEE's side, their own card and how far the caller has paid.
+ * Both absent = a free call, exactly as before.
+ */
+export interface PaidState {
+  paying?: { meter: Meter; payTo: PayTo };
+  charging?: { card: RateCard; paidThroughS: number; seq: number; paidUnits: number };
+}
+
 export type CallState =
   | { phase: 'idle' }
-  | ({ phase: 'dialing'; peer: Peer } & VideoState)
-  | ({ phase: 'ringing-out'; peer: Peer; callId: string } & VideoState)
+  /** The callee charges: show the rate and a max spend before anything rings. */
+  | { phase: 'quote'; peer: Peer; card: RateCard; payTo: PayTo; video: boolean }
+  | ({ phase: 'dialing'; peer: Peer } & VideoState & PaidState)
+  | ({ phase: 'ringing-out'; peer: Peer; callId: string } & VideoState & PaidState)
   | { phase: 'incoming'; peer: Peer; callId: string }
-  | ({ phase: 'connecting'; peer: Peer; callId: string } & VideoState)
-  | ({ phase: 'active'; peer: Peer; callId: string; since: number; muted: boolean; speaker: boolean } & VideoState)
-  | { phase: 'ended'; peer: Peer; callId: string | null; reason: EndReason; message?: string; duration?: number };
+  | ({ phase: 'connecting'; peer: Peer; callId: string } & VideoState & PaidState)
+  | ({ phase: 'active'; peer: Peer; callId: string; since: number; muted: boolean; speaker: boolean } & VideoState &
+      PaidState)
+  | {
+      phase: 'ended';
+      peer: Peer;
+      callId: string | null;
+      reason: EndReason;
+      message?: string;
+      duration?: number;
+      /** What this side paid (caller) or was paid (callee) on a priced call. */
+      spent?: { card: RateCard; units: number };
+    };
 
 export type CallEvent =
   | { type: 'DIAL'; peer: Peer; video?: boolean }
+  /** The callee has a price: ask the caller first. */
+  | { type: 'QUOTE'; peer: Peer; card: RateCard; payTo: PayTo; video?: boolean }
+  /** The caller accepted the rate with a max spend (card units): dial, metered. */
+  | { type: 'ACCEPT_QUOTE'; maxUnits: number }
+  | { type: 'DECLINE_QUOTE' }
   | { type: 'PLACED'; callId: string }
   | { type: 'RING_IN'; call: ServerCall; peer: Peer }
-  | { type: 'ACCEPT'; video?: boolean }
+  /** `charging`: my own rate card when I charge for calls (callee side). */
+  | { type: 'ACCEPT'; video?: boolean; charging?: RateCard | null }
   | { type: 'DECLINE' }
   | { type: 'MEDIA_UP'; at: number }
   | { type: 'REMOTE'; callId: string; status: ServerStatus; at: number }
-  | { type: 'HANGUP'; at: number }
+  /** Caller side: the meter advanced (a payment went out, or it stopped). */
+  | { type: 'METER'; meter: Meter }
+  /** Callee side: a receipt arrived over the data channel. Out-of-order / repeated seqs are ignored. */
+  | { type: 'RECEIPT'; notice: PayNotice }
+  | { type: 'HANGUP'; at: number; reason?: 'unpaid' | 'cap' }
   | { type: 'FAIL'; message: string; reason?: EndReason }
   | { type: 'TOGGLE_MUTE' }
   | { type: 'TOGGLE_SPEAKER' }
@@ -77,6 +123,14 @@ export type CallEvent =
 export const IDLE: CallState = { phase: 'idle' };
 
 const callIdOf = (s: CallState): string | null => ('callId' in s ? s.callId : null);
+
+const spentOf = (s: CallState): { card: RateCard; units: number } | undefined => {
+  if (!('paying' in s || 'charging' in s)) return undefined;
+  const p = (s as PaidState).paying;
+  if (p) return { card: p.meter.card, units: p.meter.paidUnits };
+  const c = (s as PaidState).charging;
+  return c ? { card: c.card, units: c.paidUnits } : undefined;
+};
 
 const ended = (
   s: Exclude<CallState, { phase: 'idle' }>,
@@ -90,6 +144,12 @@ const ended = (
   reason,
   message,
   duration: s.phase === 'active' && at !== undefined ? Math.max(0, at - s.since) : undefined,
+  spent: spentOf(s),
+});
+
+const paidOf = (s: PaidState): PaidState => ({
+  ...(s.paying ? { paying: s.paying } : {}),
+  ...(s.charging ? { charging: s.charging } : {}),
 });
 
 const NO_VIDEO: VideoState = { camera: false, facing: 'user', remoteVideo: false };
@@ -111,8 +171,26 @@ export function reduce(s: CallState, e: CallEvent): CallState {
       return s.phase === 'idle' || s.phase === 'ended'
         ? { phase: 'dialing', peer: e.peer, ...NO_VIDEO, camera: !!e.video }
         : s;
+    case 'QUOTE':
+      return s.phase === 'idle' || s.phase === 'ended'
+        ? { phase: 'quote', peer: e.peer, card: e.card, payTo: e.payTo, video: !!e.video }
+        : s;
+    case 'ACCEPT_QUOTE':
+      return s.phase === 'quote'
+        ? {
+            phase: 'dialing',
+            peer: s.peer,
+            ...NO_VIDEO,
+            camera: s.video,
+            paying: { meter: startMeter(s.card, e.maxUnits), payTo: s.payTo },
+          }
+        : s;
+    case 'DECLINE_QUOTE':
+      return s.phase === 'quote' ? IDLE : s;
     case 'PLACED':
-      return s.phase === 'dialing' ? { phase: 'ringing-out', peer: s.peer, callId: e.callId, ...videoOf(s) } : s;
+      return s.phase === 'dialing'
+        ? { phase: 'ringing-out', peer: s.peer, callId: e.callId, ...videoOf(s), ...paidOf(s) }
+        : s;
     case 'RING_IN':
       // Busy: a second incoming call while on (or placing) one is ignored; the caller hears
       // it ring out to missed. Only a fresh idle/ended screen takes it.
@@ -121,14 +199,46 @@ export function reduce(s: CallState, e: CallEvent): CallState {
       return { phase: 'incoming', peer: e.peer, callId: e.call.id };
     case 'ACCEPT':
       return s.phase === 'incoming'
-        ? { phase: 'connecting', peer: s.peer, callId: s.callId, ...NO_VIDEO, camera: !!e.video }
+        ? {
+            phase: 'connecting',
+            peer: s.peer,
+            callId: s.callId,
+            ...NO_VIDEO,
+            camera: !!e.video,
+            ...(e.charging ? { charging: { card: e.charging, paidThroughS: 0, seq: 0, paidUnits: 0 } } : {}),
+          }
         : s;
     case 'DECLINE':
       return s.phase === 'incoming' ? ended(s, 'declined') : s;
     case 'MEDIA_UP':
       return s.phase === 'connecting'
-        ? { phase: 'active', peer: s.peer, callId: s.callId, since: e.at, muted: false, speaker: false, ...videoOf(s) }
+        ? {
+            phase: 'active',
+            peer: s.peer,
+            callId: s.callId,
+            since: e.at,
+            muted: false,
+            speaker: false,
+            ...videoOf(s),
+            ...paidOf(s),
+          }
         : s;
+    case 'METER':
+      return hasVideo(s) && s.paying ? { ...s, paying: { ...s.paying, meter: e.meter } } : s;
+    case 'RECEIPT': {
+      if (s.phase !== 'active' || !s.charging) return s;
+      const n = e.notice;
+      if (n.seq <= s.charging.seq) return s; // a repeat or an old receipt
+      return {
+        ...s,
+        charging: {
+          ...s.charging,
+          seq: n.seq,
+          paidThroughS: Math.max(s.charging.paidThroughS, n.throughS),
+          paidUnits: s.charging.paidUnits + n.units,
+        },
+      };
+    }
     case 'REMOTE': {
       if (s.phase === 'idle' || s.phase === 'ended' || callIdOf(s) !== e.callId) return s;
       if (e.status === 'active') {
@@ -142,6 +252,7 @@ export function reduce(s: CallState, e: CallEvent): CallState {
             muted: false,
             speaker: false,
             ...videoOf(s),
+            ...paidOf(s),
           };
         return s;
       }
@@ -152,7 +263,9 @@ export function reduce(s: CallState, e: CallEvent): CallState {
       return ended(s, reason, e.at);
     }
     case 'HANGUP':
-      return s.phase === 'idle' || s.phase === 'ended' ? s : ended(s, 'hung-up', e.at);
+      if (s.phase === 'idle' || s.phase === 'ended') return s;
+      if (s.phase === 'quote') return IDLE;
+      return ended(s, e.reason ?? 'hung-up', e.at);
     case 'FAIL':
       return s.phase === 'idle' || s.phase === 'ended' ? s : ended(s, e.reason ?? 'failed', undefined, e.message);
     case 'TOGGLE_MUTE':
@@ -205,4 +318,6 @@ export const END_TEXT: Record<EndReason, string> = {
   cancelled: 'Cancelled',
   failed: 'Call failed',
   unavailable: 'Unavailable',
+  unpaid: 'Ended: not paid',
+  cap: 'Ended: max spend reached',
 };

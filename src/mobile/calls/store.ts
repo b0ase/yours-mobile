@@ -1,9 +1,25 @@
-import type { OneSatContext } from '@1sat/actions';
+import { sendBsv, sendBsv21, sendMnee, type OneSatContext } from '@1sat/actions';
 import { isNative } from '../native';
 import { defaultHttp } from '../chat/api';
+import { mneeKeyDerivations } from '../../utils/mneeDerivations';
+import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
+import { usdToSats } from '../money/money';
+import { PAID_CALLS_ENABLED } from '../storeBuild';
 import { CallsClient, walletCallSigner, type BlockEntry } from './api';
+import { fetchPeerBPhone, myRateCard } from './bphone';
 import { CallMedia } from './media';
 import { verifyCaller } from './peer';
+import {
+  calleeShouldHangUp,
+  decideMeterPayment,
+  parsePayNotice,
+  payNotice,
+  payToFor,
+  recordPayment,
+  type Meter,
+  type PayTo,
+  type RateCard,
+} from './rateCard';
 import { busy, IDLE, reduce, type CallEvent, type CallState, type Peer, type ServerCall } from './machine';
 
 /**
@@ -19,6 +35,10 @@ import { busy, IDLE, reduce, type CallEvent, type CallState, type Peer, type Ser
 const POLL_IDLE_MS = 4000;
 const POLL_CALL_MS = 1500;
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+/** Smallest BSV payment the meter sends (above common dust limits); a tiny rate rounds up to it. */
+const MIN_PAY_SATS = 546;
+/** Give up (and let the callee's phone cut the call) after this many payment failures in a row. */
+const MAX_PAY_FAILURES = 3;
 
 type Listener = (s: Snapshot) => void;
 export interface Snapshot {
@@ -35,6 +55,9 @@ let ctxRef: OneSatContext | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let media: CallMedia | null = null;
 let myLabel: string | undefined;
+/** How many MNEE deposit keys to scan when paying in MNEE (the account's maxKeyIndex + 1). */
+let mneeKeyCount = 5;
+let payFailures = 0;
 const seenIncoming = new Set<string>();
 
 const set = (patch: Partial<Snapshot>) => {
@@ -70,6 +93,11 @@ export const setCallLabel = (label: string | undefined) => {
   myLabel = label || undefined;
 };
 
+/** MNEE sends scan this many deposit keys (BsvWallet uses settings.maxKeyIndex + 1). */
+export const setMneeKeyCount = (n: number) => {
+  if (Number.isInteger(n) && n > 0) mneeKeyCount = n;
+};
+
 export function stopCalls() {
   if (busy(snap.call)) void hangUp();
   if (timer) clearTimeout(timer);
@@ -93,8 +121,11 @@ async function tick() {
       return; // resumes on visibilitychange
     }
     if (s.phase === 'ringing-out' || s.phase === 'active' || s.phase === 'connecting' || s.phase === 'incoming') {
+      if (s.phase === 'active' && PAID_CALLS_ENABLED) await meterTick(s);
       const call = await c.get(s.callId);
       dispatch({ type: 'REMOTE', callId: call.id, status: call.status, at: Date.now() });
+    } else if (s.phase === 'quote') {
+      // Nothing to poll while the caller reads the price.
     } else if (!busy(s)) {
       const { incoming, recent } = await c.list();
       set({ recent, ready: true, error: null });
@@ -134,6 +165,10 @@ async function joinMedia(callId: string) {
         if (busy(snap.call)) dispatch({ type: 'FAIL', message: 'Connection lost' });
       },
       onRemoteVideo: (on) => dispatch({ type: 'REMOTE_VIDEO', on }),
+      onData: (msg) => {
+        const n = parsePayNotice(msg);
+        if (n) dispatch({ type: 'RECEIPT', notice: n });
+      },
     },
     { camera, facing },
   );
@@ -159,9 +194,43 @@ async function teardown() {
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 
+/**
+ * Call someone. bPhone: if they charge for calls, show their rate first (phase 'quote') and only
+ * ring once the caller accepts it with a max spend (acceptQuote). A store build never quotes:
+ * it rings, and a callee who charges will end the unpaid call.
+ */
 export async function dial(peer: Peer, opts: { video?: boolean } = {}) {
   if (!client || busy(snap.call)) return;
+  if (PAID_CALLS_ENABLED) {
+    const bp = await fetchPeerBPhone(f, peer.key).catch(() => null);
+    const card = bp?.profile.rate ?? null;
+    if (card) {
+      const payTo = payToFor(card, bp?.paymail ?? null);
+      if (!payTo) {
+        set({ error: `${peer.label} charges for calls but has nowhere to be paid yet` });
+        return;
+      }
+      dispatch({ type: 'QUOTE', peer, card, payTo, video: !!opts.video });
+      return;
+    }
+  }
   dispatch({ type: 'DIAL', peer, video: !!opts.video });
+  await place(peer);
+}
+
+/** The caller agreed to the quoted rate with a max spend in the card's units: ring, metered. */
+export async function acceptQuote(maxUnits: number) {
+  const s = snap.call;
+  if (!client || s.phase !== 'quote') return;
+  dispatch({ type: 'ACCEPT_QUOTE', maxUnits });
+  payFailures = 0;
+  await place(s.peer);
+}
+
+export const declineQuote = () => dispatch({ type: 'DECLINE_QUOTE' });
+
+async function place(peer: Peer) {
+  if (!client) return;
   try {
     const call = await client.place(peer.key, { caller: myLabel, callee: peer.label });
     dispatch({ type: 'PLACED', callId: call.id });
@@ -180,7 +249,10 @@ export async function dial(peer: Peer, opts: { video?: boolean } = {}) {
 export async function accept(opts: { video?: boolean } = {}) {
   const s = snap.call;
   if (!client || s.phase !== 'incoming') return;
-  dispatch({ type: 'ACCEPT', video: !!opts.video });
+  // If I charge for calls, this call is metered on my side: the caller's receipts must keep up.
+  const me = client.identityKey;
+  const charging = PAID_CALLS_ENABLED && me ? myRateCard(me) : null;
+  dispatch({ type: 'ACCEPT', video: !!opts.video, charging });
   try {
     await client.act(s.callId, 'accept');
     await joinMedia(s.callId);
@@ -198,12 +270,99 @@ export async function decline() {
   await client.act(s.callId, 'decline').catch(() => undefined);
 }
 
-export async function hangUp() {
+export async function hangUp(reason?: 'unpaid' | 'cap') {
   const s = snap.call;
   const id = 'callId' in s ? s.callId : null;
-  dispatch({ type: 'HANGUP', at: Date.now() });
+  dispatch({ type: 'HANGUP', at: Date.now(), reason });
   if (client && id) await client.act(id, 'end').catch(() => undefined);
 }
+
+// ── bPhone meter ─────────────────────────────────────────────────────────────
+
+/**
+ * Once per poll while the call is active. Caller: pay the next interval when it is due, send the
+ * receipt over the data channel, stop at the cap. Callee: end the call when the caller has not
+ * paid for the time being used (the first payment within FIRST_PAYMENT_S, then GRACE_S past
+ * paid-through). A free call has neither and does nothing here.
+ */
+async function meterTick(s: Extract<CallState, { phase: 'active' }>) {
+  const elapsedS = (Date.now() - s.since) / 1000;
+  if (s.charging && calleeShouldHangUp(elapsedS, s.charging.paidThroughS)) {
+    await hangUp('unpaid');
+    return;
+  }
+  if (!s.paying || !ctxRef) return;
+  const { meter, payTo } = s.paying;
+  const d = decideMeterPayment(meter, elapsedS);
+  if (!d.ok) {
+    // Out of money under the cap: let what is paid run out, then hang up.
+    if (d.reason === 'cap' && elapsedS >= meter.paidThroughS) await hangUp('cap');
+    return;
+  }
+  if (d.units <= 0) {
+    dispatch({ type: 'METER', meter: recordPayment(meter, d, null) });
+    return;
+  }
+  dispatch({ type: 'METER', meter: { ...meter, paying: true } });
+  try {
+    const txid = await pay(ctxRef, meter.card, payTo, d.units);
+    payFailures = 0;
+    const next = recordPayment(meter, d, txid);
+    // The call may have ended while the payment was in flight: never resurrect it.
+    if (snap.call.phase === 'active' && snap.call.callId === s.callId) {
+      dispatch({ type: 'METER', meter: next });
+      await media?.sendData(payNotice(d.seq, d.units, d.throughS, txid));
+    }
+  } catch (e) {
+    payFailures += 1;
+    set({ error: `Payment failed: ${e instanceof Error ? e.message : String(e)}` });
+    const cur = snap.call;
+    if (cur.phase === 'active' && cur.paying) {
+      dispatch({
+        type: 'METER',
+        meter: { ...cur.paying.meter, paying: false, stopped: payFailures >= MAX_PAY_FAILURES },
+      });
+    }
+  }
+}
+
+/** One interval's payment, wallet to wallet. Returns the txid (null when the action gives none). */
+async function pay(ctx: OneSatContext, card: RateCard, payTo: PayTo, units: number): Promise<string | null> {
+  const asset = card.asset;
+  if (asset.kind === 'bsv') {
+    if (!('paymail' in payTo)) throw new Error('No paymail to pay');
+    const rate = cachedExchangeRate() || (await fetchExchangeRate('main').catch(() => 0));
+    const sats = usdToSats(units, rate);
+    if (sats === null) throw new Error('BSV price unavailable');
+    const res = await sendBsv.execute(ctx, {
+      requests: [{ paymail: payTo.paymail, satoshis: Math.max(sats, MIN_PAY_SATS) }],
+    });
+    if (res.error || !res.txid) throw new Error(String(res.error ?? 'send failed'));
+    return res.txid;
+  }
+  if (!('address' in payTo)) throw new Error('No address to pay');
+  if (asset.kind === 'mnee') {
+    const res = await sendMnee.execute(ctx, {
+      recipients: [{ address: payTo.address, amount: units }],
+      derivations: mneeKeyDerivations(0, mneeKeyCount),
+    });
+    if (res.error) throw new Error(res.error);
+    return res.txid ?? null;
+  }
+  const raw = BigInt(Math.round(units * 10 ** asset.dec));
+  const res = await sendBsv21.execute(ctx, {
+    tokenId: asset.id,
+    recipients: [{ amount: raw, destination: { address: payTo.address } }],
+  });
+  if (res.error || !res.txid) throw new Error(String(res.error ?? 'send failed'));
+  return res.txid;
+}
+
+/** The caller's meter right now (for the in-call spend counter), or null on a free call. */
+export const currentMeter = (): Meter | null => {
+  const s = snap.call;
+  return 'paying' in s && s.paying ? s.paying.meter : null;
+};
 
 export async function toggleMute() {
   dispatch({ type: 'TOGGLE_MUTE' });
