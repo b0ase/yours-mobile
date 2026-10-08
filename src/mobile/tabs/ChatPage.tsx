@@ -43,6 +43,7 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
+import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -1578,6 +1579,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [lookups, setLookups] = useState<Record<string, TokenRoomLookup>>({});
   const [listError, setListError] = useState('');
   const [query, setQuery] = useState('');
+  // Chat filters (bWalletX only): All, or Spaces = token rooms with a space on (spaces/SpacesFilter.tsx).
+  const [roomFilter, setRoomFilter] = useState<RoomFilter>('all');
   const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null } | null>(null);
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(
     null,
@@ -2125,7 +2128,24 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           </div>
         )}
 
-        {handle && rooms && (
+        {BSPACES_ENABLED && ROOMS && handle && rooms && (
+          <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />
+        )}
+        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
+          <SpacesRoomList
+            client={client}
+            me={handle}
+            items={tokenMine.flatMap(({ e }) =>
+              e.room ? [{ key: e.key, ticker: e.room.ticker, title: entryTitle(e, e.room) ?? `$${e.gate.symbol}` }] : [],
+            )}
+            onOpen={(key) => {
+              const hit = tokenMine.find(({ e }) => e.key === key);
+              if (hit) void openEntry(hit.e);
+            }}
+          />
+        )}
+
+        {handle && rooms && (!BSPACES_ENABLED || roomFilter === 'all') && (
           <>
             <ListLabel>Your rooms</ListLabel>
             {yours.length === 0 && (
