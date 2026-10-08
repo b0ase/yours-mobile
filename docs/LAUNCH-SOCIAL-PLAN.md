@@ -195,7 +195,106 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
   - Cons: less prominent from other tabs.
 - **Recommendation: (b) now.** Airdrops are sporadic and the inbox is new. Measure how often people open it, and switch to (a) if airdrops become a daily driver. Revisit when launch airdrops (section 4) ship.
 
-## 6. Phases
+## 6. Advanced launch options (TokenBlaster, plan only)
+
+Today the curve is fixed:
+- Constant product on virtual reserves: V0 = 1 BSV, T0 = 1.073B, supply 1B.
+- Graduation at 793.1M sold.
+- Minimum buy 10k sats, maximum buy 20 BSV.
+
+Fees are 0.70% house plus a 0.30% route. The route is chosen once at launch and can't be changed afterwards. It is one of:
+- creator;
+- split across 2–10 wallets;
+- holders: BSV paid pro-rata to holders of 100k tokens or more, about every 10 minutes;
+- buyback and burn: buys once 100k sats have built up, with each buy moving the price by 2% or less.
+
+The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everything below goes in a collapsed **Advanced** panel of the launch form, and it would be built in tokenblaster.lol. This section is a plan only.
+
+### 6.1 Curve presets (named, not free-form)
+
+| Preset | V0 / T0 | Graduates at | Effect |
+|---|---|---|---|
+| Standard (today) | 1 BSV / 1.073B | 793.1M sold | Unchanged |
+| Gentle | 2 BSV / 1.073B | 793.1M | Lower slope: price rises more slowly per BSV in |
+| Steep | 0.5 BSV / 1.073B | 793.1M | Early buyers move the price more |
+| Late graduation | 1 BSV / 1.073B | 900M | More of the supply is sold on the curve before graduating |
+
+**Bounds** so that no preset can trap buyers:
+- The starting price is between 0.25× and 4× Standard.
+- Graduation is between 700M and 900M sold.
+- The BSV reserve at graduation must at least cover selling every curve token back. For a constant product curve this always holds, so the check is mainly against rounding.
+- The reserve at graduation must be at least as large as Standard's minimum liquidity.
+- No preset may make the first MIN_BUY return 0 tokens, or let one MAX_BUY push the curve past graduation.
+- Unit tests run every preset through the existing curve test suite.
+
+**Per-coin parameters**:
+- The quote code, the trade validator, proof-of-reserves (`validate.ts`, and the wallet's `launchpad/curve.ts`) and the board's market cap all read `{V0, T0, grad}` from the coin instead of from constants.
+- The parameters go into the signed `launch_msg` as `curve: <preset>@v1 V0=… T0=… grad=…`, so they can't change.
+- The wallet's own quote check must use the coin's parameters. If they're missing, it falls back to Standard; unknown presets are refused.
+- **Wallet impact**: bWalletX's `curve.ts` and `validate.ts` hard-code Standard today, so they must be made parameter-driven before any non-Standard coin launches. Otherwise the wallet's quote check would reject, or worse misquote, trades.
+
+### 6.2 Fee mix
+
+- The 0.30% route can be split by percentage across creator, split wallets and buyback & burn (and holder airdrops, see 6.5). For example, 50% buyback and 50% creator.
+- **Validation**:
+  - Whole percentages that add up to 100.
+  - Each share is either 0 or at least 10%.
+  - At most 3 routes.
+  - The split route keeps its 2–10 wallets rule, and its share is divided among them.
+  - The mix is written into `launch_msg` and can't be changed.
+- **Vault processing order, each cycle**:
+  1. Pay out accrued creator and split shares, once above dust.
+  2. Buyback & burn on its threshold.
+  3. Holder airdrops.
+- Each route keeps its own accrued counter (extending `route_accrued`), so one route can't starve another.
+- The coin page shows the accrued amount per route.
+
+### 6.3 Buyback settings
+
+- Threshold: 50k–1M sats (default 100k).
+- Maximum price move per buy: 0.5–5% (default 2%).
+- Defaults are today's values, and both settings are signed into `launch_msg`.
+- The lower bounds stop dust-sized buy spam that pays more in miner fees than it buys; the upper bounds stop a buyback that moves the price sharply.
+
+### 6.4 Buyer locks (set by the issuer at launch)
+
+- These are tokens bought on the curve that stay time-locked until a height, for example "buys in the first 24 hours unlock after 30 days".
+- Lock scripts, indexer support, receipts and the reasons to be cautious are in **docs/TIME-LOCK-PLAN.md (branch feat/lock-curves)**; see that plan's token-lock section and section 4 above.
+- Recommended limits: optional, for early buys only, at most 90 days, and shown prominently before a buyer confirms ("Tokens you buy now are locked until block H, about D days").
+- Selling a locked balance is impossible until the unlock height. The quote screen must state this.
+- Depends on the TokenLock indexer test (phase 6 in section 7).
+
+### 6.5 Holder-rewards route: flag
+
+- Paying BSV pro-rata to holders resembles a **dividend**. That conflicts with the owner's rule that issuers reward holders with airdrops, not earnings. It is also the route most likely to look like a security or financial promotion.
+- **Live coins on it: none.** `/api/launch/coins` on 8 Oct 2026 lists 4 coins (BSVGUN, FROGGER, DOUBLEO, ARENA), all on the `creator` route.
+- **Recommendation**: retire the BSV holders route for new launches now, before anyone uses it, and replace it with **holder airdrops**. There are two ways to do that:
+  - the vault uses the route's BSV to buy the coin's own token on the curve, then airdrops those tokens pro-rata to holders above the threshold; or
+  - the issuer sets aside an airdrop allocation that is released on a schedule.
+- Existing signed routes are honoured as signed. None exists today, so there's nothing to migrate. Wording: "holder airdrops", never "rewards", "yield" or "dividends". The owner decides.
+
+### 6.6 UX
+
+- The one-tap **Standard launch** path stays first and unchanged.
+- **Advanced** is collapsed by default. Each option gets one plain-language line, for example "Gentle: the price climbs more slowly as people buy" and "Buyback: part of each fee buys and burns your token", plus a live preview chart (`CurveSlider`).
+- The returns-wording filter (section 1) also applies to option labels and issuer text.
+- The coin page has an "Launch settings" block listing the preset and its parameters, the fee mix, buyback settings and buyer locks. It also shows the signed `launch_msg` with "Verify" (signature by `creator_key`) and the launch txid.
+- bWalletX's coin sheet shows the same block in a compact form.
+
+### 6.7 Phases and effort
+
+| # | What | Effort |
+|---|---|---|
+| A1 | Parameter-driven curve in TokenBlaster and bWalletX (quote, validator, proof-of-reserves, board), still Standard only | M (4–5 days) |
+| A2 | Presets with bounds and tests, `launch_msg` v2, coin page "Launch settings" | S–M (3 days) |
+| A3 | Retire the holders route; holder airdrops via the buy-and-airdrop vault job | M (1 week) |
+| A4 | Fee mix (multi-route vault accounting) | M (4 days) |
+| A5 | Buyback settings | S (1–2 days) |
+| A6 | Buyer locks (after the TokenLock indexer test) | M–L |
+
+**Order**: A3 (policy, cheap while no coin uses the holders route) → A1 → A2 → A5 → A4 → A6.
+
+## 7. Phases
 
 | # | What | Size | Risk |
 |---|---|---|---|
