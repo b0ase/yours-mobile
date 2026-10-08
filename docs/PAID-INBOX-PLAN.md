@@ -47,3 +47,24 @@ Owner (8 Oct): don't advertise it as a game. It's a general mechanic that other 
 | M5 | (Low priority, owner 8 Oct: "we don't need that necessarily") Split-or-steal primitive; play tokens first; legal advice before real money | M + legal |
 
 **Order**: M1 → M2 → M4 → M3 → M5. Store build: M1–M2 maybe (plain messaging); M3–M5 bWalletX only until reviewed.
+
+## 6. Friendship funds: loops that accumulate (owner, 8 Oct 2026)
+
+Owner: "A friendship is a reciprocal loop that grows in trust every round… reciprocal payments are never spent but keep accumulating… friends decide HOW to spend their mutual fund as they build it."
+
+- **Shape:** a loop's payments go into a **shared fund** owned by both friends, instead of to each other's wallets. Each round adds to it, the history shows who added what and when, and the streak shows trust.
+- **Custody:** a **2-of-2** output (both keys must sign to spend). Spending is a joint decision: either friend proposes, the other approves in the app.
+- **Safety valves** (decided when the fund is created, shown up front):
+  - **Silence rule:** if one friend goes silent for N years (default 2; no activity, no co-signing), the other can reclaim **their own contributions** through a timelocked path built into the script. No one is ever locked out forever by a vanished friend.
+  - **Split:** either friend can propose ending the fund. The default split is by contribution; any other split needs both to agree.
+  - **Death / heirs:** reuse the inheritance design (TIME-LOCK-PLAN §9): an heir path after a long timelock.
+- **Spending ideas** (the friends choose): a shared purchase, a gift to someone else, a trip, a donation, or moving part into a lock (§13 cascades: e.g. "lock 10% of our fund for 10 years").
+- **Locks:** a fund can be wholly or partly time-locked by mutual choice ("we won't touch this until 2036"). It reuses the Lock BSV scripts, with sealed cascades later.
+- **Generalises to groups:** m-of-n funds for families, clubs and rooms. That's the same primitive as bPositive's shared pots: see docs/BPOSITIVE-PLAN.md.
+
+**Copy rule (important):**
+- The owner's thesis is that BSV locked up and used grows in value as the network grows. **Product copy must not promise or imply that a fund will grow in value.**
+- Say "your shared fund", "built together", "1,240 rounds", "held in BSV". Never "grows", "returns", "yield" or "pot of gold".
+- A promise of appreciation is a financial promotion (UK FCA), a store-review risk, and an on-ramp partner risk. Showing the current dollar value and the BSV amount is fine. Projections are not.
+
+**Phases (after M4 friend loops):** F1 a 2-of-2 fund with joint spend + silence rule + split → F2 locks inside funds → F3 group (m-of-n) funds, shared with bPositive.
