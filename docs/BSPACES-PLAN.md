@@ -138,3 +138,63 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 - Platform fee: 5% of paid tickets, paid-speaker bids and per-minute charges, taken in the same transaction and shown before payment. Hosts keep 95%.
 - Later: optional "Pro host" subscription (recording storage, bigger video audiences).
 - A dedicated video server (about EUR 30-60 a month) only once revenue covers it; video is not promoted until then.
+
+## Invite links and tickets (owner approved, 8 Oct 2026)
+
+A host (or the room admin) shares one link. It unfurls as a card made for that Space, opens a landing page, and opens the app straight into the Space. Phase 1 is built on branch `feat/space-invites` in both repos; phase 2 (tickets) is planned.
+
+### The link
+
+- `https://bwalletx.com/s/<code>` for now. `<code>` is 10 characters from `a–z, 2–9` without look-alikes (no `0 o 1 l i`), random from the server.
+- **bChatX.com**, the owner's new mainstream bChat domain, comes later. The base URL is one setting on bit-sign (`SPACE_INVITE_BASE_URL`), so the switch is config, not code.
+- The code shows the card and nothing else. **It never grants entry.** Entry is the room's own gate, checked by the same room routes as before.
+- One link per tap of "Share invite". Each is tied to the room and, when the host shares a live Space, to that Space. Later the same Space's link reads "This space has ended" when it ends; a room link (nothing live) shows whichever Space is live.
+
+### The share image
+
+A card made for each Space, 1200×630, bWalletX gold on black (bit-sign `GET /api/og/space-invite/<code>`):
+
+- the bWalletX mark, and **LIVE** (red pill) or "Not live right now" / "This space has ended";
+- the Space title as the headline (room name when it has none), sized to fit and truncated rather than clipped;
+- "Hosted by $host · Room name · $TICKER";
+- the entry: **"Free entry"**, **"Hold: 1 $TOKEN"**, **"Entry: 1 $TOKEN"** (burn rooms), with **"≈ $x"** only when a real price exists. The price is the cheapest live market listing for that token (GorillaPool BSV-21 market) times the WhatsOnChain BSV/USD rate, for the amount entry needs. No listing, no rate, or a collection token: no price, only the requirement. Never invented.
+- Scheduled times: Spaces have no schedule yet, so the card says "Not live right now". When scheduling lands, the card shows the start time in place of that line.
+
+### The landing page
+
+`/s/<code>` (bit-sign today). Server-rendered with Open Graph and Twitter `summary_large_image` tags pointing at the card, `noindex`. Shows LIVE/status, title, host, room, entry line (with "price from the cheapest live listing; it changes" when shown), and two buttons:
+
+- **Open in bWalletX**: `bwalletx://space/<code>`.
+- **Get bWalletX**: `https://bwalletx.com/get`.
+
+An unknown or withdrawn code shows "This invite isn't available" and still offers Get bWalletX. The card route still returns a plain card so an unfurl never breaks.
+
+### The deep link into the app
+
+- `bwalletx://space/<code>`: the custom scheme is already registered on iOS (Info.plist) and now on Android (an intent filter for host `space`).
+- `https://bwalletx.com/s/<code>` (and `/s/` on bit-sign.online and bitcoinchat.online) are parsed too, ready for universal / app links once bwalletx.com serves the app-site files for `/s/*` (see "To make it live").
+- `src/mobile/spaces/inviteLinks.ts` holds the code (cold start via `getLaunchUrl`, warm via `appUrlOpen`) and the top bar (or PhoneShell in the phone layout) sends it to `/m/spaces?invite=<code>`. The Spaces page shows the invite card and, if you are in the room and it is live, **Join** opens the Space.
+
+### The token gate with a one-tap "get entry"
+
+If the room refuses you (403), the invite card says what entry needs ("You need 1 $TOKEN to enter") and shows the existing ways in: **Buy** (that token's page in bWalletX's own Market, one tap) and **Chat** (opens the token's room, which admits a holder and shows the locked-room buy flow otherwise). Members-only rooms say "Ask the host to add you." Not signed in: "Open Chat once to sign in to rooms."
+
+### Phase 2: invite tickets (planned, not built)
+
+- A host can attach **N free entry tokens** to a link: one per unique wallet, first come.
+- Claiming = signing a server challenge with the wallet's identity key (BRC-100 `createSignature`), so a claim is bound to one key; the server records the identity key, the handle, the link and the time.
+- The ticket is a real token transfer from the host's pot (or a room-issued ticket the room gate accepts), so entry still goes through the one gate. The host pre-funds the pot when creating the link.
+- Abuse limits, set per link: a minimum **$401 identity strength** or a minimum wallet balance / age; a cap on claims per link and per host per day; an expiry; one claim per identity key, and per handle.
+- **Invite tracking**: per link, opens, claims, joins and who invited whom (the host sees counts; no viewer list is public). This also feeds referral rewards later.
+- Table sketch: `bit_sign_space_invite_claims (code, identity_key, handle, claimed_at, txid)`, unique on `(code, identity_key)`; columns on the invite for `tickets_total`, `tickets_left`, `min_strength`, `expires_at`.
+
+### Moderation comes first
+
+Hosts must not be encouraged to invite strangers until moderation lands (Phase 2 above: kick, mute, report, and the Apple 1.2 / Play UGC requirements). Until then "Share invite" stays a quiet button for hosts, there is no public directory of invite links, and store builds have none of this (all of it sits behind `BSPACES_ENABLED`).
+
+### To make it live (owner)
+
+1. Run `supabase/migrations/20261013_space_invites.sql` on Hetzner (with `-i` and `ON_ERROR_STOP=1`), `NOTIFY pgrst, 'reload schema'`, then `pnpm exec tsx schema-reachability.mts`. Until then creating a link answers 503.
+2. Merge bit-sign `feat/space-invites` (main auto-deploys).
+3. Domain: bwalletx.com is a separate site (`bwalletx-site`), so add a rewrite there: `{ "source": "/s/:code", "destination": "https://www.bit-sign.online/s/:code" }`, then set `SPACE_INVITE_BASE_URL=https://bwalletx.com` on bit-sign. The card image stays on bit-sign's own URL, so it works through the rewrite. Optional for universal links: add `/s/*` to bwalletx.com's apple-app-site-association and assetlinks, and `applinks:bwalletx.com` / an Android `autoVerify` filter for `bwalletx.com /s/` in the app.
+4. Release the wallet with the next bWallet release (`feat/space-invites` → `bwallet`).

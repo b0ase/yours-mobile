@@ -331,6 +331,16 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
   }
 
+  /** Share link for the room's live space (host or room admin only). `{ invite }`. */
+  async spaceInvite(ticker: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/invite`, {});
+  }
+
+  /** A space invite's public card (no session needed). `{ invite }`. */
+  async publicSpaceInvite(code: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/space-invites/${encodeURIComponent(code)}`, undefined, false);
+  }
+
   // ── Token rooms (docs/TOKEN-ROOMS.md) ──
 
   /** Is there a room for this token key, and am I in it? (GET never joins.) */

@@ -6,7 +6,7 @@
  * a few at a time). Plan: one GET /api/bitsign/spaces/live (docs/BSPACES-PLAN.md, Phase 2).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
@@ -14,6 +14,8 @@ import { roomTitle, type ChatRoom } from '../chat/messages';
 import { gateOfRoom } from '../chat/tokenRooms';
 import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
+import { InviteCard } from './InviteCard';
+import { isSpaceInviteCode } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
 
 const GOLD = '#FFD24D';
@@ -28,7 +30,22 @@ const SpacesPage = () => {
   const me = client.handle ?? '';
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState('');
-  const [open, setOpen] = useState<{ room: ChatRoom; start?: string } | null>(null);
+  const [open, setOpen] = useState<{ ticker: string; name: string; start?: string; admin?: boolean } | null>(null);
+  const openRoom = (room: ChatRoom, start?: string) =>
+    setOpen({
+      ticker: room.ticker,
+      name: roomTitle(room, me),
+      start,
+      admin: canHostRoom({ me, createdBy: room.created_by_handle }),
+    });
+  // An invite link (inviteLinks.ts) lands here as ?invite=<code>.
+  const [params, setParams] = useSearchParams();
+  const inviteCode = params.get('invite') ?? '';
+  const clearInvite = () => {
+    const next = new URLSearchParams(params);
+    next.delete('invite');
+    setParams(next, { replace: true });
+  };
 
   const load = useCallback(async () => {
     if (!client.handle) return;
@@ -74,6 +91,16 @@ const SpacesPage = () => {
         </button>
       </header>
 
+      {isSpaceInviteCode(inviteCode) && (
+        <InviteCard
+          client={client}
+          code={inviteCode}
+          me={me}
+          onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName })}
+          onClose={clearInvite}
+        />
+      )}
+
       {!client.handle ? (
         <Empty>
           Open Chat once to sign in to rooms, then come back.
@@ -100,7 +127,7 @@ const SpacesPage = () => {
           {live.map(({ room, state }) => (
             <button
               key={room.ticker}
-              onClick={() => setOpen({ room })}
+              onClick={() => openRoom(room)}
               className="w-full flex items-center gap-3 px-4 py-3 text-left"
               style={{ borderBottom: `1px solid ${LINE}` }}
             >
@@ -136,7 +163,7 @@ const SpacesPage = () => {
             >
               <span className="flex-1 truncate">{roomTitle(room, me)}</span>
               <button
-                onClick={() => setOpen({ room, start: roomTitle(room, me) })}
+                onClick={() => openRoom(room, roomTitle(room, me))}
                 className="rounded-full px-3 py-1 text-xs font-semibold"
                 style={{ border: `1px solid ${GOLD}`, color: GOLD }}
               >
@@ -159,10 +186,11 @@ const SpacesPage = () => {
       {open && (
         <SpaceScreen
           client={client}
-          ticker={open.room.ticker}
-          roomName={roomTitle(open.room, me)}
+          ticker={open.ticker}
+          roomName={open.name}
           me={me}
           startTitle={open.start}
+          canInvite={open.admin}
           onClose={() => {
             setOpen(null);
             void load();

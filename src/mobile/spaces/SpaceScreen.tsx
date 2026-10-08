@@ -21,6 +21,7 @@ import {
   Radio,
   RefreshCw,
   Send,
+  Share2,
   Users,
   X,
 } from 'lucide-react';
@@ -42,6 +43,7 @@ import {
   type Participant,
   type SpaceState,
 } from './model';
+import { inviteShareText, parseSpaceInvite } from './invite';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -307,12 +309,14 @@ export interface SpaceScreenProps {
   me: string;
   /** Host starting a new space: its title. Omit to join the live one. */
   startTitle?: string;
+  /** Room admin (issuer / creator): may share an invite even when someone else hosts. */
+  canInvite?: boolean;
   onClose: () => void;
 }
 
 type Phase = 'joining' | 'live' | 'ended' | 'error';
 
-export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose }: SpaceScreenProps) => {
+export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvite, onClose }: SpaceScreenProps) => {
   const media = useMemo(() => new SpaceMedia(), []);
   const [phase, setPhase] = useState<Phase>('joining');
   const [error, setError] = useState('');
@@ -590,6 +594,29 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
       </div>
     );
 
+  const [sharing, setSharing] = useState(false);
+  // Invite link (docs/BSPACES-PLAN.md, "Invite links and tickets"): bit-sign mints it for the host or
+  // room admin; the native share sheet where there is one, else the clipboard. Must start in a tap.
+  const shareInvite = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const inv = parseSpaceInvite(await client.spaceInvite(ticker));
+      if (!inv?.url) throw new Error('No link came back.');
+      const text = inviteShareText(inv);
+      if (navigator.share) {
+        await navigator.share({ title: inv.title, text, url: inv.url }).catch(() => undefined);
+      } else {
+        await navigator.clipboard?.writeText(text);
+        setNote('Invite link copied.');
+      }
+    } catch (e) {
+      setNote(e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can invite.' : errText(e));
+    } finally {
+      setSharing(false);
+    }
+  };
+
   const controls = phase === 'live' && (
     <div
       className={landscape ? 'flex flex-col justify-center gap-3 px-2' : 'flex items-start justify-around px-2 pt-3'}
@@ -678,6 +705,18 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
             {state.space ? `· ${elapsed(state.space.startedAt)} · ${audienceLine(audience)}` : ''}
           </div>
         </div>
+        {phase === 'live' && (isHost || canInvite) && (
+          <button
+            onClick={() => void shareInvite()}
+            disabled={sharing}
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD, opacity: sharing ? 0.6 : 1 }}
+            aria-label="Share invite"
+          >
+            <Share2 size={14} />
+            Share invite
+          </button>
+        )}
       </header>
 
       <div className={`flex-1 min-h-0 relative ${landscape ? 'flex' : 'flex flex-col'}`}>
