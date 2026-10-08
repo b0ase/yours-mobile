@@ -27,6 +27,13 @@ const ROUTES = {
   unlink: ['POST', 'unlink'],
   'apps-get': ['POST', 'appsGet'],
   'apps-put': ['POST', 'appsPut'],
+  // bPhone (docs/BPHONE-PLAN.md): public rate card + directory, signed writes and bookings.
+  'bphone-get': ['GET', 'bphone-get'],
+  'bphone-put': ['POST', 'bphone-put'],
+  'bphone-directory': ['GET', 'bphone-directory'],
+  'bphone-book': ['POST', 'bphone-book'],
+  'bphone-bookings': ['POST', 'bphone-bookings'],
+  'bphone-book-act': ['POST', 'bphone-book-act'],
 };
 
 const hits = new Map();
@@ -68,7 +75,14 @@ module.exports = async function handler(req, res) {
   const route = ROUTES[q.op || 'caps'];
   if (!route) return send(res, 404, { error: 'not-found' });
   if (req.method !== route[0]) return send(res, 405, { error: 'method-not-allowed' });
-  res.setHeader('Cache-Control', route[1] === 'caps' ? 'public, max-age=300' : 'no-store');
+  res.setHeader(
+    'Cache-Control',
+    route[1] === 'caps'
+      ? 'public, max-age=300'
+      : route[1] === 'bphone-get' || route[1] === 'bphone-directory'
+        ? 'public, max-age=30'
+        : 'no-store',
+  );
   const ip =
     String(req.headers['x-forwarded-for'] || '')
       .split(',')[0]

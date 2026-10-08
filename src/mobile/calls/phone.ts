@@ -8,13 +8,19 @@ import { filterContacts, type Contact } from '../chat/contacts';
  * Voicemail: not built (no server mailbox).
  */
 
-export type PhoneTab = 'favourites' | 'recents' | 'contacts' | 'dial';
+export type PhoneTab = 'favourites' | 'recents' | 'contacts' | 'dial' | 'experts' | 'bphone';
 export const PHONE_TABS: { id: PhoneTab; label: string }[] = [
   { id: 'favourites', label: 'Favourites' },
   { id: 'recents', label: 'Recents' },
   { id: 'contacts', label: 'Contacts' },
   { id: 'dial', label: 'Dial' },
 ];
+/** bPhone (rateCard.ts): the directory of people who charge for calls, and my own price. bWalletX only. */
+export const BPHONE_TABS: { id: PhoneTab; label: string }[] = [
+  { id: 'experts', label: 'Experts' },
+  { id: 'bphone', label: 'bPhone' },
+];
+export const phoneTabsFor = (paidCalls: boolean) => (paidCalls ? [...PHONE_TABS, ...BPHONE_TABS] : PHONE_TABS);
 
 export const isMissed = (c: ServerCall) =>
   c.direction === 'incoming' && !c.answered_at && c.status !== 'ringing' && c.status !== 'active';

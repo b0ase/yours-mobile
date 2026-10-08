@@ -423,3 +423,29 @@ describe('BSPACES_ENABLED: bSpaces is bWalletX only', () => {
     expect(src('./tabs/ChatPage.tsx').match(/BSPACES_ENABLED && ROOMS && handle && rooms/g)?.length).toBe(2);
   });
 });
+
+describe('PAID_CALLS_ENABLED: bPhone paid calls are bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { PAID_CALLS_ENABLED, paidCallsEnabled } = await import('./storeBuild');
+    expect(PAID_CALLS_ENABLED).toBe(!STORE_BUILD);
+    expect(paidCallsEnabled(true)).toBe(false);
+    expect(paidCallsEnabled(false)).toBe(true);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'PAID_CALLS_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the bPhone tabs, the quote and the pay loop sit behind the flag', () => {
+    expect(src('./calls/CallsList.tsx')).toContain(
+      "PAID_CALLS_ENABLED ? lazy(() => import('./BPhoneSettings')) : null",
+    );
+    expect(src('./calls/CallsList.tsx')).toContain("PAID_CALLS_ENABLED ? lazy(() => import('./Directory')) : null");
+    expect(src('./calls/CallsList.tsx')).toContain('phoneTabsFor(PAID_CALLS_ENABLED)');
+    expect(src('./calls/store.ts')).toContain('if (PAID_CALLS_ENABLED) {');
+    expect(src('./calls/store.ts')).toMatch(/PAID_CALLS_ENABLED\) await meterTick/);
+    expect(src('./calls/CallScreen.tsx')).toContain("PAID_CALLS_ENABLED && call.phase === 'quote' && <QuoteSheet");
+  });
+});
