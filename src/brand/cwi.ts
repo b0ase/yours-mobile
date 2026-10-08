@@ -10,12 +10,14 @@
  *    use window.CWI with no picker, so with Yours installed bWalletX was unreachable). Settings ›
  *    "Be the wallet websites connect to" off → hands window.CWI back to the other wallet. The content
  *    script tells the page the setting via the `bwalletx:cwi-pref` event;
- *  - answers legacy `YoursRequest` calls only while it holds window.CWI.
+ *  - answers legacy `YoursRequest` calls only while it holds window.CWI;
+ *  - announces the wallet it displaced (as "Browser wallet"), so a site's wallet chooser can still
+ *    list it: that wallet (Yours today) doesn't announce itself, and bWalletX now holds its object.
  */
 import type { WalletInterface } from '@bsv/sdk';
 import { createCWI, CWIEventName } from '@1sat/wallet-browser';
 import icon from '../../assets/bwalletx-ext/icon128.png?inline';
-import { announceWallet, claimWindowCwi } from './discovery';
+import { announceWallet, claimWindowCwi, displacedAnnouncer } from './discovery';
 
 export { CWIEventName };
 
@@ -46,8 +48,10 @@ if (typeof window !== 'undefined') {
   const w = window as unknown as { CWI?: WalletInterface };
   let take = true; // until the content script says otherwise
   let other: WalletInterface | undefined; // another wallet's window.CWI, kept to hand back
+  const announceOther = displacedAnnouncer();
   const assert = () => {
     if (w.CWI && w.CWI !== CWI) other = w.CWI;
+    announceOther(other);
     if (take) w.CWI = CWI;
     else if (w.CWI === CWI && other) w.CWI = other;
   };

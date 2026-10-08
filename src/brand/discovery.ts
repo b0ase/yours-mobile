@@ -47,3 +47,32 @@ export function claimWindowCwi(wallet: WalletInterface, w: CwiWindow = window as
   if (!w.CWI) w.CWI = wallet;
   return w.CWI === wallet;
 }
+
+/**
+ * A wallet whose window.CWI another wallet took over. It hasn't announced itself (it would be
+ * listed under its own name if it had), so it gets a neutral name: discovery must not call it to
+ * find one, since some wallets prompt on any call from a new site.
+ */
+export const DISPLACED_INFO: Omit<WalletInfo, 'uuid'> = {
+  name: 'Browser wallet',
+  icon: '',
+  rdns: 'legacy.window-cwi',
+  kind: 'extension',
+};
+
+/**
+ * Keeps the wallet bWalletX displaced from window.CWI visible to choosers: announces whichever
+ * wallet it is passed, replacing the previous one. Pass undefined to stop.
+ */
+export function displacedAnnouncer(
+  target: Pick<Window, 'addEventListener' | 'removeEventListener' | 'dispatchEvent'> = window,
+): (wallet: WalletInterface | undefined) => void {
+  let current: WalletInterface | undefined;
+  let stop: (() => void) | undefined;
+  return (wallet) => {
+    if (wallet === current) return;
+    stop?.();
+    current = wallet;
+    stop = wallet ? announceWallet(DISPLACED_INFO, wallet, target) : undefined;
+  };
+}
