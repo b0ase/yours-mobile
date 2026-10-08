@@ -7,6 +7,8 @@
  */
 
 /** ~10 minute blocks. */
+import { curveLabel, curveWeights, mergeSmall, splitByWeights, type Curve } from './curves';
+
 export const BLOCKS_PER_DAY = 144;
 export const BLOCK_MS = 10 * 60 * 1000;
 /** Most lock outputs in one transaction. Larger schedules are split into several lock transactions. */
@@ -71,6 +73,8 @@ export type GradualInput = {
   usdPerPayout?: number;
   rate?: number;
   bufferPct?: number;
+  /** How the total spreads over the payouts (curves.ts). Missing or 'linear' = equal payouts. */
+  curve?: Curve;
 };
 
 export type ScheduleResult = { pieces: Piece[]; totalSats: number; error?: string; warning?: string };
@@ -119,6 +123,7 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
   if (dates.length === 0) return fail('No payout dates in that range.');
   if (dates.length > MAX_PIECES)
     return fail(`That is ${dates.length} payouts. The most in one lock is ${MAX_PIECES}; lock it in batches.`);
+  if (g.curve && g.curve.kind !== 'linear') return buildCurved(g, g.curve, dates, now, currentHeight);
   let amounts: number[];
   let usdTarget: number | undefined;
   if (g.usdPerPayout != null) {
@@ -155,6 +160,59 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
     pieces.push({ height: h, sats: amounts[i], date: dateForHeight(h, now, currentHeight), usdTarget });
   }
   return checkSpan(pieces, currentHeight);
+}
+
+/**
+ * A gradual schedule shaped by a curve. The total is the same as the linear schedule would lock
+ * (n × per payout, or the total entered); the curve only moves it between dates. In dollar-target mode
+ * the curve shapes the dollar targets (in cents) and each piece is sized from its own target.
+ */
+function buildCurved(g: GradualInput, curve: Curve, dates: Date[], now: Date, currentHeight: number): ScheduleResult {
+  const w = curveWeights(curve, dates.length);
+  if (typeof w === 'string') return fail(w);
+  let sats: number[];
+  let targets: number[] | undefined;
+  if (g.usdPerPayout != null) {
+    if (!(g.rate && g.rate > 0)) return fail('The BSV price is unavailable, so dollar targets cannot be sized. Use BSV amounts or try again.');
+    if (!(g.usdPerPayout > 0)) return fail('Enter a dollar amount per payout.');
+    const buffer = Math.max(0, g.bufferPct ?? DEFAULT_BUFFER_PCT);
+    const cents = splitByWeights(Math.round(g.usdPerPayout * 100) * dates.length, w);
+    targets = cents.map((c) => c / 100);
+    sats = targets.map((t) => (t > 0 ? usdToSats(t * (1 + buffer / 100), g.rate as number) : 0));
+  } else {
+    const total = g.totalSats ?? (g.perPayoutSats != null ? g.perPayoutSats * dates.length : 0);
+    if (!Number.isInteger(total) || total < 1) return fail('Enter an amount.');
+    sats = splitByWeights(total, w);
+  }
+  const m = mergeSmall(sats, MIN_PIECE_SATS);
+  if (!m.amounts.length || m.amounts.some((a) => a < MIN_PIECE_SATS))
+    return fail(`Each payout must be at least ${MIN_PIECE_SATS.toLocaleString()} sats, or claiming it costs more than it is worth.`);
+  // Dollar targets follow their sats: a merged piece carries the targets folded into it.
+  let mergedTargets: number[] | undefined;
+  if (targets) {
+    mergedTargets = [];
+    let from = 0;
+    for (const i of m.idx) {
+      let t = 0;
+      for (let j = from; j <= i; j++) t += targets[j];
+      mergedTargets.push(Math.round(t * 100) / 100);
+      from = i + 1;
+    }
+    for (let j = from; j < targets.length; j++) mergedTargets[mergedTargets.length - 1] += targets[j];
+    mergedTargets = mergedTargets.map((t) => Math.round(t * 100) / 100);
+  }
+  const pieces: Piece[] = [];
+  let prev = currentHeight;
+  m.idx.forEach((di, k) => {
+    const h = Math.max(prev + 1, heightForDate(dates[di], now, currentHeight));
+    prev = h;
+    pieces.push({ height: h, sats: m.amounts[k], date: dateForHeight(h, now, currentHeight), ...(mergedTargets ? { usdTarget: mergedTargets[k] } : {}) });
+  });
+  const res = checkSpan(pieces, currentHeight);
+  if (res.error) return res;
+  return m.merged
+    ? { ...res, warning: `${m.merged} payout${m.merged === 1 ? ' was' : 's were'} under ${MIN_PIECE_SATS.toLocaleString()} sats on the ${curveLabel(curve)} curve and ${m.merged === 1 ? 'was' : 'were'} merged into the next.` }
+    : res;
 }
 
 /** One unlock date for the whole amount. */
@@ -353,6 +411,8 @@ export type LockPlan = {
   customDays?: number;
   /** Dollar mode: where a surplus goes (SurplusTo). */
   surplusTo?: 'next' | 'extend';
+  /** Gradual schedules: the unlock curve (missing = linear). */
+  curve?: Curve;
 };
 
 export type PlanStatus = 'Locked' | 'Ready to claim' | 'Partly claimed' | 'Finished';

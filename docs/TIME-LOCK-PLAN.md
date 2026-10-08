@@ -131,6 +131,134 @@ Then a testnet run of lock, refresh and both claims, and an independent review o
 3. Do we support heirs with no wallet (the encrypted-share NFT), or require a wallet?
 4. Should heirs get the whole lock at H2, or should the payout schedule continue for them?
 
+## 10. Unlock curves (built, Oct 2026)
+
+Gradual payouts ($ per payout and BSV per payout) take an **Unlock curve** (`src/mobile/locks/curves.ts`). The
+total is unchanged (n × per payout); the curve only moves it between dates.
+
+| Curve | Shape |
+|---|---|
+| Linear | Equal payouts (default; identical to before) |
+| Front-loaded ×r | Exponential decay; first payout is r× the last |
+| Back-loaded ×r | Exponential growth; last payout is r× the first (a growing pension) |
+| S-curve (k) | Slices of a logistic: slow, fast, slow |
+| Cliff c + linear | Nothing for c payouts, then a catch-up payout worth c+1, then equal |
+| Step K | One payout every K periods, worth K periods |
+| Custom | A % per payout, validated to sum to 100 |
+
+Amounts are rounded down to sats (cents in dollar mode) with the remainder on the last piece, so the sum is
+exact. Zero-weight dates get no output. A piece under MIN_PIECE_SATS folds forward into the next piece (later,
+never earlier; a too-small last piece folds back) and the preview warns. The 520-output cap and ten-year limit
+still apply. In dollar-target mode the curve shapes the dollar targets and each piece is sized from its own
+target plus the buffer. The curve is stored in the plan, the receipt JSON (`curve`), the receipt card
+("curve: back-loaded ×2") and the verifier's description. The preview shows a bar chart of the amounts.
+
+## 11. Issuer-set buyer locks (launchpad), plan only
+
+The owner's "algorithmic locking": on the launchpad (TokenBlaster / BlastPad), the **issuer** fixes a lock
+curve at launch, and every buyer's purchased tokens arrive **time-locked** to the buyer by that curve. The curve
+is public before anyone buys and cannot change after launch.
+
+### 11.1 How it works technically
+
+Today a buy is a three-step leased trade (`tokenblaster.lol/src/app/api/launch/trade/route.ts`: prepare, sign,
+commit). In prepare the server builds fixed outputs, among them
+`tokenOut(token, q.tokens, to)` ("N tokens to you", a plain BSV-21 transfer inscription on P2PKH).
+
+With buyer locks that one output becomes a **locked token output**: the same BSV-21 transfer inscription
+(`{"p":"bsv-20","op":"transfer","id":…,"amt":…}`) prefixed onto the 1Sat **Lock** script
+(`PREFIX <buyer pkh> <unlockHeight> SUFFIX`, the contract in section 1) instead of P2PKH. The server computes
+`unlockHeight` from the launch's policy and the buy's position, puts it in the plan, and `matchesPlan` checks
+the wallet did not change it. Everything else (pool output, reserve, fees, index fund) is unchanged.
+Claiming is the bWalletX lock claim with the inscription carried forward: a token transfer spending the lock
+with nLockTime ≥ unlockHeight.
+
+**The gate:** GorillaPool's BSV-21 indexer must (a) treat a transfer inscription on a Lock-script output as a
+valid token output owned by the pkh inside it, and (b) accept the spend of that output as a valid transfer. This
+is unproven (token locks are not built in bWalletX either, see /token-locking). If the indexer drops or burns
+locked tokens, buyers lose them. **First step: a mainnet test** with a throwaway BSV-21 token: lock 1,000
+tokens to a short height, check the indexer balance/UTXO APIs show them (and as what), claim after the height,
+check the transferred balance. No launchpad work starts until this passes. If it fails, the fallbacks are an
+OrdLock-style covenant the indexer already understands (needs indexer work from GorillaPool) or a custodial
+vault with scheduled release (weaker: trust in TokenBlaster, and a regulatory difference).
+
+### 11.2 Parameters the issuer sets
+
+- **policy**: `flat` (every buy locked the same duration), `fifo` (early buyers unlock first: shortest lock or
+  earliest unlock height), `filo` (early buyers stay locked longest: anti-sniper, anti-dump).
+- **minLock / maxLock** in blocks (bounded, e.g. 0 to 1 year; never above the ten-year cap).
+- **axis**: lock as a function of **supply sold** at the buy (position on the bonding curve, 0 to GRAD_SOLD) or
+  of **time since launch** (blocks).
+- **shape** on that axis: linear, decaying, S-curve, or a cliff for the first X% (reuses `curves.ts` maths:
+  `lock = min + (max − min) × f(x)`, with f increasing for FILO-by-duration, decreasing for FIFO).
+- **FIFO by unlock date** alternative: a single release height plus a stagger, so buyer #1 unlocks first.
+- optional **exemption tier**: buys under N sats unlocked (helps small users, but see gaming below).
+
+Stored inside the signed `launch_msg` (`/api/launch/new`, creator-signed, verified with `verifySignature`) and the
+launch row, so it is immutable and auditable; optionally also in the deploy inscription's metadata. Shown on the
+coin page (a chart of lock vs. supply sold) and in the buy confirmation: "Your tokens unlock ≈ <date> (block
+H). You cannot sell them back before then." The trade's lock output is receipt-verifiable with the existing
+verifier (decode Lock height, compare with the policy recomputed from launch_msg and the buy's sold position).
+
+### 11.3 Interactions
+
+- **Selling back while locked is impossible**: the tokens cannot move. The coin page and sell screen must say
+  so and show locked vs. free balance. The curve price is unaffected (pool maths only sees sold supply).
+- **Graduation / leaderboards**: count locked tokens as sold.
+- **bChat token rooms**: locked tokens should count as holding. The gate (`/api/bitsign/rooms/token-gated`)
+  reads balances from the indexer; check whether it includes lock-script outputs. If not, either the indexer
+  test above also covers balance APIs, or the gate sums locked outputs by owner pkh itself.
+- **Wallet**: bWalletX shows locked tokens under Lock with their unlock date and claims them like BSV locks.
+
+### 11.4 Fairness and gaming
+
+- **Wallet splitting**: per-buy rules (exemption tier, per-buy lock) are dodged by splitting a buy across keys.
+  Prefer rules on position (supply sold) over buy size; keep the exemption small or off by default.
+- **Bots / snipers**: FILO is the point: the first bags are locked longest, so sniping to dump fails.
+- **Ordering**: BSV has no fee-priority MEV, but ordering is first-seen and TokenBlaster serialises trades with
+  a lease, so the server decides order. Position is the pool's sold amount at lease time, written in the plan,
+  so it is checkable afterwards. The lease must not be sellable or queue-jumpable.
+- **Issuer changing rules**: impossible after launch (signed launch_msg, verifier recomputes). The issuer's own
+  allocation should follow the same or a stricter lock.
+- **FIFO** rewards early buyers but also rewards snipers; recommend FILO or flat as defaults.
+
+### 11.5 Legal and UX caution
+
+Locked purchases must be disclosed **before** the buy, in the confirmation, with the unlock date and "you cannot
+sell or move these tokens before then; no refunds, no early release, not even by TokenBlaster or the issuer".
+Time-locking buyer tokens by issuer rule edges toward vesting/securities-like terms; keep it framed as a
+product rule of a $402 content/commodity token and get advice before marketing it as investor protection.
+Store builds: no change (launchpad is not in the store build).
+
+### 11.6 Recommendation and phases
+
+Build it, gated:
+
+1. **Token-lock indexer test** on mainnet (balance, UTXO, transfer after claim, token-gated room balance).
+   About 1 day. Go/no-go.
+2. **MVP on TokenBlaster: flat and FILO-by-supply-sold, linear**, min/max lock, in launch_msg, coin page,
+   buy confirmation, locked output in the trade plan + `matchesPlan`, claim in bWalletX, verifier. About 1 to
+   1.5 weeks.
+3. **Curves** (decay, S, cliff X%), time-since-launch axis, FIFO, optional exemption tier, room-gate support for
+   locked balances. About 1 week.
+
+## 12. Templates (built) and gift locks (coming)
+
+New Lock has a template picker (`src/mobile/locks/templates.ts`): Pension, Savings goal, Rainy-day fund,
+Allowance, Coupons ("your own BSV released in regular coupons, with the rest at the end", a custom curve),
+Tax pot (just before a deadline you choose; 31 January is only the example), Salary ($ target monthly) and
+Spend-down (front-loaded). The builder still starts empty; a template fills values only when tapped, is marked
+"Template: check the values", and Review stays disabled until "I have checked these values" is ticked. The
+0.01 BSV caution still runs at Review. Template copy is tested against interest/yield/returns wording.
+
+**Gift that unlocks later: coming, not built.** The Lock script can pay any pubkey hash, but today every lock
+goes to this wallet's own derived lock key (`lockAddress`), and claiming relies on the wallet's lock basket and
+key derivation. A gift needs: resolving the recipient's paymail/identity key to a lock pkh they can sign for,
+the recipient's wallet discovering the lock (it is not in their basket: index by their address or deliver the
+BEEF to them), a claim path in their wallet for a lock it did not create, and a receipt naming the recipient.
+Shipping before all of that works would lock coins the recipient cannot find. Plan it with BRC-100 output
+delivery (internalizeAction into the recipient's lock basket).
+
 ## Open questions for the owner
 
 Questions 1–5 were answered on 7 Oct (section 8). The inheritance questions are in section 9.

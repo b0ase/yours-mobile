@@ -8,6 +8,7 @@
  * names outputs by vout and the verifier uses the receipt's own txid.
  */
 import { Script, Utils } from '@bsv/sdk';
+import { curveLabel, type Curve } from './curves';
 import { fmtBsv, fmtUsd, type Piece } from './schedule';
 
 export const RECEIPT_TYPE = 'lock-receipt';
@@ -28,6 +29,8 @@ export type Receipt = {
   /** Percent mode: X% per payout, of the original amount or of what is left. */
   pct?: number;
   pctBase?: 'original' | 'remaining';
+  /** Gradual schedules shaped by an unlock curve (absent = linear). */
+  curve?: Curve;
   /** The address whose key can claim the locks (inside every lock script). */
   lockAddress: string;
   schedule: { vout: number; height: number; sats: number }[];
@@ -46,6 +49,7 @@ export function buildReceipt(o: {
   bufferPct?: number;
   pct?: number;
   pctBase?: 'original' | 'remaining';
+  curve?: Curve;
   now?: Date;
 }): Receipt {
   const amountSats = o.pieces.reduce((s, p) => s + p.sats, 0);
@@ -58,6 +62,7 @@ export function buildReceipt(o: {
     ...(o.rate && o.rate > 0 ? { usdAtLock: Math.round((amountSats / 1e8) * o.rate * 100) / 100 } : {}),
     ...(o.mode === 'usd-target' ? { usdPerPayout: o.usdPerPayout, bufferPct: o.bufferPct } : {}),
     ...(o.mode === 'percent' ? { pct: o.pct, pctBase: o.pctBase } : {}),
+    ...(o.curve && o.curve.kind !== 'linear' ? { curve: o.curve } : {}),
     lockAddress: o.lockAddress,
     // Lock outputs come first, in schedule order (vout 0..n-1); the receipt follows them.
     schedule: o.pieces.map((p, i) => ({ vout: i, height: p.height, sats: p.sats })),
@@ -75,18 +80,27 @@ export function scheduleLine(r: Receipt): string {
   const first = r.schedule[0]?.height;
   const last = r.schedule[n - 1]?.height;
   if (n === 1) return `Unlocks at block ${first}`;
+  if (r.curve) return `${n} payouts, blocks ${first}–${last}`;
   const per = r.mode === 'usd-target' && r.usdPerPayout ? `${fmtUsd(r.usdPerPayout)} target` : fmtBsv(r.schedule[0].sats);
   return `${n} payouts of ${per}, blocks ${first}–${last}`;
 }
+
+/** "curve: back-loaded ×2", or '' for a linear schedule. */
+export const curveText = (r: Pick<Receipt, 'curve'>): string => (r.curve && r.curve.kind !== 'linear' ? `curve: ${curveLabel(r.curve)}` : '');
+
+/** The verifier's one-line description of what a receipt claims. */
+export const describeReceipt = (r: Receipt): string => [modeText(r), curveText(r)].filter(Boolean).join(' · ');
 
 export const modeText = (r: Receipt): string =>
   r.mode === 'date'
     ? 'One unlock date'
     : r.mode === 'usd-target'
-      ? `Dollar target ${fmtUsd(r.usdPerPayout ?? 0)} per payout (${r.bufferPct ?? 0}% buffer)`
+      ? `Dollar target ${fmtUsd(r.usdPerPayout ?? 0)} ${r.curve ? 'average ' : ''}per payout (${r.bufferPct ?? 0}% buffer)`
       : r.mode === 'percent'
         ? `${r.pct}% of ${r.pctBase === 'remaining' ? 'what is left' : 'the original'} per payout`
-        : `${fmtBsv(r.schedule[0]?.sats ?? 0)} per payout`;
+        : r.curve
+          ? `${fmtBsv(Math.round(r.amountSats / Math.max(1, r.schedule.length)))} average per payout`
+          : `${fmtBsv(r.schedule[0]?.sats ?? 0)} per payout`;
 
 /** The card: amount, USD at lock time, mode and target, schedule, and every identity field the account has. */
 export function receiptSvg(r: Receipt): string {
@@ -94,6 +108,7 @@ export function receiptSvg(r: Receipt): string {
   const add = (text: string, size = 17, color = '#F2F2F0') => lines.push([text, size, color]);
   if (r.usdAtLock != null) add(`≈ ${fmtUsd(r.usdAtLock)} at lock time`, 18, '#98A2B3');
   add(modeText(r));
+  if (r.curve) add(curveText(r), 17, '#F5B800');
   add(scheduleLine(r));
   if (r.identity.handle) add(`Locked by ${r.identity.handle}`);
   if (r.identity.paymail) add(`Paymail ${r.identity.paymail}`, 15, '#98A2B3');

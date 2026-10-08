@@ -8,7 +8,7 @@
  */
 import { Lock } from '@1sat/templates';
 import { Transaction } from '@bsv/sdk';
-import { parseReceipt, type Receipt } from './receipt';
+import { describeReceipt, parseReceipt, type Receipt } from './receipt';
 
 export type VerifiedLock = { vout: number; height: number; sats: number; address: string; spent: boolean; matured: boolean };
 export type VerifyStatus = 'Locked' | 'Partly claimed' | 'Fully claimed' | 'No locks';
@@ -19,6 +19,8 @@ export type VerifyResult = {
   receipt: Receipt | null;
   /** True only when a receipt exists and every claim in it matches the lock outputs. */
   receiptValid: boolean;
+  /** What the receipt says the schedule is ("Dollar target … · curve: back-loaded ×2"), if there is one. */
+  description: string | null;
   problems: string[];
   status: VerifyStatus;
 };
@@ -62,6 +64,7 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
     totalSats: locks.reduce((a, l) => a + l.sats, 0),
     receipt: r,
     receiptValid: !!r && problems.length === 0,
+    description: r ? describeReceipt(r) : null,
     problems,
     status,
   };

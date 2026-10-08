@@ -81,6 +81,7 @@ export type CreateLockInput = {
   frequency?: LockPlan['frequency'];
   customDays?: number;
   surplusTo?: LockPlan['surplusTo'];
+  curve?: LockPlan['curve'];
 };
 
 /** Lock outputs (and the receipt) in one transaction. Returns the txid. */
@@ -129,6 +130,7 @@ export async function createLock(ctx: OneSatContext, account: string, input: Cre
       bufferPct: input.bufferPct,
       pct: input.pct,
       pctBase: input.base,
+      curve: input.curve,
     });
     // The receipt goes to a fresh key of the wallet's own ordinals (as @1sat/actions inscribe does).
     const keyID = `inscribe-${Utils.toHex(Random(8))}`;
@@ -159,6 +161,7 @@ export async function createLock(ctx: OneSatContext, account: string, input: Cre
     frequency: input.frequency,
     customDays: input.customDays,
     surplusTo: input.surplusTo,
+    ...(input.curve && input.curve.kind !== 'linear' ? { curve: input.curve } : {}),
   };
   savePlans(account, [plan, ...loadPlans(account, cs)], cs);
   return plan;

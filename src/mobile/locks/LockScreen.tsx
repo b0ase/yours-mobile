@@ -34,6 +34,8 @@ import {
 } from './schedule';
 import { claimMatured, createLock, freshRate, loadPlans, relock, savePlans, syncClaimed, walletLockOutpoints } from './lockApi';
 import { verifyLockTx, type VerifyResult } from './verify';
+import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
+import { CURVE_NAMES, DEFAULT_S_STEEPNESS, DEFAULT_STEEPNESS, curveLabel, parsePcts, type Curve, type CurveKind } from './curves';
 
 /**
  * /m/lock — the phone top bar's Lock BSV button (docs/TIME-LOCK-PLAN.md).
@@ -125,17 +127,56 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [pct, setPct] = useState<string>(EMPTY_AMOUNTS.pct);
   const [base, setBase] = useState<PercentBase>('original');
   const [receipt, setReceipt] = useState(false);
+  const [curveKind, setCurveKind] = useState<CurveKind>('linear');
+  const [steep, setSteep] = useState(String(DEFAULT_STEEPNESS));
+  const [cliff, setCliff] = useState('3');
+  const [every, setEvery] = useState('3');
+  const [customPcts, setCustomPcts] = useState('');
+  const curve: Curve = useMemo(() => {
+    switch (curveKind) {
+      case 'front':
+      case 'back':
+      case 's-curve':
+        return { kind: curveKind, steepness: Number(steep) };
+      case 'cliff':
+        return { kind: 'cliff', cliff: Number(cliff) };
+      case 'step':
+        return { kind: 'step', every: Number(every) };
+      case 'custom':
+        return { kind: 'custom', pcts: parsePcts(customPcts) ?? [] };
+      default:
+        return { kind: 'linear' };
+    }
+  }, [curveKind, steep, cliff, every, customPcts]);
+  const pickCurve = (k: CurveKind) => {
+    setCurveKind(k);
+    if (k === 's-curve') setSteep(String(DEFAULT_S_STEEPNESS));
+    else if (k === 'front' || k === 'back') setSteep(String(DEFAULT_STEEPNESS));
+  };
   /** null = automatic (extend for schedules over a year, else next). */
   const [surplusPick, setSurplusPick] = useState<SurplusTo | null>(null);
-  const pension = () => {
-    setKind('gradual');
-    setGmode('usd');
-    setFrequency('monthly');
-    setStart(dayInput(new Date(Date.now() + 3 * 365 * 86_400_000)));
+  const [templateUsed, setTemplateUsed] = useState<string | null>(null);
+  const [templateChecked, setTemplateChecked] = useState(false);
+  const applyTemplate = (t: LockTemplate) => {
+    const v = t.values(new Date());
+    const at = v.unlockOn ?? new Date(Date.now() + (v.startInDays ?? 30) * 86_400_000);
+    setKind(v.kind);
+    if (v.gmode) setGmode(v.gmode);
+    if (v.kind === 'once') setUnlockOn(dayInput(at));
+    else setStart(dayInput(at));
+    if (v.frequency) setFrequency(v.frequency);
+    if (v.customDays) setCustomDays(String(v.customDays));
     setUntil('count');
-    setCount('60');
-    setUsdPer('100');
-    if (!label) setLabel('Pension');
+    setCount(v.count != null ? String(v.count) : EMPTY_AMOUNTS.count);
+    setAmountBsv(v.amountBsv ?? EMPTY_AMOUNTS.amountBsv);
+    setUsdPer(v.usdPer ?? EMPTY_AMOUNTS.usdPer);
+    setBsvPer(v.bsvPer ?? EMPTY_AMOUNTS.bsvPer);
+    setCurveKind(v.curve?.kind ?? 'linear');
+    if (v.curve?.steep) setSteep(v.curve.steep);
+    setCustomPcts(v.curve?.custom ?? '');
+    setLabel(v.label);
+    setTemplateUsed(t.id);
+    setTemplateChecked(false);
   };
   const [typed, setTyped] = useState('');
   /** Soft check above 0.01 BSV: shown after Review, until answered. */
@@ -154,9 +195,10 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     };
     if (gmode === 'percent')
       return buildPercent({ totalSats: bsvToSats(amountBsv), pct: Number(pct), base, start: common.start, frequency, customDays: Number(customDays) }, now, height);
-    if (gmode === 'usd') return buildGradual({ ...common, usdPerPayout: Number(usdPer), rate, bufferPct: Number(buffer) }, now, height);
-    return buildGradual({ ...common, perPayoutSats: bsvToSats(bsvPer) }, now, height);
-  }, [height, entered, kind, amountBsv, unlockOn, start, frequency, customDays, until, count, end, gmode, pct, base, usdPer, rate, buffer, bsvPer]);
+    if (gmode === 'usd') return buildGradual({ ...common, usdPerPayout: Number(usdPer), rate, bufferPct: Number(buffer), curve }, now, height);
+    return buildGradual({ ...common, perPayoutSats: bsvToSats(bsvPer), curve }, now, height);
+  }, [height, entered, kind, amountBsv, unlockOn, start, frequency, customDays, until, count, end, gmode, pct, base, usdPer, rate, buffer, bsvPer, curve]);
+  const curved = kind === 'gradual' && gmode !== 'percent' && curve.kind !== 'linear';
 
   const surplusTo: SurplusTo = surplusPick ?? (schedule?.pieces.length ? defaultSurplusTo(schedule.pieces, height) : 'next');
   const mode: LockMode = kind === 'once' ? 'date' : gmode === 'usd' ? 'usd-target' : gmode === 'percent' ? 'percent' : 'bsv';
@@ -179,6 +221,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
         customDays: Number(customDays),
         pendingAmounts: pr.tail ? (percentAmounts(bsvToSats(amountBsv), Number(pct), base) as number[]).slice(MAX_PIECES - 1) : undefined,
         surplusTo: mode === 'usd-target' ? surplusTo : undefined,
+        curve: curved ? curve : undefined,
         receipt: receipt
           ? { identity: { handle: names.handle || undefined, paymail: names.paymail || undefined, idKey: acct?.pubKeys?.identityPubKey, address: account }, rate }
           : undefined,
@@ -421,9 +464,31 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
           <Field label="Name (only you see this)">
             <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Savings 2027" />
           </Field>
-          <button type="button" onClick={pension} className="text-left rounded-2xl p-3 text-xs" style={{ ...cardStyle, color: MUTED }}>
-            <span className="text-white font-semibold">Pension template:</span> fills in example values ($100 a month for 5 years, from 3 years out). Check them before you review
-          </button>
+          <div className="flex flex-col gap-2">
+            <div className="text-xs" style={{ color: MUTED }}>Templates (fill in example values when tapped)</div>
+            <div className="flex flex-wrap gap-2">
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => applyTemplate(t)}
+                  className="rounded-full px-3 py-1.5 text-xs font-semibold"
+                  style={{ border: `1px solid ${templateUsed === t.id ? GOLD : LINE}`, color: templateUsed === t.id ? GOLD : '#fff', background: templateUsed === t.id ? '#2a1d00' : PANEL }}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+            {templateUsed && (
+              <div className="rounded-2xl p-3 text-xs flex flex-col gap-2" style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}>
+                <span className="font-bold">{TEMPLATE_NOTE}</span>
+                <span style={{ color: '#F2F2F0' }}>{TEMPLATES.find((t) => t.id === templateUsed)?.blurb}</span>
+                <label className="flex items-center gap-2" style={{ color: '#F2F2F0' }}>
+                  <input type="checkbox" checked={templateChecked} onChange={(e) => setTemplateChecked(e.target.checked)} /> {TEMPLATE_CONFIRM}
+                </label>
+              </div>
+            )}
+          </div>
           <Seg value={kind} onChange={setKind} options={[['gradual', 'Gradual payouts'], ['once', 'One unlock date']]} />
           {kind === 'once' ? (
             <>
@@ -517,6 +582,19 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                   ) : (
                     <input className={inputCls} type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
                   )}
+                  <CurvePicker
+                    kind={curveKind}
+                    onKind={pickCurve}
+                    steep={steep}
+                    onSteep={setSteep}
+                    cliff={cliff}
+                    onCliff={setCliff}
+                    every={every}
+                    onEvery={setEvery}
+                    custom={customPcts}
+                    onCustom={setCustomPcts}
+                    usd={gmode === 'usd'}
+                  />
                 </>
               )}
             </>
@@ -547,6 +625,15 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </div>
               )}
               {schedule!.warning && <div className="text-xs" style={{ color: GOLD }}>{schedule!.warning}</div>}
+              {kind === 'gradual' && schedule!.pieces.length > 1 && (
+                <div className="flex flex-col gap-1">
+                  <div className="text-[11px]" style={{ color: MUTED }}>
+                    Curve: <span className="text-white font-semibold">{curved ? curveLabel(curve) : 'linear'}</span>
+                    {mode === 'usd-target' ? ' · bars are the dollar targets' : ''}
+                  </div>
+                  <Bars values={schedule!.pieces.map((p) => (mode === 'usd-target' ? (p.usdTarget ?? 0) : p.sats))} />
+                </div>
+              )}
               <div className="max-h-72 overflow-y-auto overflow-x-hidden">
                 <table className="w-full table-fixed text-[11px] [overflow-wrap:anywhere]">
                   <thead style={{ color: MUTED }}>
@@ -554,6 +641,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                       <th className="text-left font-semibold py-1 w-6">#</th>
                       <th className="text-left font-semibold">Date ≈</th>
                       <th className="text-right font-semibold">Block</th>
+                      {mode === 'usd-target' && curved && <th className="text-right font-semibold">Target</th>}
                       <th className="text-right font-semibold">BSV</th>
                       <th className="text-right font-semibold">≈ USD</th>
                     </tr>
@@ -564,6 +652,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                         <td className="py-1">{i + 1}</td>
                         <td>{fmtDate(p.date)}</td>
                         <td className="text-right">{p.height}</td>
+                        {mode === 'usd-target' && curved && <td className="text-right">{fmtUsd(p.usdTarget ?? 0)}</td>}
                         <td className="text-right">{(p.sats / 1e8).toFixed(8).replace(/0+$/, '').replace(/\.$/, '')}</td>
                         <td className="text-right">{rate > 0 ? fmtUsd(satsToUsd(p.sats, rate)) : '–'}</td>
                       </tr>
@@ -598,7 +687,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             </div>
           ) : (
             <button
-              disabled={!ok}
+              disabled={!ok || !reviewAllowed(entered, templateUsed != null, templateChecked)}
               onClick={() => (needsSizeCheck(schedule!.totalSats) ? setSizeAsk(true) : setView({ kind: 'confirm' }))}
               className={btn}
               style={{ background: GOLD, color: '#1a1300' }}
@@ -663,14 +752,91 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   );
 };
 
-const modeLabel = (p: LockPlan) =>
+const modeLabel = (p: LockPlan) => baseModeLabel(p) + (p.curve && p.curve.kind !== 'linear' ? ` · ${curveLabel(p.curve)}` : '');
+const baseModeLabel = (p: LockPlan) =>
   p.mode === 'date'
     ? 'Unlock on a date'
     : p.mode === 'usd-target'
-      ? `${fmtUsd(p.usdPerPayout ?? 0)} target per payout`
+      ? `${fmtUsd(p.usdPerPayout ?? 0)} ${p.curve ? 'average ' : ''}target per payout`
       : p.mode === 'percent'
         ? `${p.pct}% of ${p.base === 'remaining' ? 'remaining' : 'original'}`
         : 'BSV per payout';
+
+const CURVE_HINT: Record<CurveKind, string> = {
+  linear: 'Every payout the same.',
+  front: 'More early, then less. Steepness = how many times bigger the first payout is than the last.',
+  back: 'Less early, more later, like a pension that grows. Steepness = how many times bigger the last payout is than the first.',
+  's-curve': 'Slow, then fast, then slow. Higher steepness bunches more in the middle.',
+  cliff: 'Nothing for the first payouts; at the cliff, everything owed so far, then equal payouts.',
+  step: 'One payout every K periods, each worth K periods.',
+  custom: 'Your own percentage for each payout, adding up to 100%.',
+};
+
+const CurvePicker = (p: {
+  kind: CurveKind;
+  onKind: (k: CurveKind) => void;
+  steep: string;
+  onSteep: (s: string) => void;
+  cliff: string;
+  onCliff: (s: string) => void;
+  every: string;
+  onEvery: (s: string) => void;
+  custom: string;
+  onCustom: (s: string) => void;
+  usd: boolean;
+}) => (
+  <div className="flex flex-col gap-2">
+    <Field label="Unlock curve">
+      <select className={inputCls} value={p.kind} onChange={(e) => p.onKind(e.target.value as CurveKind)}>
+        {(Object.keys(CURVE_NAMES) as CurveKind[]).map((k) => (
+          <option key={k} value={k}>
+            {CURVE_NAMES[k]}
+          </option>
+        ))}
+      </select>
+    </Field>
+    {(p.kind === 'front' || p.kind === 'back' || p.kind === 's-curve') && (
+      <Field label={p.kind === 's-curve' ? 'Steepness' : 'Steepness (×)'}>
+        <input className={inputCls} inputMode="decimal" value={p.steep} onChange={(e) => p.onSteep(e.target.value)} />
+      </Field>
+    )}
+    {p.kind === 'cliff' && (
+      <Field label="Cliff (payouts with nothing)">
+        <input className={inputCls} inputMode="numeric" value={p.cliff} onChange={(e) => p.onCliff(e.target.value)} />
+      </Field>
+    )}
+    {p.kind === 'step' && (
+      <Field label="One payout every K periods">
+        <input className={inputCls} inputMode="numeric" value={p.every} onChange={(e) => p.onEvery(e.target.value)} />
+      </Field>
+    )}
+    {p.kind === 'custom' && (
+      <Field label="% per payout, comma separated (must add up to 100)">
+        <textarea className={inputCls} rows={2} placeholder="e.g. 10, 20, 30, 40" value={p.custom} onChange={(e) => p.onCustom(e.target.value)} />
+      </Field>
+    )}
+    <p className="text-[11px]" style={{ color: MUTED }}>
+      {CURVE_HINT[p.kind]} The total is the same as {p.usd ? 'the dollars per payout' : 'the BSV per payout'} × the number of payouts; the curve only moves it
+      between dates.
+    </p>
+  </div>
+);
+
+/** Amounts over time as a small bar chart. */
+const Bars = ({ values }: { values: number[] }) => {
+  const max = Math.max(...values, 1);
+  const W = 300;
+  const H = 48;
+  const bw = W / values.length;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-12" role="img" aria-label="Payout amounts over time">
+      {values.map((v, i) => {
+        const h = Math.max(1, (v / max) * H);
+        return <rect key={i} x={i * bw + bw * 0.1} y={H - h} width={Math.max(0.5, bw * 0.8)} height={h} rx={Math.min(2, bw * 0.2)} fill={GOLD} />;
+      })}
+    </svg>
+  );
+};
 
 export const VerifyCard = ({ r }: { r: VerifyResult }) => (
   <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
@@ -682,6 +848,7 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
       {r.receipt ? (r.receiptValid ? <Check size={14} /> : <AlertTriangle size={14} />) : null}
       {r.receipt ? (r.receiptValid ? 'Receipt matches the lock outputs' : 'Receipt does NOT match the chain') : 'No receipt in this transaction'}
     </div>
+    {r.description && <div className="text-xs text-white">{r.description}</div>}
     {r.receipt && (
       <div className="text-xs" style={{ color: MUTED }}>
         Locked by {r.receipt.identity.handle || r.receipt.identity.paymail || r.receipt.identity.address}
