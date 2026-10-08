@@ -10,7 +10,8 @@ import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, X } from 'lucide-react';
+import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
+import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AgentToolsSheet } from '../agents/AgentToolsSheet';
@@ -278,6 +279,15 @@ const TopNavBar = () => {
                 />
               </div>
               <div className="border-t border-white/5 px-2 py-2">
+                {/* 5.1.86: the top-bar b is now Airdrops, so the classic layout reaches the b agent here
+                    (the phone layout has the dock b hold and pull-down). Same toggle as the old b. */}
+                {showAgentInMenu(phone) &&
+                  action(<Sparkles size={16} color="#fff" />, X_MARK ? 'bX agent' : 'b agent', () => {
+                    setDrawer(false);
+                    const to = agentMenuTarget(pathname);
+                    if (to === -1) navigate(-1);
+                    else navigate(to);
+                  })}
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {/* bWalletX: agent accounts and the tools that drive them (owner, 6 Oct 2026). */}
                 {X_MARK &&
