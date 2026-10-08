@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 // The server module (CommonJS, site/lib) — the wallet's signatures must verify there.
 import server from '../../../site/lib/paymail.js';
-import { signRequest, signedMessage, toAlias, PAYMAIL_ALIAS_RE } from './paymail';
+import { nameChangeBlocked, signRequest, signedMessage, toAlias, PAYMAIL_ALIAS_RE } from './paymail';
 import { ownedFromOutputs, payableLabel, pickName } from './accountName';
 import type { WalletOutput } from '@bsv/sdk';
 
@@ -79,5 +79,17 @@ describe('verified social names', () => {
     expect(personalTicker('b0asex.x')).toBe('B0ASEX');
     expect(personalTicker('theirname.gmail@bwalletx.com')).toBe('THEIRNAME');
     expect(personalTicker('boase')).toBe('BOASE');
+  });
+});
+
+describe('nameChangeBlocked', () => {
+  test('blocks a verified X / Google name switching to a plain name', () => {
+    expect(nameChangeBlocked('b0asex.x@bwallet.space', 'b0ase')).toMatch(/verified with X/);
+    expect(nameChangeBlocked('me.gmail@bwallet.space', 'me')).toMatch(/verified with Google/);
+  });
+  test('lets a plain name rename, and allows no-change or a first claim', () => {
+    expect(nameChangeBlocked('boase@bwallet.space', 'b0ase')).toBeNull();
+    expect(nameChangeBlocked(undefined, 'b0ase')).toBeNull();
+    expect(nameChangeBlocked('b0asex.x@bwallet.space', 'b0asex.x')).toBeNull();
   });
 });

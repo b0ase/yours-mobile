@@ -14,20 +14,13 @@ import { roomTitle, type ChatRoom } from '../chat/messages';
 import { gateOfRoom } from '../chat/tokenRooms';
 import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
+import { inBatches, MAX_ROOMS } from './roomSpaces';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
-const MAX_ROOMS = 25;
-const PARALLEL = 5;
-
 type Row = { room: ChatRoom; state: SpaceState };
-
-async function inBatches<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += n) out.push(...(await Promise.all(items.slice(i, i + n).map(fn))));
-  return out;
-}
+const PARALLEL = 5;
 
 const SpacesPage = () => {
   const navigate = useNavigate();

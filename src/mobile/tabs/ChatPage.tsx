@@ -19,6 +19,7 @@ import {
   UserPlus,
   WifiOff,
   X,
+  Loader2,
 } from 'lucide-react';
 import { sendBsv, sendBsv21 } from '@1sat/actions';
 import { TopNav } from '../../components/TopNav';
@@ -42,6 +43,7 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
+import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -77,6 +79,8 @@ import { formatRaw, toRawAmount } from '../chat/tokenRooms';
 import { addToInviteList, inviteLine, inviteState, loadInviteList } from '../chat/invites';
 import { knownPersonal, rememberPersonal, tickerLabel } from '../names/personalToken';
 import { retryPersonalRoom } from '../names/claimPersonal';
+import { indexingMessage, indexingRetryDelay, isNotYetIndexed, isOwnTokenKey } from '../chat/roomIndexing';
+import { listOwnTokens } from '../tokens/indexFund';
 import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
 import { setupLabel, useRoomSetup } from '../tokens/useRoomSetup';
 import type { OwnToken } from '../tokens/indexFund';
@@ -317,7 +321,7 @@ const Conversation = ({
       .catch(() => {});
   }, [client, entryKey]);
   useEffect(loadCharge, [loadCharge]);
-  const chargeDec = (c: SpendCharge) => (c.charges.every((x) => x.unit === 'sats') ? 0 : entry?.gate.dec ?? 0);
+  const chargeDec = (c: SpendCharge) => (c.charges.every((x) => x.unit === 'sats') ? 0 : (entry?.gate.dec ?? 0));
 
   const fail = useCallback(
     (e: unknown) => {
@@ -400,7 +404,12 @@ const Conversation = ({
     const body = text.trim();
     if (!body) return;
     const prior = existing?.localId ? paidFor.current.get(existing.localId) : undefined;
-    if (!prior && mustPay(charge) && entryKey && needsConfirm(charge, loadPrefs(entryKey), spentThisSession(entryKey))) {
+    if (
+      !prior &&
+      mustPay(charge) &&
+      entryKey &&
+      needsConfirm(charge, loadPrefs(entryKey), spentThisSession(entryKey))
+    ) {
       setConfirmSend({ text: body, existing });
       return;
     }
@@ -821,7 +830,8 @@ const PayToPostSheet = ({
     <Sheet title="Pay to post" onClose={onCancel}>
       <p className="text-sm text-white mb-2">{costLine(charge, symbol, dec)}.</p>
       <p className="text-xs mb-3" style={{ color: MUTED }}>
-        The payment and your message go in one transaction. Spent here this session: {formatRaw(spent.toString(), dec)} {unit}.
+        The payment and your message go in one transaction. Spent here this session: {formatRaw(spent.toString(), dec)}{' '}
+        {unit}.
       </p>
       <label className="flex items-center gap-2 text-xs mb-2" style={{ color: MUTED }}>
         <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
@@ -856,7 +866,11 @@ const PayToPostSheet = ({
         <button onClick={onCancel} className="flex-1 rounded-2xl py-3 text-white" style={{ background: PANEL }}>
           Cancel
         </button>
-        <button onClick={pay} className="flex-1 rounded-2xl py-3 font-bold" style={{ background: GOLD, color: '#1a1300' }}>
+        <button
+          onClick={pay}
+          className="flex-1 rounded-2xl py-3 font-bold"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
           Pay and send
         </button>
       </div>
@@ -1565,6 +1579,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [lookups, setLookups] = useState<Record<string, TokenRoomLookup>>({});
   const [listError, setListError] = useState('');
   const [query, setQuery] = useState('');
+  // Chat filters (bWalletX only): All, or Spaces = token rooms with a space on (spaces/SpacesFilter.tsx).
+  const [roomFilter, setRoomFilter] = useState<RoomFilter>('all');
   const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null } | null>(null);
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(
     null,
@@ -1575,6 +1591,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [roomSettings, setRoomSettings] = useState(false);
   const [showBounties, setShowBounties] = useState(false);
   const [opening, setOpening] = useState('');
+  // A just-minted token the indexer hasn't reached yet: a neutral wait that retries (chat/roomIndexing.ts).
+  const [indexing, setIndexing] = useState<{ entry: TokenRoomEntry; since: number; tries: number } | null>(null);
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
   const [accepted, setAccepted] = useState<Set<string>>(new Set());
   // Open rooms (no token): every build, store build included.
@@ -1821,9 +1839,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           room = { id: ticker, ticker, name: null, party_count: 1 };
         }
         setRooms((cur) => cur?.map((r) => (r.ticker === room!.ticker ? { ...r, unread: 0 } : r)) ?? cur);
+        setIndexing(null);
         setOpen({ room, entry });
       } catch (e) {
         if (e instanceof ChatApiError && e.status === 401) return authLost();
+        if (isNotYetIndexed(e, { ownToken: isOwnTokenKey(entry.key, listOwnTokens()) })) {
+          // Not an error: the indexer hasn't caught up with this token yet. Wait and retry.
+          proved.current.delete(entry.key);
+          setListError('');
+          setIndexing((cur) =>
+            cur && cur.entry.key === entry.key
+              ? { ...cur, tries: cur.tries + 1 }
+              : { entry, since: Date.now(), tries: 1 },
+          );
+          return;
+        }
+        setIndexing(null);
         const refusal = e instanceof ChatApiError ? parseGateRefusal(e.data) : null;
         if (refusal)
           setLocked({ gate: refusal.gate, heldRaw: refusal.heldRaw, members: refusal.room?.members ?? null });
@@ -1834,6 +1865,13 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     },
     [client, prove, authLost],
   );
+
+  // Still indexing: retry every 5s for ~3 minutes, then every 30s while this screen is open.
+  useEffect(() => {
+    if (!indexing) return;
+    const t = window.setTimeout(() => void openEntry(indexing.entry), indexingRetryDelay(Date.now() - indexing.since));
+    return () => window.clearTimeout(t);
+  }, [indexing, openEntry]);
 
   // "Open room" from a Wallet / Market token page.
   useEffect(() => {
@@ -2067,6 +2105,18 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             Loading chatrooms…
           </div>
         )}
+        {handle && indexing && (
+          <div
+            className="mx-4 mt-3 mb-1 flex items-center gap-3 rounded-xl px-3 py-3 text-xs"
+            style={{ background: PANEL, border: `1px solid ${LINE}`, color: MUTED }}
+          >
+            <Loader2 size={16} className="animate-spin shrink-0" color={GOLD} />
+            <span className="flex-1">{indexingMessage(Date.now() - indexing.since)}</span>
+            <button onClick={() => setIndexing(null)} aria-label="Stop waiting">
+              <X size={14} color={MUTED} />
+            </button>
+          </div>
+        )}
         {handle && listError && (
           <div className="text-center text-xs pt-4 px-6 text-[#F97066]">
             {listError}
@@ -2078,7 +2128,24 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           </div>
         )}
 
-        {handle && rooms && (
+        {BSPACES_ENABLED && ROOMS && handle && rooms && (
+          <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />
+        )}
+        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
+          <SpacesRoomList
+            client={client}
+            me={handle}
+            items={tokenMine.flatMap(({ e }) =>
+              e.room ? [{ key: e.key, ticker: e.room.ticker, title: entryTitle(e, e.room) ?? `$${e.gate.symbol}` }] : [],
+            )}
+            onOpen={(key) => {
+              const hit = tokenMine.find(({ e }) => e.key === key);
+              if (hit) void openEntry(hit.e);
+            }}
+          />
+        )}
+
+        {handle && rooms && (!BSPACES_ENABLED || roomFilter === 'all') && (
           <>
             <ListLabel>Your rooms</ListLabel>
             {yours.length === 0 && (

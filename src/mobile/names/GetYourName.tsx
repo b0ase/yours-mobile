@@ -13,7 +13,14 @@ import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } fro
 import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
-import { claimPaymail, paymailAvailable, paymailEnabled, PAYMAIL_ALIAS_RE, toAlias } from './paymail';
+import {
+  claimPaymail,
+  nameChangeBlocked,
+  paymailAvailable,
+  paymailEnabled,
+  PAYMAIL_ALIAS_RE,
+  toAlias,
+} from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import { estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
@@ -232,6 +239,8 @@ export const GetYourName = ({
 
   // ---- paymail ---------------------------------------------------------------
   const ownPaymail = paymail === `${alias}@${BWALLET_PAYMAIL_DOMAIN}`;
+  // A verified X / Google name can't switch to a plain one (server rule): explain, don't offer it.
+  const blocked = nameChangeBlocked(paymail, alias);
   useEffect(() => {
     if (!paymailEnabled()) return;
     if (!alias) return setAliasState('idle');
@@ -405,16 +414,23 @@ export const GetYourName = ({
               {aliasState === 'invalid' && 'a-z, 0-9, - or _'}
               {aliasState === 'checking' && 'Checking…'}
             </span>
-            <button
-              type="button"
-              disabled={busy || aliasState !== 'free' || ownPaymail}
-              onClick={claim}
-              className={btn}
-              style={{ background: gold, color: '#000' }}
-            >
-              {paymail ? 'Change to' : 'Claim'} {alias || 'name'}@{BWALLET_PAYMAIL_DOMAIN}
-            </button>
+            {!blocked && (
+              <button
+                type="button"
+                disabled={busy || aliasState !== 'free' || ownPaymail}
+                onClick={claim}
+                className={btn}
+                style={{ background: gold, color: '#000' }}
+              >
+                {paymail ? 'Change to' : 'Claim'} {alias || 'name'}@{BWALLET_PAYMAIL_DOMAIN}
+              </button>
+            )}
           </div>
+          {blocked && (
+            <p className="text-[11px]" style={{ color: gray }}>
+              {blocked}
+            </p>
+          )}
         </div>
       )}
 
