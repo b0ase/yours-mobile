@@ -159,7 +159,7 @@ const SpaceChat = ({
   onClose: () => void;
   side: boolean;
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const end = useRef<HTMLDivElement>(null);
@@ -168,30 +168,34 @@ const SpaceChat = ({
     client
       .latestPage(ticker, 40)
       .then((p) => live && setMessages(mergeMessages([], p.messages)))
-      .catch((e) => live && setError(errText(e)));
+      .catch((e) => {
+        if (!live) return;
+        setMessages([]);
+        setError(errText(e));
+      });
     return () => {
       live = false;
     };
   }, [client, ticker]);
   useEffect(() => {
     const id = setInterval(() => {
-      const c = latestCursor(messages);
+      const c = messages && latestCursor(messages);
       if (!c) return;
       client
         .since(ticker, c)
-        .then((fresh) => fresh.length && setMessages((cur) => mergeMessages(cur, fresh)))
+        .then((fresh) => fresh.length && setMessages((cur) => mergeMessages(cur ?? [], fresh)))
         .catch(() => undefined);
     }, CHAT_POLL_MS);
     return () => clearInterval(id);
   }, [client, ticker, messages]);
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [messages.length]);
+  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [messages?.length]);
   const send = () => {
     const body = draft.trim();
     if (!body) return;
     setDraft('');
     client
       .send(ticker, body)
-      .then((m) => m && setMessages((cur) => mergeMessages(cur, [m])))
+      .then((m) => m && setMessages((cur) => mergeMessages(cur ?? [], [m])))
       .catch((e) => {
         setDraft(body);
         setError(
@@ -219,7 +223,17 @@ const SpaceChat = ({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-        {messages
+        {messages === null && (
+          <p className="pt-4 text-center text-xs" style={{ color: MUTED }}>
+            Loading chat…
+          </p>
+        )}
+        {messages?.length === 0 && !error && (
+          <p className="pt-4 text-center text-xs" style={{ color: MUTED }}>
+            No messages yet. Say hello.
+          </p>
+        )}
+        {(messages ?? [])
           .filter((m) => m.kind === 'text' && m.body)
           .map((m) => (
             <div key={m.id} className="text-[13px] leading-snug">
@@ -272,7 +286,7 @@ const CtlButton = ({
   active?: boolean;
   danger?: boolean;
 }) => (
-  <button onClick={onClick} className="flex flex-col items-center gap-1 min-w-[56px]" aria-label={label}>
+  <button onClick={onClick} className="flex flex-col items-center gap-1 min-w-[52px]" aria-label={label}>
     <span
       className="h-12 w-12 rounded-full flex items-center justify-center"
       style={{ background: danger ? '#D92D20' : active ? GOLD : '#1d1e23' }}
@@ -328,6 +342,13 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
     [client, ticker, media, onClose],
   );
   useBackClose(true, () => void leave(false));
+
+  // Notes are short status lines; they clear themselves.
+  useEffect(() => {
+    if (!note) return;
+    const id = setTimeout(() => setNote(''), 5_000);
+    return () => clearTimeout(id);
+  }, [note]);
 
   const apply = useCallback(
     (next: SpaceState) => {
@@ -488,7 +509,11 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
   const tiles = stage.length ? stage : [];
   const many = tiles.length > 4;
 
-  const stageView = (
+  const stageView = !tiles.length ? (
+    <p className="pt-10 text-center text-sm" style={{ color: MUTED }}>
+      Waiting for the host to come back on stage…
+    </p>
+  ) : (
     <div className={`grid gap-3 ${tiles.length <= 1 ? 'grid-cols-1' : many ? 'grid-cols-3' : 'grid-cols-2'}`}>
       {tiles.map((p) => (
         <StageTile
@@ -586,11 +611,28 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
               <RefreshCw size={18} color="#fff" />
             </CtlButton>
           )}
+          {myRole === 'speaker' && (
+            <CtlButton
+              label="Step down"
+              onClick={() => {
+                void media.setMic(false).catch(() => undefined);
+                void media.setCamera(false, facing).catch(() => undefined);
+                setMicOn(false);
+                setCamOn(false);
+                void act({ action: 'step_down' });
+              }}
+            >
+              <Users size={18} color="#fff" />
+            </CtlButton>
+          )}
         </>
       ) : (
         <CtlButton
           label={raised ? 'Lower hand' : 'Raise hand'}
-          onClick={() => void act({ action: 'hand', raised: !raised })}
+          onClick={() => {
+            if (!raised) setNote('Hand raised. The host can bring you on stage.');
+            void act({ action: 'hand', raised: !raised });
+          }}
           active={raised}
         >
           <Hand size={20} color={raised ? '#010101' : '#fff'} />
@@ -621,12 +663,14 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span
-              className="rounded px-1.5 py-[1px] text-[10px] font-bold"
-              style={{ background: '#D92D20', color: '#fff' }}
-            >
-              LIVE
-            </span>
+            {phase === 'live' && (
+              <span
+                className="shrink-0 rounded px-1.5 py-[1px] text-[10px] font-bold"
+                style={{ background: '#D92D20', color: '#fff' }}
+              >
+                LIVE
+              </span>
+            )}
             <span className="text-[15px] font-semibold text-white truncate">{title}</span>
           </div>
           <div className="text-[11px]" style={{ color: MUTED }}>

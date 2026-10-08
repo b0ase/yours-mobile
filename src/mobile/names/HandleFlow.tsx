@@ -7,6 +7,7 @@ import { syncBchatHandle } from './bchatHandle';
 import {
   claimPaymail,
   lookupPaymail,
+  nameChangeBlocked,
   paymailAvailable,
   paymailEnabled,
   PAYMAIL_ALIAS_RE,
@@ -202,6 +203,8 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   };
 
   const owned = (!!paymail && paymail.split('@')[0] === alias) || state === 'mine';
+  // A verified X / Google name can't switch to a plain one (server rule): explain, don't offer it.
+  const blocked = nameChangeBlocked(paymail, alias);
   const stateText: Record<AliasState, string> = {
     idle: '',
     checking: 'Checking…',
@@ -290,7 +293,12 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
                 <b style={{ color: GOLD }}>{paymail} ✓</b> receives BSV and tokens from any paymail wallet.
               </p>
             )}
-            {!owned && (
+            {!owned && blocked && (
+              <p className="text-xs" style={{ color: GRAY }}>
+                {blocked}
+              </p>
+            )}
+            {!owned && !blocked && (
               <button
                 type="button"
                 disabled={busy || state !== 'free'}

@@ -10,11 +10,12 @@ import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, X } from 'lucide-react';
+import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
+import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AgentToolsSheet } from '../agents/AgentToolsSheet';
-import bGlyph from '../brand/bwallet-glyph.svg';
+import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
 import { isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
@@ -68,7 +69,6 @@ const TopNavBar = () => {
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
-  const onAgent = pathname.startsWith('/m/agent');
   const onMedia = pathname.startsWith('/m/media');
   const onLock = pathname.startsWith('/m/lock');
   const [drawer, setDrawer] = useState(false);
@@ -141,7 +141,7 @@ const TopNavBar = () => {
         // Portalled to <body> so a page drag (phone/pager.tsx) never moves the bar.
         createPortal(
           // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
-          // Accounts · Calls · b (the agent, /m/agent) · Media · Lock. No account strip above it.
+          // Accounts · Calls · Airdrops · Media · Lock. No account strip above it.
           <div
             className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
             style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
@@ -163,29 +163,8 @@ const TopNavBar = () => {
             >
               <Phone size={16} color={ACCENT} />
             </button>
-            <button
-              type="button"
-              aria-label={X_MARK ? 'bX agent' : 'b agent'}
-              onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
-              aria-pressed={onAgent}
-              // Owner round 4: a solid gold b on its own, no circle (black on the store edition's yellow bar).
-              className="w-10 h-10 flex items-center justify-center bg-transparent cursor-pointer"
-            >
-              {FLIP ? (
-                <svg viewBox="23 8 74 100" width={21} height={28} aria-hidden>
-                  <mask id="bnavp">
-                    <rect x="0" y="0" width="140" height="140" fill="#fff" />
-                    <circle cx="60" cy="72" r="15" fill="#000" />
-                  </mask>
-                  <g fill="#010101" mask="url(#bnavp)">
-                    <polygon points="45,12 45,76 27,76 27,30" />
-                    <circle cx="60" cy="72" r="33" />
-                  </g>
-                </svg>
-              ) : (
-                <img src={bGlyph} alt="" width={30} height={30} draggable={false} />
-              )}
-            </button>
+            {/* Owner, 8 Oct 2026: the airdrops inbox takes the b's slot (the agent stays on the dock b and pull-down). */}
+            <AirdropsNavButton color={ACCENT} ring={RING} />
             <button
               type="button"
               aria-label="Media"
@@ -211,7 +190,7 @@ const TopNavBar = () => {
           document.body,
         )
       ) : (
-        // Five equal slots: Accounts · Calls · b agent · Media · Settings.
+        // Five equal slots: Accounts · Calls · Airdrops · Media · Settings.
         <div
           className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
           style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
@@ -233,30 +212,8 @@ const TopNavBar = () => {
           >
             <Phone size={16} color={ACCENT} />
           </button>
-          {/* The b opens the b agent. */}
-          <button
-            type="button"
-            aria-label={X_MARK ? 'bX agent' : 'b agent'}
-            // Toggle: the b opens the b agent, and closes it again when it's already open.
-            onClick={() => (onAgent ? navigate(-1) : navigate('/m/agent'))}
-            aria-pressed={onAgent}
-            className="relative w-10 h-10 flex items-center justify-center bg-transparent"
-          >
-            {FLIP ? (
-              <svg viewBox="23 8 74 100" width={20} height={26} aria-hidden>
-                <mask id="bnav">
-                  <rect x="0" y="0" width="140" height="140" fill="#fff" />
-                  <circle cx="60" cy="72" r="15" fill="#000" />
-                </mask>
-                <g fill="#010101" mask="url(#bnav)">
-                  <polygon points="45,12 45,76 27,76 27,30" />
-                  <circle cx="60" cy="72" r="33" />
-                </g>
-              </svg>
-            ) : (
-              <img src={bGlyph} alt="" width={26} height={26} className="w-[26px] h-[26px]" />
-            )}
-          </button>
+          {/* Owner, 8 Oct 2026: the airdrops inbox takes the b's slot. */}
+          <AirdropsNavButton color={ACCENT} ring={RING} />
           <button
             type="button"
             aria-label="Media"
@@ -322,6 +279,15 @@ const TopNavBar = () => {
                 />
               </div>
               <div className="border-t border-white/5 px-2 py-2">
+                {/* 5.1.86: the top-bar b is now Airdrops, so the classic layout reaches the b agent here
+                    (the phone layout has the dock b hold and pull-down). Same toggle as the old b. */}
+                {showAgentInMenu(phone) &&
+                  action(<Sparkles size={16} color="#fff" />, X_MARK ? 'bX agent' : 'b agent', () => {
+                    setDrawer(false);
+                    const to = agentMenuTarget(pathname);
+                    if (to === -1) navigate(-1);
+                    else navigate(to);
+                  })}
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {/* bWalletX: agent accounts and the tools that drive them (owner, 6 Oct 2026). */}
                 {X_MARK &&
