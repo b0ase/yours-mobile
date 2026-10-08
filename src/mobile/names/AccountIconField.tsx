@@ -48,6 +48,20 @@ export const AccountIconField = ({ value, onChange }: { value: string; onChange:
         className="hidden"
         onChange={(e) => void pick(e.target.files?.[0])}
       />
+      {value && (
+        <button
+          type="button"
+          onClick={() => {
+            onChange('');
+            setText('');
+            setTyping(false);
+            if (input.current) input.current.value = '';
+          }}
+          className="text-[11px] text-[#F97066] underline"
+        >
+          Remove photo
+        </button>
+      )}
       {typing ? (
         <input
           value={text}

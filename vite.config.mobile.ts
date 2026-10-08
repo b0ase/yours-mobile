@@ -179,6 +179,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
+    // A Continue with X / Google sign-in made on this screen now belongs to the new account (socialLogin.ts bindSocial).
+    [
+      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);',
+      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);\n      bindSocial(keys.identityAddress);',
+    ],
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { bindSocial } from '../../mobile/social/socialLogin';",
+    ],
     // Password asked twice for every new account (owner, 6 Oct 2026).
     ['      if (newWallet && password !== passwordConfirm) {', '      if (password !== passwordConfirm) {'],
     // Restore offer from SocialSignIn needs the bottom menu's page switch.
@@ -238,7 +247,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
-      "      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onRestore={() => (newWallet ? navigate('/restore-wallet') : handleSelect('settings', 'restore-account'))} />\n      <form onSubmit={handleKeyGeneration} className=\"flex flex-col items-center w-full gap-0\">",
+      "      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={() => (newWallet ? navigate('/restore-wallet') : handleSelect('settings', 'restore-account'))} />\n      <form onSubmit={handleKeyGeneration} className=\"flex flex-col items-center w-full gap-0\">",
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
@@ -309,6 +318,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
   'src/pages/onboarding/RestoreAccount.tsx': [
+    // A Continue with X / Google sign-in made on this screen now belongs to the new account (socialLogin.ts bindSocial).
+    [
+      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);',
+      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);\n      bindSocial(keys.identityAddress);',
+    ],
+    [
+      "import { useNavigate } from 'react-router-dom';",
+      "import { useNavigate } from 'react-router-dom';\nimport { bindSocial } from '../../mobile/social/socialLogin';",
+    ],
     // Continue with X / Google: the 12 words must be the wallet that owns the verified name (src/mobile/social/restoreGuard.ts).
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -350,7 +368,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
-      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
+      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? \'\' : v))} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
     ],
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     [
