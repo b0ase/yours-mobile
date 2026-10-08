@@ -504,6 +504,98 @@ body,
   font-size: 12px;
   color: var(--bw-wcard-muted, #8e8e89);
 }
+/* Live balance (src/mobile/wallet/live): number flash, activity ticker, session meter. One line, never grows the card. */
+.bw-wcard-usd.bw-live-flash-up {
+  animation: bw-live-up 900ms ease-out;
+}
+.bw-wcard-usd.bw-live-flash-down {
+  animation: bw-live-down 900ms ease-out;
+}
+@keyframes bw-live-up {
+  0%,
+  30% {
+    color: #2ecc71;
+  }
+}
+@keyframes bw-live-down {
+  0%,
+  30% {
+    color: #ff5a5f;
+  }
+}
+.bw-live {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+.bw-live-tick,
+.bw-live-session {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.28);
+  color: #f5f5f0;
+  cursor: pointer;
+  animation: bw-live-in 220ms ease-out;
+}
+.bw-live-tick.is-out {
+  color: #ffb3b5;
+}
+.bw-live-tick.is-in {
+  color: #9ff0c0;
+}
+.bw-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2ecc71;
+  animation: bw-live-pulse 1.4s ease-in-out infinite;
+}
+.bw-live-bar {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+.bw-live-bar > span {
+  display: block;
+  height: 100%;
+  background: #e9c46a;
+  transition: width 300ms ease-out;
+}
+@keyframes bw-live-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+@keyframes bw-live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-wcard-usd.bw-live-flash-up,
+  .bw-wcard-usd.bw-live-flash-down,
+  .bw-live-tick,
+  .bw-live-session,
+  .bw-live-dot {
+    animation: none;
+  }
+  .bw-live-bar > span {
+    transition: none;
+  }
+}
 .bw-wcard-retry {
   margin-top: 4px;
   display: inline-flex;

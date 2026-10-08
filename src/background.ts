@@ -903,6 +903,10 @@ if (isInServiceWorker) {
       sender.origin,
     );
 
+    // Live-balance messages are for the wallet page (src/mobile/wallet/live/liveBus.ts), not the wallet: never
+    // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
+    if (message?.action === 'bwxSessionSpend' || message?.action === 'bwxLiveSpend') return false;
+
     // Check if message is from our own extension popup
     const isFromExtension = sender.origin?.startsWith(`chrome-extension://${chrome.runtime.id}`);
 
@@ -2848,6 +2852,25 @@ if (isInServiceWorker) {
 
       const result = await signer.createAction(message.params, message.originator);
       console.log('[createAction] Success');
+      // Live balance: tell any open wallet page at once, so the card ticks down before the next fetch (owner, 8 Oct
+      // 2026). Display only; the page reconciles on its next balance load (src/mobile/wallet/live/liveBus.ts).
+      if (result.txid || result.tx) {
+        const sats = requestedSats(message.params.outputs);
+        if (sats > 0)
+          chrome.runtime
+            .sendMessage({
+              action: 'bwxLiveSpend',
+              data: {
+                sats,
+                txid: result.txid,
+                label: message.params.description?.slice(0, 60) ?? '',
+                origin: message.originator && message.originator !== ADMIN_ORIGINATOR ? message.originator : undefined,
+              },
+            })
+            ?.catch(() => {
+              /* no wallet page open */
+            });
+      }
       if (message.originator && message.originator !== ADMIN_ORIGINATOR && result.txid) {
         const origin = message.originator;
         const payment = {
