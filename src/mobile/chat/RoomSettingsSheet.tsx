@@ -14,7 +14,9 @@ import type { OneSatContext } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import type { BchatClient, IssuerChallenge } from './api';
 import { issuerCandidates } from './holdings';
-import { findKeyFor, signBsmWith } from './issuerKey';
+import { findKeyFor } from './issuerKey';
+import { claimIssuerAdmin } from './autoClaim';
+import { claimDepsFor } from './claimDeps';
 import { spendFloorError } from './roomSpend';
 import { HistoryToggle } from './HistoryToggle';
 import {
@@ -95,6 +97,7 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 export const RoomSettingsSheet = ({
   client,
   ctx,
+  me,
   ticker,
   entry,
   onBans,
@@ -102,6 +105,7 @@ export const RoomSettingsSheet = ({
 }: {
   client: BchatClient;
   ctx: OneSatContext;
+  me: string;
   ticker: string;
   entry: TokenRoomEntry;
   onBans: () => void;
@@ -171,9 +175,8 @@ export const RoomSettingsSheet = ({
       'claim',
       async () => {
         if (!key) throw new Error('This wallet does not hold the issuer key');
-        const ch = await client.issuerChallenge(ticker);
-        if (!ch.message) throw new Error('No issuer address on chain for this token');
-        await client.claimIssuer(ticker, ch.message, await signBsmWith(ctx.wallet, key, ch.message));
+        const r = await claimIssuerAdmin(ticker, me, claimDepsFor(client, ctx), { force: true });
+        if (r !== 'claimed' && r !== 'already') throw new Error('Could not prove the issuer key. Try again.');
       },
       "You're the room admin.",
     );

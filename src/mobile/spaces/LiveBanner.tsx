@@ -4,7 +4,10 @@
  */
 import { useEffect, useState } from 'react';
 import { Radio } from 'lucide-react';
+import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from '../chat/api';
+import { claimIssuerAdmin, onIssuerClaimed } from '../chat/autoClaim';
+import { claimDepsFor } from '../chat/claimDeps';
 import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
 
@@ -14,12 +17,15 @@ const POLL_MS = 20_000;
 
 export const LiveBanner = ({
   client,
+  ctx,
   ticker,
   roomName,
   me,
   createdBy,
 }: {
   client: BchatClient;
+  /** The wallet, for the inline "Claim admin" fallback when starting is refused. */
+  ctx?: OneSatContext;
   ticker: string;
   roomName: string;
   me: string;
@@ -49,14 +55,32 @@ export const LiveBanner = ({
 
   useEffect(() => {
     let live = true;
-    client
-      .issuerChallenge(ticker)
-      .then((c) => live && setIssuer(c.youAreIssuer))
-      .catch(() => undefined);
+    const read = () =>
+      client
+        .issuerChallenge(ticker)
+        .then((c) => live && setIssuer(c.youAreIssuer))
+        .catch(() => undefined);
+    void read();
+    // A background issuer claim (chat/autoClaim.ts) just made this account the admin.
+    const off = onIssuerClaimed((t) => t === ticker && void read());
     return () => {
       live = false;
+      off();
     };
   }, [client, ticker]);
+
+  /** Inline fallback after a refusal: run the same issuer claim, then start again. */
+  const claimAdmin = ctx
+    ? async (): Promise<boolean> => {
+        const r = await claimIssuerAdmin(ticker, me, claimDepsFor(client, ctx), { force: true });
+        if (r !== 'claimed' && r !== 'already') return false;
+        setIssuer(true);
+        const again = open;
+        setOpen(null);
+        setTimeout(() => setOpen(again ?? {}), 0);
+        return true;
+      }
+    : undefined;
 
   const host = canHostRoom({ me, createdBy, youAreIssuer: issuer });
   const space = state?.space ?? null;
@@ -150,6 +174,7 @@ export const LiveBanner = ({
           roomName={roomName}
           me={me}
           startTitle={open.start}
+          onClaimAdmin={claimAdmin}
           onClose={() => {
             setOpen(null);
             setState(null);

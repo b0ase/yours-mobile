@@ -1,3 +1,5 @@
+import { claimIssuerAdmin } from '../chat/autoClaim';
+import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
 import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
 import { logInWalletApp } from '../wallet/connectionLog';
@@ -358,6 +360,11 @@ const Conversation = ({
   // Priced token rooms (chat/roomSpend.ts): what a message costs me, asked of bit-sign on open.
   // Store builds never open token rooms (ROOMS), so this never runs there.
   const { apiContext } = useServiceContext();
+  // Token room issuer: prove the issuer key in the background (once per room per session).
+  useEffect(() => {
+    if (!entry || !me) return;
+    void claimIssuerAdmin(room.ticker, me, claimDepsFor(client, apiContext));
+  }, [entry, me, room.ticker, client, apiContext]);
   const [charge, setCharge] = useState<SpendCharge | null>(null);
   const [confirmSend, setConfirmSend] = useState<{ text: string; existing?: ChatMessage } | null>(null);
   /** A payment already made for an optimistic message: a retry reuses it (bit-sign is idempotent per txid). */
@@ -661,7 +668,14 @@ const Conversation = ({
 
       {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
       {BSPACES_ENABLED && entry && (
-        <LiveBanner client={client} ticker={room.ticker} roomName={title} me={me} createdBy={room.created_by_handle} />
+        <LiveBanner
+          client={client}
+          ctx={apiContext}
+          ticker={room.ticker}
+          roomName={title}
+          me={me}
+          createdBy={room.created_by_handle}
+        />
       )}
       <div
         ref={scroller}
@@ -2651,6 +2665,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         <RoomSettingsSheet
           client={client}
           ctx={apiContext}
+          me={handle ?? ''}
           ticker={open.room.ticker}
           entry={open.entry}
           onBans={() => {

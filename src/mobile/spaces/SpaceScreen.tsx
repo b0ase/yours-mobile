@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { isAdminRefusal as adminRefusal } from '../chat/autoClaim';
 import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
@@ -317,6 +318,8 @@ export interface SpaceScreenProps {
   me: string;
   /** Host starting a new space: its title. Omit to join the live one. */
   startTitle?: string;
+  /** Shown as an inline "Claim admin" when an admin-only start is refused; true = claimed. */
+  onClaimAdmin?: () => Promise<boolean>;
   /** Room admin (issuer / creator): may share an invite even when someone else hosts. */
   canInvite?: boolean;
   onClose: () => void;
@@ -324,7 +327,18 @@ export interface SpaceScreenProps {
 
 type Phase = 'joining' | 'live' | 'ended' | 'error';
 
-export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvite, onClose }: SpaceScreenProps) => {
+export const SpaceScreen = ({
+  client,
+  ticker,
+  roomName,
+  me,
+  startTitle,
+  canInvite,
+  onClaimAdmin,
+  onClose,
+}: SpaceScreenProps) => {
+  const [needsClaim, setNeedsClaim] = useState(false);
+  const [claiming, setClaiming] = useState(false);
   const media = useMemo(() => new SpaceMedia(), []);
   const [phase, setPhase] = useState<Phase>('joining');
   const [error, setError] = useState('');
@@ -434,6 +448,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvit
               ? 'You need to hold this room’s token to join its space.'
               : errText(e);
         setError(msg);
+        setNeedsClaim(!!startTitle && adminRefusal(e));
         setPhase('error');
         void media.close();
       }
@@ -564,6 +579,21 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvit
           <p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
             {error}
           </p>
+        )}
+        {phase === 'error' && needsClaim && onClaimAdmin && (
+          <button
+            disabled={claiming}
+            onClick={() => {
+              setClaiming(true);
+              void onClaimAdmin()
+                .then((ok) => !ok && setError('This wallet could not prove it issued this token.'))
+                .finally(() => setClaiming(false));
+            }}
+            className="mt-5 rounded-full px-5 py-2 font-semibold disabled:opacity-50"
+            style={{ background: GOLD, color: '#010101' }}
+          >
+            {claiming ? 'Signing…' : 'Claim admin'}
+          </button>
         )}
         <button
           onClick={onClose}
