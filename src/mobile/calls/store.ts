@@ -1,5 +1,6 @@
 import { sendBsv, sendBsv21, sendMnee, type OneSatContext } from '@1sat/actions';
 import { isNative } from '../native';
+import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import { defaultHttp } from '../chat/api';
 import { mneeKeyDerivations } from '../../utils/mneeDerivations';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
@@ -46,9 +47,11 @@ export interface Snapshot {
   recent: ServerCall[];
   ready: boolean;
   error: string | null;
+  /** Mic/camera refused by the OS or browser: the call screen offers Settings and retries on resume. */
+  denied: MediaKind | null;
 }
 
-let snap: Snapshot = { call: IDLE, recent: [], ready: false, error: null };
+let snap: Snapshot = { call: IDLE, recent: [], ready: false, error: null, denied: null };
 const listeners = new Set<Listener>();
 let client: CallsClient | null = null;
 let ctxRef: OneSatContext | null = null;
@@ -157,7 +160,7 @@ async function joinMedia(callId: string) {
   const facing = 'facing' in s ? s.facing : 'user';
   media = new CallMedia();
   if (videoEls) media.bindVideo(videoEls.local, videoEls.remote);
-  const { cameraFailed } = await media.connect(
+  const { cameraFailed, micDenied, cameraDenied } = await media.connect(
     t.url,
     t.token,
     {
@@ -174,8 +177,9 @@ async function joinMedia(callId: string) {
   );
   if (cameraFailed) {
     dispatch({ type: 'TOGGLE_CAMERA' });
-    set({ error: 'Camera unavailable — continuing as a voice call' });
+    if (!cameraDenied) set({ error: 'Camera unavailable — continuing as a voice call' });
   }
+  if (micDenied || cameraDenied) set({ denied: micDenied ? 'mic' : 'camera' });
 }
 
 let videoEls: { local: HTMLVideoElement | null; remote: HTMLVideoElement | null } | null = null;
@@ -189,6 +193,7 @@ async function teardown() {
   const m = media;
   media = null;
   await m?.close();
+  set({ denied: null });
   schedule(0);
 }
 
@@ -385,9 +390,29 @@ export async function toggleCamera() {
   } catch (e) {
     // Permission refused / no camera: put the button back and say why.
     if (s.camera) dispatch({ type: 'TOGGLE_CAMERA' });
-    set({ error: e instanceof Error ? e.message : String(e) });
+    if (s.camera && isPermissionDenied(e)) set({ denied: 'camera' });
+    else set({ error: e instanceof Error ? e.message : String(e) });
   }
 }
+
+/** Back from Settings: try the refused mic/camera again so the call carries on without redialling. */
+export async function retryDenied() {
+  const s = snap.call;
+  const kind = snap.denied;
+  if (!kind || !media || !busy(s)) return;
+  try {
+    if (kind === 'mic') await media.setMuted('muted' in s ? s.muted : false);
+    else if ('camera' in s && !s.camera) {
+      await media.setCamera(true, s.facing);
+      dispatch({ type: 'TOGGLE_CAMERA' });
+    }
+    set({ denied: null });
+  } catch {
+    /* still refused: keep the note */
+  }
+}
+
+export const dismissDenied = () => set({ denied: null });
 
 export async function flipCamera() {
   dispatch({ type: 'FLIP_CAMERA' });

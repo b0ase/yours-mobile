@@ -22,6 +22,8 @@ import {
   blockCaller,
   decline,
   dismiss,
+  dismissDenied,
+  retryDenied,
   flipCamera,
   hangUp,
   setCallLabel,
@@ -33,6 +35,7 @@ import {
   toggleSpeaker,
 } from './store';
 import { useCalls } from './useCalls';
+import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
 import { addFriend, isFriend } from './friends';
 import { END_TEXT, formatDuration, videoLayout, type CallState } from './machine';
 import { amountLabel } from './rateCard';
@@ -111,7 +114,7 @@ export const CallScreen = () => {
   // The label callees verify: our full paymail (unambiguous), else the OpNS name. Shown bare.
   const { paymail, handle } = useAccountNames(identityAddress, '', '', false);
   const myName = paymail || handle;
-  const { call, error } = useCalls();
+  const { call, error, denied } = useCalls();
   const [note, setNote] = useState('');
   const localRef = useRef<HTMLVideoElement>(null);
   const remoteRef = useRef<HTMLVideoElement>(null);
@@ -215,6 +218,15 @@ export const CallScreen = () => {
         <div className="text-sm text-[#98A2B3]">{status(call)}</div>
         {(note || (cam && error && /camera/i.test(error) ? error : '')) && (
           <div className="text-xs text-[#F5B800]">{note || error}</div>
+        )}
+        {denied && (
+          <MediaPermissionNote
+            kind={denied}
+            onRetry={() => void retryDenied()}
+            onDismiss={dismissDenied}
+            className="max-w-[320px] rounded-xl px-4 py-3 text-sm text-left"
+            style={{ background: '#1d1e23', color: '#fff', textShadow: 'none' }}
+          />
         )}
         {PAID_CALLS_ENABLED && call.phase === 'active' && call.paying && (
           <SpendLine meter={call.paying.meter} since={call.since} />

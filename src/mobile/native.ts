@@ -47,6 +47,11 @@ export interface YoursNativePlugin {
   /** iOS: ASWebAuthenticationSession; resolves with the `<scheme>://…` URL it ended on, rejects 'cancelled'. */
   authSession(opts: { url: string; scheme: string; httpsHost?: string; httpsPath?: string }): Promise<{ url: string }>;
 
+  /** Open this app's page in the OS Settings app (iOS: app-settings:, Android: app details). */
+  openAppSettings(): Promise<void>;
+  /** iOS: AVCaptureDevice access for the mic or camera; prompts the first time. */
+  mediaAccess(opts: { kind: 'mic' | 'camera' }): Promise<{ granted: boolean }>;
+
   /** iOS: which APNs gateway this build's push token is for (Debug builds → sandbox). */
   pushEnv(): Promise<{ env: 'production' | 'sandbox' }>;
 

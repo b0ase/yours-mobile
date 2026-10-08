@@ -9,6 +9,8 @@ import {
 } from 'livekit-client';
 import { isNative, YoursNative } from '../native';
 import type { Facing } from './machine';
+import { isPermissionDenied } from '../permissions/mediaPermission';
+import { ensureMediaAccess } from '../permissions/ensureMediaAccess';
 
 export interface MediaCallbacks {
   onDisconnected: () => void;
@@ -40,7 +42,7 @@ export class CallMedia {
     token: string,
     cb: MediaCallbacks,
     opts: { camera?: boolean; facing?: Facing } = {},
-  ): Promise<{ cameraFailed: boolean }> {
+  ): Promise<{ cameraFailed: boolean; micDenied: boolean; cameraDenied: boolean }> {
     const room = new Room({ adaptiveStream: false, dynacast: false });
     this.room = room;
     this.cb = cb;
@@ -82,15 +84,23 @@ export class CallMedia {
       }
     });
     await room.connect(url, token, { autoSubscribe: true });
-    await room.localParticipant.setMicrophoneEnabled(true);
+    // A refused mic must not cost the call either: connect muted and let the user fix it in Settings.
+    let micDenied = false;
+    try {
+      await ensureMediaAccess('mic');
+      await room.localParticipant.setMicrophoneEnabled(true);
+    } catch (e) {
+      if (!isPermissionDenied(e)) throw e;
+      micDenied = true;
+    }
     await room.startAudio().catch(() => undefined);
     // A refused or missing camera must not cost the call: report it and stay on voice.
-    if (!opts.camera) return { cameraFailed: false };
+    if (!opts.camera) return { cameraFailed: false, micDenied, cameraDenied: false };
     try {
       await this.setCamera(true, opts.facing ?? 'user');
-      return { cameraFailed: false };
-    } catch {
-      return { cameraFailed: true };
+      return { cameraFailed: false, micDenied, cameraDenied: false };
+    } catch (e) {
+      return { cameraFailed: true, micDenied, cameraDenied: isPermissionDenied(e) };
     }
   }
 
@@ -118,6 +128,7 @@ export class CallMedia {
   async setCamera(on: boolean, facing: Facing) {
     const room = this.room;
     if (!room) return;
+    if (on) await ensureMediaAccess('camera');
     await room.localParticipant.setCameraEnabled(on, on ? { facingMode: facing } : undefined);
     if (on && this.localEl) this.localVideo()?.attach(this.localEl);
   }
@@ -140,6 +151,7 @@ export class CallMedia {
   }
 
   async setMuted(muted: boolean) {
+    if (!muted) await ensureMediaAccess('mic');
     await this.room?.localParticipant.setMicrophoneEnabled(!muted);
   }
 

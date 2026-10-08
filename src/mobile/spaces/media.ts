@@ -10,6 +10,7 @@ import {
   type VideoTrack,
 } from 'livekit-client';
 import { isNative, YoursNative } from '../native';
+import { ensureMediaAccess } from '../permissions/ensureMediaAccess';
 
 export type Facing = 'user' | 'environment';
 
@@ -141,10 +142,12 @@ export class SpaceMedia {
 
   /** Opens the mic (the OS asks for permission the first time). Throws if refused or not granted. */
   async setMic(on: boolean) {
+    if (on) await ensureMediaAccess('mic');
     await this.room?.localParticipant.setMicrophoneEnabled(on);
   }
 
   async setCamera(on: boolean, facing: Facing = 'user') {
+    if (on) await ensureMediaAccess('camera');
     await this.room?.localParticipant.setCameraEnabled(on, on ? { facingMode: facing } : undefined);
     this.emitVideos();
   }
