@@ -68,7 +68,7 @@ import {
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
-import { onRoomTicker, takeRoomTicker } from '../chat/segmentNav';
+import { onRoomTicker, takeDmDraft, takeRoomTicker } from '../chat/segmentNav';
 import { RoomBell } from '../push/RoomBell';
 import {
   APP_NAME,
@@ -346,7 +346,8 @@ const Conversation = ({
   // Set when bit-sign floored this reader's history (since_join room; chat/history.ts).
   const [hiddenBefore, setHiddenBefore] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [draft, setDraft] = useState('');
+  // A DM opened with a prefilled reply (Airdrops › Reply, segmentNav.requestDm).
+  const [draft, setDraft] = useState(() => takeDmDraft(peer));
   // Facebook / WhatsApp parity (chat/social.ts): reply quote, reaction bar, typing, mentions.
   const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
   const [acting, setActing] = useState<ChatMessage | null>(null);

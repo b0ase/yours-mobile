@@ -17,6 +17,8 @@ export type AirdropItem = {
   /** Who it's from: the token id for a token (one issuer per deploy), else the sending address. */
   issuer: string;
   from: string;
+  /** The issuer's note, read from an OP_RETURN in the same tx (note.ts). Plain text, ≤280 chars. */
+  note?: string;
 };
 
 export type InboxState = {
