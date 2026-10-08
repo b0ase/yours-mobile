@@ -61,7 +61,7 @@ html:root {
   --dock-h: 3.75rem;
 }
 html[data-phone-layout]:root {
-  --dock-h: 5rem;
+  --dock-h: 5.5rem; /* 88px: 16px dots row + 72px icon row (owner, 8 Oct 2026: +8px) */
 }
 /* Phone layout dock: horizontal scroll, no scrollbar. */
 .bw-dock-scroll {
@@ -954,6 +954,20 @@ body,
 }
 
 /* Phone layout: the ring that fills while the dock's big b is held (phone/Dock.tsx HomeButton). */
+.bw-talk-sheet {
+  animation: bw-talk-up 180ms ease-out;
+}
+@keyframes bw-talk-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-talk-sheet {
+    animation: none;
+  }
+}
 .bw-hold-ring {
   stroke-dashoffset: 100;
   animation-name: bw-hold-fill;

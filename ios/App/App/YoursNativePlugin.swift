@@ -3,6 +3,7 @@ import AVFoundation
 import Capacitor
 import LocalAuthentication
 import Security
+import Speech
 import UIKit
 import WebKit
 
@@ -41,7 +42,12 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pushEnv", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "mediaAccess", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "mediaAccess", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechAvailable", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechStop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechCancel", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "haptic", returnType: CAPPluginReturnPromise)
     ]
 
     private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
@@ -154,6 +160,117 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Ask iOS for the microphone or camera before the web view opens it. This shows the system
     /// prompt (and creates the switch in Settings › Apps › bWallet) instead of relying on WebKit.
+    // MARK: - Speech (hold the dock's b to talk to b)
+
+    private var speechEngine: AVAudioEngine?
+    private var speechRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var speechTask: SFSpeechRecognitionTask?
+    private var speechText = ""
+    private var speechLastLevel = Date.distantPast
+
+    @objc func speechAvailable(_ call: CAPPluginCall) {
+        call.resolve(["available": SFSpeechRecognizer()?.isAvailable ?? false])
+    }
+
+    @objc func haptic(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            call.resolve()
+        }
+    }
+
+    /// Asks for speech recognition, then the mic (the first time), then listens. Resolves once listening:
+    /// { started: true } or { started: false, reason: 'denied' | 'unavailable' | 'error' }.
+    /// Events: speechPartial { text }, speechLevel { level 0..1 }.
+    @objc func speechStart(_ call: CAPPluginCall) {
+        SFSpeechRecognizer.requestAuthorization { auth in
+            guard auth == .authorized else { return call.resolve(["started": false, "reason": "denied"]) }
+            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                guard ok else { return call.resolve(["started": false, "reason": "denied"]) }
+                DispatchQueue.main.async { self.beginSpeech(call) }
+            }
+        }
+    }
+
+    private func beginSpeech(_ call: CAPPluginCall) {
+        endSpeech()
+        guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
+            return call.resolve(["started": false, "reason": "unavailable"])
+        }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            let engine = AVAudioEngine()
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            // On the phone where the device can: the audio never leaves it.
+            if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+                request.append(buffer)
+                self?.reportLevel(buffer)
+            }
+            speechText = ""
+            speechTask = recognizer.recognitionTask(with: request) { [weak self] result, _ in
+                guard let self = self, let result = result else { return }
+                self.speechText = result.bestTranscription.formattedString
+                self.notifyListeners("speechPartial", data: ["text": self.speechText])
+            }
+            engine.prepare()
+            try engine.start()
+            speechEngine = engine
+            speechRequest = request
+            call.resolve(["started": true])
+        } catch {
+            endSpeech()
+            call.resolve(["started": false, "reason": "error"])
+        }
+    }
+
+    private func reportLevel(_ buffer: AVAudioPCMBuffer) {
+        guard Date().timeIntervalSince(speechLastLevel) > 0.08, let data = buffer.floatChannelData?[0] else { return }
+        speechLastLevel = Date()
+        let n = Int(buffer.frameLength)
+        guard n > 0 else { return }
+        var sum: Float = 0
+        for i in 0..<n { sum += data[i] * data[i] }
+        let rms = sqrt(sum / Float(n))
+        notifyListeners("speechLevel", data: ["level": min(1, Double(rms) * 4)])
+    }
+
+    private func endSpeech() {
+        speechEngine?.inputNode.removeTap(onBus: 0)
+        speechEngine?.stop()
+        speechRequest?.endAudio()
+        speechEngine = nil
+        speechRequest = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Stops listening and resolves with the final text (a short wait lets the last words land).
+    @objc func speechStop(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.endSpeech()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.speechTask?.finish()
+                self.speechTask = nil
+                call.resolve(["text": self.speechText])
+            }
+        }
+    }
+
+    @objc func speechCancel(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.endSpeech()
+            self.speechTask?.cancel()
+            self.speechTask = nil
+            self.speechText = ""
+            call.resolve()
+        }
+    }
+
     @objc func mediaAccess(_ call: CAPPluginCall) {
         let type: AVMediaType = call.getString("kind") == "camera" ? .video : .audio
         switch AVCaptureDevice.authorizationStatus(for: type) {

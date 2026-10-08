@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { takeAgentDraft } from './handoff';
+import { AGENT_HANDOFF_EVENT, takeAgentDraft, takeAgentNote, takeAgentSend } from './handoff';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUp, Flag, Loader2, Mic } from 'lucide-react';
@@ -157,7 +157,22 @@ export const AgentConversation = ({
   const [confirm, setConfirm] = useState<{ sats: number; resolve: (ok: boolean) => void } | null>(null);
   const [unanswered, setUnanswered] = useState<Unanswered | null>(null);
   /** Shown while a saved paid answer is fetched after a reload, then "ready". */
-  const [notice, setNotice] = useState<string | null>(null);
+  // Hold the b to talk (phone/Dock.tsx): a short note when voice didn't work.
+  const [notice, setNotice] = useState<string | null>(() => takeAgentNote() || null);
+  // …or the spoken request, to send once the price / key status is known. Same send() as typing.
+  const [autoSend, setAutoSend] = useState(takeAgentSend);
+  // Already open when the b was held: take the handoff now (a fresh mount took it above).
+  useEffect(() => {
+    const onHandoff = () => {
+      const draft = takeAgentDraft();
+      const note = takeAgentNote();
+      if (draft) setInput(draft);
+      if (note) setNotice(note);
+      if (takeAgentSend()) setAutoSend(true);
+    };
+    window.addEventListener(AGENT_HANDOFF_EVENT, onHandoff);
+    return () => window.removeEventListener(AGENT_HANDOFF_EVENT, onHandoff);
+  }, []);
   // Third-party AI consent (agent/consent.ts): asked before the first message to each provider.
   const [consentAsk, setConsentAsk] = useState<((ok: boolean) => void) | null>(null);
   const [reportingReply, setReportingReply] = useState<{ text: string; index: number } | null>(null);
@@ -409,6 +424,15 @@ export const AgentConversation = ({
           ? `${formatPrice(price.sats, bsvUsd, price.usd)} per message · today ${money(today, bsvUsd)} / $${(prefs.dailyLimitCents / 100).toFixed(2)}`
           : (price.reason ?? 'Paid messages are not available yet.');
   const canSend = prefs.mode === 'own' ? keyReady !== false : !!price?.enabled;
+  const statusKnown = prefs.mode === 'own' ? keyReady !== null : price !== null;
+  // Spoken request: sent through send() like a typed one, so consent, the price and the confirm step all apply.
+  // If b can't take it (no key, paid off) it stays typed in the composer.
+  useEffect(() => {
+    if (!autoSend || busy || !statusKnown) return;
+    setAutoSend(false);
+    if (canSend && input.trim()) void send();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend, busy, statusKnown]);
 
   return (
     <div className="w-full flex-1 min-h-0 flex flex-col">

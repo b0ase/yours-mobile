@@ -1,5 +1,6 @@
 package org.yours.wallet;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
@@ -10,6 +11,14 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
@@ -43,7 +52,11 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.Collections;
@@ -67,7 +80,10 @@ import org.json.JSONObject;
  *            document start; messages are accepted from the main frame only and carry the
  *            origin WebView reports, never one the page claims.
  */
-@CapacitorPlugin(name = "YoursNative")
+@CapacitorPlugin(
+    name = "YoursNative",
+    permissions = { @Permission(strings = { Manifest.permission.RECORD_AUDIO }, alias = "microphone") }
+)
 public class YoursNativePlugin extends Plugin {
 
     /**
@@ -592,6 +608,143 @@ public class YoursNativePlugin extends Plugin {
                     "window.dispatchEvent(new CustomEvent(" + JSONObject.quote(event) + ",{detail:JSON.parse(" + JSONObject.quote(detail) + ")}));";
                 browser.evaluateJavascript(js, null);
             }
+            call.resolve();
+        });
+    }
+
+    // ------------------------------------------------------------------ speech (hold the dock's b to talk to b)
+
+    private SpeechRecognizer speech;
+    private String speechText = "";
+    private PluginCall speechStopCall;
+
+    @PluginMethod
+    public void speechAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", SpeechRecognizer.isRecognitionAvailable(getContext()));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void haptic(PluginCall call) {
+        try {
+            Vibrator v = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null) v.vibrate(VibrationEffect.createOneShot(15, VibrationEffect.DEFAULT_AMPLITUDE));
+        } catch (Exception ignored) {}
+        call.resolve();
+    }
+
+    private void speechResult(PluginCall call, boolean started, String reason) {
+        JSObject out = new JSObject();
+        out.put("started", started);
+        if (reason != null) out.put("reason", reason);
+        call.resolve(out);
+    }
+
+    /** Resolves once listening: { started: true } or { started: false, reason: 'denied' | 'asked' | 'unavailable' }. */
+    @PluginMethod
+    public void speechStart(PluginCall call) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) {
+            requestPermissionForAlias("microphone", call, "speechPermission");
+            return;
+        }
+        beginSpeech(call);
+    }
+
+    @PermissionCallback
+    private void speechPermission(PluginCall call) {
+        // The finger has usually let go while the prompt was up: say so rather than start listening late.
+        speechResult(call, false, getPermissionState("microphone") == PermissionState.GRANTED ? "asked" : "denied");
+    }
+
+    private void beginSpeech(PluginCall call) {
+        if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+            speechResult(call, false, "unavailable");
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            destroySpeech();
+            speechText = "";
+            speech = SpeechRecognizer.createSpeechRecognizer(getContext());
+            speech.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle b) {}
+                @Override public void onBeginningOfSpeech() {}
+                @Override public void onRmsChanged(float rms) {
+                    JSObject o = new JSObject();
+                    o.put("level", Math.max(0, Math.min(1, (rms + 2) / 12.0)));
+                    notifyListeners("speechLevel", o);
+                }
+                @Override public void onBufferReceived(byte[] b) {}
+                @Override public void onEndOfSpeech() {}
+                @Override public void onError(int error) { finishSpeech(); }
+                @Override public void onResults(Bundle b) { take(b); finishSpeech(); }
+                @Override public void onPartialResults(Bundle b) { take(b); }
+                @Override public void onEvent(int t, Bundle b) {}
+                private void take(Bundle b) {
+                    ArrayList<String> m = b == null ? null : b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (m == null || m.isEmpty() || m.get(0) == null || m.get(0).isEmpty()) return;
+                    speechText = m.get(0);
+                    JSObject o = new JSObject();
+                    o.put("text", speechText);
+                    notifyListeners("speechPartial", o);
+                }
+            });
+            Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+            // Holding = talking: don't end on a pause.
+            i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 10000);
+            i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 10000);
+            speech.startListening(i);
+            speechResult(call, true, null);
+        });
+    }
+
+    /** Recognition ended (results, error or the stop timeout): answer a waiting speechStop. */
+    private void finishSpeech() {
+        PluginCall c = speechStopCall;
+        speechStopCall = null;
+        if (c != null) {
+            JSObject o = new JSObject();
+            o.put("text", speechText);
+            c.resolve(o);
+        }
+    }
+
+    private void destroySpeech() {
+        if (speech != null) {
+            speech.destroy();
+            speech = null;
+        }
+    }
+
+    @PluginMethod
+    public void speechStop(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            if (speech == null) {
+                JSObject o = new JSObject();
+                o.put("text", speechText);
+                call.resolve(o);
+                return;
+            }
+            speechStopCall = call;
+            speech.stopListening();
+            // Final results normally land within a second; don't wait forever.
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                finishSpeech();
+                destroySpeech();
+            }, 1500);
+        });
+    }
+
+    @PluginMethod
+    public void speechCancel(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            speechStopCall = null;
+            if (speech != null) speech.cancel();
+            destroySpeech();
+            speechText = "";
             call.resolve();
         });
     }
