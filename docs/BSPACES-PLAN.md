@@ -131,3 +131,10 @@ Open rooms (non-token) exist in the store build. Spaces in public open rooms cou
 5. **Recording**: off by default. Replays are stored; on-chain inscription is optional (host's choice).
 6. **Infrastructure**: a dedicated LiveKit box only once we start promoting video, not now.
 7. **Meeting mode**: cap of 25. DMs and group chats come later.
+
+## Revenue model (owner approved, 8 Oct 2026)
+- Audio Spaces: free (current server handles ~300).
+- Video Spaces: host pays per viewer-minute from a pot (bandwidth cost + margin; rate set after measuring the server).
+- Platform fee: 5% of paid tickets, paid-speaker bids and per-minute charges, taken in the same transaction and shown before payment. Hosts keep 95%.
+- Later: optional "Pro host" subscription (recording storage, bigger video audiences).
+- A dedicated video server (about EUR 30-60 a month) only once revenue covers it; video is not promoted until then.
