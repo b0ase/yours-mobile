@@ -8,7 +8,30 @@ import type { MediaKind } from './mediaPermission';
  * screens turn into the Open Settings note. Android/web: getUserMedia itself prompts.
  */
 export async function ensureMediaAccess(kind: MediaKind): Promise<void> {
+  // The Sent! chime sets WebKit's audio session to 'ambient', which blocks capture
+  // ("AudioSession category is not compatible with audio capture"). Recording needs play-and-record.
+  if (kind === 'mic') setAudioSession('play-and-record');
   if (Capacitor.getPlatform() !== 'ios') return;
   const { granted } = await YoursNative.mediaAccess({ kind });
   if (!granted) throw new DOMException(`${kind} access refused`, 'NotAllowedError');
+}
+
+type AudioSessionNav = Navigator & { audioSession?: { type: string } };
+
+/** WebKit's navigator.audioSession (iOS 16.4+). No-op where unsupported. */
+export function setAudioSession(type: 'auto' | 'ambient' | 'playback' | 'play-and-record'): void {
+  try {
+    const nav = navigator as AudioSessionNav;
+    if (nav.audioSession) nav.audioSession.type = type;
+  } catch {
+    // not supported
+  }
+}
+
+export function audioSessionType(): string | undefined {
+  try {
+    return (navigator as AudioSessionNav).audioSession?.type;
+  } catch {
+    return undefined;
+  }
 }

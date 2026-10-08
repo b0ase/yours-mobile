@@ -13,7 +13,8 @@ const audioCtx = (): Ctx | null => {
   if (ctx) return ctx;
   try {
     const nav = navigator as Navigator & { audioSession?: { type: string } };
-    if (nav.audioSession) nav.audioSession.type = 'ambient';
+    // Never downgrade a live call or Space: 'ambient' blocks microphone capture.
+    if (nav.audioSession && nav.audioSession.type !== 'play-and-record') nav.audioSession.type = 'ambient';
   } catch {
     // not supported
   }

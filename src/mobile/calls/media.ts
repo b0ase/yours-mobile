@@ -10,7 +10,7 @@ import {
 import { isNative, YoursNative } from '../native';
 import type { Facing } from './machine';
 import { isPermissionDenied } from '../permissions/mediaPermission';
-import { ensureMediaAccess } from '../permissions/ensureMediaAccess';
+import { ensureMediaAccess, setAudioSession } from '../permissions/ensureMediaAccess';
 
 export interface MediaCallbacks {
   onDisconnected: () => void;
@@ -172,5 +172,6 @@ export class CallMedia {
     if (isNative) await YoursNative.audioSetSpeaker({ on: false }).catch(() => undefined);
     // Disconnecting stops local tracks, which releases the camera (and its indicator light).
     await room?.disconnect().catch(() => undefined);
+    setAudioSession('auto');
   }
 }

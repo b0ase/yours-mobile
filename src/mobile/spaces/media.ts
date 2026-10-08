@@ -10,7 +10,7 @@ import {
   type VideoTrack,
 } from 'livekit-client';
 import { isNative, YoursNative } from '../native';
-import { ensureMediaAccess } from '../permissions/ensureMediaAccess';
+import { ensureMediaAccess, setAudioSession } from '../permissions/ensureMediaAccess';
 
 export type Facing = 'user' | 'environment';
 
@@ -176,5 +176,6 @@ export class SpaceMedia {
     if (isNative) await YoursNative.audioSetSpeaker({ on: false }).catch(() => undefined);
     // Disconnecting stops local tracks, which releases the mic and camera (and their indicators).
     await room?.disconnect().catch(() => undefined);
+    setAudioSession('auto');
   }
 }
