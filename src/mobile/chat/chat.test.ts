@@ -172,6 +172,8 @@ describe('BchatClient', () => {
       pubkey_hex: '02ab',
       signature: 'SIG',
       intent: 'sign-in',
+      // Device kind for bit-sign's "New sign-in to bChat" alert (bun has no native platform → browser).
+      client: 'browser',
     });
     expect(calls[0].headers.Authorization).toBeUndefined();
     const rooms = await client.rooms();

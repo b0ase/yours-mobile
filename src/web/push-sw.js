@@ -26,6 +26,8 @@ self.addEventListener('push', (event) => {
 
 const routeQuery = (d) => {
   if (!d || d.kind === 'call') return '';
+  // "New sign-in to bChat" → Settings › Chat › Recent sign-ins (src/mobile/push/logic.ts).
+  if (d.kind === 'sign_in') return 'push=signins:';
   let t = typeof d.ticker === 'string' ? d.ticker : typeof d.room === 'string' ? d.room : '';
   if (!t && typeof d.url === 'string') {
     const m = /\/room\/([^/?#]+)/.exec(d.url);

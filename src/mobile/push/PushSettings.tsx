@@ -133,6 +133,17 @@ export const PushSettings = ({ Toggle }: { Toggle: ToggleC }) => {
             }
           />
           <Row
+            label="Sign-in alerts"
+            sub="A notification when your chat handle signs in on a device."
+            right={
+              <Toggle
+                label="Sign-in alerts"
+                on={prefs.categories.sign_in !== false}
+                onChange={(v) => void save({ ...prefs, categories: { ...prefs.categories, sign_in: v } })}
+              />
+            }
+          />
+          <Row
             label="Quiet hours"
             sub="No notifications in these hours (calls still ring)."
             right={<Toggle label="Quiet hours" on={prefs.quiet} onChange={(v) => void save({ ...prefs, quiet: v })} />}

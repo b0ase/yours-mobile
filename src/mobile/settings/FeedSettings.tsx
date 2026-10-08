@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
+  History,
   Ban,
   Bell,
   BellRing,
@@ -30,7 +31,9 @@ import {
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
-import { saveSession } from '../chat/api';
+import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
+import { isNative } from '../native';
+import { SIGNINS_OPEN_EVENT, signInRow, takeSignInsRequest } from './signIns';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
 import { IdentityMap } from './IdentityMap';
@@ -215,8 +218,8 @@ const ListRow = ({
 }: {
   title: string;
   sub?: string;
-  action: string;
-  onAction: () => void;
+  action?: string;
+  onAction?: () => void;
 }) => (
   <div
     className="mb-2 flex items-center gap-3 rounded-xl px-3 py-3"
@@ -230,13 +233,15 @@ const ListRow = ({
         </p>
       )}
     </div>
-    <button
-      onClick={onAction}
-      className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
-      style={{ border: `1px solid ${GOLD}`, color: GOLD }}
-    >
-      {action}
-    </button>
+    {action && onAction && (
+      <button
+        onClick={onAction}
+        className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+        style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+      >
+        {action}
+      </button>
+    )}
   </div>
 );
 
@@ -267,6 +272,40 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
         </>
       ) : (
         <Note>Nothing saved yet. Tap the bookmark on a post to save it.</Note>
+      )}
+    </Screen>
+  );
+};
+
+/** Settings › Chat › Recent sign-ins: the last 10 sign-ins to this account's chat handle. No IPs. */
+const SignInsScreen = ({ onBack }: { onBack: () => void }) => {
+  const session = loadSession();
+  const [items, setItems] = useState<SignInItem[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!session) return;
+    new BchatClient(defaultHttp(isNative), session)
+      .signIns()
+      .then(setItems)
+      .catch(() => setError('Couldn’t load sign-ins. Try again later.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.token]);
+  return (
+    <Screen title="Recent sign-ins" onBack={onBack}>
+      {!session ? (
+        <Note>Not signed in to chat. Open Chat to sign in.</Note>
+      ) : (
+        <>
+          <Heading>${session.handle}</Heading>
+          {error && <Note>{error}</Note>}
+          {!error && items === null && <Note>Loading…</Note>}
+          {items?.length === 0 && <Note>No sign-ins recorded yet.</Note>}
+          {items?.map((s, i) => {
+            const r = signInRow(s);
+            return <ListRow key={`${s.at}-${i}`} title={r.title} sub={r.when} />;
+          })}
+          <Note>Not you? Sign out of chat on every device, then check your account’s linked logins.</Note>
+        </>
       )}
     </Screen>
   );
@@ -453,8 +492,17 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'bagent'
     | 'websites'
     | 'idmap'
+    | 'signins'
     | null
   >(null);
+  // The "New sign-in to bChat" push opens Recent sign-ins (settings/signIns.ts).
+  useEffect(() => {
+    if (!acct) return;
+    if (takeSignInsRequest()) setScreen('signins');
+    const open = () => takeSignInsRequest() && setScreen('signins');
+    window.addEventListener(SIGNINS_OPEN_EVENT, open);
+    return () => window.removeEventListener(SIGNINS_OPEN_EVENT, open);
+  }, [acct]);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
   const [takeCwi, setTakeCwiState] = useState(true);
@@ -514,6 +562,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               setChatSignedOut(true);
             }}
             isFirst
+          />
+          <Divider />
+          <Row
+            icon={<History size={16} />}
+            label="Recent sign-ins"
+            description="When and where this chat handle signed in"
+            onClick={() => setScreen('signins')}
             isLast
           />
         </Section>
@@ -918,6 +973,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'sweep' && <HdSweepScreen onBack={() => setScreen(null)} />}
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
+      {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}

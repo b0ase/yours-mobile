@@ -160,3 +160,11 @@ describe('prefs mapping', () => {
     expect(roomNotifyFor({ ABC: 'bogus' as never }, 'ABC')).toBe('mentions');
   });
 });
+
+describe('sign-in alert taps', () => {
+  test('a sign_in push opens Recent sign-ins', () => {
+    const r = routeFromData({ kind: 'sign_in', url: '/settings/chat/sign-ins', device: 'ios-app' });
+    expect(r).toEqual({ segment: 'signins', ticker: '' });
+    expect(routeFromQuery(`?${routeToQuery(r!)}`)).toEqual({ segment: 'signins', ticker: '' });
+  });
+});
