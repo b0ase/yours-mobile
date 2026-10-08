@@ -262,7 +262,7 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 - Lock scripts, indexer support, receipts and the reasons to be cautious are in **docs/TIME-LOCK-PLAN.md (branch feat/lock-curves)**; see that plan's token-lock section and section 4 above.
 - Recommended limits: optional, for early buys only, at most 90 days, and shown prominently before a buyer confirms ("Tokens you buy now are locked until block H, about D days").
 - Selling a locked balance is impossible until the unlock height. The quote screen must state this.
-- Depends on the TokenLock indexer test (phase 6 in section 7).
+- Depends on the TokenLock indexer test (phase 6 in section 8).
 
 ### 6.5 Holder-rewards route: flag
 
@@ -294,7 +294,9 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 
 **Order**: A3 (policy, cheap while no coin uses the holders route) → A1 → A2 → A5 → A4 → A6.
 
-### 6.8 Tranches (build first of the two)
+## 7. Tranches and milestones (TokenBlaster launches)
+
+### 7.1 Tranches (build first of the two)
 
 Tranches are a supply release schedule, not a promise of anything. The issuer releases supply in time-locked tranches instead of all at once.
 
@@ -319,7 +321,7 @@ Tranches are a supply release schedule, not a promise of anything. The issuer re
 - **Immutability**: the schedule goes into the signed `launch_msg`: curve share P, the tranche list (height, amount, destination) and the curve shape and parameters. The coin page re-derives the schedule from those fields and checks it against the on-chain lock outputs.
 - **Copy**: "Supply release schedule: 40% on the curve now; 60% released in 12 monthly tranches." Never "rewards", "returns" or "value growth".
 
-### 6.9 Milestones (later)
+### 7.2 Milestones (later)
 
 Milestones are releases tied to events rather than dates. Each milestone tranche has a **deadline height**. If the milestone isn't met by then, the tranche either **releases** or **burns**, as the issuer chose at launch (signed). Nothing stays stuck forever.
 
@@ -334,7 +336,7 @@ Milestones are releases tied to events rather than dates. Each milestone tranche
 - **Recommendation**: start with **(c), with graduation first**, since the event already exists, then add **(b)** for real-world milestones. Allow (a) only with the time floor and a clear "issuer says" label, or leave it out.
 - **Enforcement**: releasing on a date can be enforced by the script. Releasing on an event needs a key or contract that checks the attestation. The vault (or a 2-of-2 between vault and issuer) releases when the condition is proved, and the deadline release or burn uses a nLockTime path, so it doesn't depend on us.
 
-### 6.10 Phases (additions)
+### 7.3 Phases (additions to 6.7)
 
 | # | What | Effort |
 |---|---|---|
@@ -345,7 +347,7 @@ Milestones are releases tied to events rather than dates. Each milestone tranche
 
 **Updated order**: A3 → A1 → A2 → A7 → A5 → A4 → A8 / A6 (after the indexer gate) → A9 → A10.
 
-## 7. Phases
+## 8. Phases
 
 | # | What | Size | Risk |
 |---|---|---|---|
