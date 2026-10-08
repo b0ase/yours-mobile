@@ -28,7 +28,32 @@ import { readListCache, writeListCache } from '../ui/listCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
-import { avatarFor, B_AVATAR, pendingBQuestions, useAvatars } from '../chat/avatars';
+import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
+import type { ReplyRef } from '../chat/api';
+import {
+  applyMention,
+  isEphemeral,
+  isPrivateB,
+  isReactionEvent,
+  isShared,
+  mentionQuery,
+  mentionSuggestions,
+  optimisticReaction,
+  reactionsByMessage,
+  replyOf,
+  replyRefFor,
+  typingLabel,
+} from '../chat/social';
+import { bubbleGestures } from '../chat/gestures';
+import {
+  MentionPicker,
+  MessageText,
+  ReactionBar,
+  ReactionChips,
+  ReplyPreview,
+  ReplyQuote,
+  TypingRow,
+} from '../chat/BubbleExtras';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
@@ -96,6 +121,7 @@ import {
   latestCursor,
   listTimeLabel,
   mergeMessages,
+  normHandle,
   oldestCursor,
   previewText,
   roomInitial,
@@ -136,7 +162,7 @@ import {
   type PublicRoom,
 } from '../chat/openRooms';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
-import { longPress, useRoomCard } from '../chat/roomCard';
+import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
 
@@ -213,6 +239,9 @@ const Avatar = ({
         src={icon}
         alt=""
         onError={() => setBroken(icon)}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
         className="rounded-full object-cover shrink-0"
         style={{ width: size, height: size, background: '#16181c' }}
       />
@@ -299,6 +328,11 @@ const Conversation = ({
   const [hasMore, setHasMore] = useState<boolean | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState('');
+  // Facebook / WhatsApp parity (chat/social.ts): reply quote, reaction bar, typing, mentions.
+  const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
+  const [acting, setActing] = useState<ChatMessage | null>(null);
+  const [typing, setTyping] = useState<string[]>([]);
+  const lastTypingPing = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const prependAnchor = useRef<number | null>(null);
@@ -363,8 +397,36 @@ const Conversation = ({
         void client.markRead(room.ticker).catch(() => {});
       })
       .catch(() => {});
+    void client.whoIsTyping(room.ticker).then(setTyping);
   }, [client, room.ticker, messages, online]);
   usePoll(poll, THREAD_POLL_MS, !loading);
+  // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
+  const pingTyping = (text: string) => {
+    if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
+    lastTypingPing.current = Date.now();
+    void client.typing(room.ticker).catch(() => {});
+  };
+  const react = (m: ChatMessage, emoji: string) => {
+    const mineNow = (reactions.get(m.id) ?? []).some((r) => r.emoji === emoji && r.handles.includes(normHandle(me)));
+    setMessages((cur) => cur.concat(optimisticReaction(m.id, emoji, me, mineNow)));
+    client.react(room.ticker, m.id, emoji).catch((e) => {
+      setMessages((cur) => cur.filter((x) => !(x.pending && x.event_type === 'reaction' && (x.event_payload as { target?: string })?.target === m.id)));
+      fail(e);
+    });
+  };
+  const shareB = (m: ChatMessage) => {
+    client
+      .shareBAnswer(room.ticker, m.id)
+      .then((saved) =>
+        setMessages((cur) =>
+          mergeMessages(
+            cur.map((x) => (x.id === m.id ? { ...x, event_payload: { ...(x.event_payload ?? {}), shared: true } } : x)),
+            saved ? [saved] : [],
+          ),
+        ),
+      )
+      .catch(fail);
+  };
 
   const loadOlder = useCallback(() => {
     const before = oldestCursor(messages);
@@ -391,7 +453,7 @@ const Conversation = ({
     } else if (stickToBottom.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, typing.length]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -418,6 +480,7 @@ const Conversation = ({
 
   const post = (body: string, existing: ChatMessage | undefined, pay: SpendCharge | null) => {
     const localId = existing?.localId ?? `l${Date.now()}-${++localSeq.current}`;
+    const quoting = existing ? replyOf(existing) : replyTo;
     const optimistic: ChatMessage = {
       id: `local:${localId}`,
       localId,
@@ -426,10 +489,14 @@ const Conversation = ({
       body,
       created_at: new Date().toISOString(),
       pending: true,
+      ...(quoting ? { event_payload: { reply_to: quoting } } : {}),
     };
     stickToBottom.current = true;
     setMessages((cur) => cur.filter((m) => m.localId !== localId).concat(optimistic));
-    if (!existing) setDraft('');
+    if (!existing) {
+      setDraft('');
+      setReplyTo(null);
+    }
     const go = async () => {
       let spend = paidFor.current.get(localId);
       if (!spend && pay && entryKey) {
@@ -437,7 +504,7 @@ const Conversation = ({
         spend = { beef: p.beef, rule: pay.rule, txid: p.txid };
         paidFor.current.set(localId, spend);
       }
-      const saved = await client.send(room.ticker, body, spend && { beef: spend.beef, rule: spend.rule });
+      const saved = await client.send(room.ticker, body, spend && { beef: spend.beef, rule: spend.rule }, quoting);
       // Spent only now: bit-sign broadcast it and stored the message.
       if (spend && pay && entryKey) recordSpent(entryKey, totalRaw(pay));
       return saved;
@@ -445,7 +512,11 @@ const Conversation = ({
     go()
       .then((saved) => {
         paidFor.current.delete(localId);
-        setMessages((cur) => (saved ? mergeMessages(cur, [saved]) : cur));
+        // An unstored reply (/b help, Lounge commands) never matches the optimistic copy: drop it.
+        setMessages((cur) => {
+          const rest = saved && normHandle(saved.author_handle ?? '') !== normHandle(me) ? cur.filter((m) => m.localId !== localId) : cur;
+          return saved ? mergeMessages(rest, [saved]) : rest;
+        });
       })
       .catch((e) => {
         setMessages((cur) => cur.map((m) => (m.localId === localId ? { ...m, failed: true } : m)));
@@ -469,9 +540,10 @@ const Conversation = ({
   const [blockTick, setBlockTick] = useState(0);
   useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
   const items = useMemo(() => {
-    const shown = withoutBlocked(messages, new Set(blockedHandles()));
+    const shown = withoutBlocked(messages, new Set(blockedHandles())).filter((m) => !isReactionEvent(m));
     return threadItems(hidden?.size ? shown.filter((m) => !hidden.has(m.id)) : shown, me);
   }, [messages, me, hidden, blockTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const reactions = useMemo(() => reactionsByMessage(messages), [messages]);
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
@@ -480,6 +552,8 @@ const Conversation = ({
     messages.map((m) => m.author_handle),
   );
   const waitingForB = pendingBQuestions(messages);
+  const mq = mentionQuery(draft);
+  const mentions = mq === null ? [] : mentionSuggestions(messages, mq, me);
   const composer = useRef<HTMLTextAreaElement>(null);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
@@ -629,8 +703,13 @@ const Conversation = ({
                     <div className="shrink-0" style={{ width: 28 }} />
                   ))}
                 <div
-                  {...(onMessageMenu && !it.message.pending ? longPress(() => onMessageMenu(it.message)) : {})}
-                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug"
+                  {...(!it.message.pending && !isEphemeral(it.message)
+                    ? bubbleGestures(
+                        () => setActing(it.message),
+                        isPrivateB(it.message) ? null : () => setReplyTo(replyRefFor(it.message)),
+                      )
+                    : {})}
+                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none"
                   style={{
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
@@ -649,7 +728,29 @@ const Conversation = ({
                       ${it.message.author_handle}
                     </div>
                   )}
-                  <span className="whitespace-pre-wrap break-words">{it.message.body}</span>
+                  {replyOf(it.message) && <ReplyQuote reply={replyOf(it.message)!} mine={it.mine} />}
+                  {(it.message.event_payload as { shared_by?: string } | null)?.shared_by && (
+                    <div className="text-[11px] mb-[2px]" style={{ color: it.mine ? '#5c4800' : MUTED }}>
+                      Shared by ${(it.message.event_payload as { shared_by?: string }).shared_by}
+                    </div>
+                  )}
+                  <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                  {isPrivateB(it.message) && (
+                    <div className="text-[11px] mt-1 flex items-center gap-2" style={{ color: it.mine ? '#5c4800' : MUTED }}>
+                      <Lock size={11} /> Only you can see this
+                      {normHandle(it.message.author_handle ?? '') === 'b' && !isEphemeral(it.message) && !isShared(it.message) && (
+                        <button
+                          type="button"
+                          onClick={() => shareB(it.message)}
+                          className="font-semibold underline"
+                          style={{ color: GOLD }}
+                        >
+                          Share to room
+                        </button>
+                      )}
+                      {isShared(it.message) && <span>· shared</span>}
+                    </div>
+                  )}
                   <span
                     className="text-[10px] ml-2 float-right mt-[6px]"
                     style={{ color: it.mine ? '#5c4800' : MUTED }}
@@ -670,6 +771,14 @@ const Conversation = ({
                   </span>
                 </div>
               </div>
+              {reactions.has(it.message.id) && (
+                <ReactionChips
+                  list={reactions.get(it.message.id)!}
+                  me={me}
+                  mine={it.mine}
+                  onToggle={(e) => react(it.message, e)}
+                />
+              )}
               {waitingForB.has(it.message.id) && (
                 <div className="flex items-end gap-2 justify-start mt-2" aria-live="polite">
                   <Avatar title="b" size={28} src={B_AVATAR} />
@@ -718,6 +827,18 @@ const Conversation = ({
               <div>Just /b shows what it can do.</div>
             </div>
           )}
+          <TypingRow label={typingLabel(typing)} />
+          {replyTo && <ReplyPreview reply={replyTo} onCancel={() => setReplyTo(null)} />}
+          {mentions.length > 0 && (
+            <MentionPicker
+              handles={mentions}
+              avatar={(h) => <Avatar title={h} size={22} src={avatarFor(h)} />}
+              onPick={(h) => {
+                setDraft((d) => applyMention(d, h));
+                requestAnimationFrame(() => composer.current?.focus());
+              }}
+            />
+          )}
           {mustPay(charge) && (
             <div className="px-4 pt-1 text-[11px] shrink-0" style={{ color: MUTED, background: '#0b0b0b' }}>
               {costLine(charge, entry?.gate.symbol ?? '', chargeDec(charge))}
@@ -748,7 +869,10 @@ const Conversation = ({
             <textarea
               ref={composer}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                pingTyping(e.target.value);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !isNative) {
                   e.preventDefault();
@@ -772,6 +896,46 @@ const Conversation = ({
             </button>
           </form>
         </>
+      )}
+      {acting && (
+        <ReactionBar
+          preview={acting.body || ''}
+          onReact={
+            isPrivateB(acting) || isEphemeral(acting)
+              ? null
+              : (e) => {
+                  react(acting, e);
+                  setActing(null);
+                }
+          }
+          onReply={
+            isPrivateB(acting)
+              ? null
+              : () => {
+                  setReplyTo(replyRefFor(acting));
+                  setActing(null);
+                  requestAnimationFrame(() => composer.current?.focus());
+                }
+          }
+          onShare={
+            isPrivateB(acting) && normHandle(acting.author_handle ?? '') === 'b' && !isEphemeral(acting) && !isShared(acting)
+              ? () => {
+                  shareB(acting);
+                  setActing(null);
+                }
+              : null
+          }
+          onMore={
+            onMessageMenu && !isPrivateB(acting)
+              ? () => {
+                  const m = acting;
+                  setActing(null);
+                  onMessageMenu(m);
+                }
+              : null
+          }
+          onClose={() => setActing(null)}
+        />
       )}
       {confirmSend && mustPay(charge) && entryKey && (
         <PayToPostSheet
@@ -1607,6 +1771,29 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   // Cache first (owner round 6): the last room list shows at once; the live list replaces it quietly.
   const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(`chat:rooms:${identityAddress}`));
+  // My X / Google picture (names/socialAvatar.ts) goes to bit-sign once, so other people's bubbles show it
+  // instead of my initial; bit-sign keeps a photo chosen there. Remembered per handle + picture.
+  const socialAvatar = chromeStorageService.getCurrentAccountObject().account?.settings?.socialProfile?.avatar ?? '';
+  useEffect(() => {
+    if (!handle || !/^https:\/\//.test(socialAvatar)) return;
+    rememberAvatar(handle, socialAvatar);
+    const key = `bwallet.chatAvatarPublished.${handle}`;
+    try {
+      if (localStorage.getItem(key) === socialAvatar) return;
+    } catch {
+      /* no storage */
+    }
+    client
+      .publishAvatar(socialAvatar)
+      .then(() => {
+        try {
+          localStorage.setItem(key, socialAvatar);
+        } catch {
+          /* no storage */
+        }
+      })
+      .catch(() => undefined);
+  }, [client, handle, socialAvatar]);
   const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
@@ -2380,3 +2567,5 @@ const ChatPage = () => (
 );
 
 export default ChatPage;
+/** For the dev-only sample-data preview (screenshots); not used by the app. */
+export { Conversation as ChatConversation };

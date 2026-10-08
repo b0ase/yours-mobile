@@ -95,6 +95,13 @@ export interface ChatSession {
   address: string;
 }
 
+/** Quote of the message being replied to (bit-sign stores it as event_payload.reply_to). */
+export interface ReplyRef {
+  id: string;
+  author: string | null;
+  snippet: string;
+}
+
 export interface MessagePage {
   messages: ChatMessage[];
   /** null when the server predates paging (no has_more field). */
@@ -301,13 +308,52 @@ export class BchatClient {
   }
 
   /** `spend`: a priced room's payment (chat/roomSpend.ts), the message and payment in one tx. */
-  async send(ticker: string, body: string, spend?: { beef: string; rule: string }): Promise<ChatMessage | null> {
-    const r = await this.call<{ message?: ChatMessage }>(
-      'POST',
-      `${BchatClient.path(ticker)}/messages`,
-      spend ? { body, spend } : { body },
-    );
+  async send(
+    ticker: string,
+    body: string,
+    spend?: { beef: string; rule: string } | null,
+    replyTo?: ReplyRef | null,
+  ): Promise<ChatMessage | null> {
+    const r = await this.call<{ message?: ChatMessage }>('POST', `${BchatClient.path(ticker)}/messages`, {
+      body,
+      ...(spend ? { spend } : {}),
+      ...(replyTo ? { replyTo } : {}),
+    });
     return r.message ?? null;
+  }
+
+  /** Toggle my emoji reaction on a message (bit-sign appends a `reaction` event; toggled server-side). */
+  async react(ticker: string, messageId: string, emoji: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/message/${encodeURIComponent(messageId)}/action`, {
+      action: 'react',
+      emoji,
+    });
+  }
+
+  /** "I am typing" (best effort; throttle in the caller). */
+  async typing(ticker: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/typing`, {});
+  }
+
+  /** Who else is typing now (handles). Older servers: 404 → nobody. */
+  async whoIsTyping(ticker: string): Promise<string[]> {
+    try {
+      const r = await this.call<{ typing?: string[] }>('GET', `${BchatClient.path(ticker)}/typing`);
+      return r.typing ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** "Share to room": post one of my private $b answers publicly. */
+  async shareBAnswer(ticker: string, id: string): Promise<ChatMessage | null> {
+    const r = await this.call<{ message?: ChatMessage }>('POST', `${BchatClient.path(ticker)}/b-share`, { id });
+    return r.message ?? null;
+  }
+
+  /** Publish my X / Google picture so other people's chat bubbles show it (bit-sign keeps a chosen photo). */
+  async publishAvatar(url: string): Promise<void> {
+    await this.call('POST', '/api/bitsign/avatars', { url });
   }
 
   async markRead(ticker: string): Promise<void> {

@@ -14,6 +14,30 @@ export const B_AVATAR = 'https://bwalletx.com/icon-512.png';
 const known = new Map<string, string>([[B_HANDLE, B_AVATAR]]);
 const norm = (h: string) => h.replace(/^\$/, '').toLowerCase();
 
+// Found pictures also survive a restart (a day), so a thread opens with faces, not initials.
+const STORE = 'bwallet.chatAvatars.v1';
+const DAY = 86_400_000;
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || '{}') as Record<string, { u: string; t: number }>;
+  for (const [h, v] of Object.entries(saved)) if (v?.u && Date.now() - v.t < DAY && !known.has(h)) known.set(h, v.u);
+} catch {
+  /* no storage (tests, private mode) */
+}
+const persist = (found: Record<string, string>) => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE) || '{}') as Record<string, { u: string; t: number }>;
+    for (const [h, u] of Object.entries(found)) if (u) saved[norm(h)] = { u, t: Date.now() };
+    localStorage.setItem(STORE, JSON.stringify(saved));
+  } catch {
+    /* storage full / unavailable */
+  }
+};
+
+/** Seed a handle's picture we already know (e.g. my own social avatar). */
+export const rememberAvatar = (handle: string, url: string) => {
+  if (handle && url) known.set(norm(handle), url);
+};
+
 export const avatarFor = (handle: string | null | undefined): string | null =>
   handle ? known.get(norm(handle)) || null : null;
 
@@ -29,6 +53,7 @@ export const useAvatars = (client: BchatClient, handles: (string | null | undefi
       .avatars(ask)
       .then((found) => {
         for (const h of ask) known.set(h, found[h] ?? '');
+        persist(found);
         if (live) setTick((n) => n + 1);
       })
       .catch(() => undefined);
