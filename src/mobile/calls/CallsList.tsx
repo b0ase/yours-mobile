@@ -1,4 +1,14 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 import {
   Ban,
   ChevronDown,
@@ -219,8 +229,8 @@ const TabBar = ({ tab, onTab }: { tab: PhoneTab; onTab: (t: PhoneTab) => void })
   <nav
     role="tablist"
     aria-label="Calls"
-    className="sticky bottom-0 z-10 -mx-4 px-4 pt-2 pb-2 flex items-center gap-1 border-t border-[#1f2127]"
-    style={{ background: 'rgba(13,14,17,0.96)', backdropFilter: 'blur(8px)' }}
+    className="shrink-0 -mx-4 px-4 pt-2 pb-2 flex items-center gap-1 border-t border-[#1f2127]"
+    style={{ background: '#0d0e11' }}
   >
     {TABS.map((t) => {
       const I = TAB_ICON[t.id];
@@ -265,7 +275,35 @@ const TabBar = ({ tab, onTab }: { tab: PhoneTab; onTab: (t: PhoneTab) => void })
  * (feed/ChatSegments.tsx) and by the phone sheet in the top bar, which passes `onLeave` so
  * Message / Pay can close it on their way to another tab. Store build: no card, no Services.
  */
-export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
+/**
+ * Fill from where the view starts down to the viewport bottom, less `bottomInset` (the app's
+ * main nav + safe area), so the Calls tab bar always sits at the bottom, even for short lists.
+ */
+const useFillHeight = (bottomInset: string) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = ref.current;
+      if (!el) return;
+      const scroller = el.parentElement?.closest('.overflow-y-auto') as HTMLElement | null;
+      setTop(el.getBoundingClientRect().top + (scroller?.scrollTop ?? 0));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+  return { ref, style: { height: `calc(100dvh - ${Math.round(top)}px - ${bottomInset})` } };
+};
+
+/** In the full-screen phone sheet (covers the main nav). */
+const SHEET_INSET = 'calc(env(safe-area-inset-bottom, 0px) + 24px)';
+
+export const CallsList = ({
+  onLeave,
+  bottomInset = SHEET_INSET,
+}: { onLeave?: () => void; bottomInset?: string } = {}) => {
+  const fill = useFillHeight(bottomInset);
   const { recent, ready, error, call } = useCalls();
   const { chromeStorageService, apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
@@ -461,7 +499,7 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
 
   if (settings && BPhoneSettings)
     return (
-      <div className="w-full px-4 flex flex-col gap-3">
+      <div className="w-full px-4 flex flex-col gap-3" style={{ paddingBottom: bottomInset }}>
         <button
           onClick={() => setSettings(false)}
           className="self-start flex items-center gap-1 text-[13px] font-semibold"
@@ -476,7 +514,7 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
     );
 
   return (
-    <div className="w-full px-4 flex flex-col gap-3 min-h-full">
+    <div ref={fill.ref} className="w-full px-4 flex flex-col gap-3 min-h-0" style={fill.style}>
       {PAID_CALLS_ENABLED && <BPhoneCard profile={wallet ? mine : EMPTY_CARD} onOpen={() => setSettings(true)} />}
 
       <label className="flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5">
@@ -500,7 +538,7 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
       {problem && <p className="text-xs text-[#ff6b6b]">{problem}</p>}
       {inCall && <p className="text-xs text-[#98A2B3]">You are on a call.</p>}
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden -mx-4 px-4 flex flex-col">
         {query.trim() ? (
           <div className="flex flex-col">
             {searchEmpty(results) && (
