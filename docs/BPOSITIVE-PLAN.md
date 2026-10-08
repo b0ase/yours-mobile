@@ -189,3 +189,6 @@ Dependencies: Sign and seal (phase 2), public profile page bwalletx.com/bchat/u/
 9. **Public amounts:** show totals raised on journey pages, or only number of sponsors (less pressure, fewer scams)?
 10. **Token:** confirm there's no $bPOSITIVE token.
 11. **Sponsors' room:** on by default for each journey, or opt-in by the recipient?
+
+## Owner decisions (8 Oct 2026)
+All recommendations accepted: Option A pledges in phase 1; release pinned to the recipient; witnesses 2-of-3 at strength ≥ 2 (stronger for large amounts); no witness payment; 0% bCorp fee; 18+ at launch; hidden in store builds; journey pages show sponsor count (totals are the recipient's choice); no $bPOSITIVE token; sponsors' room opt-in.
