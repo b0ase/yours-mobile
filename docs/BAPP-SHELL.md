@@ -180,7 +180,7 @@ token**, which funds it. Ranking weights funding (likes paid, holders, recent ba
 | bChat | posts, rooms | the poster or the room token (paid likes already live, blog 024) |
 
 **Shared mechanics (in the shell package, so every app behaves the same):**
-- Like amount set once in bWalletX: **default 1¢** (owner, 8 Oct 2026), user-adjustable, with a daily cap. Pay in BSV, or in **one PNEE** (the wallet's USD¢ penny token) when the user holds PNEEs — a Like is literally one penny. One tap, no sheet
+- Like amount set once in bWalletX: **default 1¢** (owner, 8 Oct 2026), user-adjustable, daily cap **$1 (100 likes)** by default (decided), adjustable in Settings like b's limit. Pay in BSV, or in **one PNEE** (the wallet's USD¢ penny token) when the user holds PNEEs — a Like is literally one penny. One tap, no sheet
   under the cap; above it, the normal bWalletX approval.
 - The live balance ticks down (`bwallet:session-spend` / optimistic spend, docs/LIVE-BALANCE.md);
   the item shows "you're in the $TICKER room" with an Open room link.
@@ -215,7 +215,7 @@ Each phase ships alone: 1–2 improve the web app without the wallet; 3 works wi
 
 ## Owner questions
 
-- Like-to-fund: default Like = 1¢ (decided; PNEE when held). Daily cap? Payee split per item (creator vs token treasury)? Free reactions in store builds?
+- Like-to-fund: default Like = 1¢ (PNEE when held), daily cap $1 (100 likes) — both decided. Payee split per item (creator vs token treasury)? Free reactions in store builds?
 
 
 1. Option 2 (☰ + app icon) or Option 1 (app icon replaces ☰)?
