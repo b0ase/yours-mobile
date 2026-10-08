@@ -27,7 +27,9 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.os.Message;
 import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -368,6 +370,9 @@ public class YoursNativePlugin extends Plugin {
     private WebView browser;
     private TextView browserTitle;
     private OnBackPressedCallback browserBack;
+    /** Fullscreen video view from WebChromeClient.onShowCustomView, laid over the browser. */
+    private View browserFullscreen;
+    private WebChromeClient.CustomViewCallback browserFullscreenCallback;
     /** Bumped on every main-frame navigation; replies for an older page are dropped. */
     private int pageGeneration = 0;
     private final Map<String, PendingReply> pendingReplies = new HashMap<>();
@@ -383,6 +388,21 @@ public class YoursNativePlugin extends Plugin {
             this.pageRequestId = pageRequestId;
             this.generation = generation;
         }
+    }
+
+    /** Hosts match, ignoring a leading "www.". */
+    static boolean sameSite(String a, String b) {
+        String x = a == null ? "" : a.toLowerCase().replaceFirst("^www\\.", "");
+        String y = b == null ? "" : b.toLowerCase().replaceFirst("^www\\.", "");
+        return !x.isEmpty() && x.equals(y);
+    }
+
+    private void exitBrowserFullscreen() {
+        if (browserFullscreen == null) return;
+        if (browserRoot != null) browserRoot.removeView(browserFullscreen);
+        browserFullscreen = null;
+        if (browserFullscreenCallback != null) browserFullscreenCallback.onCustomViewHidden();
+        browserFullscreenCallback = null;
     }
 
     private static boolean isWebUrl(Uri uri) {
@@ -452,9 +472,57 @@ public class YoursNativePlugin extends Plugin {
             s.setAllowFileAccess(false);
             s.setAllowContentAccess(false);
             s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-            s.setSupportMultipleWindows(false);
+            // On so target=_blank / window.open reach onCreateWindow below (another site opens in the system browser).
+            s.setSupportMultipleWindows(true);
+            s.setJavaScriptCanOpenWindowsAutomatically(true);
+            // bApps (bmovies.app feeds) autoplay muted video without a tap.
+            s.setMediaPlaybackRequiresUserGesture(false);
             // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
-            s.setUserAgentString(s.getUserAgentString() + " bWallet/1 YoursWalletMobile/1 bWalletChannel/" + BuildConfig.CHANNEL);
+            // bWalletInset/48: the wallet bar above the page is 48dp tall.
+            s.setUserAgentString(
+                s.getUserAgentString() + " bWallet/1 YoursWalletMobile/1 bWalletChannel/" + BuildConfig.CHANNEL + " bWalletInset/48"
+            );
+            browser.setWebChromeClient(
+                new WebChromeClient() {
+                    @Override
+                    public void onShowCustomView(View view, CustomViewCallback callback) {
+                        exitBrowserFullscreen();
+                        if (browserRoot == null) {
+                            callback.onCustomViewHidden();
+                            return;
+                        }
+                        view.setBackgroundColor(Color.BLACK);
+                        browserFullscreen = view;
+                        browserFullscreenCallback = callback;
+                        browserRoot.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    }
+
+                    @Override
+                    public void onHideCustomView() {
+                        exitBrowserFullscreen();
+                    }
+
+                    @Override
+                    public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                        // A throwaway WebView catches the new window's first URL, then is dropped.
+                        WebView probe = new WebView(view.getContext());
+                        probe.setWebViewClient(
+                            new WebViewClient() {
+                                @Override
+                                public boolean shouldOverrideUrlLoading(WebView p, WebResourceRequest request) {
+                                    openNewWindowUrl(request.getUrl());
+                                    p.destroy();
+                                    return true;
+                                }
+                            }
+                        );
+                        WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                        transport.setWebView(probe);
+                        resultMsg.sendToTarget();
+                        return true;
+                    }
+                }
+            );
             browser.setWebViewClient(
                 new WebViewClient() {
                     @Override
@@ -503,7 +571,8 @@ public class YoursNativePlugin extends Plugin {
             browserBack = new OnBackPressedCallback(true) {
                 @Override
                 public void handleOnBackPressed() {
-                    if (browser != null && browser.canGoBack()) browser.goBack();
+                    if (browserFullscreen != null) exitBrowserFullscreen();
+                    else if (browser != null && browser.canGoBack()) browser.goBack();
                     else closeBrowser();
                 }
             };
@@ -550,10 +619,27 @@ public class YoursNativePlugin extends Plugin {
         if (isWebUrl(Uri.parse(url))) browser.loadUrl(url);
     }
 
+    /** target=_blank / window.open: same site loads in place; another site opens in the system browser. */
+    private void openNewWindowUrl(Uri uri) {
+        if (browser == null || !isWebUrl(uri)) return;
+        Uri current = browser.getUrl() == null ? null : Uri.parse(browser.getUrl());
+        if (current != null && sameSite(uri.getHost(), current.getHost())) {
+            browser.loadUrl(uri.toString());
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(intent);
+        } catch (Exception ignored) {}
+    }
+
     private void closeBrowser() {
         getActivity().runOnUiThread(() -> {
             if (browser == null) return;
             if (browserBack != null) browserBack.remove();
+            exitBrowserFullscreen();
             ((ViewGroup) browserRoot.getParent()).removeView(browserRoot);
             browser.destroy();
             browser = null;

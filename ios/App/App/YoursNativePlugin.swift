@@ -484,14 +484,18 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         content.addScriptMessageHandler(WeakReplyHandler(self), contentWorld: .page, name: "yours")
         config.userContentController = content
         config.websiteDataStore = .default()
+        // bApps (bmovies.app feeds) play video inline with playsInline, and muted autoplay works.
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
         // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
         // bWalletChannel: ios-store or ios-private (Info.plist BWalletChannel, set by scripts/channel-build.sh).
         let channel = Bundle.main.object(forInfoDictionaryKey: "BWalletChannel") as? String ?? "ios-store"
-        config.applicationNameForUserAgent = "Mobile/15E148 bWallet/1 YoursWalletMobile/1 bWalletChannel/\(channel)"
+        config.applicationNameForUserAgent = "Mobile/15E148 bWallet/1 YoursWalletMobile/1 bWalletChannel/\(channel) bWalletInset/48"
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
+        // Off: edge swipes clash with bApp feed swipes. Back lives on the bar's back button.
+        webView.allowsBackForwardNavigationGestures = false
         #if DEBUG
         if #available(iOS 16.4, *) { webView.isInspectable = true }
         #endif
@@ -610,13 +614,28 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         titleButton.setTitle(webView.url?.host ?? "", for: .normal)
     }
 
-    /// target=_blank / window.open: keep it in this view.
+    /// target=_blank / window.open: same site loads in this view; another site opens in Safari.
     func webView(
         _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for action: WKNavigationAction, windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if action.targetFrame == nil, let url = action.request.url { webView.load(URLRequest(url: url)) }
+        guard action.targetFrame == nil, let url = action.request.url else { return nil }
+        let scheme = url.scheme?.lowercased() ?? ""
+        if ["https", "http"].contains(scheme), !Self.sameSite(url.host, webView.url?.host) {
+            UIApplication.shared.open(url)
+        } else {
+            webView.load(URLRequest(url: url))
+        }
         return nil
+    }
+
+    /// Hosts match, ignoring a leading "www.".
+    static func sameSite(_ a: String?, _ b: String?) -> Bool {
+        func bare(_ h: String?) -> String {
+            let h = (h ?? "").lowercased()
+            return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+        }
+        return !bare(a).isEmpty && bare(a) == bare(b)
     }
 
     @objc private func goBack() {
