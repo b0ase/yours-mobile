@@ -198,3 +198,27 @@ Hosts must not be encouraged to invite strangers until moderation lands (Phase 2
 2. Merge bit-sign `feat/space-invites` (main auto-deploys).
 3. Domain: bwalletx.com is a separate site (`bwalletx-site`), so add a rewrite there: `{ "source": "/s/:code", "destination": "https://www.bit-sign.online/s/:code" }`, then set `SPACE_INVITE_BASE_URL=https://bwalletx.com` on bit-sign. The card image stays on bit-sign's own URL, so it works through the rewrite. Optional for universal links: add `/s/*` to bwalletx.com's apple-app-site-association and assetlinks, and `applinks:bwalletx.com` / an Android `autoVerify` filter for `bwalletx.com /s/` in the app.
 4. Release the wallet with the next bWallet release (`feat/space-invites` → `bwallet`).
+
+## Recordings, replays and public Space pages (owner, 8 Oct 2026, plan only)
+
+**Recording** (needs LiveKit on its own server first; egress is CPU-heavy):
+- Only the host can start it. Everyone sees a red ● REC badge, and joiners see "This Space is being recorded". Stage speakers are told before recording starts. Recording consent is required before this ships.
+- Output: an audio/video file stored on our storage (Hetzner or object storage), linked to the Space.
+
+**After the event, the issuer chooses what happens to each recording:**
+1. **Private** (default): only the issuer can see it.
+2. **Released to the room**: holders, i.e. anyone who meets the room's gate, can watch it as a replay card in the room timeline.
+3. **Public**: anyone can watch it on the Space's public page.
+4. **Paid**: watching costs a price (BSV priced in dollars, MNEE or a token), paid wallet to wallet, the same rails as bPhone and per-message charges. Holders can optionally watch free.
+5. **Deleted**: the file is removed from our storage; the card shows "Recording removed".
+The issuer can change this at any time. Each change is logged.
+
+**Public Space pages** (e.g. `bchatx.com/s/<slug>` or `/<room>/spaces`):
+- **Before:** advertise scheduled Spaces (title, host, time, entry price, an "Add to calendar" button, invite and ticket claim).
+- **During:** LIVE badge, with "Join in bWalletX" for a token-gated Space, or a public watch-only stream if the issuer allows it.
+- **After:** a replay, if released (free, gated or paid), plus a summary or highlights.
+- Each page gets its own share image (title, host, when, price; real numbers only).
+
+**Costs:** replays are served as files or HLS from storage/CDN, not from LiveKit, so watching after the event is cheap. Live public viewing at scale goes through HLS egress or a CDN, not the SFU, so it ties into the LiveKit server plan.
+
+**Order:** scheduled Spaces → recording with consent → release to the room → public pages → paid replays → public live viewing.
