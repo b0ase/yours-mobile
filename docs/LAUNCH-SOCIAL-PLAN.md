@@ -294,6 +294,57 @@ The source is tokenblaster.lol `src/lib/launch/curve.ts` and `shape.ts`. Everyth
 
 **Order**: A3 (policy, cheap while no coin uses the holders route) → A1 → A2 → A5 → A4 → A6.
 
+### 6.8 Tranches (build first of the two)
+
+Tranches are a supply release schedule, not a promise of anything. The issuer releases supply in time-locked tranches instead of all at once.
+
+- **Shape**: at launch, P% of the 1B supply goes into the curve (default 100%, which is today's launch). The rest is split into N tranches that unlock over time.
+- **Destination per tranche, fixed at launch**:
+  - **joins the curve**: the tokens are added to the pool's token reserve;
+  - **creator, team or treasury**: the tokens go to a signed address.
+- **Schedule maths**: reuse `src/mobile/locks/curves.ts` from branch feat/lock-curves. It has `curveWeights(curve, n)` for linear, front-loaded ×r, back-loaded ×r, S-curve, cliff + linear, step every K and custom shapes, then `splitByWeights` and `mergeSmall`, which merges tranches below the dust or indexer-fee floor.
+  - Move it to a small shared package (or copy it into tokenblaster.lol with a test that compares results) so the launch form, the coin page and the wallet compute the same amounts.
+- **Illustrated preview**: the same bar chart as the lock curves (scratchpad `lock-shots/curves.png`), with one bar per tranche showing height = tokens and the unlock date or block underneath.
+  - On the launch form it updates live as the curve shape, N and the interval change.
+  - On the coin page it marks released and pending tranches, with each tranche's lock txid.
+- **Interaction with the bonding curve** (this has to be modelled before launch):
+  - Adding ΔT tokens to the token reserve while the BSV reserve stays the same lowers the spot price.
+  - The form shows the step for each "joins the curve" tranche: price before → after.
+  - It also shows the cumulative path assuming no trades, labelled clearly as an illustration, not a forecast.
+  - Bound: each tranche may move the price by at most X% at current reserves (suggested 10%). Larger tranches must be split.
+  - The graduation threshold is counted against **circulating curve supply**, so a coin can't graduate early or be held back by unlocks. The rule is fixed in the signed parameters.
+  - Proof-of-reserves and the wallet's quote check must add released tranches to the pool. Each release is a vault transaction the validator can see.
+- **Time-locked token outputs**: each tranche is a TokenLock output (an inscription plus the lockup script) at its unlock height. That puts it behind **the same token-lock indexer gate** (section 4 and docs/TIME-LOCK-PLAN.md).
+  - Before that gate passes, a fallback is to hold tranches in the TokenBlaster vault, with the schedule enforced by the server. That is weaker trust, so the coin page labels it "custodial schedule".
+- **Immutability**: the schedule goes into the signed `launch_msg`: curve share P, the tranche list (height, amount, destination) and the curve shape and parameters. The coin page re-derives the schedule from those fields and checks it against the on-chain lock outputs.
+- **Copy**: "Supply release schedule: 40% on the curve now; 60% released in 12 monthly tranches." Never "rewards", "returns" or "value growth".
+
+### 6.9 Milestones (later)
+
+Milestones are releases tied to events rather than dates. Each milestone tranche has a **deadline height**. If the milestone isn't met by then, the tranche either **releases** or **burns**, as the issuer chose at launch (signed). Nothing stays stuck forever.
+
+- **(a) Issuer-attested**: the issuer signs "milestone X reached" and the tranche releases.
+  - Trust is weak, because the issuer is marking their own homework.
+  - Required: a minimum time floor (for example, no release in the first 30 days) and a public attestation shown on the coin page.
+- **(b) Witness-attested**: named witnesses sign and seal through bit-sign, m-of-n (for example 2 of 3), with witnesses who have $401 identities.
+  - Good for real-world milestones ("app shipped to the stores").
+  - The witnesses and m-of-n are fixed at launch.
+- **(c) Verifiable on-chain**: conditions read from the indexer, such as curve graduation (already a curve event), holder count ≥ N, or room members ≥ N.
+  - The strongest trust, with no attestation needed. Sybil caveat: holder and member counts can be inflated, so use a minimum balance or $401-strength members.
+- **Recommendation**: start with **(c), with graduation first**, since the event already exists, then add **(b)** for real-world milestones. Allow (a) only with the time floor and a clear "issuer says" label, or leave it out.
+- **Enforcement**: releasing on a date can be enforced by the script. Releasing on an event needs a key or contract that checks the attestation. The vault (or a 2-of-2 between vault and issuer) releases when the condition is proved, and the deadline release or burn uses a nLockTime path, so it doesn't depend on us.
+
+### 6.10 Phases (additions)
+
+| # | What | Effort |
+|---|---|---|
+| A7 | Tranches: shared curve maths, launch-form preview chart, signed schedule, custodial vault releases | M (1 week) |
+| A8 | Tranches as on-chain TokenLock outputs (after the indexer gate) | M |
+| A9 | Milestones (c): graduation, holders and members conditions with deadline release or burn | M |
+| A10 | Milestones (b): bit-sign m-of-n witness attestations | M–L |
+
+**Updated order**: A3 → A1 → A2 → A7 → A5 → A4 → A8 / A6 (after the indexer gate) → A9 → A10.
+
 ## 7. Phases
 
 | # | What | Size | Risk |
