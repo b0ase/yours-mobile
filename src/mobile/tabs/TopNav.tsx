@@ -1,20 +1,23 @@
 import { routeFor } from './tabs';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useInPeek } from '../phone/pageEl';
 import { useBackClose } from '../backStack';
 import { useAccountNames } from '../names/accountNames';
-import { AccountList } from '../account/AccountSwitcher';
+import { AccountRow } from '../account/AccountSwitcher';
+import { AgentsSheet, SwitchAccountSheet } from '../account/AccountSheets';
+import { useMenuAccounts, useSignOut } from '../account/useMenuAccounts';
+import { getRecent, inlineAccounts } from '../account/accountMenu';
 import { useAccountSwitch } from '../account/accountSwitch';
 import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, Download, Lock, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
+import { Bot, ChevronRight, Lock, LogOut, Menu, Phone, Play, Plus, ScanLine, Settings, Users, X } from 'lucide-react';
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { startAgentCreate } from '../agents/agentCreate';
-import { AgentToolsSheet } from '../agents/AgentToolsSheet';
+import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
 import { isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
@@ -46,6 +49,7 @@ const BAR_BG = FLIP ? '#F5B800' : undefined;
 const ICON = FLIP ? '#010101' : '#F2F2F0';
 const ACCENT = FLIP ? '#010101' : '#F5B800';
 const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
+const PAIR_LABEL = IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website';
 
 /** Padlock with a coin: Lock BSV (time-locks), not "lock the app". */
 const LockCoin = ({ color, accent }: { color: string; accent: string }) => (
@@ -82,6 +86,9 @@ const TopNavBar = () => {
   const [callsOpen, setCallsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
+  const [sheet, setSheet] = useState<'accounts' | 'agents' | null>(null);
+  const [confirmOut, setConfirmOut] = useState(false);
+  const signOut = useSignOut();
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
@@ -121,6 +128,15 @@ const TopNavBar = () => {
     accountObj.account?.name ?? '',
     accountObj.account?.settings?.socialProfile?.displayName ?? '',
   );
+  const { people, agents } = useMenuAccounts();
+  // Recent order is read when the drawer opens (switching reloads the app anyway).
+  const recent = useMemo(getRecent, [drawer]);
+  const inline = inlineAccounts(people, current, recent);
+  // Agents row: bWalletX always; the store build only when it has agent / pot accounts or the classic b agent.
+  const showAgents = X_MARK || agents.length > 0 || showAgentInMenu(phone);
+  useEffect(() => {
+    if (!drawer) setConfirmOut(false);
+  }, [drawer]);
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
 
@@ -132,13 +148,14 @@ const TopNavBar = () => {
     if (route) navigate(route);
   };
 
-  const action = (icon: React.ReactNode, label: string, onClick: () => void) => (
+  const action = (icon: React.ReactNode, label: string, onClick: () => void, more = false) => (
     <button
       onClick={onClick}
       className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left active:bg-white/5"
     >
-      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2b2f36]">{icon}</span>
-      <span className="text-sm font-semibold text-white">{label}</span>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#2b2f36]">{icon}</span>
+      <span className="min-w-0 flex-1 text-sm font-semibold text-white">{label}</span>
+      {more && <ChevronRight size={16} color="#98A2B3" />}
     </button>
   );
 
@@ -278,57 +295,187 @@ const TopNavBar = () => {
                   setHandleOpen(true);
                 }}
               />
-              <div className="flex-1 overflow-y-auto px-2" role="listbox">
-                <AccountList
-                  current={current}
-                  switchingTo={switchingTo}
-                  onSwitch={(id) => void handleSwitchAccount(id)}
-                  verified={verified}
-                />
+              <div className="flex-1 overflow-y-auto px-2" role="listbox" aria-label="Accounts">
+                {/* Owner, 8 Oct 2026: the current account plus the most recent (up to 4), then "All accounts (N)".
+                    Agent accounts are under Agents, never here (account/accountMenu.ts). */}
+                {inline.shown.map((a) => (
+                  <AccountRow
+                    key={a.id}
+                    account={a.account}
+                    current={current}
+                    switchingTo={switchingTo}
+                    onSwitch={(id) => void handleSwitchAccount(id)}
+                    verified={verified}
+                  />
+                ))}
+                {inline.more &&
+                  action(
+                    <Users size={16} color="#fff" />,
+                    `All accounts (${people.length})`,
+                    () => setSheet('accounts'),
+                    true,
+                  )}
+                {!inline.more && action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
               </div>
-              <div className="border-t border-white/5 px-2 py-2">
-                {/* 5.1.86: the top-bar b is now Airdrops, so the classic layout reaches the b agent here
-                    (the phone layout has the dock b hold and pull-down). Same toggle as the old b. */}
-                {showAgentInMenu(phone) &&
-                  action(<Sparkles size={16} color="#fff" />, X_MARK ? 'bX agent' : 'b agent', () => {
-                    setDrawer(false);
-                    const to = agentMenuTarget(pathname);
-                    if (to === -1) navigate(-1);
-                    else navigate(to);
-                  })}
-                {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
-                {/* bWalletX: agent accounts and the tools that drive them (owner, 6 Oct 2026). */}
-                {X_MARK &&
-                  action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
-                    startAgentCreate();
-                    go('create-account');
-                  })}
-                {X_MARK &&
-                  action(<Terminal size={16} color="#fff" />, 'CLI & MCP for agents', () => {
-                    setDrawer(false);
-                    setToolsOpen(true);
-                  })}
-                {action(<Download size={16} color="#fff" />, 'Import account', () => go('restore-account'))}
-                {action(
-                  <ScanLine size={16} color="#fff" />,
-                  IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website',
-                  () => {
+              <div className="border-t border-white/5 px-2 pt-2">
+                {showAgents &&
+                  action(<Bot size={16} color="#fff" />, `Agents (${agents.length})`, () => setSheet('agents'), true)}
+                {/* Store builds have no agent tools: pairing stays a menu row, as before. */}
+                {!X_MARK &&
+                  action(<ScanLine size={16} color="#fff" />, PAIR_LABEL, () => {
                     setDrawer(false);
                     setPairOpen(true);
-                  },
+                  })}
+                {/* Settings is the most important item in this section (owner, 8 Oct 2026). */}
+                <button
+                  type="button"
+                  onClick={() => go()}
+                  className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left border-0 active:bg-white/10"
+                  style={{ background: '#17191E' }}
+                >
+                  <span
+                    className="flex h-8 w-8 items-center justify-center rounded-full"
+                    style={{ background: '#F5B800' }}
+                  >
+                    <Settings size={16} color="#010101" />
+                  </span>
+                  <span className="text-[15px] font-bold text-white">Settings</span>
+                </button>
+              </div>
+              <div className="mt-2 border-t border-white/5 px-2 py-2">
+                {confirmOut ? (
+                  <div className="flex flex-col gap-2 px-1">
+                    <span className="text-xs" style={{ color: '#D0D5DD' }}>
+                      Sign this account out of chat and lock the wallet?
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmOut(false)}
+                        className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white border-0"
+                        style={{ background: '#2b2f36' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmOut(false);
+                          setDrawer(false);
+                          void signOut(current);
+                        }}
+                        className="flex-1 rounded-xl py-2.5 text-sm font-bold border-0"
+                        style={{ background: '#F04438', color: '#fff' }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmOut(true)}
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left border-0 bg-transparent active:bg-white/5"
+                    >
+                      <LogOut size={16} color="#F97066" />
+                      <span className="text-sm font-semibold" style={{ color: '#F97066' }}>
+                        Sign out
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Lock wallet"
+                      title="Lock wallet"
+                      onClick={() => {
+                        setDrawer(false);
+                        void lockWallet();
+                      }}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0"
+                      style={{ background: '#2b2f36' }}
+                    >
+                      <Lock size={16} color="#fff" />
+                    </button>
+                  </div>
                 )}
-                {action(<Settings size={16} color="#fff" />, 'Settings', () => go())}
-                {action(<Lock size={16} color="#fff" />, 'Lock wallet', () => {
-                  setDrawer(false);
-                  void lockWallet();
-                })}
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
       <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} fullScreen={phone} />
-      {toolsOpen && <AgentToolsSheet onClose={() => setToolsOpen(false)} />}
+      {sheet === 'accounts' && (
+        <SwitchAccountSheet
+          onClose={() => setSheet(null)}
+          current={current}
+          switchingTo={switchingTo}
+          onSwitch={(id) => void handleSwitchAccount(id)}
+          verified={verified}
+          onAdd={() => {
+            setSheet(null);
+            go('create-account');
+          }}
+          onImport={() => {
+            setSheet(null);
+            go('restore-account');
+          }}
+        />
+      )}
+      {sheet === 'agents' && (
+        <AgentsSheet
+          onClose={() => setSheet(null)}
+          current={current}
+          switchingTo={switchingTo}
+          onSwitch={(id) => void handleSwitchAccount(id)}
+          verified={verified}
+          toolsLabel={AGENT_TOOLS_TITLE}
+          // 5.1.86: the top-bar b is now Airdrops, so the classic layout reaches the b agent here
+          // (the phone layout has the dock b hold and pull-down). Same toggle as the old b.
+          onAgent={
+            showAgentInMenu(phone)
+              ? {
+                  label: X_MARK ? 'bX agent' : 'b agent',
+                  go: () => {
+                    setSheet(null);
+                    setDrawer(false);
+                    const to = agentMenuTarget(pathname);
+                    if (to === -1) navigate(-1);
+                    else navigate(to);
+                  },
+                }
+              : undefined
+          }
+          // bWalletX only: agent accounts and the tools that drive them (owner, 6 Oct 2026).
+          onAddAgent={
+            X_MARK
+              ? () => {
+                  setSheet(null);
+                  startAgentCreate();
+                  go('create-account');
+                }
+              : undefined
+          }
+          onTools={
+            X_MARK
+              ? () => {
+                  setSheet(null);
+                  setDrawer(false);
+                  setToolsOpen(true);
+                }
+              : undefined
+          }
+        />
+      )}
+      {toolsOpen && (
+        <AgentToolsSheet
+          onClose={() => setToolsOpen(false)}
+          pairLabel={PAIR_LABEL}
+          onPair={() => {
+            setToolsOpen(false);
+            setPairOpen(true);
+          }}
+        />
+      )}
       {pairOpen && (
         <Suspense fallback={null}>
           <PairSheet
