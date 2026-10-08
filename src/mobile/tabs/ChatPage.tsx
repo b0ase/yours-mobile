@@ -95,7 +95,10 @@ import {
   avatarHue,
   latestCursor,
   listTimeLabel,
+  isBotMessage,
+  isEphemeral,
   mergeMessages,
+  settleEphemeral,
   oldestCursor,
   previewText,
   roomInitial,
@@ -445,7 +448,9 @@ const Conversation = ({
     go()
       .then((saved) => {
         paidFor.current.delete(localId);
-        setMessages((cur) => (saved ? mergeMessages(cur, [saved]) : cur));
+        setMessages((cur) =>
+          !saved ? cur : isEphemeral(saved) ? settleEphemeral(cur, localId, saved) : mergeMessages(cur, [saved]),
+        );
       })
       .catch((e) => {
         setMessages((cur) => cur.map((m) => (m.localId === localId ? { ...m, failed: true } : m)));
@@ -602,6 +607,22 @@ const Conversation = ({
               <span className="text-[11px] px-3 py-1 rounded-full" style={{ background: '#1a1a1a', color: '#c9c3ad' }}>
                 {it.label}
               </span>
+            </div>
+          ) : isBotMessage(it.message) ? (
+            <div key={it.key} className="flex justify-start my-2">
+              <div
+                className="text-[13px] px-3 py-2 rounded-2xl max-w-[85%]"
+                style={{ background: '#0c2433', color: '#e6f4ff', border: '1px solid #1d4d6b' }}
+              >
+                <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ color: '#8fcdf5' }}>
+                  <span className="font-semibold">{String(it.message.event_payload?.name || 'Lounge bot')}</span>
+                  <span className="text-[9px] font-bold px-1 rounded" style={{ background: '#1f6d9c', color: '#fff' }}>
+                    BOT
+                  </span>
+                  {isEphemeral(it.message) && <span>· only you can see this</span>}
+                </div>
+                <div className="whitespace-pre-line break-words">{it.message.body}</div>
+              </div>
             </div>
           ) : it.message.kind === 'event' ? (
             <div key={it.key} className="flex justify-center my-2">
