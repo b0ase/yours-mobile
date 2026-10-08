@@ -9,6 +9,8 @@ import {
 } from 'livekit-client';
 import { isNative, YoursNative } from '../native';
 import type { Facing } from './machine';
+import { isPermissionDenied } from '../permissions/mediaPermission';
+import { ensureMediaAccess, setAudioSession } from '../permissions/ensureMediaAccess';
 
 export interface MediaCallbacks {
   onDisconnected: () => void;
@@ -40,7 +42,7 @@ export class CallMedia {
     token: string,
     cb: MediaCallbacks,
     opts: { camera?: boolean; facing?: Facing } = {},
-  ): Promise<{ cameraFailed: boolean }> {
+  ): Promise<{ cameraFailed: boolean; micDenied: boolean; cameraDenied: boolean; micError: string | null }> {
     const room = new Room({ adaptiveStream: false, dynacast: false });
     this.room = room;
     this.cb = cb;
@@ -82,15 +84,27 @@ export class CallMedia {
       }
     });
     await room.connect(url, token, { autoSubscribe: true });
-    await room.localParticipant.setMicrophoneEnabled(true);
+    // A refused mic must not cost the call either: connect muted and let the user fix it in Settings.
+    let micDenied = false;
+    let micError: string | null = null;
+    try {
+      await ensureMediaAccess('mic');
+      await room.localParticipant.setMicrophoneEnabled(true);
+    } catch (e) {
+      // ⚠ NEVER LET THE MIC END THE CALL. A throw here used to bubble up and drop the caller while
+      // the callee stayed connected. Refused → the Settings note; anything else (e.g. iOS audio
+      // session not ready) → stay connected muted and say so.
+      if (isPermissionDenied(e)) micDenied = true;
+      else micError = e instanceof Error ? e.message : String(e);
+    }
     await room.startAudio().catch(() => undefined);
     // A refused or missing camera must not cost the call: report it and stay on voice.
-    if (!opts.camera) return { cameraFailed: false };
+    if (!opts.camera) return { cameraFailed: false, micDenied, cameraDenied: false, micError };
     try {
       await this.setCamera(true, opts.facing ?? 'user');
-      return { cameraFailed: false };
-    } catch {
-      return { cameraFailed: true };
+      return { cameraFailed: false, micDenied, cameraDenied: false, micError };
+    } catch (e) {
+      return { cameraFailed: true, micDenied, cameraDenied: isPermissionDenied(e), micError };
     }
   }
 
@@ -118,6 +132,7 @@ export class CallMedia {
   async setCamera(on: boolean, facing: Facing) {
     const room = this.room;
     if (!room) return;
+    if (on) await ensureMediaAccess('camera');
     await room.localParticipant.setCameraEnabled(on, on ? { facingMode: facing } : undefined);
     if (on && this.localEl) this.localVideo()?.attach(this.localEl);
   }
@@ -140,6 +155,7 @@ export class CallMedia {
   }
 
   async setMuted(muted: boolean) {
+    if (!muted) await ensureMediaAccess('mic');
     await this.room?.localParticipant.setMicrophoneEnabled(!muted);
   }
 
@@ -160,5 +176,6 @@ export class CallMedia {
     if (isNative) await YoursNative.audioSetSpeaker({ on: false }).catch(() => undefined);
     // Disconnecting stops local tracks, which releases the camera (and its indicator light).
     await room?.disconnect().catch(() => undefined);
+    setAudioSession('auto');
   }
 }

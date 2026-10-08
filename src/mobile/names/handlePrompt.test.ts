@@ -47,7 +47,8 @@ describe('handle prompt', () => {
   });
 
   test('isPlaceholderName: defaults nobody chose are never shown as a name', () => {
-    for (const n of ['Anonymous', 'anon', 'Account 1', 'account', '', '  ', 'bWalletX', 'Yours']) expect(isPlaceholderName(n)).toBe(true);
+    for (const n of ['Anonymous', 'anon', 'Account 1', 'account', '', '  ', 'bWalletX', 'Yours'])
+      expect(isPlaceholderName(n)).toBe(true);
     for (const n of ['Richard', 'b0asex', 'Anon Ymous']) expect(isPlaceholderName(n)).toBe(false);
   });
 

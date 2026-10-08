@@ -75,7 +75,8 @@ export const onAgentsChange = (fn: () => void) => {
 };
 
 export const listAgentAccounts = (): AgentAccount[] => Object.values(read<Store>(KEY, {}));
-export const getAgentAccount = (id?: string | null): AgentAccount | null => (id ? (read<Store>(KEY, {})[id] ?? null) : null);
+export const getAgentAccount = (id?: string | null): AgentAccount | null =>
+  id ? (read<Store>(KEY, {})[id] ?? null) : null;
 export const isAgentAccount = (id?: string | null) => !!getAgentAccount(id);
 /** A pot (pots/pots.ts) is an agent account with kind 'pot'. */
 export const isPotAccount = (a?: AgentAccount | null) => a?.kind === 'pot';
@@ -103,8 +104,16 @@ export const markAgentAccount = (
   opts: { kind?: 'agent' | 'pot' } = {},
 ) => {
   const used = new Set(listAgentAccounts().map((x) => x.ghostColor));
-  const ghostColor = GHOST_COLORS.find((c) => !used.has(c)) ?? GHOST_COLORS[listAgentAccounts().length % GHOST_COLORS.length];
-  const a: AgentAccount = { identityAddress, labels: cleanLabels(labels), stopped: false, dailyCapUsd: null, createdAt: now, ghostColor };
+  const ghostColor =
+    GHOST_COLORS.find((c) => !used.has(c)) ?? GHOST_COLORS[listAgentAccounts().length % GHOST_COLORS.length];
+  const a: AgentAccount = {
+    identityAddress,
+    labels: cleanLabels(labels),
+    stopped: false,
+    dailyCapUsd: null,
+    createdAt: now,
+    ghostColor,
+  };
   if (opts.kind === 'pot') a.kind = 'pot';
   save(a);
   appendAgentLog(identityAddress, {
@@ -150,7 +159,8 @@ export const allAgentsStopped = () => read<boolean>(STOP_ALL, false);
 export const setAllAgentsStopped = (on: boolean) => write(STOP_ALL, on);
 
 export const getAgentLog = (id: string): AgentLogEntry[] => read<AgentLogEntry[]>(LOG(id), []);
-export const appendAgentLog = (id: string, e: AgentLogEntry) => write(LOG(id), [e, ...getAgentLog(id)].slice(0, LOG_MAX));
+export const appendAgentLog = (id: string, e: AgentLogEntry) =>
+  write(LOG(id), [e, ...getAgentLog(id)].slice(0, LOG_MAX));
 
 const dayStart = (now: number) => {
   const d = new Date(now);
@@ -179,7 +189,11 @@ export const spendAllowed = (
   if (account.stopped) return { ok: false, reason: 'This agent account is stopped' };
   if (account.dailyCapUsd !== null) {
     const left = account.dailyCapUsd - spentToday(log, now);
-    if (usd > left + 1e-9) return { ok: false, reason: `Over today's cap ($${Math.max(0, left).toFixed(2)} left of $${account.dailyCapUsd})` };
+    if (usd > left + 1e-9)
+      return {
+        ok: false,
+        reason: `Over today's cap ($${Math.max(0, left).toFixed(2)} left of $${account.dailyCapUsd})`,
+      };
   }
   return { ok: true };
 };

@@ -3,6 +3,7 @@
  * the "+ New room" sheet (create, or join with an invite code), the room info / moderation
  * sheet, and the message menu (report, block, delete). Every build, store build included.
  */
+import { HistoryToggle } from './HistoryToggle';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Ban, Copy, Flag, LogOut, Lock, ShieldCheck, Trash2, UserMinus, UserPlus, X } from 'lucide-react';
@@ -298,6 +299,12 @@ export const OpenRoomSheet = ({
         {card.closed && <span style={{ color: RED }}>· Closed</span>}
       </div>
       {card.description && <p className="text-sm text-white mb-3 whitespace-pre-wrap">{card.description}</p>}
+
+      {owner && !card.closed && (
+        <div className="mb-3">
+          <HistoryToggle client={client} ticker={card.ticker} />
+        </div>
+      )}
 
       {staff && card.inviteCode && (
         <div className="rounded-xl p-3 mb-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>

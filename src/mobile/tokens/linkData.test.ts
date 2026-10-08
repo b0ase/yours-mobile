@@ -12,7 +12,14 @@ describe('token links', () => {
       url: 'https://www.frogger.game/play',
       label: 'frogger.game',
     });
-    for (const bad of ['http://a.com', 'javascript:alert(1)', 'https://u:p@a.com', 'https://localhost', 'https://1.2.3.4', 'data:text/html,x'])
+    for (const bad of [
+      'http://a.com',
+      'javascript:alert(1)',
+      'https://u:p@a.com',
+      'https://localhost',
+      'https://1.2.3.4',
+      'data:text/html,x',
+    ])
       expect(toLink('website', bad)).toBeNull();
     expect(safeHttps('ftp://a.com')).toBeNull();
   });

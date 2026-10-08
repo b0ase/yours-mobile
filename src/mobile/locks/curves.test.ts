@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { curveLabel, curveWeights, mergeSmall, nonDecreasing, nonIncreasing, parsePcts, splitByWeights, validateCustom, type Curve } from './curves';
+import {
+  curveLabel,
+  curveWeights,
+  mergeSmall,
+  nonDecreasing,
+  nonIncreasing,
+  parsePcts,
+  splitByWeights,
+  validateCustom,
+  type Curve,
+} from './curves';
 import { MAX_PIECES, MIN_PIECE_SATS, buildGradual } from './schedule';
 import { buildReceipt, parseReceipt, receiptSvg } from './receipt';
 import { Script, Utils } from '@bsv/sdk';
@@ -103,12 +113,20 @@ describe('buildGradual with a curve', () => {
   });
 
   test('cliff and step drop the empty dates', () => {
-    expect(buildGradual({ ...base, perPayoutSats: 1_000_000, curve: { kind: 'cliff', cliff: 3 } }, NOW, H).pieces.length).toBe(9);
-    expect(buildGradual({ ...base, perPayoutSats: 1_000_000, curve: { kind: 'step', every: 4 } }, NOW, H).pieces.length).toBe(3);
+    expect(
+      buildGradual({ ...base, perPayoutSats: 1_000_000, curve: { kind: 'cliff', cliff: 3 } }, NOW, H).pieces.length,
+    ).toBe(9);
+    expect(
+      buildGradual({ ...base, perPayoutSats: 1_000_000, curve: { kind: 'step', every: 4 } }, NOW, H).pieces.length,
+    ).toBe(3);
   });
 
   test('small pieces on a steep curve are merged with a warning', () => {
-    const r = buildGradual({ ...base, count: 24, perPayoutSats: 2_000, curve: { kind: 'front', steepness: 50 } }, NOW, H);
+    const r = buildGradual(
+      { ...base, count: 24, perPayoutSats: 2_000, curve: { kind: 'front', steepness: 50 } },
+      NOW,
+      H,
+    );
     expect(r.error).toBeUndefined();
     expect(r.totalSats).toBe(48_000);
     expect(r.pieces.every((p) => p.sats >= MIN_PIECE_SATS)).toBe(true);
@@ -122,7 +140,11 @@ describe('buildGradual with a curve', () => {
   });
 
   test('dollar targets follow the curve; the target total is preserved', () => {
-    const r = buildGradual({ ...base, usdPerPayout: 100, rate: 50, bufferPct: 20, curve: { kind: 'back', steepness: 2 } }, NOW, H);
+    const r = buildGradual(
+      { ...base, usdPerPayout: 100, rate: 50, bufferPct: 20, curve: { kind: 'back', steepness: 2 } },
+      NOW,
+      H,
+    );
     expect(r.error).toBeUndefined();
     const t = r.pieces.map((p) => p.usdTarget as number);
     expect(sum(t)).toBeCloseTo(1200, 6);
@@ -132,13 +154,47 @@ describe('buildGradual with a curve', () => {
   });
 
   test('the 520-output cap and the ten-year limit still apply', () => {
-    expect(buildGradual({ start: day(1), frequency: 'daily', count: MAX_PIECES + 1, perPayoutSats: 5000, curve: { kind: 'back', steepness: 2 } }, NOW, H).error).toContain(String(MAX_PIECES));
-    expect(buildGradual({ start: day(1), frequency: 'monthly', count: 130, perPayoutSats: 5000, curve: { kind: 's-curve', steepness: 8 } }, NOW, H).error).toContain('ten years');
+    expect(
+      buildGradual(
+        {
+          start: day(1),
+          frequency: 'daily',
+          count: MAX_PIECES + 1,
+          perPayoutSats: 5000,
+          curve: { kind: 'back', steepness: 2 },
+        },
+        NOW,
+        H,
+      ).error,
+    ).toContain(String(MAX_PIECES));
+    expect(
+      buildGradual(
+        {
+          start: day(1),
+          frequency: 'monthly',
+          count: 130,
+          perPayoutSats: 5000,
+          curve: { kind: 's-curve', steepness: 8 },
+        },
+        NOW,
+        H,
+      ).error,
+    ).toContain('ten years');
   });
 
   test('custom curve needs one percentage per payout summing to 100', () => {
-    expect(buildGradual({ ...base, count: 4, perPayoutSats: 1_000_000, curve: { kind: 'custom', pcts: [10, 20, 30] } }, NOW, H).error).toContain('Enter 4');
-    const r = buildGradual({ ...base, count: 4, perPayoutSats: 1_000_000, curve: { kind: 'custom', pcts: [10, 20, 30, 40] } }, NOW, H);
+    expect(
+      buildGradual(
+        { ...base, count: 4, perPayoutSats: 1_000_000, curve: { kind: 'custom', pcts: [10, 20, 30] } },
+        NOW,
+        H,
+      ).error,
+    ).toContain('Enter 4');
+    const r = buildGradual(
+      { ...base, count: 4, perPayoutSats: 1_000_000, curve: { kind: 'custom', pcts: [10, 20, 30, 40] } },
+      NOW,
+      H,
+    );
     expect(r.pieces.map((p) => p.sats)).toEqual([400_000, 800_000, 1_200_000, 1_600_000]);
   });
 });
@@ -150,7 +206,13 @@ describe('receipt records the curve', () => {
   ];
   const identity = { address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' };
   test('JSON, card and verifier description', () => {
-    const r = buildReceipt({ mode: 'bsv', pieces, lockAddress: identity.address, identity, curve: { kind: 'back', steepness: 2 } });
+    const r = buildReceipt({
+      mode: 'bsv',
+      pieces,
+      lockAddress: identity.address,
+      identity,
+      curve: { kind: 'back', steepness: 2 },
+    });
     expect(r.curve).toEqual({ kind: 'back', steepness: 2 });
     const svg = receiptSvg(r);
     expect(svg).toContain('curve: back-loaded ×2');

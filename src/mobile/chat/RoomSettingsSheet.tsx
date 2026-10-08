@@ -3,7 +3,8 @@
  * issuer address from chain). Everyone else sees the room's rules read-only.
  *
  *  - Issuer who hasn't claimed yet, and this wallet holds the issuer key → "Claim admin".
- *  - Claimed issuer → minimum to enter, spend rule, title, cover, bans.
+ *  - Claimed issuer → minimum to enter, spend rule, title, cover, bans, and whether new
+ *    members can see earlier messages (HistoryToggle; saved on its own, not by Save).
  *  - Anyone else → "Room rules" summary.
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -13,8 +14,11 @@ import type { OneSatContext } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import type { BchatClient, IssuerChallenge } from './api';
 import { issuerCandidates } from './holdings';
-import { findKeyFor, signBsmWith } from './issuerKey';
+import { findKeyFor } from './issuerKey';
+import { claimIssuerAdmin } from './autoClaim';
+import { claimDepsFor } from './claimDeps';
 import { spendFloorError } from './roomSpend';
+import { HistoryToggle } from './HistoryToggle';
 import {
   amountLabel,
   formatRaw,
@@ -93,6 +97,7 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 export const RoomSettingsSheet = ({
   client,
   ctx,
+  me,
   ticker,
   entry,
   onBans,
@@ -100,6 +105,7 @@ export const RoomSettingsSheet = ({
 }: {
   client: BchatClient;
   ctx: OneSatContext;
+  me: string;
   ticker: string;
   entry: TokenRoomEntry;
   onBans: () => void;
@@ -169,9 +175,8 @@ export const RoomSettingsSheet = ({
       'claim',
       async () => {
         if (!key) throw new Error('This wallet does not hold the issuer key');
-        const ch = await client.issuerChallenge(ticker);
-        if (!ch.message) throw new Error('No issuer address on chain for this token');
-        await client.claimIssuer(ticker, ch.message, await signBsmWith(ctx.wallet, key, ch.message));
+        const r = await claimIssuerAdmin(ticker, me, claimDepsFor(client, ctx), { force: true });
+        if (r !== 'claimed' && r !== 'already') throw new Error('Could not prove the issuer key. Try again.');
       },
       "You're the room admin.",
     );
@@ -256,6 +261,7 @@ export const RoomSettingsSheet = ({
 
       {look && isIssuer && (
         <div className="flex flex-col gap-3">
+          <HistoryToggle client={client} ticker={ticker} />
           <label className="text-xs" style={{ color: MUTED }}>
             Title
             <input
@@ -310,8 +316,7 @@ export const RoomSettingsSheet = ({
               </select>
             </div>
             <p className="mt-1">
-              {per === 'message' ? SPEND_ENFORCED_NOTE : SPEND_COMING_NOTE}
-              {' '}You never pay to post in your own room.
+              {per === 'message' ? SPEND_ENFORCED_NOTE : SPEND_COMING_NOTE} You never pay to post in your own room.
             </p>
           </div>
           <button

@@ -33,7 +33,13 @@ export const parseActions = (reply: string): { text: string; actions: AgentActio
         const o = JSON.parse(body.trim()) as Record<string, unknown>;
         const kind = o.kind as StrategyAction;
         const usd = Number(o.usd ?? 0);
-        if (!['buy', 'sell', 'send', 'list'].includes(kind) || typeof o.token !== 'string' || !o.token.trim() || !(usd >= 0)) throw 0;
+        if (
+          !['buy', 'sell', 'send', 'list'].includes(kind) ||
+          typeof o.token !== 'string' ||
+          !o.token.trim() ||
+          !(usd >= 0)
+        )
+          throw 0;
         actions.push({
           kind,
           token: o.token.trim(),
@@ -52,7 +58,9 @@ export const parseActions = (reply: string): { text: string; actions: AgentActio
 
 /** The cheapest buyable listing of a token whose whole price fits the budget. Pure over its inputs. */
 export const pickListing = (listings: Listing[], maxUsd: number, bsvUsd: number): Listing | null =>
-  listings.filter((l) => l.buyable && (l.priceSats / 1e8) * bsvUsd <= maxUsd + 1e-9).sort((a, b) => a.priceSats - b.priceSats)[0] ?? null;
+  listings
+    .filter((l) => l.buyable && (l.priceSats / 1e8) * bsvUsd <= maxUsd + 1e-9)
+    .sort((a, b) => a.priceSats - b.priceSats)[0] ?? null;
 
 /** Extra system-prompt text for an agent account: its strategy and how to ask for actions. Empty otherwise. */
 export const agentAccountPrompt = (id: string | undefined, name: string) => {
@@ -80,7 +88,12 @@ The wallet checks every action before signing and may refuse it; the result is s
 export type ActionResult = { ok: boolean; text: string; txid?: string };
 
 /** Quote, gate and run one action on the current (agent) account. */
-export const runAgentAction = async (ctx: OneSatContext, id: string, a: AgentActionBlock, bsvUsd: number): Promise<ActionResult> => {
+export const runAgentAction = async (
+  ctx: OneSatContext,
+  id: string,
+  a: AgentActionBlock,
+  bsvUsd: number,
+): Promise<ActionResult> => {
   if (!getAgentAccount(id)) return { ok: false, text: 'This isn’t an agent account, so b can’t act on it.' };
   if (!(bsvUsd > 0)) return { ok: false, text: 'No BSV price right now; try again shortly.' };
   if (a.kind === 'sell' || a.kind === 'list') return { ok: false, text: 'Selling from chat isn’t available yet.' };
@@ -95,7 +108,14 @@ export const runAgentAction = async (ctx: OneSatContext, id: string, a: AgentAct
     const to = a.to.includes('@') ? { paymail: a.to } : { address: a.to };
     const res = await sendBsv.execute(ctx, { requests: [{ ...to, satoshis: sats }] });
     if (!res.txid || res.error) return { ok: false, text: `Send failed: ${String(res.error ?? 'unknown error')}` };
-    appendAgentLog(id, { at: Date.now(), action: 'send', detail: `Sent $${a.usd.toFixed(2)} to ${a.to}`, usd: a.usd, txid: res.txid, rule: getLoadedStrategy(id)?.strategy.name });
+    appendAgentLog(id, {
+      at: Date.now(),
+      action: 'send',
+      detail: `Sent $${a.usd.toFixed(2)} to ${a.to}`,
+      usd: a.usd,
+      txid: res.txid,
+      rule: getLoadedStrategy(id)?.strategy.name,
+    });
     return { ok: true, text: `Sent $${a.usd.toFixed(2)} to ${a.to}`, txid: res.txid };
   }
 
@@ -121,6 +141,13 @@ export const runAgentAction = async (ctx: OneSatContext, id: string, a: AgentAct
     ...MODULE_FINISHES,
   });
   if (!res.txid || res.error) return { ok: false, text: `Buy failed: ${String(res.error ?? 'unknown error')}` };
-  appendAgentLog(id, { at: Date.now(), action: 'buy', detail: `Bought ${pick.label}`, usd, txid: res.txid, rule: getLoadedStrategy(id)?.strategy.name });
+  appendAgentLog(id, {
+    at: Date.now(),
+    action: 'buy',
+    detail: `Bought ${pick.label}`,
+    usd,
+    txid: res.txid,
+    rule: getLoadedStrategy(id)?.strategy.name,
+  });
   return { ok: true, text: `Bought ${pick.label} for $${usd.toFixed(2)}`, txid: res.txid };
 };

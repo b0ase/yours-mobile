@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { coldStartRedirect, LANDING, neighbour, SCREENS, screenById, screenForPath, screenForSelected, stripFor } from './screens';
+import {
+  coldStartRedirect,
+  LANDING,
+  neighbour,
+  SCREENS,
+  screenById,
+  screenForPath,
+  screenForSelected,
+  stripFor,
+} from './screens';
 
 const ids = (s: { id: string }[]) => s.map((x) => x.id);
 

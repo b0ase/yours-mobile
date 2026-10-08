@@ -31,7 +31,9 @@ const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 
 describe('mint limits', () => {
   test('clamped and described for the approval screen', () => {
-    expect(describeMintLimits(makeMintLimits(50, 3))).toBe('This computer may mint up to 50 items, spending at most $3.00.');
+    expect(describeMintLimits(makeMintLimits(50, 3))).toBe(
+      'This computer may mint up to 50 items, spending at most $3.00.',
+    );
     const l = makeMintLimits(10_000, 1e6);
     expect([l.maxItems, l.maxUsd]).toEqual([500, 100]);
     expect(makeMintLimits(0, 0).maxItems).toBe(1);
@@ -59,7 +61,14 @@ describe('chunked upload', () => {
     const s = new UploadStore(() => NOW);
     const total = 3;
     for (let i = total - 1; i >= 0; i--)
-      s.put({ uploadId: 'up-123456', index: i, total, bytes: bytes.length, sha256: sha, data: b64(bytes.subarray(i * UPLOAD_CHUNK_BYTES, (i + 1) * UPLOAD_CHUNK_BYTES)) });
+      s.put({
+        uploadId: 'up-123456',
+        index: i,
+        total,
+        bytes: bytes.length,
+        sha256: sha,
+        data: b64(bytes.subarray(i * UPLOAD_CHUNK_BYTES, (i + 1) * UPLOAD_CHUNK_BYTES)),
+      });
     expect(await s.take('up-123456')).toBe(b64(bytes));
     expect(await codeOf(() => s.take('up-123456'))).toBe('NO_UPLOAD');
   });
@@ -67,11 +76,24 @@ describe('chunked upload', () => {
   test('refuses over 10 MB, bad numbering, a wrong hash and incomplete uploads', async () => {
     const s = new UploadStore(() => NOW);
     const sha = 'a'.repeat(64);
-    expect(await codeOf(() => s.put({ uploadId: 'up-123456', index: 0, total: 7, bytes: 11 * 1024 * 1024, sha256: sha, data: '' }))).toBe('TOO_BIG');
-    expect(await codeOf(() => s.put({ uploadId: 'up-123456', index: 0, total: 5, bytes: 3, sha256: sha, data: 'AAAA' }))).toBe('INVALID');
+    expect(
+      await codeOf(() =>
+        s.put({ uploadId: 'up-123456', index: 0, total: 7, bytes: 11 * 1024 * 1024, sha256: sha, data: '' }),
+      ),
+    ).toBe('TOO_BIG');
+    expect(
+      await codeOf(() => s.put({ uploadId: 'up-123456', index: 0, total: 5, bytes: 3, sha256: sha, data: 'AAAA' })),
+    ).toBe('INVALID');
     s.put({ uploadId: 'up-123456', index: 0, total: 1, bytes: 3, sha256: sha, data: 'AAAA' });
     expect(await codeOf(() => s.take('up-123456'))).toBe('INVALID');
-    s.put({ uploadId: 'up-abcdefg', index: 0, total: 2, bytes: UPLOAD_CHUNK_BYTES + 3, sha256: sha, data: b64(new Uint8Array(UPLOAD_CHUNK_BYTES)) });
+    s.put({
+      uploadId: 'up-abcdefg',
+      index: 0,
+      total: 2,
+      bytes: UPLOAD_CHUNK_BYTES + 3,
+      sha256: sha,
+      data: b64(new Uint8Array(UPLOAD_CHUNK_BYTES)),
+    });
     expect(await codeOf(() => s.take('up-abcdefg'))).toBe('INCOMPLETE');
   });
 });
@@ -87,7 +109,9 @@ describe('paired mint calls', () => {
     const noLimits = makeGrant('1Main', 'b0asex', ['mint'], 7, NOW);
     expect(noLimits.scopes).toEqual(['read']); // mint needs limits
     markAgentAccount('1A', [], NOW);
-    expect(await codeOf(() => checkGrant(makeGrant('1A', 'agent', ['trade'], 7, NOW), 'mint', '1A', NOW))).toBe('SCOPE');
+    expect(await codeOf(() => checkGrant(makeGrant('1A', 'agent', ['trade'], 7, NOW), 'mint', '1A', NOW))).toBe(
+      'SCOPE',
+    );
   });
 
   const deps = (over: Partial<AgentDeps> = {}) => {
@@ -101,7 +125,13 @@ describe('paired mint calls', () => {
       saveGrant: (g) => saved.push(g),
       mintMedia: async (_ctx, m) => {
         calls.push(m.title);
-        return { txid: 'f'.repeat(64), outpoint: `${'f'.repeat(64)}_0`, origin: `${'f'.repeat(64)}_0`, networkSats: 2000, ...(m.collection.kind === 'new' && { collectionId: `${'e'.repeat(64)}_0` }) };
+        return {
+          txid: 'f'.repeat(64),
+          outpoint: `${'f'.repeat(64)}_0`,
+          origin: `${'f'.repeat(64)}_0`,
+          networkSats: 2000,
+          ...(m.collection.kind === 'new' && { collectionId: `${'e'.repeat(64)}_0` }),
+        };
       },
       ...over,
     };
@@ -112,7 +142,12 @@ describe('paired mint calls', () => {
   test('mints within the budget and records the actual spend', async () => {
     const g = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(2, 3));
     const { d, calls, saved } = deps();
-    const r = (await handleAgentCall(g, 'mint', { ...mp3, collection: { kind: 'new', name: 'VexVoid Discography' } }, d)) as Record<string, unknown>;
+    const r = (await handleAgentCall(
+      g,
+      'mint',
+      { ...mp3, collection: { kind: 'new', name: 'VexVoid Discography' } },
+      d,
+    )) as Record<string, unknown>;
     expect(calls).toEqual(['Echoes in the Abyss']);
     expect(r.collectionId).toBe(`${'e'.repeat(64)}_0`);
     expect(r.outpoint).toBe(`${'f'.repeat(64)}_0`);
@@ -130,7 +165,9 @@ describe('paired mint calls', () => {
     const big = { ...mp3, base64Content: b64(new Uint8Array(1_500_000)) }; // ~$0.03 at 100 sat/kB, $20
     expect(await codeOf(() => handleAgentCall(tiny, 'mint', big, d))).toBe('BUDGET');
     const g2 = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(5, 3));
-    expect(await codeOf(() => handleAgentCall(g2, 'mint', { ...mp3, contentType: 'application/x-msdownload' }, d))).toBe('TYPE');
+    expect(
+      await codeOf(() => handleAgentCall(g2, 'mint', { ...mp3, contentType: 'application/x-msdownload' }, d)),
+    ).toBe('TYPE');
     expect(await codeOf(() => handleAgentCall(g2, 'mint', mp3, { ...d, bsvUsd: async () => 0 }))).toBe('NO_PRICE');
     const old = makeGrant('1Main', 'b0asex', ['mint'], 1, Date.now() - 2 * 86_400_000, makeMintLimits(5, 3));
     expect(await codeOf(() => handleAgentCall(old, 'mint', mp3, d))).toBe('EXPIRED');

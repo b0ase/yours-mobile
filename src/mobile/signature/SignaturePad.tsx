@@ -59,7 +59,8 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
     if (!live.current) return;
     const events = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
     if (events.length) {
-      for (const c of events) live.current.points.push(at(c.clientX, c.clientY, live.current.pen ? c.pressure || 0.5 : 0.5));
+      for (const c of events)
+        live.current.points.push(at(c.clientX, c.clientY, live.current.pen ? c.pressure || 0.5 : 0.5));
     } else live.current.points.push(pt(e));
     redraw((n) => n + 1);
   };
@@ -90,7 +91,12 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
   };
 
   return createPortal(
-    <div className={`bw-sigpad${rotated ? ' is-rotated' : ''}`} role="dialog" aria-modal="true" aria-label="Draw your signature">
+    <div
+      className={`bw-sigpad${rotated ? ' is-rotated' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Draw your signature"
+    >
       <div className="bw-sigpad-sheet">
         <div className="bw-sigpad-title">{rotated ? 'Sign along the phone' : 'Sign with your finger'}</div>
         <div
@@ -132,7 +138,15 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
 };
 
 /** Redraw / Remove choice once a signature exists. */
-export const ChangeSheet = ({ onRedraw, onRemove, onClose }: { onRedraw: () => void; onRemove: () => void; onClose: () => void }) => {
+export const ChangeSheet = ({
+  onRedraw,
+  onRemove,
+  onClose,
+}: {
+  onRedraw: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) => {
   useBackClose(true, onClose);
   return createPortal(
     <div className="bw-sigpad" role="dialog" aria-modal="true" aria-label="Your signature" onClick={onClose}>

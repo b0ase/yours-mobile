@@ -19,13 +19,13 @@ Status: **planning, 5 Oct 2026** · For: owner decisions marked **DECIDE**
 
 ## Where we are (facts, from the code)
 
-| | Today |
-| --- | --- |
-| Wallet chat UI | Native wallet code: `src/mobile/tabs/ChatPage.tsx`, `src/mobile/chat/*` (about 6,700 lines). Ships inside both store apps. |
-| Server | `bit-sign` repo (also identity, signing, registers: about 216 API route files). Next.js on Vercel. Postgres on our Hetzner Supabase. |
-| New messages | Polling: 4 s inside a room, 30 s on the list (`THREAD_POLL_MS`, `LIST_POLL_MS`; the code says "until realtime lands in v2"). DMs list: 30 s. |
-| Offline / history | Nothing stored on the phone; every open fetches from the server. |
-| Rooms | Token rooms (hold a token to enter), personal $HANDLE rooms, open rooms, DMs, calls. Room settings are issuer-only since 5.1.52. |
+|                    | Today                                                                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Wallet chat UI     | Native wallet code: `src/mobile/tabs/ChatPage.tsx`, `src/mobile/chat/*` (about 6,700 lines). Ships inside both store apps.                                                                                                                                         |
+| Server             | `bit-sign` repo (also identity, signing, registers: about 216 API route files). Next.js on Vercel. Postgres on our Hetzner Supabase.                                                                                                                               |
+| New messages       | Polling: 4 s inside a room, 30 s on the list (`THREAD_POLL_MS`, `LIST_POLL_MS`; the code says "until realtime lands in v2"). DMs list: 30 s.                                                                                                                       |
+| Offline / history  | Nothing stored on the phone; every open fetches from the server.                                                                                                                                                                                                   |
+| Rooms              | Token rooms (hold a token to enter), personal $HANDLE rooms, open rooms, DMs, calls. Room settings are issuer-only since 5.1.52.                                                                                                                                   |
 | Loading other apps | Three ways already exist: built-in screens; the **bApp frame** (our own apps in an iframe inside the wallet, talking to it through the standard BRC-100 wallet interface, allowlisted origins only); and the full-screen dApp browser (any site, wallet injected). |
 
 ## 1. What bChat is
@@ -94,11 +94,11 @@ In order of impact:
 
 Three tiers, already partly built:
 
-| Tier | What | Who | Speed |
-| --- | --- | --- | --- |
-| Built in | Native wallet screens (Wallet, Exchange, Chat, b agent) | bCorp | Fastest |
+| Tier          | What                                                                                         | Who         | Speed     |
+| ------------- | -------------------------------------------------------------------------------------------- | ----------- | --------- |
+| Built in      | Native wallet screens (Wallet, Exchange, Chat, b agent)                                      | bCorp       | Fastest   |
 | In-frame bApp | A web app inside the wallet's frame, using the wallet through the standard BRC-100 interface | Listed apps | Web speed |
-| Browser | Any site in the full-screen browser, wallet injected | Anyone | Web speed |
+| Browser       | Any site in the full-screen browser, wallet injected                                         | Anyone      | Web speed |
 
 To make the store genuinely open:
 
@@ -157,13 +157,13 @@ and multicast later.
 
 ## Phases
 
-| Phase | What | Size |
-| --- | --- | --- |
-| 1 | Live updates (Supabase Realtime) + instant send in rooms and DMs | 1 week |
-| 2 | Messages on the phone + paging + preload | 1 week |
-| 3 | Push notifications (FCM/APNs) | 3–5 days, plus Apple/Google setup by you |
-| 4 | `bchat-server` repo: copy, switch, delete from bit-sign; publish the spec | 1 week |
-| 5 | Open bApp listing + permissions + SDK and template | 2 weeks |
+| Phase | What                                                                      | Size                                     |
+| ----- | ------------------------------------------------------------------------- | ---------------------------------------- |
+| 1     | Live updates (Supabase Realtime) + instant send in rooms and DMs          | 1 week                                   |
+| 2     | Messages on the phone + paging + preload                                  | 1 week                                   |
+| 3     | Push notifications (FCM/APNs)                                             | 3–5 days, plus Apple/Google setup by you |
+| 4     | `bchat-server` repo: copy, switch, delete from bit-sign; publish the spec | 1 week                                   |
+| 5     | Open bApp listing + permissions + SDK and template                        | 2 weeks                                  |
 
 Sizes are rough and assume no surprises in Realtime access control.
 

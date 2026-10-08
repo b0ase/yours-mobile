@@ -32,7 +32,12 @@ async function db(path, init = {}) {
   if (!base || !key) throw new Error('unconfigured');
   return fetch(`${base.replace(/\/$/, '')}/rest/v1/${path}`, {
     ...init,
-    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
   });
 }
 const rows = async (path) => {
@@ -40,7 +45,8 @@ const rows = async (path) => {
   if (!r.ok) throw new Error(`db ${r.status}`);
   return r.json();
 };
-const soldCount = async (keyHash) => (await rows(`bwallet_strategy_copies?select=origin&key_hash=eq.${keyHash}`)).length;
+const soldCount = async (keyHash) =>
+  (await rows(`bwallet_strategy_copies?select=origin&key_hash=eq.${keyHash}`)).length;
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -59,7 +65,9 @@ async function list(req, res) {
     if (!K.OUTPOINT.test(origin)) return send(res, 400, { error: 'Bad origin' });
     const [s] = await rows(`bwallet_strategies?select=origin,envelope,created_at,key_hash&origin=eq.${origin}`);
     if (!s) return send(res, 404, { error: 'Not found' });
-    return send(res, 200, { strategy: { origin: s.origin, envelope: s.envelope, sold: await soldCount(s.key_hash), createdAt: s.created_at } });
+    return send(res, 200, {
+      strategy: { origin: s.origin, envelope: s.envelope, sold: await soldCount(s.key_hash), createdAt: s.created_at },
+    });
   }
   const [all, copies] = await Promise.all([
     rows('bwallet_strategies?select=origin,envelope,created_at,key_hash&order=created_at.desc&limit=200'),
@@ -68,7 +76,12 @@ async function list(req, res) {
   const sold = new Map();
   for (const c of copies) sold.set(c.key_hash, (sold.get(c.key_hash) || 0) + 1);
   return send(res, 200, {
-    strategies: all.map((s) => ({ origin: s.origin, envelope: K.publicEnvelope(s.envelope), sold: sold.get(s.key_hash) || 0, createdAt: s.created_at })),
+    strategies: all.map((s) => ({
+      origin: s.origin,
+      envelope: K.publicEnvelope(s.envelope),
+      sold: sold.get(s.key_hash) || 0,
+      createdAt: s.created_at,
+    })),
   });
 }
 
@@ -83,14 +96,21 @@ async function publish(b, res) {
   if (!at) return send(res, 400, { error: 'That output isn’t a strategy inscription' });
   const { env } = at;
   // Authorship = holding the content key (sha256 must match keyHash below) + owning this fresh copy.
-  if (outpoint !== ((await K.chain.origin(outpoint)) || outpoint)) return send(res, 400, { error: 'Publish from the newly minted copy' });
+  if (outpoint !== ((await K.chain.origin(outpoint)) || outpoint))
+    return send(res, 400, { error: 'Publish from the newly minted copy' });
   const keyB64 = String(b.key || '');
   const hash = crypto.createHash('sha256').update(Buffer.from(keyB64, 'base64')).digest('hex');
   if (hash !== env.keyHash) return send(res, 400, { error: 'The key doesn’t match this strategy' });
   const r = await db('bwallet_strategies', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ key_hash: env.keyHash, origin: outpoint, envelope: env, author_address: proof.address, key_enc: K.sealKey(keyB64) }),
+    body: JSON.stringify({
+      key_hash: env.keyHash,
+      origin: outpoint,
+      envelope: env,
+      author_address: proof.address,
+      key_enc: K.sealKey(keyB64),
+    }),
   });
   if (r.status === 409) return send(res, 409, { error: 'Already published' });
   if (!r.ok) return send(res, 500, { error: 'Could not save' });
@@ -120,7 +140,7 @@ async function unlock(b, res) {
       const paid = K.paidTo(tx, sale.payTo);
       const rate = await K.chain.bsvUsd();
       if (!(rate > 0)) return send(res, 503, { error: 'No BSV price right now; try again shortly' });
-      const need = Math.floor(((sale.priceUsd / rate) * 1e8) * K.PRICE_TOLERANCE);
+      const need = Math.floor((sale.priceUsd / rate) * 1e8 * K.PRICE_TOLERANCE);
       if (paid < need) return send(res, 402, { error: 'This copy wasn’t paid for' });
       if ((await soldCount(env.keyHash)) >= sale.copies) return send(res, 410, { error: 'Sold out' });
       const r = await db('bwallet_strategy_copies', {
@@ -138,7 +158,10 @@ module.exports = async function handler(req, res) {
   try {
     if (req.method === 'GET') return await list(req, res);
     if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
-    const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+    const ip =
+      String(req.headers['x-forwarded-for'] || '')
+        .split(',')[0]
+        .trim() || 'unknown';
     if (limited(ip)) return send(res, 429, { error: 'Too many requests' });
     const b = await readBody(req);
     if (b.action === 'publish') return await publish(b, res);

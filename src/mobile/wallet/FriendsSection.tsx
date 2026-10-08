@@ -63,7 +63,10 @@ export const FriendsSection = () => {
   return (
     <div className="w-[92%] mx-auto flex flex-col gap-3 pb-6">
       {me && (
-        <div className="flex items-center gap-3 rounded-xl px-3 py-3" style={{ background: '#17191E', border: '1px solid #F5B80044' }}>
+        <div
+          className="flex items-center gap-3 rounded-xl px-3 py-3"
+          style={{ background: '#17191E', border: '1px solid #F5B80044' }}
+        >
           <div className="flex-1 min-w-0">
             <div className="text-sm font-bold text-white">${me.ticker.replace(/^\$/, '')}</div>
             <div className="text-xs" style={{ color: '#98A2B3' }}>

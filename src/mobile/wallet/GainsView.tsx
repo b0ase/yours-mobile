@@ -15,7 +15,8 @@ const GOLD = '#FFD24D';
 const GREEN = '#32D583';
 const RED = '#F97066';
 
-const fmtQty = (asset: string, q: number) => (asset === 'BSV' ? `${(q / 1e8).toFixed(8).replace(/\.?0+$/, '')} BSV` : q.toLocaleString());
+const fmtQty = (asset: string, q: number) =>
+  asset === 'BSV' ? `${(q / 1e8).toFixed(8).replace(/\.?0+$/, '')} BSV` : q.toLocaleString();
 
 /** History › Gains: realised gains and losses per asset per tax year, with the accountant CSV. */
 export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: string }) => {
@@ -53,16 +54,27 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
     return { disposals: computeGains(events, uk ? 'hmrc' : 'fifo'), warnings };
   }, [rows, price, uk, ovr]);
 
-  const years = useMemo(() => [...new Set(disposals.map((d) => taxYearOf(d.day, uk)))].sort().reverse(), [disposals, uk]);
+  const years = useMemo(
+    () => [...new Set(disposals.map((d) => taxYearOf(d.day, uk)))].sort().reverse(),
+    [disposals, uk],
+  );
   const shownYear = years.includes(year) ? year : (years[0] ?? '');
   const inYear = disposals.filter((d) => taxYearOf(d.day, uk) === shownYear);
   const totals = totalsByAsset(inYear);
-  const sum = totals.reduce((a, t) => ({ proceeds: a.proceeds + t.proceeds, cost: a.cost + t.cost, gains: a.gains + t.gains, losses: a.losses + t.losses }), {
-    proceeds: 0,
-    cost: 0,
-    gains: 0,
-    losses: 0,
-  });
+  const sum = totals.reduce(
+    (a, t) => ({
+      proceeds: a.proceeds + t.proceeds,
+      cost: a.cost + t.cost,
+      gains: a.gains + t.gains,
+      losses: a.losses + t.losses,
+    }),
+    {
+      proceeds: 0,
+      cost: 0,
+      gains: 0,
+      losses: 0,
+    },
+  );
   const money = (raw: number) => {
     const n = Math.round(raw * 100) / 100;
     return `${n < 0 ? '-' : ''}${sym}${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -73,7 +85,10 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
     saveOverrides(o);
   };
   const toggleOwn = (txid: string) =>
-    update({ ...ovr, ownWallet: ovr.ownWallet.includes(txid) ? ovr.ownWallet.filter((t) => t !== txid) : [...ovr.ownWallet, txid] });
+    update({
+      ...ovr,
+      ownWallet: ovr.ownWallet.includes(txid) ? ovr.ownWallet.filter((t) => t !== txid) : [...ovr.ownWallet, txid],
+    });
   const setValue = (key: string, v: string) => {
     const lotValue = { ...ovr.lotValue };
     const n = Number(v);
@@ -90,12 +105,19 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
     );
 
   const transfers = rows.filter(
-    (r) => r.direction !== 'self' && (r.type === 'transfer-in' || r.type === 'transfer-out' || r.type === 'receive' || r.type === 'send') && taxYearOf(dayIn(r.time, uk), uk) === shownYear,
+    (r) =>
+      r.direction !== 'self' &&
+      (r.type === 'transfer-in' || r.type === 'transfer-out' || r.type === 'receive' || r.type === 'send') &&
+      taxYearOf(dayIn(r.time, uk), uk) === shownYear,
   );
 
   return (
     <div className="flex-1 overflow-y-auto px-4" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-      <p role="note" className="text-xs mt-4 rounded-xl p-3 font-semibold" style={{ border: '1px solid #f5b301', color: '#f5b301' }}>
+      <p
+        role="note"
+        className="text-xs mt-4 rounded-xl p-3 font-semibold"
+        style={{ border: '1px solid #f5b301', color: '#f5b301' }}
+      >
         {GAINS_BETA}
       </p>
       <p className="text-xs mt-3" style={{ color: MUTED }}>
@@ -171,7 +193,11 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
           </div>
           <div className="rounded-xl overflow-hidden" style={{ background: CARD }}>
             {totals.map((t) => (
-              <div key={t.asset} className="flex justify-between gap-2 px-3 py-2 text-sm" style={{ borderTop: `1px solid ${LINE}` }}>
+              <div
+                key={t.asset}
+                className="flex justify-between gap-2 px-3 py-2 text-sm"
+                style={{ borderTop: `1px solid ${LINE}` }}
+              >
                 <span className="truncate">{t.label}</span>
                 <span style={{ color: MUTED }}>{t.disposals}×</span>
                 <span className="font-semibold" style={{ color: t.net >= 0 ? GREEN : RED }}>
@@ -185,14 +211,21 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
             Disposals
           </div>
           <div className="flex flex-col gap-2">
-            {inYear.slice(-200).reverse().map((d) => (
-              <DisposalRow key={`${d.asset}-${d.day}-${d.txids[0]}`} d={d} money={money} />
-            ))}
+            {inYear
+              .slice(-200)
+              .reverse()
+              .map((d) => (
+                <DisposalRow key={`${d.asset}-${d.day}-${d.txids[0]}`} d={d} money={money} />
+              ))}
           </div>
 
           {warnings.length > 0 && (
             <div className="text-xs mt-3" style={{ color: RED }}>
-              {warnings.length} item{warnings.length > 1 ? 's' : ''} left out: {warnings.slice(0, 3).map((w) => w.text).join('; ')}
+              {warnings.length} item{warnings.length > 1 ? 's' : ''} left out:{' '}
+              {warnings
+                .slice(0, 3)
+                .map((w) => w.text)
+                .join('; ')}
             </div>
           )}
 
@@ -213,7 +246,8 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
                   <div key={r.txid} className="rounded-xl p-3 text-xs" style={{ background: CARD }}>
                     <div className="flex justify-between gap-2">
                       <span className="font-semibold">
-                        {r.asset ? assetText(r.asset) : `${(r.amountSats / 1e8).toFixed(8).replace(/\.?0+$/, '')} BSV`} {r.direction === 'in' ? 'in' : 'out'}
+                        {r.asset ? assetText(r.asset) : `${(r.amountSats / 1e8).toFixed(8).replace(/\.?0+$/, '')} BSV`}{' '}
+                        {r.direction === 'in' ? 'in' : 'out'}
                       </span>
                       <span style={{ color: MUTED }}>{new Date(r.time).toLocaleDateString()}</span>
                     </div>
@@ -247,7 +281,13 @@ export const GainsView = ({ rows, account }: { rows: HistoryRow[]; account: stri
   );
 };
 
-const RULES: Record<string, string> = { 'same-day': 'same day', 'bed-and-breakfast': '30-day', s104: 'pool', fifo: 'FIFO', unmatched: 'no cost' };
+const RULES: Record<string, string> = {
+  'same-day': 'same day',
+  'bed-and-breakfast': '30-day',
+  s104: 'pool',
+  fifo: 'FIFO',
+  unmatched: 'no cost',
+};
 
 const DisposalRow = ({ d, money }: { d: Disposal; money: (n: number) => string }) => (
   <div className="rounded-xl p-3" style={{ background: CARD }}>

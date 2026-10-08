@@ -22,8 +22,23 @@ import {
   type LocalInfo,
   type RangePreset,
 } from './txHistory';
-import { fetchAccountTxs, fetchDailyRates, fetchLocalInfo, fetchTokenSymbols, fetchTxs, type Progress } from './txHistoryFetch';
-import { CATEGORIES, assetText, classifyEvent, filterCategory, findListings, historyLooksIncomplete, type Category } from './historyEvents';
+import {
+  fetchAccountTxs,
+  fetchDailyRates,
+  fetchLocalInfo,
+  fetchTokenSymbols,
+  fetchTxs,
+  type Progress,
+} from './txHistoryFetch';
+import {
+  CATEGORIES,
+  assetText,
+  classifyEvent,
+  filterCategory,
+  findListings,
+  historyLooksIncomplete,
+  type Category,
+} from './historyEvents';
 import { missingParents, ownOutputs, type RawTx } from './txHistory';
 import { loadLastBalance } from './balanceLoad';
 import { appsByTxid, loadConnectionLog } from './connectionLog';
@@ -92,17 +107,26 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
       const extra = new Map<string, number>();
       if (parents.length) {
         setProgress({ phase: 'Fees', done: 0, total: parents.length });
-        for (const t of await fetchTxs(parents.slice(0, 2000), key)) for (const o of t.vout) extra.set(`${t.txid}:${o.n}`, o.sats);
+        for (const t of await fetchTxs(parents.slice(0, 2000), key))
+          for (const o of t.vout) extra.set(`${t.txid}:${o.n}`, o.sats);
       }
       let rows = buildRows(txs, own, local as Map<string, LocalInfo>, now, extra);
       if (kind)
         rows = rows.map((r) =>
-          r.direction === 'out' && r.label === 'send' ? { ...r, label: kind === 'pot' ? 'pot payment' : 'agent spend' } : r,
+          r.direction === 'out' && r.label === 'send'
+            ? { ...r, label: kind === 'pot' ? 'pot payment' : 'agent spend' }
+            : r,
         );
       // History v2: token / NFT / game / subscription / app events (historyEvents.ts).
       const byId = new Map<string, RawTx>(txs.map((t) => [t.txid, t]));
       const prev = ownOutputs([...byId.values()], own);
-      const ctx = { own, prev, listings: findListings([...byId.values()], prev), appByTxid: appsByTxid(connLog), accountKind: kind };
+      const ctx = {
+        own,
+        prev,
+        listings: findListings([...byId.values()], prev),
+        appByTxid: appsByTxid(connLog),
+        accountKind: kind,
+      };
       rows = rows.map((r) => classifyEvent(r, byId.get(r.txid), local.get(r.txid), ctx));
       // Txs only the action log knew about that move nothing on these addresses (BRC-100 derived keys) are noise here.
       rows = rows.filter((r) => r.amountSats !== 0 || r.feeSats !== 0 || r.asset || r.direction === 'self');
@@ -113,7 +137,9 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
       if (syms.size)
         rows = rows.map((r) => {
           const t = r.asset ? syms.get(r.asset.id) : undefined;
-          return r.asset && t ? { ...r, asset: { ...r.asset, symbol: r.asset.symbol ?? t.sym, dec: r.asset.dec ?? t.dec } } : r;
+          return r.asset && t
+            ? { ...r, asset: { ...r.asset, symbol: r.asset.symbol ?? t.sym, dec: r.asset.dec ?? t.dec } }
+            : r;
         });
       setProgress({ phase: 'Prices', done: 1, total: 1 });
       const oldest = rows.length ? Math.min(...rows.map((r) => r.time)) : now;
@@ -136,7 +162,8 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
 
   const range = useMemo(() => rangeFor(preset, data?.at ?? Date.now(), custom), [preset, custom, data?.at]);
   const rows = useMemo(
-    () => (data ? filterCategory(filterRange(data.rows, range) as (HistoryRow & { category: Category })[], category) : []),
+    () =>
+      data ? filterCategory(filterRange(data.rows, range) as (HistoryRow & { category: Category })[], category) : [],
     [data, range, category],
   );
   const sum = totals(rows);
@@ -199,7 +226,13 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
         >
           <RefreshCw size={18} className={progress ? 'animate-spin' : ''} />
         </button>
-        <button type="button" aria-label="Close" onClick={onClose} className="p-2 bg-transparent border-0 cursor-pointer" style={{ color: '#fff' }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="p-2 bg-transparent border-0 cursor-pointer"
+          style={{ color: '#fff' }}
+        >
           <X size={20} />
         </button>
       </div>
@@ -231,136 +264,180 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
       ) : view === 'gains' ? (
         <GainsView rows={data?.rows ?? []} account={accountName} />
       ) : (
-      <div className="flex-1 overflow-y-auto px-4 pb-8" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-        {progress && (
-          <div className="mt-4" aria-live="polite">
-            <div className="text-xs mb-1" style={{ color: MUTED }}>
-              Loading full history… {progress.phase}
-              {progress.total > 1 ? ` (${progress.done}/${progress.total})` : ''}
-            </div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background: LINE }}>
-              <div className="h-full" style={{ width: `${Math.max(4, pct)}%`, background: GOLD, transition: 'width .3s' }} />
-            </div>
-          </div>
-        )}
-        {error && (
-          <div className="mt-4 text-sm" style={{ color: RED }}>
-            {error}{' '}
-            <button type="button" onClick={() => void load()} className="underline bg-transparent border-0" style={{ color: GOLD }}>
-              Retry
-            </button>
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-2 mt-4" role="group" aria-label="Date range">
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              aria-pressed={preset === p.id}
-              onClick={() => {
-                setPreset(p.id);
-                setShown(100);
-              }}
-              className="px-3 py-1 rounded-full text-xs border-0 cursor-pointer"
-              style={{ background: preset === p.id ? GOLD : CARD, color: preset === p.id ? '#000' : '#fff' }}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2 mt-2 overflow-x-auto pb-1" role="group" aria-label="Category">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              aria-pressed={category === c.id}
-              onClick={() => {
-                setCategory(c.id);
-                setShown(100);
-              }}
-              className="px-3 py-1 rounded-full text-xs cursor-pointer whitespace-nowrap"
-              style={{
-                background: category === c.id ? '#fff' : 'transparent',
-                color: category === c.id ? '#000' : MUTED,
-                border: `1px solid ${category === c.id ? '#fff' : LINE}`,
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-        {preset === 'custom' && (
-          <div className="flex gap-2 mt-2 text-xs items-center" style={{ color: MUTED }}>
-            <label className="flex flex-col gap-1">
-              From
-              <input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="rounded px-2 py-1" style={{ background: CARD, color: '#fff', border: `1px solid ${LINE}` }} />
-            </label>
-            <label className="flex flex-col gap-1">
-              To
-              <input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="rounded px-2 py-1" style={{ background: CARD, color: '#fff', border: `1px solid ${LINE}` }} />
-            </label>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-2 mt-4">
-          {[
-            ['In', sum.inSats, GREEN],
-            ['Out', -sum.outSats, RED],
-            ['Fees', -sum.feeSats, MUTED],
-            ['Net', sum.netSats, sum.netSats >= 0 ? GREEN : RED],
-          ].map(([k, v, c]) => (
-            <div key={k as string} className="rounded-xl p-3" style={{ background: CARD }}>
-              <div className="text-xs" style={{ color: MUTED }}>
-                {k as string}
+        <div
+          className="flex-1 overflow-y-auto px-4 pb-8"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}
+        >
+          {progress && (
+            <div className="mt-4" aria-live="polite">
+              <div className="text-xs mb-1" style={{ color: MUTED }}>
+                Loading full history… {progress.phase}
+                {progress.total > 1 ? ` (${progress.done}/${progress.total})` : ''}
               </div>
-              <div className="font-semibold" style={{ color: c as string }}>
-                {fmtBsv(v as number)}
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: LINE }}>
+                <div
+                  className="h-full"
+                  style={{ width: `${Math.max(4, pct)}%`, background: GOLD, transition: 'width .3s' }}
+                />
               </div>
-              <div className="text-xs" style={{ color: MUTED }}>
-                {fmtSats(v as number)}
-              </div>
-            </div>
-          ))}
-        </div>
-        {incomplete && (
-          <div role="status" className="text-xs mt-2 rounded-lg p-2" style={{ color: GOLD, border: `1px solid ${GOLD}` }}>
-            History may be incomplete. Pull to refresh or run Repair Sync (Settings &gt; Troubleshooting).
-          </div>
-        )}
-        {bal && (
-          <div className="text-xs mt-2" style={{ color: MUTED }}>
-            {sum.count} transactions
-            {/* Opening / closing are for the whole account, so only beside the unfiltered list. */}
-            {category === 'all' && ` · opening ${fmtBsv(bal.opening)} · closing ${fmtBsv(bal.closing)}`}
-          </div>
-        )}
-
-        <div className="flex gap-2 mt-4">
-          <button type="button" disabled={!data} onClick={exportCsv} className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 border-0 cursor-pointer font-semibold" style={{ background: GOLD, color: '#000', opacity: data ? 1 : 0.5 }}>
-            <Download size={16} /> Export CSV
-          </button>
-          <button type="button" disabled={!data} onClick={exportPdf} className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 cursor-pointer font-semibold" style={{ background: CARD, color: '#fff', border: `1px solid ${LINE}`, opacity: data ? 1 : 0.5 }}>
-            <FileText size={16} /> PDF statement
-          </button>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-2">
-          {data && rows.length === 0 && (
-            <div className="text-sm mt-6 text-center" style={{ color: MUTED }}>
-              No transactions in this period.
             </div>
           )}
-          {rows.slice(0, shown).map((r) => (
-            <Row key={r.txid} r={r} />
-          ))}
-          {rows.length > shown && (
-            <button type="button" onClick={() => setShown((n) => n + 200)} className="py-2 bg-transparent border-0 cursor-pointer text-sm" style={{ color: GOLD }}>
-              Show more ({rows.length - shown} left)
-            </button>
+          {error && (
+            <div className="mt-4 text-sm" style={{ color: RED }}>
+              {error}{' '}
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="underline bg-transparent border-0"
+                style={{ color: GOLD }}
+              >
+                Retry
+              </button>
+            </div>
           )}
+
+          <div className="flex flex-wrap gap-2 mt-4" role="group" aria-label="Date range">
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={preset === p.id}
+                onClick={() => {
+                  setPreset(p.id);
+                  setShown(100);
+                }}
+                className="px-3 py-1 rounded-full text-xs border-0 cursor-pointer"
+                style={{ background: preset === p.id ? GOLD : CARD, color: preset === p.id ? '#000' : '#fff' }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-2 overflow-x-auto pb-1" role="group" aria-label="Category">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                aria-pressed={category === c.id}
+                onClick={() => {
+                  setCategory(c.id);
+                  setShown(100);
+                }}
+                className="px-3 py-1 rounded-full text-xs cursor-pointer whitespace-nowrap"
+                style={{
+                  background: category === c.id ? '#fff' : 'transparent',
+                  color: category === c.id ? '#000' : MUTED,
+                  border: `1px solid ${category === c.id ? '#fff' : LINE}`,
+                }}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          {preset === 'custom' && (
+            <div className="flex gap-2 mt-2 text-xs items-center" style={{ color: MUTED }}>
+              <label className="flex flex-col gap-1">
+                From
+                <input
+                  type="date"
+                  value={custom.from}
+                  onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
+                  className="rounded px-2 py-1"
+                  style={{ background: CARD, color: '#fff', border: `1px solid ${LINE}` }}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                To
+                <input
+                  type="date"
+                  value={custom.to}
+                  onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))}
+                  className="rounded px-2 py-1"
+                  style={{ background: CARD, color: '#fff', border: `1px solid ${LINE}` }}
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 mt-4">
+            {[
+              ['In', sum.inSats, GREEN],
+              ['Out', -sum.outSats, RED],
+              ['Fees', -sum.feeSats, MUTED],
+              ['Net', sum.netSats, sum.netSats >= 0 ? GREEN : RED],
+            ].map(([k, v, c]) => (
+              <div key={k as string} className="rounded-xl p-3" style={{ background: CARD }}>
+                <div className="text-xs" style={{ color: MUTED }}>
+                  {k as string}
+                </div>
+                <div className="font-semibold" style={{ color: c as string }}>
+                  {fmtBsv(v as number)}
+                </div>
+                <div className="text-xs" style={{ color: MUTED }}>
+                  {fmtSats(v as number)}
+                </div>
+              </div>
+            ))}
+          </div>
+          {incomplete && (
+            <div
+              role="status"
+              className="text-xs mt-2 rounded-lg p-2"
+              style={{ color: GOLD, border: `1px solid ${GOLD}` }}
+            >
+              History may be incomplete. Pull to refresh or run Repair Sync (Settings &gt; Troubleshooting).
+            </div>
+          )}
+          {bal && (
+            <div className="text-xs mt-2" style={{ color: MUTED }}>
+              {sum.count} transactions
+              {/* Opening / closing are for the whole account, so only beside the unfiltered list. */}
+              {category === 'all' && ` · opening ${fmtBsv(bal.opening)} · closing ${fmtBsv(bal.closing)}`}
+            </div>
+          )}
+
+          <div className="flex gap-2 mt-4">
+            <button
+              type="button"
+              disabled={!data}
+              onClick={exportCsv}
+              className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 border-0 cursor-pointer font-semibold"
+              style={{ background: GOLD, color: '#000', opacity: data ? 1 : 0.5 }}
+            >
+              <Download size={16} /> Export CSV
+            </button>
+            <button
+              type="button"
+              disabled={!data}
+              onClick={exportPdf}
+              className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 cursor-pointer font-semibold"
+              style={{ background: CARD, color: '#fff', border: `1px solid ${LINE}`, opacity: data ? 1 : 0.5 }}
+            >
+              <FileText size={16} /> PDF statement
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2">
+            {data && rows.length === 0 && (
+              <div className="text-sm mt-6 text-center" style={{ color: MUTED }}>
+                No transactions in this period.
+              </div>
+            )}
+            {rows.slice(0, shown).map((r) => (
+              <Row key={r.txid} r={r} />
+            ))}
+            {rows.length > shown && (
+              <button
+                type="button"
+                onClick={() => setShown((n) => n + 200)}
+                className="py-2 bg-transparent border-0 cursor-pointer text-sm"
+                style={{ color: GOLD }}
+              >
+                Show more ({rows.length - shown} left)
+              </button>
+            )}
+          </div>
         </div>
-      </div>
       )}
     </div>,
     document.body,
@@ -394,14 +471,26 @@ const Row = ({ r }: { r: HistoryRow }) => {
         {(r.asset || r.app || r.appNote) && (
           <div className="text-xs mt-1 break-all" style={{ color: '#fff' }}>
             {r.asset && <span>{assetText(r.asset)} </span>}
-            {r.app && <span style={{ color: MUTED }}>{r.asset ? '· ' : ''}via {r.app}</span>}
-            {r.appNote && <span>{r.asset || r.app ? ' · ' : ''}“{r.appNote}”</span>}
+            {r.app && (
+              <span style={{ color: MUTED }}>
+                {r.asset ? '· ' : ''}via {r.app}
+              </span>
+            )}
+            {r.appNote && (
+              <span>
+                {r.asset || r.app ? ' · ' : ''}“{r.appNote}”
+              </span>
+            )}
           </div>
         )}
         {(r.feeSats > 0 || r.counterparty || r.note) && (
           <div className="text-xs mt-1 break-all" style={{ color: MUTED }}>
             {r.feeSats > 0 && <span>Fee {fmtSats(r.feeSats)} </span>}
-            {r.counterparty && <span>· {r.direction === 'in' ? 'from' : 'to'} {r.counterparty} </span>}
+            {r.counterparty && (
+              <span>
+                · {r.direction === 'in' ? 'from' : 'to'} {r.counterparty}{' '}
+              </span>
+            )}
             {r.note && <span>· {r.note}</span>}
           </div>
         )}

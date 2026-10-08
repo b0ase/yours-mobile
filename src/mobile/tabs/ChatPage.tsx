@@ -1,4 +1,7 @@
+import { claimIssuerAdmin } from '../chat/autoClaim';
+import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
+import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
 import { logInWalletApp } from '../wallet/connectionLog';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
@@ -17,18 +20,51 @@ import {
   ShoppingCart,
   Trophy,
   UserPlus,
+  Copy,
+  Share2,
   WifiOff,
   X,
   Loader2,
 } from 'lucide-react';
-import { sendBsv, sendBsv21 } from '@1sat/actions';
+import { getBsv21Balances, sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { SendBsv21View } from '../../components/SendBsv21View';
+import { NameInput } from '../names/NameInput';
+import { useTheme } from '../../hooks/useTheme';
+import { InviteLinksPanel } from '../chat/InviteLinksPanel';
+import { copyLink, shareLink } from '../chat/shareLink';
+import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
+import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
-import { avatarFor, B_AVATAR, pendingBQuestions, useAvatars } from '../chat/avatars';
+import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
+import type { ReplyRef } from '../chat/api';
+import {
+  applyMention,
+  isPrivateB,
+  isReactionEvent,
+  isShared,
+  mentionQuery,
+  mentionSuggestions,
+  optimisticReaction,
+  reactionsByMessage,
+  replyOf,
+  replyRefFor,
+  typingLabel,
+} from '../chat/social';
+import { bubbleGestures } from '../chat/gestures';
+import {
+  MentionPicker,
+  MessageText,
+  ReactionBar,
+  ReactionChips,
+  ReplyPreview,
+  ReplyQuote,
+  TypingRow,
+} from '../chat/BubbleExtras';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
@@ -95,13 +131,18 @@ import {
   avatarHue,
   latestCursor,
   listTimeLabel,
+  isBotMessage,
+  isEphemeral,
   mergeMessages,
+  settleEphemeral,
+  normHandle,
   oldestCursor,
   previewText,
   roomInitial,
   roomTitle,
   threadItems,
   timeLabel,
+  visibleMessages,
   type ChatMessage,
   type ChatRoom,
 } from '../chat/messages';
@@ -136,7 +177,7 @@ import {
   type PublicRoom,
 } from '../chat/openRooms';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
-import { longPress, useRoomCard } from '../chat/roomCard';
+import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
 
@@ -213,6 +254,9 @@ const Avatar = ({
         src={icon}
         alt=""
         onError={() => setBroken(icon)}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
         className="rounded-full object-cover shrink-0"
         style={{ width: size, height: size, background: '#16181c' }}
       />
@@ -294,11 +338,20 @@ const Conversation = ({
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
   useBackClose(true, onBack);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Admin-only events (event_payload.audience === 'admins') are for the room admin / issuer only.
+  const viewerIsAdmin = !!onBans || String((room as { created_by_handle?: unknown }).created_by_handle ?? '') === me;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hasMore, setHasMore] = useState<boolean | null>(null);
+  // Set when bit-sign floored this reader's history (since_join room; chat/history.ts).
+  const [hiddenBefore, setHiddenBefore] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState('');
+  // Facebook / WhatsApp parity (chat/social.ts): reply quote, reaction bar, typing, mentions.
+  const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
+  const [acting, setActing] = useState<ChatMessage | null>(null);
+  const [typing, setTyping] = useState<string[]>([]);
+  const lastTypingPing = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const prependAnchor = useRef<number | null>(null);
@@ -307,6 +360,11 @@ const Conversation = ({
   // Priced token rooms (chat/roomSpend.ts): what a message costs me, asked of bit-sign on open.
   // Store builds never open token rooms (ROOMS), so this never runs there.
   const { apiContext } = useServiceContext();
+  // Token room issuer: prove the issuer key in the background (once per room per session).
+  useEffect(() => {
+    if (!entry || !me) return;
+    void claimIssuerAdmin(room.ticker, me, claimDepsFor(client, apiContext));
+  }, [entry, me, room.ticker, client, apiContext]);
   const [charge, setCharge] = useState<SpendCharge | null>(null);
   const [confirmSend, setConfirmSend] = useState<{ text: string; existing?: ChatMessage } | null>(null);
   /** A payment already made for an optimistic message: a retry reuses it (bit-sign is idempotent per txid). */
@@ -340,8 +398,9 @@ const Conversation = ({
       .latestPage(room.ticker)
       .then((p) => {
         if (!live) return;
-        setMessages(mergeMessages([], p.messages));
+        setMessages(mergeMessages([], visibleMessages(p.messages, viewerIsAdmin)));
         setHasMore(p.hasMore);
+        setHiddenBefore(p.hiddenBefore ?? null);
         setError('');
         void client.markRead(room.ticker).catch(() => {});
       })
@@ -350,7 +409,7 @@ const Conversation = ({
     return () => {
       live = false;
     };
-  }, [client, room.ticker, fail]);
+  }, [client, room.ticker, fail, viewerIsAdmin]);
 
   const poll = useCallback(() => {
     const cursor = latestCursor(messages);
@@ -358,13 +417,47 @@ const Conversation = ({
     client
       .since(room.ticker, cursor)
       .then((fresh) => {
-        if (!fresh.length) return;
-        setMessages((cur) => mergeMessages(cur, fresh));
+        const shown = visibleMessages(fresh, viewerIsAdmin);
+        if (!shown.length) return;
+        setMessages((cur) => mergeMessages(cur, shown));
         void client.markRead(room.ticker).catch(() => {});
       })
       .catch(() => {});
-  }, [client, room.ticker, messages, online]);
+    void client.whoIsTyping(room.ticker).then(setTyping);
+  }, [client, room.ticker, messages, online, viewerIsAdmin]);
   usePoll(poll, THREAD_POLL_MS, !loading);
+  // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
+  const pingTyping = (text: string) => {
+    if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
+    lastTypingPing.current = Date.now();
+    void client.typing(room.ticker).catch(() => {});
+  };
+  const react = (m: ChatMessage, emoji: string) => {
+    const mineNow = (reactions.get(m.id) ?? []).some((r) => r.emoji === emoji && r.handles.includes(normHandle(me)));
+    setMessages((cur) => cur.concat(optimisticReaction(m.id, emoji, me, mineNow)));
+    client.react(room.ticker, m.id, emoji).catch((e) => {
+      setMessages((cur) =>
+        cur.filter(
+          (x) =>
+            !(x.pending && x.event_type === 'reaction' && (x.event_payload as { target?: string })?.target === m.id),
+        ),
+      );
+      fail(e);
+    });
+  };
+  const shareB = (m: ChatMessage) => {
+    client
+      .shareBAnswer(room.ticker, m.id)
+      .then((saved) =>
+        setMessages((cur) =>
+          mergeMessages(
+            cur.map((x) => (x.id === m.id ? { ...x, event_payload: { ...(x.event_payload ?? {}), shared: true } } : x)),
+            saved ? [saved] : [],
+          ),
+        ),
+      )
+      .catch(fail);
+  };
 
   const loadOlder = useCallback(() => {
     const before = oldestCursor(messages);
@@ -374,12 +467,12 @@ const Conversation = ({
     client
       .page(room.ticker, { before })
       .then((p) => {
-        setMessages((cur) => mergeMessages(cur, p.messages));
+        setMessages((cur) => mergeMessages(cur, visibleMessages(p.messages, viewerIsAdmin)));
         setHasMore(p.hasMore);
       })
       .catch(fail)
       .finally(() => setLoadingOlder(false));
-  }, [client, room.ticker, messages, hasMore, loadingOlder, fail]);
+  }, [client, room.ticker, messages, hasMore, loadingOlder, fail, viewerIsAdmin]);
 
   // Keep position when older messages are prepended; otherwise follow the bottom.
   useLayoutEffect(() => {
@@ -391,7 +484,7 @@ const Conversation = ({
     } else if (stickToBottom.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, typing.length]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -418,6 +511,7 @@ const Conversation = ({
 
   const post = (body: string, existing: ChatMessage | undefined, pay: SpendCharge | null) => {
     const localId = existing?.localId ?? `l${Date.now()}-${++localSeq.current}`;
+    const quoting = existing ? replyOf(existing) : replyTo;
     const optimistic: ChatMessage = {
       id: `local:${localId}`,
       localId,
@@ -426,10 +520,14 @@ const Conversation = ({
       body,
       created_at: new Date().toISOString(),
       pending: true,
+      ...(quoting ? { event_payload: { reply_to: quoting } } : {}),
     };
     stickToBottom.current = true;
     setMessages((cur) => cur.filter((m) => m.localId !== localId).concat(optimistic));
-    if (!existing) setDraft('');
+    if (!existing) {
+      setDraft('');
+      setReplyTo(null);
+    }
     const go = async () => {
       let spend = paidFor.current.get(localId);
       if (!spend && pay && entryKey) {
@@ -437,7 +535,7 @@ const Conversation = ({
         spend = { beef: p.beef, rule: pay.rule, txid: p.txid };
         paidFor.current.set(localId, spend);
       }
-      const saved = await client.send(room.ticker, body, spend && { beef: spend.beef, rule: spend.rule });
+      const saved = await client.send(room.ticker, body, spend && { beef: spend.beef, rule: spend.rule }, quoting);
       // Spent only now: bit-sign broadcast it and stored the message.
       if (spend && pay && entryKey) recordSpent(entryKey, totalRaw(pay));
       return saved;
@@ -445,7 +543,16 @@ const Conversation = ({
     go()
       .then((saved) => {
         paidFor.current.delete(localId);
-        setMessages((cur) => (saved ? mergeMessages(cur, [saved]) : cur));
+        // A private bot reply (lounge-bot) settles in place of the never-stored command.
+        // Any other unstored reply (/b help, Lounge commands) never matches the optimistic copy: drop it.
+        setMessages((cur) => {
+          if (saved && isEphemeral(saved)) return settleEphemeral(cur, localId, saved);
+          const rest =
+            saved && normHandle(saved.author_handle ?? '') !== normHandle(me)
+              ? cur.filter((m) => m.localId !== localId)
+              : cur;
+          return saved ? mergeMessages(rest, [saved]) : rest;
+        });
       })
       .catch((e) => {
         setMessages((cur) => cur.map((m) => (m.localId === localId ? { ...m, failed: true } : m)));
@@ -469,9 +576,10 @@ const Conversation = ({
   const [blockTick, setBlockTick] = useState(0);
   useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
   const items = useMemo(() => {
-    const shown = withoutBlocked(messages, new Set(blockedHandles()));
+    const shown = withoutBlocked(messages, new Set(blockedHandles())).filter((m) => !isReactionEvent(m));
     return threadItems(hidden?.size ? shown.filter((m) => !hidden.has(m.id)) : shown, me);
   }, [messages, me, hidden, blockTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const reactions = useMemo(() => reactionsByMessage(messages), [messages]);
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
@@ -480,6 +588,8 @@ const Conversation = ({
     messages.map((m) => m.author_handle),
   );
   const waitingForB = pendingBQuestions(messages);
+  const mq = mentionQuery(draft);
+  const mentions = mq === null ? [] : mentionSuggestions(messages, mq, me);
   const composer = useRef<HTMLTextAreaElement>(null);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
@@ -558,7 +668,14 @@ const Conversation = ({
 
       {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
       {BSPACES_ENABLED && entry && (
-        <LiveBanner client={client} ticker={room.ticker} roomName={title} me={me} createdBy={room.created_by_handle} />
+        <LiveBanner
+          client={client}
+          ctx={apiContext}
+          ticker={room.ticker}
+          roomName={title}
+          me={me}
+          createdBy={room.created_by_handle}
+        />
       )}
       <div
         ref={scroller}
@@ -569,6 +686,11 @@ const Conversation = ({
         {loadingOlder && (
           <div className="text-center text-[11px] py-2" style={{ color: MUTED }}>
             Loading earlier messages…
+          </div>
+        )}
+        {showHistoryNote(hiddenBefore) && hasMore !== true && (
+          <div className="text-center text-[11px] py-2" style={{ color: MUTED }}>
+            {HISTORY_HIDDEN_NOTE}
           </div>
         )}
         {hasMore === false && messages.length > 0 && (
@@ -603,6 +725,22 @@ const Conversation = ({
                 {it.label}
               </span>
             </div>
+          ) : isBotMessage(it.message) ? (
+            <div key={it.key} className="flex justify-start my-2">
+              <div
+                className="text-[13px] px-3 py-2 rounded-2xl max-w-[85%]"
+                style={{ background: '#0c2433', color: '#e6f4ff', border: '1px solid #1d4d6b' }}
+              >
+                <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ color: '#8fcdf5' }}>
+                  <span className="font-semibold">{String(it.message.event_payload?.name || 'Lounge bot')}</span>
+                  <span className="text-[9px] font-bold px-1 rounded" style={{ background: '#1f6d9c', color: '#fff' }}>
+                    BOT
+                  </span>
+                  {isEphemeral(it.message) && <span>· only you can see this</span>}
+                </div>
+                <div className="whitespace-pre-line break-words">{it.message.body}</div>
+              </div>
+            </div>
           ) : it.message.kind === 'event' ? (
             <div key={it.key} className="flex justify-center my-2">
               <span
@@ -629,8 +767,13 @@ const Conversation = ({
                     <div className="shrink-0" style={{ width: 28 }} />
                   ))}
                 <div
-                  {...(onMessageMenu && !it.message.pending ? longPress(() => onMessageMenu(it.message)) : {})}
-                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug"
+                  {...(!it.message.pending && !isEphemeral(it.message)
+                    ? bubbleGestures(
+                        () => setActing(it.message),
+                        isPrivateB(it.message) ? null : () => setReplyTo(replyRefFor(it.message)),
+                      )
+                    : {})}
+                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none"
                   style={{
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
@@ -649,7 +792,34 @@ const Conversation = ({
                       ${it.message.author_handle}
                     </div>
                   )}
-                  <span className="whitespace-pre-wrap break-words">{it.message.body}</span>
+                  {replyOf(it.message) && <ReplyQuote reply={replyOf(it.message)!} mine={it.mine} />}
+                  {(it.message.event_payload as { shared_by?: string } | null)?.shared_by && (
+                    <div className="text-[11px] mb-[2px]" style={{ color: it.mine ? '#5c4800' : MUTED }}>
+                      Shared by ${(it.message.event_payload as { shared_by?: string }).shared_by}
+                    </div>
+                  )}
+                  <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                  {isPrivateB(it.message) && (
+                    <div
+                      className="text-[11px] mt-1 flex items-center gap-2"
+                      style={{ color: it.mine ? '#5c4800' : MUTED }}
+                    >
+                      <Lock size={11} /> Only you can see this
+                      {normHandle(it.message.author_handle ?? '') === 'b' &&
+                        !isEphemeral(it.message) &&
+                        !isShared(it.message) && (
+                          <button
+                            type="button"
+                            onClick={() => shareB(it.message)}
+                            className="font-semibold underline"
+                            style={{ color: GOLD }}
+                          >
+                            Share to room
+                          </button>
+                        )}
+                      {isShared(it.message) && <span>· shared</span>}
+                    </div>
+                  )}
                   <span
                     className="text-[10px] ml-2 float-right mt-[6px]"
                     style={{ color: it.mine ? '#5c4800' : MUTED }}
@@ -670,6 +840,14 @@ const Conversation = ({
                   </span>
                 </div>
               </div>
+              {reactions.has(it.message.id) && (
+                <ReactionChips
+                  list={reactions.get(it.message.id)!}
+                  me={me}
+                  mine={it.mine}
+                  onToggle={(e) => react(it.message, e)}
+                />
+              )}
               {waitingForB.has(it.message.id) && (
                 <div className="flex items-end gap-2 justify-start mt-2" aria-live="polite">
                   <Avatar title="b" size={28} src={B_AVATAR} />
@@ -718,6 +896,18 @@ const Conversation = ({
               <div>Just /b shows what it can do.</div>
             </div>
           )}
+          <TypingRow label={typingLabel(typing)} />
+          {replyTo && <ReplyPreview reply={replyTo} onCancel={() => setReplyTo(null)} />}
+          {mentions.length > 0 && (
+            <MentionPicker
+              handles={mentions}
+              avatar={(h) => <Avatar title={h} size={22} src={avatarFor(h)} />}
+              onPick={(h) => {
+                setDraft((d) => applyMention(d, h));
+                requestAnimationFrame(() => composer.current?.focus());
+              }}
+            />
+          )}
           {mustPay(charge) && (
             <div className="px-4 pt-1 text-[11px] shrink-0" style={{ color: MUTED, background: '#0b0b0b' }}>
               {costLine(charge, entry?.gate.symbol ?? '', chargeDec(charge))}
@@ -748,7 +938,10 @@ const Conversation = ({
             <textarea
               ref={composer}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                pingTyping(e.target.value);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !isNative) {
                   e.preventDefault();
@@ -772,6 +965,49 @@ const Conversation = ({
             </button>
           </form>
         </>
+      )}
+      {acting && (
+        <ReactionBar
+          preview={acting.body || ''}
+          onReact={
+            isPrivateB(acting) || isEphemeral(acting)
+              ? null
+              : (e) => {
+                  react(acting, e);
+                  setActing(null);
+                }
+          }
+          onReply={
+            isPrivateB(acting)
+              ? null
+              : () => {
+                  setReplyTo(replyRefFor(acting));
+                  setActing(null);
+                  requestAnimationFrame(() => composer.current?.focus());
+                }
+          }
+          onShare={
+            isPrivateB(acting) &&
+            normHandle(acting.author_handle ?? '') === 'b' &&
+            !isEphemeral(acting) &&
+            !isShared(acting)
+              ? () => {
+                  shareB(acting);
+                  setActing(null);
+                }
+              : null
+          }
+          onMore={
+            onMessageMenu && !isPrivateB(acting)
+              ? () => {
+                  const m = acting;
+                  setActing(null);
+                  onMessageMenu(m);
+                }
+              : null
+          }
+          onClose={() => setActing(null)}
+        />
       )}
       {confirmSend && mustPay(charge) && entryKey && (
         <PayToPostSheet
@@ -948,38 +1184,86 @@ const LockedRoom = ({
 );
 
 /**
- * Invite = send the room token. Resolves $handle → their proven receive address (bit-sign), then
- * asks the wallet to send exactly the room minimum. Nothing is sent until the user confirms here,
- * and the wallet's own approval for the transaction still applies.
+ * Invite to a token room (owner, 8 Oct 2026). Two ways, both behind token rooms (tokenRoomsEnabled):
+ *
+ * 1. A link. "Copy room page" is the permanent /r/<ticker> page (entry rule, real price, "Buy 1 $X
+ *    and enter"); the invite panel makes an ephemeral /i/<code> with expiry and max uses, and lists
+ *    yours with their uses and Revoke. Opening either without the token shows the room's existing
+ *    get-entry screen; with it, the room.
+ * 2. Send the entry token. The recipient box is the Send screen's own NameInput ($handle, paymail,
+ *    OpNS or address, with the same address-poisoning warning); Next opens the wallet's existing
+ *    BSV-21 send view (SendBsv21View) already filled, whose confirm screen does the send. After a
+ *    send, it offers to share the room link with them too.
  */
 const InviteSheet = ({
   client,
   ticker,
+  roomName,
   entry,
   onClose,
 }: {
   client: BchatClient;
   ticker: string;
+  roomName: string;
   entry: TokenRoomEntry;
   onClose: () => void;
 }) => {
   const { apiContext } = useServiceContext();
-  const { addSnackbar } = useSnackbar();
-  const [input, setInput] = useState('');
-  const [target, setTarget] = useState<{ label: string; address: string } | null>(null);
+  const { theme } = useTheme();
+  const [to, setTo] = useState('');
+  const [amount, setAmount] = useState(() => formatRaw(entry.gate.minRaw, entry.gate.dec));
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const amount = amountLabel(entry.gate.minRaw, entry.gate);
+  const [short, setShort] = useState(false);
+  const [sending, setSending] = useState<{
+    token: { isConfirmed: boolean; info: Bsv21Balance };
+    amountInput: string;
+  } | null>(null);
+  const [sentTo, setSentTo] = useState('');
+  const [note, setNote] = useState('');
+  const symbol = entry.gate.symbol;
 
-  const resolve = async () => {
-    const who = parseInvitee(input);
-    if (!who) return setError('Enter a $handle or a BSV address');
+  const roomPage = async () => {
+    const page = parsePage(await client.roomPage(ticker).catch(() => null));
+    return page?.url || '';
+  };
+  const copyRoomPage = async () => {
+    const url = await roomPage();
+    if (!url) return setNote('The room page isn’t available yet.');
+    setNote((await copyLink(url)) === 'copied' ? 'Room link copied.' : url);
+  };
+  const shareRoom = async () => {
+    // An invite link if the server has them on, else the permanent room page.
+    const inv = parseSpaceInvite(
+      await client.createRoomInvite(ticker, { expires_in: DEFAULT_EXPIRY }).catch(() => null),
+    );
+    const url = inv?.url || (await roomPage());
+    if (!url) return setNote('The room link isn’t available yet.');
+    const r = await shareLink({ title: roomName, text: `Join ${roomName}`, url });
+    if (r === 'copied') setNote('Room link copied.');
+    if (r === 'failed') setNote(url);
+  };
+  const createInvite = useCallback(
+    (opts: { expires_in: string; max_uses?: number }) => client.createRoomInvite(ticker, opts),
+    [client, ticker],
+  );
+  const listInvites = useCallback(() => client.roomInvites(ticker), [client, ticker]);
+  const revokeInvite = useCallback((code: string) => client.revokeRoomInvite(ticker, code), [client, ticker]);
+
+  const next = async () => {
     setError('');
-    if ('address' in who) return setTarget({ label: `${who.address.slice(0, 8)}…`, address: who.address });
-    setBusy('Looking up…');
+    setShort(false);
+    if (!to) return setError('Enter a $handle, paymail or address, and confirm the name.');
+    const raw = toRawAmount(amount, entry.gate.dec);
+    if (!raw || raw === '0') return setError('Enter an amount.');
+    setBusy('Checking balance…');
     try {
-      const address = await client.inviteAddress(ticker, who.handle);
-      setTarget({ label: `$${who.handle}`, address });
+      const balances = await getBsv21Balances.execute(apiContext, {});
+      const id = (entry.holding.id || '').toLowerCase().replace('.', '_');
+      const info = balances.find((b) => (b.id || '').toLowerCase().replace('.', '_') === id);
+      const held = info ? info.all.confirmed : 0n;
+      if (!info || held < BigInt(raw)) return setShort(true);
+      setSending({ token: { isConfirmed: true, info }, amountInput: amount });
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -987,97 +1271,123 @@ const InviteSheet = ({
     }
   };
 
-  const send = async () => {
-    if (!target) return;
-    setBusy('Sending…');
-    setError('');
-    try {
-      const res = await sendBsv21.execute(apiContext, {
-        tokenId: entry.holding.id,
-        recipients: [{ amount: BigInt(entry.gate.minRaw), destination: { address: target.address } }],
-      });
-      if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
-      const shown = celebrateSend(res, {
-        amount: { kind: 'token', display: amount, ticker: '' },
-        recipients: [target.label],
-        title: 'Invite sent!',
-      });
-      if (!shown) addSnackbar(`Invited ${target.label} — sent ${amount}`, 'success');
-      onClose();
-    } catch (e) {
-      setError(errText(e));
-    } finally {
-      setBusy('');
-    }
-  };
+  if (sending) {
+    return createPortal(
+      <div className="fixed inset-0 z-[160] flex" style={{ background: theme.color.global.walletBackground }}>
+        <SendBsv21View
+          token={sending.token}
+          prefill={{ address: to, amountInput: sending.amountInput }}
+          onBack={(sentAtomic) => {
+            setSending(null);
+            if (sentAtomic && sentAtomic > 0n) setSentTo(to);
+          }}
+        />
+      </div>,
+      document.body,
+    );
+  }
 
   return (
     <Sheet title="Invite to this room" onClose={onClose}>
-      {!target ? (
-        <>
-          <p className="text-xs mb-3" style={{ color: MUTED }}>
-            An invite is the room token: you send {amount} and they're in.
-          </p>
-          <div
-            className="flex items-center gap-2 rounded-2xl px-3"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
-          >
-            <input
-              autoFocus
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && resolve()}
-              placeholder="$handle or address"
-              autoCapitalize="none"
-              autoCorrect="off"
-              className="flex-1 bg-transparent py-3 text-white outline-none"
-            />
+      <div className="max-h-[75vh] overflow-y-auto pb-2">
+        {sentTo ? (
+          <div className="rounded-2xl p-4 mb-4" style={{ background: PANEL, border: `1px solid ${GOLD}` }}>
+            <p className="text-sm text-white font-semibold">Sent. Share the room link with them too?</p>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => void shareRoom()}
+                className="flex-1 rounded-2xl py-2.5 font-bold flex items-center justify-center gap-2"
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
+                <Share2 size={15} /> Share link
+              </button>
+              <button
+                onClick={() => setSentTo('')}
+                className="flex-1 rounded-2xl py-2.5 font-bold text-white"
+                style={{ background: PANEL, border: `1px solid ${LINE}` }}
+              >
+                Done
+              </button>
+            </div>
           </div>
+        ) : null}
+
+        <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: MUTED }}>
+          Room link
+        </div>
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Anyone with the link can see the room and buy {amountLabel(entry.gate.minRaw, entry.gate)} to enter.
+        </p>
+        <div className="flex gap-2 mb-4">
           <button
-            onClick={resolve}
-            disabled={!!busy || !input.trim()}
-            className="w-full mt-4 rounded-2xl py-3 font-bold disabled:opacity-50"
-            style={{ background: GOLD, color: '#1a1300' }}
+            onClick={() => void copyRoomPage()}
+            className="flex-1 rounded-2xl py-2.5 font-semibold flex items-center justify-center gap-2"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
           >
-            {busy || 'Next'}
+            <Copy size={15} /> Copy link
           </button>
-        </>
-      ) : (
-        <>
-          <div className="rounded-2xl p-4 text-sm" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
-            <div className="flex justify-between">
-              <span style={{ color: MUTED }}>Send</span>
-              <span className="text-white font-semibold">{amount}</span>
-            </div>
-            <div className="flex justify-between mt-2">
-              <span style={{ color: MUTED }}>To</span>
-              <span className="text-white font-semibold">{target.label}</span>
-            </div>
-            <div className="text-[11px] mt-2 break-all" style={{ color: MUTED }}>
-              {target.address}
+          <button
+            onClick={() => void shareRoom()}
+            className="flex-1 rounded-2xl py-2.5 font-semibold flex items-center justify-center gap-2"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+          >
+            <Share2 size={15} /> Share
+          </button>
+        </div>
+        <InviteLinksPanel
+          create={createInvite}
+          list={listInvites}
+          revoke={revokeInvite}
+          title={roomName}
+          onNote={setNote}
+        />
+
+        <div className="text-[11px] font-semibold uppercase tracking-wide mt-6 mb-2" style={{ color: MUTED }}>
+          Send token to
+        </div>
+        <NameInput theme={theme} asset="token" value={to} onChange={setTo} placeholder="$handle, paymail or address" />
+        <div
+          className="mt-2 flex items-center gap-2 rounded-2xl px-3"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        >
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            inputMode="decimal"
+            className="flex-1 bg-transparent py-3 text-white outline-none"
+            aria-label="Amount"
+          />
+          <span className="text-sm font-semibold" style={{ color: GOLD }}>
+            ${symbol}
+          </span>
+        </div>
+        {short ? (
+          <div className="mt-3">
+            <p className="text-sm text-[#F97066]">You don’t hold enough ${symbol}.</p>
+            <div className="mt-2 flex gap-2">
+              <BuyTokenButton kind={entry.holding.kind === 'coll' ? 'coll' : 'bsv21'} id={entry.holding.id} />
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
-            <button
-              onClick={() => setTarget(null)}
-              disabled={!!busy}
-              className="flex-1 rounded-2xl py-3 font-bold text-white"
-              style={{ background: PANEL }}
-            >
-              Back
-            </button>
-            <button
-              onClick={send}
-              disabled={!!busy}
-              className="flex-1 rounded-2xl py-3 font-bold disabled:opacity-50"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {busy || `Send ${amount}`}
-            </button>
-          </div>
-        </>
-      )}
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        ) : null}
+        <button
+          onClick={() => void next()}
+          disabled={!!busy || !to}
+          className="w-full mt-3 rounded-2xl py-3 font-bold disabled:opacity-50"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          {busy || 'Next'}
+        </button>
+        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {note && (
+          <button
+            onClick={() => setNote('')}
+            className="mt-3 w-full text-left text-xs break-all"
+            style={{ color: MUTED }}
+          >
+            {note}
+          </button>
+        )}
+      </div>
     </Sheet>
   );
 };
@@ -1607,6 +1917,29 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   // Cache first (owner round 6): the last room list shows at once; the live list replaces it quietly.
   const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(`chat:rooms:${identityAddress}`));
+  // My X / Google picture (names/socialAvatar.ts) goes to bit-sign once, so other people's bubbles show it
+  // instead of my initial; bit-sign keeps a photo chosen there. Remembered per handle + picture.
+  const socialAvatar = chromeStorageService.getCurrentAccountObject().account?.settings?.socialProfile?.avatar ?? '';
+  useEffect(() => {
+    if (!handle || !/^https:\/\//.test(socialAvatar)) return;
+    rememberAvatar(handle, socialAvatar);
+    const key = `bwallet.chatAvatarPublished.${handle}`;
+    try {
+      if (localStorage.getItem(key) === socialAvatar) return;
+    } catch {
+      /* no storage */
+    }
+    client
+      .publishAvatar(socialAvatar)
+      .then(() => {
+        try {
+          localStorage.setItem(key, socialAvatar);
+        } catch {
+          /* no storage */
+        }
+      })
+      .catch(() => undefined);
+  }, [client, handle, socialAvatar]);
   const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
@@ -2128,15 +2461,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           </div>
         )}
 
-        {BSPACES_ENABLED && ROOMS && handle && rooms && (
-          <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />
-        )}
+        {BSPACES_ENABLED && ROOMS && handle && rooms && <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />}
         {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
           <SpacesRoomList
             client={client}
             me={handle}
             items={tokenMine.flatMap(({ e }) =>
-              e.room ? [{ key: e.key, ticker: e.room.ticker, title: entryTitle(e, e.room) ?? `$${e.gate.symbol}` }] : [],
+              e.room
+                ? [{ key: e.key, ticker: e.room.ticker, title: entryTitle(e, e.room) ?? `$${e.gate.symbol}` }]
+                : [],
             )}
             onOpen={(key) => {
               const hit = tokenMine.find(({ e }) => e.key === key);
@@ -2332,6 +2665,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         <RoomSettingsSheet
           client={client}
           ctx={apiContext}
+          me={handle ?? ''}
           ticker={open.room.ticker}
           entry={open.entry}
           onBans={() => {
@@ -2352,7 +2686,13 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         />
       )}
       {inviting && open?.entry && (
-        <InviteSheet client={client} ticker={open.room.ticker} entry={open.entry} onClose={() => setInviting(false)} />
+        <InviteSheet
+          client={client}
+          ticker={open.room.ticker}
+          roomName={roomTitle(open.room, handle ?? '')}
+          entry={open.entry}
+          onClose={() => setInviting(false)}
+        />
       )}
     </div>
   );
@@ -2380,3 +2720,5 @@ const ChatPage = () => (
 );
 
 export default ChatPage;
+/** For the dev-only sample-data preview (screenshots); not used by the app. */
+export { Conversation as ChatConversation };

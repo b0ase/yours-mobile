@@ -14,18 +14,18 @@ small secondary text. USD figures below use about $20/BSV, so 1¢ is about 500 s
 
 ## What already exists (and what we reuse)
 
-| Piece | Where | Reuse |
-|---|---|---|
-| Audio player with a queue, background audio and lock-screen controls | `src/mobile/media/player.ts` (one module-level `<audio>`, Media Session API), `MiniPlayer.tsx`, `MediaPage.tsx`, `useWalletMedia.ts` | Plays bMusic tracks as-is. Add a "paid" track type and a spend line in the MiniPlayer. |
-| Music NFTs, Exchange "Music" category, play preview on cards | `src/mobile/market/classify.ts` (`audio/*` becomes `music`), `NftCard.tsx`, `MarketPage.tsx` | Owned track NFTs already play. The Exchange already lists music NFTs for sale. |
-| Minting | `src/mobile/mint/mint.ts` (fee `ceil((bytes+900) × satsPerKb/1000)+1`, 10 MB `MAX_MINT_BYTES`, 1% bWalletX fee) | Artists mint track NFTs here. |
-| Pay per request (quote, pay, deliver, retry without paying twice) | `src/mobile/agent/paid.ts` (price, quote, pay to P2PKH, then turn; `MAX_MESSAGE_SATS` ceiling; daily limit) | Same shape for "pay per play". |
-| Pay-per-second streams spec | `docs/STREAMING-PAYMENTS-SPEC.md` (allowance sheet, caps, on-chain every N seconds vs. credits vs. channels) | Same UX vocabulary and same server (bit-sign). bMusic is the simple per-play case. |
-| Credits ledger | `src/mobile/credits/` and bit-sign credits | Fallback for sub-cent prices and quick replays. |
-| bMusic bApp entry | `src/mobile/bapps.ts` (bMusic, `https://www.bmovies.app/bmusic`, "Tokenise your music; fans who hold it make the video with you"), `ownerApps.ts` (bmusic.space, "Pump.fun for music") | Keep as the creation side; the in-wallet store is the listening side. Link both ways. |
-| Old $bMusic project | `/Volumes/2026/Projects/bitcoin-music` (DAW plus NFT marketplace concept; `.nft` tracks, `.ft` revenue shares, HandCash) | Ideas only (revenue shares, splits). No code reuse planned; it is a separate web app. |
-| $402 protocol | `/Volumes/2026/Projects/path402`, `path402-com` (a `$` path becomes a priced object with a price curve, holders and revenue; path402d nodes check ownership before serving) | "Own the token, get the content" is the same idea as "own the NFT, unlimited plays". A later phase can expose each track as a $402 path. |
-| First catalogue | `docs/VEXVOID-MINT-QUOTE.md` | 70 MP3s, 35 unique titles; mint all 35 at 128 kbps for about $2.30 at the default fee rate. |
+| Piece                                                                | Where                                                                                                                                                                                  | Reuse                                                                                                                                    |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio player with a queue, background audio and lock-screen controls | `src/mobile/media/player.ts` (one module-level `<audio>`, Media Session API), `MiniPlayer.tsx`, `MediaPage.tsx`, `useWalletMedia.ts`                                                   | Plays bMusic tracks as-is. Add a "paid" track type and a spend line in the MiniPlayer.                                                   |
+| Music NFTs, Exchange "Music" category, play preview on cards         | `src/mobile/market/classify.ts` (`audio/*` becomes `music`), `NftCard.tsx`, `MarketPage.tsx`                                                                                           | Owned track NFTs already play. The Exchange already lists music NFTs for sale.                                                           |
+| Minting                                                              | `src/mobile/mint/mint.ts` (fee `ceil((bytes+900) × satsPerKb/1000)+1`, 10 MB `MAX_MINT_BYTES`, 1% bWalletX fee)                                                                        | Artists mint track NFTs here.                                                                                                            |
+| Pay per request (quote, pay, deliver, retry without paying twice)    | `src/mobile/agent/paid.ts` (price, quote, pay to P2PKH, then turn; `MAX_MESSAGE_SATS` ceiling; daily limit)                                                                            | Same shape for "pay per play".                                                                                                           |
+| Pay-per-second streams spec                                          | `docs/STREAMING-PAYMENTS-SPEC.md` (allowance sheet, caps, on-chain every N seconds vs. credits vs. channels)                                                                           | Same UX vocabulary and same server (bit-sign). bMusic is the simple per-play case.                                                       |
+| Credits ledger                                                       | `src/mobile/credits/` and bit-sign credits                                                                                                                                             | Fallback for sub-cent prices and quick replays.                                                                                          |
+| bMusic bApp entry                                                    | `src/mobile/bapps.ts` (bMusic, `https://www.bmovies.app/bmusic`, "Tokenise your music; fans who hold it make the video with you"), `ownerApps.ts` (bmusic.space, "Pump.fun for music") | Keep as the creation side; the in-wallet store is the listening side. Link both ways.                                                    |
+| Old $bMusic project                                                  | `/Volumes/2026/Projects/bitcoin-music` (DAW plus NFT marketplace concept; `.nft` tracks, `.ft` revenue shares, HandCash)                                                               | Ideas only (revenue shares, splits). No code reuse planned; it is a separate web app.                                                    |
+| $402 protocol                                                        | `/Volumes/2026/Projects/path402`, `path402-com` (a `$` path becomes a priced object with a price curve, holders and revenue; path402d nodes check ownership before serving)            | "Own the token, get the content" is the same idea as "own the NFT, unlimited plays". A later phase can expose each track as a $402 path. |
+| First catalogue                                                      | `docs/VEXVOID-MINT-QUOTE.md`                                                                                                                                                           | 70 MP3s, 35 unique titles; mint all 35 at 128 kbps for about $2.30 at the default fee rate.                                              |
 
 ## Precedents (BSV)
 
@@ -56,23 +56,23 @@ small secondary text. USD figures below use about $20/BSV, so 1¢ is about 500 s
 
 ## Pricing (USD, artist can change)
 
-| Item | Default | Notes |
-|---|---|---|
-| Per play | **1¢** | Charged once the play passes 30 s. Skips before 30 s are free. |
-| Replay of the same track, same day | free after 3 paid plays | Fans aren't punished for repeats. |
-| Daily cap per listener | **$0.50** (user can change) | Shown on the sheet. |
-| Buy the track NFT | **$1.99** | Artist sets. Limited editions allowed. |
-| Album bundle | sum of tracks minus 30% | Later. |
-| Platform fee | 10% of plays and primary sales | Covers hosting and bandwidth. |
-| Resales on the Exchange | existing market fee plus an optional artist royalty | Royalty only if the listing contract supports it. |
+| Item                               | Default                                             | Notes                                                          |
+| ---------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| Per play                           | **1¢**                                              | Charged once the play passes 30 s. Skips before 30 s are free. |
+| Replay of the same track, same day | free after 3 paid plays                             | Fans aren't punished for repeats.                              |
+| Daily cap per listener             | **$0.50** (user can change)                         | Shown on the sheet.                                            |
+| Buy the track NFT                  | **$1.99**                                           | Artist sets. Limited editions allowed.                         |
+| Album bundle                       | sum of tracks minus 30%                             | Later.                                                         |
+| Platform fee                       | 10% of plays and primary sales                      | Covers hosting and bandwidth.                                  |
+| Resales on the Exchange            | existing market fee plus an optional artist royalty | Royalty only if the listing contract supports it.              |
 
 ## How payment per play works
 
-| Option | Fees | Latency | Offline | Verdict |
-|---|---|---|---|---|
-| **A. One on-chain tx per play** | about 25 sats per tx (100 sat/kB) on about 500 sats, so about 5% | about 0.3 s to accept a 0-conf tx (Phase 0 test) | No, needs network to pay | **Recommended** for the MVP |
-| B. Prepaid credits, debited per play | none per play; one top-up tx | instant | can play cached tracks and settle later | Fallback for sub-cent prices and fast skipping |
-| C. Payment channel | one open, one close | instant | partly | Too much work for now; revisit with streaming |
+| Option                               | Fees                                                             | Latency                                          | Offline                                 | Verdict                                        |
+| ------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------ | --------------------------------------- | ---------------------------------------------- |
+| **A. One on-chain tx per play**      | about 25 sats per tx (100 sat/kB) on about 500 sats, so about 5% | about 0.3 s to accept a 0-conf tx (Phase 0 test) | No, needs network to pay                | **Recommended** for the MVP                    |
+| B. Prepaid credits, debited per play | none per play; one top-up tx                                     | instant                                          | can play cached tracks and settle later | Fallback for sub-cent prices and fast skipping |
+| C. Payment channel                   | one open, one close                                              | instant                                          | partly                                  | Too much work for now; revisit with streaming  |
 
 **Recommendation: A, with the `paid.ts` shape.** It is non-custodial (the money goes straight to the
 artist's and bCorp's addresses), it uses verify code we already have, and at 1¢ the fee is small.
@@ -144,6 +144,7 @@ Add B (credits) later when prices go below about 0.5¢, where the fee would be o
 ## Phased plan
 
 **Phase 1, MVP (1-2 weeks), VexVoid only**
+
 - Pick 35 unique titles; re-encode to 128 kbps; upload masters and 30 s previews to private storage.
 - bit-sign: catalogue table, quote, play (verify tx outputs, issue signed URL), play log.
 - Wallet: paid track type in the player, quote/pay/play helper (copy `paid.ts` and its tests),

@@ -38,6 +38,16 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="bwalletx" android:host="social" />
             </intent-filter>
+            <!-- Space pages, invites and room pages: bwalletx://space/<slug>, bwalletx://invite/<code>,
+                 bwalletx://room/<ticker> from the /s/, /i/ and /r/ pages (src/mobile/spaces/inviteLinks.ts). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bwalletx" android:host="space" />
+                <data android:scheme="bwalletx" android:host="invite" />
+                <data android:scheme="bwalletx" android:host="room" />
+            </intent-filter>
 
         </activity>
 

@@ -42,17 +42,32 @@ if (list.includes(`url: '${url.origin}`)) {
   process.exit(1);
 }
 
-const get = (u) => fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(12_000), headers: { 'user-agent': 'Mozilla/5.0 bWalletX add-app' } });
-const html = await get(url.href).then((r) => r.text()).catch(() => '');
+const get = (u) =>
+  fetch(u, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(12_000),
+    headers: { 'user-agent': 'Mozilla/5.0 bWalletX add-app' },
+  });
+const html = await get(url.href)
+  .then((r) => r.text())
+  .catch(() => '');
 const meta = (re) => html.match(re)?.[1]?.trim();
-const decode = (s) => s?.replace(/&amp;/g, '&').replace(/&#39;|&#x27;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+const decode = (s) =>
+  s
+    ?.replace(/&amp;/g, '&')
+    .replace(/&#39;|&#x27;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
 const title = decode(
   nameArg ||
     meta(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)/i) ||
     meta(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i) ||
     meta(/<title[^>]*>([^<]+)<\/title>/i) ||
     host,
-).split(/\s[|–-]\s/)[0].slice(0, 40);
+)
+  .split(/\s[|–-]\s/)[0]
+  .slice(0, 40);
 const desc = decode(
   descArg ||
     meta(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i) ||
@@ -80,7 +95,19 @@ for (const h of iconHrefs) {
     const file = join(tmp, 'icon');
     writeFileSync(file, Buffer.from(await r.arrayBuffer()));
     // First frame of .ico, flattened onto black, 96px square.
-    execFileSync('magick', [`${file}[0]`, '-background', 'black', '-flatten', '-resize', '96x96', '-gravity', 'center', '-extent', '96x96', out]);
+    execFileSync('magick', [
+      `${file}[0]`,
+      '-background',
+      'black',
+      '-flatten',
+      '-resize',
+      '96x96',
+      '-gravity',
+      'center',
+      '-extent',
+      '96x96',
+      out,
+    ]);
     ok = true;
     break;
   } catch {
@@ -88,7 +115,23 @@ for (const h of iconHrefs) {
   }
 }
 if (!ok) {
-  execFileSync('magick', ['-size', '96x96', 'xc:#17191E', '-font', '/System/Library/Fonts/Supplemental/Arial Bold.ttf', '-gravity', 'center', '-fill', '#F5B800', '-pointsize', '48', '-annotate', '0', title[0].toUpperCase(), out]);
+  execFileSync('magick', [
+    '-size',
+    '96x96',
+    'xc:#17191E',
+    '-font',
+    '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+    '-gravity',
+    'center',
+    '-fill',
+    '#F5B800',
+    '-pointsize',
+    '48',
+    '-annotate',
+    '0',
+    title[0].toUpperCase(),
+    out,
+  ]);
   console.warn('No usable icon found: used a lettered placeholder.');
 }
 

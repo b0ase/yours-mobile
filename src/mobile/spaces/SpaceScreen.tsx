@@ -21,13 +21,18 @@ import {
   Radio,
   RefreshCw,
   Send,
+  Share2,
   Users,
   X,
 } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { isAdminRefusal as adminRefusal } from '../chat/autoClaim';
 import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
+import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
+import { LevelBars } from './LevelBars';
+import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import {
   audienceCount,
   audienceLine,
@@ -42,6 +47,9 @@ import {
   type Participant,
   type SpaceState,
 } from './model';
+import { inviteShareText, parsePage } from './invite';
+import { InviteLinksPanel } from '../chat/InviteLinksPanel';
+import { shareLink } from '../chat/shareLink';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -80,7 +88,9 @@ const StageTile = ({
   me,
   big,
   onTap,
+  micOff = false,
 }: {
+  micOff?: boolean;
   p: Participant;
   video: boolean;
   speaking: boolean;
@@ -136,6 +146,7 @@ const StageTile = ({
         className="absolute left-2 bottom-2 right-2 flex items-center gap-1 text-[12px] text-white"
         style={{ textShadow: '0 1px 3px #000' }}
       >
+        <LevelBars read={() => media.levelOf(p.handle)} speaking={speaking} muted={micOff} />
         <span className="truncate">${p.handle}</span>
         {p.role === 'host' && (
           <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
@@ -307,12 +318,27 @@ export interface SpaceScreenProps {
   me: string;
   /** Host starting a new space: its title. Omit to join the live one. */
   startTitle?: string;
+  /** Shown as an inline "Claim admin" when an admin-only start is refused; true = claimed. */
+  onClaimAdmin?: () => Promise<boolean>;
+  /** Room admin (issuer / creator): may share an invite even when someone else hosts. */
+  canInvite?: boolean;
   onClose: () => void;
 }
 
 type Phase = 'joining' | 'live' | 'ended' | 'error';
 
-export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose }: SpaceScreenProps) => {
+export const SpaceScreen = ({
+  client,
+  ticker,
+  roomName,
+  me,
+  startTitle,
+  canInvite,
+  onClaimAdmin,
+  onClose,
+}: SpaceScreenProps) => {
+  const [needsClaim, setNeedsClaim] = useState(false);
+  const [claiming, setClaiming] = useState(false);
   const media = useMemo(() => new SpaceMedia(), []);
   const [phase, setPhase] = useState<Phase>('joining');
   const [error, setError] = useState('');
@@ -327,6 +353,10 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
   const [chatOpen, setChatOpen] = useState(false);
   const [menuFor, setMenuFor] = useState<Participant | null>(null);
   const [note, setNote] = useState('');
+  // A denied mic/camera stays on screen (with Open Settings) until fixed or dismissed.
+  const [denied, setDenied] = useState<MediaKind | null>(null);
+  const refused = (kind: MediaKind, e: unknown, other: string) =>
+    isPermissionDenied(e) ? setDenied(kind) : setNote(`${other} (${e instanceof Error ? e.message : String(e)})`);
   const [, tick] = useState(0);
   const landscape = useLandscape();
   const left = useRef(false);
@@ -406,7 +436,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
           await media
             .setMic(true)
             .then(() => setMicOn(true))
-            .catch(() => setNote('Microphone not allowed. Turn it on in Settings to speak.'));
+            .catch((e) => refused('mic', e, 'Couldn’t start the microphone.'));
         }
       } catch (e) {
         if (!live) return;
@@ -418,6 +448,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
               ? 'You need to hold this room’s token to join its space.'
               : errText(e);
         setError(msg);
+        setNeedsClaim(!!startTitle && adminRefusal(e));
         setPhase('error');
         void media.close();
       }
@@ -473,16 +504,16 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
     try {
       await media.setMic(!micOn);
       setMicOn(!micOn);
-    } catch {
-      setNote('Microphone not allowed. Check Settings.');
+    } catch (e) {
+      refused('mic', e, 'Couldn’t start the microphone.');
     }
   };
   const toggleCam = async () => {
     try {
       await media.setCamera(!camOn, facing);
       setCamOn(!camOn);
-    } catch {
-      setNote('Camera not allowed. Check Settings.');
+    } catch (e) {
+      refused('camera', e, 'Couldn’t start the camera.');
     }
   };
   const flip = async () => {
@@ -495,8 +526,8 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
     try {
       await media.setMic(true);
       setMicOn(true);
-    } catch {
-      setNote('Microphone not allowed. You’re on stage muted.');
+    } catch (e) {
+      refused('mic', e, 'Couldn’t start the microphone. You’re on stage muted.');
     }
     if (withCamera) await toggleCam();
   };
@@ -523,6 +554,7 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
           media={media}
           video={videos.includes(p.handle)}
           speaking={speakers.includes(p.handle)}
+          micOff={p.handle === me.replace(/^\$/, '').toLowerCase() && !micOn}
           big={tiles.length <= 1}
           onTap={isHost && p.role === 'speaker' ? () => setMenuFor(p) : null}
         />
@@ -547,6 +579,21 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
           <p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
             {error}
           </p>
+        )}
+        {phase === 'error' && needsClaim && onClaimAdmin && (
+          <button
+            disabled={claiming}
+            onClick={() => {
+              setClaiming(true);
+              void onClaimAdmin()
+                .then((ok) => !ok && setError('This wallet could not prove it issued this token.'))
+                .finally(() => setClaiming(false));
+            }}
+            className="mt-5 rounded-full px-5 py-2 font-semibold disabled:opacity-50"
+            style={{ background: GOLD, color: '#010101' }}
+          >
+            {claiming ? 'Signing…' : 'Claim admin'}
+          </button>
         )}
         <button
           onClick={onClose}
@@ -589,6 +636,34 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
         </div>
       </div>
     );
+
+  // Share (docs/BSPACES-PLAN.md, "Invite links and tickets"), host or room admin: the permanent
+  // Space page /s/<slug>, or an ephemeral invite /i/<code> with expiry and max uses, plus the list.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const shareSpacePage = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const page = parsePage(await client.spacePageLink(ticker));
+      if (!page?.url) throw new Error('No link came back.');
+      const r = await shareLink({ title: page.title, text: inviteShareText(page), url: page.url });
+      if (r === 'copied') setNote('Space page link copied.');
+      if (r === 'failed') setNote(page.url);
+    } catch (e) {
+      setNote(
+        e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e),
+      );
+    } finally {
+      setSharing(false);
+    }
+  };
+  const createInvite = useCallback(
+    (opts: { expires_in: string; max_uses?: number }) => client.createSpaceInvite(ticker, opts),
+    [client, ticker],
+  );
+  const listInvites = useCallback(() => client.spaceInvites(ticker), [client, ticker]);
+  const revokeInvite = useCallback((code: string) => client.revokeSpaceInvite(ticker, code), [client, ticker]);
 
   const controls = phase === 'live' && (
     <div
@@ -678,6 +753,17 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
             {state.space ? `· ${elapsed(state.space.startedAt)} · ${audienceLine(audience)}` : ''}
           </div>
         </div>
+        {phase === 'live' && (isHost || canInvite) && (
+          <button
+            onClick={() => setShareOpen(true)}
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+            aria-label="Share"
+          >
+            <Share2 size={14} />
+            Share
+          </button>
+        )}
       </header>
 
       <div className={`flex-1 min-h-0 relative ${landscape ? 'flex' : 'flex flex-col'}`}>
@@ -705,6 +791,65 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, onClose 
         >
           {note}
         </button>
+      )}
+
+      {denied && (
+        <MediaPermissionNote
+          kind={denied}
+          // Back from Settings: try again so the user can speak without rejoining.
+          onRetry={() =>
+            onStage &&
+            void (denied === 'mic' ? media.setMic(true) : media.setCamera(true, facing))
+              .then(() => {
+                if (denied === 'mic') setMicOn(true);
+                else setCamOn(true);
+                setDenied(null);
+              })
+              .catch(() => undefined)
+          }
+          onDismiss={() => setDenied(null)}
+          className="absolute left-4 right-4 rounded-xl px-4 py-3 text-sm text-left"
+          style={{ bottom: 110, background: '#1d1e23', color: '#fff', zIndex: 11 }}
+        />
+      )}
+
+      {shareOpen && (
+        <div
+          className="absolute inset-0 flex items-end"
+          style={{ background: 'rgba(0,0,0,0.6)', zIndex: 20 }}
+          onClick={() => setShareOpen(false)}
+        >
+          <div
+            className="w-full rounded-t-2xl p-4 max-h-[85%] overflow-y-auto"
+            style={{ background: '#111215', paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-white font-semibold">Share</span>
+              <button onClick={() => setShareOpen(false)} className="p-1" aria-label="Close">
+                <X size={18} color={MUTED} />
+              </button>
+            </div>
+            <button
+              onClick={() => void shareSpacePage()}
+              disabled={sharing}
+              className="w-full h-11 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+            >
+              <Share2 size={15} /> Share Space page
+            </button>
+            <p className="mt-1 mb-4 text-[11px]" style={{ color: MUTED }}>
+              The permanent page for this Space: live now, ended later.
+            </p>
+            <InviteLinksPanel
+              create={createInvite}
+              list={listInvites}
+              revoke={revokeInvite}
+              title={title}
+              onNote={setNote}
+            />
+          </div>
+        </div>
       )}
 
       {invited && (

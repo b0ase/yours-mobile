@@ -39,7 +39,9 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "browserEmit", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "audioSetSpeaker", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "pushEnv", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "pushEnv", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "mediaAccess", returnType: CAPPluginReturnPromise)
     ]
 
     private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
@@ -137,6 +139,31 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         #else
         call.resolve(["env": "production"])
         #endif
+    }
+
+    /// Open this app's page in iPhone Settings (microphone / camera switches live there).
+    @objc func openAppSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                call.reject("Settings unavailable")
+                return
+            }
+            UIApplication.shared.open(url) { ok in ok ? call.resolve() : call.reject("Could not open Settings") }
+        }
+    }
+
+    /// Ask iOS for the microphone or camera before the web view opens it. This shows the system
+    /// prompt (and creates the switch in Settings › Apps › bWallet) instead of relying on WebKit.
+    @objc func mediaAccess(_ call: CAPPluginCall) {
+        let type: AVMediaType = call.getString("kind") == "camera" ? .video : .audio
+        switch AVCaptureDevice.authorizationStatus(for: type) {
+        case .authorized:
+            call.resolve(["granted": true])
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: type) { ok in call.resolve(["granted": ok]) }
+        default:
+            call.resolve(["granted": false])
+        }
     }
 
     @objc func biometricStatus(_ call: CAPPluginCall) {

@@ -86,7 +86,10 @@ export function parseFwetchFeed(body: unknown, verified: VerifiedAuthors = new M
   const out: FeedPost[] = [];
   for (const item of posts) {
     const p = parseFwetchItem(item, verified);
-    if (p && !seen.has(p.txid)) { seen.add(p.txid); out.push(p); }
+    if (p && !seen.has(p.txid)) {
+      seen.add(p.txid);
+      out.push(p);
+    }
   }
   return out;
 }
@@ -101,9 +104,16 @@ function opReturnPushes(b: number[]): number[][] | null {
     let n: number;
     if (op >= 0x01 && op <= 0x4b) n = op;
     else if (op === 0x4c) n = b[i++];
-    else if (op === 0x4d) { n = b[i] | (b[i + 1] << 8); i += 2; }
-    else if (op === 0x4e) { n = (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16)) + b[i + 3] * 0x1000000; i += 4; }
-    else { out.push([]); continue; }
+    else if (op === 0x4d) {
+      n = b[i] | (b[i + 1] << 8);
+      i += 2;
+    } else if (op === 0x4e) {
+      n = (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16)) + b[i + 3] * 0x1000000;
+      i += 4;
+    } else {
+      out.push([]);
+      continue;
+    }
     if (i + n > b.length) return null;
     out.push(b.slice(i, i + n));
     i += n;
@@ -123,7 +133,9 @@ export function fwetchPayload(hex: string, txid: string): Rec | null {
       const j = JSON.parse(Utils.toUTF8(d[2])) as unknown;
       return j && typeof j === 'object' && !Array.isArray(j) ? (j as Rec) : null;
     }
-  } catch { /* not a tx */ }
+  } catch {
+    /* not a tx */
+  }
   return null;
 }
 
@@ -131,7 +143,8 @@ const anyone = new ProtoWallet('anyone');
 
 /** The author's address when `payload.sig` verifies against `payload.pub`, else null. */
 export async function verifyFwetchPayload(payload: Rec): Promise<string | null> {
-  const pub = asStr(payload.pub), sig = asStr(payload.sig);
+  const pub = asStr(payload.pub),
+    sig = asStr(payload.sig);
   if (!/^0[23][0-9a-f]{64}$/i.test(pub) || !/^[0-9a-f]{16,200}$/i.test(sig)) return null;
   if (Number(payload.anon) === 1) return null;
   const clean: Rec = {};
@@ -145,7 +158,9 @@ export async function verifyFwetchPayload(payload: Rec): Promise<string | null> 
       counterparty: pub,
     });
     return valid ? PublicKey.fromString(pub).toAddress() : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** Raw tx hex → verified author address, or null. */

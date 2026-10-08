@@ -100,9 +100,7 @@ export const BackupGate = ({ sats }: { sats: number }) => {
       )}
       {reminder && !request && (
         <div className="w-[88%] mt-3 rounded-xl px-3 py-3" style={{ background: '#16181D' }} role="status">
-          <p className="text-[13px] m-0 text-white">
-            Still have your backup? iPhone can clear web-app data.
-          </p>
+          <p className="text-[13px] m-0 text-white">Still have your backup? iPhone can clear web-app data.</p>
           <div className="flex gap-2 mt-2">
             <button
               onClick={() => {

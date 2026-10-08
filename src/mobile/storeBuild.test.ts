@@ -444,6 +444,10 @@ describe('PAID_CALLS_ENABLED: bPhone paid calls are bWalletX only', () => {
     );
     expect(src('./calls/CallsList.tsx')).toContain("PAID_CALLS_ENABLED ? lazy(() => import('./Directory')) : null");
     expect(src('./calls/CallsList.tsx')).toContain('phoneTabsFor(PAID_CALLS_ENABLED)');
+    // The yellow bPhone card, the directory fetch and Services in search are bWalletX only.
+    expect(src('./calls/CallsList.tsx')).toContain('{PAID_CALLS_ENABLED && <BPhoneCard');
+    expect(src('./calls/CallsList.tsx')).toContain('if (!PAID_CALLS_ENABLED) return;');
+    expect(src('./calls/CallsList.tsx')).toContain('services: PAID_CALLS_ENABLED ? (services ?? []) : []');
     expect(src('./calls/store.ts')).toContain('if (PAID_CALLS_ENABLED) {');
     expect(src('./calls/store.ts')).toMatch(/PAID_CALLS_ENABLED\) await meterTick/);
     expect(src('./calls/CallScreen.tsx')).toContain("PAID_CALLS_ENABLED && call.phase === 'quote' && <QuoteSheet");

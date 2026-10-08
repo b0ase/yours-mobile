@@ -43,12 +43,15 @@ export const SegmentSwitch = ({ value, onChange }: { value: ChatSegment; onChang
 );
 
 // Calls is built separately: use src/mobile/calls/CallsList.tsx (export CallsList) once it exists.
-const callsModules = import.meta.glob<{ CallsList?: ComponentType; default?: ComponentType }>('../calls/CallsList.tsx');
+const callsModules = import.meta.glob<{
+  CallsList?: ComponentType<{ bottomInset?: string }>;
+  default?: ComponentType<{ bottomInset?: string }>;
+}>('../calls/CallsList.tsx');
 const callsLoader = Object.values(callsModules)[0];
 const CallsList = callsLoader
   ? lazy(async () => {
       const m = await callsLoader();
-      return { default: (m.CallsList ?? m.default ?? CallsPlaceholder) as ComponentType };
+      return { default: (m.CallsList ?? m.default ?? CallsPlaceholder) as ComponentType<{ bottomInset?: string }> };
     })
   : null;
 
@@ -80,7 +83,7 @@ export const SegmentTitle = ({ title, children }: { title: string; children?: Re
 /** The Calls segment: same top bar + switch, then its body. */
 const SegmentShell = ({ header, children }: { header: ReactNode; children: ReactNode }) => (
   <div
-    className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+    className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto"
     style={{ height: '100%', background: '#010101' }}
   >
     <TopNav />
@@ -120,7 +123,7 @@ export const ChatTabs = ({
     <SegmentShell header={header}>
       {CallsList ? (
         <Suspense fallback={null}>
-          <CallsList />
+          <CallsList bottomInset="calc(3.75rem + env(safe-area-inset-bottom, 0px))" />
         </Suspense>
       ) : (
         <CallsPlaceholder />

@@ -1084,11 +1084,15 @@ a.btn-store {
 /* bWalletX: big wordmark under the hero logo. */
 .wordmark {
   margin: 0 0 1.4rem;
-  font: 800 clamp(3rem, 11vw, 6.5rem) / 1 'Space Grotesk', sans-serif;
+  font:
+    800 clamp(3rem, 11vw, 6.5rem) / 1 'Space Grotesk',
+    sans-serif;
   letter-spacing: -0.03em;
   color: #f2f2f0;
 }
-.brand { font-size: 1.35rem; }
+.brand {
+  font-size: 1.35rem;
+}
 
 .beta-banner {
   position: fixed;
@@ -1098,13 +1102,19 @@ a.btn-store {
   z-index: 60;
   padding: 6px 16px;
   text-align: center;
-  font: 600 0.8rem/1.4 'Space Grotesk', sans-serif;
+  font:
+    600 0.8rem/1.4 'Space Grotesk',
+    sans-serif;
   letter-spacing: 0.02em;
   color: #000;
   background: #f5b800;
 }
-.topbar { top: 30px; }
-.hero { padding-top: calc(30px + var(--hero-pad, 0px)); }
+.topbar {
+  top: 30px;
+}
+.hero {
+  padding-top: calc(30px + var(--hero-pad, 0px));
+}
 .web-btn {
   text-decoration: none;
   font: 700 0.95rem var(--hf);
@@ -1167,7 +1177,9 @@ a.btn-store {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .section-nav a:hover {
   color: #000;
@@ -1209,16 +1221,25 @@ a.btn-store {
 
 /* Sub-pages: clear the fixed beta banner + topbar so the b logo isn't tucked under them (owner, 5 Oct 2026).
    On phones the nav drops to its own row, so the header is taller there. */
-main.ext { padding-top: 150px !important; }
+main.ext {
+  padding-top: 150px !important;
+}
 @media (max-width: 859px) {
-  main.ext { padding-top: 172px !important; }
+  main.ext {
+    padding-top: 172px !important;
+  }
 }
 
 /* Home hero: start below the banner + topbar + section tabs, and never let the content spill up under
    them when it's taller than the screen (safe alignment), so the big b always shows (owner, 5 Oct 2026). */
-.hero { padding-top: 176px; align-items: safe flex-end; }
+.hero {
+  padding-top: 176px;
+  align-items: safe flex-end;
+}
 @media (max-width: 859px) {
-  .hero { padding-top: 196px; }
+  .hero {
+    padding-top: 196px;
+  }
 }
 
 /* One content width for every page (owner, 5 Oct 2026). Pages must not override it. */

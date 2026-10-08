@@ -7,6 +7,7 @@ import { createContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { createChromeCWI, OneSatServices } from '@1sat/wallet-browser';
 import { gateWalletOnUsb } from '../../services/usbPresence';
+import { setChatAccount } from '../../mobile/chat/chatAccount';
 
 const initializeServices = async (onUsbRemoved: () => void) => {
   const chromeStorageService = new ChromeStorageService();
@@ -15,7 +16,9 @@ const initializeServices = async (onUsbRemoved: () => void) => {
   const all = await chromeStorageService.getAndSetStorage();
   try {
     const bytes = JSON.stringify(all ?? {}).length;
-    console.info(`[startup] storage read ${Math.round(performance.now() - t0)} ms, ${Object.keys(all ?? {}).length} keys, ~${Math.round(bytes / 1024)} KB`);
+    console.info(
+      `[startup] storage read ${Math.round(performance.now() - t0)} ms, ${Object.keys(all ?? {}).length} keys, ~${Math.round(bytes / 1024)} KB`,
+    );
   } catch {
     /* size is diagnostics only */
   }
@@ -68,7 +71,9 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
       try {
         const initializedServices = await initializeServices(() => lockRef.current());
         const { chromeStorageService, apiContext } = initializedServices;
-        const { account, lastActiveTime } = chromeStorageService.getCurrentAccountObject();
+        const { account, lastActiveTime, selectedAccount } = chromeStorageService.getCurrentAccountObject();
+        // bit-sign sessions are per account: every bChat call acts as the ACTIVE account.
+        setChatAccount(selectedAccount);
 
         // Unlocked only with session passKey AND within inactivity window.
         // lastActiveTime alone must not unlock (passKey is cleared on restart).
@@ -119,6 +124,7 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const chromeStorageService = services.chromeStorageService;
         await chromeStorageService.getAndSetStorage();
         const result = chromeStorageService.getCurrentAccountObject();
+        setChatAccount(result?.selectedAccount);
         const lastActiveTime = result?.lastActiveTime;
         const timeout = chromeStorageService.getLockTimeout() ?? INACTIVITY_LIMIT;
 

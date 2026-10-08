@@ -88,7 +88,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
         if (!live || !p || p === paymail) return;
         setPaymail(identityAddress, p);
         setPm(p);
-        if (!socialProof()) setAlias(p.split('@')[0]);
+        if (!socialProof(identityAddress)) setAlias(p.split('@')[0]);
       })
       .catch(() => undefined);
     return () => {
@@ -98,7 +98,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
   }, []);
   // Continue with X / Google on Create Account: offer its verified handle (b0asex.x / theirname.gmail).
   const [socialAlias] = useState<string | null>(() => {
-    const a = socialProof()?.profile.alias ?? null;
+    const a = socialProof(identityAddress)?.profile.alias ?? null;
     if (a) setTimeout(() => setAlias(a), 0);
     return a;
   });
@@ -179,7 +179,7 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
     setBusy(true);
     setMsg('');
     try {
-      const proof = alias === socialAlias ? socialProof() : null;
+      const proof = alias === socialAlias ? socialProof(identityAddress) : null;
       const pm = await claimPaymail(f, apiContext.wallet, alias, {
         ordAddress,
         name: proof?.profile.provider === 'x' ? proof.profile.name : profileName,

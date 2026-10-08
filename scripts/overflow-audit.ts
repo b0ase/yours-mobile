@@ -22,7 +22,8 @@ const WIDTHS = EXT ? [360, 400] : [320, 375, 390];
 /** Past the last content a page may keep its normal bottom padding (the tab bar / dock, ~5rem + safe area). */
 const OVERSCROLL_MAX = 180;
 const HEIGHT = Number(process.env.AUDIT_HEIGHT ?? 760);
-const SKIP = /^v\d|lock wallet|sign out|log ?out|delete|remove|lock now|disable|reset|wipe|erase|forget|switch account|source code/i;
+const SKIP =
+  /^v\d|lock wallet|sign out|log ?out|delete|remove|lock now|disable|reset|wipe|erase|forget|switch account|source code/i;
 const password = randomBytes(12).toString('base64url');
 const found = new Map<string, Set<string>>();
 
@@ -45,7 +46,11 @@ const probe = (OVERSCROLL_MAX: number) => {
     // Vertical scrollers (overflow-y auto/scroll): their x overflow is pannable. Intentional
     // sideways rows (overflow-x auto with overflow-y hidden/visible→auto pairs) are skipped.
     // Sideways scrollers on purpose (chip rows: overflow-x-auto) scroll inside themselves; skip them.
-    if (/(auto|scroll)/.test(s.overflowX) && /(auto|scroll)/.test(s.overflowY) && !/overflow-x-(auto|scroll)/.test(el.getAttribute('class') ?? ''))
+    if (
+      /(auto|scroll)/.test(s.overflowX) &&
+      /(auto|scroll)/.test(s.overflowY) &&
+      !/overflow-x-(auto|scroll)/.test(el.getAttribute('class') ?? '')
+    )
       scrollers.push(el);
   }
   for (const sc of scrollers) {
@@ -78,7 +83,10 @@ const probe = (OVERSCROLL_MAX: number) => {
           `(nothing in flow; widest: ${[...sc.querySelectorAll('*')]
             .sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)
             .slice(0, 2)
-            .map((e) => `${describe(e)} right=${Math.round(e.getBoundingClientRect().right)} ${getComputedStyle(e).position}`)
+            .map(
+              (e) =>
+                `${describe(e)} right=${Math.round(e.getBoundingClientRect().right)} ${getComputedStyle(e).position}`,
+            )
             .join(' | ')})`),
     );
   }
@@ -86,7 +94,8 @@ const probe = (OVERSCROLL_MAX: number) => {
   const vscrollers: Element[] = [document.scrollingElement!];
   for (const el of document.querySelectorAll('*')) {
     const st = getComputedStyle(el);
-    if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 2 && el.getClientRects().length) vscrollers.push(el);
+    if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 2 && el.getClientRects().length)
+      vscrollers.push(el);
   }
   for (const sc of vscrollers) {
     const doc = sc === document.scrollingElement;
@@ -95,10 +104,16 @@ const probe = (OVERSCROLL_MAX: number) => {
     for (const el of sc.querySelectorAll('*')) {
       const st = getComputedStyle(el);
       if (st.position === 'fixed' || st.visibility === 'hidden' || !el.getClientRects().length) continue;
-      if (el.children.length && !(el as HTMLElement).innerText?.trim() && !['IMG', 'VIDEO', 'CANVAS', 'svg'].includes(el.tagName)) continue;
+      if (
+        el.children.length &&
+        !(el as HTMLElement).innerText?.trim() &&
+        !['IMG', 'VIDEO', 'CANVAS', 'svg'].includes(el.tagName)
+      )
+        continue;
       if (el.children.length) continue; // leaves only: wrappers carry the padding
       let nested = false; // content of an inner scroller is that scroller's, not this one's
-      for (let q = el.parentElement; q && q !== sc; q = q.parentElement) if (/(auto|scroll)/.test(getComputedStyle(q).overflowY)) nested = true;
+      for (let q = el.parentElement; q && q !== sc; q = q.parentElement)
+        if (/(auto|scroll)/.test(getComputedStyle(q).overflowY)) nested = true;
       if (nested) continue;
       const r = el.getBoundingClientRect();
       if (r.height === 0) continue;
@@ -107,7 +122,9 @@ const probe = (OVERSCROLL_MAX: number) => {
     if (doc && sc.scrollHeight <= sc.clientHeight + 2) continue;
     const gap = sc.scrollHeight - bottom;
     if ((window as unknown as { __dump?: boolean }).__dump) {
-      out.push(`DUMP ${describe(sc).slice(0, 80)} sh=${sc.scrollHeight} ch=${sc.clientHeight} bottom=${Math.round(bottom)}`);
+      out.push(
+        `DUMP ${describe(sc).slice(0, 80)} sh=${sc.scrollHeight} ch=${sc.clientHeight} bottom=${Math.round(bottom)}`,
+      );
     }
     if (bottom > 0 && gap > OVERSCROLL_MAX)
       out.push(`${doc ? 'page' : describe(sc)} scrolls ${Math.round(gap)}px past its last content`);
@@ -130,13 +147,23 @@ const measure = async (page: Page, screen: string) => {
       found.get(key)!.add(String(w));
     }
   }
-  await page.setViewport({ width: WIDTHS[WIDTHS.length - 1], height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  await page.setViewport({
+    width: WIDTHS[WIDTHS.length - 1],
+    height: HEIGHT,
+    deviceScaleFactor: 1,
+    isMobile: true,
+    hasTouch: true,
+  });
 };
 
 const clickByText = async (page: Page, text: string) => {
   const ok = await page.evaluate((t) => {
-    const els = [...document.querySelectorAll('button, a, [role="button"], label, [class*="cursor-pointer"]')] as HTMLElement[];
-    const el = els.find((e) => e.innerText?.trim().split('\n')[0].trim() === t) ?? els.find((e) => e.innerText?.trim().startsWith(t));
+    const els = [
+      ...document.querySelectorAll('button, a, [role="button"], label, [class*="cursor-pointer"]'),
+    ] as HTMLElement[];
+    const el =
+      els.find((e) => e.innerText?.trim().split('\n')[0].trim() === t) ??
+      els.find((e) => e.innerText?.trim().startsWith(t));
     el?.click();
     return !!el;
   }, text);
@@ -145,7 +172,9 @@ const clickByText = async (page: Page, text: string) => {
 };
 const clickAria = async (page: Page, label: string) => {
   const ok = await page.evaluate((l) => {
-    const el = ([...document.querySelectorAll(`[aria-label="${l}"]`)] as HTMLElement[]).find((e) => e.getClientRects().length > 0);
+    const el = ([...document.querySelectorAll(`[aria-label="${l}"]`)] as HTMLElement[]).find(
+      (e) => e.getClientRects().length > 0,
+    );
     el?.click();
     return !!el;
   }, label);
@@ -153,14 +182,20 @@ const clickAria = async (page: Page, label: string) => {
   await sleep(1200);
 };
 const openSettings = async (page: Page) => {
-  if (await page.evaluate(() => [...document.querySelectorAll('[aria-label="Settings"]')].some((e) => e.getClientRects().length > 0)))
+  if (
+    await page.evaluate(() =>
+      [...document.querySelectorAll('[aria-label="Settings"]')].some((e) => e.getClientRects().length > 0),
+    )
+  )
     return clickAria(page, 'Settings');
   await clickAria(page, 'Accounts menu');
   await clickByText(page, 'Settings');
 };
 const acceptTerms = async (page: Page) => {
   await page.evaluate(() => {
-    const b = ([...document.querySelectorAll('button')] as HTMLElement[]).find((e) => /^(I agree|Agree|Accept)/i.test(e.innerText.trim()));
+    const b = ([...document.querySelectorAll('button')] as HTMLElement[]).find((e) =>
+      /^(I agree|Agree|Accept)/i.test(e.innerText.trim()),
+    );
     b?.click();
   });
   await sleep(1000);
@@ -179,20 +214,26 @@ const rows = (page: Page) =>
     ([...document.querySelectorAll('button, [role="button"], [class*="cursor-pointer"]')] as HTMLElement[])
       .filter((b) => b.getClientRects().length > 0 && !b.closest('nav'))
       .map((b) => b.innerText.trim().split('\n')[0].trim())
-      .filter((t) => t.length > 1 && !['Wallet', 'Exchange', 'Market', 'Feed', 'Chat', 'Settings', 'Tools', 'About'].includes(t)),
+      .filter(
+        (t) =>
+          t.length > 1 && !['Wallet', 'Exchange', 'Market', 'Feed', 'Chat', 'Settings', 'Tools', 'About'].includes(t),
+      ),
   );
 
 const browser = EXT
   ? await puppeteer.launch({ headless: true, enableExtensions: [EXT], args: ['--no-first-run'] }) // Chrome for Testing
   : await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run'] });
 if (EXT) {
-  const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'));
+  const sw = await browser.waitForTarget(
+    (t) => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'),
+  );
   URL = `chrome-extension://${new globalThis.URL(sw.url()).hostname}/index.html`;
 }
 const page = await browser.newPage();
 await page.emulate({
   viewport: { width: 390, height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true },
-  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+  userAgent:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
 });
 const errors: string[] = [];
 const ONLY = process.env.STEPS ? new RegExp(process.env.STEPS, 'i') : null;
@@ -223,7 +264,9 @@ try {
   await clickByText(page, 'Create New Wallet');
   await page.locator('input[placeholder="Password"]').fill(password);
   await page.locator('input[placeholder="Confirm password"]').fill(password);
-  await page.evaluate(() => document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((c) => !c.checked && c.click()));
+  await page.evaluate(() =>
+    document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((c) => !c.checked && c.click()),
+  );
   await measure(page, 'create wallet');
   await clickByText(page, 'Generate Seed');
   await waitText(page, 'Your recovery phrase', 120_000);

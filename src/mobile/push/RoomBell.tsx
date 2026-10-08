@@ -47,10 +47,18 @@ const Sheet = ({
 }) => {
   useBackClose(true, onClose);
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex items-end justify-center" style={{ background: 'rgba(0,0,0,.6)' }} onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[150] flex items-end justify-center"
+      style={{ background: 'rgba(0,0,0,.6)' }}
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-md rounded-t-2xl p-4"
-        style={{ background: PANEL, borderTop: `1px solid ${LINE}`, paddingBottom: 'max(env(safe-area-inset-bottom), 16px)' }}
+        style={{
+          background: PANEL,
+          borderTop: `1px solid ${LINE}`,
+          paddingBottom: 'max(env(safe-area-inset-bottom), 16px)',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <p className="mb-1 text-[15px] font-bold text-white">Notifications for this room</p>
@@ -125,7 +133,9 @@ export const RoomBell = ({ ticker }: { ticker: string }) => {
       >
         <Icon size={19} color={value === 'off' ? MUTED : GOLD} />
       </button>
-      {open && <Sheet value={value} busy={busy} error={error} onPick={(v) => void pick(v)} onClose={() => setOpen(false)} />}
+      {open && (
+        <Sheet value={value} busy={busy} error={error} onPick={(v) => void pick(v)} onClose={() => setOpen(false)} />
+      )}
     </>
   );
 };

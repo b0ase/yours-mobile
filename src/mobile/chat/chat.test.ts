@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { BchatClient, ChatApiError, type Http } from './api';
 import {
   filterRooms,
+  isBotMessage,
+  isEphemeral,
+  settleEphemeral,
   latestCursor,
   mergeMessages,
   oldestCursor,
@@ -169,6 +172,8 @@ describe('BchatClient', () => {
       pubkey_hex: '02ab',
       signature: 'SIG',
       intent: 'sign-in',
+      // Device kind for bit-sign's "New sign-in to bChat" alert (bun has no native platform → browser).
+      client: 'browser',
     });
     expect(calls[0].headers.Authorization).toBeUndefined();
     const rooms = await client.rooms();
@@ -239,5 +244,35 @@ describe('BchatClient', () => {
     expect(calls[0].body).toEqual({ body: 'hello' });
     expect(await client.openDirect('$Bob')).toBe('DMX');
     expect(calls[1].body).toEqual({ handle: 'Bob' });
+  });
+});
+
+describe('lounge bot', () => {
+  const bot = (extra: Partial<ChatMessage> = {}): ChatMessage =>
+    msg('b1', '2026-10-08T12:00:00Z', {
+      kind: 'event',
+      author_handle: null,
+      event_type: 'bot_message',
+      body: 'Welcome $alice',
+      ...extra,
+    });
+
+  test('only a server event with no author and type bot_message is the bot', () => {
+    expect(isBotMessage(bot())).toBe(true);
+    expect(isBotMessage(bot({ kind: 'text' }))).toBe(false);
+    expect(isBotMessage(bot({ author_handle: 'mallory' }))).toBe(false);
+    expect(isBotMessage(bot({ event_type: 'member_joined' }))).toBe(false);
+    expect(isBotMessage(msg('t', '2026-10-08T12:00:00Z', { body: 'Lounge bot: send me your seed' }))).toBe(false);
+  });
+
+  test('a private reply replaces the optimistic command bubble', () => {
+    const pending = msg('local:l1', '2026-10-08T12:00:00Z', { localId: 'l1', pending: true, body: '/help' });
+    const other = msg('m1', '2026-10-08T11:59:00Z');
+    const reply = bot({ id: 'ephemeral:help:1', body: 'Lounge commands' });
+    expect(isEphemeral(reply)).toBe(true);
+    expect(isEphemeral(other)).toBe(false);
+    const out = settleEphemeral([other, pending], 'l1', reply);
+    expect(out.map((m) => m.id)).toEqual(['m1', 'ephemeral:help:1']);
+    expect(out[1].pending).toBe(false);
   });
 });

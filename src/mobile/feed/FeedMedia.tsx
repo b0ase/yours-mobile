@@ -103,10 +103,7 @@ export const Gallery = ({
         }}
       >
         {ok.map((m) => (
-          <div
-            key={m.src.slice(0, 120)}
-            className="w-full shrink-0 snap-center"
-          >
+          <div key={m.src.slice(0, 120)} className="w-full shrink-0 snap-center">
             <Img
               m={m}
               blurred={!shown}

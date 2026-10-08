@@ -74,7 +74,9 @@ describe('schedules', () => {
     expect(r.pieces).toHaveLength(5);
   });
   test('pieces under the minimum are refused', () => {
-    expect(buildGradual({ start: day(1), frequency: 'daily', count: 5, perPayoutSats: 500 }, NOW, H).error).toContain('1,000');
+    expect(buildGradual({ start: day(1), frequency: 'daily', count: 5, perPayoutSats: 500 }, NOW, H).error).toContain(
+      '1,000',
+    );
   });
   test(`more than ${MAX_PIECES} payouts is refused with a batching hint`, () => {
     const r = buildGradual({ start: day(1), frequency: 'daily', count: MAX_PIECES + 1, perPayoutSats: 5000 }, NOW, H);
@@ -87,13 +89,19 @@ describe('schedules', () => {
     expect(new Set(hs).size).toBe(3);
   });
   test('$10 a day with a 20% buffer at $50/BSV', () => {
-    const r = buildGradual({ start: day(1), frequency: 'daily', count: 3, usdPerPayout: 10, rate: 50, bufferPct: 20 }, NOW, H);
+    const r = buildGradual(
+      { start: day(1), frequency: 'daily', count: 3, usdPerPayout: 10, rate: 50, bufferPct: 20 },
+      NOW,
+      H,
+    );
     expect(r.pieces[0].sats).toBe(usdToSats(12, 50));
     expect(r.pieces[0].sats).toBe(24_000_000);
     expect(r.pieces[0].usdTarget).toBe(10);
   });
   test('dollar mode without a price is refused, not guessed', () => {
-    expect(buildGradual({ start: day(1), frequency: 'daily', count: 3, usdPerPayout: 10, rate: 0 }, NOW, H).error).toContain('unavailable');
+    expect(
+      buildGradual({ start: day(1), frequency: 'daily', count: 3, usdPerPayout: 10, rate: 0 }, NOW, H).error,
+    ).toContain('unavailable');
   });
 });
 
@@ -155,11 +163,24 @@ describe('percentage payouts', () => {
     expect(e as string).toContain('weekly');
   });
   test('no piece more than ten years out (monthly 1% of original = 100 months is fine; 0.1% monthly is not)', () => {
-    expect(buildPercent({ totalSats: 100_000_000, pct: 1, base: 'original', start: day(30), frequency: 'monthly' }, NOW, H).error).toBeUndefined();
-    expect(buildPercent({ totalSats: 1_000_000_000, pct: 0.1, base: 'original', start: day(30), frequency: 'monthly' }, NOW, H).error).toContain('ten years');
+    expect(
+      buildPercent({ totalSats: 100_000_000, pct: 1, base: 'original', start: day(30), frequency: 'monthly' }, NOW, H)
+        .error,
+    ).toBeUndefined();
+    expect(
+      buildPercent(
+        { totalSats: 1_000_000_000, pct: 0.1, base: 'original', start: day(30), frequency: 'monthly' },
+        NOW,
+        H,
+      ).error,
+    ).toContain('ten years');
   });
   test('long schedules fold into a tail lock and report the end date', () => {
-    const r = buildPercent({ totalSats: 100_000_000, pct: 0.01, base: 'original', start: day(1), frequency: 'daily' }, NOW, H);
+    const r = buildPercent(
+      { totalSats: 100_000_000, pct: 0.01, base: 'original', start: day(1), frequency: 'daily' },
+      NOW,
+      H,
+    );
     expect(r.periods).toBe(10_000);
     expect(r.pieces).toHaveLength(MAX_PIECES);
     expect(r.tail).toBe(true);
@@ -179,7 +200,11 @@ describe('many locks', () => {
     pieces: pieces.map(([height, sats, claimed], vout) => ({ txid: 't', vout, height, sats, claimed })),
   });
   test('status and totals across locks', () => {
-    const a = plan('a', [[H - 1, 1000, true], [H, 2000], [H + 10, 3000]]);
+    const a = plan('a', [
+      [H - 1, 1000, true],
+      [H, 2000],
+      [H + 10, 3000],
+    ]);
     const b = plan('b', [[H + 5, 7000]]);
     expect(planStatus(a, H)).toEqual({ status: 'Ready to claim', locked: 5000, ready: 2000, next: H + 10 });
     expect(planStatus(b, H).status).toBe('Locked');
@@ -202,9 +227,17 @@ const key = PrivateKey.fromRandom();
 const address = key.toAddress();
 const UNTIL = 970_500;
 
-function fundedLockTx(outputs: { height: number; sats: number }[], extra: { lockingScript: ReturnType<typeof Lock.lock>; satoshis: number }[] = []) {
+function fundedLockTx(
+  outputs: { height: number; sats: number }[],
+  extra: { lockingScript: ReturnType<typeof Lock.lock>; satoshis: number }[] = [],
+) {
   const src = new Transaction();
-  src.addInput({ sourceTXID: '00'.repeat(32), sourceOutputIndex: 0, unlockingScript: new P2PKH().lock(address), sequence: 0xffffffff });
+  src.addInput({
+    sourceTXID: '00'.repeat(32),
+    sourceOutputIndex: 0,
+    unlockingScript: new P2PKH().lock(address),
+    sequence: 0xffffffff,
+  });
   for (const o of outputs) src.addOutput({ lockingScript: Lock.lock(address, o.height), satoshis: o.sats });
   for (const e of extra) src.addOutput(e);
   return src;
@@ -269,11 +302,35 @@ describe('receipt + verifier', () => {
     { height: UNTIL, sats: 10_000 },
     { height: UNTIL + 144, sats: 10_000 },
   ];
-  const receipt = buildReceipt({ mode: 'usd-target', pieces, lockAddress: address, identity: { handle: '$b0asex', address }, rate: 50, usdPerPayout: 0.004, bufferPct: 20, now: NOW });
-  const inscription = (r: typeof receipt) => buildInscriptionScript(new P2PKH().lock(address), new TextEncoder().encode(receiptSvg(r)), 'image/svg+xml', receiptMap(r));
+  const receipt = buildReceipt({
+    mode: 'usd-target',
+    pieces,
+    lockAddress: address,
+    identity: { handle: '$b0asex', address },
+    rate: 50,
+    usdPerPayout: 0.004,
+    bufferPct: 20,
+    now: NOW,
+  });
+  const inscription = (r: typeof receipt) =>
+    buildInscriptionScript(
+      new P2PKH().lock(address),
+      new TextEncoder().encode(receiptSvg(r)),
+      'image/svg+xml',
+      receiptMap(r),
+    );
 
   test('receipt JSON from the schedule', () => {
-    expect(receipt).toMatchObject({ app: 'bwalletx', type: 'lock-receipt', v: 1, mode: 'usd-target', amountSats: 20_000, usdPerPayout: 0.004, bufferPct: 20, lockAddress: address });
+    expect(receipt).toMatchObject({
+      app: 'bwalletx',
+      type: 'lock-receipt',
+      v: 1,
+      mode: 'usd-target',
+      amountSats: 20_000,
+      usdPerPayout: 0.004,
+      bufferPct: 20,
+      lockAddress: address,
+    });
     expect(receipt.schedule).toEqual([
       { vout: 0, height: UNTIL, sats: 10_000 },
       { vout: 1, height: UNTIL + 144, sats: 10_000 },
@@ -290,7 +347,11 @@ describe('receipt + verifier', () => {
     expect(checkLockTx(tx.toHex(), new Set([0, 1]), UNTIL + 200).status).toBe('Fully claimed');
   });
   test('a receipt claiming more than is locked is rejected', () => {
-    const fake = { ...receipt, amountSats: 2_000_000, schedule: receipt.schedule.map((s) => ({ ...s, sats: 1_000_000 })) };
+    const fake = {
+      ...receipt,
+      amountSats: 2_000_000,
+      schedule: receipt.schedule.map((s) => ({ ...s, sats: 1_000_000 })),
+    };
     const tx = fundedLockTx(pieces, [{ lockingScript: inscription(fake), satoshis: 1 }]);
     const v = checkLockTx(tx.toHex(), new Set(), 0);
     expect(v.receiptValid).toBe(false);
@@ -310,7 +371,12 @@ describe('receipt + verifier', () => {
   test('locks to someone else’s key do not match the receipt', () => {
     const other = PrivateKey.fromRandom().toAddress();
     const tx = new Transaction();
-    tx.addInput({ sourceTXID: '00'.repeat(32), sourceOutputIndex: 0, unlockingScript: new P2PKH().lock(address), sequence: 0xffffffff });
+    tx.addInput({
+      sourceTXID: '00'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new P2PKH().lock(address),
+      sequence: 0xffffffff,
+    });
     for (const p of pieces) tx.addOutput({ lockingScript: Lock.lock(other, p.height), satoshis: p.sats });
     tx.addOutput({ lockingScript: inscription(receipt), satoshis: 1 });
     expect(checkLockTx(tx.toHex(), new Set(), 0).problems.join(' ')).toContain('different key');
@@ -353,7 +419,11 @@ describe('owner answers: surplus setting, pension, backup, receipt detail', () =
   });
   test('pension: locked until a date, then monthly; nothing before the start', () => {
     const start = day(3 * 365);
-    const r = buildGradual({ start, frequency: 'monthly', count: 24, usdPerPayout: 500, rate: 50, bufferPct: 20 }, NOW, H);
+    const r = buildGradual(
+      { start, frequency: 'monthly', count: 24, usdPerPayout: 500, rate: 50, bufferPct: 20 },
+      NOW,
+      H,
+    );
     expect(r.error).toBeUndefined();
     const startHeight = heightForDate(start, NOW, H);
     expect(r.pieces[0].height).toBe(startHeight);
@@ -362,7 +432,14 @@ describe('owner answers: surplus setting, pension, backup, receipt detail', () =
   });
   test('plans restored from a backup merge with this device, device copy wins', async () => {
     const { mergePlans } = await import('./schedule');
-    const p = (id: string, label: string) => ({ id, label, mode: 'bsv' as const, txids: [id], createdAt: '', pieces: [] });
+    const p = (id: string, label: string) => ({
+      id,
+      label,
+      mode: 'bsv' as const,
+      txids: [id],
+      createdAt: '',
+      pieces: [],
+    });
     const m = mergePlans([p('a', 'mine')], [p('a', 'old'), p('b', 'restored')]);
     expect(m.map((x) => `${x.id}:${x.label}`)).toEqual(['a:mine', 'b:restored']);
   });
@@ -378,8 +455,23 @@ describe('owner answers: surplus setting, pension, backup, receipt detail', () =
     });
     expect(r).toMatchObject({ usdAtLock: 0.5, usdPerPayout: 10, bufferPct: 20, mode: 'usd-target' });
     const svg = receiptSvg(r);
-    for (const t of ['at lock time', '$b0asex', 'b0asex@bwalletx.com', 'Identity key 02ab', 'Dollar target $10.00', 'Verify at bwalletx.com/lock/verify']) expect(svg).toContain(t);
-    const pr = buildReceipt({ mode: 'percent', pieces: [{ height: UNTIL, sats: 5000 }], lockAddress: address, identity: { address }, pct: 1, pctBase: 'remaining' });
+    for (const t of [
+      'at lock time',
+      '$b0asex',
+      'b0asex@bwalletx.com',
+      'Identity key 02ab',
+      'Dollar target $10.00',
+      'Verify at bwalletx.com/lock/verify',
+    ])
+      expect(svg).toContain(t);
+    const pr = buildReceipt({
+      mode: 'percent',
+      pieces: [{ height: UNTIL, sats: 5000 }],
+      lockAddress: address,
+      identity: { address },
+      pct: 1,
+      pctBase: 'remaining',
+    });
     expect(receiptSvg(pr)).toContain('1% of what is left');
   });
 });

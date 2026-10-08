@@ -37,7 +37,11 @@ describe('CallsClient session', () => {
       seen.push({ url, body: body as SessionBody });
       return {
         status: 200,
-        data: { token: 'wc1.a.b', identity_key: (body as SessionBody).identity_key, expires_at: '2099-01-01T00:00:00Z' },
+        data: {
+          token: 'wc1.a.b',
+          identity_key: (body as SessionBody).identity_key,
+          expires_at: '2099-01-01T00:00:00Z',
+        },
       };
     };
     const store = memStore();

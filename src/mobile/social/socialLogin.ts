@@ -19,20 +19,48 @@ import { YoursNative } from '../native';
  */
 
 export type SocialProvider = 'x' | 'google';
-type Pending = { provider: SocialProvider; secret: string; at: number; ticket?: string; profile?: SocialProfile; claimed?: boolean };
+type Pending = {
+  provider: SocialProvider;
+  secret: string;
+  at: number;
+  ticket?: string;
+  profile?: SocialProfile;
+  claimed?: boolean;
+  /**
+   * Whose sign-in this is: NEW_ACCOUNT while Create / Restore / Import is open, else the identity address of
+   * the account that started it (Settings › Connect X / Google), and after account creation the new account's.
+   * A pending sign-in is only ever shown to its owner, so one account's X / Google photo and name can't
+   * pre-fill another account (owner, 8 Oct 2026: Testy's Create Account showed an earlier login's photo).
+   */
+  owner?: string;
+};
+
+/** Owner of a sign-in started on Create / Restore / Import, before the account (and its identity) exists. */
+export const NEW_ACCOUNT = 'new';
 
 const KEY = 'bwallet.social';
 const TTL_MS = 10 * 60_000;
 const listeners = new Set<() => void>();
 let lastError = '';
 
-const read = (): Pending | null => {
+const readAny = (): Pending | null => {
   try {
     const p = JSON.parse(localStorage.getItem(KEY) || 'null') as Pending | null;
-    return p && Date.now() - p.at < TTL_MS ? p : null;
+    if (!p) return null;
+    // Expired, or a leftover from before sign-ins had an owner (global): drop it.
+    if (!p.owner || !(Date.now() - p.at < TTL_MS)) {
+      localStorage.removeItem(KEY);
+      return null;
+    }
+    return p;
   } catch {
     return null;
   }
+};
+/** The pending sign-in, only for its owner. */
+const read = (owner: string): Pending | null => {
+  const p = readAny();
+  return p && owner && p.owner === owner ? p : null;
 };
 const write = (p: Pending | null) => {
   try {
@@ -45,10 +73,19 @@ const write = (p: Pending | null) => {
 };
 
 export const onSocialChange = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
-/** The verified profile waiting for this new wallet, if any. */
-export const socialProfile = () => read()?.profile ?? null;
+/** The verified profile waiting for `owner` (NEW_ACCOUNT on Create / Restore / Import, else an identity address). */
+export const socialProfile = (owner: string = NEW_ACCOUNT) => read(owner)?.profile ?? null;
 export const socialError = () => lastError;
 export const clearSocial = () => write(null);
+
+/**
+ * Account just created / restored: a sign-in made on that screen now belongs to the new identity, so the
+ * next Create Account (or another account) never sees it.
+ */
+export const bindSocial = (identityAddress: string) => {
+  const p = readAny();
+  if (p && identityAddress && p.owner === NEW_ACCOUNT) write({ ...p, owner: identityAddress });
+};
 
 // bWalletX's own sign-in service (site/lib/social.js on the paymail server).
 const post = async <T>(op: string, body: unknown): Promise<T> => {
@@ -61,9 +98,10 @@ const post = async <T>(op: string, body: unknown): Promise<T> => {
   if (!r.ok) throw new Error(j.error || `Sign-in failed (${r.status})`);
   return j;
 };
-const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
+const hex = (b: ArrayBuffer | Uint8Array) =>
+  Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 
-export async function startSocial(provider: SocialProvider): Promise<void> {
+export async function startSocial(provider: SocialProvider, owner: string = NEW_ACCOUNT): Promise<void> {
   lastError = '';
   const secret = hex(crypto.getRandomValues(new Uint8Array(32)));
   const vh = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)));
@@ -75,7 +113,7 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
     verifier_hash: vh,
     ...(web ? { return_to: 'web' } : {}),
   });
-  write({ provider, secret, at: Date.now() });
+  write({ provider, secret, at: Date.now(), owner });
   if (web) {
     window.location.assign(url);
     return;
@@ -96,10 +134,16 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
   // "Open bWalletX" link did nothing. The session returns the bwalletx:// URL the return page navigates to.
   if (Capacitor.getPlatform() === 'ios') {
     try {
-      const { url: back } = await YoursNative.authSession({ url, scheme: 'bwalletx', httpsHost: 'www.bwallet.space', httpsPath: '/social' });
+      const { url: back } = await YoursNative.authSession({
+        url,
+        scheme: 'bwalletx',
+        httpsHost: 'www.bwallet.space',
+        httpsPath: '/social',
+      });
       await receiveSocialUrl(back);
     } catch (e) {
-      lastError = (e as { code?: string })?.code === 'cancelled' ? '' : e instanceof Error ? e.message : 'Sign-in failed';
+      lastError =
+        (e as { code?: string })?.code === 'cancelled' ? '' : e instanceof Error ? e.message : 'Sign-in failed';
       write(null);
     }
     return;
@@ -111,13 +155,15 @@ export async function startSocial(provider: SocialProvider): Promise<void> {
 const RETURN = 'https://www.bwallet.space/social';
 const WEB_RETURN = 'https://web.bwalletx.com/';
 const isReturn = (url: string) =>
-  url.startsWith(RETURN) || url.startsWith('bwalletx://social') || (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
+  url.startsWith(RETURN) ||
+  url.startsWith('bwalletx://social') ||
+  (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
 
 /** A return URL (universal link, bwalletx://, or the extension's tab): keep the ticket, fetch the profile. */
 export async function receiveSocialUrl(url: string): Promise<void> {
   if (!isReturn(url)) return;
   const q = new URLSearchParams(url.split('#')[1] || '');
-  const p = read();
+  const p = readAny();
   if (q.get('error')) {
     lastError = q.get('error') === 'cancelled' ? 'Sign-in cancelled.' : String(q.get('error'));
     return write(p ? { ...p, ticket: undefined } : null);
@@ -142,14 +188,21 @@ export async function receiveSocialUrl(url: string): Promise<void> {
  * that record itself (its paymail server checks the proof with the sign-in service); nothing is
  * stored anywhere else.
  */
-export function socialProof(): { profile: SocialProfile; ticket: string; secret: string } | null {
-  const p = read();
+export function socialProof(
+  owner: string = NEW_ACCOUNT,
+): { profile: SocialProfile; ticket: string; secret: string } | null {
+  const p = read(owner);
   return p?.ticket && p.profile ? { profile: p.profile, ticket: p.ticket, secret: p.secret } : null;
 }
 
 // Web wallet: back from the provider in this tab with #p=…&t=… (or #error=…). Take it, then clear the address
 // bar so the ticket isn't left in history or re-read on reload.
-if (!Capacitor.isNativePlatform() && !IS_EXTENSION && typeof location !== 'undefined' && location.href.startsWith(WEB_RETURN)) {
+if (
+  !Capacitor.isNativePlatform() &&
+  !IS_EXTENSION &&
+  typeof location !== 'undefined' &&
+  location.href.startsWith(WEB_RETURN)
+) {
   const here = location.href;
   if (isReturn(here)) {
     history.replaceState(null, '', location.pathname + location.search);

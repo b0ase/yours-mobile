@@ -18,7 +18,7 @@ other AI agents.
 6. MCP (Claude and other agents)
 7. Market › Strategies
 8. Exchange › Contracts and Exchange › Bonds
-8a. Encrypted NFTs (strategies, paid and adult media)
+   8a. Encrypted NFTs (strategies, paid and adult media)
 9. Rules we follow
 10. Build order
 11. Open questions
@@ -55,8 +55,8 @@ An **agent** is an AI worker with a name, an AI provider and a set of accounts i
 
 - **One agent per account**, or **one agent across several accounts.** The user picks which accounts an
   agent can see. An agent never sees the main wallet unless the user explicitly adds it.
-- **Several agents at once**, for example a *Trader* on two strategy accounts, a *Treasurer* that tops them
-  up from a savings account, and a *Reporter* that can only read.
+- **Several agents at once**, for example a _Trader_ on two strategy accounts, a _Treasurer_ that tops them
+  up from a savings account, and a _Reporter_ that can only read.
 - **Permissions per agent per account:** `read` (balances, history), `trade` (Market buy/sell/list),
   `send` (to addresses or names), `mint`, `rooms` (join, post). Defaults: read + whatever the account's
   strategy needs.
@@ -77,8 +77,8 @@ A strategy file contains:
 - **Version** and a changelog. A strategy is versioned like software (v1.0, v1.1).
 
 **Enforcement.** Rules and the spec's limits are checked by the wallet before any action is signed. If
-the AI asks for something outside them, the action is refused and logged. The AI chooses *when* and
-*whether* within the rules; it can never widen them.
+the AI asks for something outside them, the action is refused and logged. The AI chooses _when_ and
+_whether_ within the rules; it can never widen them.
 
 **Loading.** Account › **Load strategy** (app) or `bwalletx strategy load` (CLI). One strategy per account
 at a time; an agent on several accounts can run a different one in each.
@@ -163,15 +163,15 @@ A third Market section beside Tokens and NFTs.
 
 ### 7.2 Strategy spec (required to publish)
 
-| Field | Example |
-| --- | --- |
-| What it trades | $B0ASEX; BSV-21 tokens only |
+| Field                    | Example                            |
+| ------------------------ | ---------------------------------- |
+| What it trades           | $B0ASEX; BSV-21 tokens only        |
 | **Seller's risk rating** | Low · Medium · High · Experimental |
-| Most it will spend | $10/day, $200 total |
-| How often it acts | A few times a day |
-| When it stops | Holds 100k tokens, or down 30% |
-| Needs | Agent account with at least $50 |
-| Version / changes | v1.2: tighter stop |
+| Most it will spend       | $10/day, $200 total                |
+| How often it acts        | A few times a day                  |
+| When it stops            | Holds 100k tokens, or down 30%     |
+| Needs                    | Agent account with at least $50    |
+| Version / changes        | v1.2: tighter stop                 |
 
 The app checks only mechanical things: every field is filled in, and the program's rules are within the
 spec's limits (enforced at run time, §3). Buyers can filter by spec fields.
@@ -307,7 +307,7 @@ bought or opened in bWalletX.
 5. **MCP server**: `bwalletx mcp`.
 6. **Encrypted NFTs**: encrypt on publish, key service, unlock for owners (also enables paid media).
 7. **Market › Strategies**: spec form, Publish & sell, listings, buy and load.
-7a. **Exchange › Contracts / Bonds**: the $1 bond vault on testnet first (DOLLAR-BOND.md), then contract templates.
+   7a. **Exchange › Contracts / Bonds**: the $1 bond vault on testnet first (DOLLAR-BOND.md), then contract templates.
 8. **Adult category** (bWalletX only): 18+ gate, Adult flag, preview, report and key refusal.
 
 Each step ships on its own and is useful by itself.

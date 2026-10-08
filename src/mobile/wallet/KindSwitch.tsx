@@ -51,12 +51,23 @@ export const WalletKindSwitch = () => {
     // but let go as soon as the user scrolls or touches.
     let frames = 45;
     let raf = 0;
-    const stop = () => { frames = 0; cancelAnimationFrame(raf); };
-    const tick = () => { if (frames-- <= 0) return; pin(); raf = requestAnimationFrame(tick); };
+    const stop = () => {
+      frames = 0;
+      cancelAnimationFrame(raf);
+    };
+    const tick = () => {
+      if (frames-- <= 0) return;
+      pin();
+      raf = requestAnimationFrame(tick);
+    };
     raf = requestAnimationFrame(tick);
     box.addEventListener('wheel', stop, { passive: true, once: true });
     box.addEventListener('touchstart', stop, { passive: true, once: true });
-    return () => { stop(); box.removeEventListener('wheel', stop); box.removeEventListener('touchstart', stop); };
+    return () => {
+      stop();
+      box.removeEventListener('wheel', stop);
+      box.removeEventListener('touchstart', stop);
+    };
   }, [kind]);
   return (
     <div

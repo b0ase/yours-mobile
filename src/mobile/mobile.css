@@ -379,6 +379,100 @@ body,
   align-items: center;
   justify-content: space-between;
 }
+.bw-wcard-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+/* Identity line under the name: `$handle · 02cbe7…6ed8` (wallet/identityLine.ts). Tap copies the key. */
+.bw-wcard-idline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 28px;
+}
+.bw-wcard-idtext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  color: var(--bw-wcard-muted, #8e8e89);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.bw-wcard-idwarn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #1a1000;
+  background: #ffb020;
+  border: 0;
+  border-radius: 999px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bw-idwarn-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.bw-idwarn-card {
+  width: 100%;
+  max-width: 420px;
+  background: #121316;
+  border: 1px solid #1f2127;
+  border-radius: 16px;
+  padding: 18px 16px 12px;
+  color: #f2f2f0;
+}
+.bw-idwarn-title {
+  font-size: 16px;
+  font-weight: 800;
+  margin: 0 0 6px;
+}
+.bw-idwarn-body {
+  font-size: 13px;
+  color: #b6b8be;
+  margin: 0 0 14px;
+  line-height: 1.4;
+}
+.bw-idwarn-go,
+.bw-idwarn-cancel {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bw-idwarn-go {
+  color: #000;
+  background: linear-gradient(135deg, #ffd24d, #eab300);
+}
+.bw-idwarn-cancel {
+  margin-top: 6px;
+  color: #b6b8be;
+  background: transparent;
+}
 .bw-wcard-mark {
   width: 34px;
   height: 34px;

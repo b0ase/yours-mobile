@@ -56,7 +56,8 @@ export const TokenLinks = ({
   // The issuer's own on-chain deploy fields lead; a launchpad's API fills gaps.
   const links = parseLinks(deploy, extra);
   const utility = parseUtility(deploy, extra);
-  const key = !STORE_BUILD && tokenId && room && tokenRoomsEnabled() ? tokenKey('bsv21', tokenId.replace('.', '_')) : null;
+  const key =
+    !STORE_BUILD && tokenId && room && tokenRoomsEnabled() ? tokenKey('bsv21', tokenId.replace('.', '_')) : null;
   if (!links.length && !utility && !key) return null;
   const ticker = sym ? `$${sym.replace(/^\$/, '')}` : 'this token';
   return (
@@ -95,13 +96,16 @@ export const TokenLinks = ({
         ))}
       </div>
       {ask && (
-        <div className="flex flex-col gap-2 rounded-xl p-3 border" style={{ background: '#0F1013', borderColor: '#3a2f0c' }}>
+        <div
+          className="flex flex-col gap-2 rounded-xl p-3 border"
+          style={{ background: '#0F1013', borderColor: '#3a2f0c' }}
+        >
           <p className="text-xs text-white m-0 break-all">
             Open {NAME[ask.kind]} <b>{ask.label}</b>?
           </p>
           <p className="text-[11px] text-[#98A2B3] m-0">
-            The token&apos;s issuer set this link. It&apos;s an outside site that bWalletX hasn&apos;t checked; never enter your
-            recovery phrase there.
+            The token&apos;s issuer set this link. It&apos;s an outside site that bWalletX hasn&apos;t checked; never
+            enter your recovery phrase there.
           </p>
           <div className="flex gap-2">
             <button

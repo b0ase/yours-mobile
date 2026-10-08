@@ -281,8 +281,20 @@ const doSync = async (session: ChatSession | null, { ask = false }: { ask?: bool
   const env = await nativeEnv();
   const bundleId = await nativeBundle();
   const body = IS_WEB_PUSH
-    ? deviceBody({ platform: PUSH_PLATFORM, channel: CHANNEL, store: STORE_BUILD, subscription: await webSubscription() })
-    : deviceBody({ platform: PUSH_PLATFORM, channel: CHANNEL, store: STORE_BUILD, env, bundleId, token: await getNativeToken() });
+    ? deviceBody({
+        platform: PUSH_PLATFORM,
+        channel: CHANNEL,
+        store: STORE_BUILD,
+        subscription: await webSubscription(),
+      })
+    : deviceBody({
+        platform: PUSH_PLATFORM,
+        channel: CHANNEL,
+        store: STORE_BUILD,
+        env,
+        bundleId,
+        token: await getNativeToken(),
+      });
   const key = body.token ?? body.webPushSubscription?.endpoint ?? '';
   const cur = read();
   if (cur.deviceId && cur.handle === session.handle && cur.key === key && cur.bearer === session.token) return;

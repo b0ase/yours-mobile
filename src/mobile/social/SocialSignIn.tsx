@@ -20,6 +20,7 @@ import { isAgentCreatePending } from '../agents/agentCreate';
 import {
   clearSocial,
   onSocialChange,
+  NEW_ACCOUNT,
   socialError,
   socialProfile,
   startSocial,
@@ -60,12 +61,18 @@ const GoogleLogo = () => (
 export const SocialSignIn = ({
   onProfile,
   onRestore,
+  onClear,
+  owner = NEW_ACCOUNT,
 }: {
   onProfile: (p: { name: string; avatar: string }) => void;
+  /** The sign-in was removed (or expired): `avatar` is the photo this form filled from it, to take back out. */
+  onClear?: (avatar: string) => void;
+  /** Whose sign-in: NEW_ACCOUNT on Create / Restore / Import, else the account's identity address. */
+  owner?: string;
   /** Create Account only: offered when the verified name already belongs to a wallet. */
   onRestore?: () => void;
 }) => {
-  const [profile, setProfile] = useState(socialProfile);
+  const [profile, setProfile] = useState(() => socialProfile(owner));
   const [taken, setTaken] = useState('');
   const [error, setError] = useState(socialError);
   const [busy, setBusy] = useState<SocialProvider | null>(null);
@@ -74,29 +81,37 @@ export const SocialSignIn = ({
   // when the form mounts with a profile already saved, as it does when the app reloads the page on return
   // (owner, 6 Oct 2026: the name stayed empty). X fills the @handle, Google the display name.
   const filled = useRef('');
+  const filledAvatar = useRef('');
   const onProfileRef = useRef(onProfile);
   onProfileRef.current = onProfile;
+  const onClearRef = useRef(onClear);
+  onClearRef.current = onClear;
   const fill = (p: ReturnType<typeof socialProfile>) => {
     if (!p) return;
     const key = `${p.provider}:${p.name}`;
     if (filled.current === key) return;
     filled.current = key;
+    filledAvatar.current = p.avatar || '';
     onProfileRef.current({
       name: p.provider === 'x' ? p.name.replace(/^@/, '') : p.display || p.name.split('@')[0],
       avatar: p.avatar || '',
     });
   };
   useEffect(() => {
-    fill(socialProfile());
+    fill(socialProfile(owner));
     return onSocialChange(() => {
-      const p = socialProfile();
+      const p = socialProfile(owner);
       setProfile(p);
       setError(socialError());
       setBusy(null);
       if (p) fill(p);
-      else filled.current = '';
+      else if (filled.current) {
+        filled.current = '';
+        onClearRef.current?.(filledAvatar.current);
+        filledAvatar.current = '';
+      }
     });
-  }, []);
+  }, [owner]);
   // New Account makes new keys, so it can't bring back a wallet that already has this name (owner, 6 Oct 2026:
   // tried to get b0asex.x onto a phone that way and got an error). Say so and offer Restore (12 words).
   const alias = profile?.alias || '';
@@ -117,7 +132,7 @@ export const SocialSignIn = ({
     setBusy(provider);
     setError('');
     try {
-      await startSocial(provider);
+      await startSocial(provider, owner);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in is unavailable');
       setBusy(null);
@@ -128,30 +143,33 @@ export const SocialSignIn = ({
     return (
       <div className="w-[92%] mb-4">
         <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: '#17191E' }}>
-        {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
-        <div className="flex-1 min-w-0 text-left">
-          <div className="text-sm font-semibold text-white flex items-center gap-1">
-            {profile.provider === 'x' ? `@${profile.name}` : profile.name}
-            <BadgeCheck size={14} color="#F5B800" />
+          {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
+          <div className="flex-1 min-w-0 text-left">
+            <div className="text-sm font-semibold text-white flex items-center gap-1">
+              {profile.provider === 'x' ? `@${profile.name}` : profile.name}
+              <BadgeCheck size={14} color="#F5B800" />
+            </div>
+            <div className="text-[11px]" style={{ color: '#98A2B3' }}>
+              {profile.alias ? `Your name will be ${profile.alias}` : 'Verified'}
+            </div>
           </div>
-          <div className="text-[11px]" style={{ color: '#98A2B3' }}>
-            {profile.alias ? `Your name will be ${profile.alias}` : 'Verified'}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={clearSocial}
-          className="text-xs bg-transparent border-0"
-          style={{ color: '#98A2B3' }}
-        >
-          Remove
-        </button>
+          <button
+            type="button"
+            onClick={clearSocial}
+            className="text-xs bg-transparent border-0"
+            style={{ color: '#98A2B3' }}
+          >
+            Remove
+          </button>
         </div>
         {taken && onRestore ? (
-          <div className="mt-2 rounded-xl px-3 py-2.5 text-left text-xs" style={{ background: '#2B2F36', color: '#E7E7E7' }}>
-            <b>{taken}</b> is already linked to a wallet with its own 12-word recovery phrase. If you have it, enter it next:
-            a new account would get new keys and couldn't use this name. The words stay on this phone, encrypted with your
-            wallet password.
+          <div
+            className="mt-2 rounded-xl px-3 py-2.5 text-left text-xs"
+            style={{ background: '#2B2F36', color: '#E7E7E7' }}
+          >
+            <b>{taken}</b> is already linked to a wallet with its own 12-word recovery phrase. If you have it, enter it
+            next: a new account would get new keys and couldn't use this name. The words stay on this phone, encrypted
+            with your wallet password.
             <button
               type="button"
               onClick={onRestore}

@@ -98,7 +98,11 @@ const Row = ({ item, onKeep, onHide }: { item: AirdropItem; onKeep: () => void; 
       >
         Keep
       </button>
-      <button type="button" onClick={onHide} className="rounded-lg px-3 py-1 text-xs font-semibold bg-[#2b2f36] text-white">
+      <button
+        type="button"
+        onClick={onHide}
+        className="rounded-lg px-3 py-1 text-xs font-semibold bg-[#2b2f36] text-white"
+      >
         Hide
       </button>
     </div>
@@ -152,7 +156,12 @@ export const AirdropsInbox = ({ onClose }: { onClose: () => void }) => {
           </p>
         )}
         {visible.map((i) => (
-          <Row key={i.key} item={i} onKeep={() => update((s) => keep(s, i.key))} onHide={() => update((s) => hide(s, i))} />
+          <Row
+            key={i.key}
+            item={i}
+            onKeep={() => update((s) => keep(s, i.key))}
+            onHide={() => update((s) => hide(s, i))}
+          />
         ))}
       </div>
     </div>,

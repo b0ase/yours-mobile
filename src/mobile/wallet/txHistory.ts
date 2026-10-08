@@ -34,7 +34,7 @@ export type LocalInfo = {
    * tx it funded this is the only place the amount shows up.
    */
   satoshis?: number;
-}
+};
 
 export type HistoryRow = {
   txid: string;
@@ -230,7 +230,8 @@ export const missingParents = (txs: RawTx[], local: Map<string, LocalInfo>) => {
   const have = new Set(txs.map((t) => t.txid));
   const need = new Set<string>();
   for (const t of txs)
-    if ((local.get(t.txid)?.satoshis ?? 0) < 0) for (const i of t.vin) if (i.txid && !have.has(i.txid)) need.add(i.txid);
+    if ((local.get(t.txid)?.satoshis ?? 0) < 0)
+      for (const i of t.vin) if (i.txid && !have.has(i.txid)) need.add(i.txid);
   return [...need];
 };
 
@@ -267,7 +268,8 @@ export const rangeFor = (preset: RangePreset, now: number, custom?: { from?: str
   return { from: f === null ? null : startOfDay(f), to: t === null ? null : t + DAY - 1 };
 };
 
-export const inRange = (time: number, r: Range) => (r.from === null || time >= r.from) && (r.to === null || time <= r.to);
+export const inRange = (time: number, r: Range) =>
+  (r.from === null || time >= r.from) && (r.to === null || time <= r.to);
 export const filterRange = (rows: HistoryRow[], r: Range) => rows.filter((x) => inRange(x.time, r));
 
 // ─── Totals ──────────────────────────────────────────────────────────────────

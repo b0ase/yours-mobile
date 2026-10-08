@@ -12,7 +12,8 @@ const STATUS: Record<Subscription['status'], { label: string; color: string }> =
   ended: { label: 'Ended', color: MUTED },
 };
 
-const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+const day = (t: number) =>
+  new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
 /** One standing order: payee, amount, next payment, Pause/Resume (one tap), Cancel. */
 export const SubscriptionCard = ({ sub }: { sub: Subscription }) => {
@@ -30,7 +31,10 @@ export const SubscriptionCard = ({ sub }: { sub: Subscription }) => {
             {sub.maxCount !== null ? ` · ${sub.paidCount} of ${sub.maxCount} paid` : ` · ${sub.paidCount} paid`}
           </div>
         </div>
-        <span className="text-[10px] font-bold rounded px-1.5 py-0.5" style={{ background: `${st.color}22`, color: st.color }}>
+        <span
+          className="text-[10px] font-bold rounded px-1.5 py-0.5"
+          style={{ background: `${st.color}22`, color: st.color }}
+        >
           {st.label.toUpperCase()}
         </span>
       </div>

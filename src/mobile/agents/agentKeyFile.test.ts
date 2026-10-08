@@ -6,7 +6,12 @@ const secrets = { payPk: 'pay-placeholder', ordPk: 'ord-placeholder', identityPk
 
 describe('agent key file', () => {
   test('round-trips with the passphrase, refuses the wrong one', async () => {
-    const f = await encryptAgentKeyFile({ name: 'trader', identityAddress: '1Id' }, secrets, 'correct horse battery', 1000);
+    const f = await encryptAgentKeyFile(
+      { name: 'trader', identityAddress: '1Id' },
+      secrets,
+      'correct horse battery',
+      1000,
+    );
     expect(f.format).toBe('bwalletx.agentkey/1');
     expect(JSON.stringify(f)).not.toContain('placeholder');
     expect(await decryptAgentKeyFile(f, 'correct horse battery')).toEqual(secrets);

@@ -57,12 +57,17 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
     <div className="rounded-2xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
       <div className="text-sm font-bold text-white">Run on a computer</div>
       <div className="text-xs" style={{ color: MUTED }}>
-        Export this agent account for the bWalletX CLI and MCP (<span className="font-mono">bwalletx key import</span>), to
-        run it on a laptop or server. The file is locked with a passphrase you choose. Your other accounts are never
+        Export this agent account for the bWalletX CLI and MCP (<span className="font-mono">bwalletx key import</span>),
+        to run it on a laptop or server. The file is locked with a passphrase you choose. Your other accounts are never
         included.
       </div>
       {!open ? (
-        <button type="button" onClick={() => setOpen(true)} className="rounded-lg px-3 py-2 text-sm font-bold border-0" style={{ background: '#F5B80022', color: GOLD }}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0"
+          style={{ background: '#F5B80022', color: GOLD }}
+        >
           Export for CLI
         </button>
       ) : done ? (
@@ -71,21 +76,65 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
             Exported. Anyone with this file and the passphrase controls this account’s balance; keep both safe.
           </div>
           <div className="flex gap-2">
-            <button type="button" onClick={() => void navigator.clipboard?.writeText(done)} className="flex-1 rounded-lg px-3 py-2 text-sm font-bold border-0" style={{ background: LINE, color: '#fff' }}>
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(done)}
+              className="flex-1 rounded-lg px-3 py-2 text-sm font-bold border-0"
+              style={{ background: LINE, color: '#fff' }}
+            >
               Copy file
             </button>
-            <button type="button" onClick={() => (setDone(null), setOpen(false), setPass(''), setPass2(''))} className="flex-1 rounded-lg px-3 py-2 text-sm font-bold border-0" style={{ background: LINE, color: '#fff' }}>
+            <button
+              type="button"
+              onClick={() => (setDone(null), setOpen(false), setPass(''), setPass2(''))}
+              className="flex-1 rounded-lg px-3 py-2 text-sm font-bold border-0"
+              style={{ background: LINE, color: '#fff' }}
+            >
               Done
             </button>
           </div>
         </>
       ) : (
         <>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Wallet password" autoComplete="current-password" className={input} style={style} />
-          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder={`New file passphrase (${MIN_PASSPHRASE}+ characters)`} autoComplete="new-password" className={input} style={style} />
-          <input type="password" value={pass2} onChange={(e) => setPass2(e.target.value)} placeholder="Passphrase again" autoComplete="new-password" className={input} style={style} />
-          {error && <div className="text-xs" style={{ color: '#FDA29B' }}>{error}</div>}
-          <button type="button" disabled={busy || !password} onClick={() => void run()} className="rounded-lg px-3 py-2 text-sm font-bold border-0" style={{ background: GOLD, color: '#000', opacity: busy || !password ? 0.6 : 1 }}>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Wallet password"
+            autoComplete="current-password"
+            className={input}
+            style={style}
+          />
+          <input
+            type="password"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            placeholder={`New file passphrase (${MIN_PASSPHRASE}+ characters)`}
+            autoComplete="new-password"
+            className={input}
+            style={style}
+          />
+          <input
+            type="password"
+            value={pass2}
+            onChange={(e) => setPass2(e.target.value)}
+            placeholder="Passphrase again"
+            autoComplete="new-password"
+            className={input}
+            style={style}
+          />
+          {error && (
+            <div className="text-xs" style={{ color: '#FDA29B' }}>
+              {error}
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={busy || !password}
+            onClick={() => void run()}
+            className="rounded-lg px-3 py-2 text-sm font-bold border-0"
+            style={{ background: GOLD, color: '#000', opacity: busy || !password ? 0.6 : 1 }}
+          >
             {busy ? 'Encrypting…' : 'Export'}
           </button>
         </>

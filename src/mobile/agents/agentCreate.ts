@@ -55,7 +55,9 @@ const takePotCreate = (): { name: string; emoji?: string } | null => {
     const v = localStorage.getItem(POT_FLAG);
     localStorage.removeItem(POT_FLAG);
     const o = v ? (JSON.parse(v) as { name?: unknown; emoji?: unknown }) : null;
-    return o && typeof o.name === 'string' ? { name: o.name, emoji: typeof o.emoji === 'string' ? o.emoji : undefined } : null;
+    return o && typeof o.name === 'string'
+      ? { name: o.name, emoji: typeof o.emoji === 'string' ? o.emoji : undefined }
+      : null;
   } catch {
     return null;
   }

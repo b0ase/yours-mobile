@@ -136,8 +136,11 @@ export const syncAccountNames = async (
       // Unpublished: no profile name (also clears a name cached here by mistake for another account).
       if ((await resolveBapId(ctx)) === null) return setCachedProfileName(identityAddress, '');
       const res = await getProfile.execute(ctx, {});
+      if (res.error) return;
+      // Always this identity's own answer, even '': a name cached here for another account (before the
+      // ctxIdentityAddress guard) is replaced, not kept forever (owner, 8 Oct 2026: "b0ase" on another account's Receive).
       const name = typeof res.profile?.name === 'string' ? res.profile.name.trim() : '';
-      if (name) setCachedProfileName(identityAddress, name);
+      setCachedProfileName(identityAddress, name);
     })(),
     (async () => {
       const r = await listOpns.execute(ctx, { includeTags: true, limit: 100 });

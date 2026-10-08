@@ -6,12 +6,12 @@ Owner, 7 Oct 2026: "can we add import moneybutton wallet into our restore wallet
 
 ## What a Money Button wallet is
 
-| | Value | Source |
-|---|---|---|
-| Phrase | BIP39, 12 words by default, optional passphrase ("added as though it were a 13th word") | Money Button docs, *Mnemonics (BIP39)*: github.com/moneybutton/docs `docs/bsv-mnemonic.md` |
-| Account path | `m/44'/0'/0'` | same doc: "Money Button uses the wallet path m/44'/0'/0'" |
-| Chains | Receive only, `m/44'/0'/0'/0/i`. "Money Button does not use internal addresses." | same doc |
-| ElectrumSV import | BIP39 seed words, derivation `m/44'/0'/0'` | ElectrumSV import guide (Roger Taylor) |
+|                   | Value                                                                                   | Source                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Phrase            | BIP39, 12 words by default, optional passphrase ("added as though it were a 13th word") | Money Button docs, _Mnemonics (BIP39)_: github.com/moneybutton/docs `docs/bsv-mnemonic.md` |
+| Account path      | `m/44'/0'/0'`                                                                           | same doc: "Money Button uses the wallet path m/44'/0'/0'"                                  |
+| Chains            | Receive only, `m/44'/0'/0'/0/i`. "Money Button does not use internal addresses."        | same doc                                                                                   |
+| ElectrumSV import | BIP39 seed words, derivation `m/44'/0'/0'`                                              | ElectrumSV import guide (Roger Taylor)                                                     |
 
 Restore from the phrase: walk `m/44'/0'/0'/0/i` until 20 unused addresses in a row (BIP44 gap limit). Money Button handed out a fresh address per payment, so the walk can be long; the scan keeps going while it finds history (cap 2000 per chain). We also walk `/1/i`, which costs 20 lookups and catches funds that another wallet restored from the same phrase may have put there.
 

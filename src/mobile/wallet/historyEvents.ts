@@ -140,7 +140,11 @@ export const parseInscription = (scriptHex: string | undefined): Inscription | n
     i = value.next;
   }
   const textual = /^(text\/|application\/(json|bsv-20))/.test(contentType);
-  return { contentType, text: textual && content !== undefined && !truncated ? hexToUtf8(content) : undefined, truncated };
+  return {
+    contentType,
+    text: textual && content !== undefined && !truncated ? hexToUtf8(content) : undefined,
+    truncated,
+  };
 };
 
 export type Bsv20 = { op: string; id?: string; tick?: string; amt?: string; sym?: string };
@@ -176,7 +180,8 @@ export const isOrdLock = (scriptHex: string | undefined) =>
  */
 export const trailingP2pkh = (scriptHex: string | undefined): string | null => {
   const s = (scriptHex ?? '').toLowerCase();
-  const m = s.match(/76a914([0-9a-f]{40})88ac$/) ?? (s.startsWith('76a914') ? s.match(/^76a914([0-9a-f]{40})88ac/) : null);
+  const m =
+    s.match(/76a914([0-9a-f]{40})88ac$/) ?? (s.startsWith('76a914') ? s.match(/^76a914([0-9a-f]{40})88ac/) : null);
   if (!m) return null;
   return Utils.toBase58Check(Utils.toArray(m[1], 'hex'), [0]);
 };
@@ -267,12 +272,17 @@ const ownAddr = (o: RawTx['vout'][number], own: Set<string>) =>
 export const inWalletAppOf = (local: LocalInfo | undefined): string | undefined => {
   const d = local?.description ?? '';
   if (/tokenblaster curve/i.test(d) || local?.labels?.includes('tokenblaster')) return 'tokenblaster';
-  if (/^(Purchase \d+ tokens? for|Purchase ordinal|Fund OrdLock purchase|List (ordinal|OpNS)|Cancel .*listing)/i.test(d)) return '1sat.market';
+  if (
+    /^(Purchase \d+ tokens? for|Purchase ordinal|Fund OrdLock purchase|List (ordinal|OpNS)|Cancel .*listing)/i.test(d)
+  )
+    return '1sat.market';
   return undefined;
 };
 
 /** Local record text → event (wallet action descriptions from @1sat/actions and our own code). */
-const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'token' | 'nft'; qty?: string; id?: string; dec?: number } | null => {
+const fromLocal = (
+  local: LocalInfo | undefined,
+): { type: EventType; kind?: 'token' | 'nft'; qty?: string; id?: string; dec?: number } | null => {
   if (!local) return null;
   const d = local.description ?? '';
   const labels = local.labels ?? [];
@@ -281,7 +291,13 @@ const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'tok
   if ((m = d.match(/^Purchase (\d+) tokens? for/i))) return { type: 'buy', kind: 'token', qty: m[1], id: tokenLabel };
   // TokenBlaster curve (market/launchpad/client.ts): the amount is already in whole tokens.
   if ((m = d.match(/^(Buy|Sell) ([\d.,]+) \$\S+ (?:on|to) the tokenblaster curve/i)))
-    return { type: m[1].toLowerCase() === 'buy' ? 'buy' : 'sell', kind: 'token', qty: m[2].replace(/,/g, ''), id: tokenLabel, dec: 0 };
+    return {
+      type: m[1].toLowerCase() === 'buy' ? 'buy' : 'sell',
+      kind: 'token',
+      qty: m[2].replace(/,/g, ''),
+      id: tokenLabel,
+      dec: 0,
+    };
   if (/^(Purchase ordinal|Fund OrdLock purchase)/i.test(d)) return { type: 'buy', kind: 'nft' };
   if (/^List (ordinal|OpNS)/i.test(d)) return { type: 'list', kind: tokenLabel ? 'token' : 'nft', id: tokenLabel };
   if (/^Cancel .*listing/i.test(d)) return { type: 'cancel', kind: tokenLabel ? 'token' : 'nft', id: tokenLabel };
@@ -294,7 +310,12 @@ const fromLocal = (local: LocalInfo | undefined): { type: EventType; kind?: 'tok
 };
 
 /** Add category / type / asset / app to a row (txHistory.classify did direction and amounts). */
-export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: LocalInfo | undefined, ctx: EventContext): ClassifiedRow => {
+export const classifyEvent = (
+  row: HistoryRow,
+  tx: RawTx | undefined,
+  local: LocalInfo | undefined,
+  ctx: EventContext,
+): ClassifiedRow => {
   const inWallet = inWalletAppOf(local);
   const app = ctx.appByTxid?.get(row.txid) ?? (inWallet ? { app: inWallet } : undefined);
   const appLabel = appLabelOf(local);
@@ -314,7 +335,10 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
     if (listingIn) {
       const back = tx.vout.some((o) => o.sats === 1 && ownAddr(o, ctx.own));
       const asset = { ...listingIn.asset, symbol: ctx.symbols?.get(listingIn.asset.id) ?? listingIn.asset.symbol };
-      return { ...base(asset.kind, back ? 'cancel' : 'sell', asset), label: `${asset.kind === 'nft' ? 'NFT' : 'token'} ${back ? 'listing cancelled' : 'sold'}` };
+      return {
+        ...base(asset.kind, back ? 'cancel' : 'sell', asset),
+        label: `${asset.kind === 'nft' ? 'NFT' : 'token'} ${back ? 'listing cancelled' : 'sold'}`,
+      };
     }
     const funded = tx.vin.some((i) => ctx.prev.has(`${i.txid}:${i.vout}`));
     // Lock BSV (time-locks): locking, and claiming matured locks back to the wallet.
@@ -325,7 +349,9 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
     const lockOut = tx.vout.find((o) => isOrdLock(o.script));
     if (funded && lockOut) {
       const b = parseBsv20(parseInscription(lockOut.script));
-      const asset: Asset = b ? assetOf(b, `${tx.txid}_${lockOut.n}`, ctx.symbols) : { kind: 'nft', id: `${tx.txid}_${lockOut.n}`, qty: '1' };
+      const asset: Asset = b
+        ? assetOf(b, `${tx.txid}_${lockOut.n}`, ctx.symbols)
+        : { kind: 'nft', id: `${tx.txid}_${lockOut.n}`, qty: '1' };
       return { ...base(asset.kind, 'list', asset), label: `${asset.kind === 'nft' ? 'NFT' : 'token'} listed` };
     }
     const ownOne = tx.vout.find((o) => o.sats === 1 && ownAddr(o, ctx.own));
@@ -342,19 +368,26 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
     const spentOne = tx.vin.some((i) => ctx.prev.get(`${i.txid}:${i.vout}`)?.sats === 1);
     if (spentOne && extOne) {
       const b = parseBsv20(parseInscription(extOne.script));
-      const asset: Asset = b ? assetOf(b, `${tx.txid}_${extOne.n}`, ctx.symbols) : { kind: 'nft', id: `${tx.txid}_${extOne.n}`, qty: '1' };
+      const asset: Asset = b
+        ? assetOf(b, `${tx.txid}_${extOne.n}`, ctx.symbols)
+        : { kind: 'nft', id: `${tx.txid}_${extOne.n}`, qty: '1' };
       return { ...base(asset.kind, 'transfer-out', asset), label: `${asset.kind === 'nft' ? 'NFT' : 'token'} sent` };
     }
     if (ownOne && !funded) {
       const b = parseBsv20(parseInscription(ownOne.script));
-      const asset: Asset = b ? assetOf(b, `${tx.txid}_${ownOne.n}`, ctx.symbols) : { kind: 'nft', id: `${tx.txid}_${ownOne.n}`, qty: '1' };
+      const asset: Asset = b
+        ? assetOf(b, `${tx.txid}_${ownOne.n}`, ctx.symbols)
+        : { kind: 'nft', id: `${tx.txid}_${ownOne.n}`, qty: '1' };
       return { ...base(asset.kind, 'transfer-in', asset), label: `${asset.kind === 'nft' ? 'NFT' : 'token'} received` };
     }
     if (ownOne && funded) {
       const b = parseBsv20(parseInscription(ownOne.script));
       if (b && /deploy|mint/.test(b.op)) {
         const asset = assetOf(b, `${tx.txid}_${ownOne.n}`, ctx.symbols);
-        return { ...base('token', 'mint', asset.id.includes('_') ? asset : { ...asset, id: `${tx.txid}_${ownOne.n}` }), label: 'token minted' };
+        return {
+          ...base('token', 'mint', asset.id.includes('_') ? asset : { ...asset, id: `${tx.txid}_${ownOne.n}` }),
+          label: 'token minted',
+        };
       }
     }
   }
@@ -363,15 +396,27 @@ export const classifyEvent = (row: HistoryRow, tx: RawTx | undefined, local: Loc
   if (loc?.kind) {
     const asset: Asset | undefined =
       loc.id || loc.qty
-        ? { kind: loc.kind, id: loc.id ?? '', qty: loc.qty, symbol: loc.id ? ctx.symbols?.get(loc.id) : undefined, ...(loc.dec !== undefined ? { dec: loc.dec } : {}) }
+        ? {
+            kind: loc.kind,
+            id: loc.id ?? '',
+            qty: loc.qty,
+            symbol: loc.id ? ctx.symbols?.get(loc.id) : undefined,
+            ...(loc.dec !== undefined ? { dec: loc.dec } : {}),
+          }
         : undefined;
     return base(loc.kind, loc.type, asset);
   }
 
-  if (app?.game || appLabel?.game) return { ...base('game', 'payment'), label: row.direction === 'in' ? 'game winnings' : 'game payment' };
-  if (row.label === 'pot payment' || ctx.accountKind === 'pot') return base('subscription', row.direction === 'out' ? 'payment' : plainType);
+  if (app?.game || appLabel?.game)
+    return { ...base('game', 'payment'), label: row.direction === 'in' ? 'game winnings' : 'game payment' };
+  if (row.label === 'pot payment' || ctx.accountKind === 'pot')
+    return base('subscription', row.direction === 'out' ? 'payment' : plainType);
   if (row.label === 'agent spend') return base('app', 'payment');
-  if (app || appLabel) return { ...base('app', row.direction === 'out' ? 'payment' : plainType), label: row.label === 'send' ? 'app payment' : row.label };
+  if (app || appLabel)
+    return {
+      ...base('app', row.direction === 'out' ? 'payment' : plainType),
+      label: row.label === 'send' ? 'app payment' : row.label,
+    };
   if (row.label === 'time lock') return { ...base('lock', plainType), label: 'BSV locked' };
   if (row.label === 'lock claimed') return { ...base('lock', plainType), label: 'locked BSV claimed' };
   if (['tip', 'like', 'lock', 'seal'].includes(row.label)) return base('social', plainType);
@@ -388,6 +433,12 @@ export const filterCategory = <R extends { category: Category }>(rows: R[], c: C
 export const assetText = (a: Asset | undefined) => {
   if (!a) return '';
   if (a.kind === 'nft') return `NFT ${a.id.length > 20 ? `${a.id.slice(0, 8)}…${a.id.slice(-4)}` : a.id}`;
-  const name = a.symbol ? (a.symbol.startsWith('$') ? a.symbol : `$${a.symbol}`) : a.id ? `${a.id.slice(0, 8)}…` : 'tokens';
+  const name = a.symbol
+    ? a.symbol.startsWith('$')
+      ? a.symbol
+      : `$${a.symbol}`
+    : a.id
+      ? `${a.id.slice(0, 8)}…`
+      : 'tokens';
   return `${tokenAmount(a.qty, a.dec)} ${name}`.trim();
 };

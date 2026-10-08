@@ -20,11 +20,16 @@ const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
 const unb64 = (s: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 const aesKey = async (passphrase: string, salt: Uint8Array<ArrayBuffer>, iter: number) => {
-  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, base, { name: 'AES-GCM', length: 256 }, false, [
-    'encrypt',
-    'decrypt',
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, [
+    'deriveKey',
   ]);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
 };
 
 export const encryptAgentKeyFile = async (
@@ -37,7 +42,9 @@ export const encryptAgentKeyFile = async (
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await aesKey(passphrase, salt, iter);
-  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(secrets))));
+  const data = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(secrets))),
+  );
   return {
     format: AGENT_KEY_FORMAT,
     name: meta.name.slice(0, 60),

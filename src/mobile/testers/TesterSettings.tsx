@@ -33,15 +33,22 @@ export const TesterSettings = () => {
             </div>
           )}
           {status && 'error' in status && <div className="mt-1 text-[#ff6b6b]">{status.error}</div>}
-          <button className="mt-2 text-[#98A2B3] underline" onClick={() => { setTesterLink(null); setLink(null); setStatus(null); }}>
+          <button
+            className="mt-2 text-[#98A2B3] underline"
+            onClick={() => {
+              setTesterLink(null);
+              setLink(null);
+              setStatus(null);
+            }}
+          >
             Unlink (stops check-ins)
           </button>
         </>
       ) : (
         <>
           <div className="text-[#98A2B3]">
-            Testing bWallet for bwalletx.com/testers? Enter the tester code from your status page. The app then sends one
-            check-in a day: a random install id, your code, and whether it came from Google Play. Nothing else.
+            Testing bWallet for bwalletx.com/testers? Enter the tester code from your status page. The app then sends
+            one check-in a day: a random install id, your code, and whether it came from Google Play. Nothing else.
           </div>
           <div className="mt-2 flex gap-2">
             <input
@@ -52,7 +59,12 @@ export const TesterSettings = () => {
               className="flex-1 rounded-lg px-2 py-1 outline-none"
               style={box}
             />
-            <button disabled={busy} onClick={() => void save()} className="rounded-lg px-3 py-1 font-semibold text-black" style={{ background: '#f5c542' }}>
+            <button
+              disabled={busy}
+              onClick={() => void save()}
+              className="rounded-lg px-3 py-1 font-semibold text-black"
+              style={{ background: '#f5c542' }}
+            >
               Link
             </button>
           </div>

@@ -32,17 +32,17 @@ wallet → page: { type: 'BWX', isInvocation: false, id, status: 'success' | 'er
 
 ### BWX calls (v1)
 
-| Call | Returns / does | Prompt |
-| --- | --- | --- |
-| `agents.list` | `[{ id, name, handle, ghostColor, labels, stopped, dailyCapUsd, balanceUsd, spentTodayUsd, isCurrent }]` + `allStopped` | none |
-| `agents.log` `{ id, limit }` | activity entries (action, detail, usd, txid, rule, at) | none |
-| `agents.stop` `{ id }` / `agents.resume` `{ id }` | sets Stop; logs it | none for stop, confirm for resume |
-| `agents.stopAll` / `agents.resumeAll` | global kill switch | none / confirm |
-| `agents.setCap` `{ id, usd }` | daily cap | confirm when raising or removing |
-| `agents.setLabels` `{ id, labels }` | labels | none |
-| `agents.open` `{ id, screen? }` | switches the wallet to that account (Fund / Sweep / Receive) | wallet's own UI |
-| `agents.create` | opens the wallet's Add agent account flow | wallet's own UI |
-| `events` (push) | `{ type: 'BWX', event: 'agents.changed' }` when anything changes (`onAgentsChange`) | — |
+| Call                                              | Returns / does                                                                                                          | Prompt                            |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `agents.list`                                     | `[{ id, name, handle, ghostColor, labels, stopped, dailyCapUsd, balanceUsd, spentTodayUsd, isCurrent }]` + `allStopped` | none                              |
+| `agents.log` `{ id, limit }`                      | activity entries (action, detail, usd, txid, rule, at)                                                                  | none                              |
+| `agents.stop` `{ id }` / `agents.resume` `{ id }` | sets Stop; logs it                                                                                                      | none for stop, confirm for resume |
+| `agents.stopAll` / `agents.resumeAll`             | global kill switch                                                                                                      | none / confirm                    |
+| `agents.setCap` `{ id, usd }`                     | daily cap                                                                                                               | confirm when raising or removing  |
+| `agents.setLabels` `{ id, labels }`               | labels                                                                                                                  | none                              |
+| `agents.open` `{ id, screen? }`                   | switches the wallet to that account (Fund / Sweep / Receive)                                                            | wallet's own UI                   |
+| `agents.create`                                   | opens the wallet's Add agent account flow                                                                               | wallet's own UI                   |
+| `events` (push)                                   | `{ type: 'BWX', event: 'agents.changed' }` when anything changes (`onAgentsChange`)                                     | —                                 |
 
 Balance per agent: the wallet reads it the way the account switcher does (its cached balance per account), in dollars.
 
@@ -67,6 +67,7 @@ Balance per agent: the wallet reads it the way the account switcher does (its ca
    - Links to web.bwalletx.com/agents.
 
 v2:
+
 - **Strategies:** browse and buy from the Exchange, design one with the b agent or $b, and load it on paper → live (live always confirmed in the wallet).
 - **Paired computers / AIs:** list and revoke.
 - **P&L:** per agent, over time.

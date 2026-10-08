@@ -143,9 +143,7 @@ describe('listing script', () => {
     expect(() => buildListingScript(TOKEN, 1n, cancel, pay, 1.5)).toThrow();
     expect(decodeListing(new Script())).toBeNull();
     // Existing v1 listings (built with v1 bytes; creation is off in @1sat/templates) still decode.
-    const v1 = BSV21.transfer(TOKEN, 1n).lock(
-      new LockingScript(v1Lock(cancel, pay, 5).chunks),
-    );
+    const v1 = BSV21.transfer(TOKEN, 1n).lock(new LockingScript(v1Lock(cancel, pay, 5).chunks));
     expect(decodeListing(v1)).toMatchObject({ priceSats: 5, v2: false });
   });
 

@@ -21,7 +21,9 @@ const KEY_FILE = process.env.PLAY_SERVICE_ACCOUNT ?? join(homedir(), '.yours-mob
 const LISTING = readFileSync(join(process.cwd(), 'store/play/listing.md'), 'utf8');
 const TITLE = 'bWallet';
 const SHORT = LISTING.match(/\*\*Short description[^\n]*\n\n> (.+)/)[1].trim();
-const FULL = LISTING.split(/\*\*Full description[^\n]*\n\n```\n/)[1].split('\n```')[0].trim();
+const FULL = LISTING.split(/\*\*Full description[^\n]*\n\n```\n/)[1]
+  .split('\n```')[0]
+  .trim();
 const CONTACT = { contactEmail: 'support@bwalletx.com', contactWebsite: 'https://www.bwallet.space' };
 const key = JSON.parse(readFileSync(KEY_FILE, 'utf8'));
 const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
@@ -74,9 +76,9 @@ try {
   console.log(`✓ listing text (${LANG}): ${SHORT.length}/80 short, ${FULL.length}/4000 full`);
   const details = process.env.SKIP_DETAILS ? null : await call('GET', `${API}/edits/${edit}/details`);
   if (details)
-  await call('PATCH', `${API}/edits/${edit}/details`, JSON.stringify({ ...details, ...CONTACT }), {
-    'content-type': 'application/json',
-  });
+    await call('PATCH', `${API}/edits/${edit}/details`, JSON.stringify({ ...details, ...CONTACT }), {
+      'content-type': 'application/json',
+    });
   if (details) console.log(`✓ contact details (default language ${details.defaultLanguage})`);
 
   const upload = async (type, file) => {
@@ -93,7 +95,12 @@ try {
   }
   await upload('icon', 'icon-512.png');
   await upload('featureGraphic', 'feature-graphic-1024x500.png');
-  for (const f of ['screenshot-01-wallet.png', 'screenshot-02-receive.png', 'screenshot-03-send.png', 'screenshot-04-collections.png'])
+  for (const f of [
+    'screenshot-01-wallet.png',
+    'screenshot-02-receive.png',
+    'screenshot-03-send.png',
+    'screenshot-04-collections.png',
+  ])
     await upload('phoneScreenshots', f);
 
   // Unpublished apps reject changesNotSentForReview; listing changes are reviewed with the next release.

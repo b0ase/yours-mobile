@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
+  History,
   Ban,
   Bell,
   BellRing,
@@ -23,11 +24,19 @@ import {
   ScanLine,
   EyeOff,
   PiggyBank,
+  ShieldCheck,
+  LogOut,
+  Network,
 } from 'lucide-react';
+import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
+import { isNative } from '../native';
+import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
+import { IdentityMap } from './IdentityMap';
 import {
   B_AGENT_DESC,
   MY_TOKENS_DESC,
@@ -53,6 +62,9 @@ import { PhoneLayoutToggle } from '../phone/PhoneLayoutToggle';
 import { testersEnabled } from '../testers/checkin';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
+
+/** bit-sign's branded Verify-your-identity page (Veriff). Shows only verified / not and the date. */
+const KYC_URL = 'https://bit-sign.online/kyc';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
@@ -206,8 +218,8 @@ const ListRow = ({
 }: {
   title: string;
   sub?: string;
-  action: string;
-  onAction: () => void;
+  action?: string;
+  onAction?: () => void;
 }) => (
   <div
     className="mb-2 flex items-center gap-3 rounded-xl px-3 py-3"
@@ -221,13 +233,15 @@ const ListRow = ({
         </p>
       )}
     </div>
-    <button
-      onClick={onAction}
-      className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
-      style={{ border: `1px solid ${GOLD}`, color: GOLD }}
-    >
-      {action}
-    </button>
+    {action && onAction && (
+      <button
+        onClick={onAction}
+        className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+        style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+      >
+        {action}
+      </button>
+    )}
   </div>
 );
 
@@ -244,7 +258,9 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
             <ListRow
               key={p.txid}
               title={safeName(p.author.name)}
-              sub={isSlur(p.text) ? 'Post hidden: offensive language' : p.text || `${p.media?.length ?? 0} attachment(s)`}
+              sub={
+                isSlur(p.text) ? 'Post hidden: offensive language' : p.text || `${p.media?.length ?? 0} attachment(s)`
+              }
               action="Remove"
               onAction={() => {
                 setItems((b) => toggleSyncedBookmark(b, p));
@@ -256,6 +272,40 @@ const BookmarksScreen = ({ onBack }: { onBack: () => void }) => {
         </>
       ) : (
         <Note>Nothing saved yet. Tap the bookmark on a post to save it.</Note>
+      )}
+    </Screen>
+  );
+};
+
+/** Settings › Chat › Recent sign-ins: the last 10 sign-ins to this account's chat handle. No IPs. */
+const SignInsScreen = ({ onBack }: { onBack: () => void }) => {
+  const session = loadSession();
+  const [items, setItems] = useState<SignInItem[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!session) return;
+    new BchatClient(defaultHttp(isNative), session)
+      .signIns()
+      .then(setItems)
+      .catch(() => setError('Couldn’t load sign-ins. Try again later.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.token]);
+  return (
+    <Screen title="Recent sign-ins" onBack={onBack}>
+      {!session ? (
+        <Note>Not signed in to chat. Open Chat to sign in.</Note>
+      ) : (
+        <>
+          <Heading>${session.handle}</Heading>
+          {error && <Note>{error}</Note>}
+          {!error && items === null && <Note>Loading…</Note>}
+          {items?.length === 0 && <Note>No sign-ins recorded yet.</Note>}
+          {items?.map((s, i) => {
+            const r = signInRow(s);
+            return <ListRow key={`${s.at}-${i}`} title={r.title} sub={r.when} />;
+          })}
+          <Note>Not you? Sign out of chat on every device, then check your account’s linked logins.</Note>
+        </>
       )}
     </Screen>
   );
@@ -441,8 +491,25 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'indexing'
     | 'bagent'
     | 'websites'
+    | 'idmap'
+    | 'signins'
     | null
   >(null);
+  // The "New sign-in to bChat" push opens Recent sign-ins (settings/signIns.ts).
+  useEffect(() => {
+    if (!acct) return;
+    if (takeSignInsRequest()) setScreen('signins');
+    const open = () => takeSignInsRequest() && setScreen('signins');
+    window.addEventListener(SIGNINS_OPEN_EVENT, open);
+    return () => window.removeEventListener(SIGNINS_OPEN_EVENT, open);
+  }, [acct]);
+  // Long-press on the wallet card's identity line opens the Identity map (settings/signIns.ts).
+  useEffect(() => {
+    if (takeIdentityMapRequest()) setScreen('idmap');
+    const open = () => takeIdentityMapRequest() && setScreen('idmap');
+    window.addEventListener(IDMAP_OPEN_EVENT, open);
+    return () => window.removeEventListener(IDMAP_OPEN_EVENT, open);
+  }, []);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
   const [takeCwi, setTakeCwiState] = useState(true);
@@ -456,6 +523,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   };
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
+  const [chatSignedOut, setChatSignedOut] = useState(false);
   const paidLikes = PAID_LIKE_OPTIONS.map((v) => ({ id: v as number, label: money(v, rate) }));
   return (
     <>
@@ -463,11 +531,51 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
         <Section title="Identity">
           <WalletNames />
           <Row
+            icon={<Network size={16} />}
+            label="Identity map"
+            description="Your identity key, the keys derived from it, and the names that point at them"
+            onClick={() => setScreen('idmap')}
+            isFirst
+          />
+          <Divider />
+          <Row
             icon={<BadgeCheck size={16} />}
             label="Connect X or Google"
             description="Get a verified name like yourname.x; it becomes the main name"
             onClick={() => setScreen('social')}
+          />
+          <Divider />
+          <Row
+            icon={<ShieldCheck size={16} />}
+            label="Verify your identity"
+            description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
+            onClick={() => void openDappBrowser(KYC_URL)}
+            isLast
+          />
+        </Section>
+      )}
+      {acct && (
+        <Section title="Chat">
+          <Row
+            icon={<LogOut size={16} />}
+            label="Sign out of chat"
+            description={
+              chatSignedOut
+                ? 'Signed out. Chat signs this account in again when you open it.'
+                : 'This account only: chat signs in fresh next time'
+            }
+            onClick={() => {
+              saveSession(null);
+              setChatSignedOut(true);
+            }}
             isFirst
+          />
+          <Divider />
+          <Row
+            icon={<History size={16} />}
+            label="Recent sign-ins"
+            description="When and where this chat handle signed in"
+            onClick={() => setScreen('signins')}
             isLast
           />
         </Section>
@@ -872,9 +980,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'sweep' && <HdSweepScreen onBack={() => setScreen(null)} />}
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
+      {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
+      {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>

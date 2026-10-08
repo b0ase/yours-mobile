@@ -23,7 +23,12 @@ describe('HMRC share pooling: worked examples', () => {
     // Pool: 100 for £1,000 + 100 for £3,000 = 200 at £20 each. Sell 50 for £2,500: cost £1,000, gain £1,500.
     // Then sell the other 150 for £4,500: cost £3,000, gain £1,500.
     const d = computeGains(
-      [ev('2026-01-01', 'acquire', 100, 1000), ev('2026-02-01', 'acquire', 100, 3000), ev('2026-05-01', 'dispose', 50, 2500), ev('2026-09-01', 'dispose', 150, 4500)],
+      [
+        ev('2026-01-01', 'acquire', 100, 1000),
+        ev('2026-02-01', 'acquire', 100, 3000),
+        ev('2026-05-01', 'dispose', 50, 2500),
+        ev('2026-09-01', 'dispose', 150, 4500),
+      ],
       'hmrc',
     );
     expect(d.map((x) => [x.cost, x.gain, x.matches[0].rule])).toEqual([
@@ -35,7 +40,11 @@ describe('HMRC share pooling: worked examples', () => {
   test('same-day rule beats the pool', () => {
     // Pool 100 at £10. On 1 Jun buy 10 for £500 and sell 10 for £400: matched to that day's buy, loss £100.
     const d = computeGains(
-      [ev('2026-01-01', 'acquire', 100, 1000), ev('2026-06-01', 'acquire', 10, 500), ev('2026-06-01', 'dispose', 10, 400)],
+      [
+        ev('2026-01-01', 'acquire', 100, 1000),
+        ev('2026-06-01', 'acquire', 10, 500),
+        ev('2026-06-01', 'dispose', 10, 400),
+      ],
       'hmrc',
     );
     expect(d[0]).toMatchObject({ cost: 500, gain: -100, matches: [{ rule: 'same-day', qty: 10 }] });
@@ -43,7 +52,12 @@ describe('HMRC share pooling: worked examples', () => {
 
   test('same-day disposals and acquisitions are each treated as one', () => {
     const d = computeGains(
-      [ev('2026-06-01', 'acquire', 4, 40), ev('2026-06-01', 'acquire', 6, 80), ev('2026-06-01', 'dispose', 5, 100), ev('2026-06-01', 'dispose', 5, 100)],
+      [
+        ev('2026-06-01', 'acquire', 4, 40),
+        ev('2026-06-01', 'acquire', 6, 80),
+        ev('2026-06-01', 'dispose', 5, 100),
+        ev('2026-06-01', 'dispose', 5, 100),
+      ],
       'hmrc',
     );
     expect(d).toHaveLength(1);
@@ -56,10 +70,19 @@ describe('HMRC share pooling: worked examples', () => {
     // The sale is matched to the buy-back: cost £700, loss £100 (not £400 cost from the pool).
     // Selling the remaining 150 later uses the untouched pool: cost £3,000.
     const d = computeGains(
-      [ev('2026-01-01', 'acquire', 150, 3000), ev('2026-07-01', 'dispose', 20, 600), ev('2026-07-15', 'acquire', 20, 700), ev('2026-09-01', 'dispose', 150, 4500)],
+      [
+        ev('2026-01-01', 'acquire', 150, 3000),
+        ev('2026-07-01', 'dispose', 20, 600),
+        ev('2026-07-15', 'acquire', 20, 700),
+        ev('2026-09-01', 'dispose', 150, 4500),
+      ],
       'hmrc',
     );
-    expect(d[0]).toMatchObject({ cost: 700, gain: -100, matches: [{ rule: 'bed-and-breakfast', qty: 20, acquiredOn: '2026-07-15' }] });
+    expect(d[0]).toMatchObject({
+      cost: 700,
+      gain: -100,
+      matches: [{ rule: 'bed-and-breakfast', qty: 20, acquiredOn: '2026-07-15' }],
+    });
     expect(d[1]).toMatchObject({ cost: 3000, gain: 1500, matches: [{ rule: 's104', qty: 150 }] });
   });
 
@@ -67,7 +90,12 @@ describe('HMRC share pooling: worked examples', () => {
     // Pool 100 at £10. Sell 50 for £1,000 on 1 Mar; buy 20 for £300 on 20 Mar.
     // 20 matched at £300, 30 from the pool at £300: cost £600, gain £400. Pool left: 70 at £10 (the March buy is used up).
     const d = computeGains(
-      [ev('2026-01-01', 'acquire', 100, 1000), ev('2026-03-01', 'dispose', 50, 1000), ev('2026-03-20', 'acquire', 20, 300), ev('2026-12-01', 'dispose', 70, 1400)],
+      [
+        ev('2026-01-01', 'acquire', 100, 1000),
+        ev('2026-03-01', 'dispose', 50, 1000),
+        ev('2026-03-20', 'acquire', 20, 300),
+        ev('2026-12-01', 'dispose', 70, 1400),
+      ],
       'hmrc',
     );
     expect(d[0].matches.map((m) => [m.rule, m.qty, m.cost])).toEqual([
@@ -79,9 +107,23 @@ describe('HMRC share pooling: worked examples', () => {
   });
 
   test('day 30 counts, day 31 does not', () => {
-    const in30 = computeGains([ev('2026-01-01', 'acquire', 10, 100), ev('2026-01-10', 'dispose', 10, 200), ev('2026-02-09', 'acquire', 10, 150)], 'hmrc');
+    const in30 = computeGains(
+      [
+        ev('2026-01-01', 'acquire', 10, 100),
+        ev('2026-01-10', 'dispose', 10, 200),
+        ev('2026-02-09', 'acquire', 10, 150),
+      ],
+      'hmrc',
+    );
     expect(in30[0].matches[0]).toMatchObject({ rule: 'bed-and-breakfast', cost: 150 });
-    const in31 = computeGains([ev('2026-01-01', 'acquire', 10, 100), ev('2026-01-10', 'dispose', 10, 200), ev('2026-02-10', 'acquire', 10, 150)], 'hmrc');
+    const in31 = computeGains(
+      [
+        ev('2026-01-01', 'acquire', 10, 100),
+        ev('2026-01-10', 'dispose', 10, 200),
+        ev('2026-02-10', 'acquire', 10, 150),
+      ],
+      'hmrc',
+    );
     expect(in31[0].matches[0]).toMatchObject({ rule: 's104', cost: 100 });
   });
 
@@ -89,7 +131,12 @@ describe('HMRC share pooling: worked examples', () => {
     // Sell 10 on 1 May; on 5 May buy 10 and sell 10. The 5 May buy goes to the 5 May sale (same day),
     // so the 1 May sale falls back to the pool.
     const d = computeGains(
-      [ev('2026-01-01', 'acquire', 10, 50), ev('2026-05-01', 'dispose', 10, 100), ev('2026-05-05', 'acquire', 10, 90), ev('2026-05-05', 'dispose', 10, 95)],
+      [
+        ev('2026-01-01', 'acquire', 10, 50),
+        ev('2026-05-01', 'dispose', 10, 100),
+        ev('2026-05-05', 'acquire', 10, 90),
+        ev('2026-05-05', 'dispose', 10, 95),
+      ],
       'hmrc',
     );
     expect(d[0].matches[0]).toMatchObject({ rule: 's104', cost: 50 });
@@ -103,7 +150,14 @@ describe('HMRC share pooling: worked examples', () => {
   });
 
   test('assets are pooled separately', () => {
-    const d = computeGains([ev('2026-01-01', 'acquire', 10, 100, 'A'), ev('2026-01-01', 'acquire', 10, 900, 'B'), ev('2026-02-01', 'dispose', 10, 500, 'A')], 'hmrc');
+    const d = computeGains(
+      [
+        ev('2026-01-01', 'acquire', 10, 100, 'A'),
+        ev('2026-01-01', 'acquire', 10, 900, 'B'),
+        ev('2026-02-01', 'dispose', 10, 500, 'A'),
+      ],
+      'hmrc',
+    );
     expect(d[0]).toMatchObject({ asset: 'A', cost: 100, gain: 400 });
   });
 });
@@ -112,7 +166,12 @@ describe('FIFO', () => {
   test('oldest lots first, across lots', () => {
     // 10 at £10, then 10 at £20. Sell 15 for £450: cost 10×£10 + 5×£20 = £200, gain £250. Sell 5 more: cost £100.
     const d = computeGains(
-      [ev('2026-01-01', 'acquire', 10, 100), ev('2026-02-01', 'acquire', 10, 200), ev('2026-03-01', 'dispose', 15, 450), ev('2026-04-01', 'dispose', 5, 50)],
+      [
+        ev('2026-01-01', 'acquire', 10, 100),
+        ev('2026-02-01', 'acquire', 10, 200),
+        ev('2026-03-01', 'dispose', 15, 450),
+        ev('2026-04-01', 'dispose', 5, 50),
+      ],
       'fifo',
     );
     expect(d[0]).toMatchObject({ cost: 200, gain: 250 });
@@ -123,7 +182,14 @@ describe('FIFO', () => {
     expect(d[1]).toMatchObject({ cost: 100, gain: -50 });
   });
   test('no bed-and-breakfast under FIFO', () => {
-    const d = computeGains([ev('2026-01-01', 'acquire', 10, 100), ev('2026-01-10', 'dispose', 10, 200), ev('2026-01-15', 'acquire', 10, 150)], 'fifo');
+    const d = computeGains(
+      [
+        ev('2026-01-01', 'acquire', 10, 100),
+        ev('2026-01-10', 'dispose', 10, 200),
+        ev('2026-01-15', 'acquire', 10, 150),
+      ],
+      'fifo',
+    );
     expect(d[0]).toMatchObject({ cost: 100, gain: 100 });
   });
 });
@@ -139,7 +205,10 @@ describe('tax years, days, totals', () => {
     expect(dayIn(Date.parse('2026-06-30T23:30:00Z'), false)).toBe('2026-06-30');
   });
   test('totals split gains and losses', () => {
-    const d = computeGains([ev('2026-01-01', 'acquire', 10, 100), ev('2026-02-01', 'dispose', 5, 100), ev('2026-03-01', 'dispose', 5, 20)], 'hmrc');
+    const d = computeGains(
+      [ev('2026-01-01', 'acquire', 10, 100), ev('2026-02-01', 'dispose', 5, 100), ev('2026-03-01', 'dispose', 5, 20)],
+      'hmrc',
+    );
     expect(totalsByAsset(d)[0]).toMatchObject({ disposals: 2, gains: 50, losses: 30, net: 20 });
   });
 });
@@ -172,7 +241,13 @@ describe('ledger from History rows', () => {
   const day = (ms: number) => dayIn(ms, false);
 
   test('buying a token disposes of BSV and acquires the token at BSV paid + fee', () => {
-    const r = row({ amountSats: -10_000_000, feeSats: 100, type: 'buy', category: 'token', asset: { kind: 'token', id: 'T_0', qty: '204', symbol: '$T' } });
+    const r = row({
+      amountSats: -10_000_000,
+      feeSats: 100,
+      type: 'buy',
+      category: 'token',
+      asset: { kind: 'token', id: 'T_0', qty: '204', symbol: '$T' },
+    });
     const { events } = buildLedger([r], price, day);
     expect(events.map((e) => [e.asset, e.side, e.qty, Math.round(e.fiat * 100) / 100])).toEqual([
       ['token:T_0', 'acquire', 204, 5],
@@ -180,7 +255,13 @@ describe('ledger from History rows', () => {
     ]);
   });
   test('selling a token disposes of it and acquires BSV', () => {
-    const r = row({ direction: 'in', amountSats: 20_000_000, type: 'sell', category: 'token', asset: { kind: 'token', id: 'T_0', qty: '204' } });
+    const r = row({
+      direction: 'in',
+      amountSats: 20_000_000,
+      type: 'sell',
+      category: 'token',
+      asset: { kind: 'token', id: 'T_0', qty: '204' },
+    });
     const { events } = buildLedger([r], price, day);
     expect(events.map((e) => [e.asset, e.side, e.fiat])).toEqual([
       ['token:T_0', 'dispose', 10],
@@ -188,15 +269,37 @@ describe('ledger from History rows', () => {
     ]);
   });
   test('airdrop at zero cost unless a cost is entered; own-wallet moves are left out', () => {
-    const a = row({ direction: 'in', amountSats: 1, type: 'transfer-in', category: 'token', asset: { kind: 'token', id: 'T_0', qty: '5' } });
+    const a = row({
+      direction: 'in',
+      amountSats: 1,
+      type: 'transfer-in',
+      category: 'token',
+      asset: { kind: 'token', id: 'T_0', qty: '5' },
+    });
     expect(buildLedger([a], price, day).events[0]).toMatchObject({ side: 'acquire', fiat: 0 });
-    expect(buildLedger([a], price, day, { ownWallet: [], lotValue: { [`${a.txid}|token:T_0`]: 12 } }).events[0]).toMatchObject({ fiat: 12 });
+    expect(
+      buildLedger([a], price, day, { ownWallet: [], lotValue: { [`${a.txid}|token:T_0`]: 12 } }).events[0],
+    ).toMatchObject({ fiat: 12 });
     const send = row({ amountSats: -5_000_000, feeSats: 50 });
     expect(buildLedger([send], price, day, { ownWallet: [send.txid], lotValue: {} }).events).toHaveLength(0);
   });
   test('end to end: buy then sell a token, and the accountant CSV', () => {
-    const buy = row({ time: Date.parse('2026-05-01T10:00:00Z'), amountSats: -10_000_000, type: 'buy', category: 'token', asset: { kind: 'token', id: 'T_0', qty: '100', symbol: '$T' } });
-    const sell = row({ time: Date.parse('2026-08-01T10:00:00Z'), direction: 'in', amountSats: 30_000_000, usdRate: 40, type: 'sell', category: 'token', asset: { kind: 'token', id: 'T_0', qty: '100', symbol: '$T' } });
+    const buy = row({
+      time: Date.parse('2026-05-01T10:00:00Z'),
+      amountSats: -10_000_000,
+      type: 'buy',
+      category: 'token',
+      asset: { kind: 'token', id: 'T_0', qty: '100', symbol: '$T' },
+    });
+    const sell = row({
+      time: Date.parse('2026-08-01T10:00:00Z'),
+      direction: 'in',
+      amountSats: 30_000_000,
+      usdRate: 40,
+      type: 'sell',
+      category: 'token',
+      asset: { kind: 'token', id: 'T_0', qty: '100', symbol: '$T' },
+    });
     const d = computeGains(buildLedger([buy, sell], price, day).events, 'hmrc').filter((x) => x.asset !== 'BSV');
     expect(d[0]).toMatchObject({ proceeds: 12, cost: 5, gain: 7 });
     const csv = gainsCsv(d, { uk: true, currency: 'GBP', method: 'HMRC share pooling' });

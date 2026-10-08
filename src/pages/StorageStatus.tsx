@@ -133,11 +133,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   // Same list, but only a new array when its contents change (remotes is rebuilt every render).
   const stableRemotes = useMemo(() => (remotesKey ? remotesKey.split(',') : []), [remotesKey]);
   const knownAccountUrls = useMemo(() => Object.fromEntries(KNOWN_PROVIDERS.map((p) => [p.url, p.accountUrl])), []);
-  const { statusMap, loading: statusLoading } = useRemoteStatus(
-    apiContext.wallet,
-    stableRemotes,
-    knownAccountUrls,
-  );
+  const { statusMap, loading: statusLoading } = useRemoteStatus(apiContext.wallet, stableRemotes, knownAccountUrls);
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<'active' | 'remove' | null>(null);
   const [syncing, setSyncing] = useState(false);

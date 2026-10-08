@@ -50,8 +50,22 @@ const txs = [fund, buy1, buy2];
 // listActions `satoshis`: the wallet's net change, fee included.
 const local = new Map<string, LocalInfo>([
   [fund.txid, { description: 'Received payment', satoshis: 6_000_000 }],
-  [buy1.txid, { description: 'Purchase 89131856 tokens for 15000 sats', labels: [`bsv21 ${BLASTER}`], satoshis: 1 + 5_984_899 - 6_000_000 }],
-  [buy2.txid, { description: 'Purchase 100000000000 tokens for 500001 sats', labels: [`bsv21 ${GOF}`], satoshis: 1 + 5_484_848 - 5_984_899 }],
+  [
+    buy1.txid,
+    {
+      description: 'Purchase 89131856 tokens for 15000 sats',
+      labels: [`bsv21 ${BLASTER}`],
+      satoshis: 1 + 5_984_899 - 6_000_000,
+    },
+  ],
+  [
+    buy2.txid,
+    {
+      description: 'Purchase 100000000000 tokens for 500001 sats',
+      labels: [`bsv21 ${GOF}`],
+      satoshis: 1 + 5_484_848 - 5_984_899,
+    },
+  ],
 ]);
 const NOW = Date.parse('2026-10-08T12:00:00Z');
 
@@ -60,7 +74,15 @@ const load = () => {
   const rows = buildRows(txs, own, local, NOW, extra);
   const prev = ownOutputs(txs, own);
   const byId = new Map(txs.map((t) => [t.txid, t]));
-  const ctx = { own, prev, listings: findListings(txs, prev), symbols: new Map([[BLASTER, 'BLASTER'], [GOF, 'GO•F#CK•YOURSELF']]) };
+  const ctx = {
+    own,
+    prev,
+    listings: findListings(txs, prev),
+    symbols: new Map([
+      [BLASTER, 'BLASTER'],
+      [GOF, 'GO•F#CK•YOURSELF'],
+    ]),
+  };
   return rows.map((r) => classifyEvent(r, byId.get(r.txid), local.get(r.txid), ctx));
 };
 
@@ -112,16 +134,26 @@ describe('wallet-funded token buys', () => {
     expect(tokenAmount('89131856', 8)).toBe('0.89131856');
     expect(tokenAmount('100000000000', 8)).toBe('1000');
     expect(tokenAmount('204', 0)).toBe('204');
-    expect(assetText({ kind: 'token', id: BLASTER, symbol: 'BLASTER', qty: '89131856', dec: 8 })).toBe('0.89131856 $BLASTER');
+    expect(assetText({ kind: 'token', id: BLASTER, symbol: 'BLASTER', qty: '89131856', dec: 8 })).toBe(
+      '0.89131856 $BLASTER',
+    );
     const rows = load().map((r) => (r.asset ? { ...r, asset: { ...r.asset, dec: 8 } } : r));
-    const { events } = buildLedger(rows, () => 40, (ms) => new Date(ms).toISOString().slice(0, 10));
+    const { events } = buildLedger(
+      rows,
+      () => 40,
+      (ms) => new Date(ms).toISOString().slice(0, 10),
+    );
     expect(events.find((e) => e.asset === `token:${BLASTER}`)?.qty).toBeCloseTo(0.89131856, 8);
   });
 
   test('before the fix the buys read 0: a list with rows but nothing moved is flagged', () => {
     expect(historyLooksIncomplete({ inSats: 0, outSats: 0, feeSats: 0, count: 2 }, null, null)).toBe(true);
-    expect(historyLooksIncomplete({ inSats: 0, outSats: 515_000, feeSats: 150, count: 2 }, 5_449_588, 5_449_588)).toBe(false);
-    expect(historyLooksIncomplete({ inSats: 0, outSats: 515_000, feeSats: 150, count: 2 }, 5_449_588, 4_934_438)).toBe(true);
+    expect(historyLooksIncomplete({ inSats: 0, outSats: 515_000, feeSats: 150, count: 2 }, 5_449_588, 5_449_588)).toBe(
+      false,
+    );
+    expect(historyLooksIncomplete({ inSats: 0, outSats: 515_000, feeSats: 150, count: 2 }, 5_449_588, 4_934_438)).toBe(
+      true,
+    );
   });
 });
 
@@ -130,9 +162,11 @@ describe('Connections on the phone (in-wallet apps)', () => {
     const { mergeConnections, deviceAppHosts, logInWalletApp, loadConnectionLog } = await import('./connectionLog');
     const { inWalletAppOf } = await import('./historyEvents');
     expect(inWalletAppOf(local.get(buy1.txid))).toBe('1sat.market');
-    expect(inWalletAppOf({ description: 'Buy 1,000 $BLASTER on the TokenBlaster curve for 0.0001 BSV incl. curve fees, plus network fee' })).toBe(
-      'tokenblaster',
-    );
+    expect(
+      inWalletAppOf({
+        description: 'Buy 1,000 $BLASTER on the TokenBlaster curve for 0.0001 BSV incl. curve fees, plus network fee',
+      }),
+    ).toBe('tokenblaster');
     const rows = load();
     expect(rows.find((r) => r.txid === buy1.txid)?.app).toBe('1sat.market');
     const seen = deviceAppHosts([
@@ -148,7 +182,12 @@ describe('Connections on the phone (in-wallet apps)', () => {
     // The page-side logger writes through chrome.storage.local (the mobile shim's shared store).
     const store: Record<string, unknown> = {};
     (globalThis as { chrome?: unknown }).chrome = {
-      storage: { local: { get: async (k: string) => ({ [k]: store[k] }), set: async (v: Record<string, unknown>) => void Object.assign(store, v) } },
+      storage: {
+        local: {
+          get: async (k: string) => ({ [k]: store[k] }),
+          set: async (v: Record<string, unknown>) => void Object.assign(store, v),
+        },
+      },
     };
     logInWalletApp('tokenblaster', 'createAction', { txid: h('7'), sats: 15_000 });
     logInWalletApp('bitcoinchat.online', 'signIn');
@@ -163,10 +202,20 @@ describe('Connections on the phone (in-wallet apps)', () => {
   test('TokenBlaster curve buys are token buys in whole tokens', () => {
     const tbx: RawTx = { ...buy1, txid: h('8') };
     const loc = new Map(local);
-    loc.set(tbx.txid, { description: 'Buy 0.89131856 $BLASTER on the TokenBlaster curve for 0.00015 BSV incl. curve fees, plus network fee', labels: ['tokenblaster', `bsv21 ${BLASTER}`], satoshis: -15_100 });
+    loc.set(tbx.txid, {
+      description:
+        'Buy 0.89131856 $BLASTER on the TokenBlaster curve for 0.00015 BSV incl. curve fees, plus network fee',
+      labels: ['tokenblaster', `bsv21 ${BLASTER}`],
+      satoshis: -15_100,
+    });
     const prev = ownOutputs([fund, tbx], own);
     const [r] = buildRows([fund, tbx], own, loc, NOW).filter((x) => x.txid === tbx.txid);
     const c = classifyEvent(r, tbx, loc.get(tbx.txid), { own, prev, listings: new Map() });
-    expect(c).toMatchObject({ type: 'buy', amountSats: -15_000, app: 'tokenblaster', asset: { qty: '0.89131856', dec: 0 } });
+    expect(c).toMatchObject({
+      type: 'buy',
+      amountSats: -15_000,
+      app: 'tokenblaster',
+      asset: { qty: '0.89131856', dec: 0 },
+    });
   });
 });

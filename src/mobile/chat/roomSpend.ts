@@ -55,7 +55,8 @@ export function parseSpendCharge(v: unknown): SpendCharge | null {
     const x = c as { unit?: unknown; amount?: unknown; to?: unknown; tokenId?: unknown };
     if (!isAmt(x.amount) || typeof x.to !== 'string' || !x.to) return null;
     if (x.unit === 'sats') charges.push({ unit: 'sats', amount: x.amount, to: x.to });
-    else if (x.unit === 'token' && typeof x.tokenId === 'string') charges.push({ unit: 'token', tokenId: x.tokenId, amount: x.amount, to: x.to });
+    else if (x.unit === 'token' && typeof x.tokenId === 'string')
+      charges.push({ unit: 'token', tokenId: x.tokenId, amount: x.amount, to: x.to });
     else return null;
   }
   return {
@@ -67,7 +68,8 @@ export function parseSpendCharge(v: unknown): SpendCharge | null {
 }
 
 /** Does posting here cost anything for me? */
-export const mustPay = (c: SpendCharge | null | undefined): c is SpendCharge => !!c && !c.exempt && c.charges.length > 0;
+export const mustPay = (c: SpendCharge | null | undefined): c is SpendCharge =>
+  !!c && !c.exempt && c.charges.length > 0;
 
 /** "5 $ACME, burned" / "100 sats to the issuer" */
 export function chargeLabel(c: MessageCharge, symbol: string, dec: number): string {
@@ -133,11 +135,19 @@ export function paymentOutputs(charges: MessageCharge[], commitment: Commitment)
       c.to === 'burn'
         ? BSV21.burn(c.tokenId, BigInt(c.amount)).lock()
         : BSV21.transfer(c.tokenId, BigInt(c.amount)).lock(new P2PKH().lock(c.to));
-    out.push({ lockingScript: script.toHex(), satoshis: 1, outputDescription: c.to === 'burn' ? 'Room message burn' : 'Room message payment' });
+    out.push({
+      lockingScript: script.toHex(),
+      satoshis: 1,
+      outputDescription: c.to === 'burn' ? 'Room message burn' : 'Room message payment',
+    });
   }
   for (const c of charges) {
     if (c.unit !== 'sats') continue;
-    out.push({ lockingScript: new P2PKH().lock(c.to).toHex(), satoshis: Number(c.amount), outputDescription: 'Room message payment' });
+    out.push({
+      lockingScript: new P2PKH().lock(c.to).toHex(),
+      satoshis: Number(c.amount),
+      outputDescription: 'Room message payment',
+    });
   }
   out.push({ lockingScript: commitmentScript(commitment).toHex(), satoshis: 0, outputDescription: 'Room message' });
   return out;
@@ -156,7 +166,10 @@ const PREF_KEY = (roomKey: string) => `bwx.roomSpend.${roomKey}`;
 export function loadPrefs(roomKey: string, store: Pick<Storage, 'getItem'> | null = safeStorage()): SpendPrefs {
   try {
     const v = JSON.parse(store?.getItem(PREF_KEY(roomKey)) || 'null') as Partial<SpendPrefs> | null;
-    return { autoUnderRaw: isAmt(v?.autoUnderRaw) ? v!.autoUnderRaw! : '', sessionCapRaw: isAmt(v?.sessionCapRaw) ? v!.sessionCapRaw! : '' };
+    return {
+      autoUnderRaw: isAmt(v?.autoUnderRaw) ? v!.autoUnderRaw! : '',
+      sessionCapRaw: isAmt(v?.sessionCapRaw) ? v!.sessionCapRaw! : '',
+    };
   } catch {
     return { autoUnderRaw: '', sessionCapRaw: '' };
   }
@@ -261,7 +274,11 @@ export async function payForMessage(
     return !!id && normalizeBsv21TokenId(id) === normalizeBsv21TokenId(tokenId);
   });
   const states = new Map<string, string>();
-  for (const s of await ctx.services.bsv21.getOutputStatus(tokenId, mine.map((o) => o.outpoint))) states.set(s.outpoint, s.state);
+  for (const s of await ctx.services.bsv21.getOutputStatus(
+    tokenId,
+    mine.map((o) => o.outpoint),
+  ))
+    states.set(s.outpoint, s.state);
   const selected: ListedOutput[] = [];
   let have = BigInt(0);
   for (const o of mine) {
@@ -273,13 +290,20 @@ export async function payForMessage(
   }
   if (have < need) throw new Error(`Not enough $${details.token.sym ?? 'tokens'} ready to spend`);
 
-  const outputs: Array<PlannedOutput & { basket?: string; tags?: string[]; customInstructions?: string }> = [...planned];
+  const outputs: Array<PlannedOutput & { basket?: string; tags?: string[]; customInstructions?: string }> = [
+    ...planned,
+  ];
   const change = have - need;
   let tokenOuts = tokens.length;
   if (change > BigInt(0)) {
     tokenOuts++;
     const keyID = `${tokenId}-${Date.now()}`;
-    const { publicKey } = await ctx.wallet.getPublicKey({ protocolID: P1SAT_PROTOCOL, keyID, counterparty: 'self', forSelf: true });
+    const { publicKey } = await ctx.wallet.getPublicKey({
+      protocolID: P1SAT_PROTOCOL,
+      keyID,
+      counterparty: 'self',
+      forSelf: true,
+    });
     const lock = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress());
     // Change goes right after the payment outputs, before sats and the commitment.
     outputs.splice(tokens.length, 0, {
@@ -289,7 +313,14 @@ export async function payForMessage(
       basket: BSV21_BASKET,
       tags: bsv21FilterTags({ tokenId }),
       customInstructions: buildBsv21CustomInstructions({
-        token: { id: tokenId, op: 'transfer', amt: change.toString(), sym: details.token.sym, dec: details.token.dec ?? 0, icon: details.token.icon },
+        token: {
+          id: tokenId,
+          op: 'transfer',
+          amt: change.toString(),
+          sym: details.token.sym,
+          dec: details.token.dec ?? 0,
+          icon: details.token.icon,
+        },
         protocolID: P1SAT_PROTOCOL,
         keyID,
         counterparty: 'self',
@@ -299,7 +330,11 @@ export async function payForMessage(
   const feeAddr = details.status?.fee_address;
   const feePer = details.status?.fee_per_output;
   if (typeof feeAddr === 'string' && feeAddr && typeof feePer === 'number' && feePer > 0) {
-    outputs.push({ lockingScript: new P2PKH().lock(feeAddr).toHex(), satoshis: feePer * tokenOuts, outputDescription: 'Overlay processing fee' });
+    outputs.push({
+      lockingScript: new P2PKH().lock(feeAddr).toHex(),
+      satoshis: feePer * tokenOuts,
+      outputDescription: 'Overlay processing fee',
+    });
   }
   const inputBEEF = list.BEEF ? Array.from(list.BEEF) : undefined;
   if (!inputBEEF?.length) throw new Error('Token inputs unavailable');
@@ -307,10 +342,17 @@ export async function payForMessage(
     description: `Message in $${commitment.room}`,
     labels: [
       buildTokenLabel(tokenId),
-      ...selected.map((o) => readAssetIdTag(o.tags)).filter((id): id is string => !!id).map((id) => buildInputAssetLabel(BSV21_BASKET, id)),
+      ...selected
+        .map((o) => readAssetIdTag(o.tags))
+        .filter((id): id is string => !!id)
+        .map((id) => buildInputAssetLabel(BSV21_BASKET, id)),
     ],
     inputBEEF,
-    inputs: selected.map((o) => ({ outpoint: o.outpoint, inputDescription: 'Token input', unlockingScriptLength: 108 })),
+    inputs: selected.map((o) => ({
+      outpoint: o.outpoint,
+      inputDescription: 'Token input',
+      unlockingScriptLength: 108,
+    })),
     outputs,
     options: NO_SEND,
   });
@@ -318,7 +360,10 @@ export async function payForMessage(
     .map((o) => readAssetIdTag(o.tags))
     .filter((id): id is string => !!id)
     .map((id) => ({ basket: BSV21_BASKET, id }));
-  const res = await executeTrackedAction(ctx.wallet, args, undefined, inputBEEF, undefined, { spends, permissionScheme: 'bsv21' });
+  const res = await executeTrackedAction(ctx.wallet, args, undefined, inputBEEF, undefined, {
+    spends,
+    permissionScheme: 'bsv21',
+  });
   if (res.error || !res.tx || !res.txid) throw new Error(res.error || 'The wallet did not return the payment');
   // No overlay submit here: the tx is not on the network until bit-sign broadcasts it.
   return { beef: Utils.toHex(res.tx), txid: res.txid };

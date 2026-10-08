@@ -55,15 +55,20 @@ export function savePlans(account: string, plans: LockPlan[], cs?: ChromeStorage
   if (!cs || !found) return;
   const { address: _drop, ...acct } = found as typeof found & { address?: string };
   void cs
-    .updateNested('accounts', { [account]: { ...acct, settings: { ...acct.settings, lockPlans: plans } } } as Parameters<
-      typeof cs.updateNested<'accounts'>
-    >[1])
+    .updateNested('accounts', {
+      [account]: { ...acct, settings: { ...acct.settings, lockPlans: plans } },
+    } as Parameters<typeof cs.updateNested<'accounts'>>[1])
     .catch(() => undefined);
 }
 
 /** The address every lock in this wallet pays to (lockBsv's derived key). */
 export async function lockAddress(ctx: OneSatContext): Promise<string> {
-  const { publicKey } = await ctx.wallet.getPublicKey({ protocolID: P1SAT_PROTOCOL, keyID: LOCK_KEY_ID, counterparty: 'self', forSelf: true });
+  const { publicKey } = await ctx.wallet.getPublicKey({
+    protocolID: P1SAT_PROTOCOL,
+    keyID: LOCK_KEY_ID,
+    counterparty: 'self',
+    forSelf: true,
+  });
   return PublicKey.fromString(publicKey).toAddress();
 }
 
@@ -85,7 +90,12 @@ export type CreateLockInput = {
 };
 
 /** Lock outputs (and the receipt) in one transaction. Returns the txid. */
-async function lockTx(ctx: OneSatContext, address: string, pieces: CreateLockInput['pieces'], receipt?: { hex: string; ci: string; tags: string[] }) {
+async function lockTx(
+  ctx: OneSatContext,
+  address: string,
+  pieces: CreateLockInput['pieces'],
+  receipt?: { hex: string; ci: string; tags: string[] },
+) {
   if (pieces.length === 0 || pieces.length > MAX_PIECES) throw new Error(`A lock needs 1 to ${MAX_PIECES} payouts.`);
   const outputs = pieces.map((p) => {
     const script = Lock.lock(address, p.height);
@@ -102,10 +112,22 @@ async function lockTx(ctx: OneSatContext, address: string, pieces: CreateLockInp
   });
   const all: Parameters<typeof executeTrackedAction>[1]['outputs'] = [...outputs];
   // The receipt comes after the locks (the receipt names them as vout 0..n-1).
-  if (receipt) all!.push({ lockingScript: receipt.hex, satoshis: 1, outputDescription: 'Lock receipt', basket: ORDINALS_BASKET, tags: receipt.tags, customInstructions: receipt.ci });
+  if (receipt)
+    all!.push({
+      lockingScript: receipt.hex,
+      satoshis: 1,
+      outputDescription: 'Lock receipt',
+      basket: ORDINALS_BASKET,
+      tags: receipt.tags,
+      customInstructions: receipt.ci,
+    });
   const res = await executeTrackedAction(
     ctx.wallet,
-    { description: `Lock BSV in ${pieces.length} output(s)`, outputs: all, options: { acceptDelayedBroadcast: false, randomizeOutputs: false } },
+    {
+      description: `Lock BSV in ${pieces.length} output(s)`,
+      outputs: all,
+      options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+    },
     undefined,
     undefined,
     undefined,
@@ -116,7 +138,12 @@ async function lockTx(ctx: OneSatContext, address: string, pieces: CreateLockInp
 }
 
 /** Lock a schedule. Irreversible once broadcast: the caller must have shown the confirmation step. */
-export async function createLock(ctx: OneSatContext, account: string, input: CreateLockInput, cs?: ChromeStorageService): Promise<LockPlan> {
+export async function createLock(
+  ctx: OneSatContext,
+  account: string,
+  input: CreateLockInput,
+  cs?: ChromeStorageService,
+): Promise<LockPlan> {
   const address = await lockAddress(ctx);
   let receiptOut: { hex: string; ci: string; tags: string[] } | undefined;
   if (input.receipt) {
@@ -134,7 +161,12 @@ export async function createLock(ctx: OneSatContext, account: string, input: Cre
     });
     // The receipt goes to a fresh key of the wallet's own ordinals (as @1sat/actions inscribe does).
     const keyID = `inscribe-${Utils.toHex(Random(8))}`;
-    const { publicKey } = await ctx.wallet.getPublicKey({ protocolID: P1SAT_PROTOCOL, keyID, counterparty: 'self', forSelf: true });
+    const { publicKey } = await ctx.wallet.getPublicKey({
+      protocolID: P1SAT_PROTOCOL,
+      keyID,
+      counterparty: 'self',
+      forSelf: true,
+    });
     const dest = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress());
     const content = new TextEncoder().encode(receiptSvg(r));
     const tags = ['type:image/svg+xml', 'origin', 'lock-receipt'];
@@ -168,12 +200,24 @@ export async function createLock(ctx: OneSatContext, account: string, input: Cre
 }
 
 /** Add more lock pieces to an existing plan (a dollar-target surplus, or the next percent batch). */
-export async function relock(ctx: OneSatContext, account: string, planId: string, pieces: PlanPiece[], pendingAmounts?: number[], cs?: ChromeStorageService) {
+export async function relock(
+  ctx: OneSatContext,
+  account: string,
+  planId: string,
+  pieces: PlanPiece[],
+  pendingAmounts?: number[],
+  cs?: ChromeStorageService,
+) {
   const address = await lockAddress(ctx);
   const txid = await lockTx(ctx, address, pieces);
   const plans = loadPlans(account, cs).map((p) =>
     p.id === planId
-      ? { ...p, txids: [...p.txids, txid], pieces: [...p.pieces, ...pieces.map((x, vout) => ({ ...x, vout, txid }))], pendingAmounts: pendingAmounts ?? p.pendingAmounts }
+      ? {
+          ...p,
+          txids: [...p.txids, txid],
+          pieces: [...p.pieces, ...pieces.map((x, vout) => ({ ...x, vout, txid }))],
+          pendingAmounts: pendingAmounts ?? p.pendingAmounts,
+        }
       : p,
   );
   savePlans(account, plans, cs);
@@ -181,7 +225,9 @@ export async function relock(ctx: OneSatContext, account: string, planId: string
 }
 
 /** Outpoints still unspent in the wallet's lock basket. */
-export async function walletLockOutpoints(ctx: OneSatContext): Promise<{ outpoint: string; satoshis: number; until: number }[]> {
+export async function walletLockOutpoints(
+  ctx: OneSatContext,
+): Promise<{ outpoint: string; satoshis: number; until: number }[]> {
   const res = await listLocks.execute(ctx, { limit: 10000 });
   if (!('outputs' in res) || !res.outputs) return [];
   return res.outputs.map((o) => ({
@@ -195,14 +241,17 @@ export async function walletLockOutpoints(ctx: OneSatContext): Promise<{ outpoin
 export function syncClaimed(plans: LockPlan[], unspent: Set<string>, height: number): LockPlan[] {
   return plans.map((p) => ({
     ...p,
-    pieces: p.pieces.map((x) => (x.claimed || unspent.has(`${x.txid}.${x.vout}`) || x.height > height ? x : { ...x, claimed: true })),
+    pieces: p.pieces.map((x) =>
+      x.claimed || unspent.has(`${x.txid}.${x.vout}`) || x.height > height ? x : { ...x, claimed: true },
+    ),
   }));
 }
 
 /** Claim every matured lock on the account, across all plans, in one transaction (unlockBsv). */
 export async function claimMatured(ctx: OneSatContext): Promise<string> {
   const res = await unlockBsv.execute(ctx, {});
-  if ('error' in res && res.error) throw new Error(res.error === 'no-matured-locks' ? 'Nothing is ready to claim yet.' : res.error);
+  if ('error' in res && res.error)
+    throw new Error(res.error === 'no-matured-locks' ? 'Nothing is ready to claim yet.' : res.error);
   if (!('txid' in res) || !res.txid) throw new Error('The wallet did not return a transaction id.');
   return res.txid;
 }

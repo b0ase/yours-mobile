@@ -56,12 +56,16 @@ export const visibleItems = (items: AirdropItem[], s: InboxState): AirdropItem[]
   const knownIssuers = new Set(items.filter((i) => kept.has(i.key)).map((i) => i.issuer));
   return items.filter(
     (i) =>
-      !kept.has(i.key) && !hidden.has(i.key) && !badIssuers.has(i.issuer) && (!s.onlyKnown || knownIssuers.has(i.issuer)),
+      !kept.has(i.key) &&
+      !hidden.has(i.key) &&
+      !badIssuers.has(i.issuer) &&
+      (!s.onlyKnown || knownIssuers.has(i.issuer)),
   );
 };
 
 /** Badge: visible items that arrived after the inbox was last opened. */
-export const badgeCount = (items: AirdropItem[], s: InboxState) => visibleItems(items, s).filter((i) => i.time > s.seenAt).length;
+export const badgeCount = (items: AirdropItem[], s: InboxState) =>
+  visibleItems(items, s).filter((i) => i.time > s.seenAt).length;
 
 export const keep = (s: InboxState, key: string): InboxState => ({ ...s, kept: [...new Set([...s.kept, key])] });
 /** Hide one item and every future item from its issuer. */

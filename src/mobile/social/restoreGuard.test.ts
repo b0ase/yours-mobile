@@ -1,10 +1,21 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { getKeys } from '../../utils/keys';
 
 const realConfig = await import('../names/config');
 mock.module('../names/config', () => ({ ...realConfig, BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com' }));
-const realSocial = await import('./socialLogin');
-mock.module('./socialLogin', () => ({ ...realSocial, socialProfile: () => ({ alias: 'someone.x' }) }));
+// A pending Continue with X sign-in for the account being restored (real socialLogin, no module mock, so
+// the other social tests in this process see the real module).
+const ls = new Map<string, string>();
+(globalThis as unknown as { localStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> }).localStorage = {
+  getItem: (k: string) => ls.get(k) ?? null,
+  setItem: (k: string, v: string) => void ls.set(k, String(v)),
+  removeItem: (k: string) => void ls.delete(k),
+};
+const pendingSignIn = () =>
+  ls.set(
+    'bwallet.social',
+    JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), owner: 'new', profile: { alias: 'someone.x' } }),
+  );
 const { checkRestoreMatchesName } = await import('./restoreGuard');
 
 // Throwaway test phrases (BIP39 test vectors), never real wallets.
@@ -20,6 +31,7 @@ const serve = (pki: Response) =>
         ? pki
         : new Response('{}')) as typeof fetch);
 
+beforeEach(pendingSignIn);
 afterEach(() => (globalThis.fetch = realFetch));
 
 describe('checkRestoreMatchesName', () => {

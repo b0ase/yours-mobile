@@ -8,6 +8,7 @@ import type { ChromeStorageObject } from '../../services/types/chromeStorage.typ
 import { txFeeSats } from '../mint/mint';
 import { AccountAvatar } from './AccountAvatar';
 import { useAvatar } from './useAvatar';
+import { removeAccountPhoto } from './socialAvatar';
 import { dataUrlBytes, getLocalAvatar, paymailAvatar, resizeAvatar, setLocalAvatar } from './avatar';
 import { claimPaymail, paymailEnabled } from './paymail';
 import { getPaymail } from './accountName';
@@ -118,6 +119,24 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
       <span className="text-[11px]" style={{ color: '#98A2B3' }}>
         {avatar ? 'Tap to change your photo' : 'Add a photo (optional) or keep the gold b'}
       </span>
+      {avatar && (
+        <button
+          type="button"
+          onClick={() =>
+            void removeAccountPhoto(chromeStorageService, id).then(() =>
+              setMsg(
+                identity.isPublished && identity.profile.image
+                  ? 'Removed on this phone. A photo published to your public profile stays there until you publish a new one.'
+                  : 'Photo removed.',
+              ),
+            )
+          }
+          className="text-[11px] bg-transparent border-0 p-0 cursor-pointer underline"
+          style={{ color: '#F97066' }}
+        >
+          Remove photo
+        </button>
+      )}
       {local && identity.bapId && (
         <button
           type="button"

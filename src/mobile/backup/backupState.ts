@@ -143,7 +143,8 @@ const IMPORTED = (id: string) => `bwallet.backup.imported.${id}`;
 export const markImported = (id: string | undefined, now = Date.now()) => {
   if (id) safe('local')?.setItem(IMPORTED(id), String(now));
 };
-export const importedAt = (id: string | undefined): number => (id ? Number(safe('local')?.getItem(IMPORTED(id))) || 0 : 0);
+export const importedAt = (id: string | undefined): number =>
+  id ? Number(safe('local')?.getItem(IMPORTED(id))) || 0 : 0;
 
 const CREATED = (id: string) => `bwallet.created.${id}`;
 /** A wallet created in this app (not restored): it has no legacy Yours assets to migrate. */

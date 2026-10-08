@@ -46,7 +46,15 @@ export const TEMPLATES: LockTemplate[] = [
     id: 'pension',
     name: 'Pension',
     blurb: 'Locked until a date, then monthly. Example: $100 a month for 5 years, from 3 years out.',
-    values: () => ({ label: 'Pension', kind: 'gradual', gmode: 'usd', frequency: 'monthly', startInDays: 3 * 365, count: 60, usdPer: '100' }),
+    values: () => ({
+      label: 'Pension',
+      kind: 'gradual',
+      gmode: 'usd',
+      frequency: 'monthly',
+      startInDays: 3 * 365,
+      count: 60,
+      usdPer: '100',
+    }),
   },
   {
     id: 'savings',
@@ -58,13 +66,29 @@ export const TEMPLATES: LockTemplate[] = [
     id: 'rainy',
     name: 'Rainy-day fund',
     blurb: 'A fixed amount released every month.',
-    values: () => ({ label: 'Rainy-day fund', kind: 'gradual', gmode: 'bsv', frequency: 'monthly', startInDays: 30, count: 12, bsvPer: '0.0005' }),
+    values: () => ({
+      label: 'Rainy-day fund',
+      kind: 'gradual',
+      gmode: 'bsv',
+      frequency: 'monthly',
+      startInDays: 30,
+      count: 12,
+      bsvPer: '0.0005',
+    }),
   },
   {
     id: 'allowance',
     name: 'Allowance',
     blurb: 'Small weekly payouts, like pocket money.',
-    values: () => ({ label: 'Allowance', kind: 'gradual', gmode: 'bsv', frequency: 'weekly', startInDays: 7, count: 12, bsvPer: '0.0002' }),
+    values: () => ({
+      label: 'Allowance',
+      kind: 'gradual',
+      gmode: 'bsv',
+      frequency: 'weekly',
+      startInDays: 7,
+      count: 12,
+      bsvPer: '0.0002',
+    }),
   },
   {
     id: 'coupons',
@@ -92,7 +116,15 @@ export const TEMPLATES: LockTemplate[] = [
     id: 'salary',
     name: 'Salary',
     blurb: 'A fixed dollar target every month.',
-    values: () => ({ label: 'Salary', kind: 'gradual', gmode: 'usd', frequency: 'monthly', startInDays: 30, count: 12, usdPer: '1' }),
+    values: () => ({
+      label: 'Salary',
+      kind: 'gradual',
+      gmode: 'usd',
+      frequency: 'monthly',
+      startInDays: 30,
+      count: 12,
+      usdPer: '1',
+    }),
   },
   {
     id: 'spend-down',
@@ -112,7 +144,9 @@ export const TEMPLATES: LockTemplate[] = [
 ];
 
 /** Words a template must never use: locks release the user's own coins, nothing is earned. */
-export const FORBIDDEN_WORDS = /\b(interest|yield|yields|return|returns|apy|apr|profit|earn|earns|earning|dividend|gains?)\b/i;
+export const FORBIDDEN_WORDS =
+  /\b(interest|yield|yields|return|returns|apy|apr|profit|earn|earns|earning|dividend|gains?)\b/i;
 
 /** Review is allowed only with real values entered and, after a template, an explicit check. */
-export const reviewAllowed = (entered: boolean, templateUsed: boolean, checked: boolean) => entered && (!templateUsed || checked);
+export const reviewAllowed = (entered: boolean, templateUsed: boolean, checked: boolean) =>
+  entered && (!templateUsed || checked);

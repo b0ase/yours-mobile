@@ -223,7 +223,8 @@ export async function executeTrade(p: PreparedTrade, onStatus?: (s: string) => v
       const spends: Record<number, { unlockingScript: string }> = {};
       for (const [i, s] of Object.entries(pool)) {
         const k = Number(i);
-        if (!(k >= 0 && k < plan.inputs.length)) throw new PlanError('Refusing to sign: the pool signed inputs it does not own.');
+        if (!(k >= 0 && k < plan.inputs.length))
+          throw new PlanError('Refusing to sign: the pool signed inputs it does not own.');
         spends[k] = { unlockingScript: s };
       }
       const base = plan.inputs.length;

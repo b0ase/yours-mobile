@@ -72,7 +72,11 @@ const bucket = (events: LedgerEvent[]) => {
 /** One asset under the HMRC rules. */
 const hmrcAsset = (events: LedgerEvent[]): Disposal[] => {
   const acq = bucket(events.filter((e) => e.side === 'acquire')).map((a) => ({ ...a, left: a.qty }));
-  const disp = bucket(events.filter((e) => e.side === 'dispose')).map((d) => ({ ...d, left: d.qty, matches: [] as Match[] }));
+  const disp = bucket(events.filter((e) => e.side === 'dispose')).map((d) => ({
+    ...d,
+    left: d.qty,
+    matches: [] as Match[],
+  }));
   const acqByDay = new Map(acq.map((a) => [a.day, a]));
   const take = (a: (typeof acq)[number], want: number) => {
     const q = Math.min(want, a.left);
@@ -122,7 +126,8 @@ const hmrcAsset = (events: LedgerEvent[]): Disposal[] => {
       }
       if (d.left > 0) {
         d.matches.push({ rule: 'unmatched', qty: d.left, cost: 0 });
-        if (!d.flags.includes('no matching acquisition: cost taken as 0')) d.flags.push('no matching acquisition: cost taken as 0');
+        if (!d.flags.includes('no matching acquisition: cost taken as 0'))
+          d.flags.push('no matching acquisition: cost taken as 0');
         d.left = 0;
       }
     }
@@ -202,12 +207,30 @@ export const taxYearOf = (day: string, uk: boolean) => {
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 };
 
-export type AssetTotal = { asset: string; label: string; disposals: number; proceeds: number; cost: number; gains: number; losses: number; net: number };
+export type AssetTotal = {
+  asset: string;
+  label: string;
+  disposals: number;
+  proceeds: number;
+  cost: number;
+  gains: number;
+  losses: number;
+  net: number;
+};
 
 export const totalsByAsset = (ds: Disposal[]): AssetTotal[] => {
   const m = new Map<string, AssetTotal>();
   for (const d of ds) {
-    const t = m.get(d.asset) ?? { asset: d.asset, label: d.label, disposals: 0, proceeds: 0, cost: 0, gains: 0, losses: 0, net: 0 };
+    const t = m.get(d.asset) ?? {
+      asset: d.asset,
+      label: d.label,
+      disposals: 0,
+      proceeds: 0,
+      cost: 0,
+      gains: 0,
+      losses: 0,
+      net: 0,
+    };
     t.disposals += 1;
     t.proceeds += d.proceeds;
     t.cost += d.cost;
@@ -228,5 +251,10 @@ export const NOT_TAX_ADVICE =
 /** London calendar day (UK rules) or UTC day. */
 export const dayIn = (ms: number, uk: boolean) =>
   uk
-    ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms)
+    ? new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/London',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(ms)
     : new Date(ms).toISOString().slice(0, 10);

@@ -51,12 +51,14 @@ The strip, left to right:
 ## 2. The Agent decision: two variants
 
 **Variant A: Agent as a swipe screen.**
+
 - `/m/agent` (AgentPage) becomes strip page 3, left of HOME.
 - **b** tap = HOME. b hold = jump to the Agent page.
 - Pros: it reuses AgentPage unchanged, and long sessions get full space.
 - Cons: the strip has 9 pages. The agent is two swipes from HOME, and you have to leave what you were doing to ask it anything.
 
 **Variant B: Agent as a hold-b overlay (Siri model).**
+
 - b tap = HOME. b press-and-hold (about 450ms, with a haptic tick through `@capacitor/haptics` if it is already present, otherwise `navigator.vibrate`) opens a bottom-sheet overlay over the current screen. It has a mic and a text box and reuses AgentPage's conversation core.
 - The overlay has an "Expand" control that opens the full `/m/agent` route, kept as a non-strip route.
 - The strip drops to 8 pages: `Wallet · Exchange · HOME · Apps · Games · People · Feed · Chat`.
@@ -67,6 +69,7 @@ The strip, left to right:
   - Voice needs microphone permission strings, which is an iOS review item.
 
 **Recommendation: Variant B**, with the "Agent" dock tile kept.
+
 - The default dock still contains Agent. In Variant B its tile opens the overlay, so no one depends on the hold gesture.
 - The full `/m/agent` route stays reachable for long sessions.
 - This meets the owner's Siri idea and keeps the strip short, which matters because each page is a mounted, heavy React tree.
@@ -78,22 +81,22 @@ Store builds: the agent is already own-key only (`agentModeFor`). The overlay re
 
 New directory `src/mobile/phone/`:
 
-| File | Role |
-|---|---|
-| `screens.ts` | Pure registry. `ScreenId = 'wallet'\|'exchange'\|'agent'\|'home'\|'apps'\|'games'\|'people'\|'feed'\|'chat'`. Each has `{ id, label, icon, route, storeAllowed(store), legacyIds: ['bsv','ords','market','browser',...] }`. Exports `STRIP` (variant-dependent), `stripFor(store)`, `screenForPath(pathname)`, `screenForSelected(selected)` (the replacement for `tabFor`). |
-| `dockModel.ts` | Pure dock state: types, `DEFAULT_DOCK`, `normaliseDock`, `addToDock`, `removeFromDock`, `moveInDock` (reuses `moveItem`), `DOCK_MAX = 12`, store filtering. |
-| `dockStore.ts` | localStorage persistence and a `useSyncExternalStore` hook (`useDock`). Same try/catch style as `readFavourites` / `writeFavourites`. |
-| `PhoneShell.tsx` | One layout component. It renders `PhoneTopBar`, the strip pager, `PageDots`, `Dock` and `HomeButton`, and it owns the `swipe-up → HOME` gesture. |
-| `StripPager.tsx` | Horizontal scroll-snap pager, lifted from BrowserPage's `pager` / `onPagerScroll` / `goPage`. Each page renders lazily: only the current page ±1 is mounted, the others are placeholders, to protect memory. |
-| `PageDots.tsx` | Dots with the HOME dot drawn as a small house glyph. Tapping a dot jumps to that page. |
-| `Dock.tsx` | Scrollable dock row (§5). |
-| `DockTile.tsx` | Icon and label. Handles long-press → arrange. |
-| `HomeButton.tsx` | Fixed centre b. Tap = HOME, hold = agent overlay (B) or agent page (A). |
-| `AgentOverlay.tsx` | Variant B sheet. Uses `useBackClose`. |
-| `PhoneTopBar.tsx` | Replaces TopNav's 5 slots: Accounts drawer (left), screen title, and a non-removable **Settings/Lock** button (right) that opens a small menu: Settings, Lock now, Calls, Media. |
-| `HomeScreen.tsx` | HOME (§4). |
-| `ArrangeMode.tsx` | Context `{ arranging, start, done }` shared by the HOME grid and the dock, so tiles can be dragged between them. |
-| `SendReceiveSheet.tsx` | Thin launcher reusing the existing Send/Receive flows from the wallet page, so the dock slot is not a full screen. |
+| File                   | Role                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `screens.ts`           | Pure registry. `ScreenId = 'wallet'\|'exchange'\|'agent'\|'home'\|'apps'\|'games'\|'people'\|'feed'\|'chat'`. Each has `{ id, label, icon, route, storeAllowed(store), legacyIds: ['bsv','ords','market','browser',...] }`. Exports `STRIP` (variant-dependent), `stripFor(store)`, `screenForPath(pathname)`, `screenForSelected(selected)` (the replacement for `tabFor`). |
+| `dockModel.ts`         | Pure dock state: types, `DEFAULT_DOCK`, `normaliseDock`, `addToDock`, `removeFromDock`, `moveInDock` (reuses `moveItem`), `DOCK_MAX = 12`, store filtering.                                                                                                                                                                                                                  |
+| `dockStore.ts`         | localStorage persistence and a `useSyncExternalStore` hook (`useDock`). Same try/catch style as `readFavourites` / `writeFavourites`.                                                                                                                                                                                                                                        |
+| `PhoneShell.tsx`       | One layout component. It renders `PhoneTopBar`, the strip pager, `PageDots`, `Dock` and `HomeButton`, and it owns the `swipe-up → HOME` gesture.                                                                                                                                                                                                                             |
+| `StripPager.tsx`       | Horizontal scroll-snap pager, lifted from BrowserPage's `pager` / `onPagerScroll` / `goPage`. Each page renders lazily: only the current page ±1 is mounted, the others are placeholders, to protect memory.                                                                                                                                                                 |
+| `PageDots.tsx`         | Dots with the HOME dot drawn as a small house glyph. Tapping a dot jumps to that page.                                                                                                                                                                                                                                                                                       |
+| `Dock.tsx`             | Scrollable dock row (§5).                                                                                                                                                                                                                                                                                                                                                    |
+| `DockTile.tsx`         | Icon and label. Handles long-press → arrange.                                                                                                                                                                                                                                                                                                                                |
+| `HomeButton.tsx`       | Fixed centre b. Tap = HOME, hold = agent overlay (B) or agent page (A).                                                                                                                                                                                                                                                                                                      |
+| `AgentOverlay.tsx`     | Variant B sheet. Uses `useBackClose`.                                                                                                                                                                                                                                                                                                                                        |
+| `PhoneTopBar.tsx`      | Replaces TopNav's 5 slots: Accounts drawer (left), screen title, and a non-removable **Settings/Lock** button (right) that opens a small menu: Settings, Lock now, Calls, Media.                                                                                                                                                                                             |
+| `HomeScreen.tsx`       | HOME (§4).                                                                                                                                                                                                                                                                                                                                                                   |
+| `ArrangeMode.tsx`      | Context `{ arranging, start, done }` shared by the HOME grid and the dock, so tiles can be dragged between them.                                                                                                                                                                                                                                                             |
+| `SendReceiveSheet.tsx` | Thin launcher reusing the existing Send/Receive flows from the wallet page, so the dock slot is not a full screen.                                                                                                                                                                                                                                                           |
 
 Refactors:
 
@@ -134,6 +137,7 @@ DEFAULT_DOCK = [screen:wallet, action:sendReceive, screen:chat, action:agent]
 ```
 
 **Persistence:**
+
 - Stored in localStorage key `bwallet:dock:v1`, per device and not per account. This matches the favourites pattern; per-account docks can come later.
 - `normaliseDock(raw, store)`:
   - drops unknown or duplicate items;
@@ -145,6 +149,7 @@ DEFAULT_DOCK = [screen:wallet, action:sendReceive, screen:chat, action:agent]
 - The schema is versioned, so a migration function can be added later.
 
 **Layout and scrolling (owner update):**
+
 - `Dock.tsx` is a horizontally scrolling flex row with `overflow-x:auto`, `scroll-snap-type:x proximity`, hidden scrollbar and `overscroll-behavior-x: contain`.
 - Tile width is `calc((100% - gaps) / 4.5)`. Showing 4 full tiles plus half of the next is the natural "there's more" cue. On wide screens (≥ 430px) it shows 5.
 - Edge fade: a `mask-image: linear-gradient(to right, transparent, #000 16px, #000 calc(100% - 24px), transparent)`.
@@ -152,12 +157,14 @@ DEFAULT_DOCK = [screen:wallet, action:sendReceive, screen:chat, action:agent]
 - The b button is fixed in the centre, either below the dock row or inset into it. Recommended: a row below the dock with a raised b, so the scrolling row is not split in two.
 
 **Gesture isolation from the page swipe:**
+
 1. The dock is a sibling of the `StripPager`, not inside it. Touches that start on the dock never reach the pager's scroll container. Native nested-scroll problems only happen when one scroller sits inside another, and this layout avoids that.
 2. The dock's own `touch-action: pan-x` and `overscroll-behavior-x: contain` stop a fling past the end from chaining.
 3. The swipe-up-to-HOME gesture is detected only in a 24px strip **below** the dock (the home-indicator zone, above `env(safe-area-inset-bottom)`). It uses pointer events with a vertical threshold (dy < −40px, |dx| < |dy|). This keeps it away from both the dock's horizontal scroll and the iOS system gesture.
 4. In arrange mode the dock switches to `touch-action:none` while a tile is dragged, as ArrangeGrid already does. Dragging near the dock edge auto-scrolls it.
 
 **Arrange (long-press):**
+
 - Long-press (500ms, cancelled by more than 8px movement so a scroll never triggers it) on any HOME or dock tile enters shared arrange mode. Tiles jiggle using the existing `bw-jiggle` CSS.
 - Dragging a tile from HOME onto the dock inserts it. Hit-testing combines HOME grid rects and dock rects. When the dock is full (12), the drop is refused and a toast says "Dock is full".
 - Dragging from the dock to HOME removes it from the dock.
@@ -209,6 +216,7 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 ## 9. Release B: People screen
 
 **Data:** reuse only what exists, with no new indexer.
+
 - The people list is the union of:
   - bChat contacts (`chat/useContacts.ts`, `contactSources.ts`);
   - DM rooms (`chat/contacts.ts`);
@@ -219,12 +227,14 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - Blocked handles (`client.blocks()`) are excluded from the list.
 
 **Files:**
+
 - `src/mobile/people/peopleModel.ts`: pure merge and dedupe.
 - `usePeople.ts`
 - `PeopleScreen.tsx`: avatar grid plus search.
 - `PersonPage.tsx` at route `/m/people/:id`.
 
 **Person page sections**, each lazy and each tolerant of empty data:
+
 - Tokens: the person's issued tokens, using the existing market or token lookups by issuer address.
 - bApps and games: their owner apps where these can be linked to an address.
 - Services: leave as a placeholder unless an on-chain record exists.
@@ -238,6 +248,7 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 ## 10. Phased file list
 
 **Release A0 (refactor, no visible change):**
+
 - `phone/useAppServices.ts`
 - `phone/AccountDrawer.tsx`, extracted from TopNav
 - `phone/ArrangeGrid.tsx`, extracted from BrowserPage
@@ -245,11 +256,13 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - `phone/screens.ts`, `phone/dockModel.ts` and tests
 
 **Release A1 (behind the flag):**
+
 - `phone/PhoneShell.tsx`, `StripPager.tsx`, `PageDots.tsx`, `Dock.tsx`, `DockTile.tsx`, `HomeButton.tsx`, `PhoneTopBar.tsx`, `HomeScreen.tsx`, `ArrangeMode.tsx`, `SendReceiveSheet.tsx`, `dockStore.ts`, `flag.ts`
 - `apps/AppsScreen.tsx` and `apps/GamesScreen.tsx` (from BrowserPage)
 - Edits to `tabs/tabs.ts`, `tabs/useBottomMenu.tsx`, `tabs/BottomMenu.tsx`, `tabs/TopNav.tsx`, `tabs/MobileRoutes.tsx`, `storeBuild.ts`, `vite.config.mobile.ts` (App.tsx route patch for the shell layout) and `mobile.css` (`--dock-h`, fades)
 
 **Release A2 (Variant B):**
+
 - `phone/AgentOverlay.tsx` and a hold handler in HomeButton
 - iOS `NSMicrophoneUsageDescription` / `NSSpeechRecognitionUsageDescription` if voice uses native speech
 
@@ -303,6 +316,7 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - Which Games are store-allowed?
 
 ### Critical Files for Implementation
+
 - /Volumes/2026/Projects/bwalletX/src/mobile/BrowserPage.tsx
 - /Volumes/2026/Projects/bwalletX/src/mobile/tabs/TopNav.tsx
 - /Volumes/2026/Projects/bwalletX/src/mobile/tabs/tabs.ts (with useBottomMenu.tsx, BottomMenu.tsx, MobileRoutes.tsx)
@@ -311,17 +325,67 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - /Volumes/2026/Projects/bwalletX/src/mobile/chat/avatars.ts and /Volumes/2026/Projects/bwalletX/src/mobile/chat/api.ts (Release B)
 
 ## 14. Owner decisions (7 Oct 2026)
+
 - No extra button row: Android already has system nav buttons, so we don't duplicate them. Follow the iPhone ethos, "the best interface is no interface".
-- The **b** sits in the **middle of the dock** itself. Tap = HOME, hold = agent overlay (Variant B).
+- The **b** sits in the **middle of the dock** itself. Tap = HOME, ~~hold = agent overlay (Variant B)~~ (no hold since §14.1; the agent is Ask b in the top bar).
 - **Wallet is the main app**: leftmost dock slot by default, like the iPhone's Phone app.
-- Default dock: Wallet · Send/Receive · **b** · Chat · Feed. Agent is no longer a dock tile, because b covers it. The scrolling extras sit beyond the visible slots.
+- ~~Default dock: Wallet · Send/Receive · **b** · Chat · Feed.~~ (superseded, §14.1) Agent is no longer a dock tile, because b covers it. The scrolling extras sit beyond the visible slots.
 - Still plan only; build the b button first when the owner says go.
+
+### 14.1 First feedback on the iPhone preview (7 Oct 2026), now built
+
+- **Top bar is back, one compact row (h-14):** Accounts chooser + the page title (left) · **Ask b** (centre) · Calls · Media · Settings/Lock (right). The Settings menu keeps only Settings and Lock now.
+- **The b agent moves to the top bar centre** as an "Ask b" pill that opens the full /m/agent page (it handles the keyboard). A pill rather than a second b glyph, so it doesn't read as the dock's big b, which is Home.
+- **The big raised gold b stays in the dock centre** ("I DO like the big b button"). Tap = HOME, the app grid. No hold any more: holding b on iOS was swallowed by WKWebView, and the hold-b sheet sat under the keyboard. The hold-b sheet (AgentOverlay) is removed.
+- **A "b agent" tile** is first in the Apps grid; it opens /m/agent too.
+- **Default dock: Wallet · Exchange · ( b ) · Feed · Chat.** Exchange replaces Send/Receive, which lives on the Wallet page. **Store builds: Wallet · Apps · ( b ) · Feed · Chat** (no Exchange).
+- **Migration:** a saved dock that equals the old default exactly (Wallet · Send/Receive · Chat · Feed) becomes the new default. A dock the user changed in any way is never touched.
+- **HOME is just the app grid**, like an iPhone home screen: no balance card, no Send/Receive ("it spoils the effect"). The safeguard is now Wallet as the leftmost dock item by default, and Send/Receive on the Wallet page.
+- **Apps in the dock:** touch and hold any app on Apps or Home › **Add to Dock** (shown for every app, right under Open). Dock app items use the Apps-page tile style (the icon fills the rounded square).
+- **Keyboard:** the /m/agent page and phone sheets lift above the iOS keyboard (ui/keyboardInset.ts).
+
+### 14.2 Round 3 (owner on the iPhone, 7 Oct 2026), now built (supersedes the top bar and the no-hold rule in §14.1)
+
+- **Top bar, one row, icons only, evenly spaced:** Accounts chooser · Calls · **b** (round gold button, opens /m/agent) · Media · Settings. No page title. The separate account strip above it is gone in the phone layout; the account list is in the chooser.
+- **Hold on the dock's big b is back:** tap = HOME, touch and hold 500 ms = the full /m/agent page (not a sheet), with the composer focused on release where iOS allows. Built for WKWebView: touch events drive it (pointer events only for mouse/pen), no callout/selection, contextmenu blocked, a move over 10 px cancels; a gold ring fills while holding; tap and hold never both fire.
+- **HOME:** a fixed 4 × 6 page (24 slots) filling the space between the top bar and the dock, like an iPhone home page. Empty slots stay empty; more than 24 continue below. Scroll down for Your apps (+ Add app), then Recents (recently opened apps).
+
+### 14.3 Round 4 (owner, 7 Oct 2026), now built
+
+- **Top-bar b:** a solid gold b on its own (no circle); black on the store edition's yellow bar.
+- **iOS-style paging:** the page follows the finger, the neighbour page slides in beside it, rubber band at the ends, snap on release (~280 ms ease-out; commits past 35% of the width or on a flick). Axis locks after 10 px, so vertical scrolling is untouched. Dock and dot taps slide too. Transforms only; reduced motion = no slide. How: the routed page sits in `<PhonePage>` (patched round upstream's `<Routes>`), PhoneShell renders the neighbour from `phone/pager.tsx` in a PeekContext (its TopNav hides; the real bar is portalled to `<body>` so it never moves), and the route changes after the snap. Known limit: the neighbour is mounted for the drag and the page remounts once the route changes (no permanent track yet).
+- **Dock like the iPhone's:** 4 slots plus the fixed centre b. Wallet, Exchange, Feed and Chat (Apps in the store edition) are Home tiles that sit in the dock by default; each is in exactly one place. Touch and hold a dock item › Remove from Dock: it goes back on Home (screens first, apps back into the favourites). Touch and hold a Home tile › Add to Dock; when full, "The dock is full (4)". A dock saved before the limit (up to 12) is kept as it is and not trimmed; adding is refused until it is under 4. Migration rules unchanged.
+
+### 14.4 Round 5: Option B and keep-alive (owner, 7 Oct 2026), now built (supersedes the strip in §14.3)
+
+- **Only app screens swipe.** Home is screen 1; the user has as many as they like (Move to screen… › New screen adds one; an empty last screen goes away by itself). Each is the 4 × 6 grid; titles show in the dots row (the screen on show is a gold pill with its name; tap it to rename). Default titles: Home, then "Apps 2", "Apps 3"… unless renamed.
+- **Wallet, Exchange, Feed, Chat (and People) are pages**, not swipe screens: opened from their tiles or the dock, no swipe neighbours. Store default dock: Wallet · Apps (opens screen 2) · b · Feed · Chat.
+- **Defaults / migration:** Home = the saved Home favourites (or the default set); screen 2 "bApps" = the b agent then our bApps not on Home; screen 3 "Games" = the games. Third-party apps (Other apps, BSVRadar groups) are a catalogue under Home's Your apps and Recents: only apps not on a screen or in the dock are listed; touch and hold to place one.
+- **One place per tile:** a tile is on one screen or in the dock. Dock wins; taking an app out of the dock puts it in the first free slot; page tiles (Wallet first, then Exchange, Feed, Chat) are always somewhere: in the dock or on a screen (reconciled on every read, phone/appScreensStore.ts). Touch and hold › Move to screen… / Remove from screens / Add to Dock. Saved per device (`bwallet:app-screens:v1`).
+- **Keep-alive, no flicker:** `<PhonePage>` renders the app screens itself in one track over one still wallpaper (all mounted), and each page once opened stays mounted (hidden while another shows), so lists, scroll, images and state are as they were. Off-screen pages give up the bApp frame and hide their portalled room / backup step until shown. Icons decode async at a fixed size.
+- **Not done yet:** a page opened for the first time still loads its data as before (no cache-first rendering added); drag-to-move tiles between screens (menu only for now).
+
+### 14.5 Round 6 (owner, 7 Oct 2026), now built
+
+- **Wallet speed:** all cards show at once in the phone layout (no 70 ms-per-card fade-in queue); token balances render from a per-account cache, then refresh; Wallet, Feed and Chat are prewarmed (mounted hidden) at idle after the start; the Wallet route a cold start lands on is no longer mounted behind Home. Hidden kept pages use content-visibility: hidden.
+- **Smooth paging:** one transform write per frame on the track (rAF), width read once per drag, will-change only while dragging, only the neighbour screens paint during a drag; app screens mount current ± 1, then stay.
+- **Feed and Chat cache-first:** last posts / room list from localStorage at once (ui/listCache.ts), live data replaces them quietly.
+- **Pull down from the top of an app screen = the b agent** (70 px; a small b cue grows and turns gold; ignores the top 100 px and sideways swipes).
+- **Top bar:** Accounts · Calls · b · Media · **Lock** (locks at once; Settings is in the Accounts menu). Calls opens full screen.
+- **Wallet top row:** price · Buy BSV · History (store edition: price · History). Mint is gold like Send / Receive. Card gold is linear: clamp(bsv / 100, 0, 1).
+
+### 14.6 Round 8 (owner, 7 Oct 2026), now built: one vertical Apps page
+
+- Sideways paging was laggy on an old iPhone and confusing. The app screens are now **sections of one vertical Apps page**: Home, bApps, Games, the user's screens, then Your apps, Recents and the catalogue. Each section's name is a **sticky header** (solid background, no blur; tap to rename). Grids are 4 columns with rows flowing naturally (no 4 × 6 page, no filler slots).
+- The paging track, dots and sideways swipe stay in the code behind `APPS_PAGED` (phone/flag.ts, false) for later.
+- Kept: Move to section… / New section, Add / Remove from Dock, dock b tap = top of Apps (scrolls up if already there), hold = agent, pull down at scrollTop 0 = agent. Saved layouts are unchanged; screens simply show as sections. Icons decode async and load lazily.
 
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 
 **Decided shape:** the phone layout ships first. The b button sits in the middle of the dock: one tap = HOME, press and hold = the $b agent listening (like Siri). Speech becomes a request to the agent, which can act.
 
 ### Phase V1: agent tools (text first, no layout dependency)
+
 - New $b agent tools (bWalletX only, gated by TOKENBLASTER/CURVE_COINS flags; never in store builds):
   - `launch_coin {name, ticker, supply?, logoPrompt?}` drafts a Launchpad coin; AI logo; opens the normal Launchpad confirm sheet with exact cost. Never broadcasts without the user's tap.
   - `coin_status {ticker?}` returns price, holders, volume, fees earned.
@@ -330,11 +394,13 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 - Safety: agent spending limits + Stop switch apply; confirm sheet always shows amount; name/ticker filter (brands, real people, slurs; reuse feed/language.ts + a reserved-brand list); rate limit launches per day.
 
 ### Phase V2: voice in-app (needs the b button)
+
 - Hold b: overlay with live transcript. Speech-to-text via the platform (iOS SFSpeechRecognizer / Android SpeechRecognizer via a Capacitor plugin; Web Speech API in extension/web where available). Release to send.
 - Permissions: microphone + speech recognition usage strings (iOS Info.plist), shown on first hold.
 - Reply spoken back optionally (TTS), with on-screen cards for anything that needs a tap.
 
 ### Phase V3: Siri / Google Assistant (later)
+
 - iOS App Intents in the ios-private build: "Ask b", "Launch a coin with b", "How's my coin doing". Intents open bWalletX at the confirm sheet (no silent spending).
 - Android App Actions / shortcuts equivalent for the direct APK.
 - Store editions: wallet-only intents (balance, receive), no launch or trading.

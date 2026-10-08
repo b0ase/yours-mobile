@@ -8,21 +8,21 @@ Builds on 5.1.81 (`src/mobile/wallet/txHistory*.ts`, `HistoryScreen.tsx`, `txSta
 
 ## 1. Detecting each event
 
-| Event | From the tx (WhatsOnChain + script) | From the wallet's own records | Indexer |
-|---|---|---|---|
-| BSV in / out / self | outputs vs own addresses, own prevouts (5.1.81) | action description / labels | WoC |
-| Token transfer in / out (BSV-20 / BSV-21) | 1-sat output whose inscription is `application/bsv-20` JSON (`op`, `id`/`tick`, `amt`) to or from an own address | labels `p bsv21 token <id>`, `bsv21 <id>`, `bsv20 <tick>`; "Send SYM to N recipients" | GorillaPool `/api/bsv20/id/<id>` for symbol and decimals |
-| Token / NFT listed | we funded a tx with an OrdLock output (contract prefix `2097dfd7…`) | "List ordinal for N sats" | |
-| Token / NFT sold | a later tx spends our OrdLock output and the 1-sat asset leaves | | |
-| Listing cancelled | our OrdLock output spent and the 1-sat asset comes back to us | "Cancel … listing" | |
-| Token / NFT bought | input 0 is someone else's OrdLock, we pay, a 1-sat output arrives at our ord address | "Purchase N tokens for X sats", "Purchase ordinal for X sats" | |
-| Mint / deploy | `deploy+mint` / `mint` inscription to us | "Deploy SYM …", labels `tokenblaster launch` | |
-| NFT received / sent | non-token inscription or a bare 1-sat output in / out | "Transfer N ordinals" | origin + name: GorillaPool (phase 2) |
-| Exchange / Market buys and sells (curve coins) | as above when they settle on chain | launchpad client labels `tokenblaster`, `launch` | launchpad API (phase 2) |
-| Pots, subscriptions, standing orders | pot account kind, pot payments | pot description / labels, agent log entries `sub-pay` | |
-| $b agent payments | agent account kind | agent log (`agentAccounts.ts`) | |
-| bChat tips, likes, locks, pay-per-message | bChat OP_RETURN (`tip`, `like`), lock outputs | "Lock BSV to a post" | |
-| Games (bGames and others) and any app payment | none: an app payment looks like any send | **connections log** (new): the originator of each BRC-100 `createAction` and its txid | |
+| Event                                          | From the tx (WhatsOnChain + script)                                                                              | From the wallet's own records                                                         | Indexer                                                  |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| BSV in / out / self                            | outputs vs own addresses, own prevouts (5.1.81)                                                                  | action description / labels                                                           | WoC                                                      |
+| Token transfer in / out (BSV-20 / BSV-21)      | 1-sat output whose inscription is `application/bsv-20` JSON (`op`, `id`/`tick`, `amt`) to or from an own address | labels `p bsv21 token <id>`, `bsv21 <id>`, `bsv20 <tick>`; "Send SYM to N recipients" | GorillaPool `/api/bsv20/id/<id>` for symbol and decimals |
+| Token / NFT listed                             | we funded a tx with an OrdLock output (contract prefix `2097dfd7…`)                                              | "List ordinal for N sats"                                                             |                                                          |
+| Token / NFT sold                               | a later tx spends our OrdLock output and the 1-sat asset leaves                                                  |                                                                                       |                                                          |
+| Listing cancelled                              | our OrdLock output spent and the 1-sat asset comes back to us                                                    | "Cancel … listing"                                                                    |                                                          |
+| Token / NFT bought                             | input 0 is someone else's OrdLock, we pay, a 1-sat output arrives at our ord address                             | "Purchase N tokens for X sats", "Purchase ordinal for X sats"                         |                                                          |
+| Mint / deploy                                  | `deploy+mint` / `mint` inscription to us                                                                         | "Deploy SYM …", labels `tokenblaster launch`                                          |                                                          |
+| NFT received / sent                            | non-token inscription or a bare 1-sat output in / out                                                            | "Transfer N ordinals"                                                                 | origin + name: GorillaPool (phase 2)                     |
+| Exchange / Market buys and sells (curve coins) | as above when they settle on chain                                                                               | launchpad client labels `tokenblaster`, `launch`                                      | launchpad API (phase 2)                                  |
+| Pots, subscriptions, standing orders           | pot account kind, pot payments                                                                                   | pot description / labels, agent log entries `sub-pay`                                 |                                                          |
+| $b agent payments                              | agent account kind                                                                                               | agent log (`agentAccounts.ts`)                                                        |                                                          |
+| bChat tips, likes, locks, pay-per-message      | bChat OP_RETURN (`tip`, `like`), lock outputs                                                                    | "Lock BSV to a post"                                                                  |                                                          |
+| Games (bGames and others) and any app payment  | none: an app payment looks like any send                                                                         | **connections log** (new): the originator of each BRC-100 `createAction` and its txid |                                                          |
 
 WhatsOnChain does not decode the address of an inscription wrapped round a P2PKH, so the fetcher now pulls the
 trailing P2PKH out of the script itself, and also asks for every txid in the wallet's own action log (the address

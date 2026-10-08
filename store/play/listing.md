@@ -5,14 +5,14 @@ Everything here describes the store edition only: no exchange or trading, no pai
 
 ## Assets in this folder
 
-| File | Use | Size |
-|---|---|---|
-| `icon-512.png` | App icon | 512×512, 32-bit PNG, opaque, full square |
-| `feature-graphic-1024x500.png` | Feature graphic | 1024×500, 24-bit PNG, no alpha |
-| `screenshot-01-wallet.png` | Phone screenshot 1 | 1080×1920 |
-| `screenshot-02-receive.png` | Phone screenshot 2 | 1080×1920 |
-| `screenshot-03-send.png` | Phone screenshot 3 | 1080×1920 |
-| `screenshot-04-collections.png` | Phone screenshot 4 | 1080×1920 |
+| File                            | Use                | Size                                     |
+| ------------------------------- | ------------------ | ---------------------------------------- |
+| `icon-512.png`                  | App icon           | 512×512, 32-bit PNG, opaque, full square |
+| `feature-graphic-1024x500.png`  | Feature graphic    | 1024×500, 24-bit PNG, no alpha           |
+| `screenshot-01-wallet.png`      | Phone screenshot 1 | 1080×1920                                |
+| `screenshot-02-receive.png`     | Phone screenshot 2 | 1080×1920                                |
+| `screenshot-03-send.png`        | Phone screenshot 3 | 1080×1920                                |
+| `screenshot-04-collections.png` | Phone screenshot 4 | 1080×1920                                |
 
 The screenshots come from the store-channel mobile web build (`VITE_CHANNEL=android-play VITE_STORE_BUILD=1`) with a throwaway test wallet holding no funds.
 
@@ -69,12 +69,15 @@ Privacy policy: https://www.bwallet.space/privacy.html
 ## App content forms (drafts)
 
 ### Ads
+
 Contains ads: **No**.
 
 ### Target audience and content
+
 Target age group: **18 and over** only. Not designed for children. No appeal to children in the listing.
 
 ### Content rating questionnaire (IARC)
+
 - Category: Utility / Productivity / Communication / Other (not a game).
 - Violence, sexuality, language, controlled substances: **No** (the app itself has none).
 - **User-generated content / users can interact: Yes.** Chat, DMs, voice/video calls and the Feed let users exchange text and images. Moderation: report and block in-app, 24-hour review, terms accepted before first use.
@@ -84,28 +87,30 @@ Target age group: **18 and over** only. Not designed for children. No appeal to 
 - Expect roughly IARC 12+/Teen because of unmoderated user communication; target audience is set to 18+ regardless.
 
 ### Financial features declaration
+
 - Select: **Cryptocurrency wallet: non-custodial / software wallet**.
 - Not selected: exchange, trading, buying or selling crypto inside the app, lending, banking, payments processing, investment advice.
 - Note for review: the Market tab is browse-only in this edition (`marketTradingEnabled` is false); no bCorp fees; no paid features.
 - Check before submitting: the wallet card shows a **"Buy BSV"** banner and "Get BSV" buttons. If these open a third-party on-ramp (Ramp) in this build, declare it as a link to a third-party crypto purchase provider, or hide it in the store build until Ramp is approved.
 
 ### Data safety
+
 Data is encrypted in transit (HTTPS): **Yes**. Users can request deletion: **Yes** (Settings → Delete account, or email).
 
 Never collected or sent: private keys, recovery phrase, contacts (phone address book), precise or approximate location, advertising ID, analytics, crash logs.
 
-| Data type | Collected | Shared | Purpose | Optional? | Where |
-|---|---|---|---|---|---|
-| Personal info → Name (display name) | Yes | No | App functionality | Optional (chat features) | bit-sign / bChat (bitcoinchat.online), our service |
-| Personal info → User IDs ($handle, paymail, wallet identity key) | Yes | No | App functionality, account management | Required for chat/names, optional otherwise | bit-sign; push.bwalletx.com (the bChat handle a device is registered to); name lookups also go to 1Sat/OpNS and the paymail host of the address's domain (e.g. HandCash) |
-| Financial info → Purchase/transaction history (wallet transaction records, addresses, token holdings) | Yes | Yes, with service providers | App functionality (sync, backup) | Required (storage provider can be changed) | wallet.1sat.app, 1Sat indexing APIs, WhatsOnChain API (history / tx checks / price history) |
-| Messages → Other in-app messages (chat, DMs, posts) | Yes | No | App functionality | Optional | bit-sign / bChat |
-| Photos and videos (photos you post or set as avatar) | Yes | No | App functionality | Optional | bit-sign / bChat |
-| Other user-generated content (bookmarks, reports) | Yes | No | App functionality, safety | Optional | our service |
-| Device or other IDs (FCM push token, platform, app, bundle id) | Yes | No (FCM is a service provider) | App functionality (bChat notifications) | Optional: on by default after bChat sign-in, OS permission asked; off in Settings › Notifications | push.bwalletx.com (our server, Hetzner); delivered via Google Firebase Cloud Messaging |
-| App activity → Other actions (notification preferences: previews, quiet hours + time zone, alert kinds, per-room All/Mentions/Off) | Yes | No | App functionality | Optional | push.bwalletx.com |
-| Messages → Other in-app messages ($b assistant questions + recent conversation, up to the last few turns) | Only if the user enables $b and consents | Sent at the user's direction to their own AI provider (store edition: own API key, Anthropic / OpenAI / OpenRouter, direct from the phone; not via us) | App functionality | Optional | user's chosen AI provider |
-| Personal info → Other (identity verification) | Only if the user chooses KYC | Processed by bit-sign and Veriff | Account verification | Optional | bit-sign, Veriff |
+| Data type                                                                                                                          | Collected                                | Shared                                                                                                                                                 | Purpose                                 | Optional?                                                                                         | Where                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Personal info → Name (display name)                                                                                                | Yes                                      | No                                                                                                                                                     | App functionality                       | Optional (chat features)                                                                          | bit-sign / bChat (bitcoinchat.online), our service                                                                                                                       |
+| Personal info → User IDs ($handle, paymail, wallet identity key)                                                                   | Yes                                      | No                                                                                                                                                     | App functionality, account management   | Required for chat/names, optional otherwise                                                       | bit-sign; push.bwalletx.com (the bChat handle a device is registered to); name lookups also go to 1Sat/OpNS and the paymail host of the address's domain (e.g. HandCash) |
+| Financial info → Purchase/transaction history (wallet transaction records, addresses, token holdings)                              | Yes                                      | Yes, with service providers                                                                                                                            | App functionality (sync, backup)        | Required (storage provider can be changed)                                                        | wallet.1sat.app, 1Sat indexing APIs, WhatsOnChain API (history / tx checks / price history)                                                                              |
+| Messages → Other in-app messages (chat, DMs, posts)                                                                                | Yes                                      | No                                                                                                                                                     | App functionality                       | Optional                                                                                          | bit-sign / bChat                                                                                                                                                         |
+| Photos and videos (photos you post or set as avatar)                                                                               | Yes                                      | No                                                                                                                                                     | App functionality                       | Optional                                                                                          | bit-sign / bChat                                                                                                                                                         |
+| Other user-generated content (bookmarks, reports)                                                                                  | Yes                                      | No                                                                                                                                                     | App functionality, safety               | Optional                                                                                          | our service                                                                                                                                                              |
+| Device or other IDs (FCM push token, platform, app, bundle id)                                                                     | Yes                                      | No (FCM is a service provider)                                                                                                                         | App functionality (bChat notifications) | Optional: on by default after bChat sign-in, OS permission asked; off in Settings › Notifications | push.bwalletx.com (our server, Hetzner); delivered via Google Firebase Cloud Messaging                                                                                   |
+| App activity → Other actions (notification preferences: previews, quiet hours + time zone, alert kinds, per-room All/Mentions/Off) | Yes                                      | No                                                                                                                                                     | App functionality                       | Optional                                                                                          | push.bwalletx.com                                                                                                                                                        |
+| Messages → Other in-app messages ($b assistant questions + recent conversation, up to the last few turns)                          | Only if the user enables $b and consents | Sent at the user's direction to their own AI provider (store edition: own API key, Anthropic / OpenAI / OpenRouter, direct from the phone; not via us) | App functionality                       | Optional                                                                                          | user's chosen AI provider                                                                                                                                                |
+| Personal info → Other (identity verification)                                                                                      | Only if the user chooses KYC             | Processed by bit-sign and Veriff                                                                                                                       | Account verification                    | Optional                                                                                          | bit-sign, Veriff                                                                                                                                                         |
 
 Message previews in push notifications are off by default (no message text passes through FCM unless the user turns previews on). Signing out of bChat, switching account or turning push off deletes the device row on push.bwalletx.com.
 

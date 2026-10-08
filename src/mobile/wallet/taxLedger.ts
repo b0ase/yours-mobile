@@ -42,7 +42,11 @@ export const saveOverrides = (o: Overrides) => {
 
 export const assetKeyOf = (r: HistoryRow) => (r.asset ? `${r.asset.kind}:${r.asset.id}` : 'BSV');
 const labelOf = (r: HistoryRow) =>
-  !r.asset ? 'BSV' : r.asset.kind === 'nft' ? `NFT ${r.asset.id.slice(0, 8)}…${r.asset.id.slice(-4)}` : (r.asset.symbol ?? `${r.asset.id.slice(0, 8)}…`);
+  !r.asset
+    ? 'BSV'
+    : r.asset.kind === 'nft'
+      ? `NFT ${r.asset.id.slice(0, 8)}…${r.asset.id.slice(-4)}`
+      : (r.asset.symbol ?? `${r.asset.id.slice(0, 8)}…`);
 
 /**
  * Build the ledger. `fiatPerBsv(row)` gives the price on the row's day (undefined when unknown); `dayOf` the
@@ -65,8 +69,16 @@ export const buildLedger = (
     else if (r.usdRateIsCurrent) flags.push('priced at the current rate');
     const val = (sats: number) => ((price ?? 0) * sats) / 1e8;
     const day = dayOf(r.time);
-    const ev = (asset: string, label: string, side: LedgerEvent['side'], qty: number, fiat: number, extra: string[] = []) => {
-      if (qty > 0) events.push({ asset, label, time: r.time, day, side, qty, fiat, txid: r.txid, flags: [...flags, ...extra] });
+    const ev = (
+      asset: string,
+      label: string,
+      side: LedgerEvent['side'],
+      qty: number,
+      fiat: number,
+      extra: string[] = [],
+    ) => {
+      if (qty > 0)
+        events.push({ asset, label, time: r.time, day, side, qty, fiat, txid: r.txid, flags: [...flags, ...extra] });
     };
     const bsv = (side: LedgerEvent['side'], sats: number) => ev('BSV', 'BSV', side, sats, val(sats));
     const key = assetKeyOf(r);
@@ -90,11 +102,25 @@ export const buildLedger = (
         bsv('dispose', r.feeSats);
         continue;
       case 'transfer-in':
-        ev(key, labelOf(r), 'acquire', qty, entered ?? 0, entered === undefined ? ['received (airdrop / gift): cost 0'] : []);
+        ev(
+          key,
+          labelOf(r),
+          'acquire',
+          qty,
+          entered ?? 0,
+          entered === undefined ? ['received (airdrop / gift): cost 0'] : [],
+        );
         bsv('dispose', r.feeSats);
         continue;
       case 'transfer-out':
-        ev(key, labelOf(r), 'dispose', qty, entered ?? 0, entered === undefined ? ['sent away: value 0 unless entered'] : []);
+        ev(
+          key,
+          labelOf(r),
+          'dispose',
+          qty,
+          entered ?? 0,
+          entered === undefined ? ['sent away: value 0 unless entered'] : [],
+        );
         bsv('dispose', spent);
         continue;
       default:

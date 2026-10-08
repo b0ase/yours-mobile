@@ -1,6 +1,7 @@
 import * as qr from 'qrcode';
-import { useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useContext, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
@@ -18,6 +19,12 @@ import { PixelGhost } from '../agents/PixelGhost';
 import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
 import { cardGoldLevel } from './cardGold';
+import { saveSession } from '../chat/api';
+import { identityLine } from './identityLine';
+import { useChatIdentity } from './useChatIdentity';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
+import { asMenuItem } from '../tabs/tabs';
+import { requestIdentityMap } from '../settings/signIns';
 import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -159,8 +166,56 @@ export const WalletCard = ({
   };
   const stop = (e: MouseEvent) => e.stopPropagation();
   const sig = useCardSignature(id);
+  // `$handle · 02cbe7…6ed8` under the name: which chat identity this account is using (identityLine.ts).
+  const chat = useChatIdentity(id);
+  const idLine = identityLine(chat.handle, chat.identityKey);
+  const [mismatchOpen, setMismatchOpen] = useState(false);
+  // Long-press the identity line: Settings › Identity map. Tap still copies the key.
+  const selectTab = useContext(BottomMenuContext)?.handleSelect;
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const clearPress = () => {
+    if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+  const openIdMap = () => {
+    longPressed.current = true;
+    selectTab?.(asMenuItem('settings'));
+    requestIdentityMap();
+  };
+  const idLinePress = {
+    onTouchStart: () => {
+      clearPress();
+      longPressed.current = false;
+      pressTimer.current = window.setTimeout(openIdMap, 550);
+    },
+    onTouchEnd: clearPress,
+    onTouchMove: clearPress,
+    onContextMenu: (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearPress();
+      openIdMap();
+    },
+  };
+  useEffect(() => clearPress, []);
+  const copyKey = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (longPressed.current) {
+      longPressed.current = false;
+      return;
+    }
+    if (!chat.identityKey) return;
+    navigator.clipboard
+      ?.writeText(chat.identityKey)
+      .then(() => addSnackbar('Identity key copied', 'success'))
+      .catch(() => undefined);
+  };
   // More golden as the BSV balance grows (cardGold.ts); drives --gold in mobile.css.
-  const gold = cardGoldLevel(sats / 100_000_000, { hidden: balanceHidden, known: view !== 'unknown' && view !== 'spinner' });
+  const gold = cardGoldLevel(sats / 100_000_000, {
+    hidden: balanceHidden,
+    known: view !== 'unknown' && view !== 'spinner',
+  });
 
   return (
     <div className="bw-wcard-wrap">
@@ -180,47 +235,81 @@ export const WalletCard = ({
               <PixelGhost color={ghost} size={34} title="Agent account" />
             </span>
           )}
-          <div className="bw-wcard-top">
-            <div className="bw-wcard-holder">
-              <AccountAvatar src={avatar} size={22} id={id} />
-              {t.tag ? (
-                <>
-                  <span className="bw-wcard-handle">{t.tag}</span>
-                  {verified && (
-                    <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
-                      <Check size={13} strokeWidth={3} />
-                    </span>
-                  )}
-                  <button type="button" onClick={copy(t.copy)} aria-label={`Copy ${t.copy}`} className="bw-wcard-icon">
-                    <Copy size={15} color="#98A2B3" />
+          <div className="bw-wcard-head">
+            <div className="bw-wcard-top">
+              <div className="bw-wcard-holder">
+                <AccountAvatar src={avatar} size={22} id={id} />
+                {t.tag ? (
+                  <>
+                    <span className="bw-wcard-handle">{t.tag}</span>
+                    {verified && (
+                      <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
+                        <Check size={13} strokeWidth={3} />
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={copy(t.copy)}
+                      aria-label={`Copy ${t.copy}`}
+                      className="bw-wcard-icon"
+                    >
+                      <Copy size={15} color="#98A2B3" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="bw-wcard-getname"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHandleOpen(true);
+                    }}
+                  >
+                    Get your $name
                   </button>
-                </>
-              ) : (
+                )}
+              </div>
+              <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
+                {(['usd', 'bsv'] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    aria-pressed={unit === u}
+                    className={unit === u ? 'is-on' : undefined}
+                    onClick={pickUnit(u)}
+                  >
+                    {u === 'usd' ? '$' : 'BSV'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {(chat.identityKey || chat.handle) && (
+              <div className="bw-wcard-idline">
                 <button
                   type="button"
-                  className="bw-wcard-getname"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setHandleOpen(true);
-                  }}
+                  className="bw-wcard-idtext"
+                  onClick={copyKey}
+                  {...idLinePress}
+                  aria-label="Copy identity key. Long-press for the identity map"
+                  title={chat.identityKey ? `${chat.identityKey} (hold for identity map)` : 'Hold for identity map'}
                 >
-                  Get your $name
+                  {idLine.text}
                 </button>
-              )}
-            </div>
-            <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
-              {(['usd', 'bsv'] as const).map((u) => (
-                <button
-                  key={u}
-                  type="button"
-                  aria-pressed={unit === u}
-                  className={unit === u ? 'is-on' : undefined}
-                  onClick={pickUnit(u)}
-                >
-                  {u === 'usd' ? '$' : 'BSV'}
-                </button>
-              ))}
-            </div>
+                {chat.mismatch && (
+                  <button
+                    type="button"
+                    className="bw-wcard-idwarn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMismatchOpen(true);
+                    }}
+                  >
+                    <AlertTriangle size={11} aria-hidden="true" />
+                    Chat identity mismatch
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className="bw-wcard-centre">
             {view === 'spinner' ? (
@@ -332,13 +421,13 @@ export const WalletCard = ({
                 <span>{shortAddr(receiveAddress)}</span>
                 <Copy size={13} color="#98A2B3" />
               </button>
-              <span className="bw-wcard-sig-cap">
-                AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}
-              </span>
+              <span className="bw-wcard-sig-cap">AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}</span>
               <div
                 className={`bw-wcard-sig${sig.svgPath ? ' has-drawn' : ''}`}
                 role="img"
-                aria-label={sig.svgPath ? 'Your drawn signature. Tap Edit to change it.' : 'Signature strip. Tap to sign.'}
+                aria-label={
+                  sig.svgPath ? 'Your drawn signature. Tap Edit to change it.' : 'Signature strip. Tap to sign.'
+                }
                 {...sig.pressHandlers}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -346,7 +435,12 @@ export const WalletCard = ({
                 }}
               >
                 {sig.svgPath ? (
-                  <svg className="bw-wcard-sig-drawn" viewBox={sig.viewBox} preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+                  <svg
+                    className="bw-wcard-sig-drawn"
+                    viewBox={sig.viewBox}
+                    preserveAspectRatio="xMinYMid meet"
+                    aria-hidden="true"
+                  >
                     <path d={sig.svgPath} fill="#1b2a5a" />
                   </svg>
                 ) : (
@@ -376,6 +470,33 @@ export const WalletCard = ({
       </div>
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
+      {mismatchOpen &&
+        createPortal(
+          <div className="bw-idwarn-sheet" role="dialog" aria-modal="true" aria-label="Chat identity mismatch">
+            <div className="bw-idwarn-card">
+              <p className="bw-idwarn-title">Chat identity mismatch</p>
+              <p className="bw-idwarn-body">
+                This account is signed in to chat as {idLine.handle ?? 'another handle'}, which doesn’t belong to this
+                account. Sign out of chat; it signs this account in fresh next time you open it.
+              </p>
+              <button
+                type="button"
+                className="bw-idwarn-go"
+                onClick={() => {
+                  saveSession(null);
+                  setMismatchOpen(false);
+                  addSnackbar('Signed out of chat', 'success');
+                }}
+              >
+                Sign out of chat
+              </button>
+              <button type="button" className="bw-idwarn-cancel" onClick={() => setMismatchOpen(false)}>
+                Not now
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
       {sig.ui}
     </div>
   );

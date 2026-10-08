@@ -16,7 +16,10 @@ const LINE = '#1f2127';
 type ToggleC = (p: { label: string; on: boolean; onChange: (v: boolean) => void }) => ReactNode;
 
 const Row = ({ label, sub, right }: { label: string; sub?: string; right: ReactNode }) => (
-  <div className="mb-2 flex items-center gap-3 rounded-xl px-3 py-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+  <div
+    className="mb-2 flex items-center gap-3 rounded-xl px-3 py-3"
+    style={{ background: PANEL, border: `1px solid ${LINE}` }}
+  >
     <div className="min-w-0 flex-1">
       <p className="text-sm font-semibold text-white">{label}</p>
       {sub && (
@@ -99,7 +102,8 @@ export const PushSettings = ({ Toggle }: { Toggle: ToggleC }) => {
     }
   };
 
-  const where = PUSH_PLATFORM === 'web' ? 'this browser' : PUSH_PLATFORM === 'extension' ? 'this extension' : 'this phone';
+  const where =
+    PUSH_PLATFORM === 'web' ? 'this browser' : PUSH_PLATFORM === 'extension' ? 'this extension' : 'this phone';
   return (
     <div>
       <Row
@@ -120,7 +124,24 @@ export const PushSettings = ({ Toggle }: { Toggle: ToggleC }) => {
           <Row
             label="Show message previews"
             sub="Off: “$alice sent you a message”. On: the message text shows on your lock screen."
-            right={<Toggle label="Show message previews" on={prefs.previews} onChange={(v) => void save({ ...prefs, previews: v })} />}
+            right={
+              <Toggle
+                label="Show message previews"
+                on={prefs.previews}
+                onChange={(v) => void save({ ...prefs, previews: v })}
+              />
+            }
+          />
+          <Row
+            label="Sign-in alerts"
+            sub="A notification when your chat handle signs in on a device."
+            right={
+              <Toggle
+                label="Sign-in alerts"
+                on={prefs.categories.sign_in !== false}
+                onChange={(v) => void save({ ...prefs, categories: { ...prefs.categories, sign_in: v } })}
+              />
+            }
           />
           <Row
             label="Quiet hours"
@@ -130,18 +151,30 @@ export const PushSettings = ({ Toggle }: { Toggle: ToggleC }) => {
           {prefs.quiet && (
             <div className="mb-2 flex items-center gap-2 px-1 text-sm text-white">
               From
-              <TimeInput label="Quiet from" value={prefs.quietFrom} onChange={(v) => v && void save({ ...prefs, quietFrom: v })} />
+              <TimeInput
+                label="Quiet from"
+                value={prefs.quietFrom}
+                onChange={(v) => v && void save({ ...prefs, quietFrom: v })}
+              />
               to
-              <TimeInput label="Quiet to" value={prefs.quietTo} onChange={(v) => v && void save({ ...prefs, quietTo: v })} />
+              <TimeInput
+                label="Quiet to"
+                value={prefs.quietTo}
+                onChange={(v) => v && void save({ ...prefs, quietTo: v })}
+              />
             </div>
           )}
           <p className="mt-3 text-xs" style={{ color: MUTED }}>
-            Groups notify on mentions unless you change it with the bell in the room. DMs always notify. Previews
-            and quiet hours apply to all your devices.
+            Groups notify on mentions unless you change it with the bell in the room. DMs always notify. Previews and
+            quiet hours apply to all your devices.
           </p>
         </>
       )}
-      {saved && <p className="mt-2 text-xs" style={{ color: MUTED }}>{saved}</p>}
+      {saved && (
+        <p className="mt-2 text-xs" style={{ color: MUTED }}>
+          {saved}
+        </p>
+      )}
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
     </div>
   );

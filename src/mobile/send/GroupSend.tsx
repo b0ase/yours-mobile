@@ -65,11 +65,15 @@ export const GroupSendBar = ({
     setRecipients((prev) => {
       const have = new Set(prev.map((r) => r.address.trim()));
       const base = prev.filter((r) => r.address.trim() || r.amountInput);
-      const added = [...new Set(found)].filter((a) => !have.has(a)).map((a) => ({ ...newRecipient(), address: a, amountInput: each }));
+      const added = [...new Set(found)]
+        .filter((a) => !have.has(a))
+        .map((a) => ({ ...newRecipient(), address: a, amountInput: each }));
       const next = [...base, ...added];
       return next.length ? next : prev;
     });
-    setNote(missed.length ? `Added ${found.length}. Can't receive tokens: ${missed.join(', ')}.` : `Added ${found.length}.`);
+    setNote(
+      missed.length ? `Added ${found.length}. Can't receive tokens: ${missed.join(', ')}.` : `Added ${found.length}.`,
+    );
   };
 
   return (
@@ -174,7 +178,10 @@ const FriendPicker = ({ onClose, onAdd }: { onClose: () => void; onAdd: (c: Cont
                   </span>
                   <span
                     className="w-6 h-6 rounded-full flex items-center justify-center"
-                    style={{ background: on ? '#F5B800' : 'transparent', border: `1px solid ${on ? '#F5B800' : '#475467'}` }}
+                    style={{
+                      background: on ? '#F5B800' : 'transparent',
+                      border: `1px solid ${on ? '#F5B800' : '#475467'}`,
+                    }}
                   >
                     {on && <Check size={14} color="#000" />}
                   </span>

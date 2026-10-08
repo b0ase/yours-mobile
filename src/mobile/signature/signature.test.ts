@@ -35,7 +35,17 @@ const scribble = (n: number, w: number, h: number): SigPoint[] =>
 
 describe('card signature path', () => {
   test('normalises pad pixels to the 1000 × 250 box and clamps', () => {
-    expect(normalisePoints([[200, 50, 0.5], [400, 100, 0.5], [-5, 120, 1]], 400, 100)).toEqual([
+    expect(
+      normalisePoints(
+        [
+          [200, 50, 0.5],
+          [400, 100, 0.5],
+          [-5, 120, 1],
+        ],
+        400,
+        100,
+      ),
+    ).toEqual([
       [500, 125, 0.5],
       [1000, 250, 0.5],
       [0, 250, 1],
@@ -44,7 +54,13 @@ describe('card signature path', () => {
   });
 
   test('rounds to integers and clamps outlines', () => {
-    expect(polygonToPath([[1.4, 2.6], [10.5, -3], [1200, 300.2]])).toBe('M1 3L11 0L1000 250Z');
+    expect(
+      polygonToPath([
+        [1.4, 2.6],
+        [10.5, -3],
+        [1200, 300.2],
+      ]),
+    ).toBe('M1 3L11 0L1000 250Z');
     expect(polygonToPath([[1, 1]])).toBe('');
   });
 
@@ -58,13 +74,19 @@ describe('card signature path', () => {
   test('simplify drops collinear points, keeps ends', () => {
     const line: SigPoint[] = Array.from({ length: 50 }, (_, i) => [i, i * 2, 0.5]);
     expect(simplifyPoints(line, 0.5)).toEqual([line[0], line[49]]);
-    const v: SigPoint[] = [[0, 0, 0.5], [5, 10, 0.5], [10, 0, 0.5]];
+    const v: SigPoint[] = [
+      [0, 0, 0.5],
+      [5, 10, 0.5],
+      [10, 0, 0.5],
+    ];
     expect(simplifyPoints(v, 1)).toEqual(v);
   });
 
   test('a huge drawing is simplified under the 8KB cap', () => {
     const strokes = Array.from({ length: 10 }, () => ({ pen: true, points: scribble(400, 800, 200) }));
-    expect(strokesToPath(strokes.map((s) => ({ ...s, points: normalisePoints(s.points, 800, 200) }))).length).toBeGreaterThan(SIG_MAX_BYTES);
+    expect(
+      strokesToPath(strokes.map((s) => ({ ...s, points: normalisePoints(s.points, 800, 200) }))).length,
+    ).toBeGreaterThan(SIG_MAX_BYTES);
     const path = signatureFromStrokes(strokes, 800, 200);
     expect(path.length).toBeGreaterThan(0);
     expect(path.length).toBeLessThanOrEqual(SIG_MAX_BYTES);
@@ -80,7 +102,12 @@ describe('card signature storage', () => {
     const b = signatureFromStrokes([{ pen: false, points: scribble(20, 400, 100) }], 400, 100);
     setSignature('1AAA', a, 1000);
     setSignature('1BBB', b, 2000);
-    expect(getSignature('1AAA')).toEqual({ svgPath: a, viewBox: '0 0 1000 250', createdAt: 1000, sha256: signatureSha256(a) });
+    expect(getSignature('1AAA')).toEqual({
+      svgPath: a,
+      viewBox: '0 0 1000 250',
+      createdAt: 1000,
+      sha256: signatureSha256(a),
+    });
     expect(getSignature('1BBB')?.svgPath).toBe(b);
     expect(getSignature('1CCC')).toBeNull();
     expect(getSignature(undefined)).toBeNull();
@@ -114,7 +141,13 @@ describe('card signature storage', () => {
       mem.set('bwallet.signature.1AAA', JSON.stringify({ v: 1, svgPath: bad, createdAt: 1 }));
       expect(getSignature('1AAA')).toBeNull();
     }
-    for (const raw of ['not json', '{}', 'null', JSON.stringify({ v: 2, svgPath: 'M1 1L2 2Z', createdAt: 1 }), JSON.stringify({ v: 1, svgPath: 'M1 1L2 2Z', createdAt: 'x' })]) {
+    for (const raw of [
+      'not json',
+      '{}',
+      'null',
+      JSON.stringify({ v: 2, svgPath: 'M1 1L2 2Z', createdAt: 1 }),
+      JSON.stringify({ v: 1, svgPath: 'M1 1L2 2Z', createdAt: 'x' }),
+    ]) {
       mem.set('bwallet.signature.1AAA', raw);
       expect(getSignature('1AAA')).toBeNull();
     }

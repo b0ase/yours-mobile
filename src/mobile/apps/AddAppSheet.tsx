@@ -49,7 +49,12 @@ export const AddAppSheet = ({ store, onClose }: { store: ReturnType<typeof useUs
             autoCorrect="off"
             className={field}
           />
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" className={field} />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name (optional)"
+            className={field}
+          />
           <button
             type="submit"
             disabled={!url.trim()}
@@ -67,11 +72,18 @@ export const AddAppSheet = ({ store, onClose }: { store: ReturnType<typeof useUs
         {store.apps.length > 0 && (
           <ul className="m-0 p-0 list-none flex flex-col gap-1 mt-2">
             {store.apps.map((a) => (
-              <li key={a.url} className="flex items-center gap-3 rounded-xl px-3 py-2" style={{ background: '#17191E' }}>
+              <li
+                key={a.url}
+                className="flex items-center gap-3 rounded-xl px-3 py-2"
+                style={{ background: '#17191E' }}
+              >
                 <img src={appIconFor(a.url)} alt="" width={28} height={28} className="rounded-md bg-black" />
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-semibold text-white">{a.name}</span>
-                  <span className="block text-[11px] overflow-hidden text-ellipsis whitespace-nowrap" style={{ color: '#98A2B3' }}>
+                  <span
+                    className="block text-[11px] overflow-hidden text-ellipsis whitespace-nowrap"
+                    style={{ color: '#98A2B3' }}
+                  >
                     {a.url}
                   </span>
                 </span>

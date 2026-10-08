@@ -16,7 +16,12 @@ const ONESAT = 'https://api.1sat.app/1sat';
 type Sale = { id: string; outpoint: string; spend: string; amt: string; sym?: string; dec?: number; icon?: string };
 type Txo = { outpoint: string; owner?: string; spend?: string };
 
-export type RecoverResult = { checked: number; found: { sym: string; amt: string }[]; held: string[]; failed: string[] };
+export type RecoverResult = {
+  checked: number;
+  found: { sym: string; amt: string }[];
+  held: string[];
+  failed: string[];
+};
 
 const sales = async (pages: number): Promise<Sale[]> => {
   const all: Sale[] = [];
@@ -56,7 +61,12 @@ export async function recoverPurchases(wallet: WalletInterface, pages = 10): Pro
     let keyID = '';
     for (const op of [s.outpoint.replace(/_(\d+)$/, '.$1'), s.outpoint]) {
       const k = `${s.id}-${op}`;
-      const { publicKey } = await wallet.getPublicKey({ protocolID: P1SAT_PROTOCOL, keyID: k, counterparty: 'self', forSelf: true });
+      const { publicKey } = await wallet.getPublicKey({
+        protocolID: P1SAT_PROTOCOL,
+        keyID: k,
+        counterparty: 'self',
+        forSelf: true,
+      });
       if (PublicKey.fromString(publicKey).toAddress() === txo.owner) {
         keyID = k;
         break;
@@ -112,4 +122,3 @@ export async function recoverPurchases(wallet: WalletInterface, pages = 10): Pro
   }
   return result;
 }
-

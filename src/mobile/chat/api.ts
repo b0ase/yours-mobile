@@ -11,7 +11,9 @@
  * so the WebView's capacitor:// origin never meets CORS. In a browser it falls
  * back to fetch. Both are behind an injectable `Http` for tests.
  */
-import { CapacitorHttp } from '@capacitor/core';
+import { parseHistorySetting, type HistorySetting, type HistoryVisibility } from './history';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { getChatAccount, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
 import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
@@ -89,16 +91,43 @@ export interface ChatSigner {
   sign: (message: string) => Promise<{ address: string; pubKey: string; sig: string }>;
 }
 
+export interface SignInItem {
+  at: string;
+  device: 'ios-app' | 'android-app' | 'browser';
+  newAccount: boolean;
+}
+
+/** Which kind of device is signing in, for the server's sign-in alert. */
+export const signInClient = (): SignInItem['device'] => {
+  try {
+    const p = Capacitor.getPlatform();
+    return p === 'ios' ? 'ios-app' : p === 'android' ? 'android-app' : 'browser';
+  } catch {
+    return 'browser';
+  }
+};
+
 export interface ChatSession {
   token: string;
   handle: string;
   address: string;
+  /** The wallet account (identity address) this session was made for; see setChatAccount. */
+  account?: string;
+}
+
+/** Quote of the message being replied to (bit-sign stores it as event_payload.reply_to). */
+export interface ReplyRef {
+  id: string;
+  author: string | null;
+  snippet: string;
 }
 
 export interface MessagePage {
   messages: ChatMessage[];
   /** null when the server predates paging (no has_more field). */
   hasMore: boolean | null;
+  /** Set when the server floored this reader's history (since_join room; chat/history.ts). */
+  hiddenBefore?: string | null;
 }
 
 const errorOf = (data: unknown, fallback: string) =>
@@ -138,6 +167,9 @@ export class BchatClient {
   ): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) {
+      // A session made for another account (the wallet switched since) is never reused.
+      const active = getChatAccount();
+      if (this.session?.account && active && this.session.account !== active) this.session = null;
       if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
       headers.Authorization = `Bearer ${this.session.token}`;
     }
@@ -182,6 +214,8 @@ export class BchatClient {
           pubkey_hex: signed.pubKey,
           signature: signed.sig,
           intent: 'sign-in',
+          // For the "New sign-in to bChat" alert only (bit-sign lib/sign-in-alert.ts); not used for auth.
+          client: signInClient(),
         },
         false,
       );
@@ -191,7 +225,8 @@ export class BchatClient {
           401,
         );
       }
-      this.session = { token: v.token, handle: v.handle, address };
+      const account = getChatAccount();
+      this.session = { token: v.token, handle: v.handle, address, ...(account ? { account } : {}) };
       return this.session;
     }
     throw new ChatApiError('The wallet signed with an unexpected key', 401);
@@ -268,11 +303,15 @@ export class BchatClient {
     const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
     if (opts.before) q.set('before', opts.before);
     else q.set('latest', '1');
-    const r = await this.call<{ messages?: ChatMessage[]; has_more?: boolean }>(
+    const r = await this.call<{ messages?: ChatMessage[]; has_more?: boolean; history_hidden_before?: string | null }>(
       'GET',
       `${BchatClient.path(ticker)}/messages?${q}`,
     );
-    return { messages: r.messages ?? [], hasMore: typeof r.has_more === 'boolean' ? r.has_more : null };
+    return {
+      messages: r.messages ?? [],
+      hasMore: typeof r.has_more === 'boolean' ? r.has_more : null,
+      hiddenBefore: typeof r.history_hidden_before === 'string' ? r.history_hidden_before : null,
+    };
   }
 
   async since(ticker: string, sinceIso: string): Promise<ChatMessage[]> {
@@ -301,13 +340,52 @@ export class BchatClient {
   }
 
   /** `spend`: a priced room's payment (chat/roomSpend.ts), the message and payment in one tx. */
-  async send(ticker: string, body: string, spend?: { beef: string; rule: string }): Promise<ChatMessage | null> {
-    const r = await this.call<{ message?: ChatMessage }>(
-      'POST',
-      `${BchatClient.path(ticker)}/messages`,
-      spend ? { body, spend } : { body },
-    );
+  async send(
+    ticker: string,
+    body: string,
+    spend?: { beef: string; rule: string } | null,
+    replyTo?: ReplyRef | null,
+  ): Promise<ChatMessage | null> {
+    const r = await this.call<{ message?: ChatMessage }>('POST', `${BchatClient.path(ticker)}/messages`, {
+      body,
+      ...(spend ? { spend } : {}),
+      ...(replyTo ? { replyTo } : {}),
+    });
     return r.message ?? null;
+  }
+
+  /** Toggle my emoji reaction on a message (bit-sign appends a `reaction` event; toggled server-side). */
+  async react(ticker: string, messageId: string, emoji: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/message/${encodeURIComponent(messageId)}/action`, {
+      action: 'react',
+      emoji,
+    });
+  }
+
+  /** "I am typing" (best effort; throttle in the caller). */
+  async typing(ticker: string): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/typing`, {});
+  }
+
+  /** Who else is typing now (handles). Older servers: 404 → nobody. */
+  async whoIsTyping(ticker: string): Promise<string[]> {
+    try {
+      const r = await this.call<{ typing?: string[] }>('GET', `${BchatClient.path(ticker)}/typing`);
+      return r.typing ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** "Share to room": post one of my private $b answers publicly. */
+  async shareBAnswer(ticker: string, id: string): Promise<ChatMessage | null> {
+    const r = await this.call<{ message?: ChatMessage }>('POST', `${BchatClient.path(ticker)}/b-share`, { id });
+    return r.message ?? null;
+  }
+
+  /** Publish my X / Google picture so other people's chat bubbles show it (bit-sign keeps a chosen photo). */
+  async publishAvatar(url: string): Promise<void> {
+    await this.call('POST', '/api/bitsign/avatars', { url });
   }
 
   async markRead(ticker: string): Promise<void> {
@@ -331,7 +409,53 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
   }
 
-  // ── Token rooms (docs/TOKEN-ROOMS.md) ──
+  /** The live space's permanent page `/s/<slug>` (host or room admin only). `{ page }`. */
+  async spacePageLink(ticker: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/page`, {});
+  }
+
+  /** A new invite `/i/<code>` to the live space (host or room admin only). `{ invite, managed }`. */
+  async createSpaceInvite(ticker: string, opts: { expires_in: string; max_uses?: number }): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/invite`, opts);
+  }
+
+  /** The live space's invites with uses (host or room admin only). `{ invites }`. */
+  async spaceInvites(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/invite`);
+  }
+
+  async revokeSpaceInvite(ticker: string, code: string): Promise<unknown> {
+    return this.call('DELETE', `${BchatClient.path(ticker)}/space/invite?code=${encodeURIComponent(code)}`);
+  }
+
+  /** A new room invite `/i/<code>` (any member; it grants nothing). `{ invite, managed }`. */
+  async createRoomInvite(ticker: string, opts: { expires_in: string; max_uses?: number }): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/room-invite`, opts);
+  }
+
+  /** Your room invites (the room admin sees all). `{ invites }`. */
+  async roomInvites(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/room-invite`);
+  }
+
+  async revokeRoomInvite(ticker: string, code: string): Promise<unknown> {
+    return this.call('DELETE', `${BchatClient.path(ticker)}/room-invite?code=${encodeURIComponent(code)}`);
+  }
+
+  /** Open an invite: counts one use for this visitor and answers `{ invite }` (no session needed). */
+  async openInvite(code: string): Promise<unknown> {
+    return this.call('POST', `/api/bitsign/space-invites/${encodeURIComponent(code)}/use`, {}, !!this.handle);
+  }
+
+  /** A Space's permanent page (public). `{ page }`. */
+  async spacePage(slug: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/space-pages/${encodeURIComponent(slug)}`, undefined, false);
+  }
+
+  /** A room's public page (token / discoverable rooms). `{ page }`. */
+  async roomPage(ticker: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/room-pages/${encodeURIComponent(ticker)}`, undefined, false);
+  }
 
   /** Is there a room for this token key, and am I in it? (GET never joins.) */
   async tokenRoom(key: string): Promise<unknown> {
@@ -423,6 +547,16 @@ export class BchatClient {
     s: { min?: string; spend?: RoomSpendRule | null; name?: string },
   ): Promise<void> {
     await this.call('PATCH', '/api/bitsign/rooms/token-gated', { ticker, ...s });
+  }
+
+  /** "New members can see earlier messages" (bit-sign rooms/[ticker]/history). Any member may read it. */
+  async historySetting(ticker: string): Promise<HistorySetting> {
+    return parseHistorySetting(await this.call('GET', `${BchatClient.path(ticker)}/history`));
+  }
+
+  /** Room admin only (the issuer in a token room, the owner in an open room); the server enforces it. */
+  async setHistoryVisibility(ticker: string, visibility: HistoryVisibility): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/history`, { history_visibility: visibility });
   }
 
   /** Issuer only (token rooms): set or clear (null) the cover image, an image data URL. */
@@ -542,6 +676,22 @@ export class BchatClient {
     return this.call(method, path, body);
   }
 
+  /**
+   * Who the server says this token is (GET /api/bitsign/whoami). With `address`, also whether that wallet
+   * address is a credential of that handle (null when the server can't say). Wallet card mismatch chip.
+   */
+  async whoami(address?: string): Promise<{ handle: string; addressLinked: boolean | null }> {
+    const q = address ? `?address=${encodeURIComponent(address)}` : '';
+    const r = await this.call<{ handle?: string; address_linked?: boolean | null }>('GET', `/api/bitsign/whoami${q}`);
+    return { handle: r.handle ?? '', addressLinked: typeof r.address_linked === 'boolean' ? r.address_linked : null };
+  }
+
+  /** The last 10 sign-ins to this handle (GET /api/bitsign/me/sign-ins): Settings › Chat › Recent sign-ins. */
+  async signIns(): Promise<SignInItem[]> {
+    const r = await this.call<{ sign_ins?: SignInItem[] }>('GET', '/api/bitsign/me/sign-ins');
+    return Array.isArray(r.sign_ins) ? r.sign_ins : [];
+  }
+
   /** Profile pictures for up to 50 handles (bit-sign /api/bitsign/avatars): handle → https URL. */
   async avatars(handles: string[]): Promise<Record<string, string>> {
     if (!handles.length) return {};
@@ -658,13 +808,25 @@ export class BchatClient {
   }
 }
 
-// ── Session persistence (per wallet identity) ──
-const KEY = 'bwallet.bchat.session';
+// ── Session persistence (per wallet ACCOUNT) ──
+/**
+ * ⚠ ONE SESSION PER ACCOUNT. This used to be a single global key, so after switching accounts the
+ * new account kept acting with the previous account's bit-sign token: a room created from
+ * richardwboase.gmail was recorded as started by b0asex (8 Oct 2026). Sessions are now stored
+ * under the active account's identity address (set at startup and on every switch by
+ * `setChatAccount`) and carry that account, so a session can never be read by another account.
+ */
+const KEY = LEGACY_SESSION_KEY;
+const keyFor = (account: string) => `${KEY}:${account}`;
+export { setChatAccount, getChatAccount };
 
 export const loadSession = (address?: string): ChatSession | null => {
+  const chatAccount = getChatAccount();
+  if (!chatAccount) return null;
   try {
-    const s = JSON.parse(localStorage.getItem(KEY) || 'null') as ChatSession | null;
+    const s = JSON.parse(localStorage.getItem(keyFor(chatAccount)) || 'null') as ChatSession | null;
     if (!s?.token || !s.handle) return null;
+    if (s.account && s.account !== chatAccount) return null;
     if (address && s.address !== address) return null;
     return s;
   } catch {
@@ -677,8 +839,12 @@ export const SESSION_EVENT = 'bwallet:bchat-session';
 
 export const saveSession = (s: ChatSession | null) => {
   try {
-    if (s) localStorage.setItem(KEY, JSON.stringify(s));
-    else localStorage.removeItem(KEY);
+    const chatAccount = getChatAccount();
+    // No active account yet: nothing to store against (and nothing another account could pick up).
+    if (chatAccount) {
+      if (s) localStorage.setItem(keyFor(chatAccount), JSON.stringify({ ...s, account: chatAccount }));
+      else localStorage.removeItem(keyFor(chatAccount));
+    }
   } catch {
     /* storage unavailable */
   }

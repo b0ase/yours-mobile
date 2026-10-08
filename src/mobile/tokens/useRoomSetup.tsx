@@ -31,7 +31,11 @@ export const useRoomSetup = (
     exchangeRate = 0,
     onDone,
     issuer = true,
-  }: { exchangeRate?: number; onDone?: () => void; /** false: a holder, not the issuer: no bCorp fee. */ issuer?: boolean } = {},
+  }: {
+    exchangeRate?: number;
+    onDone?: () => void;
+    /** false: a holder, not the issuer: no bCorp fee. */ issuer?: boolean;
+  } = {},
 ) => {
   const { addSnackbar } = useSnackbar();
   const { apiContext } = useServiceContext();

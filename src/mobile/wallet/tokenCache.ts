@@ -17,7 +17,10 @@ export const loadTokenCache = <T>(id: string | undefined): T[] => {
 export const saveTokenCache = (id: string | undefined, tokens: unknown[]) => {
   if (!id) return;
   try {
-    localStorage.setItem(key(id), JSON.stringify(tokens, (_, v) => (typeof v === 'bigint' ? v.toString() : v)));
+    localStorage.setItem(
+      key(id),
+      JSON.stringify(tokens, (_, v) => (typeof v === 'bigint' ? v.toString() : v)),
+    );
   } catch {
     /* storage full or unavailable: no cache */
   }

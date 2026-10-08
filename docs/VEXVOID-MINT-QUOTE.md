@@ -23,11 +23,11 @@ BSV/USD is $20.13 (WhatsOnChain, 5 Oct 2026).
 
 ## Cost (network fee plus the 1% bWalletX fee)
 
-| Fee rate | All 70 files | 35 unique titles |
-|---|---|---|
+| Fee rate                        | All 70 files                | 35 unique titles            |
+| ------------------------------- | --------------------------- | --------------------------- |
 | **100 sat/kB (wallet default)** | **31,126,342 sats ≈ $6.27** | **16,993,096 sats ≈ $3.42** |
-| 10 sat/kB | 3,112,758 sats ≈ $0.63 | 1,699,371 sats ≈ $0.34 |
-| 1 sat/kB | 311,404 sats ≈ $0.06 | 170,002 sats ≈ $0.03 |
+| 10 sat/kB                       | 3,112,758 sats ≈ $0.63      | 1,699,371 sats ≈ $0.34      |
+| 1 sat/kB                        | 311,404 sats ≈ $0.06        | 170,002 sats ≈ $0.03        |
 
 ## Cheaper options
 

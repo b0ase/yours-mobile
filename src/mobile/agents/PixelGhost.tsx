@@ -23,12 +23,20 @@ const SKIRT_A = ['##.###..###.##', '#...##..##...#'];
 const SKIRT_B = ['####.####.####', '.##...##...##.'];
 // Eye whites (white) and pupils (blue), per glance direction.
 const WHITES = [
-  [3, 3, 2, 1], [2, 4, 4, 2], [3, 6, 2, 1],
-  [9, 3, 2, 1], [8, 4, 4, 2], [9, 6, 2, 1],
+  [3, 3, 2, 1],
+  [2, 4, 4, 2],
+  [3, 6, 2, 1],
+  [9, 3, 2, 1],
+  [8, 4, 4, 2],
+  [9, 6, 2, 1],
 ];
 
 const rects = (rows: string[], y0: number) =>
-  rows.flatMap((row, y) => [...row].flatMap((c, x) => (c === '#' ? [<rect key={`${x},${y0 + y}`} x={x} y={y0 + y} width={1.02} height={1.02} />] : [])));
+  rows.flatMap((row, y) =>
+    [...row].flatMap((c, x) =>
+      c === '#' ? [<rect key={`${x},${y0 + y}`} x={x} y={y0 + y} width={1.02} height={1.02} />] : [],
+    ),
+  );
 
 export const PixelGhost = ({ color, size = 28, title }: { color: string; size?: number; title?: string }) => (
   <svg

@@ -291,7 +291,10 @@ async function getJsonRetry<T>(url: string, timeoutMs: number): Promise<T> {
 type GpMarketRow = { id?: string; sym?: string; tick?: string; icon?: string | null };
 /** Fallback when the 1Sat overlay is down: every token with a live GorillaPool listing. */
 async function gorillaDirectory(): Promise<DirectoryToken[]> {
-  const rows = await getJson<GpMarketRow[]>('https://ordinals.gorillapool.io/api/bsv20/market?limit=300&dir=desc', 12_000);
+  const rows = await getJson<GpMarketRow[]>(
+    'https://ordinals.gorillapool.io/api/bsv20/market?limit=300&dir=desc',
+    12_000,
+  );
   const out = new Map<string, DirectoryToken>();
   for (const r of rows ?? []) {
     if (!r.id || out.has(r.id) || !parseRoom('bsv21', r.id)) continue;
@@ -666,7 +669,13 @@ export const tokenSales = (tokenId: string, limit = 60): Promise<Sale[]> =>
       `https://ordinals.gorillapool.io/api/bsv20/market/sales?id=${encodeURIComponent(tokenId)}&limit=${limit}&dir=desc`,
     );
     if (!r.ok) return [];
-    const rows = (await r.json()) as { amt: string; price: string; dec?: number; spendHeight?: number; height: number }[];
+    const rows = (await r.json()) as {
+      amt: string;
+      price: string;
+      dec?: number;
+      spendHeight?: number;
+      height: number;
+    }[];
     return rows
       .map((s) => {
         const tokens = Number(s.amt) / 10 ** (s.dec ?? 0);

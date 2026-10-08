@@ -18,18 +18,7 @@ import { decrypt } from '../utils/crypto';
 import type { Keys } from '../utils/keys';
 import type { SweepStep, SweepSelection, SweepTxResult, AddressScanStatus } from '../sweep/types';
 import { motion } from 'framer-motion';
-import {
-  Shield,
-  Lock,
-  AlertTriangle,
-  CheckCircle,
-  ExternalLink,
-  Loader2,
-  Coins,
-  Image,
-  Check,
-  X,
-} from 'lucide-react';
+import { Shield, Lock, AlertTriangle, CheckCircle, ExternalLink, Loader2, Coins, Image, Check, X } from 'lucide-react';
 import { checkUsbPresence } from '../services/usbPresence';
 
 const EXPLORER_BASE = 'https://bananablocks.com/tx/';

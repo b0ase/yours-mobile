@@ -193,7 +193,18 @@ describe('hide (spec §7.1)', () => {
     const T = 'ab'.repeat(32);
     const s = buildHideScript(T.toUpperCase());
     expect(s.chunks.slice(2).map((c) => Utils.toUTF8(c.data ?? []))).toEqual([
-      MP, 'SET', 'app', 'bChat', 'type', 'hide', 'v', '2', 'context', 'tx', 'tx', T,
+      MP,
+      'SET',
+      'app',
+      'bChat',
+      'type',
+      'hide',
+      'v',
+      '2',
+      'context',
+      'tx',
+      'tx',
+      T,
     ]);
     expect(Utils.toUTF8(buildHideScript(T, true).chunks[7].data ?? [])).toBe('unhide');
     expect(() => buildHideScript('nope')).toThrow();

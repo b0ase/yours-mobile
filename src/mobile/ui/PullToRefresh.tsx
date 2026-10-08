@@ -130,9 +130,7 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
       setPull(THRESHOLD);
       const t0 = Date.now();
       void Promise.resolve()
-        .then(() =>
-          Promise.race([Promise.resolve(cb.current()), new Promise((r) => setTimeout(r, MAX_HOLD_MS))]),
-        )
+        .then(() => Promise.race([Promise.resolve(cb.current()), new Promise((r) => setTimeout(r, MAX_HOLD_MS))]))
         .catch(() => undefined)
         .then(() => new Promise((r) => setTimeout(r, Math.max(0, MIN_SPIN_MS - (Date.now() - t0)))))
         .then(() => {

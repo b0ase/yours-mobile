@@ -582,4 +582,3 @@ const Tile = ({
     </span>
   </button>
 );
-

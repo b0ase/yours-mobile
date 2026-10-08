@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { FINAL_CODES, PENDING_MAX_AGE_MS, clearPending, errorCode, loadPending, parsePending, savePending, type PendingPaid } from './pending';
+import {
+  FINAL_CODES,
+  PENDING_MAX_AGE_MS,
+  clearPending,
+  errorCode,
+  loadPending,
+  parsePending,
+  savePending,
+  type PendingPaid,
+} from './pending';
 
 const store = new Map<string, string>();
 (globalThis as { localStorage?: unknown }).localStorage = {

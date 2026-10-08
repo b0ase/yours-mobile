@@ -56,7 +56,10 @@ export const WalletNames = () => {
           {n.kind === 'plain' ? <AtSign size={14} color="#98A2B3" /> : <BadgeCheck size={14} color="#F5B800" />}
           <span className="truncate">{n.paymail}</span>
           {n.main && (
-            <span className="text-[10px] font-bold rounded px-1.5 py-0.5" style={{ background: '#F5B80022', color: '#F5B800' }}>
+            <span
+              className="text-[10px] font-bold rounded px-1.5 py-0.5"
+              style={{ background: '#F5B80022', color: '#F5B800' }}
+            >
               MAIN
             </span>
           )}

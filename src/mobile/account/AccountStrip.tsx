@@ -22,7 +22,12 @@ export const AccountStrip = () => {
   const { account } = chromeStorageService.getCurrentAccountObject();
   const [open, setOpen] = useState(false);
   const { current, switchingTo, switchAccount } = useAccountSwitch(() => setOpen(false));
-  const names = useAccountNames(current, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '', false);
+  const names = useAccountNames(
+    current,
+    account?.name ?? '',
+    account?.settings?.socialProfile?.displayName ?? '',
+    false,
+  );
   const avatar = useAvatar(current);
   const many = chromeStorageService.getAllAccounts().length > 1;
   useBackClose(open && !switchingTo, () => setOpen(false));
@@ -38,10 +43,7 @@ export const AccountStrip = () => {
 
   return (
     <>
-      <div
-        className="bw-account-strip fixed left-0 w-full z-[11] flex items-center px-3"
-        data-testid="account-strip"
-      >
+      <div className="bw-account-strip fixed left-0 w-full z-[11] flex items-center px-3" data-testid="account-strip">
         <button
           type="button"
           onClick={() => many && setOpen((o) => !o)}
@@ -75,7 +77,12 @@ export const AccountStrip = () => {
             role="listbox"
             onClick={(e) => e.stopPropagation()}
           >
-            <AccountList current={current} switchingTo={switchingTo} onSwitch={(id) => void switchAccount(id)} compact />
+            <AccountList
+              current={current}
+              switchingTo={switchingTo}
+              onSwitch={(id) => void switchAccount(id)}
+              compact
+            />
           </div>
         </div>
       )}

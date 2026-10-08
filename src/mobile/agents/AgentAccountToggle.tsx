@@ -21,8 +21,8 @@ export const AgentAccountToggle = () => {
       <span className="flex-1">
         <span className="block text-sm font-bold text-white">Agent account {on ? '· on' : ''}</span>
         <span className="block text-xs" style={{ color: '#98A2B3' }}>
-          Your AI agents may use this account without asking each time. Its balance is their budget; your other
-          accounts are never touched.
+          Your AI agents may use this account without asking each time. Its balance is their budget; your other accounts
+          are never touched.
         </span>
       </span>
     </button>

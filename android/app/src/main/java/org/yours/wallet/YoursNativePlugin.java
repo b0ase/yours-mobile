@@ -2,6 +2,8 @@ package org.yours.wallet;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.Intent;
+import android.provider.Settings;
 import android.media.AudioManager;
 import android.media.AudioDeviceInfo;
 import android.content.SharedPreferences;
@@ -607,6 +609,19 @@ public class YoursNativePlugin extends Plugin {
         JSObject out = new JSObject();
         out.put("installer", installer);
         call.resolve(out);
+    }
+
+    /** Open this app's details page in Android Settings (Permissions lives there). */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getContext().getPackageName(), null));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not open Settings");
+        }
     }
 
     /** bWallet calls: loudspeaker on/off for WebRTC audio (src/mobile/calls/media.ts). */
