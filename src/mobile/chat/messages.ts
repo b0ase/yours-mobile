@@ -62,6 +62,26 @@ const ts = (iso: string | null | undefined) => {
  * edited version replace the one it supersedes, drop an optimistic copy once
  * its server row arrives (same author + body), and keep oldest-first order.
  */
+/**
+ * The bChat Lounge bot (bit-sign lib/lounge-bot-rules.ts): a server-written room event,
+ * author null, type `bot_message`. Only that exact shape gets the BOT badge, so a person's
+ * text that says "Lounge bot" is still drawn as their own bubble.
+ */
+export const isBotMessage = (
+  m: Pick<ChatMessage, 'kind' | 'author_handle' | 'event_type'> | null | undefined,
+): boolean => !!m && m.kind === 'event' && !m.author_handle && m.event_type === 'bot_message';
+
+/** A private bot reply (e.g. /help in the Lounge): returned by the send, never stored. */
+export const isEphemeral = (m: Pick<ChatMessage, 'id'> | null | undefined): boolean =>
+  !!m && m.id.startsWith('ephemeral:');
+
+/**
+ * Settle a send whose answer was a private bot reply: the typed command was never stored,
+ * so its optimistic bubble goes, and the reply is shown in its place.
+ */
+export const settleEphemeral = (current: ChatMessage[], localId: string, reply: ChatMessage): ChatMessage[] =>
+  current.filter((m) => m.localId !== localId && m.id !== reply.id).concat({ ...reply, pending: false, failed: false });
+
 export const mergeMessages = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
   // Edits keep the original's position: order by the chain root's time, which
   // must be read before the superseded original is dropped.
