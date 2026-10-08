@@ -165,6 +165,8 @@ Owner, 8 Oct 2026: every bApp's Feed is "what's the latest trending THING" — a
 "what tokens can I buy today (by clicking 'like' on whatever I like) that will fund the content I
 want to see more of". Feeds differ per app; the mechanic is shared.
 
+**Utility, not investment (owner, 8 Oct 2026):** "in every case… the tokens are buying access to a chat room that deals with that specific thing. They're utility tokens." Every item's token is the key to that item's token-gated room (bChat / bWalletX rooms, existing hold gates). A Like = a small buy of the key: you're in the $TICKER room, and the purchase funds the item.
+
 **Definition.** Feed = the app's trending items. **Like = a small, fixed purchase of that item's
 token**, which funds it. Ranking weights funding (likes paid, holders, recent backing) over views.
 
@@ -181,7 +183,7 @@ token**, which funds it. Ranking weights funding (likes paid, holders, recent ba
 - Like amount set once in bWalletX (default 1–10¢, user-adjustable, daily cap). One tap, no sheet
   under the cap; above it, the normal bWalletX approval.
 - The live balance ticks down (`bwallet:session-spend` / optimistic spend, docs/LIVE-BALANCE.md);
-  the item shows "you backed this".
+  the item shows "you're in the $TICKER room" with an Open room link.
 - The token lands in the user's wallet; the app's **Wallet slot** lists what they've backed there.
 - Item manifest fields the app supplies per card: `id`, `token` (BSV-21 id / $TICKER), `payee`
   rule, `title`, `media`. The shell renders the Like control and runs the purchase via BRC-100.
