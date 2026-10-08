@@ -12,6 +12,17 @@ import type { OneSatContext } from '@1sat/actions';
 import type { ChromeStorageService } from '../services/ChromeStorage.service';
 import type { ChromeStorageObject } from '../services/types/chromeStorage.types';
 import { HOSTED_YOURS_IMAGE } from '../utils/constants';
+import { PublicKey } from '@bsv/sdk';
+
+/** The identity address this wallet context signs as, or null (same check as mobile/names/accountName.ts). */
+const ctxIdentityAddress = async (ctx: OneSatContext): Promise<string | null> => {
+  try {
+    const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
+    return PublicKey.fromString(publicKey).toAddress();
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Resolve a 1sat:// protocol URI to a renderable HTTPS URL.
@@ -132,7 +143,12 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
         }
       }
 
-      if (isPublished) cacheToStorage(profile);
+      // Only cache into the account this wallet context signs as: right after a switch `apiContext` can still be the
+      // previous account's wallet, and its profile name / photo were written into the new account's settings
+      // (owner, 8 Oct 2026: richardwboase.gmail showed "b0ase" on Receive).
+      const { account } = chromeStorageService?.getCurrentAccountObject() ?? {};
+      if (isPublished && account && (await ctxIdentityAddress(apiContext)) === account.addresses.identityAddress)
+        cacheToStorage(profile);
       setState({ bapId, isPublished, profile, loading: false, error: null });
     } catch (err) {
       setState((s) => ({
@@ -141,7 +157,7 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
         error: err instanceof Error ? err.message : String(err),
       }));
     }
-  }, [apiContext, cacheToStorage]);
+  }, [apiContext, cacheToStorage, chromeStorageService]);
 
   useEffect(() => {
     loadIdentity();

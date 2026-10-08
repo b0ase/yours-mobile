@@ -24,10 +24,12 @@ import {
   EyeOff,
   PiggyBank,
   ShieldCheck,
+  LogOut,
 } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { saveSession } from '../chat/api';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
 import {
@@ -463,6 +465,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   };
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
+  const [chatSignedOut, setChatSignedOut] = useState(false);
   const paidLikes = PAID_LIKE_OPTIONS.map((v) => ({ id: v as number, label: money(v, rate) }));
   return (
     <>
@@ -482,6 +485,25 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             label="Verify your identity"
             description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
             onClick={() => void openDappBrowser(KYC_URL)}
+            isLast
+          />
+        </Section>
+      )}
+      {acct && (
+        <Section title="Chat">
+          <Row
+            icon={<LogOut size={16} />}
+            label="Sign out of chat"
+            description={
+              chatSignedOut
+                ? 'Signed out. Chat signs this account in again when you open it.'
+                : 'This account only: chat signs in fresh next time'
+            }
+            onClick={() => {
+              saveSession(null);
+              setChatSignedOut(true);
+            }}
+            isFirst
             isLast
           />
         </Section>

@@ -33,7 +33,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
-  const [proof, setProof] = useState(socialProof);
+  const identityAddress = account?.addresses?.identityAddress ?? '';
+  const [proof, setProof] = useState(() => socialProof(identityAddress));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [claimed, setClaimed] = useState('');
@@ -46,7 +47,6 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const [iconImage, setIconImage] = useState<File | null>(null);
   const iconInput = useRef<HTMLInputElement>(null);
   const iconPreview = iconImage ? URL.createObjectURL(iconImage) : socialAvatar;
-  const identityAddress = account?.addresses?.identityAddress ?? '';
   const claimedAlias = claimed.split('@')[0];
   const ticker = personalTicker(claimedAlias);
 
@@ -79,7 +79,7 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
       setMinting(false);
     }
   };
-  useEffect(() => onSocialChange(() => setProof(socialProof())), []);
+  useEffect(() => onSocialChange(() => setProof(socialProof(identityAddress))), [identityAddress]);
 
   const claim = async () => {
     if (!proof?.profile.alias) return;
@@ -197,7 +197,7 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
               <span className="text-white">yourname.x@{BWALLET_PAYMAIL_DOMAIN}</span>. It becomes this wallet's name,
               token and chat room.
             </p>
-            <SocialSignIn onProfile={() => setProof(socialProof())} />
+            <SocialSignIn owner={identityAddress} onProfile={() => setProof(socialProof(identityAddress))} />
             {proof?.profile.alias && (
               <button
                 onClick={() => void claim()}
