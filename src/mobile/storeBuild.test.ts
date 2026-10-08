@@ -400,3 +400,24 @@ describe('phone layout store gates', () => {
     }
   });
 });
+
+describe('BSPACES_ENABLED: bSpaces is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { BSPACES_ENABLED } = await import('./storeBuild');
+    expect(BSPACES_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BSPACES_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the tile, the route and the in-room banner sit behind the flag', () => {
+    expect(src('./BrowserPage.tsx')).toContain('BSPACES_ENABLED ? [AGENT_TILE, BSPACES_TILE] : [AGENT_TILE]');
+    expect(src('./tabs/MobileRoutes.tsx')).toContain(
+      "BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null",
+    );
+    expect(src('./tabs/ChatPage.tsx')).toMatch(/BSPACES_ENABLED && entry/);
+  });
+});

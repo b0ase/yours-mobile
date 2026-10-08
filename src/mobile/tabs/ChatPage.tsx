@@ -32,7 +32,15 @@ import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
 import { onRoomTicker, takeRoomTicker } from '../chat/segmentNav';
 import { RoomBell } from '../push/RoomBell';
-import { APP_NAME, MARKET_ENABLED, STORE_ROOM_NOTE, marketLabel, tokenRoomsEnabled } from '../storeBuild';
+import {
+  APP_NAME,
+  BSPACES_ENABLED,
+  MARKET_ENABLED,
+  STORE_ROOM_NOTE,
+  marketLabel,
+  tokenRoomsEnabled,
+} from '../storeBuild';
+import { LiveBanner } from '../spaces/LiveBanner';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -473,6 +481,10 @@ const Conversation = ({
         )}
       </div>
 
+      {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
+      {BSPACES_ENABLED && entry && (
+        <LiveBanner client={client} ticker={room.ticker} roomName={title} me={me} createdBy={room.created_by_handle} />
+      )}
       <div
         ref={scroller}
         onScroll={onScroll}

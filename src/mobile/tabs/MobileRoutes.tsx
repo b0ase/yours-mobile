@@ -2,10 +2,12 @@ import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
-import { MARKET_ENABLED } from '../storeBuild';
+import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
 const SettingsHub = lazy(() => import('./SettingsHub'));
+// bSpaces (Apps › bSpaces): bWalletX only, not even built into a store edition.
+const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
 const MarketPage = MARKET_ENABLED ? lazy(() => import('../market/MarketPage')) : null;
 const FeedTab = lazy(() => import('../feed/FeedTab'));
@@ -39,6 +41,7 @@ const MobileRoutes = () => (
         <Route path="games" element={<BrowserPage only="games" />} />
         <Route path="people" element={<PeopleScreen />} />
         {MarketPage && <Route path="market" element={<MarketPage />} />}
+        {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}
         {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
         <Route
           path="feed"

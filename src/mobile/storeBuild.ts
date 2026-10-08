@@ -105,6 +105,18 @@ export const radarGroupShown = (group: string, store = STORE_BUILD) =>
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
 export const STORE_ROOM_NOTE = 'Token rooms aren’t available in this version of bWallet.';
 
+/**
+ * bSpaces (docs/BSPACES-PLAN.md): live audio/video spaces inside token rooms, bWalletX only. Spaces
+ * live in token rooms, which a store build does not have, and live video to an audience needs
+ * Apple 1.2 / Play UGC moderation plus the paid-ticket decision first. Literal env check so Vite
+ * inlines it and Rollup drops the lazy SpacesPage chunk and the in-room banner.
+ */
+export const BSPACES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
 /** Wallet › Mint choices: tokens and media in a store build (no bCorp fee); no chatroom tickets. */
 export type MintChoice = 'ticket' | 'token' | 'media';
 export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>
