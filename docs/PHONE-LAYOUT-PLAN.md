@@ -312,56 +312,10 @@ export const peopleSellingEnabled = (store = STORE_BUILD) => !store; // Release 
 
 ## 14. Owner decisions (7 Oct 2026)
 - No extra button row: Android already has system nav buttons, so we don't duplicate them. Follow the iPhone ethos, "the best interface is no interface".
-- The **b** sits in the **middle of the dock** itself. Tap = HOME, ~~hold = agent overlay (Variant B)~~ (no hold since §14.1; the agent is Ask b in the top bar).
+- The **b** sits in the **middle of the dock** itself. Tap = HOME, hold = agent overlay (Variant B).
 - **Wallet is the main app**: leftmost dock slot by default, like the iPhone's Phone app.
-- ~~Default dock: Wallet · Send/Receive · **b** · Chat · Feed.~~ (superseded, §14.1) Agent is no longer a dock tile, because b covers it. The scrolling extras sit beyond the visible slots.
+- Default dock: Wallet · Send/Receive · **b** · Chat · Feed. Agent is no longer a dock tile, because b covers it. The scrolling extras sit beyond the visible slots.
 - Still plan only; build the b button first when the owner says go.
-
-### 14.1 First feedback on the iPhone preview (7 Oct 2026), now built
-- **Top bar is back, one compact row (h-14):** Accounts chooser + the page title (left) · **Ask b** (centre) · Calls · Media · Settings/Lock (right). The Settings menu keeps only Settings and Lock now.
-- **The b agent moves to the top bar centre** as an "Ask b" pill that opens the full /m/agent page (it handles the keyboard). A pill rather than a second b glyph, so it doesn't read as the dock's big b, which is Home.
-- **The big raised gold b stays in the dock centre** ("I DO like the big b button"). Tap = HOME, the app grid. No hold any more: holding b on iOS was swallowed by WKWebView, and the hold-b sheet sat under the keyboard. The hold-b sheet (AgentOverlay) is removed.
-- **A "b agent" tile** is first in the Apps grid; it opens /m/agent too.
-- **Default dock: Wallet · Exchange · ( b ) · Feed · Chat.** Exchange replaces Send/Receive, which lives on the Wallet page. **Store builds: Wallet · Apps · ( b ) · Feed · Chat** (no Exchange).
-- **Migration:** a saved dock that equals the old default exactly (Wallet · Send/Receive · Chat · Feed) becomes the new default. A dock the user changed in any way is never touched.
-- **HOME is just the app grid**, like an iPhone home screen: no balance card, no Send/Receive ("it spoils the effect"). The safeguard is now Wallet as the leftmost dock item by default, and Send/Receive on the Wallet page.
-- **Apps in the dock:** touch and hold any app on Apps or Home › **Add to Dock** (shown for every app, right under Open). Dock app items use the Apps-page tile style (the icon fills the rounded square).
-- **Keyboard:** the /m/agent page and phone sheets lift above the iOS keyboard (ui/keyboardInset.ts).
-
-### 14.2 Round 3 (owner on the iPhone, 7 Oct 2026), now built (supersedes the top bar and the no-hold rule in §14.1)
-- **Top bar, one row, icons only, evenly spaced:** Accounts chooser · Calls · **b** (round gold button, opens /m/agent) · Media · Settings. No page title. The separate account strip above it is gone in the phone layout; the account list is in the chooser.
-- **Hold on the dock's big b is back:** tap = HOME, touch and hold 500 ms = the full /m/agent page (not a sheet), with the composer focused on release where iOS allows. Built for WKWebView: touch events drive it (pointer events only for mouse/pen), no callout/selection, contextmenu blocked, a move over 10 px cancels; a gold ring fills while holding; tap and hold never both fire.
-- **HOME:** a fixed 4 × 6 page (24 slots) filling the space between the top bar and the dock, like an iPhone home page. Empty slots stay empty; more than 24 continue below. Scroll down for Your apps (+ Add app), then Recents (recently opened apps).
-
-
-### 14.3 Round 4 (owner, 7 Oct 2026), now built
-- **Top-bar b:** a solid gold b on its own (no circle); black on the store edition's yellow bar.
-- **iOS-style paging:** the page follows the finger, the neighbour page slides in beside it, rubber band at the ends, snap on release (~280 ms ease-out; commits past 35% of the width or on a flick). Axis locks after 10 px, so vertical scrolling is untouched. Dock and dot taps slide too. Transforms only; reduced motion = no slide. How: the routed page sits in `<PhonePage>` (patched round upstream's `<Routes>`), PhoneShell renders the neighbour from `phone/pager.tsx` in a PeekContext (its TopNav hides; the real bar is portalled to `<body>` so it never moves), and the route changes after the snap. Known limit: the neighbour is mounted for the drag and the page remounts once the route changes (no permanent track yet).
-- **Dock like the iPhone's:** 4 slots plus the fixed centre b. Wallet, Exchange, Feed and Chat (Apps in the store edition) are Home tiles that sit in the dock by default; each is in exactly one place. Touch and hold a dock item › Remove from Dock: it goes back on Home (screens first, apps back into the favourites). Touch and hold a Home tile › Add to Dock; when full, "The dock is full (4)". A dock saved before the limit (up to 12) is kept as it is and not trimmed; adding is refused until it is under 4. Migration rules unchanged.
-
-
-### 14.4 Round 5: Option B and keep-alive (owner, 7 Oct 2026), now built (supersedes the strip in §14.3)
-- **Only app screens swipe.** Home is screen 1; the user has as many as they like (Move to screen… › New screen adds one; an empty last screen goes away by itself). Each is the 4 × 6 grid; titles show in the dots row (the screen on show is a gold pill with its name; tap it to rename). Default titles: Home, then "Apps 2", "Apps 3"… unless renamed.
-- **Wallet, Exchange, Feed, Chat (and People) are pages**, not swipe screens: opened from their tiles or the dock, no swipe neighbours. Store default dock: Wallet · Apps (opens screen 2) · b · Feed · Chat.
-- **Defaults / migration:** Home = the saved Home favourites (or the default set); screen 2 "bApps" = the b agent then our bApps not on Home; screen 3 "Games" = the games. Third-party apps (Other apps, BSVRadar groups) are a catalogue under Home's Your apps and Recents: only apps not on a screen or in the dock are listed; touch and hold to place one.
-- **One place per tile:** a tile is on one screen or in the dock. Dock wins; taking an app out of the dock puts it in the first free slot; page tiles (Wallet first, then Exchange, Feed, Chat) are always somewhere: in the dock or on a screen (reconciled on every read, phone/appScreensStore.ts). Touch and hold › Move to screen… / Remove from screens / Add to Dock. Saved per device (`bwallet:app-screens:v1`).
-- **Keep-alive, no flicker:** `<PhonePage>` renders the app screens itself in one track over one still wallpaper (all mounted), and each page once opened stays mounted (hidden while another shows), so lists, scroll, images and state are as they were. Off-screen pages give up the bApp frame and hide their portalled room / backup step until shown. Icons decode async at a fixed size.
-- **Not done yet:** a page opened for the first time still loads its data as before (no cache-first rendering added); drag-to-move tiles between screens (menu only for now).
-
-
-### 14.5 Round 6 (owner, 7 Oct 2026), now built
-- **Wallet speed:** all cards show at once in the phone layout (no 70 ms-per-card fade-in queue); token balances render from a per-account cache, then refresh; Wallet, Feed and Chat are prewarmed (mounted hidden) at idle after the start; the Wallet route a cold start lands on is no longer mounted behind Home. Hidden kept pages use content-visibility: hidden.
-- **Smooth paging:** one transform write per frame on the track (rAF), width read once per drag, will-change only while dragging, only the neighbour screens paint during a drag; app screens mount current ± 1, then stay.
-- **Feed and Chat cache-first:** last posts / room list from localStorage at once (ui/listCache.ts), live data replaces them quietly.
-- **Pull down from the top of an app screen = the b agent** (70 px; a small b cue grows and turns gold; ignores the top 100 px and sideways swipes).
-- **Top bar:** Accounts · Calls · b · Media · **Lock** (locks at once; Settings is in the Accounts menu). Calls opens full screen.
-- **Wallet top row:** price · Buy BSV · History (store edition: price · History). Mint is gold like Send / Receive. Card gold is linear: clamp(bsv / 100, 0, 1).
-
-
-### 14.6 Round 8 (owner, 7 Oct 2026), now built: one vertical Apps page
-- Sideways paging was laggy on an old iPhone and confusing. The app screens are now **sections of one vertical Apps page**: Home, bApps, Games, the user's screens, then Your apps, Recents and the catalogue. Each section's name is a **sticky header** (solid background, no blur; tap to rename). Grids are 4 columns with rows flowing naturally (no 4 × 6 page, no filler slots).
-- The paging track, dots and sideways swipe stay in the code behind `APPS_PAGED` (phone/flag.ts, false) for later.
-- Kept: Move to section… / New section, Add / Remove from Dock, dock b tap = top of Apps (scrolls up if already there), hold = agent, pull down at scrollTop 0 = agent. Saved layouts are unchanged; screens simply show as sections. Icons decode async and load lazily.
 
 ## 15. The b button as voice agent (owner, 8 Oct 2026): build after Sign and seal
 

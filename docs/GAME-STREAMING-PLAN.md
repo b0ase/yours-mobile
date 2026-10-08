@@ -1,6 +1,12 @@
 # Game streaming into token rooms (owner, 8 Oct 2026; plan only)
 
-Example: the owner holds the **$FROGGER** token. Frogger is single-player, but play can be **livestreamed into the FROGGER room** as a Space: one person plays, holders watch, chat, react and tip. The same works for Arena (tokenblaster.lol) and every game in the Games catalogue.
+**Lead example: $ARENA** (the multiplayer arena game on tokenblaster.lol; owner, 8 Oct: "a much better example"). Matches are already happening between players, so the $ARENA room can show them **live without anyone streaming**: the game itself provides a spectator feed. Holders watch matches, chat, react and tip the players. Single-player games like **$FROGGER** use the streamer route below, where one person plays and holders watch.
+
+## Route 0 (best, for multiplayer games like Arena): spectator feed from the game
+- The game server already knows the full match state. It exposes a **spectator view**: a read-only page (`/spectate/<match>`) the room embeds in a "Watching now" panel, or a server-side render pushed as a video track into the room's Space.
+- No player's device or upload is involved, so it costs almost nothing compared with video, and it scales well (state updates, not video).
+- The room shows **live matches** ("🎮 LIVE: $a vs $b"), with the scoreboard, results posted as room event cards (see the room event-feeds idea), and tips to players.
+- Needs from tokenblaster.lol: a spectator endpoint (state over WebSocket) and a lightweight spectator renderer. Ours to build, since we own the game.
 
 ## How a game becomes a stream
 1. **Canvas capture (the main route, web games).** Most catalogue games (Frogger, Arena, …) render to a `<canvas>` inside the wallet's bApp frame. `canvas.captureStream(30)` gives a video track, plus the game's WebAudio via a MediaStreamDestination. The wallet publishes those as a LiveKit track in the room's Space. No screen-share prompt is needed, and only the game is sent, never notifications or other tabs.
@@ -21,7 +27,8 @@ Example: the owner holds the **$FROGGER** token. Frogger is single-player, but p
 ## Phases
 | # | What | Size |
 |---|---|---|
-| G1 | Canvas capture from our own catalogue games (Frogger first), stream mode in Spaces, "Go live" on the game page | M |
+| G0 | **$ARENA spectator feed**: live matches in the ARENA room (state-stream renderer, match cards, results as room events) | M |
+| G1 | Canvas capture from our own catalogue games (Frogger), stream mode in Spaces, "Go live" on the game page | M |
 | G2 | Screen/window share fallback (web + extension) | S |
 | G3 | Score overlay + room leaderboard | S–M |
 | G4 | Public spectator pages, replays (with recordings) | M |
