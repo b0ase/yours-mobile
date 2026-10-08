@@ -58,6 +58,7 @@ import {
   needsConfirm,
   payForMessage,
   recordSpent,
+  releasePayment,
   savePrefs,
   spentThisSession,
   totalRaw,
@@ -296,7 +297,7 @@ const Conversation = ({
   const [charge, setCharge] = useState<SpendCharge | null>(null);
   const [confirmSend, setConfirmSend] = useState<{ text: string; existing?: ChatMessage } | null>(null);
   /** A payment already made for an optimistic message: a retry reuses it (bit-sign is idempotent per txid). */
-  const paidFor = useRef(new Map<string, { beef: string; rule: string }>());
+  const paidFor = useRef(new Map<string, { beef: string; rule: string; txid: string }>());
   const entryKey = entry?.key ?? null;
   const loadCharge = useCallback(() => {
     if (!ROOMS || !entryKey) return;
@@ -415,11 +416,13 @@ const Conversation = ({
       let spend = paidFor.current.get(localId);
       if (!spend && pay && entryKey) {
         const p = await payForMessage(apiContext, { ticker: room.ticker, handle: me, text: body, charge: pay });
-        spend = { beef: p.beef, rule: pay.rule };
+        spend = { beef: p.beef, rule: pay.rule, txid: p.txid };
         paidFor.current.set(localId, spend);
-        recordSpent(entryKey, totalRaw(pay));
       }
-      return client.send(room.ticker, body, spend);
+      const saved = await client.send(room.ticker, body, spend && { beef: spend.beef, rule: spend.rule });
+      // Spent only now: bit-sign broadcast it and stored the message.
+      if (spend && pay && entryKey) recordSpent(entryKey, totalRaw(pay));
+      return saved;
     };
     go()
       .then((saved) => {
@@ -430,7 +433,10 @@ const Conversation = ({
         setMessages((cur) => cur.map((m) => (m.localId === localId ? { ...m, failed: true } : m)));
         // Priced room: needs payment (402) or the price changed (409). Say so; refresh the price.
         if (e instanceof ChatApiError && (e.status === 402 || e.status === 409)) {
-          if ((e.data as { rule_changed?: unknown } | null)?.rule_changed) paidFor.current.delete(localId);
+          // Refused before broadcast: nothing was spent. Release the signed tx; the next send re-signs.
+          const signed = paidFor.current.get(localId);
+          paidFor.current.delete(localId);
+          if (signed) void releasePayment(apiContext, signed.txid);
           setError(e.message);
           loadCharge();
         } else if (!(e instanceof ChatApiError) && pay) setError(errText(e));

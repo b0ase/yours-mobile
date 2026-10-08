@@ -8,7 +8,10 @@ import {
   needsConfirm,
   parseSpendCharge,
   paymentOutputs,
+  payForMessage,
+  releasePayment,
   sha256Hex,
+  spendFloorError,
   type MessageCharge,
   type SpendCharge,
 } from './roomSpend';
@@ -100,5 +103,34 @@ describe('room spend: parsing the server', () => {
     expect(spendLabel(s, 'X', 0)).toBe('Spend 100 sats per message, to the issuer');
     expect(spendEnforced(s)).toBe(true);
     expect(spendEnforced({ amountRaw: '1', per: 'hour', to: 'burn' })).toBe(false);
+  });
+});
+
+describe('room spend: the wallet never broadcasts', () => {
+  test('sats payment is signed with noSend and returned for bit-sign to broadcast', async () => {
+    const calls: Array<{ options?: { noSend?: boolean } }> = [];
+    const ctx = {
+      wallet: {
+        createAction: async (a: { options?: { noSend?: boolean } }) => {
+          calls.push(a);
+          return { txid: 'ab'.repeat(32), tx: [1, 2, 3] };
+        },
+      },
+    } as never;
+    const r = await payForMessage(ctx, { ticker: 'CHAT', handle: 'alice', text: 'gm', charge: charge([sats]) });
+    expect(calls.length).toBe(1);
+    expect(calls[0].options?.noSend).toBe(true);
+    expect(r).toEqual({ beef: '010203', txid: 'ab'.repeat(32) });
+  });
+  test('a server refusal releases the signed tx (abortAction), so nothing is spent', async () => {
+    const aborted: string[] = [];
+    const ctx = { wallet: { abortAction: async (a: { reference: string }) => void aborted.push(a.reference) } } as never;
+    await releasePayment(ctx, 'cd'.repeat(32));
+    expect(aborted).toEqual(['cd'.repeat(32)]);
+  });
+  test('floors: 50 sats minimum, token rules any positive unit', () => {
+    expect(spendFloorError('sats', '49')).not.toBeNull();
+    expect(spendFloorError('sats', '50')).toBeNull();
+    expect(spendFloorError('token', '1')).toBeNull();
   });
 });

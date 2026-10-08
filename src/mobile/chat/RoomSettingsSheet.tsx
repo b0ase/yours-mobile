@@ -14,6 +14,7 @@ import { useBackClose } from '../backStack';
 import type { BchatClient, IssuerChallenge } from './api';
 import { issuerCandidates } from './holdings';
 import { findKeyFor, signBsmWith } from './issuerKey';
+import { spendFloorError } from './roomSpend';
 import {
   amountLabel,
   formatRaw,
@@ -187,6 +188,8 @@ export const RoomSettingsSheet = ({
             if (per !== 'message') throw new Error('Sats are charged per message');
             const sats = toRawAmount(spendAmt, 0);
             if (!sats) throw new Error('Spend must be a whole number of sats');
+            const floor = spendFloorError('sats', sats);
+            if (floor) throw new Error(floor);
             spend = { amountRaw: sats, per, to: 'issuer', unit: 'sats' };
           } else {
             const amountRaw = toRawAmount(spendAmt, dec);

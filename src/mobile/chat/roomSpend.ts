@@ -7,8 +7,10 @@
  *   commitment: OP_FALSE OP_RETURN <MAP> SET app bChat type room_pay
  *                 room <ticker> author <handle> body <sha256 hex of the text> rule <rule since>
  *
- * Pure helpers (tested in roomSpend.test.ts) + `payForMessage`, which builds and broadcasts the
- * tx through the wallet and returns its AtomicBEEF for the post.
+ * Pure helpers (tested in roomSpend.test.ts) + `payForMessage`, which builds and SIGNS the tx
+ * with `noSend` (the wallet never broadcasts it) and returns its AtomicBEEF. bit-sign verifies,
+ * broadcasts and only then stores the message; if it refuses, nothing was spent and
+ * `releasePayment` aborts the action so the wallet frees the inputs.
  */
 import { Hash, OP, P2PKH, PublicKey, Script, Utils } from '@bsv/sdk';
 import { BSV21 } from '@1sat/templates';
@@ -198,6 +200,23 @@ export function needsConfirm(c: SpendCharge, prefs: SpendPrefs, spent: bigint): 
 
 // ── building the transaction ──
 
+/** Sign, never broadcast: bit-sign broadcasts after it verifies (owner, 8 Oct 2026). */
+export const NO_SEND = { randomizeOutputs: false, noSend: true } as const;
+
+/** bit-sign refused the message: drop the unsent action so its inputs are spendable again. */
+export async function releasePayment(ctx: OneSatContext, txid: string): Promise<void> {
+  try {
+    await ctx.wallet.abortAction({ reference: txid });
+  } catch {
+    /* already gone, or the wallet frees it on its own */
+  }
+}
+
+/** Minimum charges (owner, 8 Oct 2026). Token rules: at least 1 raw unit. */
+export const SATS_FLOOR = 50;
+export const spendFloorError = (unit: 'token' | 'sats', raw: string): string | null =>
+  unit === 'sats' && BigInt(raw) < BigInt(SATS_FLOOR) ? `At least ${SATS_FLOOR} sats per message` : null;
+
 type ListedOutput = { outpoint: string; tags?: string[]; customInstructions?: string };
 
 /**
@@ -219,7 +238,7 @@ export async function payForMessage(
     const r = await ctx.wallet.createAction({
       description: `Message in $${commitment.room}`,
       outputs: planned,
-      options: { randomizeOutputs: false },
+      options: NO_SEND,
     });
     if (!r.tx || !r.txid) throw new Error('The wallet did not return the payment');
     return { beef: Utils.toHex(r.tx), txid: r.txid };
@@ -293,7 +312,7 @@ export async function payForMessage(
     inputBEEF,
     inputs: selected.map((o) => ({ outpoint: o.outpoint, inputDescription: 'Token input', unlockingScriptLength: 108 })),
     outputs,
-    options: { randomizeOutputs: false },
+    options: NO_SEND,
   });
   const spends = selected
     .map((o) => readAssetIdTag(o.tags))
@@ -301,10 +320,6 @@ export async function payForMessage(
     .map((id) => ({ basket: BSV21_BASKET, id }));
   const res = await executeTrackedAction(ctx.wallet, args, undefined, inputBEEF, undefined, { spends, permissionScheme: 'bsv21' });
   if (res.error || !res.tx || !res.txid) throw new Error(res.error || 'The wallet did not return the payment');
-  try {
-    await ctx.services.overlay.submitBsv21(res.tx, tokenId);
-  } catch {
-    /* bit-sign submits too */
-  }
+  // No overlay submit here: the tx is not on the network until bit-sign broadcasts it.
   return { beef: Utils.toHex(res.tx), txid: res.txid };
 }
