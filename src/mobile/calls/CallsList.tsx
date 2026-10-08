@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import {
   Ban,
   Loader2,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { PAID_CALLS_ENABLED } from '../storeBuild';
 import { asMenuItem } from '../tabs/tabs';
 import { bareName } from '../names/names';
 import { requestDm } from '../chat/segmentNav';
@@ -33,7 +34,7 @@ import {
   loadFavourites,
   loadHidden,
   parseDial,
-  PHONE_TABS,
+  phoneTabsFor,
   saveFavourites,
   saveHidden,
   toggleFavourite,
@@ -45,6 +46,10 @@ import {
 
 const GOLD = '#F5B800';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
+// bPhone screens are bWalletX only: the store bundle carries neither (Rollup drops the dead branch).
+const BPhoneSettings = PAID_CALLS_ENABLED ? lazy(() => import('./BPhoneSettings')) : null;
+const Directory = PAID_CALLS_ENABLED ? lazy(() => import('./Directory')) : null;
+const TABS = phoneTabsFor(PAID_CALLS_ENABLED);
 
 const when = (iso: string) => {
   const d = new Date(iso);
@@ -275,8 +280,8 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
 
   return (
     <div className="w-full px-4 flex flex-col gap-3">
-      <div role="tablist" className="flex rounded-full p-[3px] bg-[#121316] border border-[#1f2127]">
-        {PHONE_TABS.map((t) => (
+      <div role="tablist" className="flex rounded-full p-[3px] bg-[#121316] border border-[#1f2127] overflow-x-auto">
+        {TABS.map((t) => (
           <Pill
             key={t.id}
             on={tab === t.id}
@@ -474,6 +479,18 @@ export const CallsList = ({ onLeave }: { onLeave?: () => void } = {}) => {
             ))}
           </ul>
         </>
+      )}
+
+      {tab === 'experts' && Directory && (
+        <Suspense fallback={<Loader2 size={20} className="animate-spin self-center" color="#98A2B3" />}>
+          <Directory onLeave={onLeave} />
+        </Suspense>
+      )}
+
+      {tab === 'bphone' && BPhoneSettings && (
+        <Suspense fallback={<Loader2 size={20} className="animate-spin self-center" color="#98A2B3" />}>
+          <BPhoneSettings onLeave={onLeave} />
+        </Suspense>
       )}
 
       {tab === 'dial' && (

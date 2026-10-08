@@ -117,6 +117,20 @@ export const BSPACES_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
 
+/**
+ * bPhone paid calls (docs/BPHONE-PLAN.md): charging to receive a call, the directory of people who
+ * charge, and paying as you go. bWalletX only: the store edition keeps free voice and video calls
+ * but never shows price setting or paid dialling (Apple 3.1.1 / 3.1.3(d) to be settled with a
+ * reviewer first). Literal env check so Vite inlines it and Rollup drops the bPhone tab and the
+ * pay loop from the store bundle. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const PAID_CALLS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+export const paidCallsEnabled = (store = STORE_BUILD) => !store;
+
 /** Wallet › Mint choices: tokens and media in a store build (no bCorp fee); no chatroom tickets. */
 export type MintChoice = 'ticket' | 'token' | 'media';
 export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>

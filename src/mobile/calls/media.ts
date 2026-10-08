@@ -14,7 +14,11 @@ export interface MediaCallbacks {
   onDisconnected: () => void;
   /** The peer's camera started or stopped showing. */
   onRemoteVideo?: (on: boolean) => void;
+  /** A JSON message from the peer over the call's data channel (bPhone payment receipts). */
+  onData?: (msg: unknown) => void;
 }
+
+const DATA_TOPIC = 'bphone';
 
 /**
  * LiveKit media for one 1-to-1 call. Microphone always; camera only when the user turns it on
@@ -63,11 +67,20 @@ export class CallMedia {
     });
     // A peer turning the camera off mutes the publication rather than unpublishing it.
     const onMute = (pub: TrackPublication) => {
-      if (pub.kind === Track.Kind.Video && (pub as RemoteTrackPublication).track === this.remoteVideo) this.emitRemote();
+      if (pub.kind === Track.Kind.Video && (pub as RemoteTrackPublication).track === this.remoteVideo)
+        this.emitRemote();
     };
     room.on(RoomEvent.TrackMuted, onMute);
     room.on(RoomEvent.TrackUnmuted, onMute);
     room.on(RoomEvent.Disconnected, cb.onDisconnected);
+    room.on(RoomEvent.DataReceived, (payload: Uint8Array, _p, _k, topic?: string) => {
+      if (topic !== DATA_TOPIC || !this.cb?.onData || payload.byteLength > 4096) return;
+      try {
+        this.cb.onData(JSON.parse(new TextDecoder().decode(payload)));
+      } catch {
+        /* not ours */
+      }
+    });
     await room.connect(url, token, { autoSubscribe: true });
     await room.localParticipant.setMicrophoneEnabled(true);
     await room.startAudio().catch(() => undefined);
@@ -115,6 +128,15 @@ export class CallMedia {
     if (!t) return;
     await t.restartTrack({ facingMode: facing });
     if (this.localEl) t.attach(this.localEl);
+  }
+
+  /** Send a small JSON message to the peer (reliable; dropped silently when the room is gone). */
+  async sendData(msg: unknown) {
+    const room = this.room;
+    if (!room) return;
+    await room.localParticipant
+      .publishData(new TextEncoder().encode(JSON.stringify(msg)), { reliable: true, topic: DATA_TOPIC })
+      .catch(() => undefined);
   }
 
   async setMuted(muted: boolean) {

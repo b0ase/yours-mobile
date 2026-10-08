@@ -15,6 +15,7 @@ import {
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
+import { PAID_CALLS_ENABLED } from '../storeBuild';
 import {
   accept,
   bindVideo,
@@ -24,6 +25,7 @@ import {
   flipCamera,
   hangUp,
   setCallLabel,
+  setMneeKeyCount,
   startCalls,
   stopCalls,
   toggleCamera,
@@ -33,6 +35,8 @@ import {
 import { useCalls } from './useCalls';
 import { addFriend, isFriend } from './friends';
 import { END_TEXT, formatDuration, videoLayout, type CallState } from './machine';
+import { amountLabel } from './rateCard';
+import { PaidThroughLine, QuoteSheet, SpendLine } from './QuoteSheet';
 
 /**
  * App-wide call overlay (mounted next to MiniPlayer by vite.config.mobile.ts): starts the
@@ -86,6 +90,8 @@ const status = (s: CallState) => {
       return 'Calling…';
     case 'ringing-out':
       return 'Ringing…';
+    case 'quote':
+      return 'Before you call';
     case 'incoming':
       return 'Incoming bWallet call';
     case 'connecting':
@@ -119,6 +125,9 @@ export const CallScreen = () => {
   }, [inCall]);
 
   useEffect(() => setCallLabel(myName || undefined), [myName]);
+  // bPhone MNEE payments scan the account's deposit keys (the same count BsvWallet uses).
+  const maxKeyIndex = chromeStorageService?.getCurrentAccountObject?.()?.account?.settings?.maxKeyIndex;
+  useEffect(() => setMneeKeyCount((maxKeyIndex ?? 4) + 1), [maxKeyIndex]);
   useEffect(() => {
     if (isLocked || !apiContext?.wallet) return stopCalls();
     startCalls(apiContext);
@@ -207,7 +216,23 @@ export const CallScreen = () => {
         {(note || (cam && error && /camera/i.test(error) ? error : '')) && (
           <div className="text-xs text-[#F5B800]">{note || error}</div>
         )}
+        {PAID_CALLS_ENABLED && call.phase === 'active' && call.paying && (
+          <SpendLine meter={call.paying.meter} since={call.since} />
+        )}
+        {PAID_CALLS_ENABLED && call.phase === 'active' && call.charging && (
+          <PaidThroughLine
+            card={call.charging.card}
+            paidThroughS={call.charging.paidThroughS}
+            paidUnits={call.charging.paidUnits}
+            since={call.since}
+          />
+        )}
+        {PAID_CALLS_ENABLED && call.phase === 'active' && error && /payment/i.test(error) && (
+          <div className="text-xs text-[#ff6b6b]">{error}</div>
+        )}
       </div>
+
+      {PAID_CALLS_ENABLED && call.phase === 'quote' && <QuoteSheet s={call} />}
 
       {call.phase === 'incoming' && (
         <div className="flex flex-col items-center gap-8">
@@ -267,6 +292,12 @@ export const CallScreen = () => {
       {call.phase === 'ended' && (
         <div className="flex flex-col items-center gap-4 w-full px-8">
           {call.duration !== undefined && <div className="text-sm text-[#98A2B3]">{formatDuration(call.duration)}</div>}
+          {call.spent && (
+            <div className="text-sm" style={{ color: GOLD }}>
+              {amountLabel(call.spent.card.asset, call.spent.units)}{' '}
+              {call.spent.card.asset.kind === 'bsv' ? 'in BSV' : ''} · bPhone
+            </div>
+          )}
           {!isFriend(peer.key) && (
             <button
               className="w-full rounded-xl py-3 flex items-center justify-center gap-2 font-semibold"

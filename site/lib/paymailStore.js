@@ -28,7 +28,8 @@ function supabaseStore(env = process.env, f = fetch) {
       one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&limit=1`),
     // Every name that receives for this wallet (Settings › Identity shows them all).
     listByKey: async (k) =>
-      (await req(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&select=alias,kind&order=created_at.asc&limit=50`)) || [],
+      (await req(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&select=alias,kind&order=created_at.asc&limit=50`)) ||
+      [],
     getAliasByKeyKind: (k, kind) => one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.${q(kind)}&limit=1`),
     // Verified social names (alias ends .x / .gmail), for the bWalletX Market "X Accounts" filter.
     listSocial: async (suffix) =>
@@ -73,12 +74,59 @@ function supabaseStore(env = process.env, f = fetch) {
         headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify({ identity_key: k, apps, updated_at: new Date().toISOString() }),
       }),
+    // bPhone (migrations/20261008_bwallet_bphone.sql): rate card + listing per identity, and bookings.
+    getBphone: (k) =>
+      one(`bwallet_bphone_profiles?identity_key=eq.${q(k)}&select=identity_key,profile,updated_at&limit=1`),
+    setBphone: (k, profile) =>
+      req('bwallet_bphone_profiles?on_conflict=identity_key', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({
+          identity_key: k,
+          profile,
+          listed: profile.listing.listed === true,
+          category: profile.listing.category,
+          updated_at: new Date().toISOString(),
+        }),
+      }),
+    listBphone: async (category, limit) =>
+      (await req(
+        `bwallet_bphone_profiles?listed=is.true${category ? `&category=eq.${q(category)}` : ''}&select=identity_key,profile,updated_at&order=updated_at.desc&limit=${limit}`,
+      )) || [],
+    deleteBphone: async (k) => {
+      await req(`bwallet_bphone_profiles?identity_key=eq.${q(k)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    },
+    insertBooking: (row) =>
+      req('bwallet_bphone_bookings', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    getBooking: (id) => one(`bwallet_bphone_bookings?id=eq.${q(id)}&limit=1`),
+    listBookings: async (k) =>
+      (await req(`bwallet_bphone_bookings?or=(callee_key.eq.${q(k)},caller_key.eq.${q(k)})&order=at.asc&limit=200`)) ||
+      [],
+    updateBooking: (id, patch) =>
+      req(`bwallet_bphone_bookings?id=eq.${q(id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(patch),
+      }),
     // Unlink one name: its payment records go too (FK on alias). Callers refuse while any is uncollected.
     countUncollected: async (alias) =>
       ((await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&status=eq.received&select=reference`)) ?? []).length,
     deleteAlias: async (alias) => {
-      await req(`bwallet_paymail_payments?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
-      await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      await req(`bwallet_paymail_payments?alias=eq.${q(alias)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+      await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
     },
     deleteByKey: async (k) => {
       const del = async (table) =>

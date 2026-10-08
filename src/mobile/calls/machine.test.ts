@@ -156,7 +156,12 @@ test('formatDuration', () => {
 
 describe('video', () => {
   const activeVoice = () =>
-    run(IDLE, { type: 'DIAL', peer }, { type: 'PLACED', callId: 'c1' }, { type: 'REMOTE', callId: 'c1', status: 'active', at: 1 });
+    run(
+      IDLE,
+      { type: 'DIAL', peer },
+      { type: 'PLACED', callId: 'c1' },
+      { type: 'REMOTE', callId: 'c1', status: 'active', at: 1 },
+    );
 
   test('a voice call has no video and the audio-only layout', () => {
     const s = activeVoice();
@@ -214,5 +219,79 @@ describe('video', () => {
     const ring = run(IDLE, { type: 'RING_IN', call: incoming(), peer });
     expect(reduce(ring, { type: 'TOGGLE_CAMERA' })).toBe(ring);
     expect(videoLayout(ring)).toEqual({ remote: 'none', self: 'none' });
+  });
+});
+
+describe('bPhone: priced calls', () => {
+  const card = { amount: 2, per: 'minute', asset: { kind: 'bsv' } } as const;
+  const payTo = { paymail: 'alice@bwallet.space' };
+
+  test('quote → accept with a cap → metered dial; decline goes back to idle', () => {
+    const q = reduce(IDLE, { type: 'QUOTE', peer, card, payTo, video: true });
+    expect(q).toMatchObject({ phase: 'quote', card, payTo, video: true });
+    expect(busy(q)).toBe(true);
+    expect(reduce(q, { type: 'DECLINE_QUOTE' })).toBe(IDLE);
+    expect(reduce(q, { type: 'HANGUP', at: 1 })).toBe(IDLE);
+    let s = reduce(q, { type: 'ACCEPT_QUOTE', maxUnits: 60 });
+    expect(s).toMatchObject({
+      phase: 'dialing',
+      camera: true,
+      paying: { payTo, meter: { maxUnits: 60, paidUnits: 0 } },
+    });
+    s = run(s, { type: 'PLACED', callId: 'c1' }, { type: 'REMOTE', callId: 'c1', status: 'active', at: 1000 });
+    expect(s).toMatchObject({ phase: 'active', paying: { payTo } });
+    // The meter advances as payments go out; the ended screen says what was spent.
+    const meter = {
+      ...(s as Extract<typeof s, { phase: 'active' }>).paying!.meter,
+      paidUnits: 4.2,
+      paidThroughS: 130,
+      seq: 13,
+    };
+    s = reduce(s, { type: 'METER', meter });
+    expect(s).toMatchObject({ paying: { meter: { paidUnits: 4.2 } } });
+    s = reduce(s, { type: 'HANGUP', at: 131_000, reason: 'cap' });
+    expect(s).toMatchObject({ phase: 'ended', reason: 'cap', duration: 130_000, spent: { card, units: 4.2 } });
+  });
+
+  test('a quote cannot interrupt a call', () => {
+    const s = run(IDLE, { type: 'DIAL', peer }, { type: 'PLACED', callId: 'c1' });
+    expect(reduce(s, { type: 'QUOTE', peer, card, payTo })).toBe(s);
+  });
+
+  test('callee: accept with my rate, receipts advance paid-through once each, unpaid ends it', () => {
+    let s = run(
+      IDLE,
+      { type: 'RING_IN', call: incoming(), peer },
+      { type: 'ACCEPT', charging: card },
+      { type: 'MEDIA_UP', at: 0 },
+    );
+    expect(s).toMatchObject({ phase: 'active', charging: { card, paidThroughS: 0, seq: 0, paidUnits: 0 } });
+    const notice = { t: 'bphone.pay' as const, seq: 1, units: 0.34, throughS: 10, txid: null };
+    s = reduce(s, { type: 'RECEIPT', notice });
+    expect(s).toMatchObject({ charging: { paidThroughS: 10, seq: 1, paidUnits: 0.34 } });
+    expect(reduce(s, { type: 'RECEIPT', notice })).toBe(s); // a repeat
+    expect(reduce(s, { type: 'RECEIPT', notice: { ...notice, seq: 0, throughS: 99 } })).toBe(s); // out of order
+    s = reduce(s, { type: 'RECEIPT', notice: { ...notice, seq: 2, units: 0.33, throughS: 20 } });
+    expect(s).toMatchObject({ charging: { paidThroughS: 20, paidUnits: 0.67 } });
+    s = reduce(s, { type: 'HANGUP', at: 31_000, reason: 'unpaid' });
+    expect(s).toMatchObject({ phase: 'ended', reason: 'unpaid', spent: { card, units: 0.67 } });
+  });
+
+  test('a free call carries no meter and no spent line', () => {
+    const s = run(
+      IDLE,
+      { type: 'RING_IN', call: incoming(), peer },
+      { type: 'ACCEPT' },
+      { type: 'MEDIA_UP', at: 0 },
+      { type: 'HANGUP', at: 5 },
+    );
+    expect(s).toMatchObject({ phase: 'ended', reason: 'hung-up' });
+    expect((s as { spent?: unknown }).spent).toBeUndefined();
+    expect(
+      reduce(run(IDLE, { type: 'DIAL', peer }), {
+        type: 'RECEIPT',
+        notice: { t: 'bphone.pay', seq: 1, units: 1, throughS: 1, txid: null },
+      }).phase,
+    ).toBe('dialing');
   });
 });
