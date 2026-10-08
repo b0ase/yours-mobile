@@ -159,6 +159,45 @@ package bar.
 
 Rule: a slot an app has no use for is shown **disabled**, never removed — five slots always.
 
+## 4b. The Feed slot: like-to-fund
+
+Owner, 8 Oct 2026: every bApp's Feed is "what's the latest trending THING" — and the model is
+"what tokens can I buy today (by clicking 'like' on whatever I like) that will fund the content I
+want to see more of". Feeds differ per app; the mechanic is shared.
+
+**Definition.** Feed = the app's trending items. **Like = a small, fixed purchase of that item's
+token**, which funds it. Ranking weights funding (likes paid, holders, recent backing) over views.
+
+| bApp | Item in the feed | A Like funds |
+|---|---|---|
+| bMovies | films, clips | the film's $TICKER (made, extended, sequelled) |
+| bMusic | tracks, artists | the track or artist token |
+| bArt | pieces | the piece or the artist |
+| bBooks | books, chapters | the next chapter |
+| bGame | games, matches | the game or the player |
+| bChat | posts, rooms | the poster or the room token (paid likes already live, blog 024) |
+
+**Shared mechanics (in the shell package, so every app behaves the same):**
+- Like amount set once in bWalletX (default 1–10¢, user-adjustable, daily cap). One tap, no sheet
+  under the cap; above it, the normal bWalletX approval.
+- The live balance ticks down (`bwallet:session-spend` / optimistic spend, docs/LIVE-BALANCE.md);
+  the item shows "you backed this".
+- The token lands in the user's wallet; the app's **Wallet slot** lists what they've backed there.
+- Item manifest fields the app supplies per card: `id`, `token` (BSV-21 id / $TICKER), `payee`
+  rule, `title`, `media`. The shell renders the Like control and runs the purchase via BRC-100.
+- On chain: the purchase is a normal token buy; a bChatX-protocol `like` (MAP context tx) can be
+  written alongside so likes are visible across apps (peck.to etc.).
+
+**Wording rule (non-negotiable):** "fund", "back", "support", "you backed this" — never "invest",
+"returns", "earn", "price goes up". Keeps these tokens on the $402 side. Anything that pays holders
+revenue is $403 and needs KYC first (see docs/PAY-B-TO-BUILD.md token section, NO-APPRECIATION rule).
+
+**Store edition:** like-to-fund buys tokens, so it follows the existing store gating for token
+purchases (check docs/STORE-AUDIT.md); store builds may show likes as free reactions only.
+
+**Phase:** add as phase 4b (after the shell and bMovies adoption): Like control + shared purchase
+flow in `@bwalletx/connect/shell` (2–3 days), bMovies first, then bChat's paid likes moved onto it.
+
 ## 5. Phases
 
 | # | Ship | Effort |
@@ -173,6 +212,9 @@ Rule: a slot an app has no use for is shown **disabled**, never removed — five
 Each phase ships alone: 1–2 improve the web app without the wallet; 3 works with any manifest app.
 
 ## Owner questions
+
+- Like-to-fund: default Like amount (1¢? 5¢? 10¢?) and daily cap? Payee split per item (creator vs token treasury)? Free reactions in store builds?
+
 
 1. Option 2 (☰ + app icon) or Option 1 (app icon replaces ☰)?
 2. Inside a bApp, should the Wallet slot show the app's holdings only, or app holdings with a link
