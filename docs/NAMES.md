@@ -167,3 +167,22 @@ label a caller asserts is the full paymail, so callee verification is unambiguou
 
    (Or the same `update` via `pg_cron` if that extension is enabled.) Also monitor `paymail broadcast failed` logs.
    The endpoint has a per-instance rate limit and a cap of 200 destinations per alias per hour.
+
+## Name tokens (owner approved for the plan, 8 Oct 2026; plan only)
+
+A chosen name (e.g. `$richardwboase`, `$b0ase`) can be a **one-of-one token** that its owner holds, transfers or sells, like OpNS names or ENS. **The name moves. The identity never does.**
+
+- **Name token → identity key.** The token records which identity key the name points at, and only the token's holder can change that pointer.
+- **What never moves with a name:** the identity key and everything attached to it: rooms joined or owned, signed contracts, the KYC/"Verified" status and $401 strands, call history, friendships and loops, and messages already sent. On transfer, history stays with the old identity, shown under that identity's new name or its key.
+- **Anti-impersonation:**
+  - when a name changes owner, everyone who has dealt with the name sees "**$name is now a different person**" (in DMs, rooms and contacts);
+  - cached contacts pin identity keys, not names;
+  - calls and sends to a name confirm the identity if it changed recently.
+- **Placeholder handles** (`bwallet0126`, `yours-xxxx`) are never minted. Only names someone chooses are.
+- **Mechanics (to design):** an OpNS-style inscription, or a BSV-21 supply-1 token with a name→key pointer update signed by the holder. bit-sign and the paymail server resolve name → current pointer. The bChat handle and the paymail alias follow the pointer.
+- **UI:** the Identity map shows "name (token, transferable) → identity key (permanent, you) → derived keys". The name screen gets **Mint as token**, **Transfer**, and **Sell** (via the Market).
+- **Open questions:**
+  - fees and royalties on resale;
+  - reserved and brand names;
+  - how this works with X/Google-verified names (`.x` / `.gmail` names are proofs of a social account, so they probably stay non-transferable);
+  - a cool-down period before a newly bought name can be used to message the previous owner's contacts.
