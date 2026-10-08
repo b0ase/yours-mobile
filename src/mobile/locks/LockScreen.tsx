@@ -34,6 +34,7 @@ import {
 } from './schedule';
 import { claimMatured, createLock, freshRate, loadPlans, relock, savePlans, syncClaimed, walletLockOutpoints } from './lockApi';
 import { verifyLockTx, type VerifyResult } from './verify';
+import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
 import { CURVE_NAMES, DEFAULT_S_STEEPNESS, DEFAULT_STEEPNESS, curveLabel, parsePcts, type Curve, type CurveKind } from './curves';
 
 /**
@@ -154,15 +155,28 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   };
   /** null = automatic (extend for schedules over a year, else next). */
   const [surplusPick, setSurplusPick] = useState<SurplusTo | null>(null);
-  const pension = () => {
-    setKind('gradual');
-    setGmode('usd');
-    setFrequency('monthly');
-    setStart(dayInput(new Date(Date.now() + 3 * 365 * 86_400_000)));
+  const [templateUsed, setTemplateUsed] = useState<string | null>(null);
+  const [templateChecked, setTemplateChecked] = useState(false);
+  const applyTemplate = (t: LockTemplate) => {
+    const v = t.values(new Date());
+    const at = v.unlockOn ?? new Date(Date.now() + (v.startInDays ?? 30) * 86_400_000);
+    setKind(v.kind);
+    if (v.gmode) setGmode(v.gmode);
+    if (v.kind === 'once') setUnlockOn(dayInput(at));
+    else setStart(dayInput(at));
+    if (v.frequency) setFrequency(v.frequency);
+    if (v.customDays) setCustomDays(String(v.customDays));
     setUntil('count');
-    setCount('60');
-    setUsdPer('100');
-    if (!label) setLabel('Pension');
+    setCount(v.count != null ? String(v.count) : EMPTY_AMOUNTS.count);
+    setAmountBsv(v.amountBsv ?? EMPTY_AMOUNTS.amountBsv);
+    setUsdPer(v.usdPer ?? EMPTY_AMOUNTS.usdPer);
+    setBsvPer(v.bsvPer ?? EMPTY_AMOUNTS.bsvPer);
+    setCurveKind(v.curve?.kind ?? 'linear');
+    if (v.curve?.steep) setSteep(v.curve.steep);
+    setCustomPcts(v.curve?.custom ?? '');
+    setLabel(v.label);
+    setTemplateUsed(t.id);
+    setTemplateChecked(false);
   };
   const [typed, setTyped] = useState('');
   /** Soft check above 0.01 BSV: shown after Review, until answered. */
@@ -450,9 +464,31 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
           <Field label="Name (only you see this)">
             <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Savings 2027" />
           </Field>
-          <button type="button" onClick={pension} className="text-left rounded-2xl p-3 text-xs" style={{ ...cardStyle, color: MUTED }}>
-            <span className="text-white font-semibold">Pension template:</span> fills in example values ($100 a month for 5 years, from 3 years out). Check them before you review
-          </button>
+          <div className="flex flex-col gap-2">
+            <div className="text-xs" style={{ color: MUTED }}>Templates (fill in example values when tapped)</div>
+            <div className="flex flex-wrap gap-2">
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => applyTemplate(t)}
+                  className="rounded-full px-3 py-1.5 text-xs font-semibold"
+                  style={{ border: `1px solid ${templateUsed === t.id ? GOLD : LINE}`, color: templateUsed === t.id ? GOLD : '#fff', background: templateUsed === t.id ? '#2a1d00' : PANEL }}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+            {templateUsed && (
+              <div className="rounded-2xl p-3 text-xs flex flex-col gap-2" style={{ background: '#2a1d00', border: `1px solid ${GOLD}`, color: GOLD }}>
+                <span className="font-bold">{TEMPLATE_NOTE}</span>
+                <span style={{ color: '#F2F2F0' }}>{TEMPLATES.find((t) => t.id === templateUsed)?.blurb}</span>
+                <label className="flex items-center gap-2" style={{ color: '#F2F2F0' }}>
+                  <input type="checkbox" checked={templateChecked} onChange={(e) => setTemplateChecked(e.target.checked)} /> {TEMPLATE_CONFIRM}
+                </label>
+              </div>
+            )}
+          </div>
           <Seg value={kind} onChange={setKind} options={[['gradual', 'Gradual payouts'], ['once', 'One unlock date']]} />
           {kind === 'once' ? (
             <>
@@ -651,7 +687,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             </div>
           ) : (
             <button
-              disabled={!ok}
+              disabled={!ok || !reviewAllowed(entered, templateUsed != null, templateChecked)}
               onClick={() => (needsSizeCheck(schedule!.totalSats) ? setSizeAsk(true) : setView({ kind: 'confirm' }))}
               className={btn}
               style={{ background: GOLD, color: '#1a1300' }}

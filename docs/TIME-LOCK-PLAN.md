@@ -242,6 +242,23 @@ Build it, gated:
 3. **Curves** (decay, S, cliff X%), time-since-launch axis, FIFO, optional exemption tier, room-gate support for
    locked balances. About 1 week.
 
+## 12. Templates (built) and gift locks (coming)
+
+New Lock has a template picker (`src/mobile/locks/templates.ts`): Pension, Savings goal, Rainy-day fund,
+Allowance, Coupons ("your own BSV released in regular coupons, with the rest at the end", a custom curve),
+Tax pot (just before a deadline you choose; 31 January is only the example), Salary ($ target monthly) and
+Spend-down (front-loaded). The builder still starts empty; a template fills values only when tapped, is marked
+"Template: check the values", and Review stays disabled until "I have checked these values" is ticked. The
+0.01 BSV caution still runs at Review. Template copy is tested against interest/yield/returns wording.
+
+**Gift that unlocks later: coming, not built.** The Lock script can pay any pubkey hash, but today every lock
+goes to this wallet's own derived lock key (`lockAddress`), and claiming relies on the wallet's lock basket and
+key derivation. A gift needs: resolving the recipient's paymail/identity key to a lock pkh they can sign for,
+the recipient's wallet discovering the lock (it is not in their basket: index by their address or deliver the
+BEEF to them), a claim path in their wallet for a lock it did not create, and a receipt naming the recipient.
+Shipping before all of that works would lock coins the recipient cannot find. Plan it with BRC-100 output
+delivery (internalizeAction into the recipient's lock basket).
+
 ## Open questions for the owner
 
 Questions 1–5 were answered on 7 Oct (section 8). The inheritance questions are in section 9.
