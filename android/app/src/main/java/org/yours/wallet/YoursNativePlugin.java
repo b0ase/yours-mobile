@@ -370,6 +370,7 @@ public class YoursNativePlugin extends Plugin {
     private WebView browser;
     private TextView browserTitle;
     private OnBackPressedCallback browserBack;
+    private TextView browserBackButton;
     /** Fullscreen video view from WebChromeClient.onShowCustomView, laid over the browser. */
     private View browserFullscreen;
     private WebChromeClient.CustomViewCallback browserFullscreenCallback;
@@ -449,9 +450,9 @@ public class YoursNativePlugin extends Plugin {
             bar.setGravity(Gravity.CENTER_VERTICAL);
             bar.setPadding(dp(4), 0, dp(4), 0);
             TextView back = toolbarButton(activity, "‹", 26);
-            back.setOnClickListener((v) -> {
-                if (browser != null && browser.canGoBack()) browser.goBack();
-            });
+            back.setContentDescription("Back");
+            browserBackButton = back;
+            back.setOnClickListener((v) -> browserGoBack());
             browserTitle = new TextView(activity);
             browserTitle.setTextColor(Color.rgb(156, 163, 175));
             browserTitle.setTextSize(13);
@@ -538,6 +539,11 @@ public class YoursNativePlugin extends Plugin {
                         Uri uri = Uri.parse(pageUrl);
                         if (browserTitle != null) browserTitle.setText(uri.getHost() == null ? pageUrl : uri.getHost());
                     }
+
+                    @Override
+                    public void doUpdateVisitedHistory(WebView view, String pageUrl, boolean isReload) {
+                        updateBrowserBackLabel();
+                    }
                 }
             );
 
@@ -572,8 +578,7 @@ public class YoursNativePlugin extends Plugin {
                 @Override
                 public void handleOnBackPressed() {
                     if (browserFullscreen != null) exitBrowserFullscreen();
-                    else if (browser != null && browser.canGoBack()) browser.goBack();
-                    else closeBrowser();
+                    else browserGoBack();
                 }
             };
             activity.getOnBackPressedDispatcher().addCallback(activity, browserBack);
@@ -635,6 +640,38 @@ public class YoursNativePlugin extends Plugin {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Bar back and system back: native history, else the page's own history (single-page apps),
+     * else close the browser and return to the wallet.
+     */
+    private void browserGoBack() {
+        final WebView view = browser;
+        if (view == null) return;
+        if (view.canGoBack()) {
+            view.goBack();
+            return;
+        }
+        final String before = view.getUrl();
+        view.evaluateJavascript("history.length > 1 ? (history.back(), true) : false", (result) -> {
+            if (browser != view) return;
+            if (!"true".equals(result)) {
+                closeBrowser();
+                return;
+            }
+            view.postDelayed(() -> {
+                if (browser != view) return;
+                String after = view.getUrl();
+                if (after == null ? before == null : after.equals(before)) closeBrowser();
+            }, 300);
+        });
+    }
+
+    /** Back label: "Close" when back would leave the browser. */
+    private void updateBrowserBackLabel() {
+        if (browserBackButton == null || browser == null) return;
+        browserBackButton.setContentDescription(browser.canGoBack() ? "Back" : "Close");
+    }
+
     private void closeBrowser() {
         getActivity().runOnUiThread(() -> {
             if (browser == null) return;
@@ -645,6 +682,7 @@ public class YoursNativePlugin extends Plugin {
             browser = null;
             browserRoot = null;
             browserTitle = null;
+            browserBackButton = null;
             pendingReplies.clear();
             notifyListeners("browserClosed", new JSObject());
         });

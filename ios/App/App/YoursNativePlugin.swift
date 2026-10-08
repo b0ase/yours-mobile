@@ -461,6 +461,8 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
     private let provider: String
     private var webView: WKWebView!
     private let titleButton = UIButton(type: .system)
+    private let backButton = UIButton(type: .system)
+    private var observingBack = false
     private var pending: [String: (generation: Int, reply: (Any?, String?) -> Void)] = [:]
     /// Bumped on every main-frame navigation; replies meant for an older page are refused.
     private var generation = 0
@@ -496,13 +498,16 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         webView.uiDelegate = self
         // Off: edge swipes clash with bApp feed swipes. Back lives on the bar's back button.
         webView.allowsBackForwardNavigationGestures = false
+        webView.addObserver(self, forKeyPath: "canGoBack", options: [.new], context: nil)
+        observingBack = true
         #if DEBUG
         if #available(iOS 16.4, *) { webView.isInspectable = true }
         #endif
 
         let gray = UIColor(red: 156 / 255, green: 163 / 255, blue: 175 / 255, alpha: 1)
-        let back = UIButton(type: .system)
+        let back = backButton
         back.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        back.accessibilityLabel = "Close"
         back.tintColor = gray
         back.addTarget(self, action: #selector(goBack), for: .touchUpInside)
         let close = UIButton(type: .system)
@@ -548,6 +553,7 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         failPending("Browser closed")
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
         webView?.stopLoading()
+        if observingBack { webView?.removeObserver(self, forKeyPath: "canGoBack"); observingBack = false }
     }
 
     func respond(requestId: String, response: String) {
@@ -638,8 +644,36 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         return !bare(a).isEmpty && bare(a) == bare(b)
     }
 
+    /// Bar back: native history, else the page's own history (single-page apps), else close the
+    /// browser and return to the wallet (same as ×).
     @objc private func goBack() {
-        if webView.canGoBack { webView.goBack() }
+        if webView.canGoBack { return webView.goBack() }
+        let before = webView.url
+        webView.evaluateJavaScript("history.length > 1 ? (history.back(), true) : false") { [weak self] result, _ in
+            guard let self = self else { return }
+            guard (result as? Bool) == true else {
+                self.onClose?()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self = self else { return }
+                if self.webView.url == before { self.onClose?() }
+            }
+        }
+    }
+
+    /// "Back" vs "Close" for VoiceOver, kept in step with the history.
+    private func updateBackLabel() {
+        backButton.accessibilityLabel = webView.canGoBack ? "Back" : "Close"
+    }
+
+    override func observeValue(
+        forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?,
+        context: UnsafeMutableRawPointer?
+    ) {
+        if keyPath == "canGoBack" { updateBackLabel() } else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+        }
     }
 
     @objc private func closeTapped() { onClose?() }

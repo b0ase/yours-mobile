@@ -59,6 +59,10 @@ bWalletInset/48`. Detect the wallet with `bWallet/` or `YoursWalletMobile/` (unc
   autoplay needs no tap. On Android, the video fullscreen button works (back exits it).
 - **Gestures.** iOS edge-swipe back/forward is off so feed swipes are not stolen; back is the bar's
   back button (Android: system back).
+- **Back.** The bar's back button (and Android system back) goes back in the web view's history; if
+  there is none, it tries the page's own history (`history.back()`, for single-page apps) and, if the
+  URL has not changed after ~300 ms, closes the browser and returns to the wallet, same as ×. So back
+  always does something; at the root its accessibility label is "Close".
 - **New windows.** `target=_blank` / `window.open` to the same site (ignoring `www.`) load in place;
   another site opens in Safari / the default browser. Wallet approvals and the BRC-100 provider are
   unchanged.
