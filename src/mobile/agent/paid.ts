@@ -31,7 +31,8 @@ export type Quote = { quoteId: string; sats: number; payTo: string; expiresAt: n
 export interface PaidBackend {
   price(): Promise<PriceInfo>;
   quote(messages: AgentMessage[]): Promise<Quote>;
-  turn(quote: Quote, txid: string, messages: AgentMessage[], system: string): Promise<string>;
+  /** `beef` = the signed payment (hex BEEF / raw tx) so the server can verify + broadcast it without waiting on indexers. */
+  turn(quote: Quote, txid: string, messages: AgentMessage[], system: string, beef?: string): Promise<string>;
 }
 
 const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {});
@@ -110,12 +111,18 @@ export const refuseText = (reason: 'limit-off' | 'over-daily' | 'over-max', limi
       : 'That price is higher than bWallet allows for one message.';
 
 /** Body for the answer call. Only the transcript and the guide: never a key. */
-export const turnBody = (quote: Quote, txid: string, messages: AgentMessage[], system: string) => ({
+export const turnBody = (quote: Quote, txid: string, messages: AgentMessage[], system: string, beef?: string) => ({
   quoteId: quote.quoteId,
   txid,
   messages,
   system,
+  // The signed payment itself: the server checks it pays this quote and broadcasts it, so a
+  // fresh tx is never "not on the network yet". Older servers ignore it (txid-only fallback).
+  ...(beef && /^[0-9a-f]+$/i.test(beef) ? { beef } : {}),
 });
+
+/** Waits before re-asking when the server has not seen the payment yet (it also polls ~12 s itself). */
+export const NOT_YET_RETRY_MS = [3000, 6000] as const;
 
 /** bit-sign implementation over any JSON caller (the signed-in bChat client). */
 export const bitsignPaidBackend = (
@@ -129,6 +136,6 @@ export const bitsignPaidBackend = (
         chars: messages.reduce((n, m) => n + m.text.length, 0),
       }),
     ),
-  turn: async (quote, txid, messages, system) =>
-    parseTurn(await call('POST', '/api/bitsign/agent/turn', turnBody(quote, txid, messages, system))),
+  turn: async (quote, txid, messages, system, beef) =>
+    parseTurn(await call('POST', '/api/bitsign/agent/turn', turnBody(quote, txid, messages, system, beef))),
 });

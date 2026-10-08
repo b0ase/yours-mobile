@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AGENT_HANDOFF_EVENT, takeAgentDraft, takeAgentNote, takeAgentSend } from './handoff';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUp, Flag, Loader2, Mic } from 'lucide-react';
+import { ArrowUp, Flag, Loader2, Mic, X } from 'lucide-react';
 import { sendBsv } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -18,7 +18,15 @@ import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
 import { KeyScreen } from '../settings/AgentSettings';
 import { limitSats, loadSpend, recordSpend, spentToday, useAgentPrefs } from './agentPrefs';
-import { bitsignPaidBackend, formatPrice, payDecision, refuseText, type PaidBackend, type PriceInfo } from './paid';
+import {
+  NOT_YET_RETRY_MS,
+  bitsignPaidBackend,
+  formatPrice,
+  payDecision,
+  refuseText,
+  type PaidBackend,
+  type PriceInfo,
+} from './paid';
 import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
@@ -49,7 +57,28 @@ const MUTED = '#98A2B3';
  * A paid message whose payment went out but whose answer did not come back: retried, never re-paid.
  * Also saved on the device (pending.ts) so a reload or app restart resumes it (owner, 6 Oct 2026).
  */
-type Unanswered = PendingPaid & { txid: string };
+const MUTED_X = '#98A2B3';
+const NUDGE_KEY = 'bwallet.agent.keyNudgeDismissed';
+/** The own-key nudge, once dismissed, stays hidden for that account on this device. */
+const keyNudgeDismissed = (account: string | null | undefined) => {
+  try {
+    return !!account && !!JSON.parse(localStorage.getItem(NUDGE_KEY) || '{}')[account];
+  } catch {
+    return false;
+  }
+};
+const dismissKeyNudge = (account: string | null | undefined) => {
+  if (!account) return;
+  try {
+    const v = JSON.parse(localStorage.getItem(NUDGE_KEY) || '{}');
+    localStorage.setItem(NUDGE_KEY, JSON.stringify({ ...(v && typeof v === 'object' ? v : {}), [account]: true }));
+  } catch {
+    /* storage unavailable: it shows again next time */
+  }
+};
+
+/** `beef`: the signed payment, kept in memory only (not persisted) and sent with the turn. */
+type Unanswered = PendingPaid & { txid: string; beef?: string };
 
 const ConfirmSheet = ({
   sats,
@@ -245,9 +274,20 @@ export const AgentConversation = ({
   /** Ask for the answer with the quote + txid already paid. A failure that can never succeed clears the slot. */
   const answerPaid = async (u: Unanswered) => {
     setUnanswered(u);
-    savePending(u);
+    const { beef: _beef, ...persisted } = u;
+    savePending(persisted);
     try {
-      const text = await backend.turn(u.quote, u.txid, u.messages, system);
+      // A fresh payment can race the network: re-ask (same quote + txid, never a new payment) a couple of times first.
+      let text = '';
+      for (let i = 0; ; i++) {
+        try {
+          text = await backend.turn(u.quote, u.txid, u.messages, system, u.beef);
+          break;
+        } catch (e) {
+          if (errorCode(e) !== 'tx_not_found' || i >= NOT_YET_RETRY_MS.length) throw e;
+          await new Promise((r) => setTimeout(r, NOT_YET_RETRY_MS[i]));
+        }
+      }
       clearPending();
       setUnanswered(null);
       return text;
@@ -290,7 +330,8 @@ export const AgentConversation = ({
       throw new Error(getErrorMessage(res.error));
     }
     recordSpend(quote.sats);
-    return answerPaid({ ...pending, txid: res.txid });
+    const beef = res.tx?.length ? res.tx.map((b) => b.toString(16).padStart(2, '0')).join('') : undefined;
+    return answerPaid({ ...pending, txid: res.txid, beef });
   };
 
   // On open: resume a paid message whose answer had not arrived (reload / app restart). Same quote + txid: never re-paid.
@@ -412,6 +453,8 @@ export const AgentConversation = ({
     }
   };
 
+  const [nudgeHidden, setNudgeHidden] = useState(() => keyNudgeDismissed(accountId));
+  useEffect(() => setNudgeHidden(keyNudgeDismissed(accountId)), [accountId]);
   const today = spentToday(loadSpend(), Date.now());
   const status =
     prefs.mode === 'own'
@@ -440,7 +483,7 @@ export const AgentConversation = ({
       <button
         type="button"
         onClick={() => navigate('/m/settings')}
-        className="shrink-0 w-full px-4 py-1.5 text-[11px] font-semibold text-left border-0 overflow-hidden text-ellipsis whitespace-nowrap"
+        className="shrink-0 w-full px-4 py-1 text-[11px] leading-tight font-semibold text-left border-0 overflow-hidden text-ellipsis whitespace-nowrap"
         style={{ background: '#F5B800', color: '#1a1300' }}
       >
         {status}
@@ -448,16 +491,34 @@ export const AgentConversation = ({
 
       {/* Own-key nudge (owner, 5 Oct 2026): most people never find Settings › b agent. With their own key, messages
           go from this device straight to their AI provider instead of through bCorp's paid service. */}
-      {(prefs.mode !== 'own' || keyReady === false) && (
-        <button
-          type="button"
-          onClick={() => setKeyScreen(true)}
-          className="shrink-0 w-full px-4 py-1.5 text-[11px] font-semibold text-left border-0"
-          style={{ background: PANEL, color: GOLD, borderBottom: `1px solid ${LINE}` }}
+      {/* Shown until dismissed (✕), remembered per account on this device (owner, 8 Oct 2026: "a lot of text"). */}
+      {(prefs.mode !== 'own' || keyReady === false) && !nudgeHidden && (
+        <div
+          className="shrink-0 w-full flex items-center"
+          style={{ background: PANEL, borderBottom: `1px solid ${LINE}` }}
         >
-          More private: use your own AI key (Claude, OpenAI or OpenRouter). Messages go straight to them, not through
-          us. Add it here ›
-        </button>
+          <button
+            type="button"
+            onClick={() => setKeyScreen(true)}
+            className="flex-1 min-w-0 pl-4 py-1.5 text-[11px] font-semibold text-left border-0 bg-transparent"
+            style={{ color: GOLD }}
+          >
+            More private: use your own AI key (Claude, OpenAI or OpenRouter). Messages go straight to them, not through
+            us. Add it here ›
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => {
+              setNudgeHidden(true);
+              dismissKeyNudge(accountId);
+            }}
+            className="shrink-0 px-3 py-1.5 border-0 bg-transparent"
+            style={{ color: MUTED_X }}
+          >
+            <X size={14} />
+          </button>
+        </div>
       )}
       {keyScreen && (
         <KeyScreen

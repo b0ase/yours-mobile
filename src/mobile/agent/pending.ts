@@ -119,11 +119,14 @@ export const FINAL_CODES = new Set([
   'quote_expired',
   'bad_quote',
   'bad_txid',
+  'tx_rejected',
 ]);
 
 export const finalText = (code: string) =>
   code === 'quote_used'
     ? 'Your paid answer was sent but did not reach this device, and it can no longer be fetched. Contact bCorp support with the payment in Activity for a refund.'
-    : code === 'quote_expired'
-      ? 'The quote expired before your payment was seen. Contact bCorp support with the payment in Activity for a refund.'
-      : 'This paid message could not be answered. Contact bCorp support with the payment in Activity for a refund.';
+    : code === 'tx_rejected'
+      ? 'The network refused that payment, so it did not go through. Ask again to pay for a new answer.'
+      : code === 'quote_expired'
+        ? 'The quote expired before your payment was seen. Contact bCorp support with the payment in Activity for a refund.'
+        : 'This paid message could not be answered. Contact bCorp support with the payment in Activity for a refund.';

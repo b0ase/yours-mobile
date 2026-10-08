@@ -39,20 +39,25 @@ export const ConsentSheet = ({
       >
         <div className="flex items-center gap-2">
           <ShieldCheck size={20} color={GOLD} />
-          <span className="text-base font-bold text-white">Send your messages to {info.provider}?</span>
+          <span className="text-base font-bold text-white">Send messages to {info.provider}?</span>
         </div>
-        <p className="text-xs" style={{ color: MUTED }}>
-          b is an AI assistant run by a third party, {info.provider}. To answer you, what you type has to leave this
-          phone.
-        </p>
-        {row('Sent', SENT_TEXT)}
-        {row('Goes to', info.route)}
-        {target === 'paid' && row('Payment', PAID_EXTRA_TEXT)}
-        {row('Not sent', NOT_SENT_TEXT)}
-        <p className="text-[11px]" style={{ color: MUTED }}>
-          {info.provider} processes it under {info.terms}. Don’t type your recovery phrase or private keys. You can
-          withdraw this in Settings › b agent.
-        </p>
+        <p className="text-[13px] leading-snug text-white">{info.summary}</p>
+        {/* Every fact stays one tap away (store review needs them); collapsed so the sheet is short. */}
+        <details className="group">
+          <summary className="cursor-pointer select-none py-1 text-xs font-semibold" style={{ color: GOLD }}>
+            Details
+          </summary>
+          <div className="mt-1.5 flex flex-col gap-2.5">
+            {row('Sent', SENT_TEXT)}
+            {row('Goes to', info.route)}
+            {target === 'paid' && row('Payment', PAID_EXTRA_TEXT)}
+            {row('Not sent', NOT_SENT_TEXT)}
+            <p className="text-[11px]" style={{ color: MUTED }}>
+              {info.provider} processes it under {info.terms}. Don’t type your recovery phrase or private keys. You can
+              withdraw this in Settings › b agent.
+            </p>
+          </div>
+        </details>
         <button
           onClick={onAllow}
           className="mt-1 rounded-full py-3 text-sm font-bold"
