@@ -62,7 +62,8 @@ export const deviceBody = (o: {
 
 // ── Tap → where to go ──────────────────────────────────────────────────────────────────────────
 
-export type PushRoute = { segment: 'rooms' | 'dms'; ticker: string };
+/** 'signins' = Settings › Chat › Recent sign-ins (the "New sign-in to bChat" alert); ticker is ''. */
+export type PushRoute = { segment: 'rooms' | 'dms' | 'signins'; ticker: string };
 
 const TICKER_RE = /^[A-Z0-9_.-]{1,64}$/;
 const normTicker = (t: unknown): string | null => {
@@ -80,6 +81,7 @@ const truthy = (v: unknown) => v === true || v === 'true' || v === '1';
 export const routeFromData = (data: Record<string, unknown> | null | undefined): PushRoute | null => {
   if (!data || typeof data !== 'object') return null;
   if (data.kind === 'call') return null;
+  if (data.kind === 'sign_in') return { segment: 'signins', ticker: '' };
   let ticker = normTicker(data.ticker) ?? normTicker(data.room);
   if (!ticker && typeof data.url === 'string') {
     const m = /\/room\/([^/?#]+)/.exec(data.url);
@@ -93,6 +95,7 @@ export const routeFromData = (data: Record<string, unknown> | null | undefined):
 export const routeToQuery = (r: PushRoute) => `push=${r.segment}:${encodeURIComponent(r.ticker)}`;
 export const routeFromQuery = (search: string): PushRoute | null => {
   const v = new URLSearchParams(search).get('push');
+  if (v === 'signins:' || v === 'signins') return { segment: 'signins', ticker: '' };
   const m = v ? /^(rooms|dms):(.+)$/.exec(v) : null;
   const ticker = m ? normTicker(m[2]) : null;
   return m && ticker ? { segment: m[1] as PushRoute['segment'], ticker } : null;

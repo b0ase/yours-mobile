@@ -12,7 +12,7 @@
  * back to fetch. Both are behind an injectable `Http` for tests.
  */
 import { parseHistorySetting, type HistorySetting, type HistoryVisibility } from './history';
-import { CapacitorHttp } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { getChatAccount, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
 import type { ChatMessage, ChatRoom } from './messages';
 
@@ -90,6 +90,22 @@ export interface ChatSigner {
   address: () => Promise<string>;
   sign: (message: string) => Promise<{ address: string; pubKey: string; sig: string }>;
 }
+
+export interface SignInItem {
+  at: string;
+  device: 'ios-app' | 'android-app' | 'browser';
+  newAccount: boolean;
+}
+
+/** Which kind of device is signing in, for the server's sign-in alert. */
+export const signInClient = (): SignInItem['device'] => {
+  try {
+    const p = Capacitor.getPlatform();
+    return p === 'ios' ? 'ios-app' : p === 'android' ? 'android-app' : 'browser';
+  } catch {
+    return 'browser';
+  }
+};
 
 export interface ChatSession {
   token: string;
@@ -198,6 +214,8 @@ export class BchatClient {
           pubkey_hex: signed.pubKey,
           signature: signed.sig,
           intent: 'sign-in',
+          // For the "New sign-in to bChat" alert only (bit-sign lib/sign-in-alert.ts); not used for auth.
+          client: signInClient(),
         },
         false,
       );
@@ -656,6 +674,22 @@ export class BchatClient {
   async agentCall(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
     if (!path.startsWith('/api/bitsign/agent/')) throw new Error('Not a b agent endpoint');
     return this.call(method, path, body);
+  }
+
+  /**
+   * Who the server says this token is (GET /api/bitsign/whoami). With `address`, also whether that wallet
+   * address is a credential of that handle (null when the server can't say). Wallet card mismatch chip.
+   */
+  async whoami(address?: string): Promise<{ handle: string; addressLinked: boolean | null }> {
+    const q = address ? `?address=${encodeURIComponent(address)}` : '';
+    const r = await this.call<{ handle?: string; address_linked?: boolean | null }>('GET', `/api/bitsign/whoami${q}`);
+    return { handle: r.handle ?? '', addressLinked: typeof r.address_linked === 'boolean' ? r.address_linked : null };
+  }
+
+  /** The last 10 sign-ins to this handle (GET /api/bitsign/me/sign-ins): Settings › Chat › Recent sign-ins. */
+  async signIns(): Promise<SignInItem[]> {
+    const r = await this.call<{ sign_ins?: SignInItem[] }>('GET', '/api/bitsign/me/sign-ins');
+    return Array.isArray(r.sign_ins) ? r.sign_ins : [];
   }
 
   /** Profile pictures for up to 50 handles (bit-sign /api/bitsign/avatars): handle → https URL. */

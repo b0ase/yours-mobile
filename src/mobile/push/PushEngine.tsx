@@ -4,6 +4,7 @@ import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { loadSession, SESSION_EVENT } from '../chat/api';
 import { requestRoomByTicker } from '../chat/segmentNav';
 import { asMenuItem } from '../tabs/tabs';
+import { requestSignIns } from '../settings/signIns';
 import { isNative } from '../native';
 import { routeFromQuery, type PushRoute } from './logic';
 import { onPushRoute, syncPush, takeRouteFrom } from './register';
@@ -36,6 +37,11 @@ const PushEngine = () => {
   // Tap → Chat tab → the room (or the DM) → open it.
   useEffect(() => {
     const go = (r: PushRoute) => {
+      if (r.segment === 'signins') {
+        handleSelect(asMenuItem('settings'));
+        requestSignIns();
+        return;
+      }
       handleSelect(asMenuItem('chat'));
       requestRoomByTicker(r.ticker, r.segment === 'dms');
     };
