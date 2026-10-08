@@ -222,3 +222,27 @@ The issuer can change this at any time. Each change is logged.
 **Costs:** replays are served as files or HLS from storage/CDN, not from LiveKit, so watching after the event is cheap. Live public viewing at scale goes through HLS egress or a CDN, not the SFU, so it ties into the LiveKit server plan.
 
 **Order:** scheduled Spaces → recording with consent → release to the room → public pages → paid replays → public live viewing.
+
+## Stage roles and control (owner questions, 8 Oct 2026, plan only)
+
+**Today:** the roles are host, speaker and listener. The host invites or demotes speakers. There is **no stage cap** (the server doesn't limit speakers), no co-host, no handoff and no moderators. A host who leaves leaves the Space hostless.
+
+**Plan:**
+- **Stage cap:** 8 on stage by default (host + 7) and 13 at most, enforced by the server. Video tiles: show up to 4 cameras at once, with the rest as audio tiles. This keeps phones and the SFU sane.
+- **Roles:** host > co-host > moderator > speaker > listener.
+  - **Co-host** (up to 2): everything the host can do except remove the host or end the Space. A co-host keeps the Space running if the host drops.
+  - **Moderator** (any number, appointed by the host or the room admin): can mute, remove someone from the stage, kick from the Space, and clear hands. Can't bring people on stage, unless the host allows it.
+- **Handoff:** "Make host" transfers hosting. If the host disconnects, a grace period of about 60s, then the co-host is promoted automatically. With no co-host, the Space ends after the grace period, with an "ended: host left" state, not a dangling room.
+- **Disruptors:**
+  - **Mute** (moderator or host; server-enforced through LiveKit track permissions, so the person can't simply unmute)
+  - **Remove from stage**
+  - **Kick** (can't rejoin this Space)
+  - **Block** (can't join any of this room's Spaces; ties to room bans)
+  - Listener-side **Report**, and **Hide** (local)
+  - Every action is logged with who did it.
+- **Video switching:**
+  - **Spotlight:** the host/co-host pins one camera as the main view for everyone ("director mode"); the others stay small.
+  - **Auto:** follow the active speaker (LiveKit active speakers), with a minimum hold of about 3s so it doesn't flicker.
+  - **Viewer choice:** tap a tile to pin it locally.
+  - **One person, several cameras:** e.g. a phone plus a desk camera; later, as a second device joining as the same handle.
+- **Order:** stage cap + host handoff + co-host (fixes hostless Spaces) → moderators + mute/remove/kick + log → block/report → spotlight/auto video → multi-camera.
