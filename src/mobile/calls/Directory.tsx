@@ -1,28 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Loader2, Phone, Video } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { BadgeCheck, CalendarClock, Loader2, Phone, Video } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { Avatar } from '../chat/ContactViews';
 import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import { Sheet } from '../phone/Sheet';
-import { fetchDirectory, requestBooking, type PeerBPhone } from './bphone';
+import { requestBooking, type PeerBPhone } from './bphone';
+import { SERVICE_CHIPS, servicesIn, type ServiceChip } from './phone';
 import { busy, type Peer } from './machine';
-import {
-  BOOKING_MINUTES,
-  bookingSlots,
-  CATEGORIES,
-  categoryLabel,
-  DAYS,
-  hoursLabel,
-  isOpenAt,
-  nextOpening,
-  rateShort,
-  type Category,
-} from './rateCard';
+import { BOOKING_MINUTES, bookingSlots, categoryLabel, DAYS, isOpenAt, nextOpening, rateShort } from './rateCard';
 import { dial } from './store';
 import { useCalls } from './useCalls';
 
 const GOLD = '#F5B800';
+const GREEN = '#2ecc71';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -32,117 +23,192 @@ const peerOf = (p: PeerBPhone): Peer => ({
   verified: !!p.paymail,
 });
 
+const serviceName = (p: PeerBPhone) => bareName(p.name ?? p.paymail ?? '') || p.key.slice(0, 10);
+
+/** "Open now" / "Opens Tue 09:00" / "Closed" for a listing at `now`. */
+const openLabel = (p: PeerBPhone, now: number): { text: string; open: boolean } => {
+  const { hours, timezone } = p.profile.listing;
+  if (isOpenAt(hours, timezone, now)) return { text: 'Open now', open: true };
+  const next = nextOpening(hours, timezone, now);
+  return { text: next ? `Opens ${DAYS[next.day]} ${next.from}` : 'Closed', open: false };
+};
+
+const Badge = ({ children, tone }: { children: ReactNode; tone: 'gold' | 'grey' }) => (
+  <span
+    className="inline-flex items-center gap-[3px] rounded-full px-[6px] py-[1px] text-[9px] font-bold shrink-0"
+    style={
+      tone === 'gold'
+        ? { background: 'rgba(245,184,0,0.12)', color: GOLD, border: '1px solid rgba(245,184,0,0.35)' }
+        : { background: '#1b1c20', color: '#a3a8b1', border: '1px solid #2b2f36' }
+    }
+  >
+    {children}
+  </span>
+);
+
+const Badges = ({ p }: { p: PeerBPhone }) =>
+  p.verified ? (
+    <span className="flex gap-1 flex-wrap">
+      {p.verified.kyc && (
+        <Badge tone="gold">
+          <BadgeCheck size={10} /> KYC Verified
+        </Badge>
+      )}
+      {p.verified.x && <Badge tone="grey">X</Badge>}
+      {p.verified.google && <Badge tone="grey">Google</Badge>}
+    </span>
+  ) : null;
+
+const ServiceCard = ({
+  p,
+  now,
+  inCall,
+  onCall,
+  onBook,
+}: {
+  p: PeerBPhone;
+  now: number;
+  inCall: boolean;
+  onCall: (video: boolean) => void;
+  onBook: () => void;
+}) => {
+  const { listing, rate } = p.profile;
+  const name = serviceName(p);
+  const status = openLabel(p, now);
+  return (
+    <article className="rounded-2xl border border-[#23262c] bg-[#121316] p-3 flex flex-col gap-2.5">
+      <div className="flex items-start gap-3">
+        <Avatar title={name} src={p.avatar} size={44} />
+        <div className="flex-1 min-w-0">
+          <div className={`text-[14px] font-semibold text-white ${CLIP}`}>{name}</div>
+          <div className={`text-[12px] text-[#c9ccd1] ${CLIP}`}>{listing.title || categoryLabel(listing.category)}</div>
+          <div className="mt-1">
+            <Badges p={p} />
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-[14px] font-bold" style={{ color: GOLD }}>
+            {rate ? rateShort(rate) : 'Free'}
+          </div>
+          <div
+            className="text-[11px] flex items-center justify-end gap-1"
+            style={{ color: status.open ? GREEN : '#98A2B3' }}
+          >
+            {status.open && <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: GREEN }} />}
+            {status.text}
+          </div>
+        </div>
+      </div>
+      {listing.about && <p className="text-[12px] text-[#a3a8b1] leading-snug line-clamp-2">{listing.about}</p>}
+      <div className="flex gap-2">
+        <button
+          className="flex-1 min-w-0 rounded-xl py-2 text-[13px] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40"
+          style={{ background: GOLD, color: '#1a1300' }}
+          disabled={inCall}
+          onClick={() => onCall(false)}
+        >
+          <Phone size={14} /> Call
+        </button>
+        <button
+          className="flex-1 min-w-0 rounded-xl py-2 text-[13px] font-semibold flex items-center justify-center gap-1.5 border border-[#2b2f36] text-white disabled:opacity-40"
+          disabled={inCall}
+          onClick={() => onCall(true)}
+        >
+          <Video size={14} color={GOLD} /> Video
+        </button>
+        <button
+          className="flex-1 min-w-0 rounded-xl py-2 text-[13px] font-semibold flex items-center justify-center gap-1.5 border border-[#2b2f36] text-white disabled:opacity-40"
+          disabled={!listing.booking}
+          title={listing.booking ? undefined : 'Not taking bookings'}
+          onClick={onBook}
+        >
+          <CalendarClock size={14} color={GOLD} /> Book
+        </button>
+      </div>
+    </article>
+  );
+};
+
 /**
- * Chat › Calls › Experts: everyone who has listed themselves in bPhone, with their rate, whether
- * they are open now, and Call / Book. The call itself goes through the normal dial, which shows
- * the rate and asks for a max spend before ringing.
+ * Chat › Calls › Services: everyone who has listed themselves in bPhone, with their rate, whether
+ * they are open now, and Call / Video / Book. The call goes through the normal dial, which shows
+ * the rate and asks for a max spend (QuoteSheet) before ringing. The list is fetched once by
+ * CallsList (the search box uses it too) and filtered here by category chip.
  */
-export const Directory = ({ onLeave }: { onLeave?: () => void }) => {
+export const Directory = ({
+  list,
+  error,
+  onListServices,
+  onLeave,
+}: {
+  list: PeerBPhone[] | null;
+  error: string;
+  onListServices: () => void;
+  onLeave?: () => void;
+}) => {
   const { call } = useCalls();
-  const [category, setCategory] = useState<Category | ''>('');
-  const [list, setList] = useState<PeerBPhone[] | null>(null);
-  const [error, setError] = useState('');
+  const [chip, setChip] = useState<ServiceChip>('all');
   const [booking, setBooking] = useState<PeerBPhone | null>(null);
   const inCall = busy(call);
   const now = Date.now();
-
-  useEffect(() => {
-    let live = true;
-    setList(null);
-    setError('');
-    fetchDirectory(f, category || null)
-      .then((l) => live && setList(l))
-      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
-    return () => {
-      live = false;
-    };
-  }, [category]);
+  const shown = useMemo(() => (list ? servicesIn(list, chip) : null), [list, chip]);
 
   return (
-    <div className="flex flex-col gap-3">
-      <select
-        className="rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
-        value={category}
-        onChange={(e) => setCategory(e.target.value as Category | '')}
+    <div className="flex flex-col gap-3 min-w-0">
+      <div
+        role="radiogroup"
         aria-label="Category"
+        className="flex gap-1.5 overflow-x-auto -mx-4 px-4"
+        style={{ scrollbarWidth: 'none' }}
       >
-        <option value="">All categories</option>
-        {CATEGORIES.map(([id, label]) => (
-          <option key={id} value={id}>
-            {label}
-          </option>
+        {SERVICE_CHIPS.map((c) => (
+          <button
+            key={c.id}
+            role="radio"
+            aria-checked={chip === c.id}
+            onClick={() => setChip(c.id)}
+            className="shrink-0 rounded-full px-3 py-[6px] text-[12px] font-semibold whitespace-nowrap"
+            style={
+              chip === c.id
+                ? { background: GOLD, color: '#1a1300' }
+                : { background: '#121316', color: '#a3a8b1', border: '1px solid #23262c' }
+            }
+          >
+            {c.label}
+          </button>
         ))}
-      </select>
-      {list === null && !error && (
+      </div>
+      {shown === null && !error && (
         <div className="flex justify-center py-8">
           <Loader2 size={20} className="animate-spin" color="#98A2B3" />
         </div>
       )}
       {error && <p className="text-xs text-[#ff6b6b]">{error}</p>}
-      {list && list.length === 0 && (
-        <p className="text-sm text-[#98A2B3] text-center py-8">Nobody listed here yet. List yourself under bPhone.</p>
+      {shown && shown.length === 0 && !error && (
+        <div className="flex flex-col items-center gap-3 py-10 text-center">
+          <p className="text-sm text-[#98A2B3]">No listings yet.</p>
+          <button
+            className="rounded-full px-4 py-2 text-[13px] font-semibold"
+            style={{ background: GOLD, color: '#1a1300' }}
+            onClick={onListServices}
+          >
+            List your services
+          </button>
+        </div>
       )}
-      {list?.map((p) => {
-        const { listing, rate } = p.profile;
-        const open = isOpenAt(listing.hours, listing.timezone, now);
-        const next = open ? null : nextOpening(listing.hours, listing.timezone, now);
-        const name = bareName(p.paymail ?? p.name ?? '') || p.key.slice(0, 10);
-        return (
-          <div key={p.key} className="rounded-2xl border border-[#2b2f36] p-3 flex flex-col gap-2">
-            <div className="flex items-center gap-3">
-              <Avatar title={name} src={p.avatar} size={44} />
-              <div className="flex-1 min-w-0">
-                <div className={`text-sm font-semibold text-white ${CLIP}`}>{listing.title || name}</div>
-                <div className={`text-[11px] text-[#98A2B3] ${CLIP}`}>
-                  {name} · {categoryLabel(listing.category)}
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <div className="text-sm font-bold" style={{ color: GOLD }}>
-                  {rate ? rateShort(rate) : 'Free'}
-                </div>
-                <div className="text-[11px]" style={{ color: open ? '#2ecc71' : '#98A2B3' }}>
-                  {open ? 'Open now' : next ? `Opens ${DAYS[next.day]} ${next.from}` : 'Closed'}
-                </div>
-              </div>
-            </div>
-            {listing.about && <p className="text-xs text-[#c9ccd1] leading-snug">{listing.about}</p>}
-            <div className="text-[11px] text-[#98A2B3]">{hoursLabel(listing.hours)}</div>
-            <div className="flex gap-2">
-              <button
-                className="flex-1 rounded-xl py-2 text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40"
-                style={{ background: GOLD, color: '#1a1300' }}
-                disabled={inCall}
-                onClick={() => {
-                  void dial(peerOf(p));
-                  onLeave?.();
-                }}
-              >
-                <Phone size={15} /> Call
-              </button>
-              <button
-                aria-label="Video call"
-                className="w-11 rounded-xl flex items-center justify-center border border-[#2b2f36] disabled:opacity-40"
-                disabled={inCall}
-                onClick={() => {
-                  void dial(peerOf(p), { video: true });
-                  onLeave?.();
-                }}
-              >
-                <Video size={16} color={GOLD} />
-              </button>
-              {listing.booking && (
-                <button
-                  className="flex-1 rounded-xl py-2 text-sm font-semibold flex items-center justify-center gap-1.5 border border-[#2b2f36] text-white"
-                  onClick={() => setBooking(p)}
-                >
-                  <CalendarClock size={15} color={GOLD} /> Book
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
+      {shown?.map((p) => (
+        <ServiceCard
+          key={p.key}
+          p={p}
+          now={now}
+          inCall={inCall}
+          onCall={(video) => {
+            void dial(peerOf(p), { video });
+            onLeave?.();
+          }}
+          onBook={() => setBooking(p)}
+        />
+      ))}
       {booking && <BookingSheet peer={booking} onClose={() => setBooking(null)} />}
     </div>
   );
