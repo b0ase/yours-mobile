@@ -213,6 +213,11 @@ flow in `@bwalletx/connect/shell` (2–3 days), bMovies first, then bChat's paid
 
 Each phase ships alone: 1–2 improve the web app without the wallet; 3 works with any manifest app.
 
+## Decisions
+
+- **Top left = ☰ then the app icon** (Option 2, owner 8 Oct 2026): ☰ (wallet menu) far left, the app icon to its right opens the app's Home/sections drawer, ✕ on the right closes the bApp.
+- Like-to-fund: 1¢ (one PNEE when held), $1/day cap; tokens are utility keys to each item's room.
+
 ## Owner questions
 
 - Like-to-fund: default Like = 1¢ (PNEE when held), daily cap $1 (100 likes) — both decided. Payee split per item (creator vs token treasury)? Free reactions in store builds?
