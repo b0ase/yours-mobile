@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bApp Shell Mock</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#000;color:#F2F2F0;font:14px -apple-system,system-ui,sans-serif}
+.phone{width:100vw;max-width:var(--w,100vw);height:100vh;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.strip{height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11px;color:#9a9a9a;background:#0A0B0D}
+.strip b{color:#F5B800}
+.row{height:56px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#0A0B0D;border-bottom:1px solid #1C1C1E}
+.btn{width:36px;height:36px;border-radius:50%;border:1px solid #2A2A2C;display:grid;place-items:center;color:#F5B800;flex:none}
+.btn svg{width:18px;height:18px}
+.app{border-color:#F5B800;background:#1a1405;font-weight:800;font-size:13px}
+.title{flex:1;font-weight:700;font-size:16px}.title small{color:#777;font-weight:500;font-size:11px;display:block}
+main{flex:1;overflow:hidden;padding:12px}
+.card{border-radius:14px;height:200px;background:linear-gradient(160deg,#3a1d0a,#120a2a);margin-bottom:10px;position:relative;padding:12px;display:flex;flex-direction:column;justify-content:flex-end}
+.card h3{font-size:17px}.card p{font-size:12px;color:#bbb}
+.tag{position:absolute;top:10px;left:10px;font-size:10px;background:#FFD24D;color:#000;padding:2px 6px;border-radius:6px;font-weight:700}
+.bar{height:88px;background:#0A0B0D;border-top:1px solid #1C1C1E;display:flex;align-items:flex-start;padding-top:10px}
+.slot{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;color:#F2F2F0}
+.slot svg{width:20px;height:20px;stroke:#F2F2F0}
+.slot.on{color:#FFD24D}.slot.on svg{stroke:#FFD24D}
+.b{width:52px;height:52px;border-radius:50%;background:#000;border:2px solid #FFD24D;display:grid;place-items:center;font:800 24px Georgia,serif;color:#FFD24D;margin-top:-4px}
+.drawer{position:absolute;top:84px;left:0;bottom:88px;width:78%;background:#0d0e10;border-right:1px solid #1C1C1E;padding:14px;display:none}
+.scrim{position:absolute;top:84px;left:0;right:0;bottom:88px;background:#0009;display:none}
+.open .drawer,.open .scrim{display:block}
+.drawer h4{font-size:11px;color:#777;letter-spacing:.08em;margin:10px 0 6px}
+.drawer a{display:block;padding:11px 10px;border-radius:10px;color:#F2F2F0;text-decoration:none;font-size:15px}
+.drawer a.cur{background:#1a1405;color:#FFD24D}
+.drawer hr{border:0;border-top:1px solid #1C1C1E;margin:10px 0}
+</style></head><body>
+<div class="phone" id="p">
+ <div class="strip"><span>9:41</span><span><b>$b0asex</b> · 0.4213 BSV</span></div>
+ <div class="row">
+  <div class="btn" title="bWalletX menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+  <div class="btn app" title="bMovies Home" onclick="p.classList.toggle('open')">bM</div>
+  <div class="title">bMovies ▾<small>bApp · bmovies.app</small></div>
+  <div class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></div>
+  <div class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+ </div>
+ <main>
+  <div class="card"><span class="tag">$NEONRAIN · +12%</span><h3>Neon Rain</h3><p>Trailer · 2:14 · 318 holders</p></div>
+  <div class="card" style="background:linear-gradient(160deg,#0a2a2a,#2a0a1a)"><span class="tag">NEW</span><h3>The Last Satoshi</h3><p>Released today · 41 comments</p></div>
+ </main>
+ <div class="scrim" onclick="p.classList.remove('open')"></div>
+ <nav class="drawer">
+  <h4>BMOVIES</h4>
+  <a class="cur">Home</a><a>Studio · Make</a><a>Timeline</a><a>Channels</a><a>Commission</a><a>Profile</a><a>Settings</a>
+  <hr><a style="color:#F5B800">← Back to bWalletX</a>
+ </nav>
+ <div class="bar">
+  <div class="slot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg>Wallet</div>
+  <div class="slot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg>Exchange</div>
+  <div class="slot"><div class="b">b</div></div>
+  <div class="slot on"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>Feed</div>
+  <div class="slot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 12a8 8 0 0 1-12 7l-5 1 1-4a8 8 0 1 1 16-4z"/></svg>Chat</div>
+ </div>
+</div>
+<script>var w=new URLSearchParams(location.search).get('w');if(w)document.documentElement.style.setProperty('--w',w+'px');if(location.hash==='#drawer')p.classList.add('open')</script>
+</body></html>
