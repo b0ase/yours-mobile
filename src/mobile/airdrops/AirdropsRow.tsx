@@ -5,6 +5,9 @@ import { useAirdrops } from './useAirdrops';
 
 const Inbox = lazy(() => import('./AirdropsInbox').then((m) => ({ default: m.AirdropsInbox })));
 
+// Layout matches the cards above it (HandleOnboarding, SweepPrompt): 92% wide, mt-4, rounded-2xl, no bottom
+// margin, so the Tokens / NFTs / Friends switch's own mt-6 is the gap below (it was mt-0 mb-3: flush on the card
+// above and 36px off the tabs).
 export const AirdropsRow = () => {
   const { badge, visible } = useAirdrops();
   const [open, setOpen] = useState(false);
@@ -13,7 +16,7 @@ export const AirdropsRow = () => {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-[92%] mb-3 flex items-center gap-3 rounded-xl px-4 py-3 border text-left"
+        className="w-[92%] mx-auto mt-4 flex items-center gap-3 rounded-2xl px-4 py-3 border text-left cursor-pointer"
         style={{ background: '#17191E', borderColor: '#2b2f36' }}
       >
         <Gift size={16} color="#FFD24D" />

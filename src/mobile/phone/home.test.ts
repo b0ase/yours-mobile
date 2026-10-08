@@ -17,7 +17,7 @@ describe('HOME', () => {
     }
   });
 
-  test('dock b: tap = Home, hold = the agent page; top bar is Accounts · Calls · b · Media · Lock BSV', () => {
+  test('dock b: tap = Home, hold = the agent page; top bar is Accounts · Calls · Airdrops · Media · Lock BSV', () => {
     const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
     expect(dock).toContain('onTouchStart');
     expect(dock).toContain('B_HOLD_MS');
@@ -30,7 +30,7 @@ describe('HOME', () => {
     const order = [
       'aria-label="Accounts menu"',
       'aria-label="Calls"',
-      "'b agent'",
+      '<AirdropsNavButton',
       'aria-label="Media"',
       'aria-label="Lock BSV"',
     ].map((l) => row.indexOf(l));
