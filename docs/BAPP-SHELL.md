@@ -216,6 +216,8 @@ Each phase ships alone: 1–2 improve the web app without the wallet; 3 works wi
 ## Decisions
 
 - **Top left = ☰ then the app icon** (Option 2, owner 8 Oct 2026): ☰ (wallet menu) far left, the app icon to its right opens the app's Home/sections drawer, ✕ on the right closes the bApp.
+- **bChatX keeps its chat-first bar** (Feed · Rooms · (b) · Spaces · DMs) as the declared exception.
+- **Unused slots are greyed out (disabled), never hidden**, so the bar always looks the same.
 - Like-to-fund: 1¢ (one PNEE when held), $1/day cap; tokens are utility keys to each item's room.
 
 ## Owner questions
