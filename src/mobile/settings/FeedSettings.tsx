@@ -25,6 +25,7 @@ import {
   PiggyBank,
   ShieldCheck,
   LogOut,
+  Network,
 } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
@@ -32,6 +33,7 @@ import { ConnectSocial } from './ConnectSocial';
 import { saveSession } from '../chat/api';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
+import { IdentityMap } from './IdentityMap';
 import {
   B_AGENT_DESC,
   MY_TOKENS_DESC,
@@ -450,6 +452,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'indexing'
     | 'bagent'
     | 'websites'
+    | 'idmap'
     | null
   >(null);
   const rate = useBsvUsd();
@@ -473,11 +476,18 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
         <Section title="Identity">
           <WalletNames />
           <Row
+            icon={<Network size={16} />}
+            label="Identity map"
+            description="Your identity key, the keys derived from it, and the names that point at them"
+            onClick={() => setScreen('idmap')}
+            isFirst
+          />
+          <Divider />
+          <Row
             icon={<BadgeCheck size={16} />}
             label="Connect X or Google"
             description="Get a verified name like yourname.x; it becomes the main name"
             onClick={() => setScreen('social')}
-            isFirst
           />
           <Divider />
           <Row
@@ -911,6 +921,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
+      {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
