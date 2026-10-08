@@ -71,7 +71,8 @@ export const replyRefFor = (m: ChatMessage): ReplyRef => ({
 export const isPrivateB = (m: ChatMessage) => Boolean((m.event_payload as { agent_private?: boolean } | null)?.agent_private);
 export const isShared = (m: ChatMessage) => Boolean((m.event_payload as { shared?: boolean } | null)?.shared);
 /** Server-only ids (`ephemeral:…`, e.g. /b help): nothing can be done to them. */
-export const isEphemeral = (m: ChatMessage) => m.id.startsWith('ephemeral:');
+// One definition (messages.ts, from feat/lounge-bot); re-exported for chat-ux callers.
+export { isEphemeral } from './messages';
 
 // ── $mentions (same rule as bit-sign lib/mentions.ts) ──
 

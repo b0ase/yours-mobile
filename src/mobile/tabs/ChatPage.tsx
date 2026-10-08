@@ -42,7 +42,6 @@ import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } fr
 import type { ReplyRef } from '../chat/api';
 import {
   applyMention,
-  isEphemeral,
   isPrivateB,
   isReactionEvent,
   isShared,
