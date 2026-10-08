@@ -14,8 +14,8 @@ import { roomTitle, type ChatRoom } from '../chat/messages';
 import { gateOfRoom } from '../chat/tokenRooms';
 import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
-import { InviteCard } from './InviteCard';
-import { isSpaceInviteCode } from './invite';
+import { InviteCard, type SpaceLink } from './InviteCard';
+import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
 
 const GOLD = '#FFD24D';
@@ -38,12 +38,25 @@ const SpacesPage = () => {
       start,
       admin: canHostRoom({ me, createdBy: room.created_by_handle }),
     });
-  // An invite link (inviteLinks.ts) lands here as ?invite=<code>.
+  // A link (inviteLinks.ts) lands here as ?invite=<code> (ephemeral) or ?space=<slug> (the Space page).
   const [params, setParams] = useSearchParams();
   const inviteCode = params.get('invite') ?? '';
+  const spaceSlug = params.get('space') ?? '';
+  const spaceLink: SpaceLink | null = isSpaceInviteCode(inviteCode)
+    ? { kind: 'invite', code: inviteCode }
+    : isSpaceSlug(spaceSlug)
+      ? { kind: 'space', slug: spaceSlug }
+      : null;
   const clearInvite = () => {
     const next = new URLSearchParams(params);
     next.delete('invite');
+    next.delete('space');
+    setParams(next, { replace: true });
+  };
+  const showSpacePage = (slug: string) => {
+    const next = new URLSearchParams(params);
+    next.delete('invite');
+    next.set('space', slug);
     setParams(next, { replace: true });
   };
 
@@ -91,12 +104,13 @@ const SpacesPage = () => {
         </button>
       </header>
 
-      {isSpaceInviteCode(inviteCode) && (
+      {spaceLink && (
         <InviteCard
           client={client}
-          code={inviteCode}
+          link={spaceLink}
           me={me}
           onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName })}
+          onOpenSpacePage={showSpacePage}
           onClose={clearInvite}
         />
       )}

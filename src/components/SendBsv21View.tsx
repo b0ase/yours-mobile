@@ -48,6 +48,11 @@ export type SendBsv21ViewProps = {
    * manual back press.
    */
   onBack: (sentAtomic?: bigint) => void | Promise<void>;
+  /**
+   * Opens the send form already filled (the token room invite sheet: recipient checked by the same
+   * NameInput, amount = the room's entry). The user still reviews and confirms here as usual.
+   */
+  prefill?: { address: string; amountInput: string };
 };
 
 type Bsv21Recipient = {
@@ -75,12 +80,14 @@ const newRecipient = (): Bsv21Recipient => ({
   amountInput: '',
 });
 
-export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
+export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) => {
   const { apiContext } = useServiceContext();
   const { theme } = useTheme();
   const { addSnackbar } = useSnackbar();
   const getTokenName = (b: { sym?: string }): string => b.sym || 'Null';
-  const [recipients, setRecipients] = useState<Bsv21Recipient[]>([newRecipient()]);
+  const [recipients, setRecipients] = useState<Bsv21Recipient[]>(() => [
+    prefill ? { ...newRecipient(), address: prefill.address, amountInput: prefill.amountInput } : newRecipient(),
+  ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [sendConfirmation, setSendConfirmation] = useState<{
     icon?: string;
@@ -102,7 +109,7 @@ export const SendBsv21View = ({ token, onBack }: SendBsv21ViewProps) => {
   const [copied, setCopied] = useState(false);
   const [selling, setSelling] = useState(false);
   // Recipient fields stay hidden until the owner taps Send (owner, 5 Oct 2026).
-  const [composing, setComposing] = useState(false);
+  const [composing, setComposing] = useState(!!prefill);
   const baseUrl = ONESAT_MAINNET_CONTENT_URL;
 
   const maxAmount = token.isConfirmed ? token.info.all.confirmed : token.info.all.pending;

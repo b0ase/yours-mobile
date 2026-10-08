@@ -43,7 +43,9 @@ import {
   type Participant,
   type SpaceState,
 } from './model';
-import { inviteShareText, parseSpaceInvite } from './invite';
+import { inviteShareText, parsePage } from './invite';
+import { InviteLinksPanel } from '../chat/InviteLinksPanel';
+import { shareLink } from '../chat/shareLink';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -594,28 +596,31 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvit
       </div>
     );
 
+  // Share (docs/BSPACES-PLAN.md, "Invite links and tickets"), host or room admin: the permanent
+  // Space page /s/<slug>, or an ephemeral invite /i/<code> with expiry and max uses, plus the list.
+  const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
-  // Invite link (docs/BSPACES-PLAN.md, "Invite links and tickets"): bit-sign mints it for the host or
-  // room admin; the native share sheet where there is one, else the clipboard. Must start in a tap.
-  const shareInvite = async () => {
+  const shareSpacePage = async () => {
     if (sharing) return;
     setSharing(true);
     try {
-      const inv = parseSpaceInvite(await client.spaceInvite(ticker));
-      if (!inv?.url) throw new Error('No link came back.');
-      const text = inviteShareText(inv);
-      if (navigator.share) {
-        await navigator.share({ title: inv.title, text, url: inv.url }).catch(() => undefined);
-      } else {
-        await navigator.clipboard?.writeText(text);
-        setNote('Invite link copied.');
-      }
+      const page = parsePage(await client.spacePageLink(ticker));
+      if (!page?.url) throw new Error('No link came back.');
+      const r = await shareLink({ title: page.title, text: inviteShareText(page), url: page.url });
+      if (r === 'copied') setNote('Space page link copied.');
+      if (r === 'failed') setNote(page.url);
     } catch (e) {
-      setNote(e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can invite.' : errText(e));
+      setNote(e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e));
     } finally {
       setSharing(false);
     }
   };
+  const createInvite = useCallback(
+    (opts: { expires_in: string; max_uses?: number }) => client.createSpaceInvite(ticker, opts),
+    [client, ticker],
+  );
+  const listInvites = useCallback(() => client.spaceInvites(ticker), [client, ticker]);
+  const revokeInvite = useCallback((code: string) => client.revokeSpaceInvite(ticker, code), [client, ticker]);
 
   const controls = phase === 'live' && (
     <div
@@ -707,14 +712,13 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvit
         </div>
         {phase === 'live' && (isHost || canInvite) && (
           <button
-            onClick={() => void shareInvite()}
-            disabled={sharing}
+            onClick={() => setShareOpen(true)}
             className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold"
-            style={{ border: `1px solid ${GOLD}`, color: GOLD, opacity: sharing ? 0.6 : 1 }}
-            aria-label="Share invite"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+            aria-label="Share"
           >
             <Share2 size={14} />
-            Share invite
+            Share
           </button>
         )}
       </header>
@@ -744,6 +748,45 @@ export const SpaceScreen = ({ client, ticker, roomName, me, startTitle, canInvit
         >
           {note}
         </button>
+      )}
+
+      {shareOpen && (
+        <div
+          className="absolute inset-0 flex items-end"
+          style={{ background: 'rgba(0,0,0,0.6)', zIndex: 20 }}
+          onClick={() => setShareOpen(false)}
+        >
+          <div
+            className="w-full rounded-t-2xl p-4 max-h-[85%] overflow-y-auto"
+            style={{ background: '#111215', paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-white font-semibold">Share</span>
+              <button onClick={() => setShareOpen(false)} className="p-1" aria-label="Close">
+                <X size={18} color={MUTED} />
+              </button>
+            </div>
+            <button
+              onClick={() => void shareSpacePage()}
+              disabled={sharing}
+              className="w-full h-11 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+            >
+              <Share2 size={15} /> Share Space page
+            </button>
+            <p className="mt-1 mb-4 text-[11px]" style={{ color: MUTED }}>
+              The permanent page for this Space: live now, ended later.
+            </p>
+            <InviteLinksPanel
+              create={createInvite}
+              list={listInvites}
+              revoke={revokeInvite}
+              title={title}
+              onNote={setNote}
+            />
+          </div>
+        </div>
       )}
 
       {invited && (
