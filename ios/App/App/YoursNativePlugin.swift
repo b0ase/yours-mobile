@@ -3,6 +3,7 @@ import AVFoundation
 import Capacitor
 import LocalAuthentication
 import Security
+import Speech
 import UIKit
 import WebKit
 
@@ -41,7 +42,12 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pushEnv", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "mediaAccess", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "mediaAccess", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechAvailable", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechStop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speechCancel", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "haptic", returnType: CAPPluginReturnPromise)
     ]
 
     private let storageService = "com.bitcoincorp.yourswalletmobile.storage"
@@ -154,6 +160,117 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Ask iOS for the microphone or camera before the web view opens it. This shows the system
     /// prompt (and creates the switch in Settings › Apps › bWallet) instead of relying on WebKit.
+    // MARK: - Speech (hold the dock's b to talk to b)
+
+    private var speechEngine: AVAudioEngine?
+    private var speechRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var speechTask: SFSpeechRecognitionTask?
+    private var speechText = ""
+    private var speechLastLevel = Date.distantPast
+
+    @objc func speechAvailable(_ call: CAPPluginCall) {
+        call.resolve(["available": SFSpeechRecognizer()?.isAvailable ?? false])
+    }
+
+    @objc func haptic(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            call.resolve()
+        }
+    }
+
+    /// Asks for speech recognition, then the mic (the first time), then listens. Resolves once listening:
+    /// { started: true } or { started: false, reason: 'denied' | 'unavailable' | 'error' }.
+    /// Events: speechPartial { text }, speechLevel { level 0..1 }.
+    @objc func speechStart(_ call: CAPPluginCall) {
+        SFSpeechRecognizer.requestAuthorization { auth in
+            guard auth == .authorized else { return call.resolve(["started": false, "reason": "denied"]) }
+            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                guard ok else { return call.resolve(["started": false, "reason": "denied"]) }
+                DispatchQueue.main.async { self.beginSpeech(call) }
+            }
+        }
+    }
+
+    private func beginSpeech(_ call: CAPPluginCall) {
+        endSpeech()
+        guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
+            return call.resolve(["started": false, "reason": "unavailable"])
+        }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            let engine = AVAudioEngine()
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            // On the phone where the device can: the audio never leaves it.
+            if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+                request.append(buffer)
+                self?.reportLevel(buffer)
+            }
+            speechText = ""
+            speechTask = recognizer.recognitionTask(with: request) { [weak self] result, _ in
+                guard let self = self, let result = result else { return }
+                self.speechText = result.bestTranscription.formattedString
+                self.notifyListeners("speechPartial", data: ["text": self.speechText])
+            }
+            engine.prepare()
+            try engine.start()
+            speechEngine = engine
+            speechRequest = request
+            call.resolve(["started": true])
+        } catch {
+            endSpeech()
+            call.resolve(["started": false, "reason": "error"])
+        }
+    }
+
+    private func reportLevel(_ buffer: AVAudioPCMBuffer) {
+        guard Date().timeIntervalSince(speechLastLevel) > 0.08, let data = buffer.floatChannelData?[0] else { return }
+        speechLastLevel = Date()
+        let n = Int(buffer.frameLength)
+        guard n > 0 else { return }
+        var sum: Float = 0
+        for i in 0..<n { sum += data[i] * data[i] }
+        let rms = sqrt(sum / Float(n))
+        notifyListeners("speechLevel", data: ["level": min(1, Double(rms) * 4)])
+    }
+
+    private func endSpeech() {
+        speechEngine?.inputNode.removeTap(onBus: 0)
+        speechEngine?.stop()
+        speechRequest?.endAudio()
+        speechEngine = nil
+        speechRequest = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Stops listening and resolves with the final text (a short wait lets the last words land).
+    @objc func speechStop(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.endSpeech()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.speechTask?.finish()
+                self.speechTask = nil
+                call.resolve(["text": self.speechText])
+            }
+        }
+    }
+
+    @objc func speechCancel(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.endSpeech()
+            self.speechTask?.cancel()
+            self.speechTask = nil
+            self.speechText = ""
+            call.resolve()
+        }
+    }
+
     @objc func mediaAccess(_ call: CAPPluginCall) {
         let type: AVMediaType = call.getString("kind") == "camera" ? .video : .audio
         switch AVCaptureDevice.authorizationStatus(for: type) {
@@ -344,6 +461,8 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
     private let provider: String
     private var webView: WKWebView!
     private let titleButton = UIButton(type: .system)
+    private let backButton = UIButton(type: .system)
+    private var observingBack = false
     private var pending: [String: (generation: Int, reply: (Any?, String?) -> Void)] = [:]
     /// Bumped on every main-frame navigation; replies meant for an older page are refused.
     private var generation = 0
@@ -367,21 +486,28 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         content.addScriptMessageHandler(WeakReplyHandler(self), contentWorld: .page, name: "yours")
         config.userContentController = content
         config.websiteDataStore = .default()
+        // bApps (bmovies.app feeds) play video inline with playsInline, and muted autoplay works.
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
         // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
         // bWalletChannel: ios-store or ios-private (Info.plist BWalletChannel, set by scripts/channel-build.sh).
         let channel = Bundle.main.object(forInfoDictionaryKey: "BWalletChannel") as? String ?? "ios-store"
-        config.applicationNameForUserAgent = "Mobile/15E148 bWallet/1 YoursWalletMobile/1 bWalletChannel/\(channel)"
+        config.applicationNameForUserAgent = "Mobile/15E148 bWallet/1 YoursWalletMobile/1 bWalletChannel/\(channel) bWalletInset/48"
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
+        // Off: edge swipes clash with bApp feed swipes. Back lives on the bar's back button.
+        webView.allowsBackForwardNavigationGestures = false
+        webView.addObserver(self, forKeyPath: "canGoBack", options: [.new], context: nil)
+        observingBack = true
         #if DEBUG
         if #available(iOS 16.4, *) { webView.isInspectable = true }
         #endif
 
         let gray = UIColor(red: 156 / 255, green: 163 / 255, blue: 175 / 255, alpha: 1)
-        let back = UIButton(type: .system)
+        let back = backButton
         back.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        back.accessibilityLabel = "Close"
         back.tintColor = gray
         back.addTarget(self, action: #selector(goBack), for: .touchUpInside)
         let close = UIButton(type: .system)
@@ -427,6 +553,7 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         failPending("Browser closed")
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
         webView?.stopLoading()
+        if observingBack { webView?.removeObserver(self, forKeyPath: "canGoBack"); observingBack = false }
     }
 
     func respond(requestId: String, response: String) {
@@ -493,17 +620,63 @@ final class DappBrowserViewController: UIViewController, WKNavigationDelegate, W
         titleButton.setTitle(webView.url?.host ?? "", for: .normal)
     }
 
-    /// target=_blank / window.open: keep it in this view.
+    /// target=_blank / window.open: same site loads in this view; another site opens in Safari.
     func webView(
         _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for action: WKNavigationAction, windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if action.targetFrame == nil, let url = action.request.url { webView.load(URLRequest(url: url)) }
+        guard action.targetFrame == nil, let url = action.request.url else { return nil }
+        let scheme = url.scheme?.lowercased() ?? ""
+        if ["https", "http"].contains(scheme), !Self.sameSite(url.host, webView.url?.host) {
+            UIApplication.shared.open(url)
+        } else {
+            webView.load(URLRequest(url: url))
+        }
         return nil
     }
 
+    /// Hosts match, ignoring a leading "www.".
+    static func sameSite(_ a: String?, _ b: String?) -> Bool {
+        func bare(_ h: String?) -> String {
+            let h = (h ?? "").lowercased()
+            return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+        }
+        return !bare(a).isEmpty && bare(a) == bare(b)
+    }
+
+    /// Bar back: native history, else the page's own history (single-page apps), else close the
+    /// browser and return to the wallet (same as ×).
     @objc private func goBack() {
-        if webView.canGoBack { webView.goBack() }
+        if webView.canGoBack {
+            webView.goBack()
+            return
+        }
+        let before = webView.url
+        webView.evaluateJavaScript("history.length > 1 ? (history.back(), true) : false") { [weak self] result, _ in
+            guard let self = self else { return }
+            guard (result as? Bool) == true else {
+                self.onClose?()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self = self else { return }
+                if self.webView.url == before { self.onClose?() }
+            }
+        }
+    }
+
+    /// "Back" vs "Close" for VoiceOver, kept in step with the history.
+    private func updateBackLabel() {
+        backButton.accessibilityLabel = webView.canGoBack ? "Back" : "Close"
+    }
+
+    override func observeValue(
+        forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?,
+        context: UnsafeMutableRawPointer?
+    ) {
+        if keyPath == "canGoBack" { updateBackLabel() } else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+        }
     }
 
     @objc private func closeTapped() { onClose?() }

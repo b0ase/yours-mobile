@@ -30,9 +30,12 @@ export const onChatSegment = (fn: () => void) => {
 /** Open the 1:1 with a bChat handle (from Calls): switches Chat to DMs, which takes the request. */
 const DM_EVENT = 'bwallet:chat-dm';
 let pendingDm: string | null = null;
+let pendingDraft: { handle: string; text: string } | null = null;
 
-export const requestDm = (handle: string) => {
+/** `draft` prefills that DM's composer once (e.g. "Re: $X airdrop" from the Airdrops inbox). */
+export const requestDm = (handle: string, draft?: string) => {
   pendingDm = handle;
+  pendingDraft = draft ? { handle: handle.replace(/^\$/, '').toLowerCase(), text: draft } : null;
   requestChatSegment('dms');
   try {
     window.dispatchEvent(new Event(DM_EVENT));
@@ -45,6 +48,14 @@ export const takeDmRequest = (): string | null => {
   const h = pendingDm;
   pendingDm = null;
   return h;
+};
+
+/** The pending composer draft if it is for this DM peer, else ''. Taken once. */
+export const takeDmDraft = (peer: string | null | undefined): string => {
+  if (!peer || !pendingDraft || pendingDraft.handle !== peer.replace(/^\$/, '').toLowerCase()) return '';
+  const t = pendingDraft.text;
+  pendingDraft = null;
+  return t;
 };
 
 export const onDmRequest = (fn: () => void) => {

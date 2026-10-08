@@ -6,7 +6,8 @@ import { PROVIDERS, type ProviderId } from './providers';
  * user is told who receives what and must allow it. Stored per provider on this device;
  * Settings › b agent can revoke it. Nothing is sent without it (AgentPage checks before every send).
  *
- * 'paid' = bWallet's pay-per-message mode: the message goes to bit-sign (bitcoinchat.online), which
+ * 'paid' = bWallet's pay-per-message mode: the message goes to bit-sign (BCHAT_ORIGIN, www.bitcoinchat.online —
+ * bChatX's server, also served as bchatx.com), which
  * forwards it to Anthropic on bCorp's key (bit-sign src/lib/paid-agent-server.ts).
  */
 export type ConsentTarget = 'paid' | ProviderId;
@@ -22,27 +23,33 @@ export type ConsentInfo = {
   /** Every party the text passes through, in order. */
   route: string;
   terms: string;
+  /** The one short line the sheet shows up front; the full facts sit under "Details". */
+  summary: string;
 };
+
+const KEEP = 'Your keys, balances, contacts and files never leave your wallet.';
 
 export const consentInfo = (t: ConsentTarget): ConsentInfo =>
   t === 'paid'
     ? {
         provider: 'Anthropic',
         route:
-          'bWallet’s server (bitcoinchat.online, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
+          'bChatX’s server (bitcoinchat.online / bchatx.com, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
         terms: 'Anthropic’s commercial terms and privacy policy (anthropic.com/legal)',
+        summary: `b is run by Anthropic. Your message and the last few messages go via bChatX’s server to Anthropic. ${KEEP}`,
       }
     : {
         provider: PROVIDERS[t].label,
         route: `${PROVIDERS[t].label} directly from your phone, using your own API key`,
         terms: `${PROVIDERS[t].label}’s terms and privacy policy for API use`,
+        summary: `b is run by ${PROVIDERS[t].label}. Your message and the last few messages go straight from your phone to ${PROVIDERS[t].label}, using your own key. ${KEEP}`,
       };
 
 /** What the sheet says is sent, and what is not. Kept here so the test can hold it to MAX_TURNS. */
 export const SENT_TEXT = `Your message and the recent conversation (up to the last ${MAX_TURNS} messages), plus bWallet’s fixed instructions to b.`;
-/** Pay-per-message also needs the payment proven: bWallet's server sees the txid and your bChat sign-in, not the provider. */
+/** Pay-per-message also needs the payment proven: bChatX's server sees the txid and your bChat sign-in, not the provider. */
 export const PAID_EXTRA_TEXT =
-  'To check your payment, bWallet’s server also receives the payment’s transaction id and your bChat sign-in. Anthropic does not.';
+  'To check your payment, bChatX’s server also receives the payment’s transaction id and your bChat sign-in. Anthropic does not.';
 export const NOT_SENT_TEXT =
   'Nothing else from your wallet: not your keys or recovery phrase, balances, addresses, contacts, chats or files.';
 

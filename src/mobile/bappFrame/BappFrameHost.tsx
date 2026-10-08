@@ -13,6 +13,8 @@ import {
   reloadBapp,
   subscribeBappFrame,
 } from './bappFrame';
+import { reportSessionSpend } from '../wallet/live/liveBus';
+import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import { isAllowedFrameOrigin, parseXdmRequest, toXdmResponse } from './frameBridge';
 import { BWX_CHANGED, answerBwx, isBwxOrigin, parseBwx, type BwxDeps } from './bwxBridge';
 import {
@@ -75,6 +77,11 @@ export const BappFrameHost = () => {
         return;
       }
       if (!isAllowedFrameOrigin(e.origin, BAPP_FRAME_ALLOWLIST)) return;
+      // Live balance: a framed bApp reporting spends from a session it funded (docs/LIVE-BALANCE.md). Display only.
+      if ((e.data as { type?: unknown } | null)?.type === SESSION_SPEND_TYPE) {
+        void reportSessionSpend(e.origin, e.data);
+        return;
+      }
       const req = parseXdmRequest(e.data);
       if (!req) return;
       const pageUrl = lastUrlFor(e.origin) ?? session.url;

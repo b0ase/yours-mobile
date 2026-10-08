@@ -79,6 +79,10 @@ describe('paid backend', () => {
     expect(await be.turn(q, 'tx', [{ role: 'user', text: 'hey' }], 'GUIDE')).toBe('hi');
     expect(calls.map((c) => c.path)).toEqual(['/api/bitsign/agent/quote', '/api/bitsign/agent/turn']);
     expect(Object.keys(turnBody(q, 'tx', [], 'g')).sort()).toEqual(['messages', 'quoteId', 'system', 'txid']);
+    expect(turnBody(q, 'tx', [], 'g', '0100beef').beef).toBe('0100beef');
+    expect(Object.keys(turnBody(q, 'tx', [], 'g', 'not hex!'))).not.toContain('beef');
+    await be.turn(q, 'tx', [{ role: 'user', text: 'hey' }], 'GUIDE', 'ABCDEF');
+    expect((calls[2].body as { beef?: string }).beef).toBe('ABCDEF');
     expect(JSON.stringify(calls)).not.toMatch(/sk-|api[_-]?key/i);
   });
 });

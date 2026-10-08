@@ -55,6 +55,18 @@ export interface YoursNativePlugin {
   /** iOS: which APNs gateway this build's push token is for (Debug builds → sandbox). */
   pushEnv(): Promise<{ env: 'production' | 'sandbox' }>;
 
+  /** Hold the dock's b to talk (agent/voice.ts): iOS SFSpeechRecognizer, Android SpeechRecognizer. */
+  speechAvailable(): Promise<{ available: boolean }>;
+  /** Asks for the mic / speech permission the first time; resolves once listening (or why not). */
+  speechStart(): Promise<{ started: boolean; reason?: 'denied' | 'asked' | 'unavailable' | 'error' }>;
+  /** Stops and resolves with the final transcript. */
+  speechStop(): Promise<{ text: string }>;
+  speechCancel(): Promise<void>;
+  /** A short haptic tick. */
+  haptic(): Promise<void>;
+
+  addListener(event: 'speechPartial', fn: (e: { text: string }) => void): Promise<PluginListenerHandle>;
+  addListener(event: 'speechLevel', fn: (e: { level: number }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'browserRequest', fn: (req: BrowserRequest) => void): Promise<PluginListenerHandle>;
   addListener(event: 'browserClosed', fn: () => void): Promise<PluginListenerHandle>;
 }
@@ -91,6 +103,12 @@ const web: Partial<YoursNativePlugin> = {
   async audioSetSpeaker() {},
   async installerPackage() {
     return { installer: null };
+  },
+  async speechAvailable() {
+    return { available: false };
+  },
+  async haptic() {
+    navigator.vibrate?.(15);
   },
 };
 

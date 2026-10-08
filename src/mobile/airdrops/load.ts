@@ -3,6 +3,7 @@ import { buildRows, ownOutputs, type RawTx } from '../wallet/txHistory';
 import { fetchAccountTxs, fetchLocalInfo, fetchTokenSymbols } from '../wallet/txHistoryFetch';
 import { classifyEvent, findListings } from '../wallet/historyEvents';
 import { loadItems, saveItems, toItems } from './inbox';
+import { noteForTx } from './note';
 import { poisonDataFrom, savePoisonData } from './poison';
 
 /** Refresh at most this often in the background (the badge); the inbox screen can force it. */
@@ -41,6 +42,10 @@ export const refreshAirdrops = (
     items = items.map((i) =>
       syms.get(i.asset.id)?.sym ? { ...i, asset: { ...i.asset, symbol: syms.get(i.asset.id)?.sym } } : i,
     );
+    items = items.map((i) => {
+      const n = noteForTx(byId.get(i.txid)?.vout, i.asset);
+      return n ? { ...i, note: n.text } : i;
+    });
     savePoisonData(account, poisonDataFrom(rows));
     saveItems(account, items, Date.now());
   })().finally(() => running.delete(account));

@@ -81,8 +81,9 @@ export const toRawTx = (t: WocTx): RawTx => ({
       n: o.n,
       sats: Math.round(o.value * 100_000_000),
       addresses: inner ? [inner] : listed,
-      // Enough for a BSV-20/21 inscription's JSON and the OrdLock prefix (historyEvents.ts).
-      script: hex.slice(0, 1200),
+      // Enough for a BSV-20/21 inscription's JSON and the OrdLock prefix (historyEvents.ts). OP_RETURN data
+      // (an airdrop note, airdrops/note.ts: up to 280 characters) is kept whole, up to 4,000 hex chars.
+      script: /^(006a|6a)/i.test(hex) ? hex.slice(0, 4000) : hex.slice(0, 1200),
     };
   }),
 });

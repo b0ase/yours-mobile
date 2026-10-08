@@ -79,3 +79,54 @@ export const PULL_TOP_ZONE = 100;
 /** 0..1 as the finger pulls; 1 = release opens the agent. */
 export const pullProgress = (pull: number) => Math.max(0, Math.min(1, pull / PULL_THRESHOLD));
 export const pullReached = (pull: number) => pull >= PULL_THRESHOLD;
+
+/**
+ * Press and hold the dock's b to talk to b (owner, 8 Oct 2026; same spec as bChatX's b in bit-sign).
+ * tap = HOME · hold B_HOLD_MS = listen (sheet, bars, live transcript) · release = send to b ·
+ * slide more than B_TALK_CANCEL_PX away, then release = cancel. Sliding back in before release keeps it.
+ * A move past B_HOLD_SLOP before the hold starts is a scroll or a miss: nothing happens.
+ */
+export const B_TALK_CANCEL_PX = 70;
+
+export type BHoldPhase = 'idle' | 'pressing' | 'listening' | 'cancelling';
+export type BHoldState = { phase: BHoldPhase; x: number; y: number };
+export type BHoldEvent =
+  | { type: 'down'; x: number; y: number }
+  | { type: 'move'; x: number; y: number }
+  | { type: 'timer' }
+  | { type: 'up' }
+  /** touchcancel / pointer leave / the app went to the background. */
+  | { type: 'abort' };
+/** What the Dock does: home = tap; listen = start the mic; send / cancel = end it. */
+export type BHoldEffect = 'none' | 'home' | 'listen' | 'send' | 'cancel';
+
+export const B_HOLD_IDLE: BHoldState = { phase: 'idle', x: 0, y: 0 };
+
+export const bHold = (s: BHoldState, e: BHoldEvent): { state: BHoldState; effect: BHoldEffect } => {
+  const idle = (effect: BHoldEffect) => ({ state: B_HOLD_IDLE, effect });
+  const stay = { state: s, effect: 'none' as const };
+  switch (e.type) {
+    case 'down':
+      // A second finger, or a down while listening, changes nothing.
+      return s.phase === 'idle' ? { state: { phase: 'pressing', x: e.x, y: e.y }, effect: 'none' } : stay;
+    case 'move': {
+      const dx = e.x - s.x;
+      const dy = e.y - s.y;
+      if (s.phase === 'pressing') return longPressCancelled(dx, dy, B_HOLD_SLOP) ? idle('none') : stay;
+      if (s.phase === 'listening' || s.phase === 'cancelling') {
+        const phase = Math.hypot(dx, dy) > B_TALK_CANCEL_PX ? 'cancelling' : 'listening';
+        return phase === s.phase ? stay : { state: { ...s, phase }, effect: 'none' };
+      }
+      return stay;
+    }
+    case 'timer':
+      return s.phase === 'pressing' ? { state: { ...s, phase: 'listening' }, effect: 'listen' } : stay;
+    case 'up':
+      if (s.phase === 'pressing') return idle('home');
+      if (s.phase === 'listening') return idle('send');
+      if (s.phase === 'cancelling') return idle('cancel');
+      return stay;
+    case 'abort':
+      return s.phase === 'listening' || s.phase === 'cancelling' ? idle('cancel') : idle('none');
+  }
+};

@@ -42,7 +42,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>bWallet uses the camera for video calls and to scan QR codes, such as when you connect your wallet to a website.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>bWallet uses the microphone for voice calls with other bWallet users.</string>
+	<string>bWallet uses the microphone for voice calls with other bWallet users, and to hear you when you hold the b to talk to b.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>When you hold the b to talk, bWallet uses Apple speech recognition to turn your words into text for b. Nothing is sent to b until you let go.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Unlock bWallet with Face ID instead of typing your password.</string>
 	<key>UIApplicationSceneManifest</key>

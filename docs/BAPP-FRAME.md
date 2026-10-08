@@ -39,3 +39,30 @@ the check for sites that are known to refuse; remove it once the site sends the 
 - iOS: WKWebView blocks third-party cookies (ITP), and iframe storage is partitioned under the wallet.
   Cookie-session logins inside a bApp will not persist in-frame; sign in with the wallet (BRC-100
   identity / `createSignature`) instead, or use full screen.
+
+## Full-screen (native) in-app browser
+
+`noFrame` bApps, and any bApp that falls back to full screen, open in the native in-app browser
+(`YoursNativePlugin` `DappBrowserViewController` on iOS, `browserOpen` on Android): a 48pt/dp wallet
+bar (back, site, close) on top, the page below it.
+
+- **bApps get full-bleed bottom; use `viewport-fit=cover`.** On iOS the page runs to the bottom edge
+  of the screen, under the home indicator. Add `<meta name="viewport" content="width=device-width,
+initial-scale=1, viewport-fit=cover">` and pad bottom tab bars with
+  `env(safe-area-inset-bottom)`. The top is already below the wallet bar, so
+  `env(safe-area-inset-top)` is 0. On Android the page sits inside the system bars (insets are 0).
+- **User agent.** The in-app browser appends `bWallet/1 YoursWalletMobile/1 bWalletChannel/<channel>
+bWalletInset/48`. Detect the wallet with `bWallet/` or `YoursWalletMobile/` (unchanged).
+  `bWalletInset/<n>` is the height in CSS px of the wallet bar above the page, for layouts that want
+  to know it.
+- **Video.** Inline playback is on (`playsinline` works, no forced fullscreen on iOS) and muted
+  autoplay needs no tap. On Android, the video fullscreen button works (back exits it).
+- **Gestures.** iOS edge-swipe back/forward is off so feed swipes are not stolen; back is the bar's
+  back button (Android: system back).
+- **Back.** The bar's back button (and Android system back) goes back in the web view's history; if
+  there is none, it tries the page's own history (`history.back()`, for single-page apps) and, if the
+  URL has not changed after ~300 ms, closes the browser and returns to the wallet, same as ×. So back
+  always does something; at the root its accessibility label is "Close".
+- **New windows.** `target=_blank` / `window.open` to the same site (ignoring `www.`) load in place;
+  another site opens in Safari / the default browser. Wallet approvals and the BRC-100 provider are
+  unchanged.

@@ -32,6 +32,8 @@ import { PriceChart } from '../mobile/wallet/PriceChart';
 import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
 import { TokenIndexButton } from '../mobile/tokens/TokenIndexButton';
 import { GroupSendBar } from '../mobile/send/GroupSend';
+import { NoteField } from '../mobile/airdrops/NoteField';
+import { cleanNote, noteOutput, withExtraOutput } from '../mobile/airdrops/note';
 import { celebrateSend } from './sent/sent';
 
 export interface Token {
@@ -110,6 +112,8 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   const [selling, setSelling] = useState(false);
   // Recipient fields stay hidden until the owner taps Send (owner, 5 Oct 2026).
   const [composing, setComposing] = useState(!!prefill);
+  // Airdrop note (src/mobile/airdrops/note.ts): optional, written on chain in the same tx.
+  const [note, setNote] = useState('');
   const baseUrl = ONESAT_MAINNET_CONTENT_URL;
 
   const maxAmount = token.isConfirmed ? token.info.all.confirmed : token.info.all.pending;
@@ -262,7 +266,16 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   ) => {
     let sendRes: Awaited<ReturnType<typeof sendBsv21.execute>>;
     try {
-      sendRes = await sendBsv21.execute(apiContext, {
+      const text = cleanNote(note);
+      if (note.trim() && !text) {
+        setIsProcessing(false);
+        addSnackbar('The note must be 1–280 characters of plain text.', 'error');
+        return;
+      }
+      const ctx = text
+        ? { ...apiContext, wallet: withExtraOutput(apiContext.wallet, noteOutput(text, token.info.id!)) }
+        : apiContext;
+      sendRes = await sendBsv21.execute(ctx, {
         tokenId: token.info.id!,
         recipients: sendRecipients.map((r) => ({
           amount: r.amount,
@@ -291,6 +304,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     }
 
     setOverlayPrompt(null);
+    setNote('');
     sentAtomicRef.current = total;
     setSuccessTxId(sendRes.txid);
     const shown = celebrateSend(sendRes, {
@@ -618,6 +632,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 Add Recipient
               </span>
             </motion.button>
+            <NoteField value={note} onChange={setNote} />
 
             </>)}
 

@@ -45,3 +45,26 @@ chrome.storage?.local.get('bwalletxTakeCwi', (r) => {
   send();
   setTimeout(send, 300); // the MAIN-world script may not be listening yet at document_start
 });
+
+// Live balance (docs/LIVE-BALANCE.md): a dApp that funded a session through this wallet (a TokenBlaster gun pack)
+// may report what it spends from it with window.postMessage({ type: 'bwallet:session-spend', … }). Forwarded to the
+// wallet page with this page's host; the page checks it against the sender origin and only lowers its meter.
+// Never sent to wallet methods (background.ts ignores the action). Light pre-check and at most 20 a second here.
+let liveSec = 0;
+let liveN = 0;
+window.addEventListener('message', (e: MessageEvent) => {
+  if (e.source !== window || (e.data as { type?: unknown } | null)?.type !== 'bwallet:session-spend') return;
+  const sec = Math.floor(Date.now() / 1000);
+  if (sec !== liveSec) {
+    liveSec = sec;
+    liveN = 0;
+  }
+  if (++liveN > 20) return;
+  try {
+    chrome.runtime
+      .sendMessage({ action: 'bwxSessionSpend', data: e.data, originator: window.location.host })
+      ?.catch(() => undefined);
+  } catch {
+    /* extension reloaded: nothing to tell */
+  }
+});

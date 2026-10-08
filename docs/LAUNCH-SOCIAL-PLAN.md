@@ -399,6 +399,77 @@ One airdrop that arrives in steps instead of all at once. This extends phase 9 (
 
 **Order**: A11 can come straight after the 5.1.86 fixes (it only needs Lock BSV and the inbox). A12 waits for the indexer gate. A13 comes after A9, because it shares the holder-snapshot logic.
 
+### 7.5 Airdrop notes (built 8 Oct 2026)
+
+Owner: "airdrops as messages from the issuer with a note". Each airdrop shows like a message from its issuer: avatar and $handle, the note, then the amount or NFT thumbnail.
+
+#### On-chain encoding (v1)
+
+One extra 0-sat output in the **same transaction** as the transfer, so any wallet can read it. It is plain Bitcoin Schema (B + MAP), like bChat posts:
+
+```
+OP_FALSE OP_RETURN
+  19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut <note> text/plain utf-8        B: the note text
+  |
+  1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5 SET app bWalletX type airdrop_note v 1
+    [context bsv21 bsv21 <tokenId>]                                 MAP: what it is, which token
+```
+
+- **Note**: UTF-8 plain text, 1–280 code points after trimming (≤ 1,120 bytes). CRLF becomes LF. Control characters (except newline and tab), bidi overrides and isolates are rejected, not stripped.
+- **Link note → transfer**: the same txid. There is no `context tx`, because a tx can't name itself. `context bsv21 bsv21 <tokenId>` names the token for token airdrops and is left out for NFTs.
+- **No AIP signature in v1.** The issuer is whoever funded the tx, the same as for the airdrop itself. A later version can add AIP or SIGMA signed by the issuer's identity key, so the note carries the verified badge on its own.
+- **Order**: token outputs, then token change, overlay fee and the note last (`randomizeOutputs: false`). BSV-21 indexers ignore the OP_RETURN output.
+
+#### Reader rules
+
+1. Only read a note from a tx that delivered a token or NFT to you (an inbox item).
+2. Take the first output that decodes as `app bWalletX type airdrop_note` with a `text/plain` B part.
+3. If the note names a token (`bsv21`) and it isn't this airdrop's token, ignore it.
+4. Reject (don't truncate) a text that is empty, longer than 280 characters, or contains control characters.
+5. Render as text only. No HTML, no markdown, no clickable links.
+
+#### What's built
+
+- **Sender**: token Send (`SendBsv21View`, single or group send) has an optional "Note to holders" field (`airdrops/NoteField.tsx`) with a 280-character counter.
+  - `sendBsv21` (@1sat/actions) has no extra-outputs option, so the wallet passed to it is wrapped (`withExtraOutput`, `airdrops/note.ts`). The note is appended to the first `createAction` only.
+  - An invalid note blocks the send with a message.
+  - NFT send and the Launchpad don't have the field yet. The Launchpad is a bonding curve, not an airdrop tool. Add the field to TokenBlaster or cascade airdrop senders (§7.4) when they ship.
+- **Receiver**:
+  - `txHistoryFetch.toRawTx` keeps OP_RETURN scripts up to 4,000 hex characters (others stay at 1,200).
+  - `airdrops/load.ts` attaches `noteForTx(...)` to each inbox item as `item.note`, which is persisted with the item.
+- **UI** (`AirdropsInbox.tsx`): each item is a message card:
+  - The issuer's avatar and $handle (verified from the token's issuer signature, `useIssuer`), or a short address when unknown. Then the note, then the asset.
+  - Actions: **Keep · Hide · Reply · Open room · Report**.
+  - **Reply** opens the DM with the issuer's handle, with the composer prefilled "Re: $TOKEN airdrop" (`segmentNav.requestDm(handle, draft)` and `takeDmDraft`). It shows only when the issuer has a verified handle.
+  - **Open room** opens or starts the token's room. It is hidden in the store build and for NFTs.
+  - **Report** sends `kind: 'user'` to bit-sign `/api/bitsign/report` with the note as content, then hides the issuer.
+- **Chat thread**: not built. The DM list comes from bit-sign rooms, and there's no clean local extension point for a chain-sourced thread. **Next step**: bit-sign indexes `type airdrop_note` and posts it into the issuer↔recipient DM as a system message.
+
+#### Safety
+
+- Notes from issuers you haven't kept show collapsed: "Note from $x: show". Notes from kept issuers show open.
+- Text only: React text nodes, with no `innerHTML` or markdown. Link-looking text is shown greyed and is never clickable, and the wallet never opens it.
+- Language filter (`feed/language.ts`): slurs are blurred behind a tap (hidden for good in the store edition). Strong language is blurred in the store edition and shown elsewhere.
+- "Only show airdrops from issuers I've kept" and Hide (which hides the issuer) still apply. Report hides the issuer too.
+
+#### Store edition
+
+- Sending a note stays in store builds. Token Send is already there, and a note is a plain memo with no payment or unlock.
+- Receiving notes shows in store builds too, with stricter rendering: the language filter in store mode, collapsed unless kept, and no links.
+- Open room is hidden (token rooms are gated, `tokenRoomsEnabled`).
+- Reply opens a DM. DMs are in the store build (for report and block, see the UGC safety section of STORE-AUDIT).
+- No new store-grep strings are needed.
+
+#### Tests
+
+`airdrops/note.test.ts`:
+
+- Encode/decode round trip, with and without a token.
+- The 280 code-point boundary, including emoji.
+- Control and bidi rejection, and malformed or foreign scripts rejected without throwing.
+- Note ↔ token matching and the one-shot output injection.
+- Collapse and language rules, link segmentation and the reply draft.
+
 ## 8. Phases
 
 | #   | What                                                                                                    | Size            | Risk                               |

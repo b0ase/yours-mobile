@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  bHold,
+  B_HOLD_IDLE,
+  B_HOLD_SLOP,
+  B_TALK_CANCEL_PX,
+  type BHoldEvent,
   classifySwipe,
   edgeFade,
   fadeMask,
@@ -77,5 +82,53 @@ describe('pull to the b agent', () => {
     expect(pullProgress(200)).toBe(1);
     expect(pullReached(69)).toBe(false);
     expect(pullReached(70)).toBe(true);
+  });
+});
+
+describe('b hold to talk', () => {
+  const run = (events: BHoldEvent[]) => {
+    let s = B_HOLD_IDLE;
+    const effects: string[] = [];
+    for (const e of events) {
+      const r = bHold(s, e);
+      s = r.state;
+      if (r.effect !== 'none') effects.push(r.effect);
+    }
+    return { phase: s.phase, effects };
+  };
+  const down = { type: 'down', x: 100, y: 500 } as const;
+
+  test('a tap is HOME', () => {
+    expect(run([down, { type: 'up' }])).toEqual({ phase: 'idle', effects: ['home'] });
+  });
+  test('holding past the timer listens; release sends', () => {
+    expect(run([down, { type: 'timer' }]).effects).toEqual(['listen']);
+    expect(run([down, { type: 'timer' }, { type: 'move', x: 110, y: 490 }, { type: 'up' }])).toEqual({
+      phase: 'idle',
+      effects: ['listen', 'send'],
+    });
+  });
+  test('moving before the hold starts cancels both tap and hold', () => {
+    expect(run([down, { type: 'move', x: 100 + B_HOLD_SLOP + 1, y: 500 }, { type: 'timer' }, { type: 'up' }])).toEqual({
+      phase: 'idle',
+      effects: [],
+    });
+  });
+  test('slide away then release cancels; sliding back keeps it', () => {
+    const away = { type: 'move', x: 100, y: 500 - B_TALK_CANCEL_PX - 1 } as const;
+    expect(run([down, { type: 'timer' }, away]).phase).toBe('cancelling');
+    expect(run([down, { type: 'timer' }, away, { type: 'up' }]).effects).toEqual(['listen', 'cancel']);
+    expect(run([down, { type: 'timer' }, away, { type: 'move', x: 100, y: 480 }, { type: 'up' }]).effects).toEqual([
+      'listen',
+      'send',
+    ]);
+  });
+  test('abort while listening cancels; abort while pressing does nothing', () => {
+    expect(run([down, { type: 'timer' }, { type: 'abort' }]).effects).toEqual(['listen', 'cancel']);
+    expect(run([down, { type: 'abort' }, { type: 'up' }]).effects).toEqual([]);
+  });
+  test('a late timer or a second down is ignored', () => {
+    expect(run([down, { type: 'up' }, { type: 'timer' }]).effects).toEqual(['home']);
+    expect(run([down, { type: 'timer' }, down, { type: 'up' }]).effects).toEqual(['listen', 'send']);
   });
 });

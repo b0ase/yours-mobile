@@ -1,5 +1,6 @@
 package org.yours.wallet;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
@@ -10,6 +11,14 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
@@ -18,7 +27,9 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.os.Message;
 import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -43,7 +54,11 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.Collections;
@@ -67,7 +82,10 @@ import org.json.JSONObject;
  *            document start; messages are accepted from the main frame only and carry the
  *            origin WebView reports, never one the page claims.
  */
-@CapacitorPlugin(name = "YoursNative")
+@CapacitorPlugin(
+    name = "YoursNative",
+    permissions = { @Permission(strings = { Manifest.permission.RECORD_AUDIO }, alias = "microphone") }
+)
 public class YoursNativePlugin extends Plugin {
 
     /**
@@ -352,6 +370,10 @@ public class YoursNativePlugin extends Plugin {
     private WebView browser;
     private TextView browserTitle;
     private OnBackPressedCallback browserBack;
+    private TextView browserBackButton;
+    /** Fullscreen video view from WebChromeClient.onShowCustomView, laid over the browser. */
+    private View browserFullscreen;
+    private WebChromeClient.CustomViewCallback browserFullscreenCallback;
     /** Bumped on every main-frame navigation; replies for an older page are dropped. */
     private int pageGeneration = 0;
     private final Map<String, PendingReply> pendingReplies = new HashMap<>();
@@ -367,6 +389,21 @@ public class YoursNativePlugin extends Plugin {
             this.pageRequestId = pageRequestId;
             this.generation = generation;
         }
+    }
+
+    /** Hosts match, ignoring a leading "www.". */
+    static boolean sameSite(String a, String b) {
+        String x = a == null ? "" : a.toLowerCase().replaceFirst("^www\\.", "");
+        String y = b == null ? "" : b.toLowerCase().replaceFirst("^www\\.", "");
+        return !x.isEmpty() && x.equals(y);
+    }
+
+    private void exitBrowserFullscreen() {
+        if (browserFullscreen == null) return;
+        if (browserRoot != null) browserRoot.removeView(browserFullscreen);
+        browserFullscreen = null;
+        if (browserFullscreenCallback != null) browserFullscreenCallback.onCustomViewHidden();
+        browserFullscreenCallback = null;
     }
 
     private static boolean isWebUrl(Uri uri) {
@@ -413,9 +450,9 @@ public class YoursNativePlugin extends Plugin {
             bar.setGravity(Gravity.CENTER_VERTICAL);
             bar.setPadding(dp(4), 0, dp(4), 0);
             TextView back = toolbarButton(activity, "‹", 26);
-            back.setOnClickListener((v) -> {
-                if (browser != null && browser.canGoBack()) browser.goBack();
-            });
+            back.setContentDescription("Back");
+            browserBackButton = back;
+            back.setOnClickListener((v) -> browserGoBack());
             browserTitle = new TextView(activity);
             browserTitle.setTextColor(Color.rgb(156, 163, 175));
             browserTitle.setTextSize(13);
@@ -436,9 +473,57 @@ public class YoursNativePlugin extends Plugin {
             s.setAllowFileAccess(false);
             s.setAllowContentAccess(false);
             s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-            s.setSupportMultipleWindows(false);
+            // On so target=_blank / window.open reach onCreateWindow below (another site opens in the system browser).
+            s.setSupportMultipleWindows(true);
+            s.setJavaScriptCanOpenWindowsAutomatically(true);
+            // bApps (bmovies.app feeds) autoplay muted video without a tap.
+            s.setMediaPlaybackRequiresUserGesture(false);
             // Lets sites tell they're inside the wallet (and can connect via window.CWI without a wallet chooser).
-            s.setUserAgentString(s.getUserAgentString() + " bWallet/1 YoursWalletMobile/1 bWalletChannel/" + BuildConfig.CHANNEL);
+            // bWalletInset/48: the wallet bar above the page is 48dp tall.
+            s.setUserAgentString(
+                s.getUserAgentString() + " bWallet/1 YoursWalletMobile/1 bWalletChannel/" + BuildConfig.CHANNEL + " bWalletInset/48"
+            );
+            browser.setWebChromeClient(
+                new WebChromeClient() {
+                    @Override
+                    public void onShowCustomView(View view, CustomViewCallback callback) {
+                        exitBrowserFullscreen();
+                        if (browserRoot == null) {
+                            callback.onCustomViewHidden();
+                            return;
+                        }
+                        view.setBackgroundColor(Color.BLACK);
+                        browserFullscreen = view;
+                        browserFullscreenCallback = callback;
+                        browserRoot.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                    }
+
+                    @Override
+                    public void onHideCustomView() {
+                        exitBrowserFullscreen();
+                    }
+
+                    @Override
+                    public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                        // A throwaway WebView catches the new window's first URL, then is dropped.
+                        WebView probe = new WebView(view.getContext());
+                        probe.setWebViewClient(
+                            new WebViewClient() {
+                                @Override
+                                public boolean shouldOverrideUrlLoading(WebView p, WebResourceRequest request) {
+                                    openNewWindowUrl(request.getUrl());
+                                    p.destroy();
+                                    return true;
+                                }
+                            }
+                        );
+                        WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                        transport.setWebView(probe);
+                        resultMsg.sendToTarget();
+                        return true;
+                    }
+                }
+            );
             browser.setWebViewClient(
                 new WebViewClient() {
                     @Override
@@ -453,6 +538,11 @@ public class YoursNativePlugin extends Plugin {
                         pendingReplies.clear();
                         Uri uri = Uri.parse(pageUrl);
                         if (browserTitle != null) browserTitle.setText(uri.getHost() == null ? pageUrl : uri.getHost());
+                    }
+
+                    @Override
+                    public void doUpdateVisitedHistory(WebView view, String pageUrl, boolean isReload) {
+                        updateBrowserBackLabel();
                     }
                 }
             );
@@ -487,8 +577,8 @@ public class YoursNativePlugin extends Plugin {
             browserBack = new OnBackPressedCallback(true) {
                 @Override
                 public void handleOnBackPressed() {
-                    if (browser != null && browser.canGoBack()) browser.goBack();
-                    else closeBrowser();
+                    if (browserFullscreen != null) exitBrowserFullscreen();
+                    else browserGoBack();
                 }
             };
             activity.getOnBackPressedDispatcher().addCallback(activity, browserBack);
@@ -534,15 +624,65 @@ public class YoursNativePlugin extends Plugin {
         if (isWebUrl(Uri.parse(url))) browser.loadUrl(url);
     }
 
+    /** target=_blank / window.open: same site loads in place; another site opens in the system browser. */
+    private void openNewWindowUrl(Uri uri) {
+        if (browser == null || !isWebUrl(uri)) return;
+        Uri current = browser.getUrl() == null ? null : Uri.parse(browser.getUrl());
+        if (current != null && sameSite(uri.getHost(), current.getHost())) {
+            browser.loadUrl(uri.toString());
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(intent);
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Bar back and system back: native history, else the page's own history (single-page apps),
+     * else close the browser and return to the wallet.
+     */
+    private void browserGoBack() {
+        final WebView view = browser;
+        if (view == null) return;
+        if (view.canGoBack()) {
+            view.goBack();
+            return;
+        }
+        final String before = view.getUrl();
+        view.evaluateJavascript("history.length > 1 ? (history.back(), true) : false", (result) -> {
+            if (browser != view) return;
+            if (!"true".equals(result)) {
+                closeBrowser();
+                return;
+            }
+            view.postDelayed(() -> {
+                if (browser != view) return;
+                String after = view.getUrl();
+                if (after == null ? before == null : after.equals(before)) closeBrowser();
+            }, 300);
+        });
+    }
+
+    /** Back label: "Close" when back would leave the browser. */
+    private void updateBrowserBackLabel() {
+        if (browserBackButton == null || browser == null) return;
+        browserBackButton.setContentDescription(browser.canGoBack() ? "Back" : "Close");
+    }
+
     private void closeBrowser() {
         getActivity().runOnUiThread(() -> {
             if (browser == null) return;
             if (browserBack != null) browserBack.remove();
+            exitBrowserFullscreen();
             ((ViewGroup) browserRoot.getParent()).removeView(browserRoot);
             browser.destroy();
             browser = null;
             browserRoot = null;
             browserTitle = null;
+            browserBackButton = null;
             pendingReplies.clear();
             notifyListeners("browserClosed", new JSObject());
         });
@@ -592,6 +732,143 @@ public class YoursNativePlugin extends Plugin {
                     "window.dispatchEvent(new CustomEvent(" + JSONObject.quote(event) + ",{detail:JSON.parse(" + JSONObject.quote(detail) + ")}));";
                 browser.evaluateJavascript(js, null);
             }
+            call.resolve();
+        });
+    }
+
+    // ------------------------------------------------------------------ speech (hold the dock's b to talk to b)
+
+    private SpeechRecognizer speech;
+    private String speechText = "";
+    private PluginCall speechStopCall;
+
+    @PluginMethod
+    public void speechAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", SpeechRecognizer.isRecognitionAvailable(getContext()));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void haptic(PluginCall call) {
+        try {
+            Vibrator v = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null) v.vibrate(VibrationEffect.createOneShot(15, VibrationEffect.DEFAULT_AMPLITUDE));
+        } catch (Exception ignored) {}
+        call.resolve();
+    }
+
+    private void speechResult(PluginCall call, boolean started, String reason) {
+        JSObject out = new JSObject();
+        out.put("started", started);
+        if (reason != null) out.put("reason", reason);
+        call.resolve(out);
+    }
+
+    /** Resolves once listening: { started: true } or { started: false, reason: 'denied' | 'asked' | 'unavailable' }. */
+    @PluginMethod
+    public void speechStart(PluginCall call) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) {
+            requestPermissionForAlias("microphone", call, "speechPermission");
+            return;
+        }
+        beginSpeech(call);
+    }
+
+    @PermissionCallback
+    private void speechPermission(PluginCall call) {
+        // The finger has usually let go while the prompt was up: say so rather than start listening late.
+        speechResult(call, false, getPermissionState("microphone") == PermissionState.GRANTED ? "asked" : "denied");
+    }
+
+    private void beginSpeech(PluginCall call) {
+        if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+            speechResult(call, false, "unavailable");
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            destroySpeech();
+            speechText = "";
+            speech = SpeechRecognizer.createSpeechRecognizer(getContext());
+            speech.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle b) {}
+                @Override public void onBeginningOfSpeech() {}
+                @Override public void onRmsChanged(float rms) {
+                    JSObject o = new JSObject();
+                    o.put("level", Math.max(0, Math.min(1, (rms + 2) / 12.0)));
+                    notifyListeners("speechLevel", o);
+                }
+                @Override public void onBufferReceived(byte[] b) {}
+                @Override public void onEndOfSpeech() {}
+                @Override public void onError(int error) { finishSpeech(); }
+                @Override public void onResults(Bundle b) { take(b); finishSpeech(); }
+                @Override public void onPartialResults(Bundle b) { take(b); }
+                @Override public void onEvent(int t, Bundle b) {}
+                private void take(Bundle b) {
+                    ArrayList<String> m = b == null ? null : b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (m == null || m.isEmpty() || m.get(0) == null || m.get(0).isEmpty()) return;
+                    speechText = m.get(0);
+                    JSObject o = new JSObject();
+                    o.put("text", speechText);
+                    notifyListeners("speechPartial", o);
+                }
+            });
+            Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+            // Holding = talking: don't end on a pause.
+            i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 10000);
+            i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 10000);
+            speech.startListening(i);
+            speechResult(call, true, null);
+        });
+    }
+
+    /** Recognition ended (results, error or the stop timeout): answer a waiting speechStop. */
+    private void finishSpeech() {
+        PluginCall c = speechStopCall;
+        speechStopCall = null;
+        if (c != null) {
+            JSObject o = new JSObject();
+            o.put("text", speechText);
+            c.resolve(o);
+        }
+    }
+
+    private void destroySpeech() {
+        if (speech != null) {
+            speech.destroy();
+            speech = null;
+        }
+    }
+
+    @PluginMethod
+    public void speechStop(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            if (speech == null) {
+                JSObject o = new JSObject();
+                o.put("text", speechText);
+                call.resolve(o);
+                return;
+            }
+            speechStopCall = call;
+            speech.stopListening();
+            // Final results normally land within a second; don't wait forever.
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                finishSpeech();
+                destroySpeech();
+            }, 1500);
+        });
+    }
+
+    @PluginMethod
+    public void speechCancel(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            speechStopCall = null;
+            if (speech != null) speech.cancel();
+            destroySpeech();
+            speechText = "";
             call.resolve();
         });
     }
