@@ -46,6 +46,51 @@ type PromptScreen =
 const WAITING_CLOSE_MS = 10000;
 const EXPIRED_CLOSE_MS = 2000;
 
+// In-page sheet (docs/ONE-SHEET-PERMISSIONS.md §3d): prompt.html framed over a site by our content script.
+const INPAGE_TOKEN = new URLSearchParams(window.location.search).get('inpage');
+// Framed by some other page (not our side panel, not our content script's sheet): show nothing.
+const FOREIGN_FRAME =
+  window.location.protocol === 'chrome-extension:' &&
+  window.top !== window &&
+  !INPAGE_TOKEN &&
+  !!window.location.ancestorOrigins?.length &&
+  window.location.ancestorOrigins[0] !== window.location.origin;
+
+/**
+ * Arms the in-page sheet: the background must vouch for the token, and the sheet must be fully visible
+ * (IntersectionObserver v2) for half a second before anything in it can be clicked. A site can cover or fade
+ * the frame, but then the buttons stay off.
+ */
+const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement | null>) => {
+  const [tokenOk, setTokenOk] = useState<boolean | undefined>(enabled ? undefined : true);
+  const [visible, setVisible] = useState(!enabled);
+  useEffect(() => {
+    if (!enabled) return;
+    sendMessageAsync<{ success: boolean }>({ action: 'INPAGE_SHEET_CHECK', token: INPAGE_TOKEN })
+      .then((r) => setTokenOk(!!r?.success))
+      .catch(() => setTokenOk(false));
+  }, [enabled]);
+  useEffect(() => {
+    if (!enabled || !target.current) return;
+    let timer: number | undefined;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[entries.length - 1] as IntersectionObserverEntry & { isVisible?: boolean };
+        window.clearTimeout(timer);
+        if (e.isVisible) timer = window.setTimeout(() => setVisible(true), 500);
+        else setVisible(false);
+      },
+      { threshold: [1.0], trackVisibility: true, delay: 100 } as IntersectionObserverInit,
+    );
+    io.observe(target.current);
+    return () => {
+      window.clearTimeout(timer);
+      io.disconnect();
+    };
+  }, [enabled, target]);
+  return { tokenOk, armed: tokenOk === true && visible };
+};
+
 const PromptApp = () => {
   const { theme } = useTheme();
   const { isLocked, isReady } = useServiceContext();
@@ -191,12 +236,47 @@ const PromptApp = () => {
   }, [loadPrompt]);
 
   const walletBg = theme.color.global.walletBackground;
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const inPage = useInPageArmed(!!INPAGE_TOKEN, sheetRef);
+
+  if (FOREIGN_FRAME || inPage.tokenOk === false) {
+    return (
+      <p className="text-xs p-4" style={{ color: '#98A2B3' }}>
+        Open bWalletX to answer this request.
+      </p>
+    );
+  }
 
   return (
     <MemoryRouter>
+      {INPAGE_TOKEN && (
+        <div
+          className="flex items-center justify-between px-3 py-2"
+          style={{ background: walletBg, borderBottom: '1px solid #ffffff14' }}
+        >
+          <span className="text-sm font-bold" style={{ color: theme.color.global.contrast }}>
+            bWalletX
+          </span>
+          <button
+            type="button"
+            aria-label="Deny and close"
+            className="text-sm border-0 bg-transparent p-1"
+            style={{ color: theme.color.global.gray }}
+            onClick={() => chrome.runtime.sendMessage({ action: 'DISMISS_PROMPT_PANEL' }).catch(() => undefined)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div
+        ref={sheetRef}
         className="flex items-center justify-center relative p-0"
-        style={{ width: 'var(--wallet-width)', height: 'var(--wallet-height)', backgroundColor: walletBg }}
+        style={{
+          width: INPAGE_TOKEN ? '100%' : 'var(--wallet-width)',
+          height: INPAGE_TOKEN ? 'calc(100vh - 41px)' : 'var(--wallet-height)',
+          backgroundColor: walletBg,
+          pointerEvents: inPage.armed ? undefined : 'none',
+        }}
       >
         {(!isReady || screen.kind === 'loading') && <PageLoader message="Loading..." theme={theme} />}
         {screen.kind === 'waiting' && <PageLoader message="Waiting for request..." theme={theme} />}

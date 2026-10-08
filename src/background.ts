@@ -91,6 +91,13 @@ const activePopupPorts = new Set<chrome.runtime.Port>();
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'extension-popup') {
     activePopupPorts.add(port);
+    if (panelPromptOnConnect) {
+      const { kind, requestID } = panelPromptOnConnect;
+      panelPromptOnConnect = undefined;
+      promptInPanel = true;
+      // Give the panel's listener a moment to attach before posting.
+      setTimeout(() => postToPanels({ action: 'SHOW_PROMPT_PANEL', kind, requestID }), 300);
+    }
     port.onDisconnect.addListener(() => {
       activePopupPorts.delete(port);
       if (promptInPanel && activePopupPorts.size === 0) {
@@ -565,6 +572,19 @@ let denyAllPendingPrompts: () => void = () => undefined;
 // prompt.html) instead of a separate popup window (owner, 6 Oct 2026). activePopupPorts are the open
 // panels (App.tsx connects 'extension-popup'); the window remains the fallback when no panel is open.
 let promptInPanel = false;
+// Set when the background opened the side panel itself: the prompt shows once the panel connects.
+let panelPromptOnConnect: { kind: PromptKind; requestID?: string } | undefined;
+
+// In-page sheet (docs/ONE-SHEET-PERMISSIONS.md §3d): prompt.html in an iframe the content script puts over
+// the site, used when the side panel is closed and Chrome won't open it without a click in the wallet.
+const dappTabs = new Map<string, { tabId: number; windowId: number }>();
+let inPageSheet: { tabId: number; token: string } | undefined;
+const hideInPageSheet = () => {
+  if (!inPageSheet) return;
+  const { tabId } = inPageSheet;
+  inPageSheet = undefined;
+  chrome.tabs?.sendMessage(tabId, { action: 'BWX_INPAGE_SHEET_HIDE' }).catch(() => undefined);
+};
 const postToPanels = (msg: unknown) =>
   activePopupPorts.forEach((p) => {
     try {
@@ -596,6 +616,7 @@ const hasQueuedDappUi = (): boolean =>
 
 const closeDappPopup = (): void => {
   hidePanelPrompt();
+  hideInPageSheet();
   if (!popupWindowId) return;
   selfClosedWindowIds.add(popupWindowId);
   removeWindow(popupWindowId);
@@ -610,7 +631,7 @@ const closeDappPopup = (): void => {
  * Never touches the browser-action popup (activePopupPorts).
  */
 const closeDappPopupIfNoUi = (): void => {
-  if (!popupWindowId && !promptInPanel) return;
+  if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
   closeDappPopup();
@@ -621,7 +642,7 @@ const closeDappPopupIfNoUi = (): void => {
  * unlock waiters, and no in-flight dApp CWI requests.
  */
 const closeDappPopupIfIdle = (): void => {
-  if (!popupWindowId && !promptInPanel) return;
+  if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (inFlightDappRequests > 0) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
@@ -859,6 +880,69 @@ if (isInServiceWorker) {
       return;
     }
 
+    // A sheet is already over the site: it loads the next prompt in place.
+    if (inPageSheet) {
+      notifyPromptWindow(kind, requestID);
+      return;
+    }
+
+    // Desktop extension only (the phone build has no side panel and shows its own overlay).
+    const tab = kind === 'usbCheck' ? undefined : tabForPrompt(kind, requestID);
+    if (tab && (chrome as unknown as { sidePanel?: unknown }).sidePanel) {
+      void openInsideWallet(kind, requestID, tab).then((shown) => {
+        if (!shown) showPromptWindow(kind, requestID);
+      });
+      return;
+    }
+    showPromptWindow(kind, requestID);
+  };
+
+  /** The site's tab for a prompt, from the request's originator (or the last site that called). */
+  const tabForPrompt = (kind: PromptKind, requestID?: string) => {
+    const payload = requestID ? (getPendingPromptPayload(kind, requestID) as { originator?: string } | undefined) : undefined;
+    const origin = payload?.originator;
+    if (origin && dappTabs.has(origin)) return dappTabs.get(origin);
+    return undefined;
+  };
+
+  /**
+   * Try the side panel (Chrome may refuse without a click in the wallet), then the in-page sheet.
+   * Resolves false when neither showed, so the caller falls back to the separate window.
+   */
+  const openInsideWallet = async (
+    kind: PromptKind,
+    requestID: string | undefined,
+    tab: { tabId: number; windowId: number },
+  ): Promise<boolean> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sp = (chrome as any).sidePanel;
+    try {
+      await sp.open({ tabId: tab.tabId, windowId: tab.windowId });
+      // The panel connects its port in a moment; show the prompt there once it does.
+      panelPromptOnConnect = { kind, requestID };
+      return true;
+    } catch {
+      /* no user gesture: fall through to the in-page sheet */
+    }
+    const token = crypto.randomUUID();
+    const params = new URLSearchParams({ kind, inpage: token });
+    if (requestID) params.set('requestID', requestID);
+    inPageSheet = { tabId: tab.tabId, token }; // before the frame loads: it checks the token on boot
+    try {
+      const res = (await chrome.tabs.sendMessage(tab.tabId, {
+        action: 'BWX_INPAGE_SHEET_SHOW',
+        query: params.toString(),
+      })) as { ok?: boolean } | undefined;
+      if (res?.ok) return true;
+    } catch {
+      /* no content script here (chrome://, Web Store, tab gone) */
+    }
+    if (inPageSheet?.token === token) inPageSheet = undefined;
+    return false;
+  };
+
+  const showPromptWindow = (kind: PromptKind, requestID?: string) => {
+
     // Check if any popup window with our extension URL is already open
     chrome.windows.getAll({ populate: true }, (windows) => {
       const promptUrl = chrome.runtime.getURL('prompt.html');
@@ -955,6 +1039,11 @@ if (isInServiceWorker) {
       }
     }
 
+    // Remember which tab each site talks from, so its sheet can open over that tab (in-page sheet).
+    if (!isFromExtension && message.originator && sender.tab?.id !== undefined) {
+      dappTabs.set(message.originator, { tabId: sender.tab.id, windowId: sender.tab.windowId });
+    }
+
     // Actions that don't require authorization
     const noAuthRequired = [
       YoursEventName.SWITCH_ACCOUNT,
@@ -975,6 +1064,7 @@ if (isInServiceWorker) {
       'GET_PROMPT_PAYLOAD',
       'GET_NEXT_PROMPT',
       'CLOSE_PROMPT_WINDOW',
+      'INPAGE_SHEET_CHECK',
       // Internal UI requests (no external domain)
       YoursEventName.GET_BALANCE,
       YoursEventName.GET_PUB_KEYS,
@@ -1108,9 +1198,17 @@ if (isInServiceWorker) {
         // back the next prompt to render. This removes the race where a prompt
         // queued between "nothing pending" and the actual close was denied as a
         // user dismissal by windows.onRemoved.
+        case 'INPAGE_SHEET_CHECK': {
+          // The in-page sheet proves it was put there by us (token from showInPageSheet), not framed by the site.
+          const { token } = message as { token?: string };
+          const ok = !!token && !!inPageSheet && token === inPageSheet.token;
+          sendResponse({ type: 'INPAGE_SHEET_CHECK', success: ok });
+          return true;
+        }
         case 'DISMISS_PROMPT_PANEL': {
           promptInPanel = false;
           postToPanels({ action: 'HIDE_PROMPT_PANEL' });
+          hideInPageSheet();
           denyAllPendingPrompts();
           sendResponse({ type: 'DISMISS_PROMPT_PANEL', success: true });
           return true;
@@ -1125,8 +1223,9 @@ if (isInServiceWorker) {
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: false, data: { prompt: { kind: 'unlock' } } });
             return true;
           }
-          if (promptInPanel) {
+          if (promptInPanel || inPageSheet) {
             hidePanelPrompt();
+            hideInPageSheet();
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: true });
             return true;
           }
@@ -3357,6 +3456,18 @@ if (isInServiceWorker) {
       }
 
   };
+
+  // In-page sheet: the site's tab closed or navigated away, so the sheet is gone. Deny what it was showing.
+  chrome.tabs?.onRemoved?.addListener((tabId) => {
+    if (inPageSheet?.tabId !== tabId) return;
+    inPageSheet = undefined;
+    denyAllPendingPrompts();
+  });
+  chrome.tabs?.onUpdated?.addListener((tabId, info) => {
+    if (inPageSheet?.tabId !== tabId || info.status !== 'loading') return;
+    inPageSheet = undefined;
+    denyAllPendingPrompts();
+  });
 
   // HANDLE WINDOW CLOSE *****************************************
   chrome.windows.onRemoved.addListener((closedWindowId) => {
