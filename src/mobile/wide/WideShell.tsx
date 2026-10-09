@@ -24,6 +24,7 @@ import { wwOpen } from './flag';
 import { LockCoin } from '../tabs/TopNav';
 import { useWalletFeed } from './walletFeed';
 import { BappHost } from './BappHost';
+import { WidePage } from './WidePage';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
 import './wide.css';
 
@@ -203,9 +204,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     account?.settings?.socialProfile?.displayName ?? '',
   );
 
+  const [section, setSection] = useState<'settings' | 'tools'>('settings');
   const go = (it: Item) => {
     if (it.act) return it.act();
     if (it.select) {
+      setSection(it.select);
       handleSelect(it.select);
       navigate('/m/settings');
       return;
@@ -339,6 +342,21 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         : onWallet
           ? 'wallet'
           : 'page';
+  // Page header: the sidebar item this route belongs to; sub-routes get their last segment and a Back button.
+  const allItems = [...groups.flatMap((g) => g.items), ...bottom];
+  const current = bapps
+    ? allItems.find((i) => i.id === 'apps')
+    : pathname === '/m/settings'
+      ? allItems.find((i) => i.id === section)
+      : (allItems.find((i) => i.to && !i.kind && pathname === i.to.split('?')[0]) ??
+        (onWallet ? allItems.find((i) => i.kind === kind) : undefined));
+  const seg = pathname.split('/').filter(Boolean).pop() ?? '';
+  const page = {
+    title:
+      current?.label.replace(/\s*\(⌘L\)$/, '') ??
+      (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : ''),
+    root: !!current,
+  };
   const navBtn = (it: Item) =>
     it.hidden ? null : (
       <button key={it.id} className={isOn(it) ? 'on' : ''} onClick={() => go(it)}>
@@ -417,20 +435,22 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             </button>
           </div>
         </header>
-        <div className={`ww-content view-${view}`}>
-          {bapps ? (
-            <Suspense fallback={null}>
-              <BappsPage />
-            </Suspense>
-          ) : (
-            <div className="ww-colwrap">
-              <div className="ww-col">
-                {bapp ? <BappHost key={bapp.id} app={bapp} onClose={() => navigate('/m/feed')} /> : children}
+        <WidePage title={page.title} onBack={page.root ? undefined : () => navigate(-1)} bleed={view === 'bapp'}>
+          <div className={`ww-content view-${view}`}>
+            {bapps ? (
+              <Suspense fallback={null}>
+                <BappsPage />
+              </Suspense>
+            ) : (
+              <div className="ww-colwrap">
+                <div className="ww-col">
+                  {bapp ? <BappHost key={bapp.id} app={bapp} onClose={() => navigate('/m/feed')} /> : children}
+                </div>
               </div>
-            </div>
-          )}
-          {view === 'wallet' && <WalletSide />}
-        </div>
+            )}
+            {view === 'wallet' && <WalletSide />}
+          </div>
+        </WidePage>
       </main>
     </div>,
     document.body,

@@ -60,7 +60,7 @@ export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absol
     <motion.div
       ref={wrap}
       aria-hidden
-      className={`pointer-events-none ${position} inset-0 overflow-hidden`}
+      className={`bw-vbg pointer-events-none ${position} inset-0 overflow-hidden`}
       style={position === 'fixed' ? { zIndex: -1 } : undefined}
       initial={{ opacity: 0, scale: reduce ? 1 : 1.08 }}
       animate={{ opacity: 1, scale: 1 }}

@@ -17,7 +17,7 @@ const CallsPage = () => (
   >
     <VideoBackground src={walletBg} poster={walletPoster} scrim="dark" />
     <TopNav />
-    <div className="px-4 pt-3 pb-2 text-lg font-semibold text-white">Calls</div>
+    <div className="bw-page-title px-4 pt-3 pb-2 text-lg font-semibold text-white">Calls</div>
     <TermsGate compact>
       {/* No onLeave: Message / Pay switch tab through the router, which leaves this route by itself. */}
       <CallsList bottomInset="var(--dock-h, 3.75rem)" />

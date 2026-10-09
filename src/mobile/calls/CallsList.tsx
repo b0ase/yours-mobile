@@ -1,3 +1,4 @@
+import { isRawMailError } from '../bmail/friendlyError';
 import {
   lazy,
   Suspense,
@@ -653,7 +654,13 @@ export const CallsList = ({
                 ) : (
                   <>
                     {!ready && !error && <div className="flex justify-center py-8">{spinner}</div>}
-                    {error && !ready && <p className="text-xs text-[#ff6b6b]">Calls unavailable: {error}</p>}
+                    {error && !ready && (
+                      <p className="text-xs text-[#ff6b6b]">
+                        {isRawMailError(error)
+                          ? "Can't reach calls right now. Try again in a moment."
+                          : `Calls unavailable: ${error}`}
+                      </p>
+                    )}
                     {ready && recents.length === 0 && (
                       <p className="text-sm text-[#98A2B3] text-center py-8">
                         {filter === 'missed'

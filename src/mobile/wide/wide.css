@@ -1022,3 +1022,131 @@ html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end > * {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   animation: ww-page-in 0.16s ease-out;
 }
+
+/* ---- Page template (WidePage.tsx): one header, one padding, one card, one background for every destination ---- */
+.ww-root {
+  --ww-pad: 32px;
+  --ww-gap: 16px;
+  --ww-radius: 16px;
+  --ww-card: #0b0b0d;
+  --ww-hair: rgba(255, 255, 255, 0.08);
+  --ww-row-h: 56px;
+  --ww-read: 72ch;
+}
+.ww-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  font-family: Inter, system-ui, sans-serif;
+}
+.ww-page-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 20px var(--ww-pad) 16px;
+}
+.ww-page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ww-text);
+}
+.ww-page-sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ww-muted);
+}
+.ww-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ww-page-back {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ww-card);
+  border: 1px solid var(--ww-hair);
+  color: var(--ww-text);
+  cursor: pointer;
+}
+.ww-page-back:hover {
+  border-color: var(--ww-line-2);
+}
+.ww-page .ww-content {
+  padding: 0 var(--ww-pad) var(--ww-pad);
+  gap: var(--ww-gap);
+}
+.ww-page.is-bleed .ww-content {
+  padding: 0;
+}
+/* One card for every screen column (wallet, chat list, bMail, pages) and every side panel. */
+.ww-page .ww-colwrap,
+.ww-page .ww-panel {
+  border-radius: var(--ww-radius) !important;
+  border: 1px solid var(--ww-hair) !important;
+  background: var(--ww-card) !important;
+}
+.ww-page.is-bleed .ww-colwrap {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+/* One background layer: the shell's clip, behind everything. Screens' own clips and page fills are off, so nothing
+   paints a scrim over content. */
+.ww-page .ww-col .bw-vbg {
+  display: none !important;
+}
+.ww-page .ww-col > *,
+.ww-page .ww-col > * > .overflow-y-auto {
+  background: transparent !important;
+}
+/* The page header is the only title: phone title rows (a Back button + title at the top of a screen) are hidden. */
+.ww-page .ww-col > * > :is(div, header):has(> button[aria-label='Back']):not(:has(input, textarea)),
+.ww-page .ww-col > * > * > :is(div, header):first-child:has(> button[aria-label='Back']):not(:has(input, textarea)),
+.ww-page .ww-col .bw-page-title {
+  display: none !important;
+}
+/* Text keeps a reading width inside full-width pages. */
+.ww-page .ww-col p {
+  max-width: var(--ww-read);
+}
+/* Shared empty state and notice. */
+.ww-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--ww-muted);
+}
+.ww-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ww-text);
+}
+.ww-empty-body {
+  max-width: 48ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ww-notice {
+  border-radius: 12px;
+  border: 1px solid var(--ww-hair);
+  background: rgba(255, 210, 77, 0.06);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ww-text);
+}
+.ww-notice.is-error {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.25);
+}
