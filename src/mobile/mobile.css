@@ -157,6 +157,25 @@ html.ww-on .yours-sheet {
   border-radius: 20px;
   padding-bottom: 20px;
 }
+/* Welcome / unlock (html.ww-onb): the sheet sits inside the wallet panel on the right, a bottom sheet as on the
+   phone, not over the story. Same box as `html.ww-on.ww-onb body #root` below. */
+html.ww-on.ww-onb .yours-sheet-backdrop {
+  inset: auto;
+  top: 50%;
+  right: max(32px, calc((50vw - 440px) / 2));
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  height: min(760px, calc(100vh - 96px));
+  transform: translateY(-50%);
+  border-radius: 24px;
+  overflow: hidden;
+  align-items: flex-end;
+  padding: 0;
+}
+html.ww-on.ww-onb .yours-sheet {
+  max-width: none;
+  border-radius: 20px 20px 0 0;
+}
 
 .yours-sheet h2 {
   margin: 0;
