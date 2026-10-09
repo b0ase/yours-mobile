@@ -19,7 +19,6 @@ import {
   Monitor,
   Mic,
   MicOff,
-  MoreHorizontal,
   Volume2,
   VolumeX,
   PhoneOff,
@@ -27,6 +26,7 @@ import {
   RefreshCw,
   Send,
   Share2,
+  Smartphone,
   QrCode,
   Users,
   X,
@@ -420,9 +420,8 @@ const SpaceScreenInner = ({
   const [menuFor, setMenuFor] = useState<Participant | null>(null);
   /** "Mute the room": all incoming audio silenced on this phone (my mic is separate). */
   const [deaf, setDeaf] = useState(false);
-  /** Keep the screen on while I host or speak (⋯ menu). */
+  /** Keep the screen on in this Space (screen icon, top right). */
   const [awakeOn, setAwakeOn] = useState(true);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [hostName, setHostName] = useState<string | null>(hostNameProp ?? null);
   const awake = useMemo(() => new ScreenAwake(), []);
   const [note, setNote] = useState('');
@@ -1013,9 +1012,6 @@ const SpaceScreenInner = ({
       <CtlButton label={deaf ? 'Room muted' : 'Mute room'} onClick={() => setDeaf((d) => !d)} active={deaf}>
         {deaf ? <VolumeX size={20} color="#010101" /> : <Volume2 size={20} color="#fff" />}
       </CtlButton>
-      <CtlButton label="More" onClick={() => setMoreOpen(true)}>
-        <MoreHorizontal size={20} color="#fff" />
-      </CtlButton>
       <CtlButton label="Chat" onClick={() => setChatOpen((o) => !o)} active={chatOpen}>
         <MessageSquare size={20} color={chatOpen ? '#010101' : '#fff'} />
       </CtlButton>
@@ -1069,14 +1065,39 @@ const SpaceScreenInner = ({
         {phase === 'live' && (isHost || canInvite) && (
           <button
             onClick={() => setShareOpen(true)}
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold"
+            className="shrink-0 flex items-center justify-center rounded-full h-9 w-9"
             style={{ border: `1px solid ${GOLD}`, color: GOLD }}
             aria-label="Share"
           >
-            <Share2 size={14} />
-            Share
+            <Share2 size={16} />
           </button>
         )}
+        <button
+          role="switch"
+          aria-checked={awakeOn}
+          aria-label="Keep screen on in this Space"
+          title={
+            wakeLockSupported()
+              ? 'Keep screen on in this Space'
+              : 'This phone can’t keep the screen on from here; turn auto-lock off in Settings'
+          }
+          onClick={() => {
+            const next = !awakeOn;
+            setAwakeOn(next);
+            setNote(next ? 'Screen stays on' : 'Screen can sleep');
+          }}
+          className="relative shrink-0 flex items-center justify-center rounded-full h-9 w-9"
+          style={{ background: awakeOn ? 'rgba(255,210,77,.14)' : 'transparent', opacity: awakeOn ? 1 : 0.5 }}
+        >
+          <Smartphone size={18} color={awakeOn ? GOLD : MUTED} />
+          {!awakeOn && (
+            <span
+              aria-hidden
+              className="absolute h-[2px] w-6 rotate-45 rounded"
+              style={{ background: MUTED }}
+            />
+          )}
+        </button>
       </header>
 
       <div className={`flex-1 min-h-0 relative ${landscape ? 'flex' : 'flex flex-col'}`}>
@@ -1219,31 +1240,6 @@ const SpaceScreenInner = ({
             </button>
             <button onClick={decline} className="rounded-full py-3 text-sm" style={{ color: MUTED }}>
               Decline, stay in the audience
-            </button>
-          </div>
-        </Sheet>
-      )}
-
-      {moreOpen && (
-        <Sheet onClose={() => setMoreOpen(false)}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-white text-sm font-semibold m-0">Keep screen on in this Space</p>
-              <p className="mt-0.5 text-xs m-0" style={{ color: MUTED }}>
-                {wakeLockSupported()
-                  ? 'Screen stays on while you’re in the Space, so the phone doesn’t sleep mid-Space.'
-                  : 'This phone can’t keep the screen on from here; turn auto-lock off in Settings while you’re in a Space.'}
-              </p>
-            </div>
-            <button
-              role="switch"
-              aria-checked={awakeOn}
-              aria-label="Keep screen on in this Space"
-              onClick={() => setAwakeOn((v) => !v)}
-              className="relative mt-1 h-7 w-12 shrink-0 rounded-full"
-              style={{ background: awakeOn ? GOLD : '#3a3d44' }}
-            >
-              <span className="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all" style={{ left: awakeOn ? 22 : 2 }} />
             </button>
           </div>
         </Sheet>
