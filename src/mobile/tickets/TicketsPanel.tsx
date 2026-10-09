@@ -1,6 +1,6 @@
 import { openTicketRoomInChat } from './ticketRoom';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { getBsv21Balances } from '@1sat/actions';
 import { MessageCircle, Ticket as TicketIcon } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -57,8 +57,7 @@ export const TicketsPanel = ({
   }, [apiContext, load]);
 
   useEffect(() => {
-    getBsv21Balances
-      .execute(apiContext, {})
+    heldBsv21Balances(apiContext)
       .then((bs) => setHeld(new Set(bs.filter((b) => BigInt(b.amt || '0') > 0n).map((b) => b.id.replace('.', '_')))))
       .catch(() => setHeld(new Set()));
   }, [apiContext, tickets?.length]);

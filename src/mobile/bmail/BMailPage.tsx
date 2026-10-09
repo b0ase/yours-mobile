@@ -12,7 +12,8 @@ import walletPoster from '../brand/bg/wallet-card.jpg';
 const BMailPage = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const tab = params.get('tab') === 'requests' ? 'requests' : 'inbox';
+  const want = params.get('tab');
+  const tab = want === 'requests' || want === 'quarantine' || want === 'bin' ? want : 'inbox';
   return (
     // Top padding = the fixed TopNav (h-14); bottom = the tab bar / dock (--dock-h), as AgentPage.
     <div

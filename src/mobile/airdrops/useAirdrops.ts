@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { badgeCount, loadInbox, loadItems, saveInbox, subscribeInbox, visibleItems, type InboxState } from './inbox';
+import {
+  badgeCount,
+  loadInbox,
+  loadItems,
+  saveInbox,
+  setQuarantineAccount,
+  subscribeInbox,
+  visibleItems,
+  type InboxState,
+} from './inbox';
 import { refreshAirdrops } from './load';
 
 let version = 0;
@@ -13,6 +22,7 @@ export const useAirdrops = () => {
   const { chromeStorageService, apiContext } = useServiceContext();
   const a = chromeStorageService.getCurrentAccountObject().account?.addresses;
   const account = a?.identityAddress ?? '';
+  setQuarantineAccount(account);
   const addresses = useMemo(
     () => [...new Set([a?.ordAddress, a?.bsvAddress, a?.identityAddress].filter((x): x is string => !!x))],
     [a?.ordAddress, a?.bsvAddress, a?.identityAddress],

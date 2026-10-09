@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getBsv21Balances, type Bsv21Balance } from '@1sat/actions';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
+import { type Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { FriendToken } from './FriendToken';
 import { UserPlus } from 'lucide-react';
@@ -27,8 +28,7 @@ export const FriendsSection = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const [held, setHeld] = useState<Bsv21Balance[]>([]);
   useEffect(() => {
-    void getBsv21Balances
-      .execute(apiContext, {})
+    void heldBsv21Balances(apiContext)
       .then(setHeld)
       .catch(() => undefined);
   }, [apiContext]);

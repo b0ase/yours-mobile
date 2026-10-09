@@ -21,6 +21,7 @@ import { thumbUrl } from '../market/thumbs';
 import { SwipeRow } from '../swipe/SwipeRow';
 import { showUndo } from '../swipe/undo';
 import { hide, keep, markSeen, type AirdropItem } from './inbox';
+import { trustIssuer } from './quarantine';
 import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
 import { useAirdrops } from './useAirdrops';
 
@@ -155,12 +156,14 @@ const Row = ({
   issuerKept,
   onKeep,
   onHide,
+  onTrust,
   onLeave,
 }: {
   item: AirdropItem;
   issuerKept: boolean;
   onKeep: () => void;
   onHide: () => void;
+  onTrust: () => void;
   onLeave: () => void;
 }) => {
   const { handleSelect } = useBottomMenu();
@@ -229,6 +232,9 @@ const Row = ({
         <button type="button" onClick={onHide} className={small}>
           Hide
         </button>
+        <button type="button" onClick={onTrust} className={small}>
+          Trust this sender
+        </button>
         {who.handle && (
           <button type="button" onClick={reply} className={small}>
             Reply
@@ -277,8 +283,9 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
       >
         <ShieldAlert size={16} className="shrink-0 mt-0.5" />
         <span>
-          Unstamped: tokens and NFTs people sent you without asking. Never interact with a token that asks you to visit
-          a site and enter your recovery words. Hiding one hides everything from that sender.
+          Quarantined tokens and NFTs: sent to you without asking. They are not in your balance and are never spent with
+          your own coins. Keep moves one into your holdings (it stays at the same address); Hide keeps it here, out of
+          sight, with everything else from that sender. Never enter your recovery words on a site a token sends you to.
         </span>
       </div>
       <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
@@ -346,6 +353,16 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
               issuerKept={known.has(i.issuer)}
               onLeave={onLeave}
               onKeep={() => update((s) => keep(s, i.key))}
+              onTrust={() => {
+                update((s) => trustIssuer(keep(s, i.key), i.issuer));
+                showUndo('Trusted: their tokens skip Quarantine', () =>
+                  update((s) => ({
+                    ...s,
+                    kept: s.kept.filter((k) => k !== i.key),
+                    trustedIssuers: (s.trustedIssuers ?? []).filter((x) => x !== i.issuer),
+                  })),
+                );
+              }}
               onHide={() => update((s) => hide(s, i))}
             />
           </SwipeRow>

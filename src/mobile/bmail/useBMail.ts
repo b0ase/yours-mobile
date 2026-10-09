@@ -10,7 +10,13 @@ import { cachedExchangeRate } from '../../utils/wallet';
 import {
   addReceived,
   isArchived,
+  isInBin,
   isLive,
+  isQuarantined,
+  isTrustedSender,
+  purgeBin,
+  restoreFromBin,
+  trustSender,
   pinnedFirst,
   restoreFlags,
   setFlags,
@@ -67,6 +73,8 @@ export const useBMail = () => {
       inbox: pinnedFirst(b.inbox),
       requests: pinnedFirst(b.requests),
       archive: state.received.filter((r) => isArchived(r, blocked)).sort((a, z) => z.at - a.at),
+      quarantine: state.received.filter((r) => isQuarantined(r, blocked)).sort((a, z) => z.at - a.at),
+      bin: state.received.filter(isInBin).sort((a, z) => (z.deletedAt ?? 0) - (a.deletedAt ?? 0)),
     };
   }, [state.received, state.blocked, isFriend, priceSats, newest]);
 
@@ -90,6 +98,30 @@ export const useBMail = () => {
     },
     [me],
   );
+
+  /** Spam: flag it and send the sender's future mail straight to Quarantine (Undo puts both back). */
+  const spam = useCallback(
+    (r: Received) => {
+      const wasBlocked = (loadMail(me).blocked ?? []).includes(r.from);
+      const undoFlag = flag([r.id], { spam: true });
+      if (!wasBlocked) updateMail(me, (s) => ({ ...s, blocked: [...new Set([...(s.blocked ?? []), r.from])] }));
+      return () => {
+        undoFlag();
+        if (!wasBlocked) updateMail(me, (s) => ({ ...s, blocked: (s.blocked ?? []).filter((k) => k !== r.from) }));
+      };
+    },
+    [me, flag],
+  );
+  const restore = useCallback((ids: string[]) => updateMail(me, (s) => restoreFromBin(s, ids)), [me]);
+  const trust = useCallback((from: string) => updateMail(me, (s) => trustSender(s, from)), [me]);
+  const isTrusted = useCallback((from: string) => isTrustedSender(state, from, isFriend), [state, isFriend]);
+  // Bin: erase the content of mail deleted more than 30 days ago (local only; money untouched).
+  useEffect(() => {
+    if (!me) return;
+    const s = loadMail(me);
+    const next = purgeBin(s);
+    if (next !== s) saveMail(me, next);
+  }, [me]);
 
   const refresh = useCallback(async () => {
     if (!me) return;
@@ -177,6 +209,10 @@ export const useBMail = () => {
     unread,
     flag,
     block,
+    spam,
+    restore,
+    trust,
+    isTrusted,
   };
 };
 

@@ -7,7 +7,8 @@
  * expiry (30 days at most). Keys never leave the phone: requests run here, through the same gate the
  * b agent uses (checkAgentAction / runAgentAction), on the paired agent account while it's the one open.
  */
-import { getBsv21Balances, listOrdinals, type OneSatContext } from '@1sat/actions';
+import { listOrdinals, type OneSatContext } from '@1sat/actions';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { checkSize, estimateCost, isMintableType, notifyMinted, validateForm, type Collection } from '../mint/mint';
 import { mintMedia } from '../mint/mintMedia';
 import {
@@ -149,7 +150,7 @@ export async function handleAgentCall(
     case 'balance': {
       const [outs, tokens, rate] = await Promise.all([
         deps.ctx.wallet.listOutputs({ basket: 'default', limit: 10_000 }),
-        getBsv21Balances.execute(deps.ctx, {}).catch(() => []),
+        heldBsv21Balances(deps.ctx).catch(() => []),
         deps.bsvUsd(),
       ]);
       const sats = outs.outputs.reduce((s, o) => s + (o.spendable !== false ? o.satoshis : 0), 0);

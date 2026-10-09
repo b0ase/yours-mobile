@@ -33,6 +33,8 @@ import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
 import { TokenIndexButton } from '../mobile/tokens/TokenIndexButton';
 import { GroupSendBar } from '../mobile/send/GroupSend';
 import { NoteField } from '../mobile/airdrops/NoteField';
+import { activeQuarantine } from '../mobile/airdrops/inbox';
+import { normId } from '../mobile/airdrops/quarantine';
 import { cleanNote, noteOutput, withExtraOutput } from '../mobile/airdrops/note';
 import { celebrateSend } from './sent/sent';
 
@@ -265,6 +267,12 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     validateOverlay: boolean,
   ) => {
     let sendRes: Awaited<ReturnType<typeof sendBsv21.execute>>;
+    // Quarantine: never spend a token from a sender you have not accepted together with your own coins.
+    if (activeQuarantine().has(normId(token.info.id ?? ''))) {
+      addSnackbar('This token is in Quarantine. Keep it in bMail › Quarantine first.', 'error');
+      setIsProcessing(false);
+      return;
+    }
     try {
       const text = cleanNote(note);
       if (note.trim() && !text) {

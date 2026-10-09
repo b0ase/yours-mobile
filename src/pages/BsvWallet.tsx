@@ -1,4 +1,7 @@
 import { validate } from 'bitcoin-address-validation';
+import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
+import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
+import { withoutQuarantined } from '../mobile/airdrops/quarantine';
 import { BsvHistoryBar, BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
 import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
 import { phoneLayoutOn } from '../mobile/phone/flag';
@@ -48,7 +51,6 @@ import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../hooks/useServiceContext';
 import {
-  getBsv21Balances,
   getLockData,
   sendAllBsv,
   sendBsv,
@@ -180,9 +182,10 @@ export const BsvWallet = () => {
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
   const [showMigrationBanner, setShowMigrationBanner] = useState(false);
   // Cache first (owner round 6): last token balances at once, refreshed in the background.
-  const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() =>
-    loadTokenCache<Bsv21Balance>(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress),
-  );
+  const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() => {
+    const id = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
+    return withoutQuarantined(loadTokenCache<Bsv21Balance>(id), quarantineFor(id ?? ''));
+  });
   const [manageFavorites, setManageFavorites] = useState(false);
   const [account, setAccount] = useState<Account>();
   const [token, setToken] = useState<{ isConfirmed: boolean; info: Bsv21Balance } | null>(null);
@@ -423,7 +426,8 @@ export const BsvWallet = () => {
   };
 
   const getAndSetAccountAndBsv21s = async (): Promise<Bsv21Balance[]> => {
-    const res = await getBsv21Balances.execute(apiContext, {});
+    setQuarantineAccount(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '');
+    const res = await heldBsv21Balances(apiContext);
     setBsv21s(res);
     saveTokenCache(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress, res);
     setAccount(chromeStorageService.getCurrentAccountObject().account);

@@ -12,7 +12,7 @@ export const AirdropsRow = () => {
   return (
     <button
       type="button"
-      onClick={() => navigate('/m/bmail?tab=requests')}
+      onClick={() => navigate('/m/bmail?tab=quarantine')}
       className="w-[92%] mx-auto mt-4 flex items-center gap-3 rounded-2xl px-4 py-3 border text-left cursor-pointer"
       style={{ background: '#17191E', borderColor: '#2b2f36' }}
     >

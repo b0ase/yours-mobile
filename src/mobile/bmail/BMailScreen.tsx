@@ -23,7 +23,8 @@ import {
 } from 'lucide-react';
 import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
 import { showUndo, UndoToastHost } from '../swipe/undo';
-import { pinnedFirst } from './store';
+import { binDaysLeft, pinnedFirst } from './store';
+import { mailSegments } from './links';
 import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
 import { isFriend as isCallFriend } from '../calls/friends';
@@ -71,7 +72,7 @@ import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
-type Tab = 'inbox' | 'requests' | 'sent' | 'archive';
+type Tab = 'inbox' | 'requests' | 'sent' | 'archive' | 'quarantine' | 'bin';
 type Draft = { to?: string; toLabel?: string; subject?: string; inReplyTo?: string; credit?: boolean };
 
 const btn = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
@@ -422,6 +423,8 @@ const Reader = ({
   open,
   creditUsed,
   onReply,
+  trusted,
+  onTrust,
 }: {
   r: Received;
   label: string;
@@ -429,6 +432,9 @@ const Reader = ({
   open: (r: Received) => Promise<{ subject: string; body: string }>;
   creditUsed: boolean;
   onReply: (d: Draft) => void;
+  /** Links are clickable only from a trusted sender (links.ts). */
+  trusted: boolean;
+  onTrust: () => void;
 }) => {
   const [mail, setMail] = useState(r.opened ?? null);
   const [err, setErr] = useState('');
@@ -456,14 +462,44 @@ const Reader = ({
           </div>
         )}
       </div>
-      {!mail ? (
+      {r.erased ? (
+        <p className="text-xs m-0" style={{ color: MUTED }}>
+          This letter was in the Bin for 30 days, so its content was erased from this device.
+        </p>
+      ) : !mail ? (
         <button type="button" disabled={busy} onClick={doOpen} className={gold} style={{ background: GOLD }}>
           {busy ? 'Opening…' : 'Open'}
         </button>
       ) : (
         <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
           <div className="text-lg font-bold text-white">{mail.subject || '(no subject)'}</div>
-          <div className="bw-mail-body whitespace-pre-wrap break-words">{mail.body}</div>
+          <div className="bw-mail-body whitespace-pre-wrap break-words">
+            {mailSegments(mail.body, trusted).map((seg, n) =>
+              seg.href ? (
+                <a key={n} href={seg.href} target="_blank" rel="noopener noreferrer nofollow" className="underline">
+                  {seg.text}
+                </a>
+              ) : seg.link ? (
+                <span key={n} style={{ color: '#9fb3c8' }} title="Links work once you trust the sender">
+                  {seg.text}
+                </span>
+              ) : (
+                <span key={n}>{seg.text}</span>
+              ),
+            )}
+          </div>
+          {!trusted && mailSegments(mail.body, false).some((x) => x.link) && (
+            <div className="flex items-center gap-2 text-[11px]" style={{ color: MUTED }}>
+              <span className="flex-1">Links from senders you haven&apos;t trusted are shown as text only.</span>
+              <button
+                type="button"
+                onClick={onTrust}
+                className="min-h-[44px] rounded-lg px-3 text-xs font-semibold bg-[#2b2f36] text-white"
+              >
+                Trust sender
+              </button>
+            </div>
+          )}
         </div>
       )}
       {err && <p className="text-xs text-[#F97066] m-0">{err}</p>}
@@ -900,7 +936,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         icon: <ShieldAlert size={14} />,
         color: '#7A2E0E',
         removes: true,
-        onPress: () => undoable('Marked as spam', m.flag([r.id], { spam: true })),
+        onPress: () => undoable('Marked as spam: future mail from them goes to Quarantine', m.spam(r)),
       },
       {
         id: 'block',
@@ -961,7 +997,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const exRequests = exView('requests');
   // Value in view: verified postage on real mail this week, plus example amounts shown (labelled as examples).
   const inView =
-    tab === 'sent' || tab === 'archive'
+    tab !== 'inbox' && tab !== 'requests'
       ? null
       : (() => {
           const real = view(tab).filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
@@ -1117,6 +1153,8 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             rate={m.rate}
             open={m.open}
             creditUsed={m.state.usedCredits.includes(reading.id)}
+            trusted={m.isTrusted(reading.from)}
+            onTrust={() => m.trust(reading.from)}
             onReply={(d) => {
               setReading(null);
               setDraft(d);
@@ -1144,13 +1182,15 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 <span>Penny post</span>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 overflow-x-auto pb-0.5">
               {(
                 [
                   ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
                   ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
                   ['sent', 'Sent'],
                   ['archive', 'Archive'],
+                  ['quarantine', `Quarantine${m.boxes.quarantine.length ? ` (${m.boxes.quarantine.length})` : ''}`],
+                  ['bin', 'Bin'],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -1158,7 +1198,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   type="button"
                   aria-pressed={tab === id}
                   onClick={() => setTab(id)}
-                  className="min-h-[44px] flex-1 rounded-xl py-2 text-sm font-semibold"
+                  className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
                   style={
                     tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
                   }
@@ -1167,7 +1207,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 </button>
               ))}
             </div>
-            {tab !== 'sent' && tab !== 'archive' && (
+            {(tab === 'inbox' || tab === 'requests') && (
               <>
                 <div className="bw-mail-seg flex rounded-xl p-0.5">
                   {(
@@ -1272,7 +1312,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 {!view('requests').length && !exRequests.length && (
                   <Empty
                     title="Requests"
-                    text="Unstamped mail, promotions and token airdrops wait here. Nothing is thrown away: keep what you like, hide an issuer to stop more."
+                    text="Unstamped mail and promotions wait here. Token airdrops from senders you haven't accepted wait in Quarantine."
                   />
                 )}
               </>
@@ -1309,7 +1349,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   text="Swipe a letter left to archive it (or press e on a keyboard). Archived mail stays here, out of your Inbox, until you move it back."
                 />
               ))}
-            {tab !== 'sent' && tab !== 'archive' && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
+            {(tab === 'inbox' || tab === 'requests') && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
               <>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
@@ -1332,7 +1372,66 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 ))}
               </>
             )}
-            {tab === 'requests' && <AirdropsList onLeave={onClose} />}
+            {tab === 'quarantine' && (
+              <>
+                <p className="m-0 px-1 text-[11px] leading-relaxed" style={{ color: MUTED }}>
+                  Mail you marked as spam or from senders you blocked, and tokens from senders you have not accepted.
+                  Mail stays sealed until you open it. Quarantined tokens are not in your balance and are never spent
+                  with your own coins. Nothing here is burned or moved.
+                </p>
+                {m.boxes.quarantine.map((r) => (
+                  <div key={r.id} className="flex flex-col gap-1">
+                    <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+                    <div className="flex gap-1.5 px-1">
+                      <button
+                        type="button"
+                        className="min-h-[44px] rounded-lg px-3 text-xs font-semibold bg-[#2b2f36] text-white"
+                        onClick={() => {
+                          m.flag([r.id], { spam: false });
+                          m.trust(r.from);
+                        }}
+                      >
+                        Not spam: trust {nameOf(r.from)}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-[44px] rounded-lg px-3 text-xs font-semibold bg-[#2b2f36] text-white"
+                        onClick={() => remove([r.id])}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <AirdropsList onLeave={onClose} />
+              </>
+            )}
+            {tab === 'bin' &&
+              (m.boxes.bin.length ? (
+                m.boxes.bin.map((r) => (
+                  <div key={r.id} className="flex flex-col gap-1">
+                    <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+                    <div className="flex items-center gap-2 px-1">
+                      <button
+                        type="button"
+                        className="min-h-[44px] rounded-lg px-3 text-xs font-semibold"
+                        style={{ background: GOLD, color: '#1a1300' }}
+                        onClick={() => m.restore([r.id])}
+                      >
+                        Restore
+                      </button>
+                      <span className="text-[11px]" style={{ color: MUTED }}>
+                        Erased from this device in {binDaysLeft(r)} days
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <Empty
+                  title="Bin is empty"
+                  text="Deleted mail waits here for 30 days so you can restore it, then its content is erased from this device. Postage you received stays yours."
+                />
+              ))}
           </>
         )}
       </div>
