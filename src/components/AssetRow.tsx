@@ -103,7 +103,7 @@ export const AssetRow = (props: AssetRowProps) => {
           <img src={icon} className="w-9 h-9 rounded-full object-cover flex-shrink-0" alt={ticker} />
         </Show>
         <div className="flex flex-col items-start ml-3 min-w-0">
-          <span className="text-sm font-semibold leading-tight" style={{ color: theme.color.global.contrast }}>
+          <span className="text-sm font-semibold leading-tight max-w-full truncate" style={{ color: theme.color.global.contrast }}>
             {ticker}
           </span>
           {/* One line under the name on every card (issuer badge replaces "Balance"), so cards match in height. */}
