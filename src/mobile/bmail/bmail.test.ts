@@ -98,3 +98,31 @@ describe('examples', () => {
     expect(EXAMPLES.some((e) => e.stamps.includes('reply'))).toBe(true);
   });
 });
+
+describe('bMail weighting and amounts', () => {
+  test('sortMail: most paid, newest, friends', async () => {
+    const { sortMail, filterMail } = await import('./route');
+    const m = (id: string, at: number, verifiedSats: number, from = K('c')) => ({ id, from, at, verifiedSats });
+    const list = [m('a', 3, 0, K('f')), m('b', 1, 900), m('c', 2, 300)];
+    const isF = (k: string) => k === K('f');
+    expect(sortMail(list, 'paid', isF).map((x) => x.id)).toEqual(['b', 'c', 'a']);
+    expect(sortMail(list, 'newest', isF).map((x) => x.id)).toEqual(['a', 'c', 'b']);
+    expect(sortMail(list, 'friends', isF)[0].id).toBe('a');
+    expect(filterMail(list, 'paid').map((x) => x.id)).toEqual(['b', 'c']);
+    expect(filterMail(list, 'tokens')).toEqual([]);
+  });
+  test('examples: amounts, PNEE, tokens, filters', async () => {
+    const ex = await import('./examples');
+    const by = (id: string) => ex.EXAMPLES.find((e) => e.id === id)!;
+    expect(ex.amountOf(by('ex-intro'))).toEqual({ main: '$0.03', note: 'Priority stamp' });
+    expect(ex.amountOf(by('ex-invoice')).note).toBe('+ $112.50 invoice');
+    expect(ex.amountOf(by('ex-refund'))).toMatchObject({ main: '422 PNEE', eq: '$4.22' });
+    expect(ex.tokenLabel({ symbol: 'MOONZ', amount: 10_000 })).toBe('10,000 $MOONZ');
+    expect(ex.filterExamples(ex.EXAMPLES, 'invoices').map((e) => e.id)).toEqual(['ex-invoice']);
+    expect(ex.filterExamples(ex.EXAMPLES, 'tokens').length).toBeGreaterThan(4);
+    const inbox = ex.sortExamples(ex.EXAMPLES.filter((e) => e.box === 'inbox'), 'paid');
+    expect(ex.totalCents(inbox[0])).toBeGreaterThanOrEqual(ex.totalCents(inbox[1]));
+    const req = ex.sortExamples(ex.EXAMPLES.filter((e) => e.box === 'requests'), 'spreading');
+    expect(req[0].id).toBe('ex-spreading');
+  });
+});

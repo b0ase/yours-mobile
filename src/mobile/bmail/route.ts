@@ -58,3 +58,33 @@ export const quote = (priceSats: number, tier: TierId, replyPaidSats = 0) => {
   const stamp = Math.max(1, Math.ceil(priceSats * mult));
   return { stamp, replyPaid: replyPaidSats, total: stamp + replyPaidSats };
 };
+
+/** Weighting controls on Inbox / Requests (owner, 9 Oct: "any filters for weighting?"). */
+export type SortMode = 'paid' | 'newest' | 'friends' | 'spreading';
+export type MailFilter = 'all' | 'paid' | 'tokens' | 'contracts' | 'invoices' | 'receipts';
+export const FILTERS: { id: MailFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'paid', label: 'Paid' },
+  { id: 'tokens', label: 'Tokens' },
+  { id: 'contracts', label: 'Contracts' },
+  { id: 'invoices', label: 'Invoices' },
+  { id: 'receipts', label: 'Receipts' },
+];
+
+/**
+ * Sort real mail. Most paid = verified postage highest first (ties newest); Friends = contacts on top then postage;
+ * Newest = time only. Spreading needs token holder/forward counts real mail does not carry yet, so it falls back to
+ * newest. TODO(bmail tokens): rank by holders/forwards once envelopes carry token outputs.
+ */
+export const sortMail = <T extends MailMeta>(mail: T[], mode: SortMode, isFriend: (key: string) => boolean): T[] => {
+  if (mode === 'friends') return rank(mail, { isFriend });
+  if (mode === 'newest' || mode === 'spreading') return rank(mail, { isFriend, newest: true });
+  return [...mail].sort((a, b) => b.verifiedSats - a.verifiedSats || b.at - a.at);
+};
+
+/**
+ * Filter real mail. Only "Paid" can be told from the envelope today; tokens, contracts, invoices and receipts are not
+ * parsed from real mail yet, so those filters show nothing real. TODO(bmail tokens/docs): envelope fields for these.
+ */
+export const filterMail = <T extends MailMeta>(mail: T[], f: MailFilter): T[] =>
+  f === 'all' ? mail : f === 'paid' ? mail.filter((m) => m.verifiedSats > 0 || !!m.replyCredit) : [];

@@ -11,18 +11,35 @@ import { fetchPeerBPhone } from '../calls/bphone';
 import { shortKey } from '../calls/machine';
 import { getFriends } from '../calls/friends';
 import { resolveCallee } from '../calls/peer';
-import { money, parseUsdInput, usdToSats } from '../money/money';
+import { money, parseUsdInput, satsToUsd, usdToSats } from '../money/money';
 import { BODY_MAX, SUBJECT_MAX } from './envelope';
 import {
   agoLabel,
+  amountOf,
   EXAMPLES,
   EXAMPLES_BELOW,
   examplesHidden,
+  filterExamples,
+  fmtCents,
   setExamplesHidden,
+  sortExamples,
+  tokenLabel,
+  totalCents,
   type ExampleMail,
+  type TokenAttach,
   type StampKind,
 } from './examples';
-import { PENNY_POST_USD, quote, TIERS, type TierId } from './route';
+import {
+  FILTERS,
+  filterMail,
+  PENNY_POST_USD,
+  quote,
+  sortMail,
+  TIERS,
+  type MailFilter,
+  type SortMode,
+  type TierId,
+} from './route';
 import type { Received, Sent } from './store';
 import { useBMail } from './useBMail';
 
@@ -94,6 +111,19 @@ const Stamp = ({ r, rate }: { r: Received; rate: number }) => (
   </div>
 );
 
+type Amount = { main: string; eq?: string; note: string; zero?: boolean };
+
+/** Big right-aligned amount for real mail: verified postage. TODO(bmail tokens): token outputs are not parsed yet. */
+const realAmount = (r: Received, rate: number, friend: boolean): Amount => {
+  const c = chipsFor(r, rate, friend)[0];
+  const note = c ? (c.text ?? CHIP[c.kind].label).replace(/ \$.*$/, '').replace(/ [\d.,]+ sats$/, '') : '';
+  return {
+    main: money(r.verifiedSats, rate),
+    note: r.env.replyPaidSats && !r.replyCredit ? `${note} · reply paid` : note,
+    zero: r.verifiedSats <= 0,
+  };
+};
+
 const Row = ({
   avatar,
   title,
@@ -105,7 +135,9 @@ const Row = ({
   tag,
   onOpen,
   extra,
+  amount,
 }: {
+  amount?: Amount;
   avatar: ReactNode;
   title: string;
   bold: boolean;
@@ -136,9 +168,11 @@ const Row = ({
             {tag}
           </span>
         )}
-        <span className="ml-auto shrink-0 text-[11px]" style={{ color: MUTED }}>
-          {time}
-        </span>
+        {!amount && (
+          <span className="ml-auto shrink-0 text-[11px]" style={{ color: MUTED }}>
+            {time}
+          </span>
+        )}
       </div>
       <div className={`${ONE} text-[13px] text-white ${bold ? 'font-semibold' : ''}`}>{subject || '(no subject)'}</div>
       <div className={`${ONE} text-xs`} style={{ color: MUTED }}>
@@ -147,7 +181,39 @@ const Row = ({
       <div className="mt-1 flex flex-wrap items-center gap-1">{chips}</div>
       {extra}
     </div>
+    {amount && (
+      <div className="flex max-w-[38%] shrink-0 flex-col items-end gap-0.5 text-right">
+        <span className="text-lg font-bold leading-tight tabular-nums" style={{ color: amount.zero ? MUTED : GOLD }}>
+          {amount.main}
+        </span>
+        {amount.eq && (
+          <span className="text-[10px] tabular-nums" style={{ color: MUTED }}>
+            ≈ {amount.eq}
+          </span>
+        )}
+        <span className="text-[10px] leading-tight" style={{ color: MUTED }}>
+          {amount.note}
+        </span>
+        <span className="text-[10px]" style={{ color: '#667085' }}>
+          {time}
+        </span>
+      </div>
+    )}
   </button>
+);
+
+const TokenChips = ({ tokens }: { tokens: TokenAttach[] }) => (
+  <>
+    {tokens.map((t) => (
+      <span
+        key={t.symbol}
+        className="rounded-md px-1.5 py-[1px] text-[10px] font-bold whitespace-nowrap"
+        style={{ color: '#C3B5FD', background: '#C3B5FD1f', border: '1px solid #C3B5FD44' }}
+      >
+        {tokenLabel(t)}
+      </span>
+    ))}
+  </>
 );
 
 const MailRow = ({
@@ -174,11 +240,14 @@ const MailRow = ({
     ))}
     time={ago(r.at)}
     onOpen={onOpen}
+    amount={realAmount(r, rate, friend)}
   />
 );
 
-const centsChip = (k: StampKind, cents: number) =>
-  k === 'penny' || k === 'priority' || k === 'reply' || k === 'paytoopen' ? `${CHIP[k].label} ${cents}¢` : undefined;
+const centsChip = (k: StampKind, cents: number, pnee?: boolean) =>
+  k === 'penny' || k === 'priority' || k === 'reply' || k === 'paytoopen'
+    ? `${CHIP[k].label} ${pnee ? `${cents} PNEE` : `${cents}¢`}`
+    : undefined;
 
 const TokenFacts = ({ t }: { t: NonNullable<ExampleMail['token']> }) => (
   <div className="mt-1 text-[11px]" style={{ color: t.spreading ? '#6CE9A6' : MUTED }}>
@@ -186,6 +255,8 @@ const TokenFacts = ({ t }: { t: NonNullable<ExampleMail['token']> }) => (
     {t.forwards.toLocaleString('en-US')} forwards
   </div>
 );
+
+const exAmount = (e: ExampleMail): Amount => ({ ...amountOf(e), zero: totalCents(e) === 0 });
 
 const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
   <Row
@@ -196,8 +267,9 @@ const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
     preview={oneLine(e.body)}
     chips={
       <>
+        {e.tokens && <TokenChips tokens={e.tokens} />}
         {e.stamps.map((k) => (
-          <Chip key={k} kind={k} text={centsChip(k, e.cents)} />
+          <Chip key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
         ))}
         {e.action && (
           <span className="text-[10px] font-semibold text-white" style={{ opacity: 0.8 }}>
@@ -209,6 +281,7 @@ const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
     time={agoLabel(e.ago)}
     tag="Example"
     onOpen={onOpen}
+    amount={exAmount(e)}
     extra={e.token && <TokenFacts t={e.token} />}
   />
 );
@@ -229,12 +302,66 @@ const ExampleReader = ({ e, onBack, onHide }: { e: ExampleMail; onBack: () => vo
           {e.handle} · {agoLabel(e.ago)} ago
         </span>
       </div>
-      <div className="flex flex-col items-end gap-1">
-        {e.stamps.map((k) => (
-          <Chip key={k} kind={k} text={centsChip(k, e.cents)} />
-        ))}
+      <div className="flex flex-col items-end gap-0.5 text-right">
+        <span className="text-xl font-bold tabular-nums" style={{ color: totalCents(e) ? GOLD : MUTED }}>
+          {amountOf(e).main}
+        </span>
+        {amountOf(e).eq && (
+          <span className="text-[10px]" style={{ color: MUTED }}>
+            ≈ {amountOf(e).eq}
+          </span>
+        )}
+        <span className="text-[10px]" style={{ color: MUTED }}>
+          {amountOf(e).note}
+        </span>
       </div>
     </div>
+    <div className="flex flex-wrap gap-1">
+      {e.stamps.map((k) => (
+        <Chip key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
+      ))}
+    </div>
+    {(totalCents(e) > 0 || e.invoiceCents) && (
+      <div className="rounded-xl p-3 flex flex-col gap-1 text-xs" style={{ background: CARD }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
+          Money in this mail
+        </div>
+        <div className="flex justify-between text-white">
+          <span>Postage{e.pnee ? ' (PNEE)' : ''}</span>
+          <span className="tabular-nums">{e.pnee ? `${e.cents} PNEE · ${fmtCents(e.cents)}` : fmtCents(e.cents)}</span>
+        </div>
+        {!!e.attachedCents && (
+          <div className="flex justify-between text-white">
+            <span>Payment attached</span>
+            <span className="tabular-nums">{fmtCents(e.attachedCents)}</span>
+          </div>
+        )}
+        {!!e.invoiceCents && (
+          <div className="flex justify-between text-white">
+            <span>Invoice (asks you to pay)</span>
+            <span className="tabular-nums">{fmtCents(e.invoiceCents)}</span>
+          </div>
+        )}
+      </div>
+    )}
+    {!!e.tokens?.length && (
+      <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
+          Tokens attached
+        </div>
+        {e.tokens.map((t) => (
+          <div key={t.symbol} className="flex items-center gap-2">
+            <span className="flex-1 text-sm font-semibold text-white">{tokenLabel(t)}</span>
+            <button type="button" disabled className={btn} style={{ opacity: 0.45 }}>
+              Keep
+            </button>
+            <button type="button" disabled className={btn} style={{ opacity: 0.45 }}>
+              Hide
+            </button>
+          </div>
+        ))}
+      </div>
+    )}
     <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
       <div className="text-base font-bold text-white">{e.subject}</div>
       <div className="text-sm text-white whitespace-pre-wrap break-words">{e.body}</div>
@@ -624,9 +751,23 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     const recent = m.state.received.filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
     return { sats: recent.reduce((a, r) => a + r.verifiedSats, 0), n: recent.length };
   }, [m.state.received, now]);
-  const exInbox = showEx ? EXAMPLES.filter((e) => e.box === 'inbox') : [];
-  const exRequests = showEx ? EXAMPLES.filter((e) => e.box === 'requests') : [];
-  const exCents = exInbox.reduce((a, e) => a + e.cents, 0);
+  const [sort, setSort] = useState<SortMode>('paid');
+  const [filter, setFilter] = useState<MailFilter>('all');
+  const mode: SortMode = tab !== 'requests' && sort === 'spreading' ? 'paid' : sort;
+  const view = (box: 'inbox' | 'requests') => sortMail(filterMail(m.boxes[box], filter), mode, isContact);
+  const exView = (box: 'inbox' | 'requests') =>
+    showEx ? sortExamples(filterExamples(EXAMPLES.filter((e) => e.box === box), filter), mode) : [];
+  const exInbox = exView('inbox');
+  const exRequests = exView('requests');
+  // Value in view: verified postage on real mail this week, plus example amounts shown (labelled as examples).
+  const inView = tab === 'sent' ? null : (() => {
+    const real = view(tab).filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
+    const ex = tab === 'inbox' ? exInbox : exRequests;
+    const usd =
+      (satsToUsd(real.reduce((a, r) => a + r.verifiedSats, 0), m.rate) ?? 0) +
+      ex.reduce((a, e) => a + totalCents(e), 0) / 100;
+    return { usd, n: real.length + ex.filter((e) => totalCents(e) > 0).length, ex: ex.length > 0 };
+  })();
 
   return createPortal(
     <div
@@ -697,14 +838,14 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             >
               <div className="flex flex-1 flex-col">
                 <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                  Postage received this week
+                  {inView ? 'In view' : 'Postage received this week'}
                 </span>
                 <span className="text-xl font-bold" style={{ color: GOLD }}>
-                  {money(week.sats, m.rate)}
+                  {inView ? `${fmtCents(Math.round(inView.usd * 100))} in postage this week` : money(week.sats, m.rate)}
                 </span>
                 <span className="text-[11px]" style={{ color: MUTED }}>
-                  {week.n} stamped {week.n === 1 ? 'letter' : 'letters'}
-                  {showEx && exCents > 0 ? ` · examples below show ${exCents}¢` : ''}
+                  {inView ? inView.n : week.n} stamped
+                  {inView?.ex ? ' · includes examples' : ''}
                 </span>
               </div>
               <div className="flex flex-col items-end text-[11px]" style={{ color: MUTED }}>
@@ -736,15 +877,52 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
               ))}
             </div>
             {tab !== 'sent' && (
-              <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
-                <input type="checkbox" checked={m.newest} onChange={(e) => m.setNewest(e.target.checked)} />
-                Newest first (otherwise contacts, then highest postage)
-              </label>
+              <>
+                <div className="flex rounded-xl p-0.5" style={{ background: CARD }}>
+                  {(
+                    [
+                      ['paid', 'Most paid'],
+                      ['newest', 'Newest'],
+                      ['friends', 'Friends'],
+                      ...(tab === 'requests' ? ([['spreading', 'Spreading']] as const) : []),
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      aria-pressed={mode === id}
+                      onClick={() => setSort(id)}
+                      className="flex-1 rounded-lg py-1.5 text-[11px] font-semibold"
+                      style={mode === id ? { background: '#2b2f36', color: GOLD } : { color: MUTED }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                  {FILTERS.map((x) => (
+                    <button
+                      key={x.id}
+                      type="button"
+                      aria-pressed={filter === x.id}
+                      onClick={() => setFilter(x.id)}
+                      className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                      style={
+                        filter === x.id
+                          ? { background: GOLD, color: '#1a1300' }
+                          : { border: '1px solid #2b2f36', color: '#fff' }
+                      }
+                    >
+                      {x.label}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
             {m.error && <p className="text-xs text-[#F97066] m-0">{m.error}</p>}
             {tab === 'inbox' && (
               <>
-                {m.boxes.inbox.map((r) => (
+                {view('inbox').map((r) => (
                   <MailRow
                     key={r.id}
                     r={r}
@@ -754,7 +932,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     onOpen={() => setReading(r)}
                   />
                 ))}
-                {!m.boxes.inbox.length && !exInbox.length && (
+                {!view('inbox').length && !exInbox.length && (
                   <Empty
                     title={m.loading ? 'Checking for mail…' : 'No mail yet'}
                     text="bMail is sealed mail with a stamp. Friends write free and sit on top. Strangers pay your price to reach you (Penny post, 1¢), and the postage comes to you. Unstamped mail waits in Requests."
@@ -764,7 +942,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             )}
             {tab === 'requests' && (
               <>
-                {m.boxes.requests.map((r) => (
+                {view('requests').map((r) => (
                   <div key={r.id} className="flex flex-col gap-1">
                     <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
                     {r.verifiedSats > 0 && (
@@ -774,7 +952,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     )}
                   </div>
                 ))}
-                {!m.boxes.requests.length && !exRequests.length && (
+                {!view('requests').length && !exRequests.length && (
                   <Empty
                     title="Requests"
                     text="Unstamped mail, promotions and token airdrops wait here. Nothing is thrown away: keep what you like, hide an issuer to stop more."
