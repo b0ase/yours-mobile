@@ -21,6 +21,7 @@ import {
   currentFx,
 } from '../../utils/displayCurrency';
 import { wwOpen } from './flag';
+import { LockCoin } from '../tabs/TopNav';
 import { useWalletFeed } from './walletFeed';
 import { BappHost } from './BappHost';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
@@ -280,7 +281,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     { id: 'settings', label: 'Settings', icon: I.settings, select: 'settings' },
     { id: 'tools', label: 'Tools', icon: I.tools, select: 'tools' },
     { id: 'connect', label: 'Connect a site / CLI', icon: I.link, act: () => wwOpen('tools') },
-    { id: 'lockapp', label: 'Lock wallet', icon: I.lock, act: () => void lockWallet() },
+    { id: 'lockapp', label: 'Lock wallet (⌘L)', icon: I.lock, act: () => void lockWallet() },
   ];
   const isOn = (it: Item) =>
     it.kind ? onWallet && kind === it.kind : !!it.to && pathname.startsWith(it.to.split('?')[0]);
@@ -405,8 +406,14 @@ const WideShell = ({ children }: { children: ReactNode }) => {
                 </button>
               ))}
             </div>
-            <button className="ww-icon-btn" title="Lock wallet (⌘L)" onClick={() => void lockWallet()}>
-              <Icon d={I.lock} />
+            {/* Same as the phone top bar: Lock BSV (time-locks). Locking the wallet is the sidebar's Lock wallet and ⌘L. */}
+            <button
+              className={`ww-icon-btn${pathname.startsWith('/m/lock') ? ' on' : ''}`}
+              title="Lock BSV (time-locks)"
+              aria-label="Lock BSV"
+              onClick={() => navigate('/m/lock')}
+            >
+              <LockCoin color="currentColor" accent="#F5B800" />
             </button>
           </div>
         </header>

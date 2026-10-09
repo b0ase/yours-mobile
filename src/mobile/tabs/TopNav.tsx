@@ -54,7 +54,7 @@ const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
 const PAIR_LABEL = IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website';
 
 /** Padlock with a coin: Lock BSV (time-locks), not "lock the app". */
-const LockCoin = ({ color, accent }: { color: string; accent: string }) => (
+export const LockCoin = ({ color, accent }: { color: string; accent: string }) => (
   <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
     <rect x="3" y="11" width="13" height="10" rx="2" stroke={color} strokeWidth="2" />
     <path d="M6 11V7.5a3.5 3.5 0 0 1 7 0V11" stroke={color} strokeWidth="2" strokeLinecap="round" />
