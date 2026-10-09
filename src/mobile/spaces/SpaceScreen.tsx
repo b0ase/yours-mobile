@@ -67,6 +67,7 @@ import {
   type GreenRoom,
 } from './model';
 import { ScreenAwake, wakeLockSupported } from './wakeLock';
+import { SpaceBackground, pipFocus } from './background';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { shareText } from '../chat/shareLink';
 
@@ -282,6 +283,17 @@ const CtlButton = ({
     </span>
   </button>
 );
+
+/** The one tile shown inside the Android PiP window. */
+const PipVideo = ({ media, handle }: { media: SpaceMedia; handle: string }) => {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    media.bindVideo(handle, ref.current);
+    media.setVideoLive(handle, true);
+    return () => media.bindVideo(handle, null);
+  }, [media, handle]);
+  return <video ref={ref} data-space-handle={handle} autoPlay playsInline muted className="h-full w-full object-cover" />;
+};
 
 export interface SpaceScreenProps {
   client: BchatClient;
@@ -671,6 +683,29 @@ const SpaceScreenInner = ({
 
   const title = state.space?.title || roomName;
   const myHandle = me.replace(/^\$/, '').toLowerCase();
+
+  // Ducking out to other apps (background.ts): Android foreground service + notification, PiP for
+  // live video, lock-screen controls. The buttons there call the latest mute/leave below.
+  const [pip, setPip] = useState(false);
+  const bgActs = useRef({ mute: () => undefined as unknown, leave: () => undefined as unknown });
+  bgActs.current = {
+    mute: () => onStage && void toggleMic(),
+    leave: () => void leave(false),
+  };
+  const bg = useMemo(
+    () =>
+      new SpaceBackground({
+        onMute: () => bgActs.current.mute(),
+        onLeave: () => bgActs.current.leave(),
+        onPip: setPip,
+      }),
+    [],
+  );
+  const focus = phase === 'live' ? pipFocus({ stage, videos, speaking: speakers, me: myHandle }) : null;
+  useEffect(() => {
+    bg.update({ live: phase === 'live', title, onStage, micOn, focus });
+  }, [bg, phase, title, onStage, micOn, focus]);
+  useEffect(() => () => bg.close(), [bg]);
   const raiseHand = () => {
     if (!raised) setNote('Hand raised. The host can bring you on stage.');
     void act({ action: 'hand', raised: !raised });
@@ -916,6 +951,15 @@ const SpaceScreenInner = ({
       </CtlButton>
     </div>
   );
+
+  // Android picture-in-picture: only the focus speaker's video, full-bleed.
+  if (pip && focus)
+    return createPortal(
+      <div className="fixed inset-0 bg-black" style={{ zIndex: 1000 }}>
+        <PipVideo media={media} handle={focus} />
+      </div>,
+      document.body,
+    );
 
   return createPortal(
     <div
