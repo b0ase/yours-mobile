@@ -1150,3 +1150,18 @@ html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end > * {
   background: rgba(248, 113, 113, 0.08);
   border-color: rgba(248, 113, 113, 0.25);
 }
+
+/* Floating gold b (phone/Dock.tsx HomeButton): bottom right; its talk sheet opens above it. */
+.ww-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  z-index: 60;
+  width: 360px;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.ww-fab > * {
+  pointer-events: auto;
+}

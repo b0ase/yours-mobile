@@ -22,6 +22,7 @@ import {
 } from '../../utils/displayCurrency';
 import { wwOpen } from './flag';
 import { LockCoin } from '../tabs/TopNav';
+import { HomeButton } from '../phone/Dock';
 import { useWalletFeed } from './walletFeed';
 import { BappHost } from './BappHost';
 import { WidePage } from './WidePage';
@@ -448,6 +449,12 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </div>
         </WidePage>
       </main>
+      {/* The phone dock's gold b, floating: click opens b, press and hold to talk (same component and gesture). */}
+      {!bapp && !pathname.startsWith('/m/agent') && (
+        <div className="ww-fab" title="b agent: click to open, hold to talk">
+          <HomeButton onHome={() => navigate('/m/agent')} onAgent={() => navigate('/m/agent')} disabled={false} />
+        </div>
+      )}
     </div>,
     document.body,
   );

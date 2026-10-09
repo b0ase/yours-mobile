@@ -177,7 +177,7 @@ const Tile = ({
  * pointer events, so touches drive it where there are any (pointer events for mouse/pen only), the callout and
  * selection are off. A gold ring fills while holding.
  */
-const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent: () => void; disabled: boolean }) => {
+export const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent: () => void; disabled: boolean }) => {
   const timer = useRef<number | null>(null);
   const hold = useRef<BHoldState>(B_HOLD_IDLE);
   const lastTouch = useRef(0);
