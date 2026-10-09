@@ -41,6 +41,19 @@ const memStore = () => {
       aliases.set(to, { ...r, alias: to });
       for (const p of pays.values()) if (p.alias === from) p.alias = to;
     },
+    forwards: new Map(),
+    getForward: async function (a) {
+      return this.forwards.get(a) ?? null;
+    },
+    putForward: async function (r) {
+      this.forwards.set(r.from_alias, { ...r });
+    },
+    deleteForward: async function (a) {
+      this.forwards.delete(a);
+    },
+    retargetForwards: async function (from, to) {
+      for (const r of this.forwards.values()) if (r.to_alias === from) r.to_alias = to;
+    },
     insertPayment: async (r) => void pays.set(r.reference, { ...r }),
     getPayment: async (ref) => pays.get(ref) ?? null,
     updatePayment: async (ref, patch) => void Object.assign(pays.get(ref), patch),
@@ -442,6 +455,52 @@ describe('renamed handles keep receiving', () => {
     expect(r.pubkey).toBe(u.identityKey);
     expect(r.handle).toBe('newname@pay.test');
     expect((await h.pki({ handle: 'nobody@pay.test' }))[0]).toBe(404);
+  });
+
+  test('a wallet rename forwards the old name for 90 days, then releases it', async () => {
+    const store = memStore();
+    let t = Date.now();
+    const h = pm.makeHandlers({ store, env: ENV, now: () => t });
+    const u = user();
+    const other = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'firstname' })))[0]).toBe(200);
+    expect((await h.register({}, await u.sign('register', { alias: 'secondname' })))[0]).toBe(200);
+    for (const fn of ['pki', 'profile', 'p2pDestination'].filter((k) => h[k])) {
+      const [s] = await h[fn]({ handle: 'firstname@pay.test' }, { satoshis: 1000 });
+      expect(s).toBe(200);
+    }
+    const [s, r] = await h.pki({ handle: 'firstname@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+    expect(r.handle).toBe('secondname@pay.test');
+    // Nobody else can take it while it forwards.
+    expect((await h.register({}, await other.sign('register', { alias: 'firstname' })))[0]).toBe(409);
+    // A second rename keeps both old names pointing at the newest.
+    expect((await h.register({}, await u.sign('register', { alias: 'thirdname' })))[0]).toBe(200);
+    expect((await h.pki({ handle: 'firstname@pay.test' }))[1].handle).toBe('thirdname@pay.test');
+    expect((await h.pki({ handle: 'secondname@pay.test' }))[1].handle).toBe('thirdname@pay.test');
+    const fw = await store.getForward('firstname');
+    expect(Date.parse(fw.expires_at) - t).toBe(pm.FORWARD_MS);
+    // After 90 days it's released.
+    t += pm.FORWARD_MS + 1000;
+    expect((await h.pki({ handle: 'firstname@pay.test' }))[0]).toBe(404);
+    expect(await store.getForward('firstname')).toBeNull();
+    t = Date.now(); // signatures are checked against real time
+    expect((await h.register({}, await other.sign('register', { alias: 'firstname' })))[0]).toBe(200);
+  });
+
+  test('a permanent extra name (no expiry) receives for the wallet', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'mainname' })))[0]).toBe(200);
+    await store.putForward({ from_alias: 'extraname', to_alias: 'mainname', identity_key: u.identityKey, expires_at: null });
+    const [s, r] = await h.pki({ handle: 'extraname@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+    // A forward whose key doesn't own the target is ignored.
+    await store.putForward({ from_alias: 'spoof', to_alias: 'mainname', identity_key: user().identityKey, expires_at: null });
+    expect((await h.pki({ handle: 'spoof@pay.test' }))[0]).toBe(404);
   });
 
   test('bitsignRenamed reads the public profile API', async () => {

@@ -39,6 +39,8 @@ async function ticketSocialCheck(alias, proof, env = process.env) {
   if (!p) return 'That sign-in has expired. Please sign in again.';
   return p.alias === alias ? null : 'That name does not match your sign-in';
 }
+/** A renamed name keeps forwarding to the new one this long, then is released (owner, 9 Oct 2026). */
+const FORWARD_MS = 90 * 24 * 60 * 60 * 1000;
 const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 const RESERVED = new Set([
   'admin',
@@ -227,11 +229,28 @@ function makeHandlers({
 }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
+  // A live forward (rename within 90 days, or a permanent extra name). Expired ones are released.
+  const liveForward = async (alias) => {
+    const fw = store.getForward ? await store.getForward(alias).catch(() => null) : null;
+    if (!fw) return null;
+    if (fw.expires_at && Date.parse(fw.expires_at) <= now()) {
+      await store.deleteForward?.(alias).catch(() => {});
+      return null;
+    }
+    return fw;
+  };
   const publicAlias = async (handle) => {
     const p = parseHandleParts(handle, env);
     if (!p) return [404, { error: 'not-found' }];
     let row = await store.getAlias(p.alias);
-    // An old handle forwards to the new one (one hop), so payments to it still arrive.
+    // An old (or extra) name forwards to the wallet's name (one hop), so payments to it still arrive.
+    if (!row) {
+      const fw = await liveForward(p.alias);
+      if (fw) {
+        row = await store.getAlias(fw.to_alias);
+        if (row && row.identity_key !== fw.identity_key) row = null;
+      }
+    }
     if (!row) {
       const to = await renamed(p.alias).catch(() => null);
       if (to) row = await store.getAlias(to);
@@ -354,6 +373,9 @@ function makeHandlers({
         if (refused) return [403, { error: refused }];
       }
       if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
+      // A name still forwarding (renamed < 90 days ago, or an extra name) belongs to its wallet.
+      const fwd = taken ? null : await liveForward(alias);
+      if (fwd && fwd.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
       // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
       // added, boase stays. A plain name still renames, keeping the inbox.
       const kind = SOCIAL_RE.test(alias) ? (alias.endsWith('.x') ? 'x' : 'gmail') : 'plain';
@@ -365,7 +387,20 @@ function makeHandlers({
       if (kind === 'gmail' && !ownsIt) return [403, { error: 'Choose a handle instead of your email name.' }];
       const mine =
         kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
-      if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) await store.renameAlias(mine.alias, alias);
+      if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
+        await store.renameAlias(mine.alias, alias);
+        // The old name keeps receiving for 90 days, then is released.
+        if (store.putForward) {
+          if (fwd) await store.deleteForward(alias);
+          await store.retargetForwards?.(mine.alias, alias);
+          await store.putForward({
+            from_alias: mine.alias,
+            to_alias: alias,
+            identity_key: identityKey,
+            expires_at: new Date(now() + FORWARD_MS).toISOString(),
+          });
+        }
+      }
       const row = await store.upsertAlias({
         kind,
         alias,
@@ -650,6 +685,7 @@ const bookingOut = (r) => ({
 });
 
 module.exports = {
+  FORWARD_MS,
   bitsignRenamed,
   socialAliasFor,
   ANYONE_PUB,

@@ -49,6 +49,26 @@ function supabaseStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ alias: to, updated_at: new Date().toISOString() }),
       }),
+    // Name forwards (migrations/20261009_bwallet_paymail_forwards.sql): old/extra name -> main name.
+    getForward: (from) => one(`bwallet_paymail_forwards?from_alias=eq.${q(from)}&limit=1`),
+    putForward: (row) =>
+      req('bwallet_paymail_forwards?on_conflict=from_alias', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    deleteForward: (from) =>
+      req(`bwallet_paymail_forwards?from_alias=eq.${q(from)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      }),
+    // Point every forward that targeted `from` at `to` (a renamed main name keeps its old names).
+    retargetForwards: (from, to) =>
+      req(`bwallet_paymail_forwards?to_alias=eq.${q(from)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ to_alias: to }),
+      }),
     insertPayment: (row) =>
       req('bwallet_paymail_payments', {
         method: 'POST',
@@ -136,6 +156,7 @@ function supabaseStore(env = process.env, f = fetch) {
         })) ?? [];
       const payments = (await del('bwallet_paymail_payments')).length;
       const aliases = (await del('bwallet_paymail_aliases')).length;
+      await del('bwallet_paymail_forwards');
       return { aliases, payments };
     },
     countRecentPayments: async (alias, since) => {

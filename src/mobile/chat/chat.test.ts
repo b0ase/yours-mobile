@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { BchatClient, ChatApiError, type Http } from './api';
+import { BchatClient, ChatApiError, needsHandle, type Http } from './api';
 import {
   filterRooms,
   isBotMessage,
@@ -194,6 +194,27 @@ describe('BchatClient', () => {
     });
     expect((calls[1].body as { address: string }).address).toBe('1New');
     expect(client.current?.address).toBe('1New');
+  });
+
+  test('needs_handle without a chosen name: refusal carries the claim, then claimHandle finishes sign-in', async () => {
+    const { http, calls } = fakeHttp({
+      'POST /api/bitsign/auth/wallet/challenge': () => ({ status: 200, data: { nonce: 'n', message: 'm' } }),
+      'POST /api/bitsign/auth/wallet/verify': () => ({ status: 200, data: { needs_handle: true, claim_token: 'CT' } }),
+      'POST /api/bitsign/auth/wallet/handle': () => ({ status: 200, data: { token: 'T', handle: 'picked' } }),
+    });
+    const client = new BchatClient(http, null, 'https://x.test');
+    const signer = {
+      address: async () => '1Addr',
+      sign: async () => ({ address: '1Addr', pubKey: '02', sig: 'S' }),
+      handle: async () => null,
+    };
+    const err = await client.signIn(signer).catch((e) => e);
+    const need = needsHandle(err);
+    expect(need).toEqual({ claimToken: 'CT', address: '1Addr' });
+    expect(needsHandle(new ChatApiError('x', 409))).toBeNull();
+    const s = await client.claimHandle(need!.claimToken, 'picked', need!.address);
+    expect(s.handle).toBe('picked');
+    expect(calls.at(-1)?.body).toEqual({ claim_token: 'CT', handle: 'picked' });
   });
 
   test('errors carry server message and status', async () => {
