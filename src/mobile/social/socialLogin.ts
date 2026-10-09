@@ -7,15 +7,16 @@ import { YoursNative } from '../native';
 
 /**
  * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bWalletX's own sign-in service
- * (paymail server, site/lib/social.js) proves the X @name or Gmail address; the new wallet then records it and may claim the matching verified paymail
- * (b0asex.x@bwalletx.com, theirname.gmail@bwalletx.com) with its personal token and room.
+ * (paymail server, site/lib/social.js) proves the X @name or Google account; the wallet uses its photo and
+ * display name, and the user chooses their own handle.
  *
  * 1. start: a random secret stays here; the sign-in service gets only its sha256 and returns the
  *    provider's sign-in URL, opened in the system browser (Google refuses embedded web views).
  * 2. return: pay server → www.bwallet.space/social#t=<ticket> → the app (universal link, or the
  *    bwalletx:// scheme from that page; the extension reads the tab). preview() fills name + photo.
- * 3. Choose your handle: the paymail server registers <name>.x / <name>.gmail with the ticket +
- *    secret. bWalletX keeps the record; bit-sign plays no part.
+ * 3. Choose your handle (owner, 9 Oct 2026): nothing is registered automatically any more. HandleFlow
+ *    opens prefilled with `suggested_handle` (the X @name; never anything from an email) and the user
+ *    picks, with a live availability check. Existing <name>.x / <name>.gmail names keep receiving.
  */
 
 export type SocialProvider = 'x' | 'google';

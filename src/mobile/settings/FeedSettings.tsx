@@ -27,10 +27,12 @@ import {
   ShieldCheck,
   LogOut,
   Network,
+  AtSign,
 } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { HandleFlow } from '../names/HandleFlow';
 import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
 import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
 import { isNative } from '../native';
@@ -543,6 +545,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
   const [chatSignedOut, setChatSignedOut] = useState(false);
+  const [handleOpen, setHandleOpen] = useState(false);
   const paidLikes = PAID_LIKE_OPTIONS.map((v) => ({ id: v as number, label: money(v, rate) }));
   return (
     <>
@@ -558,9 +561,16 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           />
           <Divider />
           <Row
+            icon={<AtSign size={16} />}
+            label="Change handle"
+            description="Choose the name people pay and find you by; your old name keeps receiving"
+            onClick={() => setHandleOpen(true)}
+          />
+          <Divider />
+          <Row
             icon={<BadgeCheck size={16} />}
             label="Connect X or Google"
-            description="Get a verified name like yourname.x; it becomes the main name"
+            description="Verify it's you and bring your photo; you still choose your handle"
             onClick={() => setScreen('social')}
           />
           <Divider />
@@ -1022,6 +1032,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
+      {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (

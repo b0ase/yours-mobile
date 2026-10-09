@@ -83,9 +83,11 @@ describe('verified social names', () => {
 });
 
 describe('nameChangeBlocked', () => {
-  test('blocks a verified X / Google name switching to a plain name', () => {
-    expect(nameChangeBlocked('b0asex.x@bwallet.space', 'b0ase')).toMatch(/verified with X/);
-    expect(nameChangeBlocked('me.gmail@bwallet.space', 'me')).toMatch(/verified with Google/);
+  test('a verified X / Google name may switch to a chosen plain handle; new .x / .gmail names are refused', () => {
+    expect(nameChangeBlocked('b0asex.x@bwallet.space', 'b0ase')).toBeNull();
+    expect(nameChangeBlocked('me.gmail@bwallet.space', 'me')).toBeNull();
+    expect(nameChangeBlocked('boase@bwallet.space', 'someone.gmail')).toMatch(/plain handle/);
+    expect(nameChangeBlocked(undefined, 'b0asex.x')).toMatch(/plain handle/);
   });
   test('lets a plain name rename, and allows no-change or a first claim', () => {
     expect(nameChangeBlocked('boase@bwallet.space', 'b0ase')).toBeNull();
