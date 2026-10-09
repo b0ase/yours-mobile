@@ -1287,3 +1287,9 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
 .ww-install:hover {
   background: rgba(245, 184, 0, 0.2);
 }
+
+/* bSpaces (/m/spaces) is a plain page, not a fixed screen under the phone top bar: .ww-col's -3.5rem offset clipped
+   its first row ("Live now" and the line under it). Push it back below the clip. */
+.ww-col .bs-spaces {
+  padding-top: 3.5rem;
+}

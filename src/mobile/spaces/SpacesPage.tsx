@@ -19,7 +19,7 @@ import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
 
 const GOLD = '#FFD24D';
-const MUTED = '#8a8f98';
+const MUTED = '#a3a9b3';
 const LINE = '#1f2127';
 type Row = { room: ChatRoom; state: SpaceState };
 const PARALLEL = 5;
@@ -88,7 +88,7 @@ const SpacesPage = () => {
   );
 
   return (
-    <div className="min-h-full flex flex-col" style={{ background: '#010101', color: '#fff' }}>
+    <div className="bs-spaces min-h-full flex flex-col" style={{ background: '#010101', color: '#fff' }}>
       <header className="flex items-center gap-2 px-2 py-2" style={{ borderBottom: `1px solid ${LINE}` }}>
         <button onClick={() => navigate(-1)} className="p-2" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
