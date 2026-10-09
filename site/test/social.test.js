@@ -74,6 +74,13 @@ describe('Continue with X (bWalletX own OAuth)', () => {
       ENV,
     );
     expect(cancelled).toBe('https://web.bwalletx.com/#error=cancelled');
+    const beta = await social.callback(
+      'x',
+      { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'beta' }), code: 'c' },
+      ENV,
+      fakeX,
+    );
+    expect(beta.startsWith('https://beta.bwalletx.com/#')).toBe(true);
     const testers = await social.callback(
       'x',
       { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'testers' }), code: 'c' },
