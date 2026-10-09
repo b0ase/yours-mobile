@@ -89,6 +89,12 @@ export interface IssuerChallenge {
 export interface ChatSigner {
   address: () => Promise<string>;
   sign: (message: string) => Promise<{ address: string; pubKey: string; sig: string }>;
+  /**
+   * The handle this wallet's owner already chose (their plain paymail name), for a wallet bChat has not
+   * seen yet: bit-sign answers `needs_handle` + `claim_token` and the account is made under this name.
+   * Never derived from an email or a provider (owner, 9 Oct 2026: users choose their handle).
+   */
+  handle?: () => Promise<string | null>;
 }
 
 export interface SignInItem {
@@ -140,8 +146,12 @@ export interface SocialProfile {
   name: string;
   display?: string | null;
   avatar?: string | null;
-  /** The paymail alias it may claim: `b0asex.x`, `theirname.gmail` (null if the name can't be one). */
+  /** @deprecated users choose their handle (owner, 9 Oct 2026). Old servers: `b0asex.x`; never .gmail now. */
   alias: string | null;
+  /** New servers: open "Choose your handle"… */
+  choose_handle?: boolean;
+  /** …prefilled with this: the X @name only, never anything from an email. */
+  suggested_handle?: string | null;
 }
 
 export class BchatClient {
@@ -202,7 +212,13 @@ export class BchatClient {
         address = signed.address;
         continue;
       }
-      const v = await this.call<{ token?: string; handle?: string; needs_handle?: boolean; error?: string }>(
+      const v = await this.call<{
+        token?: string;
+        handle?: string;
+        needs_handle?: boolean;
+        claim_token?: string;
+        error?: string;
+      }>(
         'POST',
         '/api/bitsign/auth/wallet/verify',
         // intent=sign-in: sign in as this wallet's owner, ignoring any stale cookie session in the
@@ -219,17 +235,36 @@ export class BchatClient {
         },
         false,
       );
-      if (!v.token || !v.handle) {
-        throw new ChatApiError(
-          v.needs_handle ? 'Choose a bChat handle at bitcoinchat.online first.' : 'bChat sign-in failed',
-          401,
-        );
+      if (v.needs_handle && v.claim_token) {
+        // A wallet bit-sign hasn't seen (bit-sign PR #102): no default handle any more, the owner's
+        // chosen one makes the account. Without one, the caller shows "Choose your handle".
+        const chosen = await signer.handle?.().catch(() => null);
+        if (chosen) return this.claimHandle(v.claim_token, chosen, address);
+        throw new ChatApiError('Choose your handle first.', 409, { needs_handle: true, claim_token: v.claim_token });
       }
+      if (!v.token || !v.handle) throw new ChatApiError('bChat sign-in failed', 401);
       const account = getChatAccount();
       this.session = { token: v.token, handle: v.handle, address, ...(account ? { account } : {}) };
       return this.session;
     }
     throw new ChatApiError('The wallet signed with an unexpected key', 401);
+  }
+
+  /**
+   * Make the account for a proven-but-new wallet under the handle its owner chose
+   * (bit-sign POST /api/bitsign/auth/wallet/handle; the address comes from the claim token).
+   */
+  async claimHandle(claimToken: string, handle: string, address: string): Promise<ChatSession> {
+    const r = await this.call<{ token?: string; handle?: string }>(
+      'POST',
+      '/api/bitsign/auth/wallet/handle',
+      { claim_token: claimToken, handle: handle.replace(/^\$/, '') },
+      false,
+    );
+    if (!r.token || !r.handle) throw new ChatApiError('bChat sign-in failed', 401);
+    const account = getChatAccount();
+    this.session = { token: r.token, handle: r.handle, address, ...(account ? { account } : {}) };
+    return this.session;
   }
 
   /**

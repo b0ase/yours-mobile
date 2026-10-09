@@ -209,16 +209,12 @@ export const collectPaymailInbox = async (
   return { collected: done.length, satoshis };
 };
 
-/**
- * Why the paymail can't be changed to `alias`, or null if it can. Mirrors the paymail server's
- * rule (site/lib/paymail.js `register`, owner 4 Oct 2026): a wallet whose name is a verified
- * X / Google name (`b0asex.x`) can't also take a plain name, so offering "Change to <plain>"
- * only to have the server refuse it is wrong. A plain name still renames freely.
- */
+/** Why the paymail can't be changed to `alias`, or null if it can (mirrors site/lib/paymail.js `register`). */
 export const nameChangeBlocked = (current: string | null | undefined, alias: string): string | null => {
+  // Owner, 9 Oct 2026 (handle rule): users choose their handle, and a wallet with a verified .x / .gmail
+  // name may pick a plain one (the verified name keeps receiving). Only a NEW .x / .gmail name is refused:
+  // those come from a provider, not a choice.
   const now = (current ?? '').split('@')[0];
-  if (!now || !alias || now === alias) return null;
-  if (!SOCIAL_ALIAS_RE.test(now) || SOCIAL_ALIAS_RE.test(alias)) return null;
-  const via = now.endsWith('.x') ? 'X' : 'Google';
-  return `Your name is $${now}, verified with ${via}. A wallet with a verified name keeps it, so it can't switch to a plain name. To use ${alias}, add another account.`;
+  if (!alias || now === alias || !SOCIAL_ALIAS_RE.test(alias)) return null;
+  return 'Choose a plain handle (a-z, 0-9, - or _).';
 };

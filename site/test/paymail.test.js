@@ -164,20 +164,37 @@ describe('register', () => {
     expect(store.aliases.get('w-x.x').avatar).toBe('https://img.test/a.png');
     // Nobody else can, without proof.
     expect((await h.register({}, await v.sign('register', { alias: 'w-x.x' })))[0]).toBe(403);
-    // The verified name is now the wallet's identity, and it can't take another plain name.
-    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('w-x.x');
+    // The wallet already had a plain name it chose, so that stays its main name; the X name also receives.
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
     // Market › Social: every kind of name, tagged with its kind.
     const people = (await h.social({ provider: 'all' }))[1].accounts;
     expect(people.find((a) => a.alias === 'w-x.x')?.kind).toBe('x');
     expect(people.find((a) => a.alias === 'wplain')?.kind).toBe('plain');
     expect((await h.social({ provider: 'x' }))[1].accounts.every((a) => a.kind === 'x')).toBe(true);
-    // Both names are listed, so the older plain one never receives invisibly.
+    // Both names are listed, so neither receives invisibly.
     expect((await h.lookup({ key: w.identityKey }))[1].names).toEqual([
-      { paymail: 'wplain@pay.test', kind: 'plain', main: false },
-      { paymail: 'w-x.x@pay.test', kind: 'x', main: true },
+      { paymail: 'wplain@pay.test', kind: 'plain', main: true },
+      { paymail: 'w-x.x@pay.test', kind: 'x', main: false },
     ]);
-    expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(409);
-    expect(store.aliases.has('wother')).toBe(false);
+    // Users choose their handle (owner, 9 Oct 2026): a plain rename keeps the X name receiving.
+    expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(200);
+    expect(store.aliases.has('wother')).toBe(true);
+    expect(store.aliases.has('wplain')).toBe(false);
+    expect(store.aliases.get('w-x.x').kind).toBe('x');
+    // A wallet with only a verified X name can still choose a plain handle.
+    const x = user();
+    allowed.set('xonly.x', 'ticket-x');
+    expect(
+      (await h.register({}, { ...(await x.sign('register', { alias: 'xonly.x' })), social: { ticket: 'ticket-x', secret: 's' } }))[0],
+    ).toBe(200);
+    expect((await h.register({}, await x.sign('register', { alias: 'chosen' })))[0]).toBe(200);
+    expect((await h.lookup({ key: x.identityKey }))[1].alias).toBe('chosen');
+    expect((await h.pki({ handle: 'xonly.x@pay.test' }))[1].pubkey).toBe(x.identityKey);
+    // New .gmail names are no longer issued (they published the address), even with a valid proof.
+    allowed.set('someone.gmail', 'ticket-g');
+    expect(
+      (await h.register({}, { ...(await x.sign('register', { alias: 'someone.gmail' })), social: { ticket: 'ticket-g', secret: 's' } }))[0],
+    ).toBe(403);
     // Apps › Add app: signed save and load, https only.
     const apps = JSON.stringify([{ url: 'https://zanaadu.com', name: 'Zanaadu' }]);
     expect((await h.appsPut({}, await w.sign('apps-put', { apps })))[0]).toBe(200);
@@ -191,7 +208,7 @@ describe('register', () => {
     expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(404);
     expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(200);
     expect(store.aliases.has('w-x.x')).toBe(false);
-    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wother');
     // Once taken, the same X name can't be registered to a second wallet.
     expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
     expect(pm.socialAliasFor('x', 'B0ase_X')).toBe('b0ase-x.x');
@@ -410,5 +427,31 @@ describe('delete (account deletion)', () => {
     const forged = { ...(await v.sign('delete', { confirm: 'DELETE' })), identityKey: u.identityKey };
     expect((await h.delete({}, forged))[0]).toBe(401);
     expect(store.aliases.has('mine')).toBe(true);
+  });
+});
+
+describe('renamed handles keep receiving', () => {
+  test('an old name answers as the new one via bit-sign', async () => {
+    const store = memStore();
+    const h0 = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    expect((await h0.register({}, await u.sign('register', { alias: 'newname' })))[0]).toBe(200);
+    const h = pm.makeHandlers({ store, env: ENV, renamed: async (a) => (a === 'oldname' ? 'newname' : null) });
+    const [s, r] = await h.pki({ handle: 'oldname@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+    expect(r.handle).toBe('newname@pay.test');
+    expect((await h.pki({ handle: 'nobody@pay.test' }))[0]).toBe(404);
+  });
+
+  test('bitsignRenamed reads the public profile API', async () => {
+    const f = async (url) => ({
+      ok: true,
+      json: async () => ({ handle: url.endsWith('/oldname') ? 'NewName' : 'same' }),
+    });
+    expect(await pm.bitsignRenamed('oldname', { BITSIGN_PUBLIC_URL: 'https://bs.test/' }, f)).toBe('newname');
+    expect(await pm.bitsignRenamed('same', {}, f)).toBeNull();
+    expect(await pm.bitsignRenamed('b0asex.x', {}, f)).toBeNull();
+    expect(await pm.bitsignRenamed('x', {}, async () => ({ ok: false }))).toBeNull();
   });
 });

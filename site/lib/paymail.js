@@ -192,19 +192,50 @@ function matchOutputs(tx, expected) {
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
+/**
+ * A renamed handle (bit-sign self-serve rename, PR #102): bit-sign's public profile API answers an old
+ * name with the current handle for 90 days, so `$old@ourdomain` keeps receiving for the new name.
+ * Public, read-only, no credentials. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
+ * Returns the new alias, or null (unknown, not renamed, or bit-sign unreachable).
+ */
+async function bitsignRenamed(alias, env = process.env, f = fetch) {
+  if (!ALIAS_RE.test(alias)) return null;
+  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bitcoinchat.online').replace(/\/$/, '');
+  try {
+    const r = await f(`${base}/api/public/profile/${encodeURIComponent(alias)}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return null;
+    const to = String((await r.json())?.handle || '')
+      .replace(/^\$/, '')
+      .toLowerCase();
+    return to && to !== alias && ALIAS_RE.test(to) ? to : null;
+  } catch {
+    return null;
+  }
+}
+
 function makeHandlers({
   store,
   env = process.env,
   broadcast,
   now = () => Date.now(),
   socialCheck = ticketSocialCheck,
+  // Off under `bun test` (NODE_ENV=test) so unit tests never call the network; tests inject their own.
+  renamed = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : (alias) => bitsignRenamed(alias, env),
 }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   const publicAlias = async (handle) => {
     const p = parseHandleParts(handle, env);
     if (!p) return [404, { error: 'not-found' }];
-    const row = await store.getAlias(p.alias);
+    let row = await store.getAlias(p.alias);
+    // An old handle forwards to the new one (one hop), so payments to it still arrive.
+    if (!row) {
+      const to = await renamed(p.alias).catch(() => null);
+      if (to) row = await store.getAlias(to);
+    }
     if (!row) return [404, { error: 'not-found' }];
     return [200, { ...row, _domain: p.domain }];
   };
@@ -328,16 +359,10 @@ function makeHandlers({
       const kind = SOCIAL_RE.test(alias) ? (alias.endsWith('.x') ? 'x' : 'gmail') : 'plain';
       // One identity per wallet (owner, 4 Oct 2026): a verified X / Google name always wins, so a
       // wallet that has one can't also take a plain name. Plain-name identities are separate accounts.
-      if (kind === 'plain') {
-        const social =
-          (await store.getAliasByKeyKind?.(identityKey, 'x')) ||
-          (await store.getAliasByKeyKind?.(identityKey, 'gmail'));
-        if (social)
-          return [
-            409,
-            { error: `This wallet's name is ${handleOf(social.alias)}. Add another account for a different name.` },
-          ];
-      }
+      // Owner, 9 Oct 2026 (handle rule): users choose their handle. A wallet with a verified .x / .gmail
+      // name may take ONE plain handle of its choosing (it becomes the main name); the social name keeps
+      // receiving. New .gmail names are no longer issued (they published the address); existing ones work.
+      if (kind === 'gmail' && !ownsIt) return [403, { error: 'Choose a handle instead of your email name.' }];
       const mine =
         kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
       if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) await store.renameAlias(mine.alias, alias);
@@ -365,11 +390,9 @@ function makeHandlers({
     lookup: async (q) => {
       const key = String(q.key || '').toLowerCase();
       if (!PUBKEY_RE.test(key)) return [400, { error: 'invalid-key' }];
-      // The wallet's identity: its verified social name wins over an older plain one.
-      const row =
-        (await store.getAliasByKeyKind?.(key, 'x')) ||
-        (await store.getAliasByKeyKind?.(key, 'gmail')) ||
-        (await store.getAliasByKey(key));
+      // The wallet's identity: the handle its owner chose (plain) first (owner, 9 Oct 2026), else a
+      // verified .x / .gmail name. getAliasByKey already prefers plain and falls back to any kind.
+      const row = await store.getAliasByKey(key);
       if (!row) return [404, { error: 'not-found' }];
       // All names that receive for this wallet, so none is invisible (owner, 4 Oct 2026).
       const all = store.listByKey ? await store.listByKey(key) : [row];
@@ -627,6 +650,7 @@ const bookingOut = (r) => ({
 });
 
 module.exports = {
+  bitsignRenamed,
   socialAliasFor,
   ANYONE_PUB,
   BRC29,

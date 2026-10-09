@@ -69,8 +69,20 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
     name: t.name,
     display: t.d || null,
     avatar: t.a || null,
-    alias: socialAliasFor(t.p, t.name),
+    // Deprecated (owner, 9 Oct 2026: users choose their handle). Kept for app builds that still
+    // register `<name>.x`; never a Gmail-derived name now, since that published the address.
+    alias: t.p === 'x' ? socialAliasFor(t.p, t.name) : null,
+    // New clients: open "Choose your handle" prefilled with suggested_handle (the X @name only).
+    choose_handle: true,
+    suggested_handle: suggestedHandleFor(t.p, t.name),
   };
+}
+
+/** The handle to prefill: the X @name as a plain alias (`B0ase_X` → `b0ase-x`); never anything from an email. */
+function suggestedHandleFor(provider, name) {
+  if (provider !== 'x') return null;
+  const n = String(name || '').trim().toLowerCase();
+  return /^[a-z0-9_]{1,15}$/.test(n) ? n.replace(/_/g, '-').replace(/^-+|-+$/g, '') || null : null;
 }
 
 // Where the browser lands after the provider. A fixed list, never a caller-supplied URL (no open redirect).
@@ -190,4 +202,4 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
   }
 }
 
-module.exports = { start, callback, openTicket, socialAliasFor, seal, open, sha256Hex, TTL_MS };
+module.exports = { start, callback, openTicket, socialAliasFor, suggestedHandleFor, seal, open, sha256Hex, TTL_MS };
