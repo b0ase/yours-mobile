@@ -132,25 +132,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { MintButton } from '../mobile/mint/MintButton';",
       "import { MintButton } from '../mobile/mint/MintButton';\nimport { CreditsRow } from '../mobile/credits/CreditsRow';",
     ],
-    // Send to a name: $handle / paymail / OpNS recipient box with resolve + confirm (src/mobile/names).
+    // Send to a name now lives in the Send card itself (src/mobile/wallet/send/SendCard → NameInput).
     [
       "import { MintButton } from '../mobile/mint/MintButton';",
-      "import { MintButton } from '../mobile/mint/MintButton';\nimport { NameInput } from '../mobile/names/NameInput';\nimport { ReceiveName } from '../mobile/names/MyNameBadge';",
-    ],
-    [
-      `<Input
-                theme={theme}
-                placeholder="Enter Address or Paymail"
-                type="text"
-                onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
-                value={recipient.address}
-              />`,
-      `<NameInput
-                theme={theme}
-                asset="bsv"
-                onChange={(v) => updateRecipient(recipient.id, 'address', v)}
-                value={recipient.address}
-              />`,
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { ReceiveName } from '../mobile/names/MyNameBadge';",
     ],
     // Receive screen shows the account's name.
     [

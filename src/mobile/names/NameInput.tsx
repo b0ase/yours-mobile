@@ -19,11 +19,18 @@ type Props = {
   asset: 'bsv' | 'token';
   placeholder?: string;
   style?: CSSProperties;
+  /**
+   * Send card: accept a resolved name without the extra "Send to this name" tap. The card stays
+   * on screen (name, avatar, destination) and the Send button names the recipient instead.
+   */
+  autoConfirm?: boolean;
+  /** What the box is doing, plus the resolved name when there is one. */
+  onStatus?: (status: 'empty' | 'typing' | 'loading' | 'error' | 'ready', resolved?: Resolved) => void;
 };
 
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
 
-export const NameInput = ({ theme, value, onChange, asset, placeholder, style }: Props) => {
+export const NameInput = ({ theme, value, onChange, asset, placeholder, style, autoConfirm, onStatus }: Props) => {
   const [text, setText] = useState(value);
   const [state, setState] = useState<
     { s: 'idle' } | { s: 'loading' } | { s: 'error'; msg: string } | { s: 'resolved'; r: Resolved; confirmed: boolean }
@@ -40,14 +47,16 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style }:
     onChange(v);
   };
 
-  // Upstream cleared the field (e.g. after a send) → clear ours.
-  useEffect(() => {
-    if (value !== lastOut.current) {
-      lastOut.current = value;
-      setText(value);
-      setState({ s: 'idle' });
-    }
-  }, [value]);
+  const status = useRef(onStatus);
+  status.current = onStatus;
+
+  const confirm = (r: Resolved) => {
+    const d = destinationFor(r, asset);
+    if (!d.ok) return;
+    setState({ s: 'resolved', r, confirmed: true });
+    emit(d.to);
+    status.current?.('ready', r);
+  };
 
   const onType = (raw: string) => {
     setText(raw);
@@ -56,27 +65,45 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style }:
     if (p.kind === 'empty' || p.kind === 'address' || p.kind === 'invalid') {
       setState({ s: 'idle' });
       emit(raw.trim());
+      status.current?.(p.kind === 'empty' ? 'empty' : p.kind === 'address' ? 'ready' : 'typing');
       return;
     }
     emit('');
     setState({ s: 'loading' });
+    status.current?.('loading');
     setTimeout(async () => {
       if (n !== seq.current) return;
       try {
         const r = await resolveRecipient((u, i) => fetch(u, i), p);
-        if (n === seq.current) setState({ s: 'resolved', r, confirmed: false });
+        if (n !== seq.current) return;
+        if (autoConfirm && destinationFor(r, asset).ok) confirm(r);
+        else {
+          setState({ s: 'resolved', r, confirmed: false });
+          status.current?.(destinationFor(r, asset).ok ? 'typing' : 'error', r);
+        }
       } catch (e) {
-        if (n === seq.current) setState({ s: 'error', msg: e instanceof Error ? e.message : 'Lookup failed' });
+        if (n !== seq.current) return;
+        setState({ s: 'error', msg: e instanceof Error ? e.message : 'Lookup failed' });
+        status.current?.('error');
       }
     }, 450);
   };
 
-  const confirm = (r: Resolved) => {
-    const d = destinationFor(r, asset);
-    if (!d.ok) return;
-    setState({ s: 'resolved', r, confirmed: true });
-    emit(d.to);
-  };
+  // Value set from outside: cleared after a send → clear ours; a pasted or picked $handle / paymail /
+  // name / address → treat it as typed, so names resolve and show their card.
+  useEffect(() => {
+    if (value !== lastOut.current) {
+      lastOut.current = value;
+      if (value) onType(value);
+      else {
+        seq.current++;
+        setText('');
+        setState({ s: 'idle' });
+        status.current?.('empty');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   const gray = theme.color.global.gray;
   const fg = theme.color.global.contrast;

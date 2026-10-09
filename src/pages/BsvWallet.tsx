@@ -17,7 +17,6 @@ import {
   Check,
   Trash2,
   Plus,
-  ArrowUpDown,
   Loader2,
   RefreshCw,
 } from 'lucide-react';
@@ -88,6 +87,8 @@ import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
+import { SendCard } from '../mobile/wallet/send/SendCard';
+import { rememberSent } from '../mobile/wallet/send/sendLogic';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -234,7 +235,7 @@ export const BsvWallet = () => {
   const mneeTotal = mneeRecipients.reduce((acc, r) => acc + (r.amount ?? 0), 0);
 
   const [recipients, setRecipients] = useState<Recipient[]>([
-    { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'bsv' },
+    { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
   ]);
 
   // Chat › Contacts › Pay: open Send with that recipient filled in (amount + confirm stay manual).
@@ -243,7 +244,7 @@ export const BsvWallet = () => {
       const to = takePay();
       if (!to) return;
       setRecipients([
-        { id: crypto.randomUUID(), address: to, satSendAmount: null, usdSendAmount: null, amountType: 'bsv' },
+        { id: crypto.randomUUID(), address: to, satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
       ]);
       setPageState('send');
     };
@@ -265,7 +266,7 @@ export const BsvWallet = () => {
   const addRecipient = () => {
     setRecipients((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'bsv' },
+      { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
     ]);
   };
 
@@ -300,21 +301,11 @@ export const BsvWallet = () => {
     ]);
   };
 
-  const toggleRecipientAmountType = (id: string) => {
-    updateRecipient(id, 'amountType', recipients.find((r) => r.id === id)?.amountType === 'bsv' ? 'usd' : 'bsv');
-  };
-
   const resetRecipients = () => {
     setRecipients([
-      { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'bsv' },
+      { id: crypto.randomUUID(), address: '', satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
     ]);
     setIsProcessing(false);
-  };
-
-  const computeTotalAmount = () => {
-    const totalBsv = recipients.reduce((acc, r) => acc + (r.satSendAmount ?? 0), 0);
-    const totalUsd = recipients.reduce((acc, r) => acc + (r.usdSendAmount ?? 0), 0);
-    return { totalBsv, totalUsd };
   };
 
   // BIP44-style gap limit for MNEE address discovery. `settings.maxKeyIndex` only advances
@@ -989,6 +980,7 @@ export const BsvWallet = () => {
         }
 
         setBsvBalance((prev) => Math.max(0, prev - totalSats / BSV_DECIMAL_CONVERSION));
+        rememberSent(identityAddress, addressOrder);
         refreshUtxos().catch((err) => console.error('[handleSendBsv] reconcile refresh failed:', err));
         resetSendState();
         setBsvHistoryRefreshKey((k) => k + 1);
@@ -1020,23 +1012,6 @@ export const BsvWallet = () => {
         error: undefined,
       },
     ]);
-  };
-
-  const getLabel = () => {
-    let satAmount = 0;
-    recipients.forEach((r) => {
-      const usdAmountInSats = r.usdSendAmount
-        ? Math.ceil((r.usdSendAmount / exchangeRate) * BSV_DECIMAL_CONVERSION)
-        : 0;
-      satAmount += r.satSendAmount ?? usdAmountInSats;
-    });
-    const sendAmount = satAmount ? satAmount / BSV_DECIMAL_CONVERSION : 0;
-    const overBalance = sendAmount > bsvBalance;
-    return sendAmount
-      ? overBalance
-        ? 'Insufficient Balance'
-        : `Send ${satAmount / BSV_DECIMAL_CONVERSION}`
-      : 'Enter Send Details';
   };
 
   const getMneeLabel = () => {
@@ -1938,206 +1913,22 @@ export const BsvWallet = () => {
         />
       )}
 
-      {/* Balance chip — MAX is single-recipient only */}
-      {recipients.length > 1 ? (
-        <div
-          className="flex items-center gap-2 px-4 py-2 rounded-full mb-5"
-          style={{ background: theme.color.global.row }}
-        >
-          <img src={bsvCoin} alt="BSV" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
-          <span className="text-xs" style={{ color: theme.color.global.gray }}>
-            Balance
-          </span>
-          <span className="text-sm font-semibold font-mono" style={{ color: theme.color.global.contrast }}>
-            {bsvBalance.toFixed(8)}
-          </span>
-          <span className="text-xs font-semibold" style={{ color: theme.color.component.primaryButtonLeftGradient }}>
-            BSV
-          </span>
-        </div>
-      ) : (
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={fillInputWithAllBsv}
-          className="flex items-center gap-2 px-4 py-2 rounded-full border-0 outline-none cursor-pointer mb-5"
-          style={{ background: theme.color.global.row }}
-          title="Tap to fill max balance"
-        >
-          <img src={bsvCoin} alt="BSV" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
-          <span className="text-xs" style={{ color: theme.color.global.gray }}>
-            Balance
-          </span>
-          <span className="text-sm font-semibold font-mono" style={{ color: theme.color.global.contrast }}>
-            {bsvBalance.toFixed(8)}
-          </span>
-          <span className="text-xs font-semibold" style={{ color: theme.color.component.primaryButtonLeftGradient }}>
-            BSV
-          </span>
-          <span
-            className="text-[10px] ml-1 px-1.5 py-0.5 rounded"
-            style={{
-              background: `${theme.color.component.primaryButtonLeftGradient}20`,
-              color: theme.color.component.primaryButtonLeftGradient,
-            }}
-          >
-            MAX
-          </span>
-        </motion.button>
-      )}
-
-      {/* Form */}
-      <form noValidate onSubmit={(e) => handleSendBsv(e)} className="flex flex-col items-center w-full gap-3">
-        {/* Recipient cards */}
-        <AnimatePresence>
-          {recipients.map((recipient, idx) => (
-            <motion.div
-              key={recipient.id}
-              initial={{ opacity: 0, y: 12, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.96 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="w-full rounded-2xl p-4 flex flex-col gap-3"
-              style={{ background: theme.color.global.row }}
-            >
-              {/* Card header */}
-              <div className="flex items-center justify-between">
-                <span
-                  className="text-[10px] font-semibold uppercase tracking-widest"
-                  style={{ color: theme.color.global.gray }}
-                >
-                  {recipients.length > 1 ? `Recipient ${idx + 1}` : 'Recipient'}
-                </span>
-                {recipients.length > 1 && (
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    type="button"
-                    onClick={() => removeRecipient(recipient.id)}
-                    className="flex items-center justify-center w-6 h-6 rounded-full border-0 outline-none cursor-pointer"
-                    style={{ background: '#ff444415', color: '#ff4444' }}
-                  >
-                    <Trash2 size={12} />
-                  </motion.button>
-                )}
-              </div>
-
-              {/* Address input */}
-              <Input
-                theme={theme}
-                placeholder="Enter Address or Paymail"
-                type="text"
-                onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
-                value={recipient.address}
-              />
-
-              {/* Error */}
-              {recipient.error && (
-                <p className="text-xs" style={{ color: '#ff4444' }}>
-                  {recipient.error}
-                </p>
-              )}
-
-              {/* Amount input + unit toggle */}
-              <div
-                className="flex items-center w-[85%] mx-auto rounded-xl border"
-                style={{
-                  backgroundColor: theme.color.global.row,
-                  borderColor: theme.color.global.gray + '40',
-                }}
-              >
-                <input
-                  placeholder={recipient.amountType === 'bsv' ? 'Enter BSV Amount' : 'Enter USD Amount'}
-                  type="number"
-                  step="0.00000001"
-                  className="flex-1 bg-transparent h-9 px-4 text-sm outline-none border-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
-                  style={{
-                    color: theme.color.global.contrast,
-                    fontFamily: "'Inter', Arial, Helvetica, sans-serif",
-                  }}
-                  value={
-                    recipient.satSendAmount !== null && recipient.satSendAmount !== undefined
-                      ? recipient.satSendAmount / BSV_DECIMAL_CONVERSION
-                      : recipient.usdSendAmount !== null && recipient.usdSendAmount !== undefined
-                        ? recipient.usdSendAmount
-                        : ''
-                  }
-                  onChange={(e) => {
-                    const inputValue = e.target.value;
-                    if (inputValue === '') {
-                      updateRecipient(recipient.id, 'satSendAmount', null);
-                      updateRecipient(recipient.id, 'usdSendAmount', null);
-                    } else {
-                      if (recipient.amountType === 'bsv') {
-                        updateRecipient(
-                          recipient.id,
-                          'satSendAmount',
-                          Math.round(Number(inputValue) * BSV_DECIMAL_CONVERSION),
-                        );
-                      } else {
-                        updateRecipient(recipient.id, 'usdSendAmount', Number(inputValue));
-                      }
-                    }
-                  }}
-                  onWheel={(e) => {
-                    (e.target as HTMLInputElement).blur();
-                    e.stopPropagation();
-                    setTimeout(() => (e.target as HTMLInputElement).focus(), 0);
-                  }}
-                />
-                <motion.button
-                  whileTap={{ scale: 0.93 }}
-                  type="button"
-                  onClick={() => toggleRecipientAmountType(recipient.id)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 mr-1.5 rounded-lg border-0 outline-none cursor-pointer shrink-0"
-                  style={{ background: `${theme.color.component.primaryButtonLeftGradient}18` }}
-                >
-                  <span
-                    className="text-[11px] font-bold"
-                    style={{ color: theme.color.component.primaryButtonLeftGradient }}
-                  >
-                    {recipient.amountType === 'bsv' ? 'BSV' : 'USD'}
-                  </span>
-                  <ArrowUpDown size={10} style={{ color: theme.color.component.primaryButtonLeftGradient }} />
-                </motion.button>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {/* Add recipient */}
-        <Show when={!isSendAllBsv}>
-          <motion.button
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.98 }}
-            type="button"
-            onClick={addRecipient}
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl border-0 outline-none cursor-pointer"
-            style={{
-              background: `${theme.color.component.primaryButtonLeftGradient}10`,
-              border: `1px dashed ${theme.color.component.primaryButtonLeftGradient}40`,
-            }}
-          >
-            <Plus size={14} style={{ color: theme.color.component.primaryButtonLeftGradient }} />
-            <span className="text-sm font-semibold" style={{ color: theme.color.component.primaryButtonLeftGradient }}>
-              Add Recipient
-            </span>
-          </motion.button>
-        </Show>
-
-        {/* Send button */}
-        <Button
-          theme={theme}
-          type="primary"
-          label={getLabel()}
-          disabled={
-            isProcessing ||
-            getLabel() === 'Insufficient Balance' ||
-            (!computeTotalAmount().totalBsv && !computeTotalAmount().totalUsd)
-          }
-          isSubmit
-        />
-      </form>
+      {/* Send card (src/mobile/wallet/send): recipient first, dollars first, one clear button. */}
+      <SendCard
+        theme={theme}
+        rows={recipients}
+        balanceBsv={bsvBalance}
+        rate={exchangeRate}
+        sendAll={isSendAllBsv}
+        processing={isProcessing}
+        account={identityAddress}
+        onUpdate={updateRecipient}
+        onAdd={addRecipient}
+        onRemove={removeRecipient}
+        onMax={fillInputWithAllBsv}
+        onAmountEdited={() => setSatSendAmount(null)}
+        onSubmit={(e) => handleSendBsv(e)}
+      />
 
       <div className="w-full px-4">
         <CoinHistory filter={{ type: 'bsv' }} refreshKey={bsvHistoryRefreshKey} />
