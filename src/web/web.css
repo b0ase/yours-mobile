@@ -1,7 +1,14 @@
 /*
  * Web wallet (vite.config.web.ts): the mobile UI hosted as a static site.
- * Phones get the mobile layout under a beta banner. Wider screens get one centred 720px column (tool bar,
- * page and tab bar the same width) on the black and gold background (owner, 9 Oct 2026).
+ * Phones get the mobile layout under a beta banner. Wider screens get one centred column (tool bar, page and
+ * tab bar the same width) on the black and gold background (owner, 9 Oct 2026).
+ *
+ * Responsive web (owner, 9 Oct 2026): the classic web wallet adapts to the window, decided in CSS from first paint.
+ *   < 640px      the phone layout, untouched (the same screens ship in the apps and the extension).
+ *   640–1023px   tablet: a wider column (up to 880px), pages start under the banner, sheets as centred modals.
+ *   >= 1024px    desktop: a 1100px content area; the wallet page in two columns (card, price and actions on
+ *                the left; tokens, NFTs and friends on the right).
+ * Everything below 640px stays as it was; every new rule sits in a min-width query in this web-only file.
  */
 
 html:root {
@@ -74,8 +81,9 @@ html body #root {
   html:root {
     --wallet-width: 100%;
     --wallet-unlock-width: 420px;
-    /* One container for the tool bar, the page and the tab bar (owner, 9 Oct 2026: "it's wonky"). */
-    --web-max: 720px;
+    /* One container for the tool bar, the page and the tab bar (owner, 9 Oct 2026: "it's wonky"). Tablets use
+       the width up to 880px; desktops get 1100px (below). */
+    --web-max: 880px;
     --wallet-height: calc(100dvh - var(--web-banner-height) - var(--account-strip-height));
   }
 
@@ -83,7 +91,7 @@ html body #root {
     width: 100%;
   }
 
-  /* The portalled tool bar spans the same 720px column as the page and tab bar, not the window. */
+  /* The portalled tool bar spans the same column as the page and tab bar, not the window. */
   html body > .grid.grid-cols-5.fixed.top-0 {
     left: 0;
     right: 0;
@@ -115,11 +123,90 @@ html body #root {
   }
 }
 
-/* Wide screens: one centred column, like the phone layout but wider (owner, 9 Oct 2026): the card centred at
-   the top, everything else below it. The phone layout's 88/90/92% widths keep their proportions. */
-@media (min-width: 900px) {
+/* Tablet and up: shared fixes for the wider column. */
+@media (min-width: 640px) {
   .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
     margin-left: auto;
     margin-right: auto;
+  }
+
+  /* Full-screen pages portalled to <body> (History, room view, Send...) start under the beta banner instead of
+     behind it (their header was cut off). */
+  html body > .fixed.inset-0 {
+    top: var(--web-banner-height) !important;
+  }
+
+  /* Bottom sheets become centred modals: a phone-width card in the middle of the column, not a full-width
+     strip along the bottom of a wide window. */
+  html body .fixed.inset-0.items-end.justify-center {
+    align-items: center !important;
+    padding: 16px;
+  }
+  html body .fixed.inset-0.items-end.justify-center > :not(.absolute):not(.fixed) {
+    width: 100%;
+    max-width: 560px;
+    max-height: calc(100dvh - var(--web-banner-height) - 32px);
+    overflow-y: auto;
+    border-radius: 20px !important;
+  }
+  .yours-sheet-backdrop {
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .yours-sheet {
+    max-width: 480px;
+    border-radius: 20px;
+    padding-bottom: 20px;
+  }
+}
+
+/* Desktop: a 1100px content area, and the wallet page in two columns. Left: the card, price · Buy BSV ·
+   History, the backup warning, Send/Receive/Mint, the $name offer and Airdrops, each in its own row. Right: the
+   Tokens/NFTs/Friends switch at the top, then its list spanning every row below it (pushed down past the
+   switch by a margin); the last track is 1fr, so the list's height goes there and never stretches the gaps
+   between the left column's rows. */
+@media (min-width: 1024px) {
+  html:root {
+    --web-max: 1100px;
+  }
+
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: repeat(8, auto) 1fr;
+    grid-auto-rows: auto;
+    column-gap: 32px;
+    align-content: start;
+    align-items: start;
+    justify-items: center;
+    padding-left: 24px;
+    padding-right: 24px;
+    box-sizing: border-box;
+    /* Content height, so the 1fr track takes only the list's overflow (not the window's spare height, which
+       pushed Manage Tokens to the bottom). */
+    min-height: 0 !important;
+  }
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > * {
+    grid-column: 1;
+  }
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
+    grid-row: 1;
+  }
+  /* The Tokens / NFTs / Friends switch, and everything after it (its lists sit in a display: contents wrapper). */
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .rounded-xl.mt-6.mb-3:has(> button + button + button) {
+    grid-column: 2;
+    grid-row: 1;
+    width: 100%;
+    margin-top: 0;
+  }
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .rounded-xl.mt-6.mb-3:has(> button + button + button) ~ *,
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .rounded-xl.mt-6.mb-3:has(> button + button + button) ~ * > * {
+    grid-column: 2;
+    width: 100%;
+  }
+  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .rounded-xl.mt-6.mb-3:has(> button + button + button) ~ * > :first-child {
+    grid-row: 1 / -1;
+    margin-top: 56px;
   }
 }
