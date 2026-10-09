@@ -698,8 +698,8 @@ const SpaceScreenInner = ({
   // Mute the room: applies to voices already playing and any that join later (media.ts).
   useEffect(() => media.setDeafened(deaf), [media, deaf]);
 
-  // Screen stays on while I host or speak; released as a listener, on leave or when it ends.
-  const wake = wantsWakeLock({ live: phase === 'live', role: state.me?.role, anonymous: anon, enabled: awakeOn });
+  // Screen stays on for anyone in the Space (host, speaker, listener); released on leave or end.
+  const wake = wantsWakeLock({ live: phase === 'live', enabled: awakeOn });
   useEffect(() => {
     void awake.set(wake);
   }, [awake, wake]);
@@ -1195,17 +1195,17 @@ const SpaceScreenInner = ({
         <Sheet onClose={() => setMoreOpen(false)}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-white text-sm font-semibold m-0">Keep screen on while I speak</p>
+              <p className="text-white text-sm font-semibold m-0">Keep screen on in this Space</p>
               <p className="mt-0.5 text-xs m-0" style={{ color: MUTED }}>
                 {wakeLockSupported()
-                  ? 'Screen stays on while you host or speak, so the phone doesn’t sleep mid-Space.'
-                  : 'This phone can’t keep the screen on from here; turn auto-lock off in Settings while you speak.'}
+                  ? 'Screen stays on while you’re in the Space, so the phone doesn’t sleep mid-Space.'
+                  : 'This phone can’t keep the screen on from here; turn auto-lock off in Settings while you’re in a Space.'}
               </p>
             </div>
             <button
               role="switch"
               aria-checked={awakeOn}
-              aria-label="Keep screen on while I speak"
+              aria-label="Keep screen on in this Space"
               onClick={() => setAwakeOn((v) => !v)}
               className="relative mt-1 h-7 w-12 shrink-0 rounded-full"
               style={{ background: awakeOn ? GOLD : '#3a3d44' }}

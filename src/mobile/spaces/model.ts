@@ -259,11 +259,10 @@ export const defaultJoinAs = (o: { spaceOpen: boolean; roomBoss: boolean }): 'sp
   o.roomBoss ? 'speaker' : 'listener';
 
 /**
- * Keep the screen awake while I host or speak (owner: phones went to sleep mid-Space). Off as a
- * listener, anonymous, or once the Space is over; the ⋯ toggle can turn it off.
+ * Keep the screen awake for anyone in a live Space — host, speaker or listener (owner: the phone
+ * went to sleep mid-Space). Off once I leave or the Space is over; the ⋯ toggle can turn it off.
  */
-export const wantsWakeLock = (o: { live: boolean; role: SpaceRole | null | undefined; anonymous: boolean; enabled: boolean }) =>
-  o.enabled && o.live && !o.anonymous && isOnStage(o.role);
+export const wantsWakeLock = (o: { live: boolean; enabled: boolean }) => o.enabled && o.live;
 
 /**
  * The participants reply to an action (`hand`, `role`, `mute`…) carries no space: keep ours and the

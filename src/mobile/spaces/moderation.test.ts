@@ -73,14 +73,10 @@ describe('join as speaker', () => {
 });
 
 describe('screen awake', () => {
-  const base = { live: true, anonymous: false, enabled: true };
-  test('on for host and speaker, off for listener / anonymous / ended / disabled', () => {
-    expect(wantsWakeLock({ ...base, role: 'host' })).toBe(true);
-    expect(wantsWakeLock({ ...base, role: 'speaker' })).toBe(true);
-    expect(wantsWakeLock({ ...base, role: 'listener' })).toBe(false);
-    expect(wantsWakeLock({ ...base, role: 'speaker', anonymous: true })).toBe(false);
-    expect(wantsWakeLock({ ...base, role: 'host', live: false })).toBe(false);
-    expect(wantsWakeLock({ ...base, role: 'host', enabled: false })).toBe(false);
+  test('on for anyone in a live Space, off once ended or disabled', () => {
+    expect(wantsWakeLock({ live: true, enabled: true })).toBe(true);
+    expect(wantsWakeLock({ live: false, enabled: true })).toBe(false);
+    expect(wantsWakeLock({ live: true, enabled: false })).toBe(false);
   });
   test('acquires once and releases', async () => {
     let requests = 0;
@@ -94,7 +90,7 @@ describe('screen awake', () => {
         },
       },
     };
-    const a = new ScreenAwake(nav);
+    const a = new ScreenAwake(nav, null);
     await a.set(true);
     await a.set(true);
     expect(requests).toBe(1);
@@ -104,10 +100,34 @@ describe('screen awake', () => {
     expect(a.held).toBe(false);
   });
   test('unsupported: no throw', async () => {
-    const a = new ScreenAwake({});
+    const a = new ScreenAwake({}, null);
     await a.set(true);
     expect(a.held).toBe(false);
   });
+});
+
+test('native keep-awake used first, released on leave', async () => {
+  const calls: string[] = [];
+  const native = { keepAwake: async () => void calls.push('on'), allowSleep: async () => void calls.push('off') };
+  let webRequests = 0;
+  const nav = { wakeLock: { request: async () => { webRequests++; return { released: false, release: async () => {} }; } } };
+  const a = new ScreenAwake(nav, native);
+  await a.set(true);
+  expect(a.held).toBe(true);
+  expect(webRequests).toBe(0);
+  await a.set(false);
+  expect(calls).toEqual(['on', 'off']);
+  expect(a.held).toBe(false);
+});
+
+test('native failure falls back to navigator.wakeLock', async () => {
+  const native = { keepAwake: async () => { throw new Error('no plugin'); }, allowSleep: async () => {} };
+  let webRequests = 0;
+  const nav = { wakeLock: { request: async () => { webRequests++; return { released: false, release: async () => {} }; } } };
+  const a = new ScreenAwake(nav, native);
+  await a.set(true);
+  expect(webRequests).toBe(1);
+  expect(a.held).toBe(true);
 });
 
 describe('host label', () => {
