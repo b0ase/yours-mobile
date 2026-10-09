@@ -111,7 +111,7 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
   const { authorizeUrl: url } = await post<{ authorizeUrl: string }>('start', {
     provider,
     verifier_hash: vh,
-    ...(web ? { return_to: 'web' } : {}),
+    ...(web ? { return_to: webReturnKey() } : {}),
   });
   write({ provider, secret, at: Date.now(), owner });
   if (web) {
@@ -153,11 +153,15 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
 }
 
 const RETURN = 'https://www.bwallet.space/social';
-const WEB_RETURN = 'https://web.bwalletx.com/';
+// Web wallet origins the sign-in server returns to (exact list; the server maps the key, never a caller URL).
+const WEB_RETURNS = { web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/' } as const;
+const webReturnKey = (): keyof typeof WEB_RETURNS =>
+  typeof location !== 'undefined' && location.origin === 'https://beta.bwalletx.com' ? 'beta' : 'web';
+const isWebReturn = (url: string) => Object.values(WEB_RETURNS).some((r) => url.startsWith(r));
 const isReturn = (url: string) =>
   url.startsWith(RETURN) ||
   url.startsWith('bwalletx://social') ||
-  (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
+  (isWebReturn(url) && /#(.*&)?(t|error)=/.test(url));
 
 /** A return URL (universal link, bwalletx://, or the extension's tab): keep the ticket, fetch the profile. */
 export async function receiveSocialUrl(url: string): Promise<void> {
@@ -201,7 +205,7 @@ if (
   !Capacitor.isNativePlatform() &&
   !IS_EXTENSION &&
   typeof location !== 'undefined' &&
-  location.href.startsWith(WEB_RETURN)
+  isWebReturn(location.href)
 ) {
   const here = location.href;
   if (isReturn(here)) {
