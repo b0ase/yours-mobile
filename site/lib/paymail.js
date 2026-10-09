@@ -49,6 +49,10 @@ const RESERVED = new Set([
   'bwallet', 'bwalletx', 'bcorp', 'bitcoincorp', 'bitcoin-corp', 'thebitcoincorp', 'bitsign', 'bit-sign',
   'bchat', 'bchatx', 'bspaces', 'bmail', 'bmovies', 'bvault', 'btrust', 'bapps', 'bitcoinos',
   'npg', 'ninjapunkgirls', 'kintsugi', 'moneybutton', 'divvy', 'path401', 'path402', 'path403',
+  // Bitcoin itself, its people and companies: full names only, so a real Craig keeps `craig`.
+  'bitcoin', 'bsv', 'btc', 'bitcoinsv', 'bitcoin-sv', 'satoshi', 'satoshinakamoto', 'nakamoto',
+  'craigwright', 'drcraigwright', 'csw', 'nchain', 'bsvassociation', 'bsva', 'metanet', 'teranode',
+  'handcash', 'relayx', 'twetch', 'centbee',
 ]);
 /**
  * ⚠ A SOCIAL ALIAS IS RESERVED BY ITS BASE NAME. `bcorp.x` is proven by whoever holds X @bcorp,
