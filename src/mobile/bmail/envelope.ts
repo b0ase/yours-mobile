@@ -76,7 +76,7 @@ export const encodeEnvelope = (e: Envelope): string => JSON.stringify(e);
 
 const nat = (x: unknown): number | null => (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? x : null);
 
-const parsePostage = (raw: unknown): Postage | undefined => {
+export const parsePostage = (raw: unknown): Postage | undefined => {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const sats = nat(r.sats);

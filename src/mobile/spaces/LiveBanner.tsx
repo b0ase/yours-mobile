@@ -10,6 +10,7 @@ import { claimIssuerAdmin, onIssuerClaimed } from '../chat/autoClaim';
 import { claimDepsFor } from '../chat/claimDeps';
 import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
+import { DoorKeeper } from './DoorKeeper';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -167,6 +168,7 @@ export const LiveBanner = ({
         </div>
       )}
 
+      {open && <DoorKeeper client={client} ticker={ticker} me={me} />}
       {open && (
         <SpaceScreen
           client={client}

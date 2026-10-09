@@ -1,7 +1,8 @@
 /**
  * A Space opened from a link (inviteLinks.ts → /m/spaces?invite=<code> or ?space=<slug>). Shows the
  * public card from bit-sign, then either Join (you are in the room) or the entry requirement with
- * the existing ways in: open the token's room (a holder is admitted there) and Buy in the Market.
+ * the ways in: Pay at the door (DoorButton: pay the host, the host's phone sends a ticket), open the token's
+ * room (a holder is admitted there) and Buy in the Market.
  * An expired, revoked or used-up invite says so and offers the permanent Space page.
  */
 import { useEffect, useState } from 'react';
@@ -10,6 +11,7 @@ import { ChatApiError, type BchatClient } from '../chat/api';
 import { BuyTokenButton, OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { parseSpaceState } from './model';
 import { parsePage, parseSpaceInvite, type SpacePage } from './invite';
+import { DoorButton } from './DoorButton';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -161,6 +163,23 @@ export const InviteCard = ({
               ? `You need ${inv.entry.kind === 'token' ? `${inv.entry.amount} $${inv.entry.symbol}` : 'the room’s token'} to enter. Already hold it? Open the room and you’re let in.`
               : 'This room is members only. Ask the host to add you.'}
           </p>
+          {inv.gate?.kind === 'bsv21' && inv.host && inv.entry.kind === 'token' && inv.entry.mode === 'hold' && (
+            <DoorButton
+              ticker={inv.ticker}
+              host={inv.host}
+              entryUsd={inv.entry.usd}
+              live={inv.live}
+              isMember={async () => {
+                try {
+                  parseSpaceState(await client.space(inv.ticker), me);
+                  return true;
+                } catch {
+                  return false;
+                }
+              }}
+              onAdmitted={() => setAccess('member')}
+            />
+          )}
           {inv.gate?.id && inv.gate.kind && (
             <div className="mt-3 flex gap-2">
               <BuyTokenButton kind={inv.gate.kind} id={inv.gate.id} />
