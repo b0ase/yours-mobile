@@ -24,6 +24,7 @@ import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
 import { useSpaceInviteLinks } from '../spaces/inviteLinks';
+import { useSubscribeLinks } from '../pots/subscribeLink';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
@@ -100,6 +101,7 @@ const TopNavBar = () => {
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
   // Space invite links (spaces/inviteLinks.ts); PhoneShell owns them in the phone layout.
   useSpaceInviteLinks(!phoneLayoutOn());
+  useSubscribeLinks(!phoneLayoutOn());
   useEffect(() => {
     if (phoneLayoutOn()) return;
     const show = () => {
