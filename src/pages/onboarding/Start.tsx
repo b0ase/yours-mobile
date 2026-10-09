@@ -85,7 +85,7 @@ export const Start = () => {
             initial="hidden"
             animate="visible"
             custom={0.18}
-            className="text-xs tracking-wide uppercase"
+            className="text-xs tracking-wide uppercase mb-8"
             style={{ color: gray }}
           >
             An open source project

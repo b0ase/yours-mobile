@@ -1286,40 +1286,43 @@ html.ww-on.ww-onb body #root {
   right: max(32px, calc((50vw - 440px) / 2));
   width: 440px;
   max-width: calc(100vw - 32px);
-  /* Sized by its content in CSS (no measuring script, so nothing resizes after paint), centred against the story,
-     capped to the window (scrolls beyond). Same width and padding for every step. */
-  height: auto !important;
+  /* ONE fixed, generous height for every step (owner, 9 Oct 2026: the panel loaded at half height and
+     jumped between steps). Content is centred inside; a taller step scrolls within the panel. */
+  height: min(760px, calc(100vh - 96px)) !important;
   min-height: 0 !important;
-  max-height: calc(100vh - 48px);
   overflow: hidden auto;
   margin: 0 !important;
-  padding: 20px 10px 8px;
-  /* Translate: centres it and keeps the flow's fixed / sticky bits inside the panel. */
+  padding: 0;
   transform: translateY(-50%);
   border-radius: 24px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #020202 !important;
+  background: #050505 !important;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
   scrollbar-width: none;
 }
-/* The flow's wrappers centre their content in a zero-height box, which pushes tall steps above the panel: top-align. */
-html.ww-on.ww-onb body #root > div,
-html.ww-on.ww-onb body #root > div > div {
-  align-items: flex-start !important;
-}
-/* The phone flow's wrappers are full-height (h-full / min-h-[--wallet-height]) boxes that centre their content; in
-   the panel they must take their content's height, or the content centres in a zero-height box and spills above the
-   panel (unlock: logo and "Welcome back" cut off, an empty frame below). */
+/* Pure black, the phone flow's own background, so its logo tiles and headers don't show as boxes. */
+html.ww-on.ww-onb body #root { background: #000 !important; }
+/* The flow's wrappers fill the panel (min-height, so a tall step grows and scrolls instead of spilling above
+   the top) and centre their content. They carry no background or frame of their own: one box, not two. */
 html.ww-on.ww-onb body #root > div,
 html.ww-on.ww-onb body #root > div > div,
 html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
   height: auto !important;
-  min-height: 0 !important;
-  justify-content: flex-start !important;
+  min-height: 100% !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+html.ww-on.ww-onb body #root > div,
+html.ww-on.ww-onb body #root > div > div {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch !important;
 }
 html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
-  padding-top: 8px;
-  padding-bottom: 8px;
+  justify-content: center !important;
+  padding: 28px 24px !important;
 }
 /* Errors and notices (components/Snackbar: absolute, bottom of a zero-height box, so they showed as a red sliver at
    the panel's top): pin them to the panel's bottom edge, full text, readable size. #root is transformed, so fixed
@@ -1363,8 +1366,9 @@ html.ww-on.ww-onb body #root .absolute.bottom-0.z-\[9999\] {
   transform: translateY(-50%);
 }
 .ww-auth-hero h1 {
-  margin: 20px 0 8px;
-  font-size: clamp(40px, 4vw, 60px);
+  margin: 0 0 36px;
+  line-height: 1.08;
+  font-size: clamp(36px, 3.6vw, 56px);
   font-weight: 800;
   letter-spacing: -0.03em;
 }

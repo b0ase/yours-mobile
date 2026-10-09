@@ -1,8 +1,6 @@
 import { useLayoutEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { WIDE_ON } from './flag';
-import { APP_NAME } from '../storeBuild';
-import mark from '../brand/bwalletx-glyph.svg';
 import poster from '../brand/bg/wallet-card.jpg';
 
 const FEATURES = [
@@ -33,9 +31,8 @@ export const WideAuth = ({ children }: { children: ReactNode }) => {
         <div className="ww-auth" aria-hidden={false}>
           <img className="ww-auth-bg" src={poster} alt="" />
           <div className="ww-auth-hero">
-            <img src={mark} alt="" width={88} height={88} />
-            <h1>{APP_NAME}</h1>
-            <p className="ww-auth-pitch">Money, mail, rooms and apps in one wallet you own.</p>
+            {/* The panel already carries the logo and name: the story leads with what it does (no double branding). */}
+            <h1>Money, mail, rooms and apps in one wallet you own.</h1>
             <ul>
               {FEATURES.map(([t, d]) => (
                 <li key={t}>
