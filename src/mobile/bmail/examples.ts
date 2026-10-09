@@ -147,7 +147,7 @@ export const EXAMPLES: ExampleMail[] = [
     handle: '$slowledger',
     color: '#667085',
     subject: 'Issue 31: the case for paying for attention',
-    body: 'This week: why a 1¢ stamp kills bulk mail without hurting anyone real, three small shops taking payments by mail, and a reader letter on reply-paid RSVPs.\n\nYou subscribed at 3 PNEE an issue (3¢). Stop paying and the issues stop.',
+    body: 'This week: why a 1¢ stamp kills bulk mail without hurting anyone real, three small shops taking payments by mail, and a reader letter on reply-paid RSVPs.\n\nYou subscribed at 3 PNEEs an issue (3¢). Stop paying and the issues stop.',
     stamps: ['penny'],
     cents: 3,
     pnee: true,
@@ -233,7 +233,7 @@ export const EXAMPLES: ExampleMail[] = [
     handle: '$adab',
     color: '#875BF7',
     subject: 'Your talk on penny post',
-    body: 'Loved the talk. I put 5 PNEE on this so it would sit near the top. Would you look at a 2-page draft I wrote on stamped mail for small charities?',
+    body: 'Loved the talk. I put 5 PNEEs on this so it would sit near the top. Would you look at a 2-page draft I wrote on stamped mail for small charities?',
     stamps: ['priority'],
     cents: 5,
     pnee: true,
@@ -261,8 +261,8 @@ export const EXAMPLES: ExampleMail[] = [
     name: 'Corner Pantry',
     handle: '$cornerpantry',
     color: '#16B364',
-    subject: 'Opening week: 500 PNEE off your first shop',
-    body: 'We opened on Market Street. 500 PNEE ($5.00) of shopping credit rides with this note; spend it at the till by scanning your wallet.',
+    subject: 'Opening week: 500 PNEEs off your first shop',
+    body: 'We opened on Market Street. 500 PNEEs ($5.00) of shopping credit rides with this note; spend it at the till by scanning your wallet.',
     stamps: ['penny'],
     cents: 1,
     pnee: true,
@@ -321,7 +321,7 @@ export const amountOf = (e: ExampleMail): { main: string; eq?: string; note: str
   const c = totalCents(e);
   const stamp = e.stamps.find((k) => k !== 'signed') ?? e.stamps[0] ?? 'none';
   const note = e.invoiceCents ? `+ ${fmtCents(e.invoiceCents)} invoice` : (e.note ?? STAMP_NOTE[stamp]);
-  return e.pnee ? { main: `${c} PNEE`, eq: fmtCents(c), note } : { main: fmtCents(c), note };
+  return e.pnee ? { main: `${c} ${c === 1 ? 'PNEE' : 'PNEEs'}`, eq: fmtCents(c), note } : { main: fmtCents(c), note };
 };
 
 export const tokenLabel = (t: TokenAttach): string => `${t.amount.toLocaleString('en-US')} $${t.symbol}`;

@@ -70,7 +70,8 @@ project only as "Based on the open-source Yours Wallet" in descriptions.
   Declare it as collected, not shared for advertising, in transit over HTTPS.
   Users can change the storage provider in Settings → Wallet Backup.
 - **Blockchain lookups** (addresses, transactions) go to 1Sat indexing APIs and
-  WhatsOnChain; **wallet messages** go to `messagebox.1sat.app`.
+  WhatsOnChain; **wallet messages** go to `messagebox.1sat.app`, and **bMail**
+  (end-to-end encrypted) goes through our own relay, `messagebox.bwalletx.com`.
 - **Not collected:** name, email, contacts, location, advertising identifiers,
   analytics, crash logs.
 - Websites the user opens in the in-app browser are governed by their own policies.

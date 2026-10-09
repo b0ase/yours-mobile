@@ -119,7 +119,7 @@ describe('bMail weighting and amounts', () => {
     const by = (id: string) => ex.EXAMPLES.find((e) => e.id === id)!;
     expect(ex.amountOf(by('ex-intro'))).toEqual({ main: '$0.03', note: 'Priority stamp' });
     expect(ex.amountOf(by('ex-invoice')).note).toBe('+ $112.50 invoice');
-    expect(ex.amountOf(by('ex-refund'))).toMatchObject({ main: '422 PNEE', eq: '$4.22' });
+    expect(ex.amountOf(by('ex-refund'))).toMatchObject({ main: '422 PNEEs', eq: '$4.22' });
     expect(ex.tokenLabel({ symbol: 'MOONZ', amount: 10_000 })).toBe('10,000 $MOONZ');
     expect(ex.filterExamples(ex.EXAMPLES, 'invoices').map((e) => e.id)).toEqual(['ex-invoice']);
     expect(ex.filterExamples(ex.EXAMPLES, 'tokens').length).toBeGreaterThan(4);
