@@ -41,8 +41,7 @@ import { useBottomMenu } from '../hooks/useBottomMenu';
 import { useIdentity, resolveImageUrl } from '../hooks/useIdentity';
 import { useTheme } from '../hooks/useTheme';
 import { useServiceContext } from '../hooks/useServiceContext';
-import { YoursEventName } from '../inject';
-import { sendMessage } from '../utils/chromeHelpers';
+import { useSignOut } from '../mobile/account/useMenuAccounts';
 import { FEE_PER_KB, SUPPORT_EMAIL_URL } from '../utils/constants';
 import { ChromeStorageObject, UsbBackupAccountStatus, UsbSecurity } from '../services/types/chromeStorage.types';
 import {
@@ -508,7 +507,7 @@ export const Settings = () => {
 
   const handleSignOutIntent = () => {
     setDecisionType('sign-out');
-    setSpeedBumpMessage('Make sure you have your seed phrase backed up!');
+    setSpeedBumpMessage('Sign this account out of chat and lock the wallet? Your keys stay on this device.');
     setShowSpeedBump(true);
   };
 
@@ -702,14 +701,15 @@ export const Settings = () => {
     }, 10000);
   };
 
+  // Sign out = sign this account out of chat and lock the wallet. It never removes the encrypted keys: that was
+  // upstream's chromeStorageService.clear() + SIGNED_OUT (IndexedDB deleted), which on bWalletX Desktop / web
+  // made the next visit ask for the 12 words (owner, 9 Oct 2026, D8). Removing a wallet is Forgot password or
+  // Delete account, both of which say so.
+  const signOutAndLock = useSignOut();
   const signOut = async () => {
-    await chromeStorageService.clear();
-    wallet?.close?.();
     setDecisionType(undefined);
-    sendMessage({
-      action: YoursEventName.SIGNED_OUT,
-    });
-    setTimeout(() => window.location.reload(), 100);
+    setShowSpeedBump(false);
+    await signOutAndLock(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress);
   };
 
   const handleCancel = () => {
@@ -1055,7 +1055,7 @@ export const Settings = () => {
         <SettingRow
           icon={<LogOut size={16} />}
           label="Sign Out"
-          description={`Sign out of ${theme.settings.displayName ?? `${theme.settings.walletName} Wallet`} completely`}
+          description="Sign out of chat and lock the wallet. Your keys stay on this device"
           onClick={handleSignOutIntent}
           isFirst
           isLast
