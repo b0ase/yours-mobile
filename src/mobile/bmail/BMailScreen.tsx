@@ -2,7 +2,7 @@
  * bMail (owner, 9 Oct 2026): the top-bar mailbox. Pay to send (postage), Penny post by default, friends free and on
  * top, everything unstamped (airdrops included) in Requests. Postage is utility: a stamp to reach someone.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Mailbox, PenSquare, RefreshCw, Settings, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -43,6 +43,7 @@ import {
 } from './route';
 import type { Received, Sent } from './store';
 import { useBMail } from './useBMail';
+import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 
 const CARD = '#17191E';
 const MUTED = '#98A2B3';
@@ -784,10 +785,16 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           return { usd, n: real.length + ex.filter((e) => totalCents(e) > 0).length, ex: ex.length > 0 };
         })();
 
+  const scroller = useRef<HTMLDivElement>(null);
+  const ptr = usePullToRefresh(scroller, !sub, m.refresh);
+  const ptrShow = ptr.pull > 0 || ptr.refreshing;
+  const ptrH = ptr.refreshing ? 40 : ptr.pull;
+
   return createPortal(
     <div
+      ref={scroller}
       className="fixed inset-0 z-[220] flex flex-col overflow-y-auto"
-      style={{ background: '#0d0e11', paddingTop: 'env(safe-area-inset-top)' }}
+      style={{ background: '#0d0e11', paddingTop: 'env(safe-area-inset-top)', overscrollBehaviorY: 'contain' }}
     >
       <div className="flex items-center gap-2 px-4 pt-4 pb-2">
         <Mailbox size={18} color={GOLD} />
@@ -805,6 +812,22 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           <X size={18} color={MUTED} />
         </button>
       </div>
+      {ptrShow && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex shrink-0 items-center justify-center gap-2 overflow-hidden text-[11px] motion-safe:transition-[height] motion-safe:duration-150"
+          style={{ height: ptrH, color: ptr.armed || ptr.refreshing ? GOLD : MUTED }}
+        >
+          <RefreshCw
+            size={14}
+            color={ptr.armed || ptr.refreshing ? GOLD : MUTED}
+            className={ptr.refreshing ? 'motion-safe:animate-spin' : ''}
+            style={ptr.refreshing ? undefined : { transform: `rotate(${(ptr.pull / PULL_THRESHOLD) * 270}deg)` }}
+          />
+          <span>{ptr.refreshing ? 'Refreshing…' : ptr.armed ? 'Release to refresh' : 'Pull to refresh'}</span>
+        </div>
+      )}
       <div className="flex flex-col gap-2 px-4 pb-24">
         {draft ? (
           <>
