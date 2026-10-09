@@ -37,7 +37,7 @@ import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
 import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
-import { LevelBars } from './LevelBars';
+import { SpeakerGrid } from './SpeakerGrid';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import {
   audienceCount,
@@ -58,7 +58,6 @@ import { GreenRoomSheet, RecordingBadge } from './GreenRoom';
 import {
   applyParticipantsReply,
   defaultJoinAs,
-  hostLabel,
   joinAsSpeakerOutcome,
   mayModerate,
   mayRaiseHand,
@@ -129,93 +128,6 @@ const ScreenTile = ({ owner, media }: { owner: string; media: SpaceMedia }) => {
         <Maximize2 size={16} />
       </button>
     </div>
-  );
-};
-
-const StageTile = ({
-  p,
-  video,
-  speaking,
-  media,
-  me,
-  big,
-  onTap,
-  micOff = false,
-  name,
-}: {
-  /** Display name for the host (bit-sign host_name), shown with the $handle small. */
-  name?: string | null;
-  micOff?: boolean;
-  p: Participant;
-  video: boolean;
-  speaking: boolean;
-  media: SpaceMedia;
-  me: string;
-  big: boolean;
-  onTap: (() => void) | null;
-}) => {
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    if (!video) return;
-    media.bindVideo(p.handle, ref.current);
-    return () => media.bindVideo(p.handle, null);
-  }, [video, media, p.handle]);
-  const hue = hueOf(p.handle);
-  return (
-    <button
-      onClick={onTap ?? undefined}
-      disabled={!onTap}
-      className="relative overflow-hidden rounded-2xl flex items-center justify-center"
-      style={{
-        aspectRatio: big ? '16 / 10' : '1 / 1',
-        background: `radial-gradient(120% 100% at 50% 0%, hsl(${hue} 35% 18%) 0%, #0b0b0d 70%)`,
-        boxShadow: speaking ? `0 0 0 3px ${GOLD}, 0 0 24px rgba(255,210,77,.35)` : `0 0 0 1px ${LINE}`,
-        transition: 'box-shadow .15s',
-      }}
-      aria-label={p.handle}
-    >
-      {video ? (
-        <video
-          ref={ref}
-          autoPlay
-          playsInline
-          muted={p.handle === me}
-          className="absolute inset-0 h-full w-full object-cover"
-          style={p.handle === me ? { transform: 'scaleX(-1)' } : undefined}
-        />
-      ) : (
-        <div
-          className="rounded-full flex items-center justify-center font-bold text-white"
-          style={{
-            width: big ? 96 : 64,
-            height: big ? 96 : 64,
-            fontSize: big ? 38 : 26,
-            background: `hsl(${hue} 55% 42%)`,
-            boxShadow: speaking ? `0 0 0 4px #010101, 0 0 0 7px ${GOLD}` : undefined,
-          }}
-        >
-          {p.handle[0]?.toUpperCase() ?? '?'}
-        </div>
-      )}
-      <div
-        className="absolute left-2 bottom-2 right-2 flex items-center gap-1 text-[12px] text-white"
-        style={{ textShadow: '0 1px 3px #000' }}
-      >
-        <LevelBars read={() => media.levelOf(p.handle)} speaking={speaking} muted={micOff} />
-        {name && hostLabel(p.handle, name) !== `$${p.handle}` ? (
-          <span className="truncate">
-            {name} <span className="opacity-70 text-[10px]">${p.handle}</span>
-          </span>
-        ) : (
-          <span className="truncate">${p.handle}</span>
-        )}
-        {p.role === 'host' && (
-          <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
-            HOST
-          </span>
-        )}
-      </div>
-    </button>
   );
 };
 
@@ -758,30 +670,27 @@ const SpaceScreenInner = ({
   };
 
   const title = state.space?.title || roomName;
-  const tiles = stage.length ? stage : [];
-  const many = tiles.length > 4;
-
-  const stageView = !tiles.length ? (
-    <p className="pt-10 text-center text-sm" style={{ color: MUTED }}>
-      Waiting for the host to come back on stage…
-    </p>
-  ) : (
-    <div className={`grid gap-3 ${tiles.length <= 1 ? 'grid-cols-1' : many ? 'grid-cols-3' : 'grid-cols-2'}`}>
-      {tiles.map((p) => (
-        <StageTile
-          key={p.handle}
-          p={p}
-          me={me.replace(/^\$/, '').toLowerCase()}
-          media={media}
-          video={videos.includes(p.handle)}
-          speaking={speakers.includes(p.handle)}
-          micOff={p.handle === me.replace(/^\$/, '').toLowerCase() && !micOn}
-          big={tiles.length <= 1}
-          name={p.role === 'host' ? hostName : null}
-          onTap={moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) ? () => setMenuFor(p) : null}
-        />
-      ))}
-    </div>
+  const myHandle = me.replace(/^\$/, '').toLowerCase();
+  const raiseHand = () => {
+    if (!raised) setNote('Hand raised. The host can bring you on stage.');
+    void act({ action: 'hand', raised: !raised });
+  };
+  const stageView = (
+    <SpeakerGrid
+      speakers={stage}
+      me={myHandle}
+      media={media}
+      videos={videos}
+      speaking={speakers}
+      micOn={micOn}
+      hostName={hostName}
+      listeners={audience}
+      canHand={canHand}
+      raised={raised}
+      onRaiseHand={raiseHand}
+      menuFor={(p) => (moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) ? () => setMenuFor(p) : null)}
+      avatars={Object.fromEntries((green?.stage ?? []).map((g) => [g.handle, g.avatar]))}
+    />
   );
 
   const body =
@@ -970,10 +879,7 @@ const SpaceScreenInner = ({
       ) : (
         <CtlButton
           label={raised ? 'Lower hand' : 'Raise hand'}
-          onClick={() => {
-            if (!raised) setNote('Hand raised. The host can bring you on stage.');
-            void act({ action: 'hand', raised: !raised });
-          }}
+          onClick={raiseHand}
           active={raised}
         >
           <Hand size={20} color={raised ? '#010101' : '#fff'} />

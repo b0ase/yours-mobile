@@ -185,6 +185,21 @@ export class SpaceMedia {
     this.reattach(handle);
   }
 
+  /**
+   * Speaker grid (SpeakerGrid.tsx): pause or resume one speaker's camera on this phone. A paused
+   * track stays subscribed, so the tile keeps its last frame and resumes without renegotiating; the
+   * SFU stops forwarding it meanwhile. Tile size picks the simulcast layer itself (adaptiveStream
+   * sizes each track to its <video>, so small tiles get the low layer; an explicit setVideoQuality
+   * is ignored while adaptiveStream is on).
+   */
+  setVideoLive(handle: string, live: boolean) {
+    if (handle === this.me) return;
+    const pub = this.room?.getParticipantByIdentity(handle)?.getTrackPublication(Track.Source.Camera) as
+      | RemoteTrackPublication
+      | undefined;
+    if (pub && pub.isEnabled !== live) pub.setEnabled(live);
+  }
+
   /** Audio level 0..1 for a handle (LiveKit's smoothed participant level), read by the stage tiles' meters. */
   levelOf(handle: string): number {
     const room = this.room;
