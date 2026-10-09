@@ -82,6 +82,8 @@ import {
 import { LiveBanner } from '../spaces/LiveBanner';
 import { WIDE_ON } from '../wide/flag';
 import { RoomDetails } from '../wide/RoomDetails';
+import { NewSpaceSheet } from '../spaces/NewSpaceSheet';
+import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -620,6 +622,8 @@ const Conversation = ({
       roomName={title}
       me={me}
       createdBy={room.created_by_handle}
+      gated={!!entry}
+      spaceOpen={roomSpaceOpen(room)}
     />
   );
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
@@ -693,9 +697,9 @@ const Conversation = ({
         )}
       </div>
 
-      {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). In the wide
+      {/* bSpaces: Live now / Join, or Start for the issuer or admin (every room, bWalletX only). In the wide
           layout it sits in the room details column instead. */}
-      {BSPACES_ENABLED && entry && !WIDE_ON && liveBanner}
+      {BSPACES_ENABLED && !WIDE_ON && liveBanner}
       {WIDE_ON && (
         <RoomDetails
           title={title}
@@ -726,7 +730,7 @@ const Conversation = ({
                 }
               : null
           }
-          space={BSPACES_ENABLED && entry ? liveBanner : null}
+          space={BSPACES_ENABLED ? liveBanner : null}
           actions={null}
         />
       )}
@@ -1961,6 +1965,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   // Open rooms (no token): every build, store build included.
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([]);
   const [newRoom, setNewRoom] = useState(false);
+  const [newSpace, setNewSpace] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [msgMenu, setMsgMenu] = useState<ChatMessage | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -2476,7 +2481,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
 
         {handle && (
-          <div className="px-4 pb-1 flex">
+          <div className="px-4 pb-1 flex gap-2">
             <button
               onClick={() => setNewRoom(true)}
               className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
@@ -2484,6 +2489,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             >
               <Plus size={16} strokeWidth={2.6} /> New room
             </button>
+            {BSPACES_ENABLED && (
+              <button
+                onClick={() => setNewSpace(true)}
+                className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+                style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+              >
+                <Plus size={16} strokeWidth={2.6} /> New Space
+              </button>
+            )}
           </div>
         )}
         {handle && rooms === null && !listError && (
@@ -2677,13 +2691,26 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           }}
         />
       )}
+      {newSpace && handle && (
+        <NewSpaceSheet
+          client={client}
+          me={handle}
+          rooms={rooms ?? []}
+          onClose={() => setNewSpace(false)}
+          onNewRoom={() => {
+            setNewSpace(false);
+            setNewRoom(true);
+          }}
+        />
+      )}
       {newRoom && handle && (
         <NewRoomSheet
           client={client}
           onClose={() => setNewRoom(false)}
           onDone={(r) => {
             setNewRoom(false);
-            openOpenRoom(stubRoom(r.ticker, r.name));
+            // The creator is the room's admin: say so, or the room's "Start a Space" bar stays hidden.
+            openOpenRoom(stubRoom(r.ticker, r.name, { created_by_handle: handle }));
             refresh();
           }}
         />

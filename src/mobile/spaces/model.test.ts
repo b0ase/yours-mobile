@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   audienceCount,
   canHostRoom,
+  roomSpaceOpen,
   elapsed,
   handQueue,
   myChange,
@@ -113,5 +114,22 @@ describe('roomsWithSpaces', () => {
       state: parseSpaceState(raw([P('a', 'host')], { started_at: '2026-10-08T11:00:00Z' }), 'a'),
     };
     expect(roomsWithSpaces([none, small, newer, big]).map((r) => r.k)).toEqual(['big', 'newer', 'small']);
+  });
+});
+
+describe('open stage and room creators', () => {
+  test('creator hosts a fresh open room', () => {
+    expect(canHostRoom({ me: '$testy', createdBy: 'testy' })).toBe(true);
+    expect(canHostRoom({ me: 'other', createdBy: 'testy' })).toBe(false);
+  });
+  test('open-stage rooms: any signed-in member', () => {
+    expect(canHostRoom({ me: 'richardwboase.gmail', spaceOpen: true })).toBe(true);
+    expect(canHostRoom({ me: '', spaceOpen: true })).toBe(false);
+  });
+  test('roomSpaceOpen: flag or the Lounge', () => {
+    expect(roomSpaceOpen({ ticker: 'LOUNGE', metadata: null })).toBe(true);
+    expect(roomSpaceOpen({ ticker: '$lounge' })).toBe(true);
+    expect(roomSpaceOpen({ ticker: 'stuff', metadata: { space_open: true } })).toBe(true);
+    expect(roomSpaceOpen({ ticker: 'stuff', metadata: {} })).toBe(false);
   });
 });

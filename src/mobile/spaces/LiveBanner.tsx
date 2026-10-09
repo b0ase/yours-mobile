@@ -1,9 +1,10 @@
 /**
- * bSpaces in a token room: a "Live now" banner with Join when the room has a live space, and for the
- * token's issuer or the room's admin a "Start a bSpace" row when it has none (docs/BSPACES-PLAN.md).
+ * bSpaces in a room (token or open): a "Live now" banner with Join when the room has a live space,
+ * and for the token's issuer or the room's admin (creator) a slim "Start a Space" bar pinned under the
+ * room header when it has none (docs/BSPACES-PLAN.md). Everyone else sees nothing until it is live.
  */
 import { useEffect, useState } from 'react';
-import { Radio } from 'lucide-react';
+import { Mic, Radio } from 'lucide-react';
 import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from '../chat/api';
 import { claimIssuerAdmin, onIssuerClaimed } from '../chat/autoClaim';
@@ -23,6 +24,8 @@ export const LiveBanner = ({
   roomName,
   me,
   createdBy,
+  gated = true,
+  spaceOpen = false,
 }: {
   client: BchatClient;
   /** The wallet, for the inline "Claim admin" fallback when starting is refused. */
@@ -31,12 +34,15 @@ export const LiveBanner = ({
   roomName: string;
   me: string;
   createdBy?: string | null;
+  /** A token room (holders only) or an open room (members). Changes the sheet's wording only. */
+  gated?: boolean;
+  /** Open-stage room: any member may start the Space (model.ts roomSpaceOpen). */
+  spaceOpen?: boolean;
 }) => {
   const [state, setState] = useState<SpaceState | null>(null);
   const [issuer, setIssuer] = useState(false);
   const [open, setOpen] = useState<{ start?: string } | null>(null);
   const [naming, setNaming] = useState(false);
-  const [title, setTitle] = useState('');
 
   useEffect(() => {
     if (open) return;
@@ -83,7 +89,7 @@ export const LiveBanner = ({
       }
     : undefined;
 
-  const host = canHostRoom({ me, createdBy, youAreIssuer: issuer });
+  const host = canHostRoom({ me, createdBy, youAreIssuer: issuer, spaceOpen });
   const space = state?.space ?? null;
 
   return (
@@ -117,55 +123,34 @@ export const LiveBanner = ({
           </span>
         </button>
       ) : (
-        host &&
-        state && (
-          <button
-            onClick={() => setNaming(true)}
-            className="mx-3 mt-2 flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-[12px] font-semibold"
-            style={{ border: `1px dashed ${GOLD}66`, color: GOLD }}
+        host && (
+          <div
+            className="flex items-center gap-3 px-3 py-2"
+            style={{ background: '#0d0b04', borderBottom: `1px solid ${GOLD}33` }}
           >
-            <Radio size={14} /> Start a bSpace
-          </button>
-        )
-      )}
-
-      {naming && (
-        <div
-          className="fixed inset-0 z-[999] flex items-end"
-          style={{ background: 'rgba(0,0,0,.55)' }}
-          onClick={() => setNaming(false)}
-        >
-          <form
-            className="w-full rounded-t-2xl p-5"
-            style={{ background: '#121316', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }}
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault();
-              setNaming(false);
-              setOpen({ start: title.trim() || roomName });
-            }}
-          >
-            <p className="text-white font-semibold">Start a bSpace</p>
-            <p className="mt-1 text-xs" style={{ color: MUTED }}>
-              Stage mode: you speak, holders listen and can raise a hand. Only holders of this token can join.
-            </p>
-            <input
-              autoFocus
-              value={title}
-              onChange={(e) => setTitle(e.target.value.slice(0, 80))}
-              placeholder={`What’s it about? (${roomName})`}
-              className="mt-3 w-full rounded-xl px-3 py-3 text-sm text-white outline-none"
-              style={{ background: '#1a1b1f' }}
-            />
+            <Mic size={16} color={GOLD} />
+            <span className="flex-1 text-[13px] font-semibold text-white">Start a Space</span>
             <button
-              type="submit"
-              className="mt-3 w-full rounded-full py-3 font-semibold"
+              onClick={() => setNaming(true)}
+              className="rounded-full px-3 py-1 text-xs font-bold"
               style={{ background: GOLD, color: '#010101' }}
             >
               Go live
             </button>
-          </form>
-        </div>
+          </div>
+        )
+      )}
+
+      {naming && (
+        <NameSpaceSheet
+          roomName={roomName}
+          gated={gated}
+          onCancel={() => setNaming(false)}
+          onGo={(t) => {
+            setNaming(false);
+            setOpen({ start: t });
+          }}
+        />
       )}
 
       {open && <DoorKeeper client={client} ticker={ticker} me={me} />}
@@ -184,5 +169,51 @@ export const LiveBanner = ({
         />
       )}
     </>
+  );
+};
+
+/** The "what's it about?" sheet before going live. Shared by the room bar and Chat's "+ New Space". */
+export const NameSpaceSheet = ({
+  roomName,
+  gated = true,
+  onCancel,
+  onGo,
+}: {
+  roomName: string;
+  gated?: boolean;
+  onCancel: () => void;
+  onGo: (title: string) => void;
+}) => {
+  const [title, setTitle] = useState('');
+  return (
+    <div className="fixed inset-0 z-[999] flex items-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onCancel}>
+      <form
+        className="w-full rounded-t-2xl p-5"
+        style={{ background: '#121316', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }}
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onGo(title.trim() || roomName);
+        }}
+      >
+        <p className="text-white font-semibold">Start a Space</p>
+        <p className="mt-1 text-xs" style={{ color: MUTED }}>
+          {gated
+            ? 'Stage mode: you speak, holders listen and can raise a hand. Only holders of this token can join.'
+            : 'Stage mode: you speak, room members listen and can raise a hand. Only members of this room can join.'}
+        </p>
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value.slice(0, 80))}
+          placeholder={`What’s it about? (${roomName})`}
+          className="mt-3 w-full rounded-xl px-3 py-3 text-sm text-white outline-none"
+          style={{ background: '#1a1b1f' }}
+        />
+        <button type="submit" className="mt-3 w-full rounded-full py-3 font-semibold" style={{ background: GOLD, color: '#010101' }}>
+          Go live
+        </button>
+      </form>
+    </div>
   );
 };

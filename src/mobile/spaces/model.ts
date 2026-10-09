@@ -184,8 +184,30 @@ export const myChange = (prev: SpaceState | null, next: SpaceState): MyChange =>
  * May this wallet start a space in this room? Product rule (owner, 8 Oct 2026): the token's issuer
  * or the room's admin. bit-sign lets any member start one; the wallet only offers it to these.
  */
-export const canHostRoom = (opts: { me: string; createdBy?: string | null; youAreIssuer?: boolean }) =>
-  !!opts.youAreIssuer || (!!opts.createdBy && norm(opts.createdBy) === norm(opts.me));
+export const canHostRoom = (opts: {
+  me: string;
+  createdBy?: string | null;
+  youAreIssuer?: boolean;
+  /** An open-stage room (roomSpaceOpen): any signed-in member may start its one Space. */
+  spaceOpen?: boolean;
+}) =>
+  (!!opts.spaceOpen && !!norm(opts.me)) ||
+  !!opts.youAreIssuer ||
+  (!!opts.createdBy && norm(opts.createdBy) === norm(opts.me));
+
+/** Rooms that always count as open stage, before bit-sign's `metadata.space_open` flag ships. */
+export const OPEN_STAGE_TICKERS = ['LOUNGE'];
+
+/**
+ * Open stage (owner, 9 Oct 2026): "the lounge space is either open or not open". A room marked
+ * `metadata.space_open` lets any member start a Space; still only one Space per room.
+ */
+export const roomSpaceOpen = (room: { ticker?: string | null; metadata?: unknown } | null | undefined): boolean => {
+  if (!room) return false;
+  const m = room.metadata as { space_open?: unknown; spaceOpen?: unknown } | null | undefined;
+  if (m && (m.space_open === true || m.spaceOpen === true)) return true;
+  return OPEN_STAGE_TICKERS.includes(String(room.ticker ?? '').replace(/^\$/, '').toUpperCase());
+};
 
 /** "1 listening", "12 listening". */
 export const audienceLine = (n: number) => `${n} listening`;
