@@ -11,6 +11,7 @@ const { supabaseStore, arcBroadcast } = require('../lib/paymailStore');
 
 const ROUTES = {
   caps: ['GET', 'caps'],
+  config: ['GET', 'config'],
   id: ['GET', 'pki'],
   profile: ['GET', 'profile'],
   verify: ['GET', 'verify'],
@@ -83,8 +84,11 @@ module.exports = async function handler(req, res) {
         ? 'public, max-age=30'
         : 'no-store',
   );
+  // Vercel sets x-real-ip / x-vercel-forwarded-for; x-forwarded-for's first hop is the client.
   const ip =
-    String(req.headers['x-forwarded-for'] || '')
+    String(
+      req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '',
+    )
       .split(',')[0]
       .trim() || 'unknown';
   if (limited(ip)) return send(res, 429, { error: 'rate-limited' });
@@ -99,7 +103,7 @@ module.exports = async function handler(req, res) {
   const body = req.method === 'POST' ? await readJson(req) : {};
   if (body === null) return send(res, 400, { error: 'invalid-json' });
   try {
-    const [status, out] = await handlers[route[1]](q, body);
+    const [status, out] = await handlers[route[1]](q, body, { ip: ip === 'unknown' ? null : ip });
     return send(res, status, out);
   } catch (e) {
     console.error('paymail error', route[1], String(e && e.message ? e.message : e).slice(0, 200));

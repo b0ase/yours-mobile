@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { payNameFee } from './nameFee';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -6,7 +7,10 @@ import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import {
   claimPaymail,
+  isGmailName,
   lookupPaymail,
+  type NameFee,
+  paymailConfig,
   nameChangeBlocked,
   paymailAvailable,
   paymailEnabled,
@@ -83,6 +87,17 @@ export const HandleFlow = ({
   const [supply, setSupply] = useState(DEFAULT_SUPPLY);
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
+  // 1¢ to claim a new name (anti-squatting, owner 10 Oct 2026); null = free (server fee off).
+  const [nameFee, setNameFee] = useState<NameFee | null>(null);
+  const [feeConfirm, setFeeConfirm] = useState(false);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    void paymailConfig(f).then((c) => live && setNameFee(c.nameFee));
+    return () => {
+      live = false;
+    };
+  }, [enabled]);
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
   // A restored wallet already owns its name: show it instead of suggesting a new one. (The background
   // name sync may not have finished when this opens.) The server answers with the wallet's identity,
@@ -190,7 +205,21 @@ export const HandleFlow = ({
     };
   }, [alias, enabled, paymail, apiContext.wallet]);
 
-  const claim = async () => {
+  /** Pay the 1¢ name fee with the normal wallet send, then claim with its txid. */
+  const payAndClaim = async () => {
+    setFeeConfirm(false);
+    if (!nameFee) return claim();
+    setBusy(true);
+    setMsg('');
+    try {
+      await claim(await payNameFee(apiContext, nameFee));
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Claim failed');
+      setBusy(false);
+    }
+  };
+
+  const claim = async (fee: { feeTxid?: string; feeTx?: string } = {}) => {
     setBusy(true);
     setMsg('');
     try {
@@ -200,6 +229,7 @@ export const HandleFlow = ({
         ordAddress,
         name: proof?.profile.display || profileName || (suggested ?? undefined),
         avatar: paymailAvatar(proof?.profile.avatar || account?.settings?.socialProfile?.avatar),
+        ...fee,
       });
       if (proof) {
         await adoptSocialAvatar(chromeStorageService, proof.profile.avatar);
@@ -256,8 +286,8 @@ export const HandleFlow = ({
             {handleTitle(paymail ? paymail.split('@')[0] : alias)}
           </span>
           <p className="text-xs max-w-[300px]" style={{ color: GRAY }}>
-            A name people can pay instead of a long address. You choose it; change it any time in Settings →
-            Identity, and your old name keeps receiving.
+            A name people can pay instead of a long address. You choose it; change it any time in Settings → Identity,
+            and your old name keeps receiving.
           </p>
         </div>
 
@@ -270,8 +300,8 @@ export const HandleFlow = ({
               <span className="text-[10px] uppercase tracking-widest" style={{ color: GRAY }}>
                 Your paymail
               </span>
-              <span className="text-[10px] font-semibold" style={{ color: '#2ecc71' }}>
-                Free · instant
+              <span className="text-[10px] font-semibold" style={{ color: nameFee ? GOLD : '#2ecc71' }}>
+                {nameFee ? '1¢ · instant' : 'Free · instant'}
               </span>
             </div>
             <div
@@ -305,6 +335,11 @@ export const HandleFlow = ({
             >
               {stateText[state]}
             </span>
+            {isGmailName(paymail) && (
+              <p className="text-xs" style={{ color: GOLD }}>
+                Choose a name — your current address shows your Gmail. Your old address keeps receiving for 90 days.
+              </p>
+            )}
             {paymail && (
               <p className="text-xs text-white">
                 <b style={{ color: GOLD }}>{paymail} ✓</b> receives BSV and tokens from any paymail wallet.
@@ -319,11 +354,13 @@ export const HandleFlow = ({
               <button
                 type="button"
                 disabled={busy || state !== 'free'}
-                onClick={claim}
+                onClick={() => (nameFee ? setFeeConfirm(true) : void claim())}
                 className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
                 style={{ background: GOLD, color: '#000' }}
               >
-                {busy ? 'Claiming…' : `${paymail ? 'Change to' : 'Claim'} ${alias || 'name'}@${BWALLET_PAYMAIL_DOMAIN}`}
+                {busy
+                  ? 'Claiming…'
+                  : `${paymail ? 'Change to' : 'Claim'} ${alias || 'name'}@${BWALLET_PAYMAIL_DOMAIN}${nameFee ? ' · 1¢' : ''}`}
               </button>
             )}
             {msg && (
@@ -423,6 +460,15 @@ export const HandleFlow = ({
         >
           {claimed ? 'Done' : 'Skip for now'}
         </button>
+        <SendConfirmation
+          show={feeConfirm}
+          theme={theme}
+          lineItems={[{ address: `Claim $${alias}`.slice(0, 16), amount: '1¢' }]}
+          total="1¢"
+          isProcessing={busy}
+          onConfirm={() => void payAndClaim()}
+          onCancel={() => setFeeConfirm(false)}
+        />
         <SendConfirmation
           show={confirming}
           theme={theme}

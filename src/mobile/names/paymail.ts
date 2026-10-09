@@ -74,7 +74,15 @@ export const claimPaymail = async (
   f: Fetch,
   wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
   alias: string,
-  extra: { ordAddress?: string; name?: string; avatar?: string; social?: { ticket: string; secret: string } } = {},
+  extra: {
+    ordAddress?: string;
+    name?: string;
+    avatar?: string;
+    social?: { ticket: string; secret: string };
+    /** The 1¢ name-fee payment (paymailConfig().nameFee): txid is signed; the tx hex helps a fresh tx through. */
+    feeTxid?: string;
+    feeTx?: string;
+  } = {},
 ): Promise<string> => {
   if (!paymailEnabled()) throw new Error('Paymail is not configured');
   if (!PAYMAIL_ALIAS_RE.test(alias) && !SOCIAL_ALIAS_RE.test(alias)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
@@ -82,9 +90,14 @@ export const claimPaymail = async (
   if (extra.ordAddress) fields.ordAddress = extra.ordAddress;
   if (extra.name) fields.name = extra.name.slice(0, 64);
   if (extra.avatar) fields.avatar = extra.avatar.slice(0, 512);
+  if (extra.feeTxid) fields.feeTxid = extra.feeTxid;
   const signed = await signRequest(wallet, 'register', fields);
   // A verified social name (b0asex.x) carries the Continue with X / Google proof (src/mobile/social).
-  const j = await postJson(f, api('register'), extra.social ? { ...signed, social: extra.social } : signed);
+  const j = await postJson(f, api('register'), {
+    ...signed,
+    ...(extra.social ? { social: extra.social } : {}),
+    ...(extra.feeTx ? { feeTx: extra.feeTx } : {}),
+  });
   return String(j.paymail);
 };
 
@@ -218,3 +231,25 @@ export const nameChangeBlocked = (current: string | null | undefined, alias: str
   if (!alias || now === alias || !SOCIAL_ALIAS_RE.test(alias)) return null;
   return 'Choose a plain handle (a-z, 0-9, - or _).';
 };
+
+export type NameFee = { address: string; usd: number };
+/** The server's name rules: where the 1¢ fee for a new name goes (null = no fee). Never throws. */
+export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null }> => {
+  if (!paymailEnabled()) return { nameFee: null };
+  try {
+    const r = await f(api('config'));
+    const j = r.ok ? await r.json() : null;
+    const nf = j?.nameFee;
+    return {
+      nameFee:
+        nf && typeof nf.address === 'string' && Number(nf.usd) > 0
+          ? { address: nf.address, usd: Number(nf.usd) }
+          : null,
+    };
+  } catch {
+    return { nameFee: null };
+  }
+};
+
+/** A legacy .gmail name shows the owner's Gmail address: the app asks them to choose a name. */
+export const isGmailName = (paymail: string | null | undefined) => /\.gmail@/.test(paymail ?? '');

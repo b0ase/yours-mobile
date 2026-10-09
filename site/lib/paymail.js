@@ -42,6 +42,22 @@ async function ticketSocialCheck(alias, proof, env = process.env) {
 /** A renamed name keeps forwarding to the new one this long, then is released (owner, 9 Oct 2026). */
 const FORWARD_MS = 90 * 24 * 60 * 60 * 1000;
 const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
+/** Anti-squatting (owner, 10 Oct 2026): one name change per 30 days per wallet (the first claim is free
+ * of it), and at most NAME_IP_DAILY new names per client IP per day (env PAYMAIL_NAMES_PER_IP_DAY). */
+const CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+const NAME_IP_DAILY = 5;
+const nameFee = require('./nameFee');
+const crypto = require('crypto');
+const hashIp = (ip, env = process.env) =>
+  ip
+    ? crypto
+        .createHash('sha256')
+        .update(`bwallet-paymail|${env.PAYMAIL_IP_SALT || ''}|${ip}`)
+        .digest('hex')
+        .slice(0, 32)
+    : null;
+const dayText = (ms) =>
+  new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const RESERVED = new Set([
   'admin',
   'root',
@@ -225,7 +241,11 @@ function makeHandlers({
   now = () => Date.now(),
   socialCheck = ticketSocialCheck,
   // Off under `bun test` (NODE_ENV=test) so unit tests never call the network; tests inject their own.
-  renamed = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : (alias) => bitsignRenamed(alias, env),
+  renamed = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => null
+    : (alias) => bitsignRenamed(alias, env),
+  // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
+  feeChain = nameFee.chain,
 }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
@@ -261,6 +281,18 @@ function makeHandlers({
 
   return {
     caps: async () => [200, capabilities(env)],
+
+    // What the app needs before claiming a name: where the 1 cent fee goes (null = no fee).
+    config: async () => {
+      const address = nameFee.feeAddress(env);
+      return [
+        200,
+        {
+          nameFee: address ? { address, usd: nameFee.FEE_USD } : null,
+          nameChangeDays: CHANGE_COOLDOWN_MS / 86_400_000,
+        },
+      ];
+    },
 
     pki: async ({ handle }) => {
       const [s, row] = await publicAlias(handle);
@@ -354,7 +386,7 @@ function makeHandlers({
     },
 
     // ---- wallet-authenticated ------------------------------------------------
-    register: async (_q, body) => {
+    register: async (_q, body, ctx = {}) => {
       body = body || {};
       const f = body.fields || {};
       const alias = String(f.alias || '').toLowerCase();
@@ -387,6 +419,48 @@ function makeHandlers({
       if (kind === 'gmail' && !ownsIt) return [403, { error: 'Choose a handle instead of your email name.' }];
       const mine =
         kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
+      // A new plain name for this wallet (first claim or rename; not a profile update of its own name).
+      const newName = kind === 'plain' && !ownsIt;
+      const isRename = newName && !!mine && (mine.kind ?? 'plain') === 'plain' && mine.alias !== alias;
+      const ipHash = hashIp(ctx.ip, env);
+      let fee = null;
+      if (newName) {
+        store.deleteExpiredForwards?.(new Date(now()).toISOString()).catch(() => {});
+        if (isRename && store.lastRename) {
+          const last = await store.lastRename(identityKey);
+          const next = last ? Date.parse(last) + CHANGE_COOLDOWN_MS : 0;
+          if (next > now())
+            return [
+              429,
+              { error: `You can change your name again on ${dayText(next)}.`, retryAt: new Date(next).toISOString() },
+            ];
+        }
+        if (ipHash && store.countIpClaims) {
+          const max = Number(env.PAYMAIL_NAMES_PER_IP_DAY) || NAME_IP_DAILY;
+          const since = new Date(now() - 86_400_000).toISOString();
+          if ((await store.countIpClaims(ipHash, since)) >= max)
+            return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
+        }
+        const address = nameFee.feeAddress(env);
+        if (address) {
+          const txid = String(f.feeTxid || '').toLowerCase();
+          const chk = await nameFee.checkFeeTx({
+            txid,
+            txHex: body.feeTx,
+            address,
+            c: feeChain,
+            broadcast,
+            parse: parseIncoming,
+          });
+          if (!chk.ok) return [402, { error: chk.error, nameFee: { address, usd: nameFee.FEE_USD } }];
+          if (
+            store.useFeeTx &&
+            !(await store.useFeeTx({ txid, identity_key: identityKey, alias, satoshis: chk.satoshis }))
+          )
+            return [409, { error: 'That payment already paid for a name' }];
+          fee = txid;
+        }
+      }
       if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
         await store.renameAlias(mine.alias, alias);
         // The old name keeps receiving for 90 days, then is released.
@@ -410,7 +484,20 @@ function makeHandlers({
         display_name: String(f.name || '').slice(0, 64) || (ownsIt ? taken.display_name : null) || null,
         avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
       });
-      return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
+      if (newName) {
+        // Legacy .gmail names published the owner's email: once the wallet has a plain name, the
+        // .gmail one forwards to it for 90 days, then is released (migrations/20261010_retire_gmail_names.sql).
+        const gmail = await store.getAliasByKeyKind?.(identityKey, 'gmail');
+        if (gmail && store.retireToForward)
+          await store.retireToForward(gmail.alias, alias, identityKey, new Date(now() + FORWARD_MS).toISOString());
+        await store.recordNameEvent?.({
+          identity_key: identityKey,
+          alias,
+          kind: isRename ? 'rename' : 'claim',
+          ip_hash: ipHash,
+        });
+      }
+      return [200, { paymail: handleOf(row.alias), pubkey: identityKey, ...(fee ? { feeTxid: fee } : {}) }];
     },
 
     // Market › Social: names whose owners may have a personal token. provider=all → every kind.
@@ -686,6 +773,8 @@ const bookingOut = (r) => ({
 
 module.exports = {
   FORWARD_MS,
+  CHANGE_COOLDOWN_MS,
+  hashIp,
   bitsignRenamed,
   socialAliasFor,
   ANYONE_PUB,
