@@ -1,7 +1,8 @@
 /**
  * Speaker grid layout (owner-approved spec, 9 Oct 2026). Pure: no React, no LiveKit.
  *
- *   1 = full screen, 2 = stacked, 3–4 = 2×2, 5–9 = 3×3, 10–16 = 4×4,
+ *   1 = one 16:9 TV-shaped tile (full width, never filling the screen height), 2 = two 16:9 tiles
+ *   stacked (side by side on wide screens), 3–4 = 2×2, 5–9 = 3×3, 10–16 = 4×4,
  *   more than 16 = pages of 4×4 with the active speakers sorted onto the first page.
  *
  * At 4×4 only speakers heard in the last ACTIVE_WINDOW_MS get live video; the rest pause.
@@ -19,14 +20,19 @@ export interface GridShape {
   small: boolean;
   /** 4×4 or paged: only recently active speakers get live video. */
   dense: boolean;
+  /** CSS aspect-ratio of each cell: 16:9 up to 2×2, square from 3×3. Cells never stretch to fill height. */
+  aspect: '16 / 9' | '1 / 1';
 }
 
+/** Width of a single 16:9 tile: full width, but capped so its height stays under maxVh of the screen. */
+export const tvWidth = (maxVh = 55) => `min(100%, ${(maxVh * 16) / 9}vh)`;
+
 export const gridShape = (n: number): GridShape => {
-  if (n <= 1) return { cols: 1, rows: 1, cells: 1, small: false, dense: false };
-  if (n === 2) return { cols: 1, rows: 2, cells: 2, small: false, dense: false };
-  if (n <= 4) return { cols: 2, rows: 2, cells: 4, small: false, dense: false };
-  if (n <= 9) return { cols: 3, rows: 3, cells: 9, small: true, dense: false };
-  return { cols: 4, rows: 4, cells: PAGE_SIZE, small: true, dense: true };
+  if (n <= 1) return { cols: 1, rows: 1, cells: 1, small: false, dense: false, aspect: '16 / 9' };
+  if (n === 2) return { cols: 1, rows: 2, cells: 2, small: false, dense: false, aspect: '16 / 9' };
+  if (n <= 4) return { cols: 2, rows: 2, cells: 4, small: false, dense: false, aspect: '16 / 9' };
+  if (n <= 9) return { cols: 3, rows: 3, cells: 9, small: true, dense: false, aspect: '1 / 1' };
+  return { cols: 4, rows: 4, cells: PAGE_SIZE, small: true, dense: true, aspect: '1 / 1' };
 };
 
 /** Free cells on the (last) page that could show "Request to speak". */

@@ -1,6 +1,6 @@
 /**
  * The Space stage as a speaker video grid (owner-approved spec, 9 Oct 2026). Layout rules live in
- * speakerLayout.ts (unit-tested): 1 full screen, 2 stacked, 2×2, 3×3, 4×4, then 4×4 pages with the
+ * speakerLayout.ts (unit-tested): 1 = a 16:9 TV tile, 2 = two 16:9 tiles stacked (side by side when wide), 2×2, 3×3, 4×4, then 4×4 pages with the
  * active speakers on page one. A spare cell holds the listener count and ✋ Request to speak; when
  * the grid is full the button sits under it. Tap a tile to make it large; tap again for the grid.
  *
@@ -15,7 +15,7 @@ import { pipSupported, togglePip } from './background';
 import { LevelBars } from './LevelBars';
 import type { SpaceMedia } from './media';
 import { audienceLine, hostLabel, type Participant } from './model';
-import { gridShape, pagesOf, recentlyActive, spareCells, wantsLiveVideo } from './speakerLayout';
+import { gridShape, pagesOf, recentlyActive, spareCells, tvWidth, wantsLiveVideo } from './speakerLayout';
 
 /** Desktop/web only: a PiP button on video tiles. Phones float the video on their own (background.ts). */
 const webPip = (() => {
@@ -302,23 +302,33 @@ export const SpeakerGrid = ({
   if (big)
     return (
       <div>
-        <div style={{ height: '65vh' }}>{tile(big, 'big')}</div>
+        <div className="mx-auto" style={{ width: tvWidth(75), aspectRatio: '16 / 9', minHeight: '45vh', maxWidth: '100%' }}>
+          {tile(big, 'big')}
+        </div>
         {under}
       </div>
     );
 
+  // One speaker: a neat 16:9 TV, full width but never taller than ~55% of the screen.
   if (n === 1)
     return (
       <div>
-        <div style={{ height: '65vh' }}>{tile(speakers[0], 'big')}</div>
+        <div className="mx-auto" style={{ width: tvWidth(), aspectRatio: '16 / 9' }}>
+          {tile(speakers[0], 'big')}
+        </div>
         {under}
       </div>
     );
+  // Two speakers: two 16:9 tiles, stacked on phones, side by side on wide screens.
   if (n === 2)
     return (
       <div>
-        <div className="grid grid-rows-2 gap-3" style={{ height: '65vh' }}>
-          {speakers.map((p) => tile(p, 'mid'))}
+        <div className="mx-auto grid grid-cols-1 gap-3 sm:grid-cols-2" style={{ maxWidth: tvWidth(70) }}>
+          {speakers.map((p) => (
+            <div key={p.handle} style={{ aspectRatio: '16 / 9' }}>
+              {tile(p, 'mid')}
+            </div>
+          ))}
         </div>
         {under}
       </div>
@@ -328,10 +338,10 @@ export const SpeakerGrid = ({
   const gridOf = (list: Participant[], last: boolean) => (
     <div
       className="grid gap-2"
-      style={{ gridTemplateColumns: `repeat(${shape.cols}, minmax(0, 1fr))`, gridAutoRows: '1fr' }}
+      style={{ gridTemplateColumns: `repeat(${shape.cols}, minmax(0, 1fr))`, alignContent: 'start' }}
     >
       {list.map((p) => (
-        <div key={p.handle} style={{ aspectRatio: '1 / 1' }}>
+        <div key={p.handle} style={{ aspectRatio: shape.aspect }}>
           {tile(p, size)}
         </div>
       ))}
@@ -341,7 +351,7 @@ export const SpeakerGrid = ({
           <div
             key={`spare${i}`}
             className="flex flex-col items-center justify-center gap-1.5 rounded-2xl p-1 text-center"
-            style={{ aspectRatio: '1 / 1', boxShadow: `0 0 0 1px ${LINE}`, background: '#0b0b0d' }}
+            style={{ aspectRatio: shape.aspect, boxShadow: `0 0 0 1px ${LINE}`, background: '#0b0b0d' }}
           >
             {i === 0 && (
               <>
