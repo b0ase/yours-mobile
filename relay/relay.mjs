@@ -19,7 +19,7 @@ export const LIMITS = {
   queueMs: 60_000,
   maxQrLifetimeS: 300,
   unpairedIdleMs: 2 * 60_000,
-  pairedIdleMs: 24 * 60 * 60_000,
+  pairedIdleMs: 31 * 24 * 60 * 60_000, // CLI pairings last up to 30 days
 };
 
 const CHANNEL = /^[A-Za-z0-9_-]{22}$/; // 16 random bytes, base64url
