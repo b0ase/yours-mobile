@@ -4,6 +4,7 @@ import { normId } from '../mobile/names/personalToken';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DragDropContext, Draggable, Droppable, DropResult } from '@hello-pangea/dnd';
 import { ONESAT_MAINNET_CONTENT_URL, type Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../hooks/useServiceContext';
@@ -191,7 +192,12 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                       (t, index) =>
                         t.id && (
                           <Draggable key={t.id} draggableId={t.id} index={index}>
-                            {(provided) => (
+                            {(provided, snapshot) => {
+                              // While dragging, dnd sets position:fixed on the row. Inside a
+                              // transformed ancestor (framer-motion) that resolves against the
+                              // ancestor, so a held tap made the row jump to the top of the list
+                              // and draw over it. Portal the dragged row to <body> instead.
+                              const row = (
                               <div
                                 ref={provided.innerRef}
                                 {...provided.draggableProps}
@@ -213,7 +219,9 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
                                   }
                                 />
                               </div>
-                            )}
+                              );
+                              return snapshot.isDragging ? createPortal(row, document.body) : row;
+                            }}
                           </Draggable>
                         ),
                     )}
