@@ -64,18 +64,28 @@ export type SendArgs = {
   replyPaidSats: number;
   inReplyTo?: string;
   usesReplyCredit?: boolean;
+  /** Postage already paid for this mail on an earlier attempt whose delivery failed: reuse it, do not pay twice. */
+  postage?: Postage;
+  /** Message id from that earlier attempt (keeps the postage stamp and the envelope id together). */
+  id?: string;
+  /** Called as soon as postage is paid, before delivery, so a caller can keep it if delivery then fails. */
+  onPostagePaid?: (postage: Postage, id: string) => void | Promise<void>;
 };
 
 export const sendMail = async (wallet: WalletInterface, a: SendArgs): Promise<Sent> => {
   const from = await myKey(wallet);
-  const id = newMessageId();
+  const id = a.id ?? newMessageId();
   const { ciphertext } = await wallet.encrypt({
     plaintext: sealedToBytes(a.sealed),
     protocolID: BMAIL_PROTOCOL,
     keyID: id,
     counterparty: a.to,
   });
-  const postage = a.sats > 0 ? await payPostage(wallet, a.to, a.sats, id) : undefined;
+  let postage = a.postage;
+  if (!postage && a.sats > 0) {
+    postage = await payPostage(wallet, a.to, a.sats, id);
+    await a.onPostagePaid?.(postage, id);
+  }
   const env: Envelope = { t: 'bmail', v: 1, id, from, to: a.to, at: Date.now(), sealed: Utils.toBase64(ciphertext) };
   if (postage) env.postage = postage;
   if (postage && a.replyPaidSats > 0) env.replyPaidSats = a.replyPaidSats;
@@ -93,7 +103,7 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs): Promise<Se
     at: env.at,
     subject: a.sealed.subject,
     body: a.sealed.body,
-    sats: a.sats,
+    sats: postage?.sats ?? 0,
     replyPaidSats: env.replyPaidSats ?? 0,
     txid: postage?.txid,
     inReplyTo: a.inReplyTo,
