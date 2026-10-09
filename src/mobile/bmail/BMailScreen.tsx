@@ -247,7 +247,7 @@ const MailRow = ({
 
 const centsChip = (k: StampKind, cents: number, pnee?: boolean) =>
   k === 'penny' || k === 'priority' || k === 'reply' || k === 'paytoopen'
-    ? `${CHIP[k].label} ${pnee ? `${cents} PNEE` : `${cents}¢`}`
+    ? `${CHIP[k].label} ${pnee ? `${cents} ${cents === 1 ? 'PNEE' : 'PNEEs'}` : `${cents}¢`}`
     : undefined;
 
 const TokenFacts = ({ t }: { t: NonNullable<ExampleMail['token']> }) => (
@@ -329,7 +329,7 @@ const ExampleReader = ({ e, onBack, onHide }: { e: ExampleMail; onBack: () => vo
         </div>
         <div className="flex justify-between text-white">
           <span>Postage{e.pnee ? ' (PNEE)' : ''}</span>
-          <span className="tabular-nums">{e.pnee ? `${e.cents} PNEE · ${fmtCents(e.cents)}` : fmtCents(e.cents)}</span>
+          <span className="tabular-nums">{e.pnee ? `${e.cents} ${e.cents === 1 ? 'PNEE' : 'PNEEs'} · ${fmtCents(e.cents)}` : fmtCents(e.cents)}</span>
         </div>
         {!!e.attachedCents && (
           <div className="flex justify-between text-white">
