@@ -296,7 +296,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'media', label: 'Media', icon: I.media, to: '/m/media' },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/browser?view=bapps' },
         { id: 'games', label: 'Games', icon: I.games, to: '/m/games' },
-        { id: 'agent', label: 'b agent', icon: I.agent, to: '/m/agent' },
+        { id: 'agent', label: 'Agent b', icon: I.agent, to: '/m/agent' },
       ],
     },
     // bApps pinned in the wide layout (BappHost.tsx, shell protocol v2).

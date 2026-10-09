@@ -477,7 +477,7 @@ const TopNavBar = () => {
           onAgent={
             showAgentInMenu(phone)
               ? {
-                  label: X_MARK ? 'bX agent' : 'b agent',
+                  label: 'Agent b',
                   go: () => {
                     setSheet(null);
                     setDrawer(false);
