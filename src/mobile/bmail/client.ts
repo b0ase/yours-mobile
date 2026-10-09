@@ -6,7 +6,6 @@
  */
 import { MessageBoxClient } from '@bsv/message-box-client';
 import { P2PKH, PublicKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
-import { MESSAGEBOX_URL } from '../../utils/constants';
 import {
   BMAIL_BOX,
   BMAIL_PROTOCOL,
@@ -22,7 +21,24 @@ import {
 } from './envelope';
 import type { Received, Sent } from './store';
 
-const mbox = (wallet: WalletInterface) => new MessageBoxClient({ walletClient: wallet, host: MESSAGEBOX_URL });
+/**
+ * bMail's own relay (owner, 9 Oct 2026): messagebox.1sat.app refused recipients without a 1Sat account, so bMail
+ * runs bitcoin-sv/message-box-server on our server, where any identity key can receive with no sign-up.
+ * Override (testing / self-hosting): localStorage 'bwx.bmail.host' or globalThis.__BMAIL_HOST__, https only.
+ */
+export const BMAIL_DEFAULT_HOST = 'https://messagebox.bwalletx.com';
+export const bmailHost = (): string => {
+  const pick = (v: unknown) => (typeof v === 'string' && /^https:\/\/[^\s/]+/.test(v) ? v.replace(/\/+$/, '') : '');
+  let stored: string | null = null;
+  try {
+    stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('bwx.bmail.host');
+  } catch {
+    stored = null;
+  }
+  return pick(stored) || pick((globalThis as { __BMAIL_HOST__?: unknown }).__BMAIL_HOST__) || BMAIL_DEFAULT_HOST;
+};
+
+const mbox = (wallet: WalletInterface) => new MessageBoxClient({ walletClient: wallet, host: bmailHost() });
 
 export const myKey = async (wallet: WalletInterface) =>
   (await wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
@@ -94,7 +110,7 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs): Promise<Se
   // TODO(bmail pay-to-open): escrow the stamp instead of paying it outright (BMAIL.md §5.3).
   await mbox(wallet).sendMessage(
     { recipient: a.to, messageBox: BMAIL_BOX, body: encodeEnvelope(env), skipEncryption: true },
-    MESSAGEBOX_URL,
+    bmailHost(),
   );
   return {
     id,
@@ -169,7 +185,7 @@ export const fetchMail = async (
   ctx: { me: string; sent: Sent[]; known: Set<string> },
 ): Promise<{ items: Received[]; ack: string[] }> => {
   const client = mbox(wallet);
-  const msgs = await client.listMessages({ messageBox: BMAIL_BOX, host: MESSAGEBOX_URL });
+  const msgs = await client.listMessages({ messageBox: BMAIL_BOX, host: bmailHost() });
   const items: Received[] = [];
   const ack: string[] = [];
   for (const m of msgs) {
@@ -206,7 +222,7 @@ export const fetchMail = async (
  * bMail screen still receives every message. Postage is checked read-only.
  */
 export const peekMail = async (wallet: WalletInterface, me: string): Promise<{ env: Envelope; sats: number }[]> => {
-  const msgs = await mbox(wallet).listMessages({ messageBox: BMAIL_BOX, host: MESSAGEBOX_URL });
+  const msgs = await mbox(wallet).listMessages({ messageBox: BMAIL_BOX, host: bmailHost() });
   const out: { env: Envelope; sats: number }[] = [];
   for (const m of msgs) {
     const env = decodeEnvelope(m.body);
@@ -217,7 +233,7 @@ export const peekMail = async (wallet: WalletInterface, me: string): Promise<{ e
 };
 
 export const acknowledge = async (wallet: WalletInterface, ids: string[]) => {
-  if (ids.length) await mbox(wallet).acknowledgeMessage({ messageIds: ids, host: MESSAGEBOX_URL });
+  if (ids.length) await mbox(wallet).acknowledgeMessage({ messageIds: ids, host: bmailHost() });
 };
 
 export const openMail = async (wallet: WalletInterface, env: Envelope): Promise<Sealed> => {

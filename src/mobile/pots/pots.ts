@@ -383,4 +383,4 @@ export const formatAmount = (a: Subscription['amount']) =>
     ? `$${a.value.toFixed(2)}`
     : a.currency === 'SAT'
       ? `${a.value.toLocaleString()} sats`
-      : `${a.value} PNEE`;
+      : `${a.value} ${a.value === 1 ? 'PNEE' : 'PNEEs'}`;
