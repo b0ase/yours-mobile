@@ -66,11 +66,18 @@ const webShell = (): Plugin => ({
       fileName: 'vercel.json',
       source: readFileSync(resolve(__dirname, 'src/web/vercel.json')),
     });
+    // Install UI (Chrome's richer install sheet on desktop): one wide screenshot of the welcome screen.
+    this.emitFile({
+      type: 'asset',
+      fileName: 'install-wide.png',
+      source: readFileSync(resolve(__dirname, 'src/web/install-wide.png')),
+    });
     this.emitFile({
       type: 'asset',
       fileName: 'manifest.webmanifest',
       source: JSON.stringify(
         {
+          id: '/',
           name: 'bWalletX',
           short_name: 'bWalletX',
           description: 'The BSV wallet for tokens, media and apps.',
@@ -83,6 +90,15 @@ const webShell = (): Plugin => ({
             { src: 'icons/icon192.png', sizes: '192x192', type: 'image/png' },
             { src: 'icons/icon512.png', sizes: '512x512', type: 'image/png' },
             { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          ],
+          screenshots: [
+            {
+              src: 'install-wide.png',
+              sizes: '1440x900',
+              type: 'image/png',
+              form_factor: 'wide',
+              label: 'bWalletX on the desktop',
+            },
           ],
         },
         null,
