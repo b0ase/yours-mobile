@@ -30,7 +30,7 @@ const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
-import { CallsSheet } from '../calls/CallsSheet';
+import { CALLS_ROUTE } from '../calls/route';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -84,7 +84,8 @@ const TopNavBar = () => {
   const onLock = pathname.startsWith('/m/lock');
   const [drawer, setDrawer] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
-  const [callsOpen, setCallsOpen] = useState(false);
+  // bPhone Calls opens in the content area (/m/calls, owner 9 Oct 2026, as bMail); tapping the button again leaves.
+  const onCalls = pathname.startsWith(CALLS_ROUTE);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
   // Phone: ☰ "Scan to connect a website" opens the one Scan sheet (pay codes, people, pairing).
@@ -187,9 +188,13 @@ const TopNavBar = () => {
             <button
               type="button"
               aria-label="Calls"
-              onClick={() => setCallsOpen(true)}
-              className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-              style={{ border: RING }}
+              aria-pressed={onCalls}
+              onClick={() => (onCalls ? navigate(-1) : navigate(CALLS_ROUTE))}
+              className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
+              style={{
+                border: onCalls ? `1px solid ${ACCENT}` : RING,
+                background: onCalls ? `${ACCENT}33` : 'transparent',
+              }}
             >
               <Phone size={16} color={ACCENT} />
             </button>
@@ -236,9 +241,13 @@ const TopNavBar = () => {
           <button
             type="button"
             aria-label="Calls"
-            onClick={() => setCallsOpen(true)}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
-            style={{ border: RING }}
+            aria-pressed={onCalls}
+            onClick={() => (onCalls ? navigate(-1) : navigate(CALLS_ROUTE))}
+            className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
+            style={{
+              border: onCalls ? `1px solid ${ACCENT}` : RING,
+              background: onCalls ? `${ACCENT}33` : 'transparent',
+            }}
           >
             <Phone size={16} color={ACCENT} />
           </button>
@@ -408,7 +417,6 @@ const TopNavBar = () => {
           </motion.div>
         )}
       </AnimatePresence>
-      <CallsSheet open={callsOpen} onClose={() => setCallsOpen(false)} fullScreen={phone} />
       {sheet === 'accounts' && (
         <SwitchAccountSheet
           onClose={() => setSheet(null)}

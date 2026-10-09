@@ -3,6 +3,8 @@ import { useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, AtSign, Bell, Coins, Heart, Lock, Mailbox, MessageCircle, Phone, Quote, Tag } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { useNavigate } from 'react-router-dom';
+import { CALLS_ROUTE } from '../calls/route';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { feedTimeLabel } from '../feed/post';
@@ -89,6 +91,7 @@ const NotificationsSheet = ({
 }) => {
   useBackClose(true, onClose);
   const { handleSelect } = useBottomMenu();
+  const navigate = useNavigate();
   const open = (i: NotifyItem) => {
     readOne(i.id);
     const t = i.target;
@@ -96,7 +99,9 @@ const NotificationsSheet = ({
     if (t.type === 'post') return onOpenPost(t);
     onClose();
     if (t.type === 'bmail') return openBMail();
-    handleSelect(asMenuItem(t.type === 'room' || t.type === 'calls' ? 'chat' : 'bsv'));
+    // Missed / incoming call: the calls list in the content area (/m/calls).
+    if (t.type === 'calls') return navigate(CALLS_ROUTE);
+    handleSelect(asMenuItem(t.type === 'room' ? 'chat' : 'bsv'));
   };
   return createPortal(
     <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: '#010101' }}>
