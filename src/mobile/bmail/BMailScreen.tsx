@@ -835,7 +835,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   };
   // Android Back closes the open sub-view first (registered after bMail's own closer, so it pops first).
   useBackClose(!!sub, back);
-  // Bin (owner, 9 Oct): not a tab, a floating button bottom-right; Back returns to the tab it was opened from.
+  // Bin (owner, 9 Oct): not a tab, a trash icon in the bMail header; Back returns to the tab it was opened from.
   const [binFrom, setBinFrom] = useState<Tab>(initialTab === 'bin' ? 'inbox' : initialTab);
   const openBin = () => {
     if (tab !== 'bin') setBinFrom(tab);
@@ -1153,8 +1153,22 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             <>
               <Mailbox size={18} color={GOLD} />
               <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
-              <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
-                <PenSquare size={16} color={MUTED} />
+              <button
+                type="button"
+                aria-label={m.boxes.bin.length ? `Bin, ${m.boxes.bin.length} letters` : 'Bin'}
+                title="Bin"
+                onClick={openBin}
+                className={`${iconBtn} relative`}
+              >
+                <Trash2 size={16} color={MUTED} />
+                {m.boxes.bin.length > 0 && (
+                  <span
+                    className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full px-1 text-center text-[10px] font-bold leading-4"
+                    style={{ background: GOLD, color: '#1a1300' }}
+                  >
+                    {m.boxes.bin.length > 99 ? '99+' : m.boxes.bin.length}
+                  </span>
+                )}
               </button>
               <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
                 <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
@@ -1183,28 +1197,20 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         </div>
       )}
       <UndoToastHost />
-      {!inFrameSub && !draft && tab !== 'bin' && (
+      {/* Owner, 9 Oct: a gold floating New mail button above the dock (same compose as before); Bin is in the header. */}
+      {!inFrameSub && !draft && (
         <button
           type="button"
-          onClick={openBin}
-          aria-label={m.boxes.bin.length ? `Bin, ${m.boxes.bin.length} letters` : 'Bin'}
-          title="Bin"
-          className="fixed right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full shadow-xl"
+          onClick={() => setDraft({})}
+          aria-label="New mail"
+          title="New mail"
+          className="fixed right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full shadow-xl"
           style={{
             bottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--dock-h, 3.75rem) + 16px)',
-            background: '#1d2025',
-            border: '1px solid #2b2f36',
+            background: GOLD,
           }}
         >
-          <Trash2 size={20} color="#fff" />
-          {m.boxes.bin.length > 0 && (
-            <span
-              className="absolute -right-1 -top-1 min-w-[20px] rounded-full px-1 text-center text-[11px] font-bold leading-5"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {m.boxes.bin.length > 99 ? '99+' : m.boxes.bin.length}
-            </span>
-          )}
+          <PenSquare size={22} color="#1a1300" />
         </button>
       )}
       <div
