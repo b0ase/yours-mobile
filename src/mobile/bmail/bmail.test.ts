@@ -153,3 +153,20 @@ describe('bMail weighting and amounts', () => {
     expect(req[0].id).toBe('ex-spreading');
   });
 });
+
+describe('swipe flags', () => {
+  test('archive / delete / undo and pinned first', async () => {
+    const { setFlags, restoreFlags, isLive, isArchived, pinnedFirst, emptyMail } = await import('./store');
+    const mk = (id: string, extra = {}) => ({ id, from: 'k' + id, at: 1, verifiedSats: 0, ...extra }) as never;
+    const s0 = { ...emptyMail(), received: [mk('a'), mk('b', { read: true })] };
+    const { next, prev } = setFlags(s0, ['a'], { archived: true });
+    expect(isLive(next.received[0])).toBe(false);
+    expect(isArchived(next.received[0])).toBe(true);
+    const back = restoreFlags(next, prev);
+    expect(isLive(back.received[0])).toBe(true);
+    expect(isLive(next.received[1], ['kb'])).toBe(false);
+    const del = setFlags(s0, ['b'], { deleted: true }).next;
+    expect(isArchived(del.received[1])).toBe(false);
+    expect(pinnedFirst([{ id: 1 }, { id: 2, pinned: true }]).map((x) => x.id)).toEqual([2, 1]);
+  });
+});
