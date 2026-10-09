@@ -91,6 +91,22 @@ html body #root {
     margin: 0 auto;
   }
 
+  /* Full-screen pages and sheets portalled to <body> (room view, DMs, Spaces, send, pots, agent, sheets: about 40
+     of them, position: fixed against the window) stay in the same column instead of jumping to full width
+     (owner, 9 Oct 2026: opening the bWallet Lounge went full width). */
+  html body > .fixed.inset-0,
+  html body > .fixed.inset-x-0,
+  html body > .fixed.left-0.right-0 {
+    left: max(0px, calc((100% - var(--web-max)) / 2)) !important;
+    right: max(0px, calc((100% - var(--web-max)) / 2)) !important;
+  }
+
+  /* Confirm sheets (forgot password, biometrics: .yours-sheet, appended to <body>) sit in the column too. */
+  .yours-sheet-backdrop {
+    left: max(0px, calc((100% - var(--web-max)) / 2)) !important;
+    right: max(0px, calc((100% - var(--web-max)) / 2)) !important;
+  }
+
   html body #root {
     width: 100%;
     max-width: var(--web-max);
