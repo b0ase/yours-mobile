@@ -1,5 +1,6 @@
 import { parseRecipient } from '../names/names';
 import { PAIR_HOST } from '../../pair/protocol';
+import { parseAppLink, type AppLink } from '../spaces/invite';
 
 /**
  * What a scanned QR (or pasted text) means to bWallet. Pure: no network, no side effects.
@@ -9,6 +10,8 @@ export type Scan =
   | { kind: 'pair'; text: string }
   | { kind: 'pay'; to: string; amountSats?: number; label?: string; message?: string }
   | { kind: 'person'; handle: string; to: string }
+  /** A Space page, invite or room link (https /s/ /i/ /r/ on our hosts, or bwalletx://space|invite|room/…). */
+  | { kind: 'join'; url: string; link: AppLink }
   | { kind: 'text'; text: string };
 
 const SATS = 100_000_000;
@@ -52,6 +55,9 @@ export const parseScan = (raw: string | null | undefined): Scan => {
   if (!text) return { kind: 'text', text: '' };
 
   if (isPairLink(text) || /^bwallet:.*pair/i.test(text)) return { kind: 'pair', text };
+
+  const link = parseAppLink(text);
+  if (link) return { kind: 'join', url: text, link };
 
   // BIP21: bitcoin:<address>?amount=0.01&label=…&message=… (also bsv:, payto:).
   const uri = text.match(/^(?:bitcoin|bsv|payto):(?:\/\/)?([^?]*)(?:\?(.*))?$/i);

@@ -58,4 +58,21 @@ describe('parseScan', () => {
     expect(bsvToSats('0.000000001')).toBeNull();
     expect(bsvToSats('abc')).toBeNull();
   });
+
+  test('Space, invite and room links open the join flow', () => {
+    expect(parseScan('https://bchatx.com/s/abcdefgh23')).toEqual({
+      kind: 'join',
+      url: 'https://bchatx.com/s/abcdefgh23',
+      link: { kind: 'space', slug: 'abcdefgh23' },
+    });
+    expect(parseScan('https://www.bit-sign.online/i/abcdefgh23').kind).toBe('join');
+    expect(parseScan('bwalletx://space/abcdefgh23').kind).toBe('join');
+    expect(parseScan('bwalletx://invite/abcdefgh23').kind).toBe('join');
+    const r = parseScan('https://bwalletx.com/r/PENNY?buy=1');
+    expect(r.kind === 'join' && r.link).toEqual({ kind: 'room', ticker: 'PENNY', buy: true });
+    // Person pages still win on bwalletx.com; unknown hosts stay text.
+    expect(parseScan('https://bwalletx.com/$alice').kind).toBe('person');
+    expect(parseScan('https://evil.example/s/abcdefgh23').kind).toBe('text');
+    expect(parseScan('https://bchatx.com/s/bad').kind).toBe('text');
+  });
 });

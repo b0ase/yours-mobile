@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Send,
   Share2,
+  QrCode,
   Users,
   X,
 } from 'lucide-react';
@@ -658,6 +659,24 @@ export const SpaceScreen = ({
       setSharing(false);
     }
   };
+  // QR of the permanent Space page, for a second phone or a screen to scan (Scan in bWalletX or the camera app).
+  const [qrUrl, setQrUrl] = useState<{ url: string; img: string } | null>(null);
+  const showQr = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const page = parsePage(await client.spacePageLink(ticker));
+      if (!page?.url) throw new Error('No link came back.');
+      const qr = await import('qrcode');
+      setQrUrl({ url: page.url, img: await qr.toDataURL(page.url, { margin: 1, width: 480 }) });
+    } catch (e) {
+      setNote(
+        e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e),
+      );
+    } finally {
+      setSharing(false);
+    }
+  };
   const createInvite = useCallback(
     (opts: { expires_in: string; max_uses?: number }) => client.createSpaceInvite(ticker, opts),
     [client, ticker],
@@ -838,8 +857,24 @@ export const SpaceScreen = ({
             >
               <Share2 size={15} /> Share Space page
             </button>
+            <button
+              onClick={() => void showQr()}
+              disabled={sharing}
+              className="mt-2 w-full h-11 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ border: `1px solid ${LINE}`, color: '#fff' }}
+            >
+              <QrCode size={15} /> Show QR code
+            </button>
+            {qrUrl && (
+              <div className="mt-3 flex flex-col items-center">
+                <img src={qrUrl.img} alt="QR code for the Space page" className="w-56 h-56 rounded-lg bg-white" />
+                <p className="mt-1 text-[11px] break-all text-center" style={{ color: MUTED }}>
+                  {qrUrl.url}
+                </p>
+              </div>
+            )}
             <p className="mt-1 mb-4 text-[11px]" style={{ color: MUTED }}>
-              The permanent page for this Space: live now, ended later.
+              The permanent page for this Space: live now, ended later. Scan the QR in bWalletX or with a phone camera.
             </p>
             <InviteLinksPanel
               create={createInvite}

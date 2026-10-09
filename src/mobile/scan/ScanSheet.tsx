@@ -13,6 +13,7 @@ import { useAccountNames } from '../names/accountNames';
 import { Scanner } from './Scanner';
 import { parseScan, type Scan } from './parseScan';
 import { myPayUri } from './payUri';
+import { offerAppLink } from '../spaces/inviteLinks';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 
@@ -74,7 +75,11 @@ export default function ScanSheet({
     const s = parseScan(text);
     // A plain payment code goes straight to the Send card (still needs the user's confirm there).
     if (s.kind === 'pay') pay(s.to, s.amountSats);
-    else setStage({ k: 'result', s });
+    // A Space / invite / room link opens its join flow (inviteLinks.ts: Space card, or the room's buy-to-enter screen).
+    else if (s.kind === 'join') {
+      offerAppLink(s.url);
+      onClose();
+    } else setStage({ k: 'result', s });
   };
 
   if (stage.k === 'result' && stage.s.kind === 'pair') {
