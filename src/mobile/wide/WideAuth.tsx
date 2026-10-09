@@ -21,7 +21,7 @@ export const WideAuth = ({ children }: { children: ReactNode }) => {
   useLayoutEffect(() => {
     if (!WIDE_ON) return;
     document.documentElement.classList.add('ww-onb');
-    // One fixed panel size for every step (mobile.css html.ww-onb #root): no measuring, so no height jumps.
+    // The panel is sized by CSS (mobile.css html.ww-onb #root): no measuring script, so nothing resizes after paint.
     return () => {
       document.documentElement.classList.remove('ww-onb');
     };

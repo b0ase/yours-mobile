@@ -975,7 +975,8 @@ img.ww-tok {
    1. Full-screen phone pages (backup, $name, agent tools, settings sub-pages, pots, agents, Spaces, calls…) become a
       page in the main area: beside the sidebar, under the top bar, opaque, content in a reading column. Nothing of the
       live page shows through and only one page is ever on top.
-   2. Bottom sheets (a dimmed backdrop + a sheet at the bottom) become a centred modal over a blurred, dimmed window.
+   2. Bottom sheets (a dimmed backdrop + a sheet at the bottom) become a centred modal over a blurred, dimmed window,
+      on the auth screens too (forgot password spanned the whole window bottom).
    Centred full-viewport overlays (lock, unlock, splash) are left alone. */
 html.ww-on:not(.ww-onb)
   body
@@ -1003,7 +1004,7 @@ html.ww-on:not(.ww-onb)
     transform: translateY(6px);
   }
 }
-html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end {
+html.ww-on body > .fixed.inset-0.items-end {
   align-items: center !important;
   justify-content: center !important;
   padding: 32px !important;
@@ -1011,7 +1012,7 @@ html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end {
   -webkit-backdrop-filter: blur(6px);
   background-color: rgba(0, 0, 0, 0.6);
 }
-html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end > * {
+html.ww-on body > .fixed.inset-0.items-end > * {
   width: 100% !important;
   max-width: 560px !important;
   max-height: calc(100vh - 64px) !important;

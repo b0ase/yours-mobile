@@ -146,6 +146,18 @@ select {
   gap: 12px;
 }
 
+/* Wide layout: the confirm sheet (forgot password, biometrics) is a centred modal, not a full-window strip. */
+html.ww-on .yours-sheet-backdrop {
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+html.ww-on .yours-sheet {
+  max-width: 480px;
+  border-radius: 20px;
+  padding-bottom: 20px;
+}
+
 .yours-sheet h2 {
   margin: 0;
   font-size: 18px;
@@ -1274,10 +1286,11 @@ html.ww-on.ww-onb body #root {
   right: max(32px, calc((50vw - 440px) / 2));
   width: 440px;
   max-width: calc(100vw - 32px);
-  /* One fixed size for every step (welcome, create, restore, import, seed, password, unlock): no height jumps. */
-  height: min(860px, calc(100vh - 48px)) !important;
+  /* Sized by its content in CSS (no measuring script, so nothing resizes after paint), centred against the story,
+     capped to the window (scrolls beyond). Same width and padding for every step. */
+  height: auto !important;
   min-height: 0 !important;
-  max-height: none;
+  max-height: calc(100vh - 48px);
   overflow: hidden auto;
   margin: 0 !important;
   padding: 20px 10px 8px;
@@ -1293,6 +1306,20 @@ html.ww-on.ww-onb body #root {
 html.ww-on.ww-onb body #root > div,
 html.ww-on.ww-onb body #root > div > div {
   align-items: flex-start !important;
+}
+/* The phone flow's wrappers are full-height (h-full / min-h-[--wallet-height]) boxes that centre their content; in
+   the panel they must take their content's height, or the content centres in a zero-height box and spills above the
+   panel (unlock: logo and "Welcome back" cut off, an empty frame below). */
+html.ww-on.ww-onb body #root > div,
+html.ww-on.ww-onb body #root > div > div,
+html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
+  height: auto !important;
+  min-height: 0 !important;
+  justify-content: flex-start !important;
+}
+html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 /* Errors and notices (components/Snackbar: absolute, bottom of a zero-height box, so they showed as a red sliver at
    the panel's top): pin them to the panel's bottom edge, full text, readable size. #root is transformed, so fixed
@@ -1367,4 +1394,9 @@ html.ww-on.ww-onb body #root .absolute.bottom-0.z-\[9999\] {
 .ww-auth-hero li span {
   font-size: 14px;
   color: #a5a5a0;
+}
+
+/* Wide auth panel: nothing until the flow mounts (an empty 30px frame showed for the first ~200ms). */
+html.ww-on.ww-onb body #root:empty {
+  visibility: hidden;
 }
