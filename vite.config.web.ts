@@ -26,6 +26,21 @@ const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
 const DESKTOP = process.env.VITE_WIDE_WEB === '1';
 const APP_TITLE = DESKTOP ? 'bWalletX Desktop' : 'bWalletX';
 
+// desktop.bwalletx.com share card (owner, 9 Oct 2026). Source: bwalletx-site media-src/og/og-desktop-v1.html.
+const DESKTOP_OG = 'https://desktop.bwalletx.com/og-desktop-v1.png';
+const DESKTOP_SHARE = [
+  '    <meta property="og:type" content="website" />',
+  '    <meta property="og:url" content="https://desktop.bwalletx.com/" />',
+  '    <meta property="og:title" content="bWalletX Desktop" />',
+  '    <meta property="og:description" content="Your whole wallet on one big screen: money, bMail, chat and apps side by side." />',
+  `    <meta property="og:image" content="${DESKTOP_OG}" />`,
+  '    <meta property="og:image:width" content="1200" />',
+  '    <meta property="og:image:height" content="630" />',
+  '    <meta property="og:image:alt" content="bWalletX Desktop: your whole wallet on one big screen" />',
+  '    <meta name="twitter:card" content="summary_large_image" />',
+  `    <meta name="twitter:image" content="${DESKTOP_OG}" />`,
+];
+
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
   transformIndexHtml: {
@@ -39,6 +54,7 @@ const webShell = (): Plugin => ({
           '</head>',
           [
             '    <meta name="description" content="bWalletX: the BSV wallet for tokens, media and apps." />',
+            ...(DESKTOP ? DESKTOP_SHARE : []),
             '    <link rel="manifest" href="./manifest.webmanifest" />',
             '    <link rel="icon" href="./favicon.ico" sizes="any" />',
             '    <link rel="apple-touch-icon" href="./icons/icon192.png" />',
@@ -62,6 +78,12 @@ const webShell = (): Plugin => ({
       fileName: 'agents.html',
       source: readFileSync(resolve(__dirname, 'src/web/agents.html')),
     });
+    if (DESKTOP)
+      this.emitFile({
+        type: 'asset',
+        fileName: 'og-desktop-v1.png',
+        source: readFileSync(resolve(__dirname, 'src/web/og-desktop-v1.png')),
+      });
     this.emitFile({
       type: 'asset',
       fileName: 'og-agents.png',
