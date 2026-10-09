@@ -1,185 +1,156 @@
-# bMail: the mailbox in bWalletX
+# bMail: the economic mailbox in bWalletX
 
-Status: **plan, rev 2, 9 Oct 2026** · No product code yet
+Status: **plan, rev 3, 9 Oct 2026 (late)** · Basic build in progress on `feat/bmail-basic` (another agent)
 
-Owner, 9 Oct 2026: "'airdrops' are token spam in a mailbox which should receive tokenised communications of all kinds. So the 'mailbox' icon is shorthand for bMail, which should be that icon and that screen."
+Owner, 9 Oct 2026 (rev 3): "For now we really just want to focus on economic mailbox. Pay to send and pay to open and pay to return or whatever. Ultimately bMail is email with contracts, money, permissions, signing etc. built in… Think about what we did with bPhone… ask 'what kind of things do people use email for?'… when it comes to click-wrapped contracts, how can we add payments, signatures, time locks, (written signatures) token allocations and .nds.html contracts into the bMail idea? Lots of work has been done in bit-sign already."
 
-Owner, 9 Oct 2026 (rev 2): "the economically weighted inbox where users send you mail with bits of bitcoin so that the biggest payments rise to the top… friend loops and other loops… tokenised stamps and a protocol for opening your mail… signing your mail when you open to prove when it was opened (and not before)".
+Earlier owner notes: "'airdrops' are token spam in a mailbox which should receive tokenised communications of all kinds" (rev 1); "the economically weighted inbox… biggest payments rise to the top… signing your mail when you open to prove when it was opened (and not before)" (rev 2).
 
-Rev 2 builds bMail **on the work we already have**:
+**Owner decisions, 9 Oct (folded in):** price to reach = **1¢ for everyone by default**, branded **"Penny post"** ("the default should be the same for everyone"); postage tiers = **multiples of the recipient's price** (Standard 1×, Priority 3×, Certified 3× + receipt fee); a **small built-in set of stamp designs** at launch, artists later (issuance by others parked, §6); signed open receipts **only for Certified or pay-to-open mail**; stranger tab = **Requests**; **B0 ships in 5.1.90**.
 
-| Source | What bMail takes from it |
+**What changed in rev 3.** The plan now starts from what people use email for, and gives each use a bPhone-style rate card line. The core is three money moves: **pay to send, pay to open, pay to return**. Contracts come from bit-sign as it is. Stamp issuance (artists or "the state" issuing stamps) is **parked** (§6). Rev 2's sealed mail and signed open receipts stay, shortened (§3.4).
+
+## Sources (use what exists, don't reinvent)
+
+| Source | What bMail takes |
 |---|---|
-| `docs/PAID-INBOX-PLAN.md` (owner, 8 Oct) | Price to reach me (§2), sort by paid amount with friends free and on top (§2), pay to open with an nLockTime refund (§3), read receipts (§3), friend loops (§4), friendship funds (§6). Split-or-steal (§5) **stays parked** behind legal advice and is not part of bMail |
-| `bitcoin-email` repo (the $bMail demo) | **Postal stamps** (`components/email/PostalStamp.tsx`, README "Digital Postal Stamps", `docs/index.html` "Digital Stamps"), **read receipts as a signed spend of the message** (`docs/ARCHITECTURE_API_LAYERS.md` Layer 1), mail as a 1Sat ordinal with a sender signature over a manifest (`ARCHITECTURE_API_LAYERS.md`, `docs/openapi/bmail-v1.yaml`), a minimum-payment inbox filter (`components/email/EmailList.tsx`), on-chain hash + timestamp records (README, `IMPLEMENTATION_PLAN.md`) |
-| Other wallet plans | Loops: bPhone pay loop + receipts (`BPHONE-PLAN.md`), streaming pay loop (`STREAMING-PAYMENTS-SPEC.md` §5), 1¢/day subscriptions and pots (`POTS-SUBSCRIPTIONS-PLAN.md`), signed-but-unbroadcast bids (`BSPACES-PLAN.md`), lock cascades and heirs (`TIME-LOCK-PLAN.md` §9, §13) |
+| `docs/BPHONE-PLAN.md`, `src/mobile/calls/rateCard.ts`, `QuoteSheet.tsx` | **The pattern**: a public rate card per identity key on the paymail server (BSV priced in dollars and paid in sats, MNEE, or a BSV-21 token); a **quote sheet** before anything is sent; pay wallet to wallet, 0% fee; **receipts**; store gating (`storeBuild.ts`) |
+| `docs/PAID-INBOX-PLAN.md` (owner, 8 Oct) | Price to reach me, sort by paid with friends free and on top (§2), pay to open with a 14-day nLockTime refund (§3), friend loops (§4). Split-or-steal (§5) stays parked behind legal advice |
+| `src/mobile/airdrops/` | Today's inbox: `AirdropsInbox`, `useAirdrops`, `inbox.ts` (seen / kept / hidden / hiddenIssuers / onlyKnown), `note.ts` (≤280-char OP_RETURN note), `poison.ts` (look-alike guard) |
+| bit-sign `docs/NPG-DOCUMENT-STANDARD.md`, `src/lib/nds.ts`, `nds-builder.ts`, `nds-compose.ts` | **.nds.html**: an HTML document with a `application/npg-sig-manifest+json` manifest (`signatureFields[]`, roles, `canonical` hash) and `data-sig-anchor` places for each signature |
+| bit-sign `src/components/SovereignSignature.tsx`, `NdsSigningView.tsx`, `DocumentCanvas.tsx` | **Drawn (written) signature**: canvas → `{svg, json}`, sanitised (`sanitizeSignatureSvg`) and placed on its anchor |
+| bit-sign `docs/SIGN-AND-SEAL-PLAN.md`, `src/lib/bwalletx-seal.ts`, `nds-seal-core.ts`, `brc100-inscribe.ts`, `seal.ts` | **Sign and seal with bWalletX**: identity-key signature + BRC-100 `createAction` OP_RETURN seal; **only hashes on chain**, never content (`assertNoContent`) |
+| bit-sign `docs/ESCROW-DESIGN.md` (design, not built) | **Escrow block in the NDS manifest**: `2of2-timeout`, `2of3-arbiter`, `payer-timeout`, CLTV deadline, `onTimeout` refund-payer / release-payee |
+| bit-sign `co-sign-request`, `return-to-sender`, `document-vault.ts`, `envelope-void.ts`, `room-allocations.ts`, `offer-terms.ts` | Ask someone to sign; send the signed copy back; the document vault; voiding (not deleting) an envelope; allocation arithmetic with a consent rule; structured "X of Y for Z" terms |
+| bWalletX `TIME-LOCK-PLAN.md`, `POTS-SUBSCRIPTIONS-PLAN.md`, `BSPACES-PLAN.md` | Lock scripts; 1¢/day subscriptions; signed-but-unbroadcast spends |
+| `bitcoin-email` repo (old $bMail demo) | Ideas only: postal stamp tiers, minimum-payment filter, read receipts as a signed spend. Its code (CryptoJS, HandCash, mocked send) is not reused |
 
-We keep the **ideas** from bitcoin-email, not its code: its crypto is CryptoJS AES with its own keypairs, its payments go through HandCash, and sending is mocked. bMail uses BRC-100 wallet calls only (bWalletX first, any BRC-100 wallet works).
+bMail uses **BRC-100 wallet calls only** (bWalletX first; any BRC-100 wallet works).
 
-## 1. The rule
+## 1. What people use email for → bMail item + rate card
 
-**One mailbox for every message that arrives on a token or a payment, ranked by what the sender put on it.** The top-bar mailbox icon opens bMail. Mail, tickets, invoices, signed documents and airdrops all land here. An airdrop is an **unstamped** item: nobody paid to reach you, so it is filtered hardest.
+Like bPhone, each use gets a line on a rate card. The **recipient** sets prices for what reaches them; the **sender** sets prices on what they ask for (an invoice, a contract fee). Every row is the same envelope with a different `kind` and different things attached.
 
-## 2. What exists in bWalletX today
+| People use email for… | bMail kind | Money it carries | Permission / signature | Rate card line (suggested default) |
+|---|---|---|---|---|
+| Personal letters, friends, family | `letter` | none between friends; postage from strangers | sender signs envelope | Friends free · strangers: **Penny post** (1¢, the same default for everyone) |
+| Introductions, cold outreach, pitches | `letter` (stranger) | **postage**, ranked by amount; optional pay to open | — | price to reach me; "pay only if opened" suggested |
+| Replies you want back (quotes, RSVPs, answers) | any + **reply paid** | sender prepays the reply | — | sender chooses (e.g. 5¢) |
+| Invoices, bills, payment requests | `request` | amount asked; **Pay** button | sender signs the request | free to people you've dealt with; else postage |
+| Receipts | `receipt` | none (records a payment) | signed by the payee | free (automatic from our sends, bPhone, shops) |
+| Contracts, agreements, terms, NDAs | `contract` (.nds.html) | optional pay on signing, escrow, fee | click-wrap accept or drawn signature, sealed | sender may set a signing fee; recipient's postage applies |
+| Approvals, sign-offs, permissions | `approval` | optional | one-tap signed Approve / Decline | free between friends |
+| Tickets, invites, bookings | `ticket` | the ticket token itself | holding = entry | free (issuer pays the ticket) |
+| Newsletters, subscriptions | `issue` | subscription (1¢/day pot) | you subscribed = allowed | rank with friends; unsubscribe = stop paying |
+| Notifications from apps | `notice` | none | app's key, signed | free, but Requests unless the app is kept |
+| File sending (documents, photos, media) | any + attachment | optional pay to open | encrypted to recipient | postage; large files may require pay to open |
+| Job applications, CVs | `letter` + attachment | postage (shows seriousness) | — | recipient's price (e.g. recruiters set $1) |
+| Support / customer service | `letter` | postage optional | — | businesses may set 0 for customers, a price for strangers |
+| Token sends, gifts, airdrops | `drop` | the tokens | — | unstamped → Requests |
+| Token allocations (team, contributors, community) | `allocation` | utility tokens, optionally time-locked | allocation terms accepted by click-wrap | sender pays; no postage between parties to the allocation |
 
-| Piece | Where | Use in bMail |
+Same as bPhone: prices in **dollars, paid in sats** (or MNEE or a BSV-21 token), **wallet to wallet**, fee **0%**, and the sender always sees a **quote sheet** before anything leaves the wallet.
+
+## 2. The mail rate card (from `rateCard.ts`)
+
+One card per identity key, stored next to the bPhone card on the paymail server (`bmail-get` / `bmail-put`, signed like `bphone-put`), public so any sender can read it before composing.
+
+```ts
+{
+  reach:   { amount: 0.01, asset: { kind: 'bsv' } },     // price to reach me (strangers)
+  open:    { required: false, refundDays: 14 },          // must strangers' mail be pay to open?
+  below:   'requests',                                   // 'requests' | 'bounce'
+  friends: 'free',
+  kinds:   { contract: { amount: 1 } },                  // optional per-kind prices (later)
+}
+```
+
+`rateCard.ts` already has the asset kinds, dollar pricing and the 546-sat floor; bMail reuses its types and adds a `MailCard`. The quote sheet follows `QuoteSheet.tsx`: "To $alice · price to reach $0.01 · your postage $0.25 · pay only if opened · reply paid $0.05 · total $0.30".
+
+## 3. The economic mailbox core
+
+### 3.1 Pay to send (postage)
+
+- The sender attaches **postage**: an output in the mail transaction to a key derived for the recipient (BRC-42, `protocolID [2,'bmail postage']`, `keyID = messageId`), with a marker (MAP `type bmail`, `postage`, `messageId`).
+- **Price to reach me** decides the tab: at or above it → **Inbox**; below it or unstamped → **Requests** (or bounce, the user's choice). Requests never notify.
+- **Weighted sort**: friends first (free, always on top), then by postage, highest first; ties by newest. "Newest" toggle. The amount shows on each row.
+- **Friends free**: people I've added, replied to, paid, or kept.
+- **Verified, not claimed**: the wallet checks the postage output (on chain, or the BEEF attached to a message-box envelope) before ranking. A claimed amount with no valid output ranks as unstamped.
+- **Tiers** (owner): Standard = 1× the recipient's price, Priority = 3×, Certified = 3× + a receipt fee (signed open receipt); extra postage on top always allowed. Default price is the **Penny post**, 1¢ for everyone until they change it.
+- In simple mode the postage is the recipient's when sent. Pay to open (3.2) changes that.
+
+### 3.2 Pay to open (escrow released on open, 14-day refund)
+
+- The postage output becomes a lock: path A = recipient opens (signed open receipt, 3.4) + the sender's pre-signed release carried inside the sealed envelope; path B = pre-signed refund to the sender after **14 days** (nLockTime).
+- Opening broadcasts path A, so money moves only when the recipient opens. Not opening: the sender's wallet broadcasts the refund after 14 days. Nothing stuck, nothing "paid but ignored".
+- Same script family as bit-sign ESCROW-DESIGN `2of2-timeout` with `onTimeout: refund-payer`, so mail and contracts (§4) share one escrow builder.
+- Fee 0%; miner fee only.
+
+### 3.3 Pay to return (reply paid)
+
+- **Reply paid** (like a postal reply coupon): the sender adds a second output, the **return stamp**, which the recipient's wallet spends only as the postage of a reply to this `messageId` (the Reply composer uses it; the marker names the thread).
+- If the recipient replies, the return stamp covers the reply's postage, so replying costs them nothing. If they don't reply in 14 days, it refunds to the sender (same lock as 3.2).
+- Variants on the quote sheet: **Reply paid** (sender covers the reply); **Pay for a reply** (the recipient keeps the return stamp only by replying: quotes, RSVPs, answers); **friend loops** (each reply carries a stamp back; the thread shows tally and streak, PAID-INBOX-PLAN §4).
+
+### 3.4 Sealed mail and signed open receipts (from rev 2, short)
+
+- Body encrypted with BRC-2 (`encrypt`, `protocolID [2,'bmail']`, `keyID = messageId`, counterparty = recipient); sender signs `sha256(manifest ‖ ciphertext)`; commitment `C = sha256(ciphertext)` goes on chain with the postage.
+- **Open** is an explicit tap: decrypt, sign an open receipt (`createSignature`, `[2,'bmail open']`) over `messageId ‖ C ‖ sha256(plaintext) ‖ recentBlockHash ‖ openedAt`, and spend the postage with that signature in OP_RETURN. Proves: by the recipient, not before the block hash, not after the mined block, the exact content, once.
+- Receipts only for **Certified** or pay-to-open mail (owner decision); otherwise "open quietly".
+- Honest limit in the help text: this proves when the recipient **acknowledged** opening.
+
+## 4. Contracts in mail (from bit-sign)
+
+A contract is mail whose body is an **.nds.html** document from the bit-sign vault (or made in bMail from a template), with the NDS manifest saying what this recipient must do. bMail is the **delivery and the tap**; bit-sign stays the system of record (vault, seal, verify page).
+
+| Feature | Exists in bit-sign | How it attaches to a mail | What the recipient taps |
+|---|---|---|---|
+| **.nds.html document** | `nds.ts`, `nds-builder.ts`, vault, `co-sign-request` | Encrypted attachment; the envelope carries the manifest hash and this recipient's `signatureFields`. Row shows "Contract · 1 signature needed" | **Read**, then the action below |
+| **Click-wrap accept** | No click-wrap code yet. Parts exist: the `bwallet sign in` signature scheme (`bwallet-signin.ts`) and NDS fields | A manifest field `{type:'accept', role}` and the terms' canonical hash. Accept = identity-key `createSignature` over the doc hash, sealed with a BRC-100 OP_RETURN (hash only) | **I agree** (after scrolling the terms) → quote sheet if a payment is attached → done |
+| **Drawn / written signature** | `SovereignSignature.tsx` (canvas → SVG), `NdsSigningView.tsx`, anchors, `nds-compose.ts` | Field `{type:'drawn', anchor}`; the wallet opens the same canvas, or hands off to bit-sign's signing view in the in-app browser | **Sign here** (draw) → **Sign and seal** (SIGN-AND-SEAL-PLAN) |
+| **Payment on signing** | `brc100-inscribe.ts` `createAction`; `offer-terms.ts` | Manifest `payment` block (amount, asset, payee). The seal and the payment are **one `createAction`**, so signing and paying cannot come apart | **Sign and pay $X** |
+| **Time locks / escrow** | `ESCROW-DESIGN.md` (designed, not built): `2of2-timeout`, `2of3-arbiter`, `payer-timeout`, CLTV, `onTimeout` | Manifest `escrow` block; signing funds the lock; the thread shows "Escrow funded · releases on delivery, or refunds 1 Dec" | **Fund escrow** (payer) · later **Release** / **Refund** / **Ask arbiter** in the same thread |
+| **Token allocations** | `room-allocations.ts` (arithmetic + consent rule), NDS `token` block | An `allocation` mail: handles and token amounts (utility tokens), optional vesting by time lock. Recipients accept by click-wrap; tokens are sent (or locked) when the last required party accepts | **Accept allocation** → tokens arrive, or "Locked until 1 Jun" |
+| **Return to sender** | `return-to-sender` route | The signed, sealed copy goes back to the sender as a reply in the same thread, with the seal txid | Nothing: automatic after sealing |
+| **Void** | `envelope-void.ts` (void, not delete) | The sender can void an unsigned contract; the recipient's copy shows "Voided by sender" and is kept | — |
+
+Rules:
+- **Hashes only on chain** (bit-sign `assertNoContent`). Document bodies travel encrypted (message box, bDrive or the bit-sign vault).
+- **Contracts always need an explicit tap**; nothing is accepted by opening.
+- **Utility only.** Token allocations in bMail are for utility tokens (access, credits, tickets, rewards for work). Anything share-like (DocToken / $403, KYC-gated instruments) is **out of bMail's scope** and stays in bit-sign's own flow; bMail may only deliver a link to it. Copy never says "investment", "returns", "equity" or "yield".
+- The canonical-hash question (rendered HTML vs PDF) is bit-sign's to settle (SIGN-AND-SEAL-PLAN Q1); bMail uses whatever `canonical` the manifest declares.
+
+## 5. Permissions in mail
+
+- **Approval** mail: one question, two buttons (Approve / Decline), each an identity-key signature over `messageId ‖ choice`. For sign-offs, access requests ("$bob asks to join room X"), and later bit-sign spend-policy approvals.
+- **Access grants**: a mail can carry a grant (read a bDrive file, enter a room) that the recipient's tap activates; the sender revokes it with a void.
+
+## 6. Stamp issuance: parked
+
+The Mint (`bcorp-mint`, bitcoin-mint.com: Design / Print / Stamp / Mint) can design and inscribe currency-style artwork, and rev 2 floated collectible stamp designs. Owner, 9 Oct: issuing stamps is largely **for "the state" to decide**. So **stamp issuance by others is parked for later**: no artist- or state-issued stamps, no stamp marketplace. In bMail a stamp is the **postage output** the sender pays (§3.1), shown with one of a **small built-in set of stamp designs** at launch (owner decision; artwork only, the marker carries a design id). Artist designs come later.
+
+## 7. Phases
+
+| # | What | State |
 |---|---|---|
-| Airdrops inbox | `src/mobile/airdrops/` (`AirdropsInbox`, `useAirdrops`, `inbox.ts`) | Item list from History v2 `transfer-in` rows; per-account `InboxState` (seenAt, kept, hidden, hiddenIssuers, onlyKnown); Keep / Hide / hide issuer |
-| Airdrop notes | `airdrops/note.ts` | ≤280-char public note in OP_RETURN (B + MAP `app bWalletX type airdrop_note`). Format for public on-chain text |
-| Poisoning guard | `airdrops/poison.ts` | Look-alike warning on sender and reply |
-| Mailbox icon | `fix/airdrops-mailbox-icon` (d6c4aae, not in bwallet yet) | Top-bar icon is already a mailbox |
-| Message box | `MESSAGEBOX_URL = https://messagebox.1sat.app` | Store-and-forward relay the wallet already knows |
-| Wallet crypto | BRC-100 `encrypt`/`decrypt` (BRC-2, BRC-42 keys), `createSignature`/`verifySignature`, `createAction` | Everything below; no new crypto |
-| Rate card / quote sheet | `src/mobile/calls/rateCard.ts`, `QuoteSheet.tsx` | Price to reach me and the sender's quote |
-| Lock scripts | Lock BSV (TIME-LOCK-PLAN) | nLockTime refund path for pay to open |
+| **B0 · tonight → 5.1.90** | Rename Airdrops → **bMail** (mailbox icon); tabs **Inbox · Requests · Sent**; **compose with pay to send** (postage + quote sheet); **reply paid**; **weighted sort** (friends on top, then by postage, "Newest" toggle); price to reach me (simple mode: postage is the recipient's on send) | **Being built now on `feat/bmail-basic` by another agent.** This plan describes it; it does not build it |
+| B1 | Sealed mail (BRC-2), signed envelopes, Open / Reply / Block, friends list, Sent › Receipts | next |
+| B2 | **Pay to open**: lock + 14-day refund, signed open receipts, "Opened at…" in Sent; unreplied return stamps refund | after B1 |
+| B3 | **Contracts from bit-sign**: .nds.html in mail, click-wrap accept, drawn signature, Sign and seal from bWalletX, return to sender, void | after bit-sign Sign and seal lands |
+| B4 | **Payment on signing**; invoices and receipts as kinds | — |
+| B5 | **Escrow / time locks** in contracts (shared builder with B2; ESCROW-DESIGN models) | needs the bit-sign escrow review |
+| B6 | **Token allocations** (utility) with optional vesting locks; approvals and access grants | — |
+| Later | Subscriptions as mail (1¢/day), pay-per-read, friendship funds, per-kind prices, published envelope spec for other wallets | — |
+| Parked | Stamp issuance / collectible stamps (§6); split-or-steal (PAID-INBOX-PLAN §5) | — |
 
-## 3. Stamps: the unit of postage
+Store build: B0–B1 plain messaging. Paid features follow the bPhone rule: **bWalletX only** until reviewed (`storeBuild.ts`).
 
-From bitcoin-email: `PostalStamp.tsx` offered **No stamp / Standard ($0.68) / Priority ($1.45) / Express ($3.95) / Certified ($7.50)**, plus an "extra payment beyond postal stamp" field; README and the landing page call them "collectible stamps for priority delivery" with a "stamp marketplace" on the roadmap. The demo only stored the choice; nothing was minted or paid.
+## 8. Questions for the owner (product only)
 
-In bMail a stamp is **postage you pay to reach someone, which the recipient cancels by opening the mail**.
+Answered 9 Oct and folded in: Penny post 1¢ default, tier multiples, built-in stamp designs, receipts only for Certified / pay to open, "Requests", B0 in 5.1.90.
 
-**What a stamp is.** An output in the mail's transaction, addressed to the recipient (BRC-42 key derived from the recipient's identity key with `protocolID [2,'bmail stamp']`, `keyID = messageId`), carrying:
-- the postage value (sats, priced in dollars at send time), and
-- a small stamp marker (MAP `type bmail_stamp`, `tier`, `design`, `messageId`), so any wallet can read the tier and show the stamp art.
-
-**Tiers** (names from bitcoin-email; prices are product choices, see Q1):
-
-| Tier | Meaning in bMail | Suggested price |
-|---|---|---|
-| Unstamped | Free mail, airdrops, anything without postage | 0 |
-| Standard | Meets the recipient's price to reach (or 1¢ if none) | recipient's price |
-| Priority | Pays above the price; ranks higher | 2–5× the price |
-| Certified | Priority + a **signed open receipt** is requested (§5) | price + receipt fee |
-
-A sender can always add more than the tier ("extra postage"); ranking uses the total.
-
-**Who mints.** No issuer is needed for postage: the stamp is the sender's own output, so value goes wallet to wallet, 0% fee to start (same as PAID-INBOX-PLAN §3, bPhone). **Collectible stamp designs** (bitcoin-email's "stamp marketplace") are a later, optional layer: an artist mints a design as a 1Sat ordinal or BSV-21 sheet; using it on mail references that design id in the marker. See Q2.
-
-**Cancelled on open.** Opening spends the stamp output (§5). A spent stamp is a cancelled stamp: the chain shows it was used once, by the recipient, at a known time. Unopened stamped mail with pay-to-open refunds the sender after the lock (§5.3); otherwise the postage is simply the recipient's from the start. Stamps are postage only: copy never presents them as something that holds or gains value.
-
-## 4. The economically weighted inbox
-
-From PAID-INBOX-PLAN §2 and bitcoin-email's minimum-payment filter.
-
-- **Order:** Friends first (free, always on top), then everything else **by postage, highest first**; ties by newest. A "Newest" toggle switches to time order. The amount shows on each row ("$0.25 Priority").
-- **Price to reach me** (Settings › bMail, rate card in dollars, MNEE or a token; default see Q3). Mail at or above it goes to **Inbox**; below it, to **Requests** (or bounces, the user's choice).
-- **Requests** = unstamped / under-priced mail from strangers, and all new airdrops. Never notifies, no badge.
-- **Friends list:** people I've added, replied to, paid, or kept. They write free, they sort above paid mail, and their mail never needs a stamp.
-- The weight is **verified, not claimed**: the wallet checks the stamp output in the tx (on-chain mode) or the BEEF attached to a message-box envelope before ranking. A claimed amount with no valid output ranks as unstamped.
-
-## 5. Sealed mail and signed open receipts
-
-From bitcoin-email `ARCHITECTURE_API_LAYERS.md` ("read receipts: subsequent ordinals from recipient signed and spending the original, provable on-chain") and PAID-INBOX-PLAN §3 (pay to open, read receipts, "only the recipient's own action counts").
-
-### 5.1 Sealed envelope
-
-- Body + subject encrypted with BRC-2: `encrypt({ protocolID: [2,'bmail'], keyID: messageId, counterparty: recipientIdentityKey })`.
-- The sender signs the envelope (`createSignature` over `sha256(manifest ‖ ciphertext)`), replacing bitcoin-email's "sender signature over manifest".
-- The outside shows only: sender, stamp tier and value, time, size. Rows say "Sealed" until opened.
-- The commitment `C = sha256(ciphertext)` goes on chain with the stamp (on-chain mode) so the sealed content is fixed before it is opened.
-
-### 5.2 The open protocol (what is proven)
-
-Opening is an explicit tap ("Open"), never a preview. Opening does three things in one step:
-
-1. **Decrypt** locally.
-2. **Sign an open receipt**: `createSignature({ protocolID: [2,'bmail open'], keyID: messageId, counterparty: sender })` over
-   `messageId ‖ C ‖ sha256(plaintext) ‖ recentBlockHash ‖ openedAt`.
-3. **Spend the stamp** in a receipt transaction (`createAction`) whose OP_RETURN carries that signature (MAP `type bmail_open`). This is the cancellation from §3.
-
-What this proves, and how:
-
-| Claim | Proof |
-|---|---|
-| Opened **by the recipient** | Signature from the recipient's BRC-42 key, and only the recipient can spend the stamp output |
-| Opened **no earlier than** time T | The signed data includes a recent block hash, which did not exist before that block (the "not before") |
-| Opened **no later than** time T′ | The receipt tx is mined in a block at T′ |
-| The **exact sealed content** was opened | The receipt signs both `C` (fixed on chain at send) and `sha256(plaintext)`; the sender can check both |
-| Opened **once** | The stamp output can only be spent once |
-
-Honest limit (shown in the help text): the protocol proves when the recipient **acknowledged** opening. The wallet only decrypts on the Open tap, but someone running their own key could decrypt earlier and sign later. Pay to open (5.3) is what makes acknowledging worthwhile: the money only moves with the receipt.
-
-Receipts are **optional for the recipient** unless they accept Certified/pay-to-open mail: "Open quietly" decrypts without a receipt and leaves the stamp unspent (the recipient can sweep it later). See Q4.
-
-### 5.3 Pay to open (from PAID-INBOX-PLAN §3)
-
-- The stamp output becomes a **2-of-2 with an nLockTime refund**: path A = recipient's open-receipt signature + sender's pre-signed release (sent inside the sealed envelope); path B = a pre-signed refund to the sender, valid after N days (default 14).
-- Opening = broadcast path A (the receipt tx in 5.2). Not opening = the sender's wallet broadcasts the refund after N days. No money is stuck; no mail is "paid but ignored".
-- Same pattern as bSpaces' signed-but-unbroadcast bids: nothing moves until the recipient acts.
-- Fee 0%; the miner fee is the only cost.
-
-## 6. Loops in the mailbox
-
-| Loop | Source | In bMail |
-|---|---|---|
-| **Friend loop** | PAID-INBOX-PLAN §4 | A thread where each reply carries a stamp back. The thread header shows the tally, streak and biggest round. Pure social, either side stops any time. Copy: "Loop", "Send it back", "Streak" |
-| **Friendship fund** | PAID-INBOX-PLAN §6 | A friend loop can opt to put its stamps into a 2-of-2 shared fund instead of each other's wallets; joint spend, silence rule, split by contribution. Copy: "your shared fund", "built together", never "grows" |
-| **Reply paid** | new, from stamps | The sender includes a pre-paid return stamp so the recipient can answer free (like a postal reply coupon) |
-| **Subscription loop** | POTS-SUBSCRIPTIONS-PLAN | Newsletters you pay for arrive as mail from a subscription you hold; they rank with friends. 1¢/day pots fund them |
-| **Pay-per-read loop** | STREAMING-PAYMENTS-SPEC §5 | Long mail or attached media can meter per minute like the player loop, with the same caps |
-| **Receipt loop** | BPHONE-PLAN | bPhone call receipts and paid-call summaries land in Sent › Receipts |
-
-Split-or-steal is **not** a bMail loop (PAID-INBOX-PLAN §5, legal advice first).
-
-## 7. Item kinds
-
-| Kind | Detected by | Default place |
-|---|---|---|
-| **Mail** | Envelope (MAP `type bmail`) on chain or via message box, to our identity key | Inbox if friend or stamped ≥ price, else Requests |
-| **Airdrop** (unstamped) | Unsolicited token/NFT `transfer-in` | Requests (Inbox if issuer kept) |
-| Airdrop note | Note in the airdrop's tx | On the airdrop card |
-| **Ticket / invite** | Known ticket BSV-21 (TICKETS.md) | Inbox, "Open room" |
-| **Invoice** | Envelope `type bmail_request` | Inbox if friend or stamped |
-| **Signed document** | bit-sign envelope | Inbox, "Open in bit-sign" |
-| **Open receipt** | `type bmail_open` spending our stamp | Attached to the Sent item ("Opened 9 Oct 14:02, block …") |
-| Receipt (ours) | Our sends with a note, bPhone receipts | Sent › Receipts |
-
-## 8. The screen
-
-Mailbox icon → **bMail**. Tabs **Inbox · Requests · Sent**, pencil button for Compose.
-
-- **Row:** avatar + $handle (poisoning check), stamp chip (tier art + dollar value, or "Unstamped"), kind chip, "Sealed" or first line, time. Friends get a small friend mark.
-- **Sort:** "Most paid" (default, friends on top) / "Newest".
-- **Open:** sealed items show a cover with the stamp and an **Open** button; Certified/pay-to-open shows "Opening signs a receipt and releases $0.25 to you". Then: Reply (with optional stamp / reply paid), Forward, Add friend, Block.
-- **Airdrop:** Keep, Ignore, Burn (fee shown), Block issuer.
-- **Sent:** each item shows stamp, status (Delivered / Opened at… / Refunded) and the verifiable receipt.
-
-## 9. Compose and delivery
-
-- **To:** `$handle`, paymail or identity key → identity key (BRC-29 / paymail `pki`). No identity key = payment with a public note only, no sealed mail.
-- **Stamp picker** (from bitcoin-email's compose): shows the recipient's price, tiers, extra postage, "Request receipt", "Pay only if opened", "Reply paid". Quote sheet before sending (bPhone pattern).
-- **Delivery:** unstamped mail to friends goes via the **message box** (free). Stamped mail is **on chain**: one tx with the stamp output, the commitment `C` and MAP `type bmail v 1`; the ciphertext rides in the tx if small (≤ 50 KB) or in the message box / bDrive with its hash in the tx. The recipient's wallet verifies the stamp without trusting the relay.
-- **Attachments:** encrypted with a random key, key inside the sealed body. Tokens, sats, MNEE ride as real outputs.
-
-## 10. Anti-spam
-
-Unstamped strangers → Requests. Price to reach me. Friends free. Block sender/issuer (`hiddenIssuers`). Airdrop filters (onlyKnown, returns-wording, poisoning). Message-box rate limits per sender key. Stamps make volume cost the sender, which is the point.
-
-## 11. Other surfaces
-
-Web wallet and extension share the screen; push notifies for Inbox only (NOTIFICATIONS.md); bChatX gets a "Mail" entry into the wallet; bit-sign sends documents as Certified bMail (a sealed doc with a signed open receipt fits its audit trail); other BRC-100 wallets can read on-chain bMail from the published envelope spec.
-
-## 12. Build order (smallest first)
-
-| # | What | Size |
-|---|---|---|
-| B0 | Merge `fix/airdrops-mailbox-icon`. Rename Airdrops → **bMail**; tabs Inbox / Requests from today's data (kept + known issuers → Inbox). Airdrops labelled "Unstamped". No protocol | S |
-| B1 | Tickets as items, notes on cards, Burn, Sent › Receipts from our own sends | S–M |
-| B2 | Sealed mail via message box (BRC-2, signed envelope), Open, Reply, friends list, Block | M |
-| B3 | **Stamps** on chain + price to reach me + quote sheet + **"Most paid" sort with friends on top** (PAID-INBOX-PLAN M2) | M |
-| B4 | **Signed open receipts**: Open spends the stamp with the receipt signature; Sent shows "Opened at…"; Certified tier | M |
-| B5 | **Friend loops** in threads (tally, streak), reply paid (PAID-INBOX-PLAN M4) | S |
-| B6 | **Pay to open**: 2-of-2 stamp + nLockTime refund (PAID-INBOX-PLAN M3) | M–L |
-| B7 | Invoices, bit-sign envelopes, subscriptions as mail, publish envelope spec | M |
-| Later | Friendship funds (PAID-INBOX-PLAN §6 F1–F3); collectible stamp designs; pay-per-read | — |
-
-Store build: B0–B2 plain messaging; B3+ follow the same store review as other paid features (bWalletX first).
-
-## 13. Questions for the owner
-
-1. **Default stamp prices.** (a) Tiers fixed in dollars like bitcoin-email ($0.68 / $1.45 / $3.95 / $7.50); (b) tiers as multiples of each recipient's price (1× / 3× / +receipt fee); (c) no tiers, just "postage: $x" with a slider. *Suggested: (b)*: it follows each person's price and keeps cent-level mail possible.
-2. **Collectible stamp designs.** (a) Not now, plain stamps only; (b) a small built-in set of stamp art at launch, artists later; (c) open stamp designs (artists mint designs as ordinals) from B3. *Suggested: (b)*.
-3. **Price to reach me default.** (a) Free (strangers still go to Requests unless stamped); (b) 1¢ for strangers; (c) ask the first time bMail opens. *Suggested: (c)* with 1¢ pre-selected.
-4. **Open receipts by default.** (a) Every open signs a receipt; (b) receipts only for Certified / pay-to-open mail, quiet open otherwise; (c) a per-user setting, default off. *Suggested: (b)*: private by default, proof when the sender paid for it.
-5. **Requests tab name.** (a) Requests; (b) Other (as PAID-INBOX-PLAN); (c) Unstamped. *Suggested: (a)*.
+1. **Postage in B0: simple or escrowed?** (a) Postage is the recipient's when sent (simple, tonight); (b) every stranger's postage is pay to open from day one. *Suggested: (a) tonight; pay to open as an option in B2.*
+2. **Reply paid default.** (a) Off, the sender ticks it; (b) on for mail to strangers; (c) on for everything with postage. *Suggested: (a).*
+3. **Unused return stamp.** (a) Refunds to the sender after 14 days; (b) the recipient keeps it. *Suggested: (a): it was paid for a reply.*
+4. **Where contracts are signed.** (a) Click-wrap in the wallet, drawn signatures hand off to bit-sign's signing view; (b) both in the wallet. *Suggested: (a) first, (b) later.*
+5. **Token allocations in bMail.** (a) Utility tokens only; anything share-like stays in bit-sign; (b) leave allocations out of bMail for now. *Suggested: (a).*
