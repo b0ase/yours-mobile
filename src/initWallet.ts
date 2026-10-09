@@ -77,6 +77,8 @@ export interface AccountContext {
   syncContext: SyncContext;
   storage: WalletStorageManager;
   remoteStorage?: StorageClient;
+  /** The grant store the permissions manager reads (one-sheet connect writes the monthly allowance here). */
+  permissionStore: IndexedDbPermissionStore;
   setActiveStorage: (target: 'local' | string) => Promise<void>;
   addRemote: (url: string) => Promise<void>;
   /** Call to stop sync and destroy wallet */
@@ -409,6 +411,7 @@ export const initWallet = async (
     syncContext,
     storage,
     remoteStorage,
+    permissionStore,
     setActiveStorage,
     addRemote,
     close,
