@@ -241,7 +241,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
-      "      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={() => (newWallet ? navigate('/restore-wallet') : handleSelect('settings', 'restore-account'))} />\n      <form onSubmit={handleKeyGeneration} className=\"flex flex-col items-center w-full gap-0\">",
+      "      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={() => (newWallet ? navigate('/restore-wallet') : handleSelect('settings', 'restore-account'))} />\n      <form onSubmit={handleKeyGeneration} autoComplete=\"off\" className=\"flex flex-col items-center w-full gap-0\">",
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
@@ -362,7 +362,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
-      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? \'\' : v))} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
+      '      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? \'\' : v))} />\n      <form onSubmit={handleRestore} autoComplete="off" className="flex flex-col items-center w-full">',
     ],
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     [
@@ -463,10 +463,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // UnlockWallet: bigger b mark above "Welcome back" (YoursIcon shows the b+x in bWalletX builds).
   // Unlock: let the phone / browser fill the saved wallet password (PasswordFields saves it).
+  // A hidden username (the account name the password was saved under at Create, PasswordFields) so the browser files
+  // and fills the password per wallet instead of offering whatever it saved for the domain.
   'src/components/UnlockWallet.tsx#autofill': [
     [
-      '            placeholder="Password"\n            type="password"\n            value={password}',
-      '            placeholder="Password"\n            type="password"\n            name="password"\n            autoComplete="current-password"\n            value={password}',
+      '          <Input\n            theme={theme}\n            placeholder="Password"\n            type="password"\n            value={password}',
+      '          <input\n            type="text"\n            name="username"\n            autoComplete="username"\n            value={chromeStorageService.getCurrentAccountObject().account?.name || chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress || \'\'}\n            readOnly\n            hidden\n          />\n          <Input\n            theme={theme}\n            placeholder="Password"\n            type="password"\n            name="password"\n            autoComplete="current-password"\n            value={password}',
     ],
   ],
   'src/components/UnlockWallet.tsx#logo': [['<YoursIcon width="4rem" />', '<YoursIcon width="7rem" />']],

@@ -140,6 +140,10 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
           theme={theme}
           placeholder="Account Name"
           type="text"
+          name="account-label"
+          autoComplete="off"
+          data-1p-ignore
+          data-lpignore="true"
           value={accountName}
           onChange={(e) => setAccountName(e.target.value)}
         />

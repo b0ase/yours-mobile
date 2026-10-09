@@ -464,6 +464,10 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
           theme={theme}
           placeholder="Account Name"
           type="text"
+          name="account-label"
+          autoComplete="off"
+          data-1p-ignore
+          data-lpignore="true"
           value={accountName}
           onChange={(e) => setAccountName(e.target.value)}
         />
@@ -478,6 +482,8 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
           theme={theme}
           placeholder="Password"
           type="password"
+          name="new-password"
+          autoComplete={newWallet ? 'new-password' : 'current-password'}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
@@ -486,6 +492,8 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
             theme={theme}
             placeholder="Confirm Password"
             type="password"
+            name="confirm-password"
+            autoComplete="new-password"
             value={passwordConfirm}
             onChange={(e) => setPasswordConfirm(e.target.value)}
           />

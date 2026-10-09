@@ -44,6 +44,9 @@ export const PasswordFields = ({
   setConfirm: (v: string) => void;
 }) => {
   const [show, setShow] = useState(false);
+  // Set when the first field was filled in one go (browser autofill, its strong-password suggestion, paste): the
+  // confirm field then gets a one-tap "Use same password", since the browser only fills the first field.
+  const [filled, setFilled] = useState(false);
   const [copied, setCopied] = useState(false);
   // Suggestion box under the empty field on focus, like a browser's own "Use strong password".
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -72,7 +75,9 @@ export const PasswordFields = ({
           placeholder={newWallet ? 'Password' : 'Your wallet password'}
           value={password}
           onChange={(e) => {
-            setPassword(e.target.value);
+            const v = e.target.value;
+            setFilled(v.length - password.length > 1);
+            setPassword(v);
             setSuggestion(null);
           }}
           onFocus={() => newWallet && !password && setSuggestion(strongPassword())}
@@ -105,15 +110,37 @@ export const PasswordFields = ({
         </button>
       </div>
       {(newWallet || confirmAlways) && (
-        <input
-          className={field}
-          type={type}
-          name="confirm-password"
-          autoComplete="new-password"
-          placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-        />
+        <div className="relative">
+          <input
+            className={field}
+            type={type}
+            name="confirm-password"
+            // Same hint as the first field, so the browser's strong-password suggestion fills both.
+            autoComplete={newWallet ? 'new-password' : 'current-password'}
+            placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            aria-label={show ? 'Hide password' : 'Show password'}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-transparent border-0"
+            style={{ color: '#98A2B3' }}
+          >
+            {show ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+      )}
+      {(newWallet || confirmAlways) && filled && password && !confirm && (
+        <button
+          type="button"
+          onClick={() => setConfirm(password)}
+          className="self-start flex items-center gap-1 bg-transparent border-0 p-0 text-xs font-semibold"
+          style={{ color: '#F5B800' }}
+        >
+          <Check size={13} /> Use same password
+        </button>
       )}
       {newWallet && (
         <div className="flex items-center gap-3 text-xs">
