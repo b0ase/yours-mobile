@@ -24,6 +24,7 @@ import { appNameFor } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
+import { ReplyBook } from './replies';
 
 /** What paired-CLI calls need from the app; TopNav keeps it current (wallet context + open account). */
 let agentDeps: { ctx: OneSatContext | undefined; currentId: string | undefined; feeRate?: () => number } = {
@@ -95,10 +96,41 @@ const live = new Map<string, Live>();
 const update = (c: string, patch: Partial<StoredSession>) =>
   save(load().map((s) => (s.c === c ? { ...s, ...patch } : s)));
 
+/** Answered / in-flight / unsent replies per channel (memory only). See replies.ts. */
+const replies = new ReplyBook();
+/** Per-channel send chain: frames are sealed and sent one at a time so counters reach the site in order. */
+const sendChains = new Map<string, Promise<void>>();
+
+/** Seal and send on the channel's current socket; a reply that can't go now waits for reconnect. */
+function send(c: string, msg: PairMessage, via?: Live): Promise<void> {
+  const next = (sendChains.get(c) ?? Promise.resolve()).then(async () => {
+    const l = live.get(c) ?? via; // via: a socket being closed (forget) still says goodbye
+    if (!l || l.ws.readyState !== WebSocket.OPEN) {
+      if (msg.t === 'res' && load().some((s) => s.c === c)) replies.hold(c, msg);
+      return;
+    }
+    const frame = await l.sealer.seal(msg);
+    if (l.ws.readyState !== WebSocket.OPEN) {
+      if (msg.t === 'res') replies.hold(c, msg); // resealed with a fresh counter when it goes
+      return;
+    }
+    l.ws.send(JSON.stringify(frame));
+    update(c, { ...l.sealer.counters });
+  });
+  const tail = next.catch(() => {});
+  sendChains.set(c, tail);
+  return tail;
+}
+
 async function reply(l: Live, msg: PairMessage) {
-  if (l.ws.readyState !== WebSocket.OPEN) return;
-  l.ws.send(JSON.stringify(await l.sealer.seal(msg)));
-  update(l.stored.c, { ...l.sealer.counters });
+  // Record a call's answer before sending it, so a repeat of the request is answered, never re-run.
+  if (msg.t === 'res') replies.finish(l.stored.c, msg.id, msg);
+  await send(l.stored.c, msg, l);
+}
+
+/** Send what was held while the socket was closed. */
+function flush(c: string) {
+  for (const msg of replies.drain(c)) void send(c, msg);
 }
 
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
@@ -122,6 +154,9 @@ async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: st
 }
 
 async function onRequest(l: Live, id: string, action: string, params: unknown) {
+  const seen = replies.begin(l.stored.c, id);
+  if (seen === 'busy') return; // still running: the first run replies
+  if (seen !== 'run') return send(l.stored.c, seen.replay); // answered before: re-send, never re-run
   if (l.stored.agent) return onAgentRequest(l, l.stored.agent, id, action, params);
   try {
     const r = (await handleSiteCall(l.stored.origin, l.stored.origin + '/', action, params)) as {
@@ -157,6 +192,8 @@ function attach(l: Live) {
     else if (msg.t === 'close') forget(stored.c, false);
   });
   ws.onerror = null;
+  if (ws.readyState === WebSocket.OPEN) flush(stored.c);
+  else ws.onopen = () => flush(stored.c);
   ws.onclose = () => {
     if (live.get(stored.c) !== l) return;
     live.delete(stored.c);
@@ -190,6 +227,7 @@ export function forget(c: string, notify = true) {
     if (notify) void reply(l, { t: 'close', reason: 'user unpaired' }).finally(done);
     else done();
   }
+  replies.forget(c);
   save(load().filter((s) => s.c !== c));
 }
 
