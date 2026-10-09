@@ -33,7 +33,7 @@ const tick = async () => {
   await payDue({
     bsvUsd,
     resolve: payeeAddress,
-    sign: (potId, outputs) => signFromPot(e.store, potId, outputs),
+    sign: (potId, outputs, memo) => signFromPot(e.store, potId, outputs, memo),
     broadcast: broadcastRaw,
     confirm: confirmCatchUp,
     notify: (t, b) => void notifyPot(t, b),
