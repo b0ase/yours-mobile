@@ -22,7 +22,16 @@ export interface SpaceMediaCallbacks {
   /** The SFU changed what I may publish (host brought me up or sent me back). */
   onCanPublish: (can: boolean) => void;
   onDisconnected: () => void;
+  /**
+   * Who is sharing a screen right now (owner handle), or null. A laptop shares as the
+   * `handle.screen` identity (bit-sign `device: 'screen'`), so the phone keeps the voice.
+   */
+  onScreen?: (owner: string | null) => void;
 }
+
+/** bit-sign's screen-device identity suffix: `alice.screen` is alice's laptop. */
+const SCREEN_SUFFIX = '.screen';
+export const ownerOfIdentity = (id: string) => (id.endsWith(SCREEN_SUFFIX) ? id.slice(0, -SCREEN_SUFFIX.length) : id);
 
 /**
  * LiveKit media for one bSpace (many people, one SFU room). bit-sign mints the token from the
@@ -38,6 +47,9 @@ export class SpaceMedia {
   private audio = new Map<string, HTMLMediaElement>();
   private videos = new Map<string, VideoTrack>();
   private bound = new Map<string, HTMLVideoElement>();
+  /** Shared screens by publishing identity; the newest is shown. */
+  private screens = new Map<string, VideoTrack>();
+  private screenEl: HTMLVideoElement | null = null;
   private cb: SpaceMediaCallbacks | null = null;
   me = '';
 
@@ -57,6 +69,10 @@ export class SpaceMedia {
           el.style.display = 'none';
           document.body.appendChild(el);
           this.audio.set(`${who.identity}:${pub.trackSid}`, el);
+        } else if (track.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
+          this.screens.delete(who.identity);
+          this.screens.set(who.identity, track as VideoTrack);
+          this.emitScreen();
         } else if (track.kind === Track.Kind.Video && pub.source === Track.Source.Camera) {
           this.videos.set(who.identity, track as VideoTrack);
           this.reattach(who.identity);
@@ -64,6 +80,12 @@ export class SpaceMedia {
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, who: RemoteParticipant) => {
+        if (track.kind === Track.Kind.Video && this.screens.get(who.identity) === track) {
+          track.detach();
+          this.screens.delete(who.identity);
+          this.emitScreen();
+          return;
+        }
         if (track.kind === Track.Kind.Video) {
           track.detach();
           if (this.videos.get(who.identity) === track) this.videos.delete(who.identity);
@@ -79,6 +101,7 @@ export class SpaceMedia {
       .on(RoomEvent.LocalTrackUnpublished, () => this.emitVideos())
       .on(RoomEvent.ParticipantDisconnected, (who: RemoteParticipant) => {
         if (this.videos.delete(who.identity)) this.emitVideos();
+        if (this.screens.delete(who.identity)) this.emitScreen();
       })
       .on(RoomEvent.ActiveSpeakersChanged, (speakers: LkParticipant[]) =>
         this.cb?.onSpeakers(speakers.map((p) => p.identity)),
@@ -107,6 +130,25 @@ export class SpaceMedia {
     if (this.localVideo()) live.unshift(this.me);
     this.cb?.onVideos(live);
     for (const h of live) this.reattach(h);
+  }
+
+  private currentScreen(): [string, VideoTrack] | null {
+    const all = [...this.screens.entries()];
+    return all.length ? all[all.length - 1] : null;
+  }
+
+  private emitScreen() {
+    const cur = this.currentScreen();
+    this.cb?.onScreen?.(cur ? ownerOfIdentity(cur[0]) : null);
+    if (cur && this.screenEl && !cur[1].attachedElements.includes(this.screenEl)) cur[1].attach(this.screenEl);
+  }
+
+  /** The big screen tile hands in its <video> (or null when it unmounts). */
+  bindScreen(el: HTMLVideoElement | null) {
+    const cur = this.currentScreen();
+    if (this.screenEl && this.screenEl !== el) cur?.[1].detach(this.screenEl);
+    this.screenEl = el;
+    if (el && cur && !cur[1].attachedElements.includes(el)) cur[1].attach(el);
   }
 
   private trackOf(handle: string): VideoTrack | null {
@@ -181,6 +223,8 @@ export class SpaceMedia {
     this.audio.clear();
     this.videos.clear();
     this.bound.clear();
+    this.screens.clear();
+    this.screenEl = null;
     if (isNative) await YoursNative.audioSetSpeaker({ on: false }).catch(() => undefined);
     // Disconnecting stops local tracks, which releases the mic and camera (and their indicators).
     await room?.disconnect().catch(() => undefined);

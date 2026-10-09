@@ -14,7 +14,9 @@ import {
   CameraOff,
   ChevronDown,
   Hand,
+  Maximize2,
   MessageSquare,
+  Monitor,
   Mic,
   MicOff,
   PhoneOff,
@@ -79,6 +81,38 @@ const useLandscape = () => {
     return () => m.removeEventListener('change', f);
   }, []);
   return !!on;
+};
+
+/**
+ * A shared screen (live coding): the big tile. `object-contain` so lines of code are not
+ * cropped; `muted playsInline autoPlay` so WKWebView / Android WebView start it without a tap
+ * (the audio arrives on its own elements). Fullscreen is the zoom: native fullscreen allows
+ * pinch-zoom, and iOS only fullscreens the <video> itself (`webkitEnterFullscreen`).
+ */
+const ScreenTile = ({ owner, media }: { owner: string; media: SpaceMedia }) => {
+  const ref = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    media.bindScreen(ref.current);
+    return () => media.bindScreen(null);
+  }, [media, owner]);
+  const full = () => {
+    const v = ref.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    const b = box.current;
+    if (b?.requestFullscreen) b.requestFullscreen().catch(() => v?.webkitEnterFullscreen?.());
+    else v?.webkitEnterFullscreen?.();
+  };
+  return (
+    <div ref={box} className="relative mb-3 overflow-hidden rounded-2xl bg-black" style={{ boxShadow: `0 0 0 1px ${LINE}` }}>
+      <video ref={ref} autoPlay playsInline muted onDoubleClick={full} className="block w-full object-contain" style={{ maxHeight: '70vh' }} />
+      <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
+        <Monitor size={12} /> ${owner}&rsquo;s screen
+      </span>
+      <button onClick={full} aria-label="Fullscreen" className="absolute bottom-2 right-2 rounded-full bg-black/70 p-2 text-white">
+        <Maximize2 size={16} />
+      </button>
+    </div>
+  );
 };
 
 const StageTile = ({
@@ -346,6 +380,7 @@ export const SpaceScreen = ({
   const [state, setState] = useState<SpaceState>({ space: null, participants: [], me: null });
   const prev = useRef<SpaceState | null>(null);
   const [videos, setVideos] = useState<string[]>([]);
+  const [screenOwner, setScreenOwner] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<string[]>([]);
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
@@ -418,6 +453,7 @@ export const SpaceScreen = ({
         if (!tok) throw new Error('Could not get into the space.');
         await media.connect(tok.url, tok.token, {
           onVideos: (v) => live && setVideos(v),
+          onScreen: (o) => live && setScreenOwner(o),
           onSpeakers: (s) => live && setSpeakers(s),
           onCanPublish: (can) => {
             if (!live) return;
@@ -606,6 +642,7 @@ export const SpaceScreen = ({
       </Centered>
     ) : (
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+        {screenOwner && <ScreenTile owner={screenOwner} media={media} />}
         {stageView}
         {isHost && hands.length > 0 && (
           <section className="mt-5">
