@@ -80,6 +80,8 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
+import { NewSpaceSheet } from '../spaces/NewSpaceSheet';
+import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -669,7 +671,7 @@ const Conversation = ({
       </div>
 
       {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
-      {BSPACES_ENABLED && entry && (
+      {BSPACES_ENABLED && (
         <LiveBanner
           client={client}
           ctx={apiContext}
@@ -677,6 +679,8 @@ const Conversation = ({
           roomName={title}
           me={me}
           createdBy={room.created_by_handle}
+          gated={!!entry}
+          spaceOpen={roomSpaceOpen(room)}
         />
       )}
       <div
@@ -1910,6 +1914,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   // Open rooms (no token): every build, store build included.
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([]);
   const [newRoom, setNewRoom] = useState(false);
+  const [newSpace, setNewSpace] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [msgMenu, setMsgMenu] = useState<ChatMessage | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -2425,7 +2430,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
 
         {handle && (
-          <div className="px-4 pb-1 flex">
+          <div className="px-4 pb-1 flex gap-2">
             <button
               onClick={() => setNewRoom(true)}
               className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
@@ -2433,6 +2438,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             >
               <Plus size={16} strokeWidth={2.6} /> New room
             </button>
+            {BSPACES_ENABLED && (
+              <button
+                onClick={() => setNewSpace(true)}
+                className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+                style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+              >
+                <Plus size={16} strokeWidth={2.6} /> New Space
+              </button>
+            )}
           </div>
         )}
         {handle && rooms === null && !listError && (
@@ -2626,13 +2640,26 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           }}
         />
       )}
+      {newSpace && handle && (
+        <NewSpaceSheet
+          client={client}
+          me={handle}
+          rooms={rooms ?? []}
+          onClose={() => setNewSpace(false)}
+          onNewRoom={() => {
+            setNewSpace(false);
+            setNewRoom(true);
+          }}
+        />
+      )}
       {newRoom && handle && (
         <NewRoomSheet
           client={client}
           onClose={() => setNewRoom(false)}
           onDone={(r) => {
             setNewRoom(false);
-            openOpenRoom(stubRoom(r.ticker, r.name));
+            // The creator is the room's admin: say so, or the room's "Start a Space" bar stays hidden.
+            openOpenRoom(stubRoom(r.ticker, r.name, { created_by_handle: handle }));
             refresh();
           }}
         />

@@ -11,8 +11,7 @@ import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { roomTitle, type ChatRoom } from '../chat/messages';
-import { gateOfRoom } from '../chat/tokenRooms';
-import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
+import { audienceCount, audienceLine, canHostRoom, parseSpaceState, roomSpaceOpen, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 import { InviteCard, type SpaceLink } from './InviteCard';
@@ -37,7 +36,7 @@ const SpacesPage = () => {
       ticker: room.ticker,
       name: roomTitle(room, me),
       start,
-      admin: canHostRoom({ me, createdBy: room.created_by_handle }),
+      admin: canHostRoom({ me, createdBy: room.created_by_handle, spaceOpen: roomSpaceOpen(room) }),
     });
   // A link (inviteLinks.ts) lands here as ?invite=<code> (ephemeral) or ?space=<slug> (the Space page).
   const [params, setParams] = useSearchParams();
@@ -65,7 +64,7 @@ const SpacesPage = () => {
     if (!client.handle) return;
     setError('');
     try {
-      const rooms = (await client.rooms()).filter((r) => gateOfRoom(r)).slice(0, MAX_ROOMS);
+      const rooms = (await client.rooms()).slice(0, MAX_ROOMS);
       const got = await inBatches(rooms, PARALLEL, async (room) => ({
         room,
         state: parseSpaceState(await client.space(room.ticker).catch(() => null), me),
@@ -85,7 +84,7 @@ const SpacesPage = () => {
 
   const live = (rows ?? []).filter((r) => r.state.space);
   const hostable = (rows ?? []).filter(
-    (r) => !r.state.space && canHostRoom({ me, createdBy: r.room.created_by_handle }),
+    (r) => !r.state.space && canHostRoom({ me, createdBy: r.room.created_by_handle, spaceOpen: roomSpaceOpen(r.room) }),
   );
 
   return (
