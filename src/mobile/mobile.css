@@ -1230,8 +1230,11 @@ html.ww-on:root {
   --ww-side-w: 240px;
   --ww-top-h: 69px;
   /* Chat: an open room sits beside the room list (tabs/ChatPage.tsx Conversation). */
-  --ww-conv-left: calc(240px + 24px + 420px + 16px);
-  --ww-conv-top: 69px;
+  --ww-conv-left: calc(240px + 32px + 420px + 16px);
+  --ww-conv-top: calc(69px + 76px);
+  /* …and the room details column (wide/RoomDetails.tsx) on its right. */
+  --ww-conv-right: calc(32px + 300px + 16px);
+  --ww-conv-bottom: 32px;
 }
 html.ww-on,
 html.ww-on body {

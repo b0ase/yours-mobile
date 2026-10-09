@@ -1165,3 +1165,103 @@ html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end > * {
 .ww-fab > * {
   pointer-events: auto;
 }
+
+/* Chat: the open room (ChatPage Conversation, portalled) is the middle column; room details the third. */
+html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
+  border-radius: var(--ww-radius, 16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.ww-room-details {
+  position: fixed;
+  z-index: 110;
+  top: calc(69px + 76px);
+  right: 32px;
+  bottom: 32px;
+  width: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0b0b0d;
+  color: #f2f2f0;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+}
+.ww-room-details section {
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ww-room-details section:last-child {
+  border-bottom: 0;
+}
+.ww-room-details h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8e8e89;
+}
+.ww-rd-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+.ww-rd-sub,
+.ww-rd-note {
+  color: #8e8e89;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.ww-rd-count {
+  margin-left: 6px;
+  color: #ffd24d;
+}
+.ww-rd-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+.ww-rd-dl dt {
+  color: #8e8e89;
+}
+.ww-rd-dl dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ww-rd-people {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.ww-rd-people li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+.ww-rd-av {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 210, 77, 0.12);
+  color: #ffd24d;
+  font-weight: 700;
+  font-size: 12px;
+}
+.ww-chat-empty {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

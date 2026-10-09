@@ -79,6 +79,8 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
+import { WIDE_ON } from '../wide/flag';
+import { RoomDetails } from '../wide/RoomDetails';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -287,7 +289,16 @@ const roomIcon = (room: ChatRoom): string | null => {
 const isOfficialRoom = (room: ChatRoom) =>
   Boolean((room.metadata as { open?: { official?: boolean } } | null | undefined)?.open?.official);
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** Raw network failures (CORS on a test address, offline) read as one plain line, never "Failed to fetch". */
+const errText = (e: unknown) => {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (!/failed to fetch|load failed|networkerror|network request failed/i.test(msg)) return msg;
+  console.warn('[chat]', e);
+  const host = typeof location === 'undefined' ? '' : location.hostname;
+  return /^(web|www)\.bwalletx\.com$|^bwalletx\.com$/.test(host) || !host.includes('.')
+    ? "Can't reach chat right now. Check your connection and try again."
+    : `Chat isn't available on ${host} yet. Use web.bwalletx.com or the bWalletX app to chat.`;
+};
 
 // ───────────────────────────── Conversation ─────────────────────────────
 
@@ -599,6 +610,16 @@ const Conversation = ({
 
   // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it.
   const offScreen = useInPeek();
+  const liveBanner = (
+    <LiveBanner
+      client={client}
+      ctx={apiContext}
+      ticker={room.ticker}
+      roomName={title}
+      me={me}
+      createdBy={room.created_by_handle}
+    />
+  );
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
@@ -607,8 +628,9 @@ const Conversation = ({
         display: offScreen ? 'none' : undefined,
         // Wide web layout (wide/wide.css) sets these so the room opens beside the room list.
         left: 'var(--ww-conv-left, 0px)',
+        right: 'var(--ww-conv-right, 0px)',
         top: 'calc(var(--wallet-inset-top, 0px) + var(--ww-conv-top, 3.5rem))',
-        bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem))',
+        bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem) + var(--ww-conv-bottom, 0px))',
         background: BG,
       }}
     >
@@ -669,15 +691,41 @@ const Conversation = ({
         )}
       </div>
 
-      {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
-      {BSPACES_ENABLED && entry && (
-        <LiveBanner
-          client={client}
-          ctx={apiContext}
-          ticker={room.ticker}
-          roomName={title}
-          me={me}
-          createdBy={room.created_by_handle}
+      {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). In the wide
+          layout it sits in the room details column instead. */}
+      {BSPACES_ENABLED && entry && !WIDE_ON && liveBanner}
+      {WIDE_ON && (
+        <RoomDetails
+          title={title}
+          kind={
+            peer
+              ? 'Direct message'
+              : entry
+                ? 'Token room'
+                : openRoom
+                  ? `${openRoom.visibility === 'public' ? 'Public' : 'Invite-only'} room${openRoom.closed ? ' · closed' : ''}`
+                  : `Room · $${room.ticker}`
+          }
+          members={members}
+          voices={[
+            ...new Set(
+              messages
+                .map((m) => m.author_handle)
+                .filter((h): h is string => !!h)
+                .reverse(),
+            ),
+          ].slice(0, 24)}
+          gate={
+            entry
+              ? {
+                  symbol: entry.gate.key.startsWith('coll:') ? entry.gate.symbol : `$${entry.gate.symbol}`,
+                  min: amountLabel(entry.gate.minRaw, entry.gate),
+                  hold: amountLabel(entry.holding.amountRaw, entry.gate),
+                }
+              : null
+          }
+          space={BSPACES_ENABLED && entry ? liveBanner : null}
+          actions={null}
         />
       )}
       <div

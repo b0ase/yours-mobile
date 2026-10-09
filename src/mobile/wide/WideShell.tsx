@@ -26,7 +26,7 @@ import { HomeButton } from '../phone/Dock';
 import { useWalletFeed } from './walletFeed';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
-import { WidePage } from './WidePage';
+import { WidePage, WideEmpty } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
 import './wide.css';
@@ -475,6 +475,14 @@ const WideShell = ({ children }: { children: ReactNode }) => {
               </div>
             )}
             {view === 'wallet' && <WalletSide />}
+            {view === 'chat' && (
+              <div className="ww-panel ww-chat-empty">
+                <WideEmpty
+                  title="Pick a room"
+                  body="Rooms, DMs and token rooms open here, with the room's members, token gate and live Space beside them."
+                />
+              </div>
+            )}
           </div>
         </WidePage>
       </main>
