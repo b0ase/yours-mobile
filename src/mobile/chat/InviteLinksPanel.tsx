@@ -17,7 +17,7 @@ import {
   type ExpiryChoice,
   type ManagedInvite,
 } from '../spaces/invite';
-import { copyLink, shareLink } from './shareLink';
+import { copyLink, shareText } from './shareLink';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -59,7 +59,7 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
       if (!inv?.url) throw new Error('No link came back.');
       const r =
         how === 'share'
-          ? await shareLink({ title, text: `${inv.target.live ? 'Live now: ' : ''}${title}`, url: inv.url })
+          ? await shareText(`${inv.target.live ? 'Live now: ' : ''}${title}\n${inv.url}`)
           : await copyLink(inv.url);
       if (r === 'copied') onNote('Invite link copied.');
       if (r === 'failed') onNote(inv.url);

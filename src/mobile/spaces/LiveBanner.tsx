@@ -161,6 +161,8 @@ export const LiveBanner = ({
           roomName={roomName}
           me={me}
           startTitle={open.start}
+          spaceOpen={spaceOpen}
+          canInvite={canHostRoom({ me, createdBy, youAreIssuer: issuer })}
           onClaimAdmin={claimAdmin}
           onClose={() => {
             setOpen(null);

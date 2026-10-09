@@ -51,7 +51,21 @@ export class SpaceMedia {
   private screens = new Map<string, VideoTrack>();
   private screenEl: HTMLVideoElement | null = null;
   private cb: SpaceMediaCallbacks | null = null;
+  /** "Mute the room" for me: every incoming voice silenced locally (my mic is separate). */
+  private deaf = false;
   me = '';
+
+  get deafened() {
+    return this.deaf;
+  }
+
+  /** Silence (or restore) all incoming audio on this phone only, including voices that join later. */
+  setDeafened(on: boolean) {
+    this.deaf = on;
+    this.audio.forEach((el) => {
+      el.muted = on;
+    });
+  }
 
   async connect(url: string, token: string, cb: SpaceMediaCallbacks): Promise<void> {
     const room = new Room({
@@ -67,6 +81,7 @@ export class SpaceMedia {
         if (track.kind === Track.Kind.Audio) {
           const el = track.attach();
           el.style.display = 'none';
+          el.muted = this.deaf;
           document.body.appendChild(el);
           this.audio.set(`${who.identity}:${pub.trackSid}`, el);
         } else if (track.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
