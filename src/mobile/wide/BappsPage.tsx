@@ -7,6 +7,7 @@ export default function BappsPage() {
   const [current, setCurrent] = useState('bwriter');
   const [running, setRunning] = useState<string[]>(['bwriter']);
   const app = BAPPS.find((a) => a.id === current) ?? BAPPS[0];
+  const SHELL_DOCS = 'https://github.com/b0ase/yours-mobile/blob/bwallet/docs/BAPP-FRAME.md';
   const pick = (id: string) => {
     setCurrent(id);
     const a = BAPPS.find((x) => x.id === id);
@@ -19,6 +20,13 @@ export default function BappsPage() {
   };
   return (
     <div className="bx-page">
+      <p className="bx-explain">
+        bApps open inside your wallet, signed in with it, once the app allows wallet framing. Apps that don't yet open
+        in their own tab, still paying from this wallet.{' '}
+        <a href={SHELL_DOCS} target="_blank" rel="noreferrer">
+          How a bApp enables wallet framing ↗
+        </a>
+      </p>
       <div className="bx-window">
         <div className="bx-title">
           <BappIcon app={app} size={22} />
@@ -48,7 +56,10 @@ export default function BappsPage() {
             <div className="bx-soon">
               <BappIcon app={app} size={88} />
               <h2>{app.name}</h2>
-              <p>This bApp opens in its own tab.</p>
+              <p>
+                {app.name} doesn't allow wallet framing yet, so it opens in its own tab. Payments still come from this
+                wallet.
+              </p>
               <a className="ww-btn gold" href={app.url} target="_blank" rel="noreferrer">
                 Open in new tab ↗
               </a>

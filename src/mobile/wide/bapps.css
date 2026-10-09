@@ -182,3 +182,24 @@
 .bx-item:hover .bx-tip {
   opacity: 1;
 }
+
+.bx-explain {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ww-muted, #8e8e89);
+}
+.bx-explain a {
+  color: var(--ww-gold, #ffd24d);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bx-explain a:hover {
+  text-decoration: underline;
+}
+.bx-soon p {
+  max-width: 42ch;
+  text-align: center;
+  line-height: 1.5;
+}
