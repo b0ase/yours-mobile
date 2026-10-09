@@ -88,5 +88,12 @@ describe('Continue with X (bWalletX own OAuth)', () => {
       fakeX,
     );
     expect(testers.startsWith('https://bwalletx.com/testers#')).toBe(true);
+    const desktop = await social.callback(
+      'x',
+      { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'desktop' }), code: 'c' },
+      ENV,
+      fakeX,
+    );
+    expect(desktop.startsWith('https://desktop.bwalletx.com/#')).toBe(true);
   });
 });

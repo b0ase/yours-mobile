@@ -2,7 +2,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { isAgentAccount } from '../agents/agentAccounts';
 import { accountNamesFor } from '../names/accountNames';
 import { saveSession } from '../chat/api';
-import { clearChatSessionFor, splitAccounts, type MenuAccount } from './accountMenu';
+import { signOutAndLock, splitAccounts, type MenuAccount } from './accountMenu';
 
 type StoredAccount = ReturnType<ReturnType<typeof useServiceContext>['chromeStorageService']['getAllAccounts']>[number];
 export type MenuEntry = MenuAccount & { account: StoredAccount };
@@ -21,9 +21,5 @@ export const useMenuAccounts = () => {
 /** Sign out = sign this account out of chat (only this account), then lock the wallet. */
 export const useSignOut = () => {
   const { lockWallet } = useServiceContext();
-  return async (current?: string) => {
-    saveSession(null);
-    clearChatSessionFor(current);
-    await lockWallet();
-  };
+  return (current?: string) => signOutAndLock(current, { saveSession, lockWallet });
 };

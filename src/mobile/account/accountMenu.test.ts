@@ -116,9 +116,10 @@ describe('sign out', () => {
     const src = readFileSync(join(import.meta.dir, '../tabs/TopNav.tsx'), 'utf8');
     expect(src).toContain('signOut(current)');
     expect(src).not.toContain("'Lock wallet'");
-    const sheets = readFileSync(join(import.meta.dir, 'useMenuAccounts.ts'), 'utf8');
-    const fn = sheets.slice(sheets.indexOf('export const useSignOut'));
+    const menu = readFileSync(join(import.meta.dir, 'accountMenu.ts'), 'utf8');
+    const fn = menu.slice(menu.indexOf('export const signOutAndLock'));
     expect(fn.indexOf('saveSession(null)')).toBeLessThan(fn.indexOf('lockWallet()'));
+    expect(readFileSync(join(import.meta.dir, 'useMenuAccounts.ts'), 'utf8')).toContain('signOutAndLock(');
   });
 });
 
@@ -135,5 +136,54 @@ describe('drawer inline accounts', () => {
 
   it('fills A-Z when there is little history', () => {
     expect(ids(inlineAccounts(list, '1', {}).shown)).toEqual(['1', '2', '3', '4']);
+  });
+});
+
+describe('sign out keeps the keys (D8)', () => {
+  const memStore = (init: Record<string, string>) => {
+    const m = new Map(Object.entries(init));
+    return {
+      m,
+      s: {
+        getItem: (k: string) => m.get(k) ?? null,
+        setItem: (k: string, v: string) => void m.set(k, v),
+        removeItem: (k: string) => void m.delete(k),
+        clear: () => m.clear(),
+        key: (i: number) => [...m.keys()][i] ?? null,
+        get length() {
+          return m.size;
+        },
+      } as Storage,
+    };
+  };
+
+  it('signs this account out of chat and locks; the encrypted keys stay', async () => {
+    const { signOutAndLock } = await import('./accountMenu');
+    const keys = 'secure:chrome.storage.local:accounts';
+    const { m, s } = memStore({
+      [keys]: JSON.stringify({ A: { encryptedKeys: 'ciphertext' } }),
+      'secure:chrome.storage.local:selectedAccount': '"A"',
+      'bwallet.bchat.session:A': 'chat',
+      'bwallet.bchat.session:B': 'other',
+    });
+    let locked = false;
+    let session: unknown = 'x';
+    await signOutAndLock('A', { saveSession: (v) => (session = v), lockWallet: async () => void (locked = true), store: s });
+    expect(locked).toBe(true);
+    expect(session).toBeNull();
+    expect(m.get(keys)).toContain('ciphertext');
+    expect(m.has('secure:chrome.storage.local:selectedAccount')).toBe(true);
+    expect(m.has('bwallet.bchat.session:B')).toBe(true);
+    expect(m.has('bwallet.bchat.session:A')).toBe(false);
+    expect(true).toBe(true);
+  });
+
+  it('no Sign out path clears wallet storage (Settings, drawer)', () => {
+    const settings = readFileSync(join(import.meta.dir, '../../pages/Settings.tsx'), 'utf8');
+    const body = settings.slice(settings.indexOf('const signOut = async'), settings.indexOf('const handleCancel'));
+    expect(body).toContain('signOutAndLock');
+    expect(body).not.toMatch(/\.clear\(|SIGNED_OUT|deleteDatabase|wipeLocalWallet/);
+    const hook = readFileSync(join(import.meta.dir, 'useMenuAccounts.ts'), 'utf8');
+    expect(hook).not.toMatch(/\.clear\(|SIGNED_OUT|wipeLocalWallet|removeAccount/);
   });
 });

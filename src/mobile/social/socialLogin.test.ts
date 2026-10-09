@@ -74,3 +74,37 @@ describe('social sign-in is per account', () => {
     expect(socialProfile()).toBeNull();
   });
 });
+
+describe('back from X with an existing (locked) wallet', () => {
+  it('Connect reopens once for that account, after unlock; Create Account never does', async () => {
+    const { socialReturnWaiting, takeSocialReturn } = await import('./socialLogin');
+    store.set(KEY, JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), ticket: 't', profile, owner: A, returned: true }));
+    expect(socialReturnWaiting(B)).toBe(false);
+    expect(socialReturnWaiting(A)).toBe(true);
+    expect(takeSocialReturn(A)).toBe(true);
+    // One trip: the profile stays for Connect to claim, but it won't send the user round again.
+    expect(takeSocialReturn(A)).toBe(false);
+    expect(socialProof(A)?.ticket).toBe('t');
+    store.set(KEY, JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), ticket: 't', profile, owner: NEW_ACCOUNT, returned: true }));
+    expect(takeSocialReturn(NEW_ACCOUNT)).toBe(false);
+  });
+
+  it('the return only stores the ticket: it never touches the wallet keys', async () => {
+    const { receiveSocialUrl } = await import('./socialLogin');
+    const wallet = 'secure:chrome.storage.local:accounts';
+    store.set(wallet, '{"A":{"encryptedKeys":"ciphertext"}}');
+    store.set(KEY, JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), owner: A }));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify(profile), { status: 200 })) as unknown as typeof fetch;
+    try {
+      await receiveSocialUrl('https://web.bwalletx.com/#t=ticket1');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(store.get(wallet)).toContain('ciphertext');
+    const p = JSON.parse(store.get(KEY)!);
+    expect(p.ticket).toBe('ticket1');
+    expect(p.returned).toBe(true);
+    expect(p.owner).toBe(A);
+  });
+});
