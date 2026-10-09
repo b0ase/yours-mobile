@@ -42,6 +42,7 @@ import {
   type TierId,
 } from './route';
 import type { Received, Sent } from './store';
+import { OPEN_BMAIL_EVENT, takeBMailComposeTo } from './store';
 import { useBMail } from './useBMail';
 import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 
@@ -252,7 +253,7 @@ const MailRow = ({
 
 const centsChip = (k: StampKind, cents: number, pnee?: boolean) =>
   k === 'penny' || k === 'priority' || k === 'reply' || k === 'paytoopen'
-    ? `${CHIP[k].label} ${pnee ? `${cents} PNEE` : `${cents}¢`}`
+    ? `${CHIP[k].label} ${pnee ? `${cents} ${cents === 1 ? 'PNEE' : 'PNEEs'}` : `${cents}¢`}`
     : undefined;
 
 const TokenFacts = ({ t }: { t: NonNullable<ExampleMail['token']> }) => (
@@ -331,7 +332,7 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         </div>
         <div className="flex justify-between text-white">
           <span>Postage{e.pnee ? ' (PNEE)' : ''}</span>
-          <span className="tabular-nums">{e.pnee ? `${e.cents} PNEE · ${fmtCents(e.cents)}` : fmtCents(e.cents)}</span>
+          <span className="tabular-nums">{e.pnee ? `${e.cents} ${e.cents === 1 ? 'PNEE' : 'PNEEs'} · ${fmtCents(e.cents)}` : fmtCents(e.cents)}</span>
         </div>
         {!!e.attachedCents && (
           <div className="flex justify-between text-white">
@@ -725,6 +726,16 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const [settings, setSettings] = useState(false);
   const [hideEx, setHideEx] = useState(examplesHidden);
   useBackClose(true, onClose);
+  // Scan › person page › "Send a bMail": open on a new mail to them (store.openBMailTo).
+  useEffect(() => {
+    const take = () => {
+      const to = takeBMailComposeTo();
+      if (to) setDraft({ toLabel: to });
+    };
+    take();
+    window.addEventListener(OPEN_BMAIL_EVENT, take);
+    return () => window.removeEventListener(OPEN_BMAIL_EVENT, take);
+  }, []);
   const isContact = (k: string) => m.state.contacts.includes(k);
   const myPriceSats = m.priceSats;
   const sub = reading || draft || settings || example;

@@ -115,6 +115,18 @@ export const savePending = (me: string, ids: string[], st: Store | null = ls()) 
 
 /** Event the notifier / notification taps use to open the bMail screen. */
 export const OPEN_BMAIL_EVENT = 'bw-open-bmail';
+let composeTo: string | null = null;
+/** Open bMail on a new mail to `to` ($handle / paymail), e.g. from Scan › person page. */
+export const openBMailTo = (to: string) => {
+  composeTo = to.trim() || null;
+  openBMail();
+};
+/** The pending compose recipient, read once by BMailScreen. */
+export const takeBMailComposeTo = () => {
+  const t = composeTo;
+  composeTo = null;
+  return t;
+};
 export const openBMail = () => {
   try {
     window.dispatchEvent(new Event(OPEN_BMAIL_EVENT));

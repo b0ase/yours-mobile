@@ -26,6 +26,7 @@ import { onPairLink, takePairLink } from '../pair/links';
 import { useSpaceInviteLinks } from '../spaces/inviteLinks';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
+const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -86,6 +87,10 @@ const TopNavBar = () => {
   const [callsOpen, setCallsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
+  // Phone: ☰ "Scan to connect a website" opens the one Scan sheet (pay codes, people, pairing).
+  // Extension keeps the paste-first pairing screen (a desktop can't scan its own screen).
+  const [scanOpen, setScanOpen] = useState(false);
+  const openScan = () => (IS_EXTENSION ? setPairOpen(true) : setScanOpen(true));
   const [sheet, setSheet] = useState<'accounts' | 'agents' | null>(null);
   const [confirmOut, setConfirmOut] = useState(false);
   const signOut = useSignOut();
@@ -324,7 +329,7 @@ const TopNavBar = () => {
                 {!X_MARK &&
                   action(<ScanLine size={16} color="#fff" />, PAIR_LABEL, () => {
                     setDrawer(false);
-                    setPairOpen(true);
+                    openScan();
                   })}
                 {/* Settings is the most important item in this section (owner, 8 Oct 2026). */}
                 <button
@@ -472,7 +477,7 @@ const TopNavBar = () => {
           pairLabel={PAIR_LABEL}
           onPair={() => {
             setToolsOpen(false);
-            setPairOpen(true);
+            openScan();
           }}
         />
       )}
@@ -485,6 +490,11 @@ const TopNavBar = () => {
               setPairLink(null);
             }}
           />
+        </Suspense>
+      )}
+      {scanOpen && (
+        <Suspense fallback={null}>
+          <ScanSheet onClose={() => setScanOpen(false)} />
         </Suspense>
       )}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}

@@ -1,7 +1,10 @@
 import * as qr from 'qrcode';
 import { createPortal } from 'react-dom';
-import { useContext, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
+import { lazy, Suspense, useContext, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
+import { myPayUri } from '../scan/payUri';
+
+const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
@@ -158,6 +161,7 @@ export const WalletCard = ({
     saveCardUnit(u);
   };
   const [handleOpen, setHandleOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
@@ -177,8 +181,9 @@ export const WalletCard = ({
 
   useEffect(() => {
     if (!flipped || !receiveAddress) return;
+    // BIP21 so other wallets (and another bWallet's Scan) read it as a payment code.
     qr.toDataURL(
-      receiveAddress,
+      myPayUri(receiveAddress),
       { margin: 1, width: 240, color: { dark: '#000000', light: '#ffffff' } },
       (err, url) => {
         if (!err) setQrUrl(url);
@@ -321,18 +326,35 @@ export const WalletCard = ({
                   </button>
                 )}
               </div>
-              <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
-                {(['usd', 'bsv'] as const).map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    aria-pressed={unit === u}
-                    className={unit === u ? 'is-on' : undefined}
-                    onClick={pickUnit(u)}
-                  >
-                    {u === 'usd' ? '$' : 'BSV'}
-                  </button>
-                ))}
+              <div className="bw-wcard-tr">
+                <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
+                  {(['usd', 'bsv'] as const).map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      aria-pressed={unit === u}
+                      className={unit === u ? 'is-on' : undefined}
+                      onClick={pickUnit(u)}
+                    >
+                      {u === 'usd' ? '$' : 'BSV'}
+                    </button>
+                  ))}
+                </div>
+                {/* Scan to pay (owner, 9 Oct 2026): 44px target, gold-ring icon like the top bar. */}
+                <button
+                  type="button"
+                  aria-label="Scan to pay"
+                  title="Scan to pay"
+                  className="bw-wcard-scan"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setScanOpen(true);
+                  }}
+                >
+                  <span>
+                    <ScanLine size={16} />
+                  </span>
+                </button>
               </div>
             </div>
             {(chat.identityKey || chat.handle) && (
@@ -552,6 +574,11 @@ export const WalletCard = ({
           document.body,
         )}
       {sig.ui}
+      {scanOpen && (
+        <Suspense fallback={null}>
+          <ScanSheet receiveAddress={receiveAddress} onClose={() => setScanOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 };

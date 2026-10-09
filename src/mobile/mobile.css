@@ -926,6 +926,39 @@ body,
   white-space: nowrap;
 }
 
+/* Top-right of the card: $/BSV toggle + Scan to pay. */
+.bw-wcard-tr {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -10px;
+}
+.bw-wcard-scan {
+  width: 44px;
+  height: 44px;
+  margin: -8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.bw-wcard-scan > span {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffd24d;
+  border: 1px solid rgba(255, 210, 77, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+.bw-wcard-scan:active > span {
+  background: rgba(255, 210, 77, 0.18);
+}
 .bw-wcard-unit {
   display: inline-flex;
   padding: 2px;

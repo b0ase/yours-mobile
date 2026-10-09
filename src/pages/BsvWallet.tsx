@@ -81,7 +81,7 @@ import { decrypt } from '../utils/crypto';
 import type { Keys } from '../utils/keys';
 import { getPlatform } from '../platform';
 import { withTimeout } from '../mobile/withTimeout';
-import { onPay, takePay } from '../mobile/wallet/payNav';
+import { onPay, takePay, takePayAmount } from '../mobile/wallet/payNav';
 import { onWalletAction, takeWalletAction } from '../mobile/phone/walletAction';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
@@ -242,9 +242,13 @@ export const BsvWallet = () => {
   useEffect(() => {
     const take = () => {
       const to = takePay();
+      const sats = takePayAmount();
       if (!to) return;
+      // A scanned bitcoin: request with an amount fills it in BSV; the confirm sheet still shows it.
       setRecipients([
-        { id: crypto.randomUUID(), address: to, satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
+        sats
+          ? { id: crypto.randomUUID(), address: to, satSendAmount: sats, usdSendAmount: null, amountType: 'bsv' }
+          : { id: crypto.randomUUID(), address: to, satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
       ]);
       setPageState('send');
     };

@@ -1,6 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowUpDown, ClipboardPaste, Mail, Plus, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ClipboardPaste, Mail, Plus, ScanLine, Trash2 } from 'lucide-react';
+
+const ScanSheet = lazy(() => import('../../scan/ScanSheet'));
 import type { Theme } from '../../../theme.types';
 import { NameInput } from '../../names/NameInput';
 import { useContacts } from '../../chat/useContacts';
@@ -64,6 +66,7 @@ export const SendCard = (p: Props) => {
   const [names, setNames] = useState<Record<string, string>>({});
   const [drafts, setDrafts] = useState<Record<string, string | undefined>>({});
   const [pasteMsg, setPasteMsg] = useState<Record<string, string>>({});
+  const [scanFor, setScanFor] = useState<string | null>(null);
   const contacts = useContacts();
   const recents = useMemo(() => loadRecents(p.account), [p.account]);
 
@@ -175,6 +178,16 @@ export const SendCard = (p: Props) => {
                   style={{ background: `${GOLD}18`, color: GOLD }}
                 >
                   <ClipboardPaste size={12} /> Paste
+                </button>
+                <button
+                  type="button"
+                  aria-label="Scan a QR code"
+                  title="Scan to pay"
+                  onClick={() => setScanFor(r.id)}
+                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer"
+                  style={{ background: `${GOLD}18`, color: GOLD }}
+                >
+                  <ScanLine size={12} /> Scan
                 </button>
                 {multi && (
                   <button
@@ -362,6 +375,23 @@ export const SendCard = (p: Props) => {
       >
         {btn.label}
       </button>
+      {scanFor && (
+        <Suspense fallback={null}>
+          <ScanSheet
+            onClose={() => setScanFor(null)}
+            onPay={(to, sats) => {
+              const id = scanFor;
+              setAddress(id, to);
+              if (sats) {
+                setDrafts((d) => ({ ...d, [id]: undefined }));
+                p.onAmountEdited();
+                p.onUpdate(id, 'amountType', 'bsv');
+                p.onUpdate(id, 'satSendAmount', sats);
+              }
+            }}
+          />
+        </Suspense>
+      )}
     </form>
   );
 };
