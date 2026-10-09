@@ -15,21 +15,33 @@ import { versionLabel } from '../channel';
  * sponsor…) and About (version, source code). Opened from the account drawer;
  * 'tools' deep-links (handleSelect('tools')) land on Tools.
  */
-type Section = 'settings' | 'tools' | 'about';
+type Section = 'settings' | 'new' | 'tools' | 'about';
+
+// Drawer links that open the add-account pages get their own pill, so Settings always means the Settings list.
+const NEW_QUERIES = ['create-account', 'restore-account'];
 
 const SettingsHub = () => {
-  const { selected, query } = useBottomMenu();
+  const { selected, query, handleSelect } = useBottomMenu();
   const { theme } = useTheme();
-  const [section, setSection] = useState<Section>(selected === 'tools' ? 'tools' : 'settings');
-  // Drawer deep links (create / restore account) are Settings pages.
+  const [section, setSection] = useState<Section>(
+    NEW_QUERIES.includes(query) ? 'new' : selected === 'tools' ? 'tools' : 'settings',
+  );
+  // Drawer deep links: create / restore account open New; the others are Settings pages.
   useEffect(() => {
-    if (query) setSection('settings');
+    if (query) setSection(NEW_QUERIES.includes(query) ? 'new' : 'settings');
   }, [query]);
+
+  const choose = (id: Section) => {
+    setSection(id);
+    // Leave any deep-linked sub-page behind: Settings opens its list, New opens Create account.
+    if (id === 'settings' && query) handleSelect('settings', '');
+    if (id === 'new' && !NEW_QUERIES.includes(query)) handleSelect('settings', 'create-account');
+  };
 
   const pill = (id: Section, label: string) => (
     <button
       key={id}
-      onClick={() => setSection(id)}
+      onClick={() => choose(id)}
       className="flex-1 rounded-lg py-1.5 text-xs font-semibold transition-colors"
       style={{
         background: section === id ? '#2b2f36' : 'transparent',
@@ -48,12 +60,14 @@ const SettingsHub = () => {
       >
         <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]">
           {pill('settings', 'Settings')}
+          {pill('new', 'New')}
           {pill('tools', 'Tools')}
           {pill('about', 'About')}
         </div>
       </div>
       <div className="w-full h-full flex flex-col items-center" style={{ paddingTop: '2.75rem' }}>
-        {section === 'settings' && <Settings />}
+        {section === 'settings' && <Settings key="settings" />}
+        {section === 'new' && <Settings key="new" />}
         {section === 'tools' && (
           // A little clearance below the Settings | Tools | About switch.
           <div className="w-full pt-6">
