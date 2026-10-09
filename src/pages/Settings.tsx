@@ -29,6 +29,7 @@ import {
   Wrench,
   Volume2,
   Receipt,
+  Coins,
 } from 'lucide-react';
 import { FaEnvelope } from 'react-icons/fa';
 import { Button } from '../components/Button';
@@ -70,6 +71,7 @@ import ProgressBar from '@ramonak/react-progress-bar';
 
 import { derivePasswordKey } from '../services/passKey';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { getDisplayCurrency, setDisplayCurrency, type DisplayCurrency } from '../utils/displayCurrency';
 import { usePrefs } from '../mobile/settings/usePrefs';
 import {
   runUsbBackup,
@@ -313,6 +315,7 @@ export const Settings = () => {
   const [backupError, setBackupError] = useState('');
   const currentAccount = chromeStorageService.getCurrentAccountObject();
   const [customFeeRate, setCustomFeeRate] = useState(currentAccount.account?.settings.customFeeRate ?? FEE_PER_KB);
+  const [displayCurrency, setDisplayCurrencyState] = useState<DisplayCurrency>(getDisplayCurrency);
   const [lockTimeout, setLockTimeout] = useState(currentAccount.account?.settings.lockTimeout ?? 10);
   const [selectedAccountIdentityAddress, setSelectedAccountIdentityAddress] = useState<string | undefined>();
 
@@ -1007,6 +1010,27 @@ export const Settings = () => {
               on={appPrefs.sounds}
               onChange={() => setAppPrefs({ sounds: !appPrefs.sounds })}
             />
+          }
+        />
+        <Divider />
+        <SettingRow
+          icon={<Coins size={16} />}
+          label="Currency"
+          description="Show amounts in (payments are unchanged)"
+          right={
+            <select
+              aria-label="Display currency"
+              value={displayCurrency}
+              onChange={(e) => {
+                const c: DisplayCurrency = e.target.value === 'GBP' ? 'GBP' : 'USD';
+                setDisplayCurrency(c);
+                setDisplayCurrencyState(c);
+              }}
+              style={{ border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
+            >
+              <option value="USD">US dollar ($)</option>
+              <option value="GBP">British pound (£)</option>
+            </select>
           }
         />
         <Divider />

@@ -17,6 +17,7 @@ import {
   type MailState,
   type Received,
 } from './store';
+import { friendlyMailError } from './friendlyError';
 
 let version = 0;
 subscribeMail(() => {
@@ -68,7 +69,7 @@ export const useBMail = () => {
       updateMail(me, (x) => addReceived(x, items));
       await acknowledge(wallet, ack).catch(() => undefined);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyMailError(e, { whole: true }));
     } finally {
       setLoading(false);
     }

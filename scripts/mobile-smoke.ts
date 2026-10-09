@@ -61,6 +61,9 @@ try {
   await clickText(page, 'Create New Wallet');
   await page.locator('input[placeholder="Password"]').fill(password);
   await page.locator('input[placeholder="Confirm password"]').fill(password);
+  // "I've saved this password" (required since the onboarding redesign).
+  const saved = await page.$('input[type="checkbox"]');
+  if (saved) await saved.click();
   await clickText(page, 'Generate Seed');
   await waitText(page, 'Your recovery phrase', 120_000);
   await clickText(page, 'Next');

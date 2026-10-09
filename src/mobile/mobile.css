@@ -926,7 +926,7 @@ body,
   white-space: nowrap;
 }
 
-/* Top-right of the card: $/BSV toggle + Scan to pay. */
+/* Top-right of the card: Scan to pay. */
 .bw-wcard-tr {
   display: flex;
   align-items: center;
@@ -979,6 +979,27 @@ body,
 .bw-wcard-unit button.is-on {
   background: #ffd24d;
   color: #111;
+}
+/* Bottom-left block (address, member since) beside the unit switch in the bottom-right corner. */
+.bw-wcard-bl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.bw-wcard-bottom > .bw-wcard-unit {
+  flex-shrink: 0;
+  margin: 0 -4px -4px 0;
+}
+/* 44px tap target around each small pill. */
+.bw-wcard-unit button {
+  position: relative;
+}
+.bw-wcard-unit button::after {
+  content: '';
+  position: absolute;
+  inset: -13px -2px;
 }
 
 /* Public BSV address on the card front (in place of a card number). */

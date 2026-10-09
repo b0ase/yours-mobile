@@ -7,6 +7,7 @@
  */
 
 import type { MailFilter, SortMode } from './route';
+import { currentFx, formatFiat } from '../../utils/displayCurrency';
 
 export type StampKind = 'free' | 'penny' | 'priority' | 'reply' | 'signed' | 'paytoopen' | 'none';
 
@@ -300,8 +301,8 @@ export const agoLabel = (min: number): string =>
 
 // ---- Money and weighting for examples (display only; pure, tested). ----
 
-export const fmtCents = (c: number): string =>
-  `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Postage is defined in US cents; other display currencies show "≈ £0.01". */
+export const fmtCents = (c: number): string => formatFiat(c / 100, currentFx(), { approx: true });
 
 /** Postage plus any payment attached to the mail, in cents. */
 export const totalCents = (e: ExampleMail): number => e.cents + (e.attachedCents ?? 0);

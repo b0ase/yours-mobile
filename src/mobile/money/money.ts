@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from 'react';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
+import { currentFx, formatFiat } from '../../utils/displayCurrency';
 
 const SATS_PER_BSV = 100_000_000;
 export const hasRate = (rate: number) => Number.isFinite(rate) && rate > 0;
@@ -22,13 +23,7 @@ export const usdToSats = (usd: number, rate: number): number | null => {
 };
 
 /** "$12.34", "$1,234.50", "$0.05"; sub-cent amounts keep one significant digit: "$0.0006". */
-export const fmtUsd = (usd: number): string => {
-  if (!Number.isFinite(usd)) return '';
-  const sign = usd < 0 ? '-' : '';
-  const a = Math.abs(usd);
-  if (a > 0 && a < 0.01) return `${sign}$${Number(a.toPrecision(1)).toFixed(Math.max(2, -Math.floor(Math.log10(a))))}`;
-  return `${sign}$${a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
+export const fmtUsd = (usd: number): string => formatFiat(usd, currentFx(), { small: true });
 
 export const fmtSats = (sats: number) => `${Math.round(sats).toLocaleString('en-US')} sats`;
 

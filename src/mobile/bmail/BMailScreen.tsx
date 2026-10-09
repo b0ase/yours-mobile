@@ -45,6 +45,7 @@ import type { Received, Sent } from './store';
 import { OPEN_BMAIL_EVENT, takeBMailComposeTo } from './store';
 import { useBMail } from './useBMail';
 import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
+import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 
 const CARD = '#17191E';
 const MUTED = '#98A2B3';
@@ -332,7 +333,9 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         </div>
         <div className="flex justify-between text-white">
           <span>Postage{e.pnee ? ' (PNEE)' : ''}</span>
-          <span className="tabular-nums">{e.pnee ? `${e.cents} ${e.cents === 1 ? 'PNEE' : 'PNEEs'} · ${fmtCents(e.cents)}` : fmtCents(e.cents)}</span>
+          <span className="tabular-nums">
+            {e.pnee ? `${e.cents} ${e.cents === 1 ? 'PNEE' : 'PNEEs'} · ${fmtCents(e.cents)}` : fmtCents(e.cents)}
+          </span>
         </div>
         {!!e.attachedCents && (
           <div className="flex justify-between text-white">
@@ -404,7 +407,7 @@ const Reader = ({
     setBusy(true);
     open(r)
       .then(setMail)
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setErr(friendlyMailError(e, { fallback: BMAIL_OFFLINE_ACTION })))
       .finally(() => setBusy(false));
   };
   const credit = !!r.env.replyPaidSats && r.verifiedSats > 0 && !creditUsed;
@@ -490,7 +493,7 @@ const Compose = ({
       setPeer({ key: p.key, label: p.label, priceSats });
       return { key: p.key, label: p.label, priceSats };
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlyMailError(e, { fallback: BMAIL_OFFLINE_ACTION }));
       return null;
     } finally {
       setBusy('');
@@ -518,7 +521,7 @@ const Compose = ({
       });
       onDone();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlyMailError(e, { fallback: BMAIL_OFFLINE_ACTION }));
     } finally {
       setBusy('');
     }
@@ -668,7 +671,11 @@ const PriceSettings = ({
           setBusy(true);
           save(n)
             .then(onDone)
-            .catch((e) => setErr(`Saved on this device; not published: ${e instanceof Error ? e.message : String(e)}`))
+            .catch((e) =>
+              setErr(
+                `Saved on this device; not published. ${friendlyMailError(e, { fallback: BMAIL_OFFLINE_ACTION })}`,
+              ),
+            )
             .finally(() => setBusy(false));
         }}
       >

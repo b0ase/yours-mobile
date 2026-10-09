@@ -2,12 +2,19 @@ import { useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { tokenSales, type Sale } from '../market/indexer';
+import { currentFx, fiatSymbol, usdToFiat } from '../../utils/displayCurrency';
 
 /**
  * Market chart on a token's page (owner, 4 Oct 2026, "like Phantom"): the last sales from GorillaPool,
  * in dollars per token, with the last price and the change across those sales.
  */
-const usd = (v: number) => (v >= 1 ? `$${v.toFixed(2)}` : v >= 0.01 ? `$${v.toFixed(4)}` : `$${v.toPrecision(2)}`);
+// In the display currency (Settings › Currency).
+const usd = (dollars: number) => {
+  const fx = currentFx();
+  const v = usdToFiat(dollars, fx);
+  const s = fiatSymbol(fx);
+  return v >= 1 ? `${s}${v.toFixed(2)}` : v >= 0.01 ? `${s}${v.toFixed(4)}` : `${s}${v.toPrecision(2)}`;
+};
 
 const GOLD = '#F5B800';
 const UP = '#2ecc71';

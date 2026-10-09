@@ -1,4 +1,5 @@
 import { parseRecipient } from '../../names/names';
+import { formatFiat } from '../../../utils/displayCurrency';
 
 /**
  * Pure logic for the Send card (SendCard.tsx): dollar amounts, the one Send button's wording,
@@ -32,8 +33,8 @@ export const rowUsd = (r: SendRow, rate: number): number => {
   return 0;
 };
 
-export const fmtUsd = (n: number): string =>
-  `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Dollars shown in the display currency (Settings › Currency). */
+export const fmtUsd = (n: number): string => formatFiat(n);
 
 export const fmtBsv = (sats: number): string => {
   const bsv = sats / SATS_PER_BSV;
@@ -56,7 +57,7 @@ export const balanceLine = (balanceBsv: number, rate: number): string => {
  * Returns null for empty / not a number; never negative.
  */
 export const parseAmount = (raw: string): number | null => {
-  const s = raw.replace(/[$,\s]/g, '');
+  const s = raw.replace(/[$£€,\s]/g, '');
   if (!s || s === '.') return null;
   if (!/^\d*\.?\d*$/.test(s)) return null;
   const n = Number(s);

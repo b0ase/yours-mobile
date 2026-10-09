@@ -1,5 +1,7 @@
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
+import { useDisplayCurrency } from '../../../hooks/useDisplayCurrency';
+import { fiatCode, fiatSymbol, fiatToUsd, usdToFiat } from '../../../utils/displayCurrency';
 import { ArrowUpDown, ClipboardPaste, Mail, Plus, ScanLine, Trash2 } from 'lucide-react';
 
 const ScanSheet = lazy(() => import('../../scan/ScanSheet'));
@@ -58,6 +60,7 @@ const GOLD = '#FFD24D';
 const RED = '#ff4444';
 
 export const SendCard = (p: Props) => {
+  const fx = useDisplayCurrency();
   const { theme } = p;
   const fg = theme.color.global.contrast;
   const gray = theme.color.global.gray;
@@ -119,14 +122,15 @@ export const SendCard = (p: Props) => {
 
   const setAmount = (r: SendRow, v: number | null) => {
     p.onAmountEdited();
-    if (r.amountType === 'usd') p.onUpdate(r.id, 'usdSendAmount', v);
+    // Typed in the display currency (Settings › Currency); stored in US dollars.
+    if (r.amountType === 'usd') p.onUpdate(r.id, 'usdSendAmount', v === null ? null : fiatToUsd(v, fx));
     else p.onUpdate(r.id, 'satSendAmount', v === null ? null : Math.round(v * SATS_PER_BSV));
   };
 
   const amountText = (r: SendRow) => {
     const d = drafts[r.id];
     if (d !== undefined) return d;
-    if (r.amountType === 'usd') return r.usdSendAmount ? r.usdSendAmount.toFixed(2) : '';
+    if (r.amountType === 'usd') return r.usdSendAmount ? usdToFiat(r.usdSendAmount, fx).toFixed(2) : '';
     return r.satSendAmount ? String(r.satSendAmount / SATS_PER_BSV) : '';
   };
 
@@ -263,10 +267,10 @@ export const SendCard = (p: Props) => {
             <div className="flex flex-col items-center gap-1 pt-1">
               <div className="flex items-center justify-center gap-1 w-full">
                 <span className="font-bold" style={{ color: fg, fontSize: multi ? 24 : 40 }}>
-                  {isUsd ? '$' : ''}
+                  {isUsd ? fiatSymbol(fx) : ''}
                 </span>
                 <input
-                  aria-label={isUsd ? 'Amount in dollars' : 'Amount in BSV'}
+                  aria-label={isUsd ? `Amount in ${fiatCode(fx)}` : 'Amount in BSV'}
                   inputMode="decimal"
                   placeholder={isUsd ? '0.00' : '0.000'}
                   value={amountText(r)}
@@ -305,16 +309,17 @@ export const SendCard = (p: Props) => {
                     ? `≈ ${fmtBsv(sats)} BSV · ${fmtSats(sats)}`
                     : `${p.rate > 0 ? `≈ ${fmtUsd(usd)} · ` : ''}${fmtSats(sats)}`
                   : isUsd
-                    ? 'Enter dollars'
+                    ? 'Enter an amount'
                     : 'Enter BSV'}
                 <span className="flex items-center gap-0.5 font-bold ml-1" style={{ color: GOLD }}>
-                  {isUsd ? 'USD' : 'BSV'} <ArrowUpDown size={10} />
+                  {isUsd ? fiatCode(fx) : 'BSV'} <ArrowUpDown size={10} />
                 </span>
               </button>
               {p.rate > 0 && (
                 <div className="flex gap-2 mt-1">
                   {QUICK_USD.map((n) => {
-                    const on = isUsd && r.usdSendAmount === n;
+                    const usdN = fiatToUsd(n, fx);
+                    const on = isUsd && !!r.usdSendAmount && Math.abs(r.usdSendAmount - usdN) < 1e-9;
                     return (
                       <button
                         key={n}
@@ -323,7 +328,7 @@ export const SendCard = (p: Props) => {
                           setDrafts((d) => ({ ...d, [r.id]: undefined }));
                           p.onAmountEdited();
                           if (!isUsd) p.onUpdate(r.id, 'amountType', 'usd');
-                          p.onUpdate(r.id, 'usdSendAmount', n);
+                          p.onUpdate(r.id, 'usdSendAmount', usdN);
                         }}
                         className="px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer"
                         style={{
@@ -332,7 +337,8 @@ export const SendCard = (p: Props) => {
                           border: `1px solid ${on ? GOLD : gray + '50'}`,
                         }}
                       >
-                        ${n}
+                        {fiatSymbol(fx)}
+                        {n}
                       </button>
                     );
                   })}

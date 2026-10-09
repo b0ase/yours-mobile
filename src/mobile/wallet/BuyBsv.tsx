@@ -6,6 +6,7 @@ import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { HistoryButton } from './HistoryButton';
+import { formatUSD } from '../../utils/format';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -47,7 +48,7 @@ export const BuyBsvCard = ({
   >
     <span className="text-base font-extrabold">Buy BSV</span>
     <span className="text-sm font-bold">
-      {rate > 0 ? `$${rate.toFixed(2)}` : '…'} <span className="font-semibold opacity-70">per BSV</span>
+      {rate > 0 ? formatUSD(rate) : '…'} <span className="font-semibold opacity-70">per BSV</span>
     </span>
   </button>
 );
@@ -84,7 +85,7 @@ const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
     className={`${CELL} flex-col leading-tight`}
     style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
   >
-    <span className="text-[15px] font-extrabold">{rate > 0 ? `$${rate.toFixed(2)}` : '…'}</span>
+    <span className="text-[15px] font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
     <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
       per BSV
     </span>
