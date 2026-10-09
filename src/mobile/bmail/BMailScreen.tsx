@@ -1042,45 +1042,6 @@ export const BMailScreen = ({
 
   const list = (
     <>
-      {sel.length > 0 && (
-        <div
-          className="bw-mail-card sticky top-14 z-10 flex items-center gap-2 px-3 py-2 text-sm text-white"
-          role="toolbar"
-          aria-label="Selected mail"
-        >
-          <span className="flex-1">{sel.length} selected</span>
-          <button
-            type="button"
-            className="min-h-[40px] rounded-lg px-3 font-semibold"
-            style={{ background: '#12B76A' }}
-            onClick={() => {
-              (tab === 'archive' ? unarchive : archive)(sel);
-              setSelected(new Set());
-            }}
-          >
-            {tab === 'archive' ? 'Move to Inbox' : 'Archive'}
-          </button>
-          <button
-            type="button"
-            className="min-h-[40px] rounded-lg px-3 font-semibold"
-            style={{ background: '#D92D20' }}
-            onClick={() => {
-              remove(sel);
-              setSelected(new Set());
-            }}
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            className="min-h-[40px] px-2"
-            style={{ color: MUTED }}
-            onClick={() => setSelected(new Set())}
-          >
-            Clear
-          </button>
-        </div>
-      )}
       <div className="bw-mail-card bw-mail-hero flex items-center gap-3 px-4 py-4">
         <div className="flex flex-1 flex-col">
           <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
@@ -1117,9 +1078,7 @@ export const BMailScreen = ({
             aria-pressed={tab === id}
             onClick={() => setTab(id)}
             className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
-            style={
-              tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
-            }
+            style={tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }}
           >
             {label}
           </button>
@@ -1174,10 +1133,7 @@ export const BMailScreen = ({
           {view('inbox').map((r, i, all) => (
             <div key={r.id} className="flex flex-col gap-1">
               {i === 0 && isPinned(r, isContact) && (
-                <span
-                  className="text-[10px] font-semibold uppercase tracking-wide px-1"
-                  style={{ color: '#6CE9A6' }}
-                >
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: '#6CE9A6' }}>
                   Friends
                 </span>
               )}
@@ -1212,13 +1168,7 @@ export const BMailScreen = ({
             <div key={r.id} className="flex flex-col gap-1">
               {swipeMail(
                 r,
-                <MailRow
-                  r={r}
-                  rate={m.rate}
-                  friend={false}
-                  label={nameOf(r.from)}
-                  onOpen={() => setReading(r)}
-                />,
+                <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />,
               )}
               {r.verifiedSats > 0 && (
                 <span className="text-[10px] px-2" style={{ color: MUTED }}>
@@ -1293,9 +1243,9 @@ export const BMailScreen = ({
       {tab === 'quarantine' && (
         <>
           <p className="m-0 px-1 text-[11px] leading-relaxed" style={{ color: MUTED }}>
-            Mail you marked as spam or from senders you blocked, and tokens from senders you have not accepted.
-            Mail stays sealed until you open it. Quarantined tokens are not in your balance and are never spent
-            with your own coins. Nothing here is burned or moved.
+            Mail you marked as spam or from senders you blocked, and tokens from senders you have not accepted. Mail
+            stays sealed until you open it. Quarantined tokens are not in your balance and are never spent with your own
+            coins. Nothing here is burned or moved.
           </p>
           {m.boxes.quarantine.map((r) => (
             <div key={r.id} className="flex flex-col gap-1">
@@ -1375,17 +1325,56 @@ export const BMailScreen = ({
   ) : null;
   const mainHeader = (
     <div className="bw-mail-bar sticky top-0 z-10 flex items-center gap-1 px-3 pb-2" style={{ paddingTop: 8 }}>
-      <Mailbox size={18} color={GOLD} />
-      <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
-      <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
-        <PenSquare size={16} color={MUTED} />
-      </button>
-      <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
-        <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
-      </button>
-      <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
-        <Settings size={16} color={MUTED} />
-      </button>
+      {/* Ticking mail turns this row into the selection bar (owner, 9 Oct 2026), like Mail. */}
+      {sel.length > 0 ? (
+        <div className="flex flex-1 items-center gap-2 text-sm text-white" role="toolbar" aria-label="Selected mail">
+          <span className="flex-1">{sel.length} selected</span>
+          <button
+            type="button"
+            className="min-h-[40px] rounded-lg px-3 font-semibold"
+            style={{ background: '#12B76A' }}
+            onClick={() => {
+              (tab === 'archive' ? unarchive : archive)(sel);
+              setSelected(new Set());
+            }}
+          >
+            {tab === 'archive' ? 'Move to Inbox' : 'Archive'}
+          </button>
+          <button
+            type="button"
+            className="min-h-[40px] rounded-lg px-3 font-semibold"
+            style={{ background: '#D92D20' }}
+            onClick={() => {
+              remove(sel);
+              setSelected(new Set());
+            }}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            className="min-h-[40px] px-2"
+            style={{ color: MUTED }}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      ) : (
+        <>
+          <Mailbox size={18} color={GOLD} />
+          <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
+          <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
+            <PenSquare size={16} color={MUTED} />
+          </button>
+          <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
+            <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
+          </button>
+          <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
+            <Settings size={16} color={MUTED} />
+          </button>
+        </>
+      )}
     </div>
   );
   if (wide)
