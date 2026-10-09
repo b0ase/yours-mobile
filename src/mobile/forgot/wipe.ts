@@ -18,6 +18,8 @@ type Deps = {
   native: Pick<YoursNativePlugin, 'biometricRemove' | 'secureKeys' | 'secureRemove'>;
   idb?: Pick<IDBFactory, 'databases' | 'deleteDatabase'>;
   session?: Pick<Storage, 'setItem'>;
+  /** Also flagged here: the restore screen may open in another page (a new extension tab, the app behind an overlay). */
+  local?: Pick<Storage, 'setItem'>;
   wait?: (ms: number) => Promise<void>;
   /** Open the restore screen after the reload (Forgot password). Account deletion passes false. */
   restore?: boolean;
@@ -38,6 +40,7 @@ export const wipeLocalWallet = async ({
   native,
   idb = indexedDB,
   session = sessionStorage,
+  local = globalThis.localStorage,
   wait = (ms) => new Promise((r) => setTimeout(r, ms)),
   restore = true,
 }: Deps): Promise<void> => {
@@ -63,22 +66,67 @@ export const wipeLocalWallet = async ({
   }
 
   if (!restore) return;
-  try {
-    session.setItem(RESTORE_FLAG, '1');
-  } catch {
-    /* falls back to the Start screen, which also offers Restore */
+  for (const store of [session, local]) {
+    try {
+      store.setItem(RESTORE_FLAG, '1');
+    } catch {
+      /* falls back to the Start screen, which also offers Restore */
+    }
   }
+};
+
+type OpenEnv = {
+  location: Pick<Location, 'pathname' | 'protocol' | 'reload'>;
+  self: Window;
+  top: Window | null;
+  close: () => void;
+  chrome?: any;
+};
+
+/**
+ * After the wipe, open the restore screen in the wallet itself. The unlock screen with this button is also the
+ * approval page (prompt.html): a popup window or in-page sheet in the extension (a site asking to sign in, e.g.
+ * bChatX, while the wallet is locked), an overlay frame over the wallet on the phone and the web wallet. Reloading
+ * that page only closed it (owner, 9 Oct 2026: "the restore button isn't working at all"), so from there:
+ * reload the wallet page behind the overlay, or open the wallet in a tab and close the prompt.
+ */
+export const openRestore = (env: OpenEnv): void => {
+  if (!/\/prompt\.html$/.test(env.location.pathname)) {
+    env.location.reload();
+    return;
+  }
+  if (env.top && env.top !== env.self) {
+    try {
+      env.top.location.reload(); // same-origin overlay frame (phone app, web wallet)
+      return;
+    } catch {
+      /* cross-origin: the extension's in-page sheet over a site */
+    }
+  }
+  if (env.location.protocol === 'chrome-extension:' && env.chrome?.tabs?.create) {
+    void Promise.resolve(env.chrome.tabs.create({ url: env.chrome.runtime.getURL('index.html') })).catch(
+      () => undefined,
+    );
+    void Promise.resolve(env.chrome.runtime.sendMessage({ action: 'DISMISS_PROMPT_PANEL' })).catch(() => undefined);
+    env.close();
+    return;
+  }
+  env.location.reload();
 };
 
 /** MemoryRouter's first entry: the restore screen once, right after a wipe. */
 export const initialRoute = (): string => {
-  try {
-    if (sessionStorage.getItem(RESTORE_FLAG)) {
-      sessionStorage.removeItem(RESTORE_FLAG);
-      return RESTORE_ROUTE;
+  let restore = false;
+  for (const name of ['sessionStorage', 'localStorage'] as const) {
+    try {
+      const store = globalThis[name];
+      if (store?.getItem(RESTORE_FLAG)) {
+        store.removeItem(RESTORE_FLAG);
+        restore = true;
+      }
+    } catch {
+      /* no storage */
     }
-  } catch {
-    /* no sessionStorage */
   }
-  return '/';
+  return restore ? RESTORE_ROUTE : '/';
 };
