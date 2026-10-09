@@ -1246,3 +1246,30 @@ html.ww-on body #root {
   max-width: none;
   margin: 0 !important;
 }
+
+/* Wide layout onboarding (welcome, create, restore, import, seed backup): the phone flow in a centred card over a
+   full-viewport background, never stretched across the window. WideShell toggles html.ww-onb on those routes. */
+html.ww-on.ww-onb:root {
+  --wallet-width: 440px;
+  --wallet-height: min(860px, calc(100vh - 64px));
+}
+html.ww-on.ww-onb body {
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(232, 184, 0, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 50% 120%, rgba(232, 184, 0, 0.08), transparent 60%),
+    #050505 !important;
+}
+html.ww-on.ww-onb body #root {
+  position: relative;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  height: var(--wallet-height);
+  margin: max(32px, calc((100vh - var(--wallet-height)) / 2)) auto 0 !important;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0a0a0a;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(232, 184, 0, 0.05);
+  overflow: hidden auto;
+  /* Fixed descendants (onboarding background layers, sheets) stay inside the card. */
+  transform: translateZ(0);
+}

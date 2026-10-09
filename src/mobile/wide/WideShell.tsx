@@ -320,8 +320,13 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     return () => removeEventListener('keydown', onKey);
   }, [navigate, lockWallet]);
 
-  // Create / restore / welcome: no chrome, in the centred column (#root, mobile.css html.ww-on).
-  if (ONBOARDING.includes(pathname)) return <>{children}</>;
+  // Create / restore / welcome: no chrome; a centred card over a full-viewport background (mobile.css html.ww-onb).
+  const onboarding = ONBOARDING.includes(pathname);
+  useEffect(() => {
+    document.documentElement.classList.toggle('ww-onb', onboarding);
+    return () => document.documentElement.classList.remove('ww-onb');
+  }, [onboarding]);
+  if (onboarding) return <>{children}</>;
 
   const bapp = bappFromPath(pathname);
   const view = bapp
