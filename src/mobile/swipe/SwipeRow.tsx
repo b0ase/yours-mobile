@@ -11,6 +11,7 @@
  * - prefers-reduced-motion: no slide animations.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
 import { ACTION_W, dragOffset, isArmed, lockAxis, resolveRelease, type SideSpec } from './gesture';
 import { haptic } from './haptics';
@@ -76,7 +77,12 @@ export const SwipeRow = ({
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [gone, setGone] = useState(false);
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuAt = (x: number, y: number) => setMenu({ x, y });
+  const menuAtRow = () => {
+    const r = wrap.current?.getBoundingClientRect();
+    menuAt(r ? r.right - 8 : 0, r ? r.top + 8 : 0);
+  };
   const g = useRef({
     id: -1,
     x0: 0,
@@ -123,7 +129,7 @@ export const SwipeRow = ({
   }, [offset, close]);
 
   const run = (a: SwipeAction, viaFull: boolean) => {
-    setMenu(false);
+    setMenu(null);
     if (viaFull && a.removes) {
       const w = width();
       if (reducedMotion()) {
@@ -164,7 +170,7 @@ export const SwipeRow = ({
         if (!s.moved && s.id === e.pointerId) {
           s.moved = true; // swallow the click that follows
           haptic('light');
-          setMenu(true);
+          menuAt(s.x0, s.y0);
         }
       }, LONG_PRESS_MS);
   };
@@ -242,7 +248,7 @@ export const SwipeRow = ({
   const anim = dragging || reducedMotion() ? 'none' : 'transform 180ms ease-out';
   const w = wrap.current?.offsetWidth || 360;
   const leftSide = offset < 0;
-  const armedNow = isArmed(offset, w, leftSide ? L : R);
+  const armedNow = dragging && isArmed(offset, w, leftSide ? L : R);
 
   if (gone) return <div aria-hidden className="bw-swipe-gone" style={{ height: 0, overflow: 'hidden' }} />;
 
@@ -269,15 +275,15 @@ export const SwipeRow = ({
       onContextMenu={(e) => {
         if (!all.length) return;
         e.preventDefault();
-        setMenu(true);
+        menuAt(e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
         if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
           e.preventDefault();
-          setMenu(true);
+          menuAtRow();
         }
         if (e.key === 'Escape') {
-          setMenu(false);
+          setMenu(null);
           setOffset(0);
         }
       }}
@@ -342,8 +348,12 @@ export const SwipeRow = ({
               type="button"
               aria-label={`Actions for ${label}`}
               aria-haspopup="menu"
-              aria-expanded={menu}
-              onClick={() => setMenu((x) => !x)}
+              aria-expanded={!!menu}
+              onClick={(e) => {
+                if (menu) return setMenu(null);
+                const r = e.currentTarget.getBoundingClientRect();
+                menuAt(r.right, r.bottom + 4);
+              }}
               className="bw-swipe-more flex h-8 w-8 items-center justify-center rounded-lg text-white"
               style={{ background: '#2b2f36' }}
             >
@@ -352,12 +362,15 @@ export const SwipeRow = ({
           </div>
         )}
       </div>
-      {menu && <SwipeMenu label={label} actions={all} onPick={(a) => run(a, false)} onClose={() => setMenu(false)} />}
+      {menu && (
+        <SwipeMenu at={menu} label={label} actions={all} onPick={(a) => run(a, false)} onClose={() => setMenu(null)} />
+      )}
     </div>
   );
 };
 
 const SwipeMenu = ({
+  at,
   label,
   actions,
   onPick,
@@ -367,6 +380,7 @@ const SwipeMenu = ({
   actions: SwipeAction[];
   onPick: (a: SwipeAction) => void;
   onClose: () => void;
+  at: { x: number; y: number };
 }) => {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -377,14 +391,18 @@ const SwipeMenu = ({
     window.addEventListener('pointerdown', down, true);
     return () => window.removeEventListener('pointerdown', down, true);
   }, [onClose]);
-  return (
+  // Fixed, in a portal: rows clip their overflow. Anchored at the "…" button / press point, kept on screen.
+  const W = 200;
+  const left = Math.max(8, Math.min(at.x - W, window.innerWidth - W - 8));
+  const top = Math.max(8, Math.min(at.y, window.innerHeight - (actions.length * 44 + 16) - 8));
+  return createPortal(
     <div
       ref={box}
       role="menu"
       aria-label={`Actions for ${label}`}
       data-swipe-ignore
-      className="absolute right-2 top-11 z-20 flex min-w-[160px] flex-col overflow-hidden rounded-xl py-1 shadow-xl"
-      style={{ background: '#1d2025', border: '1px solid #2b2f36' }}
+      className="fixed z-[290] flex flex-col overflow-hidden rounded-xl py-1 shadow-xl"
+      style={{ left, top, width: W, background: '#1d2025', border: '1px solid #2b2f36' }}
       onKeyDown={(e) => {
         const btns = [...(box.current?.querySelectorAll('button') ?? [])];
         const i = btns.indexOf(document.activeElement as HTMLButtonElement);
@@ -409,6 +427,7 @@ const SwipeMenu = ({
           {a.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 };

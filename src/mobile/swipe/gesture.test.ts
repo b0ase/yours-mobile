@@ -16,7 +16,8 @@ describe('resolveRelease', () => {
   test('tiny drag closes', () => expect(rel(-20)).toBe('closed'));
   test('half a tray opens it', () => expect(rel(-(3 * ACTION_W) / 2 - 1)).toBe('open-left'));
   test('right tray opens', () => expect(rel(ACTION_W + 5)).toBe('open-right'));
-  test('past 60% commits', () => expect(rel(-0.61 * 390)).toBe('commit-left'));
+  test('past 60% and clear of the tray commits', () => expect(rel(-0.62 * 390)).toBe('commit-left'));
+  test('60% but still inside the tray zone opens', () => expect(rel(-0.6 * 390)).toBe('open-left'));
   test('59% does not commit slowly', () => expect(rel(-0.59 * 390)).toBe('open-left'));
   test('slow release past the tray but under 60% opens', () => expect(rel(3 * ACTION_W + 10, 0)).toBe('open-right'));
   test('fast flick past tray commits right', () => expect(rel(2 * ACTION_W + 10, 1.2)).toBe('commit-right'));
@@ -36,6 +37,7 @@ describe('dragOffset / isArmed', () => {
     expect(dragOffset(100, 390, L, { count: 0, hasFull: false })).toBe(0));
   test('tray-only side is damped past the tray', () =>
     expect(dragOffset(-200, 390, { count: 1, hasFull: false }, R)).toBeCloseTo(-(ACTION_W + (200 - ACTION_W) * 0.2)));
+  test('an open tray on a narrow phone is never armed', () => expect(isArmed(-3 * ACTION_W, 358, L)).toBe(false));
   test('armed at 60%', () => {
     expect(isArmed(-240, 390, L)).toBe(true);
     expect(isArmed(-200, 390, L)).toBe(false);

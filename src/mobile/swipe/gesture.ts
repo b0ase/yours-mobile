@@ -19,6 +19,10 @@ export const lockAxis = (dx: number, dy: number, lock = AXIS_LOCK_PX): Axis => {
 };
 
 export type SideSpec = { count: number; hasFull: boolean };
+
+/** Distance a full swipe must pass: 60% of the row, and always clearly past the open tray (narrow phones). */
+export const commitDistance = (width: number, side: SideSpec) =>
+  Math.max(width * COMMIT_FRACTION, side.count * ACTION_W + 24);
 export type Release = 'closed' | 'open-left' | 'open-right' | 'commit-left' | 'commit-right';
 
 /**
@@ -41,7 +45,7 @@ export const resolveRelease = (o: {
   const sameDir = Math.sign(velocity) === Math.sign(offset);
   if (
     side.hasFull &&
-    (dist >= width * COMMIT_FRACTION || (sameDir && Math.abs(velocity) >= FLICK_VELOCITY && dist > tray))
+    (dist >= commitDistance(width, side) || (sameDir && Math.abs(velocity) >= FLICK_VELOCITY && dist > tray))
   )
     return `commit-${name}` as Release;
   // Flicking back toward closed closes it.
@@ -61,4 +65,4 @@ export const dragOffset = (raw: number, width: number, left: SideSpec, right: Si
 
 /** True once the drag is far enough that releasing would commit (drives the haptic tick + armed colour). */
 export const isArmed = (offset: number, width: number, side: SideSpec) =>
-  side.hasFull && Math.abs(offset) >= width * COMMIT_FRACTION;
+  side.hasFull && Math.abs(offset) >= commitDistance(width, side);
