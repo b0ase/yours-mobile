@@ -409,6 +409,16 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
   }
 
+  /** The green room shown before entering: title, stage, counts, recording notice. */
+  async spaceGreenRoom(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/green-room`);
+  }
+
+  /** Listen anonymously: a hidden, listen-only token. No participant row; still member-gated (ticket). */
+  async spaceAnonToken(ticker: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/anon-token`, {});
+  }
+
   /** The live space's permanent page `/s/<slug>` (host or room admin only). `{ page }`. */
   async spacePageLink(ticker: string): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space/page`, {});
