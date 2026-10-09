@@ -51,6 +51,8 @@ import {
   type SpaceState,
 } from './model';
 import { inviteShareText, parsePage } from './invite';
+import { GreenRoomSheet, RecordingBadge } from './GreenRoom';
+import { mayRaiseHand, parseGreenRoom, type GreenRoom } from './model';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { shareLink } from '../chat/shareLink';
 
@@ -360,7 +362,8 @@ export interface SpaceScreenProps {
   onClose: () => void;
 }
 
-type Phase = 'joining' | 'live' | 'ended' | 'error';
+/** 'green': the green room, before entering a live Space someone else started. */
+type Phase = 'green' | 'joining' | 'live' | 'ended' | 'error';
 
 export const SpaceScreen = ({
   client,
@@ -375,7 +378,23 @@ export const SpaceScreen = ({
   const [needsClaim, setNeedsClaim] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const media = useMemo(() => new SpaceMedia(), []);
-  const [phase, setPhase] = useState<Phase>('joining');
+  const [phase, setPhase] = useState<Phase>(startTitle ? 'joining' : 'green');
+  /** The green room's data; null until loaded (or if the server has no green room yet). */
+  const [green, setGreen] = useState<GreenRoom | null>(null);
+  const [greenAnon, setGreenAnon] = useState(false);
+  /**
+   * Listening anonymously: hidden listen-only token, NO participant row. So no heartbeat, no
+   * hand, and leaving never calls the space route (there is nothing of mine to remove).
+   */
+  const [anon, setAnon] = useState(false);
+  const anonRef = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [error, setError] = useState('');
   const [state, setState] = useState<SpaceState>({ space: null, participants: [], me: null });
   const prev = useRef<SpaceState | null>(null);
@@ -401,7 +420,7 @@ export const SpaceScreen = ({
     async (end = false) => {
       if (left.current) return;
       left.current = true;
-      await client.spaceAction(ticker, { action: end ? 'end' : 'leave' }).catch(() => undefined);
+      if (!anonRef.current) await client.spaceAction(ticker, { action: end ? 'end' : 'leave' }).catch(() => undefined);
       await media.close();
       onClose();
     },
@@ -436,64 +455,101 @@ export const SpaceScreen = ({
     [media],
   );
 
-  // Join → token → connect.
-  useEffect(() => {
-    let live = true;
-    (async () => {
+  /**
+   * Enter: named (join → token → connect) or anonymous (anon token → connect, no row).
+   * Starting a space goes straight here; joining someone else's goes through the green room.
+   */
+  const enter = async (anonymous: boolean) => {
+    setPhase('joining');
+    if (anonymous) {
       try {
-        const joined = parseSpaceState(
-          await client.spaceAction(ticker, { action: 'join', ...(startTitle ? { title: startTitle } : {}) }),
-          me,
-        );
-        if (!joined.space) throw new Error('This space has ended.');
-        if (!supportedTransport(joined.space)) {
-          throw new Error('This space is running peer-to-peer. Join it from bChat on the web.');
-        }
-        const tok = parseSpaceToken(await client.spaceToken(ticker));
+        const tok = parseSpaceToken(await client.spaceAnonToken(ticker));
         if (!tok) throw new Error('Could not get into the space.');
         await media.connect(tok.url, tok.token, {
-          onVideos: (v) => live && setVideos(v),
-          onScreen: (o) => live && setScreenOwner(o),
-          onSpeakers: (s) => live && setSpeakers(s),
-          onCanPublish: (can) => {
-            if (!live) return;
-            if (!can) {
-              setMicOn(false);
-              setCamOn(false);
-            }
-          },
-          onDisconnected: () => live && !left.current && setPhase((p) => (p === 'live' ? 'ended' : p)),
+          onVideos: (v) => mounted.current && setVideos(v),
+          onScreen: (o) => mounted.current && setScreenOwner(o),
+          onSpeakers: (s) => mounted.current && setSpeakers(s),
+          onCanPublish: () => undefined,
+          onDisconnected: () => mounted.current && !left.current && setPhase((p) => (p === 'live' ? 'ended' : p)),
         });
-        if (!live) return void media.close();
+        if (!mounted.current) return void media.close();
+        anonRef.current = true;
+        setAnon(true);
         prev.current = null;
-        apply(joined);
+        apply(parseSpaceState(await client.space(ticker), me));
         setPhase('live');
-        // The host starts speaking straight away (they started the space); the OS asks for the mic.
-        if (joined.me?.role === 'host') {
-          await media
-            .setMic(true)
-            .then(() => setMicOn(true))
-            .catch((e) => refused('mic', e, 'Couldn’t start the microphone.'));
-        }
       } catch (e) {
-        if (!live) return;
-        const msg =
-          // 403 not_host: bit-sign lets only the token issuer or a room admin start a space.
-          e instanceof ChatApiError && e.status === 403 && (e.data as { code?: unknown } | null)?.code === 'not_host'
-            ? errText(e)
-            : e instanceof ChatApiError && e.status === 403
-              ? 'You need to hold this room’s token to join its space.'
-              : errText(e);
-        setError(msg);
-        setNeedsClaim(!!startTitle && adminRefusal(e));
+        if (!mounted.current) return;
+        setError(errText(e));
         setPhase('error');
         void media.close();
       }
-    })();
-    return () => {
-      live = false;
-    };
-    // Join once per mount.
+      return;
+    }
+    try {
+      const joined = parseSpaceState(
+        await client.spaceAction(ticker, { action: 'join', ...(startTitle ? { title: startTitle } : {}) }),
+        me,
+      );
+      if (!joined.space) throw new Error('This space has ended.');
+      if (!supportedTransport(joined.space)) {
+        throw new Error('This space is running peer-to-peer. Join it from bChat on the web.');
+      }
+      const tok = parseSpaceToken(await client.spaceToken(ticker));
+      if (!tok) throw new Error('Could not get into the space.');
+      await media.connect(tok.url, tok.token, {
+        onVideos: (v) => mounted.current && setVideos(v),
+        onScreen: (o) => mounted.current && setScreenOwner(o),
+        onSpeakers: (s) => mounted.current && setSpeakers(s),
+        onCanPublish: (can) => {
+          if (!mounted.current) return;
+          if (!can) {
+            setMicOn(false);
+            setCamOn(false);
+          }
+        },
+        onDisconnected: () => mounted.current && !left.current && setPhase((p) => (p === 'live' ? 'ended' : p)),
+      });
+      if (!mounted.current) return void media.close();
+      prev.current = null;
+      apply(joined);
+      setPhase('live');
+      // The host starts speaking straight away (they started the space); the OS asks for the mic.
+      if (joined.me?.role === 'host') {
+        await media
+          .setMic(true)
+          .then(() => setMicOn(true))
+          .catch((e) => refused('mic', e, 'Couldn’t start the microphone.'));
+      }
+    } catch (e) {
+      if (!mounted.current) return;
+      const msg =
+        // 403 not_host: bit-sign lets only the token issuer or a room admin start a space.
+        e instanceof ChatApiError && e.status === 403 && (e.data as { code?: unknown } | null)?.code === 'not_host'
+          ? errText(e)
+          : e instanceof ChatApiError && e.status === 403
+            ? 'You need to hold this room’s token to join its space.'
+            : errText(e);
+      setError(msg);
+      setNeedsClaim(!!startTitle && adminRefusal(e));
+      setPhase('error');
+      void media.close();
+    }
+  };
+
+  // Starting: go straight in. Joining: load the green room first.
+  useEffect(() => {
+    if (startTitle) return void enter(false);
+    client
+      .spaceGreenRoom(ticker)
+      .then((d) => {
+        if (!mounted.current) return;
+        const g = parseGreenRoom(d);
+        if (g) setGreen(g);
+        else void enter(false); // No green room (older server / not live): the old path explains.
+      })
+      .catch(() => mounted.current && void enter(false));
+    // Once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -509,8 +565,9 @@ export const SpaceScreen = ({
         .catch(() => undefined);
       tick((n) => n + 1);
     }, POLL_MS);
+    // Anonymous listeners have no row to keep fresh.
     const hb = setInterval(
-      () => void client.spaceAction(ticker, { action: 'heartbeat' }).catch(() => undefined),
+      () => !anonRef.current && void client.spaceAction(ticker, { action: 'heartbeat' }).catch(() => undefined),
       HEARTBEAT_MS,
     );
     return () => {
@@ -536,6 +593,8 @@ export const SpaceScreen = ({
   const hands = handQueue(state);
   const audience = audienceCount(state);
   const raised = !!state.me?.handRaisedAt;
+  const canHand = mayRaiseHand({ anonymous: anon, role: myRole });
+  const recording = !!state.recording;
 
   const toggleMic = async () => {
     try {
@@ -600,7 +659,21 @@ export const SpaceScreen = ({
   );
 
   const body =
-    phase === 'joining' ? (
+    phase === 'green' ? (
+      green ? (
+        <GreenRoomSheet
+          data={green}
+          fallbackTitle={roomName}
+          anonymous={greenAnon}
+          onAnonymous={setGreenAnon}
+          onStart={() => void enter(greenAnon)}
+        />
+      ) : (
+        <Centered>
+          <Radio size={36} color={GOLD} className="animate-pulse" />
+        </Centered>
+      )
+    ) : phase === 'joining' ? (
       <Centered>
         <Radio size={36} color={GOLD} className="animate-pulse" />
         <p className="mt-3 text-sm" style={{ color: MUTED }}>
@@ -757,6 +830,10 @@ export const SpaceScreen = ({
             </CtlButton>
           )}
         </>
+      ) : !canHand ? (
+        <span className="self-center px-2 text-[11px] text-center" style={{ color: MUTED }}>
+          Listening anonymously
+        </span>
       ) : (
         <CtlButton
           label={raised ? 'Lower hand' : 'Raise hand'}
@@ -767,6 +844,23 @@ export const SpaceScreen = ({
           active={raised}
         >
           <Hand size={20} color={raised ? '#010101' : '#fff'} />
+        </CtlButton>
+      )}
+      {state.mayRecord && !anon && (
+        <CtlButton
+          label={recording ? 'Stop rec' : 'Record'}
+          onClick={() => {
+            if (!recording) setNote('Recording. Everyone in the Space sees ● Recording.');
+            void client
+              .spaceAction(ticker, { action: recording ? 'record_stop' : 'record_start' })
+              .then(() => client.space(ticker))
+              .then((d) => apply(parseSpaceState(d, me)))
+              .catch((e) => setNote(errText(e)));
+          }}
+          active={recording}
+          danger={recording}
+        >
+          <span className="text-base leading-none" style={{ color: recording ? '#fff' : '#ef4444' }}>●</span>
         </CtlButton>
       )}
       <CtlButton label="Chat" onClick={() => setChatOpen((o) => !o)} active={chatOpen}>
@@ -803,6 +897,7 @@ export const SpaceScreen = ({
               </span>
             )}
             <span className="text-[15px] font-semibold text-white truncate">{title}</span>
+            {phase === 'live' && recording && <RecordingBadge />}
           </div>
           <div className="text-[11px]" style={{ color: MUTED }}>
             ${ticker.replace(/^\$/, '')}{' '}
