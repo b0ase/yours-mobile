@@ -76,7 +76,7 @@ const ServiceCard = ({
   const name = serviceName(p);
   const status = openLabel(p, now);
   return (
-    <article className="rounded-2xl border border-[#23262c] bg-[#121316] p-3 flex flex-col gap-2.5">
+    <article className="bw-mail-card p-3 flex flex-col gap-2.5">
       <div className="flex items-start gap-3">
         <Avatar title={name} src={p.avatar} size={44} />
         <div className="flex-1 min-w-0">

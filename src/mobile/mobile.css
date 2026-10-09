@@ -1217,7 +1217,7 @@ select optgroup {
   display: none !important;
 }
 
-/* bMail (src/mobile/bmail): the Wallet card's black-and-gold finish on translucent cards over the wallet clip. */
+/* bMail and bPhone Calls (src/mobile/bmail, src/mobile/calls): the Wallet card's black-and-gold finish on translucent cards over the wallet clip. */
 .bw-mail-bar {
   background: linear-gradient(180deg, rgba(5, 5, 6, 0.86) 0%, rgba(5, 5, 6, 0.62) 100%);
   -webkit-backdrop-filter: blur(14px);
