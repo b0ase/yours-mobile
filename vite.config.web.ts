@@ -78,6 +78,19 @@ const webShell = (): Plugin => ({
       fileName: 'agents.html',
       source: readFileSync(resolve(__dirname, 'src/web/agents.html')),
     });
+    // desktop.bwalletx.com/desktop: what Desktop is and how to install it, and its share image.
+    if (DESKTOP) {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'desktop.html',
+        source: readFileSync(resolve(__dirname, 'src/web/desktop.html')),
+      });
+      this.emitFile({
+        type: 'asset',
+        fileName: 'og-desktop-page-v1.png',
+        source: readFileSync(resolve(__dirname, 'src/web/og-desktop-page-v1.png')),
+      });
+    }
     if (DESKTOP)
       this.emitFile({
         type: 'asset',

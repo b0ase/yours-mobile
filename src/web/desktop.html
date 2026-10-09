@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bWalletX Desktop</title>
+    <meta name="description" content="The whole bWalletX wallet on a big screen at desktop.bwalletx.com. Install it as an app from Chrome, Edge or Safari." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://desktop.bwalletx.com/desktop" />
+    <meta property="og:site_name" content="bWalletX" />
+    <meta property="og:title" content="Install bWalletX on your computer" />
+    <meta property="og:description" content="The whole wallet on a big screen. Install it as an app from Chrome, Edge or Safari: its own window and dock icon." />
+    <meta property="og:image" content="https://desktop.bwalletx.com/og-desktop-page-v1.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Install bWalletX on your computer: Install app button and steps for Chrome, Edge and Safari" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@bWalletX" />
+    <meta name="twitter:title" content="Install bWalletX on your computer" />
+    <meta name="twitter:description" content="The whole wallet on a big screen. Install it as an app from Chrome, Edge or Safari." />
+    <meta name="twitter:image" content="https://desktop.bwalletx.com/og-desktop-page-v1.png" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #050505;
+        --panel: #101114;
+        --line: #ffffff14;
+        --fg: #f2f2f2;
+        --muted: #a7adb8;
+        --gold: #f5b800;
+        --gold-hi: #ffd24d;
+        --red: #ff0000;
+        --pink: #ffb8ff;
+        --cyan: #00ffff;
+        --orange: #ffb852;
+        --green: #2ecc71;
+        --purple: #a06bff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.6 'IBM Plex Sans',
+          system-ui,
+          sans-serif;
+      }
+      body {
+        background: radial-gradient(ellipse 80% 50% at 50% 0%, #2a1e00 0%, transparent 60%), var(--bg);
+      }
+      a {
+        color: var(--gold-hi);
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 0 20px;
+      }
+      header.bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 0;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font:
+          700 20px 'Space Grotesk',
+          sans-serif;
+        color: var(--fg);
+        text-decoration: none;
+      }
+      .brand b {
+        color: var(--gold);
+      }
+      .cta {
+        display: inline-block;
+        background: linear-gradient(135deg, #ffd24d, #e9b21a);
+        color: #1a1300;
+        font-weight: 700;
+        padding: 10px 18px;
+        border-radius: 999px;
+        text-decoration: none;
+      }
+      h1,
+      h2,
+      h3 {
+        font-family: 'Space Grotesk', sans-serif;
+        line-height: 1.1;
+        margin: 0;
+        text-wrap: balance;
+      }
+      h1 {
+        font-size: clamp(2.4rem, 6vw, 4rem);
+        letter-spacing: -1.5px;
+      }
+      h1 em {
+        font-style: normal;
+        color: var(--gold-hi);
+      }
+      h2 {
+        font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+        margin-bottom: 14px;
+      }
+      h3 {
+        font-size: 1.1rem;
+        margin-bottom: 6px;
+      }
+      p {
+        margin: 0 0 12px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 40px;
+        align-items: center;
+        padding: 40px 0 64px;
+      }
+      .hero .lede {
+        font-size: 1.15rem;
+        color: var(--muted);
+        margin: 18px 0 26px;
+        max-width: 34rem;
+      }
+      .parade {
+        display: flex;
+        gap: 14px;
+        align-items: flex-end;
+        margin-top: 8px;
+      }
+      .parade .g {
+        animation: float 2.4s ease-in-out infinite;
+      }
+      .parade .g:nth-child(2) {
+        animation-delay: 0.3s;
+      }
+      .parade .g:nth-child(3) {
+        animation-delay: 0.6s;
+      }
+      .parade .g:nth-child(4) {
+        animation-delay: 0.9s;
+      }
+      @keyframes float {
+        50% {
+          transform: translateY(-6px);
+        }
+      }
+
+      /* Mock account menu */
+      .menu {
+        background: #0b0b0c;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 10px;
+        box-shadow: 0 30px 80px #000a;
+      }
+      .menu-h {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 6px 10px 10px;
+      }
+      .acct {
+        display: grid;
+        grid-template-columns: 40px 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 10px;
+        border-radius: 12px;
+      }
+      .acct.on {
+        background: #17191e;
+      }
+      .acct .av {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0b0b0b;
+        border: 1.5px solid var(--c, var(--gold));
+      }
+      .acct .nm {
+        font-weight: 600;
+      }
+      .acct .sub {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .acct .bal {
+        text-align: right;
+        font:
+          600 14px 'IBM Plex Mono',
+          monospace;
+        font-variant-numeric: tabular-nums;
+      }
+      .pill {
+        display: inline-block;
+        font-size: 11px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        border: 1px solid currentColor;
+        margin-left: 6px;
+        vertical-align: 1px;
+      }
+      .run {
+        color: #7ee2a8;
+      }
+      .stop {
+        color: #f97066;
+      }
+      .read {
+        color: var(--muted);
+      }
+      .menu .add {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 12px 10px 6px;
+        color: var(--gold-hi);
+        font-weight: 600;
+        border-top: 1px solid var(--line);
+        margin-top: 6px;
+      }
+
+      section {
+        padding: 56px 0;
+        border-top: 1px solid var(--line);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        min-width: 0;
+      }
+      .card .ic {
+        margin-bottom: 10px;
+      }
+      pre {
+        background: #0b0b0c;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        overflow-x: auto;
+        font:
+          13.5px/1.6 'IBM Plex Mono',
+          monospace;
+        color: #e8e2cf;
+        margin: 0;
+      }
+      pre .c {
+        color: #6f7682;
+      }
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      .tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .tools code {
+        background: #1a1608;
+        color: var(--gold-hi);
+        border: 1px solid #f5b80044;
+        border-radius: 8px;
+        padding: 4px 9px;
+        font:
+          13px 'IBM Plex Mono',
+          monospace;
+      }
+      .colours {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        margin-top: 16px;
+      }
+      .colours div {
+        text-align: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      footer {
+        padding: 40px 0 60px;
+        color: var(--muted);
+        font-size: 14px;
+        border-top: 1px solid var(--line);
+      }
+      .hero > *,
+      .two > *,
+      .grid > * {
+        min-width: 0;
+      }
+      @media (max-width: 820px) {
+        .hero,
+        .two {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .parade .g {
+          animation: none;
+        }
+        .ga,
+        .gl {
+          animation: none !important;
+          opacity: 1 !important;
+        }
+        .gb,
+        .gr {
+          animation: none !important;
+          opacity: 0 !important;
+        }
+      }
+      .ga,
+      .gl {
+        animation: on 0.5s steps(1, end) infinite;
+      }
+      .gb,
+      .gr {
+        animation: off 0.5s steps(1, end) infinite;
+      }
+      .gl,
+      .gr {
+        animation-duration: 1.6s;
+      }
+      @keyframes on {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+      @keyframes off {
+        0% {
+          opacity: 0;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+          .side{background:#0b0b0c;border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 30px 80px #000a;font-size:14px}
+      .side h4{font:600 11px 'Space Grotesk',sans-serif;letter-spacing:.12em;color:#7d8490;margin:12px 6px 4px;text-transform:uppercase}
+      .side div.i{padding:5px 8px;border-radius:8px;color:#d7dbe2}
+      .side .on{background:var(--gold);color:#1a1300;font-weight:700}
+      .side .ask{display:flex;justify-content:space-between;background:#17191e;border-radius:10px;padding:8px 10px;color:var(--muted);margin-bottom:6px}
+      kbd{font:12px 'IBM Plex Mono',monospace;border:1px solid #ffffff30;border-radius:5px;padding:1px 6px;color:var(--fg)}
+      ol.steps{margin:0;padding-left:1.2em}ol.steps li{margin-bottom:8px}
+      @media (max-width:420px){.brand{font-size:17px}header.bar .cta{padding:8px 14px;font-size:14px}}
+      .links{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="bar">
+        <a class="brand" href="https://bwalletx.com"><img src="/icons/icon48.png" alt="" width="28" height="28" /><span>bWallet<b>X</b> Desktop</span></a>
+        <a class="cta" href="/">Open Desktop</a>
+      </header>
+      <div class="hero">
+        <div>
+          <h1>Your whole wallet <em>on one big screen.</em></h1>
+          <p class="lede">
+            bWalletX Desktop is the full bWalletX wallet laid out for a computer at desktop.bwalletx.com. Everything sits
+            in one sidebar: your money, your messages and your apps, side by side.
+          </p>
+          <p class="links"><a class="cta" href="/">Open Desktop</a> <a href="https://bwalletx.com/get">Get the phone apps</a> <a href="https://web.bwalletx.com">Web wallet</a></p>
+        </div>
+        <div class="side" aria-label="The Desktop sidebar">
+          <div class="ask"><span>Ask b to do something…</span><kbd>⌘K</kbd></div>
+          <h4>Money</h4><div class="i on">Wallet</div><div class="i">NFTs</div><div class="i">Friends</div><div class="i">Tickets</div><div class="i">Credits</div><div class="i">Exchange</div><div class="i">Lock BSV</div>
+          <h4>Talk</h4><div class="i">bMail</div><div class="i">Chat</div><div class="i">Calls</div><div class="i">People</div><div class="i">Spaces</div>
+          <h4>Discover</h4><div class="i">Feed</div><div class="i">Media</div><div class="i">bApps</div><div class="i">Games</div><div class="i">b agent</div>
+        </div>
+      </div>
+    </div>
+
+    <section>
+      <div class="wrap">
+        <h2>What's in the sidebar</h2>
+        <div class="grid">
+          <div class="card"><h3>Money</h3><p class="muted">Wallet, NFTs, Friends, Tickets, Credits, Exchange and Lock BSV.</p></div>
+          <div class="card"><h3>Talk</h3><p class="muted">bMail, Chat, Calls, People and Spaces.</p></div>
+          <div class="card"><h3>Discover</h3><p class="muted">Feed, Media, bApps, Games and the b agent.</p></div>
+          <div class="card"><h3>Settings and tools</h3><p class="muted">Settings, Tools, Add agent account, and Connect CLI &amp; MCP for the bWalletX command line and AI agents.</p></div>
+        </div>
+        <p class="muted" style="margin-top:18px">Press <kbd>⌘K</kbd> (Ctrl+K on Windows) to ask b to do something. Press <kbd>⌘L</kbd> to lock the wallet.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap two">
+        <div>
+          <h2>Install it as an app</h2>
+          <p class="muted">Installed, it gets its own window and dock or taskbar icon. Nothing to download from a store.</p>
+        </div>
+        <ol class="steps">
+          <li><b>Chrome or Edge:</b> open desktop.bwalletx.com and click <b>Install app</b> at the top, or the install icon in the address bar.</li>
+          <li><b>Safari on Mac:</b> choose File › Add to Dock.</li>
+          <li>Open bWalletX Desktop from your dock or app launcher like any other app.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Your keys stay in this browser</h2>
+        <p class="muted">
+          Your keys are kept encrypted in this browser on this computer. desktop.bwalletx.com is a separate site from
+          web.bwalletx.com, so a wallet you made there or on another device does not appear here by itself: restore it
+          with its recovery phrase. Keep your recovery phrase safe and offline.
+        </p>
+        <p class="links"><a class="cta" href="/">Open Desktop</a> <a href="https://bwalletx.com/get">Get the phone apps</a> <a href="https://web.bwalletx.com">Web wallet</a></p>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">Questions: <a href="mailto:support@bwalletx.com">support@bwalletx.com</a></div>
+    </footer>
+  </body>
+</html>
