@@ -48,7 +48,6 @@ import { useBMail } from './useBMail';
 import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 
-const CARD = '#17191E';
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
@@ -112,10 +111,17 @@ const chipsFor = (r: Received, rate: number, friend: boolean): { kind: StampKind
   return out;
 };
 
+/** Reader stamp: a postage stamp (perforated edge, .bw-mail-stamp) in the stamp kind's colour. */
+const PostStamp = ({ kind, text }: { kind: StampKind; text?: string }) => (
+  <span className="bw-mail-stamp" style={{ color: CHIP[kind].color }}>
+    <span>{text ?? CHIP[kind].label}</span>
+  </span>
+);
+
 const Stamp = ({ r, rate }: { r: Received; rate: number }) => (
-  <div className="flex flex-wrap gap-1">
+  <div className="flex flex-wrap gap-2 pt-1">
     {chipsFor(r, rate, false).map((c) => (
-      <Chip key={c.kind} kind={c.kind} text={c.text} />
+      <PostStamp key={c.kind} kind={c.kind} text={c.text} />
     ))}
   </div>
 );
@@ -161,8 +167,7 @@ const Row = ({
   <button
     type="button"
     onClick={onOpen}
-    className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left"
-    style={{ background: CARD, border: bold ? `1px solid ${GOLD}40` : '1px solid transparent' }}
+    className={`bw-mail-card flex w-full items-start gap-3 px-3 py-3 text-left${bold ? ' is-unread' : ''}`}
   >
     {avatar}
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -297,10 +302,10 @@ const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
 
 const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) => (
   <div className="flex flex-col gap-3">
-    <div className="rounded-xl p-3 text-xs" style={{ background: '#22252c', color: MUTED }}>
+    <div className="bw-mail-seg rounded-xl p-3 text-xs" style={{ color: MUTED }}>
       Example: this shows what a bMail looks like. It is not real mail, so nothing here can be paid, signed or answered.
     </div>
-    <div className="flex items-center gap-3 rounded-xl p-3" style={{ background: CARD }}>
+    <div className="bw-mail-card flex items-center gap-3 p-4">
       <Avatar label={e.name} color={e.color} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-sm font-semibold text-white">{e.name}</span>
@@ -322,13 +327,13 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         </span>
       </div>
     </div>
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-2">
       {e.stamps.map((k) => (
-        <Chip key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
+        <PostStamp key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
       ))}
     </div>
     {(totalCents(e) > 0 || e.invoiceCents) && (
-      <div className="rounded-xl p-3 flex flex-col gap-1 text-xs" style={{ background: CARD }}>
+      <div className="bw-mail-card p-3 flex flex-col gap-1 text-xs">
         <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
           Money in this mail
         </div>
@@ -353,7 +358,7 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
       </div>
     )}
     {!!e.tokens?.length && (
-      <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
+      <div className="bw-mail-card p-3 flex flex-col gap-2">
         <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
           Tokens attached
         </div>
@@ -370,9 +375,9 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         ))}
       </div>
     )}
-    <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
-      <div className="text-base font-bold text-white">{e.subject}</div>
-      <div className="text-sm text-white whitespace-pre-wrap break-words">{e.body}</div>
+    <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
+      <div className="text-lg font-bold text-white">{e.subject}</div>
+      <div className="bw-mail-body whitespace-pre-wrap break-words">{e.body}</div>
       {e.token && <TokenFacts t={e.token} />}
     </div>
     {e.action && (
@@ -414,7 +419,7 @@ const Reader = ({
   const credit = !!r.env.replyPaidSats && r.verifiedSats > 0 && !creditUsed;
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl p-3 flex flex-col gap-1" style={{ background: CARD }}>
+      <div className="bw-mail-card p-4 flex flex-col gap-1.5">
         <div className="text-sm text-white font-semibold">From {label}</div>
         <div className="text-[11px] break-all" style={{ color: MUTED }}>
           {r.from}
@@ -432,9 +437,9 @@ const Reader = ({
           {busy ? 'Opening…' : 'Open'}
         </button>
       ) : (
-        <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
-          <div className="text-base font-bold text-white">{mail.subject || '(no subject)'}</div>
-          <div className="text-sm text-white whitespace-pre-wrap break-words">{mail.body}</div>
+        <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
+          <div className="text-lg font-bold text-white">{mail.subject || '(no subject)'}</div>
+          <div className="bw-mail-body whitespace-pre-wrap break-words">{mail.body}</div>
         </div>
       )}
       {err && <p className="text-xs text-[#F97066] m-0">{err}</p>}
@@ -588,7 +593,7 @@ const Compose = ({
           Reply paid: include their return postage ({money(myPriceSats, rate)}) so answering costs them nothing
         </label>
       )}
-      <div className="rounded-xl p-3 text-xs" style={{ background: CARD, color: '#fff' }}>
+      <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(10,10,11,0.72)', color: '#fff' }}>
         {peer
           ? `${peer.label} · price to reach: ${money(priceSats, rate)}`
           : 'Price to reach: Penny post (1¢) unless they set one'}
@@ -716,7 +721,7 @@ const useNames = (keys: string[], sent: Sent[]) => {
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 const Empty = ({ title, text }: { title: string; text: string }) => (
-  <div className="flex flex-col items-center gap-2 rounded-xl px-6 py-8 text-center" style={{ background: CARD }}>
+  <div className="bw-mail-card flex flex-col items-center gap-2 px-6 py-8 text-center">
     <Mailbox size={28} color={GOLD} />
     <div className="text-sm font-bold text-white">{title}</div>
     <div className="text-xs leading-relaxed" style={{ color: MUTED }}>
@@ -835,8 +840,8 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const inFrameSub = !draft && !!(reading || settings || example);
   const subHeader = (top: string) => (
     <div
-      className="sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
-      style={{ background: '#0d0e11', paddingTop: top }}
+      className="bw-mail-bar sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
+      style={{ paddingTop: top }}
     >
       <button type="button" aria-label="Back" onClick={back} className={roundBtn} style={RING_STYLE}>
         <ChevronLeft size={22} color="#fff" />
@@ -850,7 +855,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     <div
       ref={scroller}
       className="relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto"
-      style={{ background: '#0d0e11', overscrollBehaviorY: 'contain' }}
+      style={{ overscrollBehaviorY: 'contain' }}
       onTouchStart={inFrameSub ? edge.start : undefined}
       onTouchEnd={inFrameSub ? edge.end : undefined}
     >
@@ -882,8 +887,8 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         subHeader('8px')
       ) : (
         <div
-          className="sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
-          style={{ background: '#0d0e11', paddingTop: 8 }}
+          className="bw-mail-bar sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
+          style={{ paddingTop: 8 }}
         >
           <Mailbox size={18} color={GOLD} />
           <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
@@ -937,14 +942,13 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         {!inFrameSub && (
           <>
             <div
-              className="flex items-center gap-3 rounded-2xl px-4 py-3"
-              style={{ background: `linear-gradient(135deg, ${GOLD}26, ${CARD})`, border: `1px solid ${GOLD}33` }}
+              className="bw-mail-card bw-mail-hero flex items-center gap-3 px-4 py-4"
             >
               <div className="flex flex-1 flex-col">
                 <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
                   {inView ? 'In view' : 'Postage received this week'}
                 </span>
-                <span className="text-xl font-bold" style={{ color: GOLD }}>
+                <span className="text-2xl font-bold tabular-nums leading-tight" style={{ color: GOLD }}>
                   {inView ? `${fmtCents(Math.round(inView.usd * 100))} in postage this week` : money(week.sats, m.rate)}
                 </span>
                 <span className="text-[11px]" style={{ color: MUTED }}>
@@ -982,7 +986,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             </div>
             {tab !== 'sent' && (
               <>
-                <div className="flex rounded-xl p-0.5" style={{ background: CARD }}>
+                <div className="bw-mail-seg flex rounded-xl p-0.5">
                   {(
                     [
                       ['paid', 'Most paid'],
