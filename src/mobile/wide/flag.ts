@@ -20,5 +20,5 @@ if (WIDE_ON) document.documentElement.classList.add('ww-on', 'ww-onb');
 
 /** Window events the wide shell sends to TopNav, which owns the account drawer and the scan / pairing sheets. */
 export const WW_OPEN = 'ww:open';
-export type WwOpen = 'drawer' | 'scan' | 'pair' | 'tools' | 'accounts' | 'agents';
+export type WwOpen = 'drawer' | 'scan' | 'pair' | 'tools' | 'accounts' | 'agents' | 'add-agent';
 export const wwOpen = (what: WwOpen) => window.dispatchEvent(new CustomEvent<WwOpen>(WW_OPEN, { detail: what }));

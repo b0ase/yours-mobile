@@ -316,7 +316,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const bottom: Item[] = [
     { id: 'settings', label: 'Settings', icon: I.settings, select: 'settings' },
     { id: 'tools', label: 'Tools', icon: I.tools, select: 'tools' },
-    { id: 'connect', label: 'Connect a site / CLI', icon: I.link, act: () => wwOpen('tools') },
+    { id: 'addagent', label: 'Add agent account', icon: I.agent, act: () => wwOpen('add-agent') },
+    { id: 'connect', label: 'Connect CLI & MCP', icon: I.link, act: () => wwOpen('tools') },
     { id: 'lockapp', label: 'Lock wallet (⌘L)', icon: I.lock, act: () => void lockWallet() },
   ];
   const isOn = (it: Item) =>

@@ -13,7 +13,7 @@ import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, ChevronRight, Lock, LogOut, Menu, Phone, Play, Plus, ScanLine, Settings, Users, X } from 'lucide-react';
+import { Bot, ChevronRight, Lock, LogOut, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, Users, X } from 'lucide-react';
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { startAgentCreate } from '../agents/agentCreate';
@@ -127,6 +127,10 @@ const TopNavBar = () => {
       else if (w === 'scan') openScan();
       else if (w === 'pair') setPairOpen(true);
       else if (w === 'tools') setToolsOpen(true);
+      else if (w === 'add-agent') {
+        startAgentCreate();
+        go('create-account');
+      }
       else setSheet(w);
     };
     window.addEventListener(WW_OPEN, on);
@@ -344,10 +348,20 @@ const TopNavBar = () => {
                     () => setSheet('accounts'),
                     true,
                   )}
-                {!inline.more && action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
               </div>
               <div className="border-t border-white/5 px-2 pt-2">
-                {showAgents &&
+                {/* Owner, 9 Oct 2026: agents get their own rows up here; Add account goes back down. bWalletX only. */}
+                {X_MARK &&
+                  action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
+                    startAgentCreate();
+                    go('create-account');
+                  })}
+                {X_MARK &&
+                  action(<Terminal size={16} color="#fff" />, 'Connect CLI & MCP', () => {
+                    setDrawer(false);
+                    setToolsOpen(true);
+                  })}
+                {showAgents && agents.length > 0 &&
                   action(<Bot size={16} color="#fff" />, `Agents (${agents.length})`, () => setSheet('agents'), true)}
                 {/* Store builds have no agent tools: pairing stays a menu row, as before. */}
                 {!X_MARK &&
@@ -355,6 +369,7 @@ const TopNavBar = () => {
                     setDrawer(false);
                     openScan();
                   })}
+                {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {/* Settings is the most important item in this section (owner, 8 Oct 2026). */}
                 <button
                   type="button"
