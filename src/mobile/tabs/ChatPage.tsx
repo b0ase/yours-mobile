@@ -295,9 +295,10 @@ const errText = (e: unknown) => {
   if (!/failed to fetch|load failed|networkerror|network request failed/i.test(msg)) return msg;
   console.warn('[chat]', e);
   const host = typeof location === 'undefined' ? '' : location.hostname;
-  return /^(web|www)\.bwalletx\.com$|^bwalletx\.com$/.test(host) || !host.includes('.')
-    ? "Can't reach chat right now. Check your connection and try again."
-    : `Chat isn't available on ${host} yet. Use web.bwalletx.com or the bWalletX app to chat.`;
+  // Test and preview addresses (beta.*, *.vercel.app) aren't on bChat's allowed origins yet.
+  return /^beta\.|\.vercel\.app$/.test(host)
+    ? `Chat isn't available on ${host} yet. Use the ${APP_NAME} app or its main web address to chat.`
+    : "Can't reach chat right now. Check your connection and try again.";
 };
 
 // ───────────────────────────── Conversation ─────────────────────────────
