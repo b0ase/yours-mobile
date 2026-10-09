@@ -120,6 +120,29 @@ Rules:
 - **Utility only.** Token allocations in bMail are for utility tokens (access, credits, tickets, rewards for work). Anything share-like (DocToken / $403, KYC-gated instruments) is **out of bMail's scope** and stays in bit-sign's own flow; bMail may only deliver a link to it. Copy never says "investment", "returns", "equity" or "yield".
 - The canonical-hash question (rendered HTML vs PDF) is bit-sign's to settle (SIGN-AND-SEAL-PLAN Q1); bMail uses whatever `canonical` the manifest declares.
 
+## 4a. Signed, sealed, delivered, accepted (owner, 9 Oct)
+
+`.nds.html` (bit-sign's document standard, `NPG-DOCUMENT-STANDARD.md`, `nds.ts`) becomes a **native bMail
+attachment kind**, so anyone can sign for something with a finger-drawn signature without leaving bWalletX.
+The `b` agent drafts the contract.
+
+The lifecycle, one mail thread:
+
+| Step | Who | What happens |
+|---|---|---|
+| **Drafted** | Sender + `b` | In Compose, "Ask b to draft": b writes the `.nds.html` (terms, parties by $handle, amounts, dates, signature fields) from a plain request ("an NDA with $alice", "a £200 logo job, half up front"). The sender edits it in place. |
+| **Signed** | Sender | The sender draws their signature (bit-sign's `SovereignSignature` pad, brought into the wallet) and the wallet signs the document hash with the sender's identity key. |
+| **Sealed** | Wallet | The document is BRC-2 encrypted to the recipient, its hash goes on chain with the stamp (§3), so the content is fixed before it is opened. |
+| **Delivered** | bMail | Sent **Signed delivery** (§6a), so opening produces a receipt: who opened it, when, at what identity level. |
+| **Accepted** | Recipient | One sheet: read the document, draw a signature (or click-to-accept for simple terms), and the wallet signs the same hash. Any payment on signing (deposit, first instalment) goes in the **same transaction** as the acceptance. |
+| **Countersigned copy** | Both | Both signatures + the on-chain hashes make the final copy; it is filed in both parties' bit-sign vaults and threaded in bMail. Declines and deadlines (§6a) are recorded the same way. |
+
+Notes:
+- The drawn signature is the human mark; the key signature is the proof. Both are stored with the document.
+- Required identity level per field (e.g. "signer must be level 3") comes from the document and is checked on accept.
+- b drafts, never signs. Every signature is a person's tap.
+- Wording stays utility: agreements, deposits, payments; anything share-like stays in bit-sign / $403.
+
 ## 5. Permissions in mail
 
 - **Approval** mail: one question, two buttons (Approve / Decline), each an identity-key signature over `messageId ‖ choice`. For sign-offs, access requests ("$bob asks to join room X"), and later bit-sign spend-policy approvals.
@@ -194,6 +217,7 @@ How bCorp sells them, in two steps:
 | B1 | Sealed mail (BRC-2), signed envelopes, Open / Reply / Block, friends list, Sent › Receipts | next |
 | B2 | **Pay to open**: lock + 14-day refund, signed delivery (identity level on the receipt), "Opened at…" in Sent; deadline mail refunds return stamps when the deadline passes | after B1 |
 | B3 | **Contracts from bit-sign**: .nds.html in mail, click-wrap accept, drawn signature, Sign and seal from bWalletX, return to sender, void | after bit-sign Sign and seal lands |
+| B3a | `.nds.html` as a native attachment; finger-drawn signature pad in the wallet; "Ask b to draft" in Compose; signed → sealed → delivered → accepted thread (§4a) | with B3 |
 | B4 | **Payment on signing**; invoices and receipts as kinds | — |
 | B5 | **Escrow / time locks** in contracts (shared builder with B2; ESCROW-DESIGN models) | needs the bit-sign escrow review |
 | B6 | **Token allocations** (utility) with optional vesting locks; approvals and access grants | — |
