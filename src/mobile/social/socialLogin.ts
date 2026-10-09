@@ -154,9 +154,16 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
 
 const RETURN = 'https://www.bwallet.space/social';
 // Web wallet origins the sign-in server returns to (exact list; the server maps the key, never a caller URL).
-const WEB_RETURNS = { web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/' } as const;
-const webReturnKey = (): keyof typeof WEB_RETURNS =>
-  typeof location !== 'undefined' && location.origin === 'https://beta.bwalletx.com' ? 'beta' : 'web';
+const WEB_RETURNS = {
+  web: 'https://web.bwalletx.com/',
+  beta: 'https://beta.bwalletx.com/',
+  desktop: 'https://desktop.bwalletx.com/',
+} as const;
+const webReturnKey = (): keyof typeof WEB_RETURNS => {
+  if (typeof location === 'undefined') return 'web';
+  const key = (Object.keys(WEB_RETURNS) as (keyof typeof WEB_RETURNS)[]).find((k) => WEB_RETURNS[k] === `${location.origin}/`);
+  return key ?? 'web';
+};
 const isWebReturn = (url: string) => Object.values(WEB_RETURNS).some((r) => url.startsWith(r));
 const isReturn = (url: string) =>
   url.startsWith(RETURN) ||
