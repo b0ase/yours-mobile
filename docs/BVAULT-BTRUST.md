@@ -222,21 +222,36 @@ in their real will. (Same caution as bit-sign: published is not audited.)
 | False death claim | A release needs: missed check-in **and** grace period **and** k of n trustee confirmations. Any check-in cancels |
 | Trustee collusion | Threshold > 1 and owner reminders throughout grace; trustees can only release what the owner chose to the people the owner chose, never to themselves unless named |
 | Coercion ("unlock your vault") | Out of scope for crypto. Later: a decoy vault / duress PIN as an option. Plan copy is honest about this |
-| Seed phrases of other chains | Stored only as encrypted notes; the template warns that opening one exposes it. We never parse or use them |
+| Seed phrases / keys of other chains | Stored only as encrypted items; the template warns that opening one exposes it. We never use them. Balances come from the public address only |
+| Explorer lookups reveal holdings | User picks the provider, lookups from the device, several providers, balances can be turned off |
 | Malicious bApp page | The bApp never holds keys; every decrypt goes through the wallet's permission prompt keyed on origin |
 
-## 6. BTC and other chains
+## 6. BTC, Solana and other chains
 
-- **Yes:** encrypted backup notes for BTC/ETH/any seed or hardware wallet, and these can be released through
-  bTrust.
-- **No:** a live BTC (or other chain) wallet inside bVault. BSV first. A multi-chain wallet, if ever, is a
-  separate bApp later.
+Owner, 9 Oct: "A bVault can hold BTC keys, Solana keys etc. so you can still have crypto in the trust you hand
+down to your heirs.. and we can even read the balance for you.. but we don't have to handle it ourselves at all."
+
+- **Keys as encrypted items.** BTC, Solana, ETH (any chain) private keys and seed phrases are stored as
+  encrypted bVault items. We never use them to sign anything.
+- **Watch-only balance.** Per item the user may add the **public** address or xpub (stored separately from the
+  secret). bVault shows a read-only balance and history from public explorers. The secret is **never
+  decrypted to read a balance**; if no public address is given, no balance is shown.
+- **No send or sign for other chains.** We never build send/sign for them. A live multi-chain wallet, if ever,
+  is a separate bApp later.
+- **In bTrust:** these items can be released like any other. Heirs receive the encrypted key plus its
+  watch-only balance history, so they know what it is worth and which chain it is on.
+- **Risk: explorer privacy.** Looking up an address tells that API what you hold and links it to your IP. Let
+  the user choose the provider, rotate across several, query from the device (not our server), and allow
+  balances off.
+- **Wording:** "held in your vault", "watch-only balance". Never "custody", "we hold your BTC", or "wallet"
+  for these items.
 
 ## 7. Phases (smallest first)
 
 | Phase | What ships |
 |---|---|
 | **V1** | bVault: upload files, backup-note templates, list/search/view, export recovery file, inside bWalletX via the shell |
+| V1b | Other-chain key items + watch-only balance from the public address/xpub (BTC, Solana first) |
 | V2 | bMail "file to vault" Inbox; optional hash stamp; UHRP mirror |
 | V3 | bit-sign vault migration |
 | **T1** | bTrust: dead-man's switch releasing chosen bVault items to named people, with grace and k-of-n trustees |
