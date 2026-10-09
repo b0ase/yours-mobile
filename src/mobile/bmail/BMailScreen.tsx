@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
 import { showUndo, UndoToastHost } from '../swipe/undo';
-import { binDaysLeft, pinnedFirst } from './store';
+import { binDaysLeft } from './store';
 import { mailSegments } from './links';
 import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
@@ -71,6 +71,8 @@ import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
+/** Pinned letters: orange-gold border + pin icon. */
+const PIN = '#F79009';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 type Tab = 'inbox' | 'requests' | 'sent' | 'archive' | 'quarantine' | 'bin';
 type Draft = { to?: string; toLabel?: string; subject?: string; inReplyTo?: string; credit?: boolean };
@@ -191,13 +193,16 @@ const Row = ({
     type="button"
     onClick={onOpen}
     className={`bw-mail-card flex w-full items-start gap-3 px-3 py-3 text-left${bold ? ' is-unread' : ''}`}
+    // Pinned (owner, 9 Oct): an orange-gold border so a pinned letter stands out at the top of the list.
+    style={pinned ? { border: `1.5px solid ${PIN}`, boxShadow: `0 0 0 1px ${PIN}33` } : undefined}
+    data-pinned={pinned ? '' : undefined}
   >
     {avatar}
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <div className="flex items-center gap-1.5">
         {bold && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: GOLD }} />}
         <span className={`${ONE} text-sm text-white ${bold ? 'font-bold' : 'font-medium'}`}>{title}</span>
-        {pinned && <Pin size={12} color={GOLD} aria-label="Pinned" className="shrink-0" />}
+        {pinned && <Pin size={12} color={PIN} aria-label="Pinned" className="shrink-0" />}
         {tag && (
           <span
             className="shrink-0 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-[#2b2f36]"
@@ -280,6 +285,15 @@ const MailRow = ({
     onOpen={onOpen}
     pinned={!!r.pinned}
     amount={realAmount(r, rate, friend)}
+    extra={
+      // verifiedSats is only set once the postage is internalized into the wallet (client.ts verifyPostage), so the
+      // money is already mine: say so, so nobody keeps a letter around for the sake of its $0.03 (owner, 9 Oct).
+      r.verifiedSats > 0 ? (
+        <div className="mt-1 text-[10px] font-semibold" style={{ color: '#6CE9A6' }}>
+          +{money(r.verifiedSats, rate)} received · in your wallet
+        </div>
+      ) : undefined
+    }
   />
 );
 
@@ -830,6 +844,14 @@ export const BMailScreen = ({
   };
   // Android Back closes the open sub-view first (registered after bMail's own closer, so it pops first).
   useBackClose(!!sub, back);
+  // Bin (owner, 9 Oct): not a tab, a floating button bottom-right; Back returns to the tab it was opened from.
+  const [binFrom, setBinFrom] = useState<Tab>(initialTab === 'bin' ? 'inbox' : initialTab);
+  const openBin = () => {
+    if (tab !== 'bin') setBinFrom(tab);
+    setTab('bin');
+  };
+  const leaveBin = () => setTab(binFrom);
+  useBackClose(tab === 'bin' && !sub, leaveBin);
   const subTitle = draft
     ? draft.inReplyTo
       ? 'Reply'
@@ -871,9 +893,11 @@ export const BMailScreen = ({
   const [sort, setSort] = useState<SortMode>('paid');
   const [filter, setFilter] = useState<MailFilter>('all');
   const mode: SortMode = tab !== 'requests' && sort === 'spreading' ? 'paid' : sort;
-  const view = (box: 'inbox' | 'requests') => pinnedFirst(sortMail(filterMail(m.boxes[box], filter), mode, isContact));
-  // Swipe to organise (owner, 9 Oct): left tray Reply · Archive · Delete (full = Archive), right tray Read · Pin
-  // (full = toggle read); Spam / Block in the … menu. Every destructive action has Undo.
+  const group = (r: Received) => (r.pinned ? 0 : isPinned(r, isContact) ? 1 : 2);
+  // sortMail puts my pinned letters first (then friends, then the chosen sort) in every sort mode.
+  const view = (box: 'inbox' | 'requests') => sortMail(filterMail(m.boxes[box], filter), mode, isContact);
+  // Swipe to organise (owner, 9 Oct): left tray Reply · Archive · Delete (full = Archive), right tray Read · Pin ·
+  // Quarantine (full = toggle read); Spam / Block in the … menu. Every destructive action has Undo.
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const replyTo = (r: Received) => {
     if (r.opened)
@@ -888,11 +912,20 @@ export const BMailScreen = ({
     else setReading(r);
   };
   const undoable = (text: string, undo: () => void) => showUndo(text, undo);
+  // Paid letters: the postage was internalized into the wallet when the letter arrived (client.ts verifyPostage), so
+  // deleting or archiving it does not touch the money. The toast says so (owner, 9 Oct: "where did the money go?").
+  const keepsPostage = (ids: string[]) => {
+    const sats = m.state.received.filter((r) => ids.includes(r.id)).reduce((a, r) => a + Math.max(0, r.verifiedSats), 0);
+    return sats > 0 ? ` · the ${money(sats, m.rate)} postage stays in your wallet` : '';
+  };
   const archive = (ids: string[]) =>
-    undoable(ids.length > 1 ? `Archived ${ids.length}` : 'Archived', m.flag(ids, { archived: true }));
+    undoable(
+      `${ids.length > 1 ? `Archived ${ids.length}` : 'Archived'}${keepsPostage(ids)}`,
+      m.flag(ids, { archived: true }),
+    );
   const unarchive = (ids: string[]) => undoable('Moved to Inbox', m.flag(ids, { archived: false }));
   const remove = (ids: string[]) =>
-    undoable(ids.length > 1 ? `Deleted ${ids.length}` : 'Deleted', m.flag(ids, { deleted: true }));
+    undoable(`${ids.length > 1 ? `Deleted ${ids.length}` : 'Deleted'}${keepsPostage(ids)}`, m.flag(ids, { deleted: true }));
   const mailActions = (r: Received, inArchive: boolean) => {
     const left: SwipeAction[] = [
       { id: 'reply', label: 'Reply', icon: <Reply size={18} />, color: '#475467', onPress: () => replyTo(r) },
@@ -936,6 +969,16 @@ export const BMailScreen = ({
         icon: r.pinned ? <PinOff size={18} /> : <Pin size={18} />,
         color: '#B54708',
         onPress: () => void m.flag([r.id], { pinned: !r.pinned }),
+      },
+      {
+        id: 'quarantine',
+        label: 'Quarantine',
+        icon: <ShieldAlert size={18} />,
+        color: '#7A2E0E',
+        removes: true,
+        // Same as Spam: this letter goes to Quarantine and so does their future mail (Undo puts both back).
+        onPress: () =>
+          undoable(`Quarantined · future mail from ${nameOf(r.from)} goes to Quarantine${keepsPostage([r.id])}`, m.spam(r)),
       },
     ];
     const more: SwipeAction[] = [
@@ -1061,29 +1104,42 @@ export const BMailScreen = ({
           <span>Penny post</span>
         </div>
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-0.5">
-        {(
-          [
-            ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
-            ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
-            ['sent', 'Sent'],
-            ['archive', 'Archive'],
-            ['quarantine', `Quarantine${m.boxes.quarantine.length ? ` (${m.boxes.quarantine.length})` : ''}`],
-            ['bin', 'Bin'],
-          ] as const
-        ).map(([id, label]) => (
+      {tab === 'bin' ? (
+        <div className="flex items-center gap-2">
           <button
-            key={id}
             type="button"
-            aria-pressed={tab === id}
-            onClick={() => setTab(id)}
-            className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
-            style={tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }}
+            onClick={leaveBin}
+            className="flex min-h-[44px] items-center gap-1 rounded-xl px-3 text-sm font-semibold text-white"
+            style={{ border: '1px solid #2b2f36' }}
           >
-            {label}
+            <ChevronLeft size={16} /> Back
           </button>
-        ))}
-      </div>
+          <span className="text-base font-bold text-white">Bin</span>
+        </div>
+      ) : (
+        <div className="flex gap-2 overflow-x-auto pb-0.5">
+          {(
+            [
+              ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
+              ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
+              ['sent', 'Sent'],
+              ['archive', 'Archive'],
+              ['quarantine', `Quarantine${m.boxes.quarantine.length ? ` (${m.boxes.quarantine.length})` : ''}`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={tab === id}
+              onClick={() => setTab(id)}
+              className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
+              style={tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {(tab === 'inbox' || tab === 'requests') && (
         <>
           <div className="bw-mail-seg flex rounded-xl p-0.5">
@@ -1132,14 +1188,12 @@ export const BMailScreen = ({
         <>
           {view('inbox').map((r, i, all) => (
             <div key={r.id} className="flex flex-col gap-1">
-              {i === 0 && isPinned(r, isContact) && (
-                <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: '#6CE9A6' }}>
-                  Friends
-                </span>
-              )}
-              {i > 0 && !isPinned(r, isContact) && isPinned(all[i - 1], isContact) && (
-                <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: MUTED }}>
-                  Everyone else
+              {(i === 0 ? group(r) < 2 : group(all[i - 1]) !== group(r)) && (
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-wide px-1"
+                  style={{ color: ['#F79009', '#6CE9A6', MUTED][group(r)] }}
+                >
+                  {['Pinned', 'Friends', 'Everyone else'][group(r)]}
                 </span>
               )}
               {swipeMail(
@@ -1247,6 +1301,12 @@ export const BMailScreen = ({
             stays sealed until you open it. Quarantined tokens are not in your balance and are never spent with your own
             coins. Nothing here is burned or moved.
           </p>
+          {!m.boxes.quarantine.length && (
+            <Empty
+              title="Quarantine is empty"
+              text="Swipe a letter right and tap Quarantine (or use … › Spam or Block): that letter and their future mail land here, sealed. Token airdrops from senders you haven't accepted wait here too, out of your balance."
+            />
+          )}
           {m.boxes.quarantine.map((r) => (
             <div key={r.id} className="flex flex-col gap-1">
               <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
@@ -1377,6 +1437,32 @@ export const BMailScreen = ({
       )}
     </div>
   );
+  // Phone: fixed above the bottom dock (+ safe area). Wide: sticks to the bottom-right of the list pane.
+  const binButton = (pinnedTo: 'dock' | 'pane') =>
+    tab !== 'bin' && (
+      <button
+        type="button"
+        onClick={openBin}
+        aria-label={m.boxes.bin.length ? `Bin, ${m.boxes.bin.length} letters` : 'Bin'}
+        title="Bin"
+        className={`${pinnedTo === 'dock' ? 'fixed right-4' : 'sticky bottom-4 mr-4 self-end'} z-20 flex h-12 w-12 shrink-0 items-center justify-center rounded-full shadow-xl`}
+        style={{
+          ...(pinnedTo === 'dock' ? { bottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--dock-h, 3.75rem) + 16px)' } : {}),
+          background: '#1d2025',
+          border: '1px solid #2b2f36',
+        }}
+      >
+        <Trash2 size={20} color="#fff" />
+        {m.boxes.bin.length > 0 && (
+          <span
+            className="absolute -right-1 -top-1 min-w-[20px] rounded-full px-1 text-center text-[11px] font-bold leading-5"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
+            {m.boxes.bin.length > 99 ? '99+' : m.boxes.bin.length}
+          </span>
+        )}
+      </button>
+    );
   if (wide)
     return (
       <div
@@ -1396,6 +1482,7 @@ export const BMailScreen = ({
           >
             {list}
           </div>
+          {binButton('pane')}
         </div>
         <div className="relative flex min-h-0 flex-col overflow-y-auto">
           {draft || sub ? (
@@ -1486,6 +1573,7 @@ export const BMailScreen = ({
         </div>
       )}
       <UndoToastHost />
+      {!inFrameSub && !draft && binButton('dock')}
       <div
         className={`flex flex-col gap-2 px-4 pb-24${sel.length ? ' bw-swipe-selecting' : ''}`}
         onKeyDown={inFrameSub ? undefined : listKeys}

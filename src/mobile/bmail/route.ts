@@ -79,17 +79,24 @@ export const isPinned = (m: MailMeta, isFriend: (key: string) => boolean): boole
   isFriend(m.from) || !!m.replyCredit;
 
 /**
- * Sort real mail. Friends (and reply-paid replies) are always pinned in a group on top; both groups follow the chosen sort. Most paid = verified postage highest first (ties newest); Newest = time only. "Friends" is a filter:
- * only pinned mail. Spreading needs token holder/forward counts real mail does not carry yet, so it falls back to
- * newest. TODO(bmail tokens): rank by holders/forwards once envelopes carry token outputs.
+ * Sort real mail. Letters I pinned (swipe → Pin) come first, then friends (and reply-paid replies) in a group, then
+ * everyone else; every group follows the chosen sort. Most paid = verified postage highest first (ties newest);
+ * Newest = time only. "Friends" is a filter: only my pins and friends. Spreading needs token holder/forward counts
+ * real mail does not carry yet, so it falls back to newest. TODO(bmail tokens): rank by holders/forwards.
  */
-export const sortMail = <T extends MailMeta>(mail: T[], mode: SortMode, isFriend: (key: string) => boolean): T[] => {
+export const sortMail = <T extends MailMeta & { pinned?: boolean }>(
+  mail: T[],
+  mode: SortMode,
+  isFriend: (key: string) => boolean,
+): T[] => {
   // The amount the row shows (verified postage, reply-paid included): Most paid sorts by exactly that.
   const by = mode === 'paid' ? (a: T, b: T) => shownSats(b) - shownSats(a) || b.at - a.at : (a: T, b: T) => b.at - a.at;
-  const pinned = mail.filter((m) => isPinned(m, isFriend)).sort(by);
-  if (mode === 'friends') return pinned.sort((a, b) => b.at - a.at);
-  const rest = mail.filter((m) => !isPinned(m, isFriend)).sort(by);
-  return [...pinned, ...rest];
+  const byTime = (a: T, b: T) => b.at - a.at;
+  const mine = mail.filter((m) => m.pinned).sort(mode === 'friends' ? byTime : by);
+  const friends = mail.filter((m) => !m.pinned && isPinned(m, isFriend)).sort(mode === 'friends' ? byTime : by);
+  if (mode === 'friends') return [...mine, ...friends];
+  const rest = mail.filter((m) => !m.pinned && !isPinned(m, isFriend)).sort(by);
+  return [...mine, ...friends, ...rest];
 };
 
 /**

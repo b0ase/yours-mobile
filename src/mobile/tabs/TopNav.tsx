@@ -310,8 +310,13 @@ const TopNavBar = () => {
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', stiffness: 420, damping: 40 }}
-              className="absolute left-0 top-0 bottom-0 w-[82%] max-w-[340px] flex flex-col bg-[#101114] border-r border-white/5"
-              style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+              className="absolute left-0 top-0 w-[82%] max-w-[340px] flex flex-col bg-[#101114] border-r border-white/5"
+              // Owner, 9 Oct 2026: Settings and Sign out were hidden behind the bottom dock. The panel ends above the
+              // dock (its height + the safe-area inset), the account list scrolls and the bottom group stays visible.
+              style={{
+                paddingTop: 'env(safe-area-inset-top)',
+                bottom: 'calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom, 0px))',
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-4 h-14">
@@ -330,7 +335,7 @@ const TopNavBar = () => {
                   setHandleOpen(true);
                 }}
               />
-              <div className="flex-1 overflow-y-auto px-2" role="listbox" aria-label="Accounts">
+              <div className="min-h-0 flex-1 overflow-y-auto px-2" role="listbox" aria-label="Accounts">
                 {listed.map((a) => (
                   <AccountRow
                     key={a.id}
@@ -357,7 +362,7 @@ const TopNavBar = () => {
                   />
                 ))}
               </div>
-              <div className="border-t border-white/5 px-2 pt-2">
+              <div className="shrink-0 border-t border-white/5 px-2 pt-2 pb-2">
                 {/* Owner, 9 Oct 2026: Add account, Add agent account, Connect CLI & MCP, then Settings. */}
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {X_MARK &&
