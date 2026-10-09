@@ -1067,17 +1067,60 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         subHeader('8px')
       ) : (
         <div className="bw-mail-bar sticky top-0 z-10 flex items-center gap-1 px-3 pb-2" style={{ paddingTop: 8 }}>
-          <Mailbox size={18} color={GOLD} />
-          <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
-          <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
-            <PenSquare size={16} color={MUTED} />
-          </button>
-          <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
-            <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
-          </button>
-          <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
-            <Settings size={16} color={MUTED} />
-          </button>
+          {/* Ticking mail turns this row into the selection bar (owner, 9 Oct 2026), like Mail. */}
+          {sel.length > 0 ? (
+            <div
+              className="flex flex-1 items-center gap-2 text-sm text-white"
+              role="toolbar"
+              aria-label="Selected mail"
+            >
+              <span className="flex-1">{sel.length} selected</span>
+              <button
+                type="button"
+                className="min-h-[40px] rounded-lg px-3 font-semibold"
+                style={{ background: '#12B76A' }}
+                onClick={() => {
+                  (tab === 'archive' ? unarchive : archive)(sel);
+                  setSelected(new Set());
+                }}
+              >
+                {tab === 'archive' ? 'Move to Inbox' : 'Archive'}
+              </button>
+              <button
+                type="button"
+                className="min-h-[40px] rounded-lg px-3 font-semibold"
+                style={{ background: '#D92D20' }}
+                onClick={() => {
+                  remove(sel);
+                  setSelected(new Set());
+                }}
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                className="min-h-[40px] px-2"
+                style={{ color: MUTED }}
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </button>
+            </div>
+          ) : (
+            <>
+              <Mailbox size={18} color={GOLD} />
+              <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
+              <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
+                <PenSquare size={16} color={MUTED} />
+              </button>
+              <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
+                <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
+              </button>
+              <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
+                <Settings size={16} color={MUTED} />
+              </button>
+            </>
+          )}
         </div>
       )}
       {ptrShow && (
@@ -1101,45 +1144,6 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         className={`flex flex-col gap-2 px-4 pb-24${sel.length ? ' bw-swipe-selecting' : ''}`}
         onKeyDown={inFrameSub ? undefined : listKeys}
       >
-        {!inFrameSub && sel.length > 0 && (
-          <div
-            className="bw-mail-card sticky top-14 z-10 flex items-center gap-2 px-3 py-2 text-sm text-white"
-            role="toolbar"
-            aria-label="Selected mail"
-          >
-            <span className="flex-1">{sel.length} selected</span>
-            <button
-              type="button"
-              className="min-h-[40px] rounded-lg px-3 font-semibold"
-              style={{ background: '#12B76A' }}
-              onClick={() => {
-                (tab === 'archive' ? unarchive : archive)(sel);
-                setSelected(new Set());
-              }}
-            >
-              {tab === 'archive' ? 'Move to Inbox' : 'Archive'}
-            </button>
-            <button
-              type="button"
-              className="min-h-[40px] rounded-lg px-3 font-semibold"
-              style={{ background: '#D92D20' }}
-              onClick={() => {
-                remove(sel);
-                setSelected(new Set());
-              }}
-            >
-              Delete
-            </button>
-            <button
-              type="button"
-              className="min-h-[40px] px-2"
-              style={{ color: MUTED }}
-              onClick={() => setSelected(new Set())}
-            >
-              Clear
-            </button>
-          </div>
-        )}
         {settings ? (
           <>
             <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
