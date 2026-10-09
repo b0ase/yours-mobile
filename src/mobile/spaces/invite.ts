@@ -2,7 +2,9 @@
  * Space pages, room pages and invite links (docs/BSPACES-PLAN.md, "Invite links and tickets"), the
  * pure half: which URLs open what, and the shapes of bit-sign's public reads.
  *
- *   Space page (permanent)  https://<host>/s/<slug>    bwalletx://space/<slug>
+ *   Named Space (permanent) https://<host>/s/<ticker>  → the room, where its live Space docks
+ *   Space episode           https://<host>/s/<ticker>/<slug>
+ *   Space page (old/private) https://<host>/s/<slug>   bwalletx://space/<slug>
  *   Invite (ephemeral)      https://<host>/i/<code>    bwalletx://invite/<code>
  *   Room page (permanent)   https://<host>/r/<ticker>  bwalletx://room/<ticker>[?buy=1]
  *
@@ -36,6 +38,11 @@ export const parseAppLink = (url: string | null | undefined): AppLink | null => 
       kind = u.host;
       arg = u.pathname.replace(/^\/+|\/+$/g, '');
     } else if (u.protocol === 'https:' && WEB_HOSTS.has(u.host)) {
+      // Named Space episode: /s/<ticker>/<slug> opens that Space's page.
+      const ep = u.pathname.match(/^\/s\/([^/]+)\/([^/]+)\/?$/);
+      if (ep && isRoomTicker(decodeURIComponent(ep[1])) && isSpaceSlug(decodeURIComponent(ep[2]))) {
+        return { kind: 'space', slug: decodeURIComponent(ep[2]) };
+      }
       const m = u.pathname.match(/^\/([sir])\/([^/]+)\/?$/);
       if (!m) return null;
       kind = { s: 'space', i: 'invite', r: 'room' }[m[1]] ?? '';
@@ -43,6 +50,8 @@ export const parseAppLink = (url: string | null | undefined): AppLink | null => 
     } else return null;
     arg = decodeURIComponent(arg);
     if (kind === 'space' && isSpaceSlug(arg)) return { kind, slug: arg };
+    // Named Space (owner, 9 Oct 2026): /s/<ticker> is the room's permanent Space address → open the room.
+    if (kind === 'space' && u.protocol === 'https:' && isRoomTicker(arg)) return { kind: 'room', ticker: arg.toUpperCase(), buy: false };
     if (kind === 'invite' && isSpaceInviteCode(arg)) return { kind, code: arg };
     if (kind === 'room' && isRoomTicker(arg)) return { kind, ticker: arg, buy: u.searchParams.get('buy') === '1' };
     return null;

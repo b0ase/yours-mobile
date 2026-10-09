@@ -172,6 +172,7 @@ import { blockedHandles, onUgcChange } from '../ugc/ugc';
 import {
   browseList,
   byActivity,
+  loungeFirst,
   isOpenRoom,
   isStaff,
   openInfo,
@@ -2121,9 +2122,11 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    return list.sort(
+    const sorted = list.sort(
       (a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room),
     );
+    // The bWallet Lounge is pinned at the top (owner, 9 Oct 2026).
+    return loungeFirst(sorted, (x) => (x.kind === 'open' ? x.room.ticker : x.item.e.room?.ticker));
   }, [myOpen, tokenMine]);
 
   const openOpenRoom = (room: ChatRoom) => {

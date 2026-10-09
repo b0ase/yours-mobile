@@ -153,3 +153,20 @@ export const browseList = (rooms: PublicRoom[], mine: ReadonlySet<string>, query
 /** Drop messages from blocked handles (events stay, so the thread still makes sense). */
 export const withoutBlocked = (messages: ChatMessage[], blocked: ReadonlySet<string>): ChatMessage[] =>
   blocked.size ? messages.filter((m) => m.kind === 'event' || !blocked.has(norm(m.author_handle))) : messages;
+
+/**
+ * The bWallet Lounge is always on and pinned at the top of the chat list (owner, 9 Oct 2026).
+ * bit-sign seats every account in it on the first rooms read (lib/default-rooms), so it is
+ * joined by default; someone who left is simply not in the list. Stable: the rest keep order.
+ */
+export const PINNED_ROOM_TICKERS: readonly string[] = ['LOUNGE'];
+export const pinnedRank = (ticker: string | null | undefined): number => {
+  const i = PINNED_ROOM_TICKERS.indexOf((ticker ?? '').replace(/^\$/, '').toUpperCase());
+  return i < 0 ? PINNED_ROOM_TICKERS.length : i;
+};
+export function loungeFirst<T>(list: T[], tickerOf: (x: T) => string | null | undefined): T[] {
+  return list
+    .map((x, i) => ({ x, i, r: pinnedRank(tickerOf(x)) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((e) => e.x);
+}
