@@ -1226,6 +1226,9 @@ html.ww-on:root {
   --wallet-height: 100vh;
   --dock-h: 0px;
   --account-strip-height: 0px;
+  /* Shell geometry (wide/wide.css): sidebar width and top bar height. */
+  --ww-side-w: 240px;
+  --ww-top-h: 69px;
   /* Chat: an open room sits beside the room list (tabs/ChatPage.tsx Conversation). */
   --ww-conv-left: calc(240px + 24px + 420px + 16px);
   --ww-conv-top: 69px;

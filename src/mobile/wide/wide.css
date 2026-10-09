@@ -971,9 +971,54 @@ img.ww-tok {
 .ww-bellwrap {
   display: inline-flex;
 }
-/* Bottom sheets portalled to <body> (backup, handle, send…): a centred column, not the full window width. */
-html.ww-on .fixed.inset-x-0[role='dialog'] {
-  max-width: 640px;
-  margin-left: auto;
-  margin-right: auto;
+/* Overlays portalled to <body>, wide layout only (html.ww-onb is onboarding, which keeps the phone flow in a card).
+   1. Full-screen phone pages (backup, $name, agent tools, settings sub-pages, pots, agents, Spaces, calls…) become a
+      page in the main area: beside the sidebar, under the top bar, opaque, content in a reading column. Nothing of the
+      live page shows through and only one page is ever on top.
+   2. Bottom sheets (a dimmed backdrop + a sheet at the bottom) become a centred modal over a blurred, dimmed window.
+   Centred full-viewport overlays (lock, unlock, splash) are left alone. */
+html.ww-on:not(.ww-onb)
+  body
+  > :is(.fixed.inset-0.flex-col:not(.justify-center), .fixed.inset-x-0.bottom-0[role='dialog']) {
+  left: var(--ww-side-w) !important;
+  top: var(--ww-top-h) !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  background-color: #050505;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-left-radius: 16px;
+  padding-left: max(24px, calc((100% - 760px) / 2)) !important;
+  padding-right: max(24px, calc((100% - 760px) / 2)) !important;
+  padding-top: 8px !important;
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
+  animation: ww-page-in 0.16s ease-out;
+}
+@keyframes ww-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end {
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 32px !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  background-color: rgba(0, 0, 0, 0.6);
+}
+html.ww-on:not(.ww-onb) body > .fixed.inset-0.items-end > * {
+  width: 100% !important;
+  max-width: 560px !important;
+  max-height: calc(100vh - 64px) !important;
+  overflow-y: auto;
+  border-radius: 24px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding-bottom: 20px !important;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  animation: ww-page-in 0.16s ease-out;
 }
