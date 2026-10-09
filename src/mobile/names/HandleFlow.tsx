@@ -54,7 +54,16 @@ const GRAY = '#98A2B3';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 type AliasState = 'idle' | 'checking' | 'free' | 'mine' | 'taken' | 'invalid' | 'error';
 
-export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose: () => void; title?: string }) => {
+export const HandleFlow = ({
+  onClose,
+  title = 'Choose your handle',
+  onClaimed,
+}: {
+  onClose: () => void;
+  title?: string;
+  /** bChat sign-in waiting on a handle (needs_handle): the caller finishes the sign-in with this name. */
+  onClaimed?: (paymail: string) => Promise<void> | void;
+}) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
@@ -198,8 +207,10 @@ export const HandleFlow = ({ onClose, title = 'Choose your handle' }: { onClose:
       }
       setPaymail(identityAddress, pm);
       setPm(pm);
-      // bChat handle = paymail name, before any token room is opened under it.
-      await syncBchatHandle(apiContext, pm, { signIn: true });
+      // bChat handle = paymail name, before any token room is opened under it. A sign-in that was
+      // waiting on a handle finishes with its own claim token instead (onClaimed).
+      if (onClaimed) await onClaimed(pm);
+      else await syncBchatHandle(apiContext, pm, { signIn: true });
       // The token + room is an explicit choice (its own button below), never started automatically.
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');

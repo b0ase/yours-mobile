@@ -136,6 +136,15 @@ export interface MessagePage {
   hiddenBefore?: string | null;
 }
 
+/** bit-sign's "Choose your handle first" refusal from signIn: open HandleFlow, then claimHandle with these. */
+export const needsHandle = (e: unknown): { claimToken: string; address: string } | null => {
+  if (!(e instanceof ChatApiError) || e.status !== 409) return null;
+  const d = e.data as { needs_handle?: boolean; claim_token?: unknown; address?: unknown } | null;
+  return d?.needs_handle && typeof d.claim_token === 'string' && typeof d.address === 'string'
+    ? { claimToken: d.claim_token, address: d.address }
+    : null;
+};
+
 const errorOf = (data: unknown, fallback: string) =>
   (data && typeof data === 'object' && typeof (data as { error?: unknown }).error === 'string'
     ? (data as { error: string }).error
@@ -240,7 +249,11 @@ export class BchatClient {
         // chosen one makes the account. Without one, the caller shows "Choose your handle".
         const chosen = await signer.handle?.().catch(() => null);
         if (chosen) return this.claimHandle(v.claim_token, chosen, address);
-        throw new ChatApiError('Choose your handle first.', 409, { needs_handle: true, claim_token: v.claim_token });
+        throw new ChatApiError('Choose your handle first.', 409, {
+          needs_handle: true,
+          claim_token: v.claim_token,
+          address,
+        });
       }
       if (!v.token || !v.handle) throw new ChatApiError('bChat sign-in failed', 401);
       const account = getChatAccount();
