@@ -501,6 +501,7 @@ body,
   letter-spacing: -0.02em;
 }
 .bw-wcard-sats {
+  margin-top: 3px;
   font-size: 12px;
   color: var(--bw-wcard-muted, #8e8e89);
 }
@@ -988,9 +989,21 @@ body,
   min-width: 0;
   flex: 1 1 auto;
 }
-.bw-wcard-bottom > .bw-wcard-unit {
+/* Address (left) and $/BSV switch (right) share one row, centred together. */
+.bw-wcard-addrline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+.bw-wcard-addrslot {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.bw-wcard-addrline > .bw-wcard-unit {
   flex-shrink: 0;
-  margin: 0 -4px -4px 0;
+  margin-right: -4px;
 }
 /* 44px tap target around each small pill. */
 .bw-wcard-unit button {
@@ -1023,7 +1036,7 @@ body,
 }
 
 .bw-wcard-addrrow {
-  margin-bottom: 16px;
+  margin-bottom: 0;
   display: flex;
   align-items: center;
   gap: 4px;

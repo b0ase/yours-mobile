@@ -310,7 +310,7 @@ const WalletCardInner = ({
           <div className="bw-wcard-head">
             <div className="bw-wcard-top">
               <div className="bw-wcard-holder">
-                <AccountAvatar src={avatar} size={22} id={id} />
+                <AccountAvatar src={avatar} size={31} id={id} />
                 {t.tag ? (
                   <>
                     <span className="bw-wcard-handle">{t.tag}</span>
@@ -453,46 +453,50 @@ const WalletCardInner = ({
           </div>
           <div className="bw-wcard-bottom">
             <div className="bw-wcard-bl">
-              {receiveAddress && !backedUp && (
-                <div className="bw-wcard-addrrow">
-                  <span className="bw-wcard-addr">Back up to show your address</span>
+              <div className="bw-wcard-addrline">
+                <div className="bw-wcard-addrslot">
+                  {receiveAddress && !backedUp && (
+                    <div className="bw-wcard-addrrow">
+                      <span className="bw-wcard-addr">Back up to show your address</span>
+                    </div>
+                  )}
+                  {receiveAddress && backedUp && (
+                    <div className="bw-wcard-addrrow">
+                      <span className="bw-wcard-addr" aria-label="Your BSV address">
+                        {receiveAddress}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={copy(receiveAddress)}
+                        aria-label="Copy BSV address"
+                        className="bw-wcard-icon"
+                      >
+                        <Copy size={14} color="#98A2B3" />
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-              {receiveAddress && backedUp && (
-                <div className="bw-wcard-addrrow">
-                  <span className="bw-wcard-addr" aria-label="Your BSV address">
-                    {receiveAddress}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={copy(receiveAddress)}
-                    aria-label="Copy BSV address"
-                    className="bw-wcard-icon"
-                  >
-                    <Copy size={14} color="#98A2B3" />
-                  </button>
+                {/* $/BSV switch: same row as the address, right (owner, 9 Oct 2026). */}
+                <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
+                  {(['usd', 'bsv'] as const).map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      aria-pressed={unit === u}
+                      className={unit === u ? 'is-on' : undefined}
+                      onClick={pickUnit(u)}
+                    >
+                      {u === 'usd' ? fiatSymbol(fx) : 'BSV'}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
               {since && (
                 <div className="bw-wcard-since">
                   <span>MEMBER SINCE</span>
                   <b>{since}</b>
                 </div>
               )}
-            </div>
-            {/* $/BSV switch: bottom-right corner (owner, 9 Oct 2026). */}
-            <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
-              {(['usd', 'bsv'] as const).map((u) => (
-                <button
-                  key={u}
-                  type="button"
-                  aria-pressed={unit === u}
-                  className={unit === u ? 'is-on' : undefined}
-                  onClick={pickUnit(u)}
-                >
-                  {u === 'usd' ? fiatSymbol(fx) : 'BSV'}
-                </button>
-              ))}
             </div>
           </div>
         </div>
