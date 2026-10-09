@@ -105,9 +105,12 @@ describe('bMail weighting and amounts', () => {
     const m = (id: string, at: number, verifiedSats: number, from = K('c')) => ({ id, from, at, verifiedSats });
     const list = [m('a', 3, 0, K('f')), m('b', 1, 900), m('c', 2, 300)];
     const isF = (k: string) => k === K('f');
-    expect(sortMail(list, 'paid', isF).map((x) => x.id)).toEqual(['b', 'c', 'a']);
-    expect(sortMail(list, 'newest', isF).map((x) => x.id)).toEqual(['a', 'c', 'b']);
-    expect(sortMail(list, 'friends', isF)[0].id).toBe('a');
+    const r = { ...m('r', 0, 50), replyCredit: true };
+    // Friends and reply-paid replies always pinned on top (newest first), then the chosen sort.
+    expect(sortMail([...list, r], 'paid', isF).map((x) => x.id)).toEqual(['a', 'r', 'b', 'c']);
+    expect(sortMail([...list, r], 'newest', isF).map((x) => x.id)).toEqual(['a', 'r', 'c', 'b']);
+    // "Friends" is a filter: only pinned mail.
+    expect(sortMail([...list, r], 'friends', isF).map((x) => x.id)).toEqual(['a', 'r']);
     expect(filterMail(list, 'paid').map((x) => x.id)).toEqual(['b', 'c']);
     expect(filterMail(list, 'tokens')).toEqual([]);
   });
@@ -120,9 +123,20 @@ describe('bMail weighting and amounts', () => {
     expect(ex.tokenLabel({ symbol: 'MOONZ', amount: 10_000 })).toBe('10,000 $MOONZ');
     expect(ex.filterExamples(ex.EXAMPLES, 'invoices').map((e) => e.id)).toEqual(['ex-invoice']);
     expect(ex.filterExamples(ex.EXAMPLES, 'tokens').length).toBeGreaterThan(4);
-    const inbox = ex.sortExamples(ex.EXAMPLES.filter((e) => e.box === 'inbox'), 'paid');
-    expect(ex.totalCents(inbox[0])).toBeGreaterThanOrEqual(ex.totalCents(inbox[1]));
-    const req = ex.sortExamples(ex.EXAMPLES.filter((e) => e.box === 'requests'), 'spreading');
+    const inbox = ex.sortExamples(
+      ex.EXAMPLES.filter((e) => e.box === 'inbox'),
+      'paid',
+    );
+    const firstStranger = inbox.findIndex((e) => !e.friend);
+    expect(inbox.slice(0, firstStranger).every((e) => e.friend)).toBe(true);
+    const strangers = inbox.slice(firstStranger);
+    expect(strangers.every((e) => !e.friend)).toBe(true);
+    expect(ex.totalCents(strangers[0])).toBeGreaterThanOrEqual(ex.totalCents(strangers[1]));
+    expect(ex.sortExamples(inbox, 'friends').every((e) => e.friend)).toBe(true);
+    const req = ex.sortExamples(
+      ex.EXAMPLES.filter((e) => e.box === 'requests'),
+      'spreading',
+    );
     expect(req[0].id).toBe('ex-spreading');
   });
 });

@@ -35,6 +35,7 @@ import {
   PENNY_POST_USD,
   quote,
   sortMail,
+  isPinned,
   TIERS,
   type MailFilter,
   type SortMode,
@@ -756,18 +757,32 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const mode: SortMode = tab !== 'requests' && sort === 'spreading' ? 'paid' : sort;
   const view = (box: 'inbox' | 'requests') => sortMail(filterMail(m.boxes[box], filter), mode, isContact);
   const exView = (box: 'inbox' | 'requests') =>
-    showEx ? sortExamples(filterExamples(EXAMPLES.filter((e) => e.box === box), filter), mode) : [];
+    showEx
+      ? sortExamples(
+          filterExamples(
+            EXAMPLES.filter((e) => e.box === box),
+            filter,
+          ),
+          mode,
+        )
+      : [];
   const exInbox = exView('inbox');
   const exRequests = exView('requests');
   // Value in view: verified postage on real mail this week, plus example amounts shown (labelled as examples).
-  const inView = tab === 'sent' ? null : (() => {
-    const real = view(tab).filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
-    const ex = tab === 'inbox' ? exInbox : exRequests;
-    const usd =
-      (satsToUsd(real.reduce((a, r) => a + r.verifiedSats, 0), m.rate) ?? 0) +
-      ex.reduce((a, e) => a + totalCents(e), 0) / 100;
-    return { usd, n: real.length + ex.filter((e) => totalCents(e) > 0).length, ex: ex.length > 0 };
-  })();
+  const inView =
+    tab === 'sent'
+      ? null
+      : (() => {
+          const real = view(tab).filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
+          const ex = tab === 'inbox' ? exInbox : exRequests;
+          const usd =
+            (satsToUsd(
+              real.reduce((a, r) => a + r.verifiedSats, 0),
+              m.rate,
+            ) ?? 0) +
+            ex.reduce((a, e) => a + totalCents(e), 0) / 100;
+          return { usd, n: real.length + ex.filter((e) => totalCents(e) > 0).length, ex: ex.length > 0 };
+        })();
 
   return createPortal(
     <div
@@ -922,15 +937,29 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             {m.error && <p className="text-xs text-[#F97066] m-0">{m.error}</p>}
             {tab === 'inbox' && (
               <>
-                {view('inbox').map((r) => (
-                  <MailRow
-                    key={r.id}
-                    r={r}
-                    rate={m.rate}
-                    friend={isContact(r.from)}
-                    label={nameOf(r.from)}
-                    onOpen={() => setReading(r)}
-                  />
+                {view('inbox').map((r, i, all) => (
+                  <div key={r.id} className="flex flex-col gap-1">
+                    {i === 0 && isPinned(r, isContact) && (
+                      <span
+                        className="text-[10px] font-semibold uppercase tracking-wide px-1"
+                        style={{ color: '#6CE9A6' }}
+                      >
+                        Friends
+                      </span>
+                    )}
+                    {i > 0 && !isPinned(r, isContact) && isPinned(all[i - 1], isContact) && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: MUTED }}>
+                        Everyone else
+                      </span>
+                    )}
+                    <MailRow
+                      r={r}
+                      rate={m.rate}
+                      friend={isContact(r.from)}
+                      label={nameOf(r.from)}
+                      onOpen={() => setReading(r)}
+                    />
+                  </div>
                 ))}
                 {!view('inbox').length && !exInbox.length && (
                   <Empty

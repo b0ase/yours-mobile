@@ -71,15 +71,22 @@ export const FILTERS: { id: MailFilter; label: string }[] = [
   { id: 'receipts', label: 'Receipts' },
 ];
 
+/** Friends and reply-paid replies: free, and always pinned on top of the Inbox (owner rule). */
+export const isPinned = (m: MailMeta, isFriend: (key: string) => boolean): boolean =>
+  isFriend(m.from) || !!m.replyCredit;
+
 /**
- * Sort real mail. Most paid = verified postage highest first (ties newest); Friends = contacts on top then postage;
- * Newest = time only. Spreading needs token holder/forward counts real mail does not carry yet, so it falls back to
+ * Sort real mail. Friends (and reply-paid replies) are always pinned in a group on top, newest first; the rest follow by
+ * the chosen sort. Most paid = verified postage highest first (ties newest); Newest = time only. "Friends" is a filter:
+ * only pinned mail. Spreading needs token holder/forward counts real mail does not carry yet, so it falls back to
  * newest. TODO(bmail tokens): rank by holders/forwards once envelopes carry token outputs.
  */
 export const sortMail = <T extends MailMeta>(mail: T[], mode: SortMode, isFriend: (key: string) => boolean): T[] => {
-  if (mode === 'friends') return rank(mail, { isFriend });
-  if (mode === 'newest' || mode === 'spreading') return rank(mail, { isFriend, newest: true });
-  return [...mail].sort((a, b) => b.verifiedSats - a.verifiedSats || b.at - a.at);
+  const pinned = mail.filter((m) => isPinned(m, isFriend)).sort((a, b) => b.at - a.at);
+  if (mode === 'friends') return pinned;
+  const rest = mail.filter((m) => !isPinned(m, isFriend));
+  rest.sort(mode === 'paid' ? (a, b) => b.verifiedSats - a.verifiedSats || b.at - a.at : (a, b) => b.at - a.at);
+  return [...pinned, ...rest];
 };
 
 /**

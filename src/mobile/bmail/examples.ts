@@ -338,9 +338,11 @@ export const filterExamples = (list: ExampleMail[], f: MailFilter): ExampleMail[
   );
 
 export const sortExamples = (list: ExampleMail[], mode: SortMode): ExampleMail[] =>
-  [...list].sort((a, b) => {
+  (mode === 'friends' ? list.filter((e) => e.friend) : [...list]).sort((a, b) => {
+    // Friends always pinned on top, newest first; the rest by the chosen sort.
+    if (!!a.friend !== !!b.friend) return a.friend ? -1 : 1;
+    if (a.friend) return a.ago - b.ago;
     if (mode === 'newest') return a.ago - b.ago;
     if (mode === 'spreading') return (b.token?.forwards ?? 0) - (a.token?.forwards ?? 0) || a.ago - b.ago;
-    if (mode === 'friends' && !!a.friend !== !!b.friend) return a.friend ? -1 : 1;
     return totalCents(b) - totalCents(a) || a.ago - b.ago;
   });
