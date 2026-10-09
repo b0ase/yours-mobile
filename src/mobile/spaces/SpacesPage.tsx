@@ -30,13 +30,21 @@ const SpacesPage = () => {
   const me = client.handle ?? '';
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState('');
-  const [open, setOpen] = useState<{ ticker: string; name: string; start?: string; admin?: boolean } | null>(null);
+  const [open, setOpen] = useState<{
+    ticker: string;
+    name: string;
+    start?: string;
+    admin?: boolean;
+    spaceOpen?: boolean;
+    hostName?: string | null;
+  } | null>(null);
   const openRoom = (room: ChatRoom, start?: string) =>
     setOpen({
       ticker: room.ticker,
       name: roomTitle(room, me),
       start,
-      admin: canHostRoom({ me, createdBy: room.created_by_handle, spaceOpen: roomSpaceOpen(room) }),
+      admin: canHostRoom({ me, createdBy: room.created_by_handle }),
+      spaceOpen: roomSpaceOpen(room),
     });
   // A link (inviteLinks.ts) lands here as ?invite=<code> (ephemeral) or ?space=<slug> (the Space page).
   const [params, setParams] = useSearchParams();
@@ -109,7 +117,7 @@ const SpacesPage = () => {
           client={client}
           link={spaceLink}
           me={me}
-          onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName })}
+          onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName, hostName: inv.kind === 'space' ? inv.hostName : null })}
           onOpenSpacePage={showSpacePage}
           onClose={clearInvite}
         />
@@ -206,6 +214,8 @@ const SpacesPage = () => {
           me={me}
           startTitle={open.start}
           canInvite={open.admin}
+          spaceOpen={open.spaceOpen}
+          hostName={open.hostName}
           onClose={() => {
             setOpen(null);
             void load();

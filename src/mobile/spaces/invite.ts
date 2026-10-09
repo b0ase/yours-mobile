@@ -77,6 +77,8 @@ export interface SpacePage extends PageBase {
   kind: 'space';
   slug: string;
   host: string | null;
+  /** The host's chosen display name (bit-sign #95 `host_name`); null before it deploys. */
+  hostName?: string | null;
 }
 
 export interface RoomPage extends PageBase {
@@ -131,7 +133,7 @@ const pageOf = (d: Record<string, unknown>): SpacePage | RoomPage | null => {
   };
   if (d.kind === 'space') {
     const slug = str(d.slug);
-    return isSpaceSlug(slug) ? { ...base, kind: 'space', slug, host: str(d.host) || null } : null;
+    return isSpaceSlug(slug) ? { ...base, kind: 'space', slug, host: str(d.host) || null, hostName: str(d.host_name) || null } : null;
   }
   if (d.kind === 'room')
     return { ...base, kind: 'room', members: typeof d.members === 'number' ? d.members : null, host: null };

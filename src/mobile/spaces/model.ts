@@ -234,3 +234,52 @@ export const roomsWithSpaces = <T extends { state: SpaceState }>(rows: T[]): T[]
         audienceCount(b.state) - audienceCount(a.state) ||
         (b.state.space?.startedAt ?? '').localeCompare(a.state.space?.startedAt ?? ''),
     );
+
+// ── Moderation, join as speaker, room mute, screen awake (Lounge test, 9 Oct 2026) ──────────
+
+/**
+ * Who may mute / move / remove a speaker from the stage: the live host, or a room admin / named host
+ * (the wallet knows the latter as `canInvite`). bit-sign checks again (space-moderation-rules.ts).
+ */
+export const mayModerate = (o: { isHost: boolean; roomBoss?: boolean }) => o.isHost || !!o.roomBoss;
+
+/** Which stage tiles get the moderator menu: never yourself, never the live host. */
+export const moderatable = (p: Participant, o: { me: string; spaceHost: string; moderator: boolean }) =>
+  o.moderator && p.role === 'speaker' && p.handle !== norm(o.me) && p.handle !== norm(o.spaceHost);
+
+/**
+ * "Join as speaker": straight on stage in an open-stage room or for a room boss (mic muted until you
+ * tap), otherwise a listener with the hand already up. bit-sign decides for real (`as: 'speaker'`).
+ */
+export const joinAsSpeakerOutcome = (o: { spaceOpen: boolean; roomBoss: boolean }): 'speaker' | 'hand' =>
+  o.spaceOpen || o.roomBoss ? 'speaker' : 'hand';
+
+/** The green room's default: hosts / room admins and open stages default to speaking. */
+export const defaultJoinAs = (o: { spaceOpen: boolean; roomBoss: boolean }): 'speaker' | 'listener' =>
+  o.roomBoss ? 'speaker' : 'listener';
+
+/**
+ * Keep the screen awake while I host or speak (owner: phones went to sleep mid-Space). Off as a
+ * listener, anonymous, or once the Space is over; the ⋯ toggle can turn it off.
+ */
+export const wantsWakeLock = (o: { live: boolean; role: SpaceRole | null | undefined; anonymous: boolean; enabled: boolean }) =>
+  o.enabled && o.live && !o.anonymous && isOnStage(o.role);
+
+/**
+ * The participants reply to an action (`hand`, `role`, `mute`…) carries no space: keep ours and the
+ * recording flags from the last full state, so a reply never drops "● Recording" or the Record button.
+ * A reply without a participants array changes nothing (null).
+ */
+export const applyParticipantsReply = (cur: SpaceState, reply: unknown, me: string): SpaceState | null => {
+  const o = reply && typeof reply === 'object' ? (reply as Record<string, unknown>) : null;
+  if (!o || !Array.isArray(o.participants) || !cur.space) return null;
+  const participants = o.participants.map(parseParticipant).filter((p): p is Participant => !!p);
+  const mine = norm(me);
+  return { ...cur, participants, me: participants.find((p) => p.handle === mine) ?? null };
+};
+
+/** "Ana ($ana)" when the host chose a display name, else "$ana". */
+export const hostLabel = (handle: string, name: string | null | undefined) => {
+  const n = (name ?? '').trim();
+  return n && n.toLowerCase() !== handle.toLowerCase() ? n : `$${handle}`;
+};

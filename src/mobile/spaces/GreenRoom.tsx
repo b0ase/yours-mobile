@@ -24,8 +24,16 @@ export const GreenRoomSheet = ({
   anonymous,
   onAnonymous,
   onStart,
+  onStartSpeaker,
+  speakerFirst = false,
+  speakerLine,
   busy,
 }: {
+  /** "Join as speaker" (absent while anonymous: anonymous listeners cannot speak). */
+  onStartSpeaker?: () => void;
+  /** Hosts and room admins: the speaker button is the primary one. */
+  speakerFirst?: boolean;
+  speakerLine?: string;
   data: GreenRoom;
   fallbackTitle: string;
   anonymous: boolean;
@@ -105,10 +113,27 @@ export const GreenRoomSheet = ({
       onClick={onStart}
       disabled={busy}
       className="mt-6 h-12 w-full rounded-full text-sm font-bold disabled:opacity-60"
-      style={{ background: GOLD, color: '#010101' }}
+      style={speakerFirst && onStartSpeaker ? { border: `1px solid ${GOLD}`, color: GOLD } : { background: GOLD, color: '#010101' }}
     >
       {busy ? 'Joining…' : greenRoomPrimary({ anonymous, needsTicket: false })}
     </button>
+    {onStartSpeaker && (
+      <>
+        <button
+          onClick={onStartSpeaker}
+          disabled={busy}
+          className="mt-2 h-12 w-full rounded-full text-sm font-bold disabled:opacity-60"
+          style={speakerFirst ? { background: GOLD, color: '#010101' } : { border: `1px solid ${GOLD}`, color: GOLD }}
+        >
+          Join as speaker
+        </button>
+        {speakerLine && (
+          <p className="mt-2 text-center text-[11px]" style={{ color: MUTED }}>
+            {speakerLine}
+          </p>
+        )}
+      </>
+    )}
   </div>
 );
 
