@@ -24,6 +24,7 @@ import { wwOpen } from './flag';
 import { LockCoin } from '../tabs/TopNav';
 import { HomeButton } from '../phone/Dock';
 import { useWalletFeed } from './walletFeed';
+import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { WidePage } from './WidePage';
 import { WideAuth } from './WideAuth';
@@ -31,6 +32,7 @@ import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
 import './wide.css';
 
 const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
+const BsvPriceChart = lazy(() => import('../wallet/PriceChart').then((m) => ({ default: m.BsvPriceChart })));
 const BappsPage = lazy(() => import('./BappsPage'));
 
 /**
@@ -102,8 +104,9 @@ const useCurrency = () => useSyncExternalStore(onDisplayCurrencyChange, getDispl
 
 /* ---------- Wallet side pane: tokens table (the Wallet page's own balances) + History ---------- */
 
-type Row = { id: string; sym: string; icon?: string; amt: number; usd: number | null };
-type SortKey = 'sym' | 'amt' | 'usd';
+/** Prices the app actually has: BSV (the wallet's rate), MNEE ($1 stablecoin), PNEEs (1 = $0.01). Others: none. */
+type Row = { id: string; sym: string; icon?: string; amt: number; price: number | null; usd: number | null };
+type SortKey = 'sym' | 'amt' | 'price' | 'usd';
 
 const WalletSide = () => {
   const feed = useWalletFeed();
@@ -116,19 +119,32 @@ const WalletSide = () => {
         id: 'bsv',
         sym: 'BSV',
         amt: feed.bsvBalance,
+        price: feed.exchangeRate || null,
         usd: feed.exchangeRate ? feed.bsvBalance * feed.exchangeRate : null,
       },
     ];
-    if (feed.mneeBalance) r.push({ id: 'mnee', sym: 'MNEE', amt: feed.mneeBalance, usd: feed.mneeBalance });
+    if (feed.mneeBalance) r.push({ id: 'mnee', sym: 'MNEE', amt: feed.mneeBalance, price: 1, usd: feed.mneeBalance });
     for (const t of feed.bsv21s) {
       const amt = Number(t.amt) / 10 ** (t.dec || 0);
-      r.push({ id: t.id, sym: t.sym || t.id.slice(0, 8), icon: t.icon, amt, usd: null });
+      const price = t.id === PNEE_TOKEN_ID ? 0.01 : null;
+      r.push({
+        id: t.id,
+        sym: t.sym || t.id.slice(0, 8),
+        icon: t.icon,
+        amt,
+        price,
+        usd: price === null ? null : amt * price,
+      });
     }
     return r;
   }, [feed]);
   const sorted = [...rows].sort((a, b) => {
     const v =
-      sort.k === 'sym' ? a.sym.localeCompare(b.sym) : sort.k === 'amt' ? a.amt - b.amt : (a.usd ?? -1) - (b.usd ?? -1);
+      sort.k === 'sym'
+        ? a.sym.localeCompare(b.sym)
+        : sort.k === 'amt'
+          ? a.amt - b.amt
+          : (a[sort.k] ?? -1) - (b[sort.k] ?? -1);
     return sort.desc ? -v : v;
   });
   const total = rows.reduce((s, r) => s + (r.usd ?? 0), 0);
@@ -154,6 +170,7 @@ const WalletSide = () => {
             <tr>
               {th('sym', 'Asset')}
               {th('amt', 'Amount', true)}
+              {th('price', 'Price', true)}
               {th('usd', 'Value', true)}
             </tr>
           </thead>
@@ -170,12 +187,24 @@ const WalletSide = () => {
                 </td>
                 <td className="r mono">{t.amt.toLocaleString('en-GB', { maximumFractionDigits: 8 })}</td>
                 <td className="r mono">
+                  {t.price === null ? <span className="ww-muted">—</span> : formatFiat(t.price, currentFx())}
+                </td>
+                <td className="r mono">
                   {t.usd === null ? <span className="ww-muted">—</span> : formatFiat(t.usd, currentFx())}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="ww-panel">
+        <div className="ww-panel-head">
+          <span>BSV price</span>
+          <span className="ww-muted ww-small">WhatsOnChain daily rate</span>
+        </div>
+        <Suspense fallback={null}>
+          <BsvPriceChart />
+        </Suspense>
       </div>
       <div className="ww-panel ww-flush ww-history">
         <Suspense fallback={null}>
