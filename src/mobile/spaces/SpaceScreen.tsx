@@ -36,6 +36,8 @@ import { isAdminRefusal as adminRefusal } from '../chat/autoClaim';
 import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
+import { rejoinWithBackoff, SpaceOverError } from './reconnect';
+import { useOnResume } from '../permissions/useOnResume';
 import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
 import { SpeakerGrid } from './SpeakerGrid';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
@@ -431,6 +433,14 @@ const SpaceScreenInner = ({
   const [, tick] = useState(0);
   const landscape = useLandscape();
   const left = useRef(false);
+  /** "Reconnecting…": LiveKit resuming by itself, or our own rejoin loop (reconnect.ts). */
+  const [reconnecting, setReconnecting] = useState(false);
+  const recovering = useRef(false);
+  const recoverRef = useRef<() => Promise<void>>(async () => undefined);
+  // Mirrors for the rejoin loop, which outlives a render: republish exactly what was on.
+  const micRef = useRef(false);
+  const camRef = useRef(false);
+  const facingRef = useRef<Facing>('user');
 
   const leave = useCallback(
     async (end = false) => {
@@ -486,7 +496,9 @@ const SpaceScreenInner = ({
           onScreen: (o) => mounted.current && setScreenOwner(o),
           onSpeakers: (s) => mounted.current && setSpeakers(s),
           onCanPublish: () => undefined,
-          onDisconnected: () => mounted.current && !left.current && setPhase((p) => (p === 'live' ? 'ended' : p)),
+          onDisconnected: () => mounted.current && !left.current && void recoverRef.current(),
+          onReconnecting: () => mounted.current && setReconnecting(true),
+          onReconnected: () => mounted.current && !recovering.current && setReconnecting(false),
         });
         if (!mounted.current) return void media.close();
         anonRef.current = true;
@@ -528,7 +540,9 @@ const SpaceScreenInner = ({
             setCamOn(false);
           }
         },
-        onDisconnected: () => mounted.current && !left.current && setPhase((p) => (p === 'live' ? 'ended' : p)),
+        onDisconnected: () => mounted.current && !left.current && void recoverRef.current(),
+          onReconnecting: () => mounted.current && setReconnecting(true),
+          onReconnected: () => mounted.current && !recovering.current && setReconnecting(false),
       });
       if (!mounted.current) return void media.close();
       prev.current = null;
@@ -558,6 +572,65 @@ const SpaceScreenInner = ({
       void media.close();
     }
   };
+
+  useEffect(() => {
+    micRef.current = micOn;
+    camRef.current = camOn;
+    facingRef.current = facing;
+  }, [micOn, camOn, facing]);
+
+  /**
+   * The SFU connection died (LiveKit gave up resuming). Rejoin the SAME Space with a fresh token,
+   * backing off for ~60 s, mic/camera as they were. Never starts a new Space: if the one I was in
+   * is gone, that is the end. Giving up leaves properly, so bit-sign is not left with a ghost.
+   */
+  recoverRef.current = async () => {
+    if (recovering.current || left.current || !mounted.current) return;
+    recovering.current = true;
+    setReconnecting(true);
+    const spaceId = prev.current?.space?.id ?? null;
+    const out = await rejoinWithBackoff({
+      cancelled: () => left.current || !mounted.current,
+      attempt: async () => {
+        let tok;
+        if (anonRef.current) {
+          tok = parseSpaceToken(await client.spaceAnonToken(ticker));
+        } else {
+          const now = parseSpaceState(await client.space(ticker), me);
+          if (!now.space || (spaceId && now.space.id !== spaceId)) throw new SpaceOverError('ended');
+          const joined = parseSpaceState(await client.spaceAction(ticker, { action: 'join' }), me);
+          if (!joined.space || (spaceId && joined.space.id !== spaceId)) throw new SpaceOverError('ended');
+          tok = parseSpaceToken(await client.spaceToken(ticker));
+        }
+        if (!tok) throw new Error('No token');
+        await media.rejoin(tok.url, tok.token, { mic: micRef.current, camera: camRef.current, facing: facingRef.current });
+      },
+    });
+    recovering.current = false;
+    if (!mounted.current || left.current) return;
+    setReconnecting(false);
+    if (out === 'rejoined') {
+      setMicOn(media.micOn);
+      setCamOn(media.cameraOn);
+      setNote('Reconnected.');
+      client
+        .space(ticker)
+        .then((d) => apply(parseSpaceState(d, me)))
+        .catch(() => undefined);
+      return;
+    }
+    if (out === 'gave-up') {
+      setNote('Lost the connection to the Space.');
+      if (!anonRef.current) void client.spaceAction(ticker, { action: 'leave' }).catch(() => undefined);
+    }
+    setPhase('ended');
+    void media.close();
+  };
+
+  // Back from the background / lock screen with a dead connection: rejoin straight away.
+  useOnResume(() => {
+    if (media.disconnected && !left.current) void recoverRef.current();
+  }, phase === 'live');
 
   // Starting: go straight in. Joining: load the green room first.
   useEffect(() => {
@@ -1026,6 +1099,16 @@ const SpaceScreenInner = ({
         <p className="text-center text-[10px] pb-1 m-0" style={{ color: MUTED }}>
           Screen stays on while you speak
         </p>
+      )}
+
+      {phase === 'live' && reconnecting && (
+        <div
+          role="status"
+          className="absolute left-4 right-4 rounded-xl px-4 py-3 text-sm text-center"
+          style={{ top: 64, background: '#3a2f12', color: '#ffd76a', zIndex: 11 }}
+        >
+          Reconnecting…
+        </div>
       )}
 
       {note && (
