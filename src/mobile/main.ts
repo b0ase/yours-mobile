@@ -141,4 +141,7 @@ if (Capacitor.isNativePlatform()) {
 // Before the UI: a push tap that launched the app is held until PushEngine (after unlock) takes it.
 initPushTaps();
 initTesterCheckins();
-await import('../index');
+// PROTOTYPE (demo/desktop-shell): wide web layout with ?wide=1 on wide screens; otherwise the normal wallet.
+const wide = await import('./wide/mount');
+if (wide.wantsWideLayout()) wide.mountWideLayout();
+else await import('../index');
