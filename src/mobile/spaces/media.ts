@@ -1,4 +1,5 @@
 import {
+  ConnectionState,
   LocalVideoTrack,
   Room,
   RoomEvent,
@@ -21,7 +22,12 @@ export interface SpaceMediaCallbacks {
   onSpeakers: (handles: string[]) => void;
   /** The SFU changed what I may publish (host brought me up or sent me back). */
   onCanPublish: (can: boolean) => void;
+  /** The SFU connection is gone for good (LiveKit gave up resuming it). Not called for close(). */
   onDisconnected: () => void;
+  /** LiveKit is trying to resume a dropped connection by itself (network blip, app backgrounded). */
+  onReconnecting?: () => void;
+  /** LiveKit resumed it. */
+  onReconnected?: () => void;
   /**
    * Who is sharing a screen right now (owner handle), or null. A laptop shares as the
    * `handle.screen` identity (bit-sign `device: 'screen'`), so the phone keeps the voice.
@@ -127,11 +133,41 @@ export class SpaceMedia {
         if (!can) void this.releaseDevices();
         this.cb?.onCanPublish(can);
       })
-      .on(RoomEvent.Disconnected, () => this.cb?.onDisconnected());
+      // Only the CURRENT room reports: a room replaced by rejoin() or closed by close() is quiet.
+      .on(RoomEvent.Reconnecting, () => this.room === room && this.cb?.onReconnecting?.())
+      .on(RoomEvent.Reconnected, () => this.room === room && this.cb?.onReconnected?.())
+      .on(RoomEvent.Disconnected, () => this.room === room && this.cb?.onDisconnected());
     await room.connect(url, token, { autoSubscribe: true });
     this.me = room.localParticipant.identity;
     await room.startAudio().catch(() => undefined);
     if (isNative) await YoursNative.audioSetSpeaker({ on: true }).catch(() => undefined);
+  }
+
+  /** True when there is no usable SFU connection (never joined, dropped, or LiveKit gave up). */
+  get disconnected() {
+    return !this.room || this.room.state === ConnectionState.Disconnected;
+  }
+
+  /**
+   * Rejoin after a drop with a FRESH token (the old one may name a room LiveKit already closed;
+   * bit-sign's token route recreates it). Remote media is rebuilt from scratch; my mic and camera
+   * come back exactly as they were (prior mute state), never more.
+   */
+  async rejoin(url: string, token: string, prior: { mic: boolean; camera: boolean; facing?: Facing }): Promise<void> {
+    const cb = this.cb;
+    if (!cb) throw new Error('Not in a space.');
+    const old = this.room;
+    this.room = null; // silences the old room's events before it is torn down
+    this.audio.forEach((el) => el.remove());
+    this.audio.clear();
+    this.videos.clear();
+    this.screens.clear();
+    await old?.disconnect().catch(() => undefined);
+    await this.connect(url, token, cb);
+    if (prior.mic) await this.setMic(true).catch(() => undefined);
+    if (prior.camera) await this.setCamera(true, prior.facing).catch(() => undefined);
+    this.emitVideos();
+    this.emitScreen();
   }
 
   private localVideo(): LocalVideoTrack | null {
