@@ -213,7 +213,7 @@ const BAPP_TILES = BAPP_GROUPS.flatMap((g) => bappsIn(g.id))
   .map(bappTile);
 /** The b agent as an Apps tile (owner, 7 Oct 2026): opens /m/agent, the same as "Ask b" in the top bar. */
 const AGENT_KEY = 'sys:agent';
-const AGENT_TILE: Tile = { key: AGENT_KEY, name: 'b agent', url: '/m/agent', icon: bGlyph };
+const AGENT_TILE: Tile = { key: AGENT_KEY, name: 'Agent b', url: '/m/agent', icon: bGlyph };
 /** bSpaces (docs/BSPACES-PLAN.md): live audio/video spaces in your token rooms. bWalletX only (no token rooms in a store build). */
 const BSPACES_KEY = 'sys:bspaces';
 const BSPACES_TILE: Tile = { key: BSPACES_KEY, name: 'bSpaces', url: '/m/spaces', icon: bspacesGlyph };

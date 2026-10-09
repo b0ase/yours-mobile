@@ -353,7 +353,7 @@ const TopNavBar = () => {
                   })}
                 {/* The classic layout reaches the b agent here (the phone layout has the dock b). */}
                 {showAgentInMenu(phone) &&
-                  action(<Sparkles size={16} color="#fff" />, X_MARK ? 'bX agent' : 'b agent', () => {
+                  action(<Sparkles size={16} color="#fff" />, 'Agent b', () => {
                     setDrawer(false);
                     const to = agentMenuTarget(pathname);
                     if (to === -1) navigate(-1);
@@ -472,7 +472,7 @@ const TopNavBar = () => {
           onAgent={
             showAgentInMenu(phone)
               ? {
-                  label: X_MARK ? 'bX agent' : 'b agent',
+                  label: 'Agent b',
                   go: () => {
                     setSheet(null);
                     setDrawer(false);

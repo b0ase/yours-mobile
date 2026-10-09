@@ -287,7 +287,7 @@ try {
       await clickByText(page, tab);
       await acceptTerms(page);
     });
-  for (const aria of ['Calls', 'bX agent', 'Media', 'Lock BSV', 'Accounts menu'])
+  for (const aria of ['Calls', 'Agent b', 'Media', 'Lock BSV', 'Accounts menu'])
     await step(`top ${aria}`, async () => {
       await clickAria(page, aria);
     });
