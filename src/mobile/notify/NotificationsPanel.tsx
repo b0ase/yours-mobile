@@ -1,6 +1,7 @@
+import { openBMail } from '../bmail/store';
 import { useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, AtSign, Bell, Coins, Heart, Lock, MessageCircle, Phone, Quote, Tag } from 'lucide-react';
+import { ArrowLeft, AtSign, Bell, Coins, Heart, Lock, Mailbox, MessageCircle, Phone, Quote, Tag } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
@@ -24,6 +25,7 @@ const ICONS: Record<NotifyKind, typeof Bell> = {
   payment: Coins,
   token: Coins,
   sale: Tag,
+  bmail: Mailbox,
 };
 
 const useNotifications = () => useSyncExternalStore(subscribeItems, getItems, getItems);
@@ -93,6 +95,7 @@ const NotificationsSheet = ({
     if (!t) return;
     if (t.type === 'post') return onOpenPost(t);
     onClose();
+    if (t.type === 'bmail') return openBMail();
     handleSelect(asMenuItem(t.type === 'room' || t.type === 'calls' ? 'chat' : 'bsv'));
   };
   return createPortal(

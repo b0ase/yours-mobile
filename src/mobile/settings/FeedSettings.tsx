@@ -957,6 +957,25 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             <Divider />
             <Row
               icon={<Bell size={16} />}
+              label="bMail notification detail"
+              description="What a new bMail notification shows. The subject is opened on this phone only."
+              right={
+                <select
+                  aria-label="bMail notification detail"
+                  value={prefs.bmailDetail}
+                  onChange={(e) => setPrefs({ bmailDetail: e.target.value as 'subject' | 'sender' | 'none' })}
+                  className="rounded-lg px-2 py-1 text-xs text-white outline-none"
+                  style={{ background: PANEL, border: `1px solid ${LINE}` }}
+                >
+                  <option value="subject">Sender and subject</option>
+                  <option value="sender">Sender only</option>
+                  <option value="none">Just "New bMail"</option>
+                </select>
+              }
+            />
+            <Divider />
+            <Row
+              icon={<Bell size={16} />}
               label="Your Twetch user number"
               description="From twetch.com/u/<number>: lets replies and likes on your Twetch posts reach you"
               right={

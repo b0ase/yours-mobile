@@ -90,3 +90,35 @@ export const addReceived = (s: MailState, items: Received[]): MailState => {
   const fresh = items.filter((i) => !have.has(i.id));
   return fresh.length ? { ...s, received: [...fresh, ...s.received] } : s;
 };
+
+/**
+ * Inbox-routed mail the notifier has seen on the relay but the bMail screen has not fetched yet (ids). Lets the
+ * top-bar badge count new mail without the badge consuming the message box.
+ */
+const pendingKey = (me: string) => `bw-bmail-pending:${me}`;
+export const loadPending = (me: string, st: Store | null = ls()): string[] => {
+  try {
+    const j = JSON.parse(st?.getItem(pendingKey(me)) ?? '[]') as unknown;
+    return Array.isArray(j) ? j.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+export const savePending = (me: string, ids: string[], st: Store | null = ls()) => {
+  try {
+    st?.setItem(pendingKey(me), JSON.stringify(ids.slice(0, 500)));
+  } catch {
+    /* ignore */
+  }
+  listeners.forEach((l) => l());
+};
+
+/** Event the notifier / notification taps use to open the bMail screen. */
+export const OPEN_BMAIL_EVENT = 'bw-open-bmail';
+export const openBMail = () => {
+  try {
+    window.dispatchEvent(new Event(OPEN_BMAIL_EVENT));
+  } catch {
+    /* no window */
+  }
+};

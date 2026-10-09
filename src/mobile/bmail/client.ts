@@ -108,6 +108,7 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs): Promise<Se
 export const verifyPostage = async (
   wallet: WalletInterface,
   env: Envelope,
+  internalize = true,
 ): Promise<{ sats: number; note?: string }> => {
   const p = env.postage;
   if (!p) return { sats: 0 };
@@ -124,6 +125,7 @@ export const verifyPostage = async (
     });
     const want = new P2PKH().lock(PublicKey.fromString(publicKey).toHash()).toHex();
     if (out.lockingScript.toHex() !== want) return { sats: 0, note: 'Postage is not paid to you' };
+    if (!internalize) return { sats: out.satoshis ?? 0 };
     try {
       await wallet.internalizeAction({
         tx: Utils.toArray(p.beef, 'hex'),
@@ -187,6 +189,21 @@ export const fetchMail = async (
     ack.push(m.messageId);
   }
   return { items, ack };
+};
+
+/**
+ * Notifier peek (notify/engine.ts): list the bmail box WITHOUT acknowledging or internalizing anything, so the
+ * bMail screen still receives every message. Postage is checked read-only.
+ */
+export const peekMail = async (wallet: WalletInterface, me: string): Promise<{ env: Envelope; sats: number }[]> => {
+  const msgs = await mbox(wallet).listMessages({ messageBox: BMAIL_BOX, host: MESSAGEBOX_URL });
+  const out: { env: Envelope; sats: number }[] = [];
+  for (const m of msgs) {
+    const env = decodeEnvelope(m.body);
+    if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== me) continue;
+    out.push({ env, sats: (await verifyPostage(wallet, env, false)).sats });
+  }
+  return out;
 };
 
 export const acknowledge = async (wallet: WalletInterface, ids: string[]) => {

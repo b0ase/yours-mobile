@@ -1,13 +1,22 @@
 /** Top-bar bMail button (replaces the centred b): mailbox icon + badge; opens bMail (airdrops live in Requests). */
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { OPEN_BMAIL_EVENT } from '../bmail/store';
+import { useBMailUnread } from '../bmail/useBMail';
 import { Mailbox } from 'lucide-react';
 import { useAirdrops } from './useAirdrops';
 
 const Inbox = lazy(() => import('../bmail/BMailScreen').then((m) => ({ default: m.BMailScreen })));
 
 export const AirdropsNavButton = ({ color, ring }: { color: string; ring: string }) => {
-  const { badge } = useAirdrops();
+  const { badge: drops } = useAirdrops();
+  const mail = useBMailUnread();
+  const badge = drops + mail;
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const on = () => setOpen(true);
+    window.addEventListener(OPEN_BMAIL_EVENT, on);
+    return () => window.removeEventListener(OPEN_BMAIL_EVENT, on);
+  }, []);
   return (
     <>
       <button

@@ -6,7 +6,17 @@ import { loadMyProfile, saveMyProfile } from '../calls/bphone';
 import { usdToSats, useBsvUsd } from '../money/money';
 import { acknowledge, fetchMail, myKey, openMail, sendMail, type SendArgs } from './client';
 import { split } from './route';
-import { addReceived, loadMail, saveMail, subscribeMail, updateMail, type MailState, type Received } from './store';
+import { cachedExchangeRate } from '../../utils/wallet';
+import {
+  addReceived,
+  loadMail,
+  loadPending,
+  saveMail,
+  subscribeMail,
+  updateMail,
+  type MailState,
+  type Received,
+} from './store';
 
 let version = 0;
 subscribeMail(() => {
@@ -129,4 +139,35 @@ export const useBMail = () => {
     setPrice,
     unread,
   };
+};
+
+/**
+ * Top-bar badge: unread Inbox mail already fetched plus Inbox-routed mail the notifier saw on the relay (pending).
+ * Reads local state only: never fetches or acknowledges, so it cannot steal mail from the notifier or the screen.
+ */
+export const useBMailUnread = (): number => {
+  const { apiContext } = useServiceContext();
+  const wallet = apiContext?.wallet as unknown as WalletInterface | undefined;
+  const [me, setMe] = useState('');
+  useEffect(() => {
+    let live = true;
+    if (wallet)
+      myKey(wallet)
+        .then((k) => live && setMe(k))
+        .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [wallet]);
+  const v = useSyncExternalStore(subscribeMail, () => version);
+  return useMemo(() => {
+    if (!me) return 0;
+    const s = loadMail(me);
+    const priceSats = usdToSats(s.priceUsd, cachedExchangeRate()) ?? 0;
+    const isFriend = (k: string) => isCallFriend(k) || s.contacts.includes(k);
+    const have = new Set(s.received.map((r) => r.id));
+    const unread = split(s.received, { isFriend, priceSats }).inbox.filter((r) => !r.read).length;
+    return unread + loadPending(me).filter((id) => !have.has(id)).length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, v]);
 };

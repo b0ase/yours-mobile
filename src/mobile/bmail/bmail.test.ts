@@ -88,3 +88,13 @@ describe('routing and ranking', () => {
     expect('mail' in parseProfile({})).toBe(false);
   });
 });
+
+describe('examples', () => {
+  test('examples are display-only: ids can never be real message ids, inbox and requests both covered', async () => {
+    const { EXAMPLES } = await import('./examples');
+    for (const e of EXAMPLES) expect(/^[0-9a-f]{8,64}$/i.test(e.id)).toBe(false);
+    expect(new Set(EXAMPLES.map((e) => e.id)).size).toBe(EXAMPLES.length);
+    expect(EXAMPLES.some((e) => e.box === 'requests' && e.token?.spreading)).toBe(true);
+    expect(EXAMPLES.some((e) => e.stamps.includes('reply'))).toBe(true);
+  });
+});
