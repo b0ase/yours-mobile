@@ -1,4 +1,4 @@
-/* PROTOTYPE wide web layout (demo/desktop-shell). Only loaded with ?wide=1 at >= 1100px. */
+/* PROTOTYPE wide web layout (demo/desktop-shell). Only loaded when wide/flag.ts WIDE_ON (?wide=1 or VITE_WIDE_WEB=1, >= 1100px). */
 .ww-root {
   --gold: 0;
   --ww-bg: #050505;
@@ -18,9 +18,14 @@
   grid-template-columns: 240px 1fr;
   background: var(--ww-bg);
   color: var(--ww-text);
+  overflow: hidden;
+  z-index: 5;
+}
+.ww-sidebar,
+.ww-top,
+.ww-side-stack {
   font-family: Inter, system-ui, sans-serif;
   font-size: 14px;
-  overflow: hidden;
 }
 .ww-root.with-live {
   grid-template-columns: 240px 1fr 400px;
@@ -28,7 +33,9 @@
 .ww-root * {
   box-sizing: border-box;
 }
-.ww-root button {
+.ww-sidebar button,
+.ww-top button,
+.ww-side-stack th {
   font: inherit;
   color: inherit;
   background: none;
@@ -91,7 +98,11 @@
   gap: 12px;
 }
 kbd {
-  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   padding: 3px 5px;
   border-radius: 5px;
   border: 1px solid var(--ww-line-2);
@@ -113,7 +124,10 @@ kbd {
   align-items: center;
   gap: 10px;
   padding: 0 8px 16px;
-  font: 700 19px 'Space Grotesk', Inter, sans-serif;
+  font:
+    700 19px 'Space Grotesk',
+    Inter,
+    sans-serif;
   letter-spacing: -0.01em;
 }
 .ww-brand b {
@@ -367,7 +381,9 @@ kbd {
   font-size: 16px;
 }
 .ww-av.talking {
-  box-shadow: 0 0 0 2px var(--ww-gold), 0 0 18px rgba(255, 210, 77, 0.4);
+  box-shadow:
+    0 0 0 2px var(--ww-gold),
+    0 0 18px rgba(255, 210, 77, 0.4);
 }
 
 /* Wallet */
@@ -394,7 +410,9 @@ kbd {
     radial-gradient(120% 90% at 0% 0%, #2a2a2c 0%, transparent 60%),
     linear-gradient(160deg, #1b1b1d 0%, #0b0b0c 55%, #050505 100%);
   border: 1px solid rgb(255 210 77 / 0.3);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   aspect-ratio: 1.586;
   border-radius: 18px;
   padding: 20px;
@@ -408,11 +426,17 @@ kbd {
   align-items: center;
 }
 .ww-card-bal {
-  font: 700 30px 'Space Grotesk', Inter, sans-serif;
+  font:
+    700 30px 'Space Grotesk',
+    Inter,
+    sans-serif;
   letter-spacing: -0.02em;
 }
 .ww-card-addr {
-  font: 12px ui-monospace, Menlo, monospace;
+  font:
+    12px ui-monospace,
+    Menlo,
+    monospace;
   color: var(--bw-wcard-muted, #8e8e89);
 }
 .ww-hero-chart {
@@ -422,7 +446,10 @@ kbd {
   min-width: 0;
 }
 .ww-big {
-  font: 700 28px 'Space Grotesk', Inter, sans-serif;
+  font:
+    700 28px 'Space Grotesk',
+    Inter,
+    sans-serif;
   letter-spacing: -0.02em;
 }
 .ww-chart {
@@ -615,7 +642,10 @@ kbd {
 }
 .ww-reader h2 {
   margin: 0;
-  font: 700 22px 'Space Grotesk', Inter, sans-serif;
+  font:
+    700 22px 'Space Grotesk',
+    Inter,
+    sans-serif;
 }
 .ww-tools {
   display: flex;
@@ -712,7 +742,10 @@ kbd {
 }
 .ww-space h3 {
   margin: 12px 0;
-  font: 700 17px 'Space Grotesk', Inter, sans-serif;
+  font:
+    700 17px 'Space Grotesk',
+    Inter,
+    sans-serif;
 }
 .ww-speakers {
   display: flex;
@@ -752,7 +785,9 @@ kbd {
   display: grid;
   place-items: center;
   text-align: center !important;
-  font: 700 26px 'Space Grotesk', sans-serif !important;
+  font:
+    700 26px 'Space Grotesk',
+    sans-serif !important;
   color: #1a1405 !important;
   background: radial-gradient(circle at 35% 30%, #fff1b8, var(--ww-gold) 45%, var(--ww-gold-2)) !important;
   box-shadow:
@@ -801,7 +836,9 @@ kbd {
   border: 0;
   outline: none;
   color: var(--ww-text);
-  font: 16px Inter, sans-serif;
+  font:
+    16px Inter,
+    sans-serif;
 }
 .ww-cmd-row {
   display: flex;
@@ -825,17 +862,6 @@ kbd {
     grid-template-columns: 240px 1fr 260px;
   }
 }
-html.ww-on,
-html.ww-on body {
-  max-width: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  background: #050505 !important;
-  overflow: hidden;
-}
-html.ww-on body > .bwallet-web-banner {
-  display: none;
-}
 .ww-hero-chart .ww-row-between {
   align-items: flex-start;
 }
@@ -845,4 +871,109 @@ html.ww-on body > .bwallet-web-banner {
 }
 .ww-details .ww-panel-head {
   padding-top: 10px;
+}
+
+/* ---- Real app inside the shell ---- */
+.ww-sidebar {
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+}
+.ww-main {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+}
+.ww-navscroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.ww-navtitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ww-muted);
+  padding: 12px 10px 4px;
+}
+.ww-nav {
+  gap: 1px;
+}
+.ww-nav button {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.ww-content {
+  display: flex;
+  gap: 16px;
+  overflow: hidden;
+  padding: 16px 24px 16px;
+}
+/* The real screen. Its top 3.5rem is where the phone top bar was: clipped. transform contains fixed children. */
+.ww-colwrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.ww-col {
+  position: absolute;
+  inset: -3.5rem 0 0 0;
+  transform: translateZ(0);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.ww-col > * {
+  flex: 1;
+  min-height: 0;
+}
+.ww-content.view-wallet .ww-colwrap,
+.ww-content.view-chat .ww-colwrap {
+  border-radius: 16px;
+  border: 1px solid var(--ww-line);
+  background: #010101;
+}
+.ww-content.view-wallet .ww-colwrap {
+  flex: 0 0 460px;
+  margin: 0;
+}
+.ww-content.view-chat .ww-colwrap {
+  flex: 0 0 420px;
+  margin: 0;
+}
+.ww-content.view-mail .ww-colwrap {
+  flex: 1 1 auto;
+  margin: 0;
+}
+.ww-side-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ww-history {
+  flex: 1 0 420px;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+}
+.ww-history > * {
+  flex: 1;
+}
+img.ww-tok {
+  object-fit: cover;
+}
+.ww-bellwrap {
+  display: inline-flex;
+}
+/* Bottom sheets portalled to <body> (backup, handle, send…): a centred column, not the full window width. */
+html.ww-on .fixed.inset-x-0[role='dialog'] {
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
 }

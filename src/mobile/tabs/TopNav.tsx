@@ -34,6 +34,7 @@ import { CALLS_ROUTE } from '../calls/route';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -117,6 +118,20 @@ const TopNavBar = () => {
   useEffect(() => {
     if (!phoneLayoutOn()) initPairing();
   }, []);
+  // Wide web layout: the sidebar / top bar open this bar's drawer and sheets (wide/WideShell.tsx).
+  useEffect(() => {
+    if (!WIDE_ON) return;
+    const on = (e: Event) => {
+      const w = (e as CustomEvent<WwOpen>).detail;
+      if (w === 'drawer') setDrawer(true);
+      else if (w === 'scan') openScan();
+      else if (w === 'pair') setPairOpen(true);
+      else if (w === 'tools') setToolsOpen(true);
+      else setSheet(w);
+    };
+    window.addEventListener(WW_OPEN, on);
+    return () => window.removeEventListener(WW_OPEN, on);
+  }, []);
   // Same as upstream TopNav.handleSwitchAccount (shared with the account strip and Settings).
   const { switchingTo, switchAccount: handleSwitchAccount } = useAccountSwitch(() => setDrawer(false));
 
@@ -167,8 +182,8 @@ const TopNavBar = () => {
 
   return (
     <>
-      {!phone && <AccountStrip />}
-      {phone ? (
+      {!WIDE_ON && <>{!phone && <AccountStrip />}</>}
+      {WIDE_ON ? null : phone ? (
         // Portalled to <body> so a page drag (phone/pager.tsx) never moves the bar.
         createPortal(
           // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:

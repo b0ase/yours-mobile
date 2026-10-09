@@ -10,7 +10,11 @@ export type BappEntry = { id: string; name: string; origin: string; icon: string
 const DEV_ORIGIN_RE = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{2,5})?$/;
 /** A local bMovies dev server (e.g. VITE_BMOVIES_ORIGIN=http://localhost:3111) is honoured only in dev builds. */
 const devOrigin = (v: unknown): string | null =>
-  import.meta.env.DEV || import.meta.env.VITE_BAPP_DEV === '1' ? (typeof v === 'string' && DEV_ORIGIN_RE.test(v) ? v : null) : null;
+  import.meta.env.DEV || import.meta.env.VITE_BAPP_DEV === '1'
+    ? typeof v === 'string' && DEV_ORIGIN_RE.test(v)
+      ? v
+      : null
+    : null;
 
 /** Pinned bApps. Exact origins only: this list IS the allowlist. */
 export const BAPPS: readonly BappEntry[] = [
@@ -24,7 +28,9 @@ export const BAPPS: readonly BappEntry[] = [
 
 export const BAPP_ROUTE = '/m/bapp/';
 export const bappFromPath = (pathname: string): BappEntry | null =>
-  pathname.startsWith(BAPP_ROUTE) ? (BAPPS.find((b) => b.id === pathname.slice(BAPP_ROUTE.length).split('/')[0]) ?? null) : null;
+  pathname.startsWith(BAPP_ROUTE)
+    ? (BAPPS.find((b) => b.id === pathname.slice(BAPP_ROUTE.length).split('/')[0]) ?? null)
+    : null;
 
 /* ---------- sidebar badge store (bapp:badge) ---------- */
 const badges = new Map<string, number>();
@@ -65,7 +71,14 @@ export function readWide(raw: unknown): Wide | null {
   if (Array.isArray(w.sections))
     sections = w.sections
       .map(obj)
-      .filter((s) => typeof s.id === 'string' && SECTION_ID.test(s.id) && typeof s.label === 'string' && s.label.trim() && isPath(s.path))
+      .filter(
+        (s) =>
+          typeof s.id === 'string' &&
+          SECTION_ID.test(s.id) &&
+          typeof s.label === 'string' &&
+          s.label.trim() &&
+          isPath(s.path),
+      )
       .slice(0, 16)
       .map((s) => ({
         id: s.id as string,
@@ -78,7 +91,12 @@ export function readWide(raw: unknown): Wide | null {
     sections = ['wallet', 'exchange', 'feed', 'chat']
       .map((k) => [k, obj(slots[k])] as const)
       .filter(([, s]) => s.enabled === true && isPath(s.path))
-      .map(([k, s]) => ({ id: k, label: String(s.label ?? SLOT_LABELS[k]).slice(0, 24), path: s.path as string, icon: k }));
+      .map(([k, s]) => ({
+        id: k,
+        label: String(s.label ?? SLOT_LABELS[k]).slice(0, 24),
+        path: s.path as string,
+        icon: k,
+      }));
   }
   const mw = w.minWidth;
   const minWidth = typeof mw === 'number' && Number.isInteger(mw) && mw >= 320 && mw <= 4096 ? mw : 720;
@@ -86,4 +104,3 @@ export function readWide(raw: unknown): Wide | null {
   const icon = isPath(sbIcon) ? sbIcon : isPath(m.icon) ? m.icon : null;
   return { sections, minWidth, home: isPath(m.home) ? m.home : '/', name: m.name.slice(0, 40), icon };
 }
-

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { WIDE_ON } from '../wide/flag';
 
 /**
  * The phone layout (docs/PHONE-LAYOUT-PLAN.md) is the default since 5.1.83. Settings › Appearance › "Classic layout"
@@ -9,6 +10,8 @@ export const PHONE_LAYOUT_KEY = 'bwallet:phone-layout';
 const EVENT = 'bwallet:phone-layout-changed';
 
 export const phoneLayoutOn = (): boolean => {
+  // The wide web layout has its own chrome (wide/WideShell.tsx): classic tabs underneath, hidden.
+  if (WIDE_ON) return false;
   try {
     return localStorage.getItem(PHONE_LAYOUT_KEY) !== '0';
   } catch {

@@ -4,8 +4,8 @@ import './bapps.css';
 
 /** PROTOTYPE (demo/desktop-shell): bApps page — selected bApp in an iframe above a dock. */
 export default function BappsPage() {
-  const [current, setCurrent] = useState('music');
-  const [running, setRunning] = useState<string[]>(['music']);
+  const [current, setCurrent] = useState('bwriter');
+  const [running, setRunning] = useState<string[]>(['bwriter']);
   const app = BAPPS.find((a) => a.id === current) ?? BAPPS[0];
   const pick = (id: string) => {
     setCurrent(id);
@@ -15,7 +15,7 @@ export default function BappsPage() {
   const close = () => {
     const rest = running.filter((r) => r !== current);
     setRunning(rest);
-    setCurrent(rest[rest.length - 1] ?? 'music');
+    setCurrent(rest[rest.length - 1] ?? 'bwriter');
   };
   return (
     <div className="bx-page">
@@ -34,7 +34,7 @@ export default function BappsPage() {
           </button>
         </div>
         <div className="bx-body">
-          {BAPPS.filter((a) => a.url && running.includes(a.id)).map((a) => (
+          {BAPPS.filter((a) => a.url && !a.newTab && running.includes(a.id)).map((a) => (
             <iframe
               key={a.id}
               title={a.name}
@@ -44,6 +44,16 @@ export default function BappsPage() {
               allow="autoplay; microphone"
             />
           ))}
+          {app.url && app.newTab && (
+            <div className="bx-soon">
+              <BappIcon app={app} size={88} />
+              <h2>{app.name}</h2>
+              <p>This bApp opens in its own tab.</p>
+              <a className="ww-btn gold" href={app.url} target="_blank" rel="noreferrer">
+                Open in new tab ↗
+              </a>
+            </div>
+          )}
           {!app.url && (
             <div className="bx-soon">
               <BappIcon app={app} size={88} />

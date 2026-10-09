@@ -725,7 +725,16 @@ const Empty = ({ title, text }: { title: string; text: string }) => (
   </div>
 );
 
-export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => void; initialTab?: Tab }) => {
+export const BMailScreen = ({
+  onClose,
+  initialTab = 'inbox',
+  wide = false,
+}: {
+  onClose: () => void;
+  initialTab?: Tab;
+  /** Wide web layout: list and reader side by side, compose in the right pane. */
+  wide?: boolean;
+}) => {
   const m = useBMail();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [reading, setReading] = useState<Received | null>(null);
@@ -846,6 +855,270 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     </div>
   );
 
+  const list = (
+    <>
+      <div
+        className="flex items-center gap-3 rounded-2xl px-4 py-3"
+        style={{ background: `linear-gradient(135deg, ${GOLD}26, ${CARD})`, border: `1px solid ${GOLD}33` }}
+      >
+        <div className="flex flex-1 flex-col">
+          <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
+            {inView ? 'In view' : 'Postage received this week'}
+          </span>
+          <span className="text-xl font-bold" style={{ color: GOLD }}>
+            {inView ? `${fmtCents(Math.round(inView.usd * 100))} in postage this week` : money(week.sats, m.rate)}
+          </span>
+          <span className="text-[11px]" style={{ color: MUTED }}>
+            {inView ? inView.n : week.n} stamped
+            {inView?.ex ? ' · includes examples' : ''}
+          </span>
+        </div>
+        <div className="flex flex-col items-end text-[11px]" style={{ color: MUTED }}>
+          <span>Price to reach you</span>
+          <span className="text-sm font-semibold text-white">{money(m.priceSats, m.rate)}</span>
+          <span>Penny post</span>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        {(
+          [
+            ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
+            ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
+            ['sent', 'Sent'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={tab === id}
+            onClick={() => setTab(id)}
+            className="min-h-[44px] flex-1 rounded-xl py-2 text-sm font-semibold"
+            style={tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab !== 'sent' && (
+        <>
+          <div className="flex rounded-xl p-0.5" style={{ background: CARD }}>
+            {(
+              [
+                ['paid', 'Most paid'],
+                ['newest', 'Newest'],
+                ['friends', 'Friends'],
+                ...(tab === 'requests' ? ([['spreading', 'Spreading']] as const) : []),
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={mode === id}
+                onClick={() => setSort(id)}
+                className="min-h-[44px] flex-1 rounded-lg py-2 text-xs font-semibold"
+                style={mode === id ? { background: '#2b2f36', color: GOLD } : { color: MUTED }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+            {FILTERS.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                aria-pressed={filter === x.id}
+                onClick={() => setFilter(x.id)}
+                className="min-h-[44px] shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold"
+                style={
+                  filter === x.id
+                    ? { background: GOLD, color: '#1a1300' }
+                    : { border: '1px solid #2b2f36', color: '#fff' }
+                }
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {m.error && <p className="text-xs text-[#F97066] m-0">{m.error}</p>}
+      {tab === 'inbox' && (
+        <>
+          {view('inbox').map((r, i, all) => (
+            <div key={r.id} className="flex flex-col gap-1">
+              {i === 0 && isPinned(r, isContact) && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: '#6CE9A6' }}>
+                  Friends
+                </span>
+              )}
+              {i > 0 && !isPinned(r, isContact) && isPinned(all[i - 1], isContact) && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: MUTED }}>
+                  Everyone else
+                </span>
+              )}
+              <MailRow
+                r={r}
+                rate={m.rate}
+                friend={isContact(r.from)}
+                label={nameOf(r.from)}
+                onOpen={() => setReading(r)}
+              />
+            </div>
+          ))}
+          {!view('inbox').length && !exInbox.length && (
+            <Empty
+              title={m.loading ? 'Checking for mail…' : 'No mail yet'}
+              text="bMail is sealed mail with a stamp. Friends write free and sit on top. Strangers pay your price to reach you (Penny post, 1¢), and the postage comes to you. Unstamped mail waits in Requests."
+            />
+          )}
+        </>
+      )}
+      {tab === 'requests' && (
+        <>
+          {view('requests').map((r) => (
+            <div key={r.id} className="flex flex-col gap-1">
+              <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+              {r.verifiedSats > 0 && (
+                <span className="text-[10px] px-2" style={{ color: MUTED }}>
+                  Below your price to reach ({money(m.priceSats, m.rate)}): the sender can pay the difference.
+                </span>
+              )}
+            </div>
+          ))}
+          {!view('requests').length && !exRequests.length && (
+            <Empty
+              title="Requests"
+              text="Unstamped mail, promotions and token airdrops wait here. Nothing is thrown away: keep what you like, hide an issuer to stop more."
+            />
+          )}
+        </>
+      )}
+      {tab === 'sent' &&
+        (m.state.sent.length ? (
+          m.state.sent.map((s) => <SentRow key={s.id} s={s} rate={m.rate} />)
+        ) : (
+          <Empty
+            title="Nothing sent yet"
+            text="Write to a $handle or paymail. Your letter is sealed so only they can open it, and the stamp (1¢ by default) is paid to them from your wallet as you send."
+          />
+        ))}
+      {tab !== 'sent' && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
+        <>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
+              Examples
+            </span>
+            <span className="flex-1 text-[11px]" style={{ color: '#667085' }}>
+              what bMail looks like in use
+            </span>
+            <button
+              type="button"
+              onClick={hideExamples}
+              className="min-h-[44px] px-2 text-xs underline"
+              style={{ color: MUTED }}
+            >
+              Hide examples
+            </button>
+          </div>
+          {(tab === 'inbox' ? exInbox : exRequests).map((e) => (
+            <ExampleRow key={e.id} e={e} onOpen={() => setExample(e)} />
+          ))}
+        </>
+      )}
+      {tab === 'requests' && <AirdropsList onLeave={onClose} />}
+    </>
+  );
+  const subBody = settings ? (
+    <>
+      <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
+    </>
+  ) : example ? (
+    <ExampleReader e={example} onHide={hideExamples} />
+  ) : reading ? (
+    <Reader
+      r={m.state.received.find((x) => x.id === reading.id) ?? reading}
+      label={nameOf(reading.from)}
+      rate={m.rate}
+      open={m.open}
+      creditUsed={m.state.usedCredits.includes(reading.id)}
+      onReply={(d) => {
+        setReading(null);
+        setDraft(d);
+      }}
+    />
+  ) : null;
+  const mainHeader = (
+    <div
+      className="sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
+      style={{ background: '#0d0e11', paddingTop: 8 }}
+    >
+      <Mailbox size={18} color={GOLD} />
+      <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
+      <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
+        <PenSquare size={16} color={MUTED} />
+      </button>
+      <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
+        <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
+      </button>
+      <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
+        <Settings size={16} color={MUTED} />
+      </button>
+    </div>
+  );
+  if (wide)
+    return (
+      <div
+        className="grid h-full min-h-0 w-full flex-1"
+        style={{ gridTemplateColumns: 'minmax(360px, 460px) 1fr', background: '#0d0e11' }}
+      >
+        <div
+          ref={scroller}
+          className="relative flex min-h-0 flex-col overflow-y-auto"
+          style={{ borderRight: '1px solid #1f2127' }}
+        >
+          {mainHeader}
+          <div className="flex flex-col gap-2 px-4 pb-8">{list}</div>
+        </div>
+        <div className="relative flex min-h-0 flex-col overflow-y-auto">
+          {draft || sub ? (
+            <>
+              {subHeader('8px')}
+              <div className="mx-auto flex w-full max-w-[760px] flex-col gap-2 px-6 pb-12">
+                {draft ? (
+                  <Compose
+                    draft={draft}
+                    rate={m.rate}
+                    myPriceSats={myPriceSats}
+                    send={m.send}
+                    onDone={() => {
+                      back();
+                      setTab('sent');
+                    }}
+                  />
+                ) : (
+                  subBody
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="m-auto flex flex-col items-center gap-3 p-8 text-center" style={{ color: MUTED }}>
+              <Mailbox size={36} color={GOLD} />
+              <span className="text-sm">Select a mail to read it, or write a new one.</span>
+              <button
+                type="button"
+                className={gold}
+                style={{ background: GOLD, color: '#1a1300' }}
+                onClick={() => setDraft({})}
+              >
+                Write
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+
   return (
     <div
       ref={scroller}
@@ -878,26 +1151,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           </div>,
           document.body,
         )}
-      {inFrameSub ? (
-        subHeader('8px')
-      ) : (
-        <div
-          className="sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
-          style={{ background: '#0d0e11', paddingTop: 8 }}
-        >
-          <Mailbox size={18} color={GOLD} />
-          <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
-          <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
-            <PenSquare size={16} color={MUTED} />
-          </button>
-          <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
-            <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
-          </button>
-          <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
-            <Settings size={16} color={MUTED} />
-          </button>
-        </div>
-      )}
+      {inFrameSub ? subHeader('8px') : mainHeader}
       {ptrShow && (
         <div
           role="status"
@@ -915,204 +1169,8 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         </div>
       )}
       <div className="flex flex-col gap-2 px-4 pb-24">
-        {settings ? (
-          <>
-            <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
-          </>
-        ) : example ? (
-          <ExampleReader e={example} onHide={hideExamples} />
-        ) : reading ? (
-          <Reader
-            r={m.state.received.find((x) => x.id === reading.id) ?? reading}
-            label={nameOf(reading.from)}
-            rate={m.rate}
-            open={m.open}
-            creditUsed={m.state.usedCredits.includes(reading.id)}
-            onReply={(d) => {
-              setReading(null);
-              setDraft(d);
-            }}
-          />
-        ) : null}
-        {!inFrameSub && (
-          <>
-            <div
-              className="flex items-center gap-3 rounded-2xl px-4 py-3"
-              style={{ background: `linear-gradient(135deg, ${GOLD}26, ${CARD})`, border: `1px solid ${GOLD}33` }}
-            >
-              <div className="flex flex-1 flex-col">
-                <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                  {inView ? 'In view' : 'Postage received this week'}
-                </span>
-                <span className="text-xl font-bold" style={{ color: GOLD }}>
-                  {inView ? `${fmtCents(Math.round(inView.usd * 100))} in postage this week` : money(week.sats, m.rate)}
-                </span>
-                <span className="text-[11px]" style={{ color: MUTED }}>
-                  {inView ? inView.n : week.n} stamped
-                  {inView?.ex ? ' · includes examples' : ''}
-                </span>
-              </div>
-              <div className="flex flex-col items-end text-[11px]" style={{ color: MUTED }}>
-                <span>Price to reach you</span>
-                <span className="text-sm font-semibold text-white">{money(m.priceSats, m.rate)}</span>
-                <span>Penny post</span>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {(
-                [
-                  ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
-                  ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
-                  ['sent', 'Sent'],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={tab === id}
-                  onClick={() => setTab(id)}
-                  className="min-h-[44px] flex-1 rounded-xl py-2 text-sm font-semibold"
-                  style={
-                    tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
-                  }
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {tab !== 'sent' && (
-              <>
-                <div className="flex rounded-xl p-0.5" style={{ background: CARD }}>
-                  {(
-                    [
-                      ['paid', 'Most paid'],
-                      ['newest', 'Newest'],
-                      ['friends', 'Friends'],
-                      ...(tab === 'requests' ? ([['spreading', 'Spreading']] as const) : []),
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      aria-pressed={mode === id}
-                      onClick={() => setSort(id)}
-                      className="min-h-[44px] flex-1 rounded-lg py-2 text-xs font-semibold"
-                      style={mode === id ? { background: '#2b2f36', color: GOLD } : { color: MUTED }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                  {FILTERS.map((x) => (
-                    <button
-                      key={x.id}
-                      type="button"
-                      aria-pressed={filter === x.id}
-                      onClick={() => setFilter(x.id)}
-                      className="min-h-[44px] shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold"
-                      style={
-                        filter === x.id
-                          ? { background: GOLD, color: '#1a1300' }
-                          : { border: '1px solid #2b2f36', color: '#fff' }
-                      }
-                    >
-                      {x.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-            {m.error && <p className="text-xs text-[#F97066] m-0">{m.error}</p>}
-            {tab === 'inbox' && (
-              <>
-                {view('inbox').map((r, i, all) => (
-                  <div key={r.id} className="flex flex-col gap-1">
-                    {i === 0 && isPinned(r, isContact) && (
-                      <span
-                        className="text-[10px] font-semibold uppercase tracking-wide px-1"
-                        style={{ color: '#6CE9A6' }}
-                      >
-                        Friends
-                      </span>
-                    )}
-                    {i > 0 && !isPinned(r, isContact) && isPinned(all[i - 1], isContact) && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: MUTED }}>
-                        Everyone else
-                      </span>
-                    )}
-                    <MailRow
-                      r={r}
-                      rate={m.rate}
-                      friend={isContact(r.from)}
-                      label={nameOf(r.from)}
-                      onOpen={() => setReading(r)}
-                    />
-                  </div>
-                ))}
-                {!view('inbox').length && !exInbox.length && (
-                  <Empty
-                    title={m.loading ? 'Checking for mail…' : 'No mail yet'}
-                    text="bMail is sealed mail with a stamp. Friends write free and sit on top. Strangers pay your price to reach you (Penny post, 1¢), and the postage comes to you. Unstamped mail waits in Requests."
-                  />
-                )}
-              </>
-            )}
-            {tab === 'requests' && (
-              <>
-                {view('requests').map((r) => (
-                  <div key={r.id} className="flex flex-col gap-1">
-                    <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
-                    {r.verifiedSats > 0 && (
-                      <span className="text-[10px] px-2" style={{ color: MUTED }}>
-                        Below your price to reach ({money(m.priceSats, m.rate)}): the sender can pay the difference.
-                      </span>
-                    )}
-                  </div>
-                ))}
-                {!view('requests').length && !exRequests.length && (
-                  <Empty
-                    title="Requests"
-                    text="Unstamped mail, promotions and token airdrops wait here. Nothing is thrown away: keep what you like, hide an issuer to stop more."
-                  />
-                )}
-              </>
-            )}
-            {tab === 'sent' &&
-              (m.state.sent.length ? (
-                m.state.sent.map((s) => <SentRow key={s.id} s={s} rate={m.rate} />)
-              ) : (
-                <Empty
-                  title="Nothing sent yet"
-                  text="Write to a $handle or paymail. Your letter is sealed so only they can open it, and the stamp (1¢ by default) is paid to them from your wallet as you send."
-                />
-              ))}
-            {tab !== 'sent' && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
-              <>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
-                    Examples
-                  </span>
-                  <span className="flex-1 text-[11px]" style={{ color: '#667085' }}>
-                    what bMail looks like in use
-                  </span>
-                  <button
-                    type="button"
-                    onClick={hideExamples}
-                    className="min-h-[44px] px-2 text-xs underline"
-                    style={{ color: MUTED }}
-                  >
-                    Hide examples
-                  </button>
-                </div>
-                {(tab === 'inbox' ? exInbox : exRequests).map((e) => (
-                  <ExampleRow key={e.id} e={e} onOpen={() => setExample(e)} />
-                ))}
-              </>
-            )}
-            {tab === 'requests' && <AirdropsList onLeave={onClose} />}
-          </>
-        )}
+        {subBody}
+        {!inFrameSub && list}
       </div>
     </div>
   );

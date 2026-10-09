@@ -1,6 +1,7 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { TopNav } from '../../components/TopNav';
 import { BMailScreen } from './BMailScreen';
+import { WIDE_ON } from '../wide/flag';
 
 /**
  * bMail in the wallet's content area (/m/bmail): top bar and tab bar stay visible (owner, 9 Oct 2026). Leaving goes
@@ -17,7 +18,7 @@ const BMailPage = () => {
       style={{ background: '#0d0e11', paddingTop: '3.5rem', paddingBottom: 'var(--dock-h, 3.75rem)' }}
     >
       <TopNav />
-      <BMailScreen key={tab} initialTab={tab} onClose={() => navigate(-1)} />
+      <BMailScreen key={tab} initialTab={tab} wide={WIDE_ON} onClose={() => navigate(-1)} />
     </div>
   );
 };

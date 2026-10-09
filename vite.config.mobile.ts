@@ -157,6 +157,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
     ],
     // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
+    // Wide web layout: the token table and totals beside the wallet read this page's balances (wide/walletFeed.ts).
+    [
+      '  if (showWelcome) {',
+      '  useWideWalletFeed({ bsvBalance, mneeBalance, exchangeRate, bsv21s });\n  if (showWelcome) {',
+    ],
+    [
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { useWideWalletFeed } from '../mobile/wide/walletFeed';",
+    ],
     [
       '</SectionBoundary>\n        </motion.div>',
       '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>\n<SectionBoundary name="Sweep"><SweepPrompt /></SectionBoundary>\n<SectionBoundary name="Airdrops"><AirdropsRow /></SectionBoundary>',
@@ -642,8 +651,9 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Phone layout (src/mobile/phone, behind the Settings › Testing switch): the dock, page swipes and the hold-b
     // agent, mounted once inside the router. Renders nothing while the switch is off.
     // PhonePage wraps the routed page so the phone layout can drag it sideways (phone/pager.tsx).
-    ['<Routes>', '<Suspense fallback={null}><PhoneShell /></Suspense>\n<PhonePage><Routes>'],
-    ['</Routes>', '</Routes></PhonePage>'],
+    // Wide web layout (src/mobile/wide, demo/desktop-shell): sidebar + top bar around the same routes; a no-op when off.
+    ['<Routes>', '<Suspense fallback={null}><PhoneShell /></Suspense>\n<WideFrame><PhonePage><Routes>'],
+    ['</Routes>', '</Routes></PhonePage></WideFrame>'],
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
       "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';",
@@ -654,7 +664,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';\nimport { WideFrame } from './mobile/wide/WideFrame';",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',

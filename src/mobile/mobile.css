@@ -1216,3 +1216,33 @@ select optgroup {
 .bw-rcv-airdrop ~ * {
   display: none !important;
 }
+
+/* Wide web layout (src/mobile/wide, demo/desktop-shell): html.ww-on only. The shell itself is position: fixed;
+   lock / unlock render in a centred phone-width column. */
+html.ww-on:root {
+  --web-banner-height: 0px;
+  --wallet-unlock-width: 420px;
+  --wallet-width: 100%;
+  --wallet-height: 100vh;
+  --dock-h: 0px;
+  --account-strip-height: 0px;
+  /* Chat: an open room sits beside the room list (tabs/ChatPage.tsx Conversation). */
+  --ww-conv-left: calc(240px + 24px + 420px + 16px);
+  --ww-conv-top: 69px;
+}
+html.ww-on,
+html.ww-on body {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #050505 !important;
+  overflow: hidden;
+}
+html.ww-on body > .bwallet-web-banner {
+  display: none;
+}
+html.ww-on body #root {
+  width: 100%;
+  max-width: none;
+  margin: 0 !important;
+}

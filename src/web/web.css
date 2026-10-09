@@ -100,10 +100,10 @@ html body #root {
   }
 }
 
-/* Wide screens: the wallet card on the left, staying in view, and the rest of the wallet page on the right
+/* Wide screens (not the wide web layout, src/mobile/wide, which has its own panes): the wallet card on the left, staying in view, and the rest of the wallet page on the right
    (owner, 6 Oct 2026). Only the Wallet page's scroller holds .bw-wcard-wrap, so other pages are untouched. */
 @media (min-width: 900px) {
-  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) {
+  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) {
     display: grid;
     grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
     column-gap: 32px;
@@ -116,23 +116,26 @@ html body #root {
      layout's 88/90/92% widths, side padding and margins gave each block different edges. Fixed layers
      (background video, sheets) are left out so they cover the whole wallet, not a band starting at the
      right column. */
-  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed):not(.bw-wcard-wrap) {
+  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed):not(.bw-wcard-wrap) {
     grid-column: 2;
     width: 100%;
     max-width: none;
     margin: 0 0 12px;
   }
-  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed) :is([class*='w-[9'], [class*='w-[88%]']) {
+  html:not(.ww-on)
+    .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap)
+    > :not(.fixed)
+    :is([class*='w-[9'], [class*='w-[88%]']) {
     width: 100%;
     margin-left: 0;
     margin-right: 0;
   }
-  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed) div.w-full.px-4 {
+  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed) div.w-full.px-4 {
     padding-left: 0;
     padding-right: 0;
   }
   /* The card shares the first row's top edge and stays in view while the right column scrolls. */
-  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
+  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
     grid-column: 1;
     grid-row: 1 / span 60;
     width: 100%;

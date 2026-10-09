@@ -26,7 +26,17 @@ const ICONS: Record<string, string> = {
   dot: 'M12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
 };
 const SIcon = ({ name }: { name?: string }) => (
-  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <svg
+    viewBox="0 0 24 24"
+    width="17"
+    height="17"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
     <path d={ICONS[name ?? ''] ?? ICONS.dot} />
   </svg>
 );
@@ -78,7 +88,13 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
     if (!el || !w) return;
     const width = Math.round(el.getBoundingClientRect().width);
     const standalone = matchMedia('(display-mode: standalone)').matches;
-    post({ type: 'bapp:layout', v: 2, layout: width >= w.minWidth ? 'wide' : 'phone', width, ...(standalone ? { standalone } : {}) });
+    post({
+      type: 'bapp:layout',
+      v: 2,
+      layout: width >= w.minWidth ? 'wide' : 'phone',
+      width,
+      ...(standalone ? { standalone } : {}),
+    });
   }, [post]);
 
   // 2. Handshake: hello until ready (the app may still be booting), then layout; resend layout on resize.
@@ -109,7 +125,8 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
       if (e.source !== frame.current?.contentWindow || e.origin !== app.origin) return;
       const d = e.data as Record<string, unknown> | null;
       if (!d || typeof d !== 'object' || typeof d.type !== 'string' || !d.type.startsWith('bapp:')) return;
-      const known = (s: unknown): s is string => typeof s === 'string' && !!wideRef.current?.sections.some((x) => x.id === s);
+      const known = (s: unknown): s is string =>
+        typeof s === 'string' && !!wideRef.current?.sections.some((x) => x.id === s);
       switch (d.type) {
         case 'bapp:ready':
           if (helloTimer.current) clearInterval(helloTimer.current);
@@ -122,11 +139,14 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
           if (known(d.section)) setActive(d.section);
           break;
         case 'bapp:badge':
-          if (typeof d.count === 'number' && Number.isFinite(d.count)) setBadge(app.id, Math.max(0, Math.min(9999, Math.floor(d.count))));
+          if (typeof d.count === 'number' && Number.isFinite(d.count))
+            setBadge(app.id, Math.max(0, Math.min(9999, Math.floor(d.count))));
           break;
         case 'bapp:title':
-          // eslint-disable-next-line no-control-regex -- strip control characters from the app's title
-          if (typeof d.title === 'string') document.title = `${d.title.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)} — bWalletX`;
+          // Strip control characters from the app's title.
+          if (typeof d.title === 'string')
+            // eslint-disable-next-line no-control-regex
+            document.title = `${d.title.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)} — bWalletX`;
           break;
         case 'bapp:menu':
           // The wide shell's account drawer (flag.ts WW_OPEN; an event so this file stands alone).
@@ -159,12 +179,21 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
     <div className="bwx-bapp" data-bapp={app.id}>
       <nav className="bwx-bapp-sections" aria-label={`${app.name} sections`}>
         <div className="bwx-bapp-head">
-          {wide?.icon ? <img src={app.origin + wide.icon} alt="" width={26} height={26} /> : <span className="bwx-bapp-ph" />}
+          {wide?.icon ? (
+            <img src={app.origin + wide.icon} alt="" width={26} height={26} />
+          ) : (
+            <span className="bwx-bapp-ph" />
+          )}
           <span className="bwx-bapp-name">{wide?.name ?? app.name}</span>
           <span className={`bwx-bapp-dot ${connected ? 'on' : ''}`} title={connected ? 'Connected' : 'Connecting…'} />
         </div>
         {wide?.sections.map((s) => (
-          <button key={s.id} className={active === s.id ? 'on' : ''} aria-current={active === s.id ? 'page' : undefined} onClick={() => pick(s)}>
+          <button
+            key={s.id}
+            className={active === s.id ? 'on' : ''}
+            aria-current={active === s.id ? 'page' : undefined}
+            onClick={() => pick(s)}
+          >
             <SIcon name={s.icon} />
             <span>{s.label}</span>
           </button>
@@ -179,7 +208,11 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
         </div>
       </nav>
       <div className="bwx-bapp-stage">
-        {status === 'error' && <div className="bwx-bapp-msg">Couldn’t reach {app.name} ({new URL(app.origin).host}).</div>}
+        {status === 'error' && (
+          <div className="bwx-bapp-msg">
+            Couldn’t reach {app.name} ({new URL(app.origin).host}).
+          </div>
+        )}
         {status === 'loading' && <div className="bwx-bapp-msg">Opening {app.name}…</div>}
         {src && (
           <iframe
@@ -198,4 +231,3 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
     </div>
   );
 }
-

@@ -602,10 +602,12 @@ const Conversation = ({
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
-      className="fixed left-0 right-0 z-[110] flex flex-col"
+      className="fixed right-0 z-[110] flex flex-col"
       style={{
         display: offScreen ? 'none' : undefined,
-        top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
+        // Wide web layout (wide/wide.css) sets these so the room opens beside the room list.
+        left: 'var(--ww-conv-left, 0px)',
+        top: 'calc(var(--wallet-inset-top, 0px) + var(--ww-conv-top, 3.5rem))',
         bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem))',
         background: BG,
       }}
