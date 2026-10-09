@@ -77,6 +77,8 @@ export interface BPhoneProfile {
   rate: RateCard | null;
   listing: Listing;
   updatedAt: number;
+  /** bMail: price to reach me in USD (absent = Penny post, 1¢). */
+  mail?: { usd: number };
 }
 
 export const DEFAULT_TIMEZONE = (() => {
@@ -181,7 +183,14 @@ export const parseProfile = (raw: unknown): BPhoneProfile => {
     rate: parseRateCard(r.rate),
     listing: parseListing(r.listing),
     updatedAt: typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt) ? r.updatedAt : 0,
+    ...parseMailPrice(r.mail),
   };
+};
+
+/** bMail price to reach me: 0–$100 in USD, else absent. */
+export const parseMailPrice = (raw: unknown): { mail?: { usd: number } } => {
+  const usd = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).usd : undefined;
+  return typeof usd === 'number' && Number.isFinite(usd) && usd >= 0 && usd <= 100 ? { mail: { usd } } : {};
 };
 
 /** A listing that can go in the directory needs a title; a rate is not required (free consultations exist). */

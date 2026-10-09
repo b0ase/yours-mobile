@@ -37,6 +37,8 @@ export type Prefs = {
   animatedBackgrounds: boolean;
   /** Notifications per category (Settings → Notifications). */
   notify: Record<NotifyCategory, boolean>;
+  /** What a bMail notification shows (Settings › Notifications). The subject is decrypted on this phone only. */
+  bmailDetail: BMailDetail;
   /** Your Twetch user number (twetch.com/u/<n>), so replies on Twetch reach you. Empty: unknown. */
   twetchUserId: string;
   /** "Filter strong language": blur swearing in the Feed behind "Show anyway" (feed/language.ts). Off by default. */
@@ -51,6 +53,7 @@ export type Prefs = {
 };
 
 export type TaxCountry = 'uk' | 'other';
+export type BMailDetail = 'subject' | 'sender' | 'none';
 
 const ALL_ON = Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<NotifyCategory, boolean>;
 
@@ -64,6 +67,7 @@ export const DEFAULT_PREFS: Prefs = {
   animatedBackgrounds: true,
   indexAutoPayUsd: 0.1,
   notify: ALL_ON,
+  bmailDetail: 'subject',
   twetchUserId: '',
   filterStrong: false,
   sounds: true,
@@ -105,6 +109,7 @@ export const parsePrefs = (raw: unknown): Prefs => {
     animatedBackgrounds:
       typeof r.animatedBackgrounds === 'boolean' ? r.animatedBackgrounds : DEFAULT_PREFS.animatedBackgrounds,
     notify: parseNotify(r.notify),
+    bmailDetail: r.bmailDetail === 'sender' || r.bmailDetail === 'none' ? r.bmailDetail : 'subject',
     twetchUserId:
       typeof r.twetchUserId === 'string' && /^\d{1,12}$/.test(r.twetchUserId.trim()) ? r.twetchUserId.trim() : '',
     filterStrong: r.filterStrong === true,

@@ -96,7 +96,7 @@ export const loadMyProfile = async (f: Fetch, identityKey: string): Promise<BPho
 export const saveMyProfile = async (f: Fetch, wallet: Signer, profile: BPhoneProfile): Promise<BPhoneProfile> => {
   if (!bphoneEnabled()) throw new Error('bPhone needs a bWallet paymail');
   const identityKey = (await wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
-  const body = { v: 1, rate: profile.rate, listing: profile.listing };
+  const body = { v: 1, rate: profile.rate, listing: profile.listing, ...(profile.mail ? { mail: profile.mail } : {}) };
   const j = await postJson(
     f,
     api('bphone-put'),

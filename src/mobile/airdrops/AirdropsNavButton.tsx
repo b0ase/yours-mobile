@@ -1,23 +1,32 @@
-/** Top-bar Airdrops button (replaces the centred b): gift icon + unread badge; opens the Airdrops inbox. */
-import { lazy, Suspense, useState } from 'react';
-import { Gift } from 'lucide-react';
+/** Top-bar bMail button (replaces the centred b): mailbox icon + badge; opens bMail (airdrops live in Requests). */
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { OPEN_BMAIL_EVENT } from '../bmail/store';
+import { useBMailUnread } from '../bmail/useBMail';
+import { Mailbox } from 'lucide-react';
 import { useAirdrops } from './useAirdrops';
 
-const Inbox = lazy(() => import('./AirdropsInbox').then((m) => ({ default: m.AirdropsInbox })));
+const Inbox = lazy(() => import('../bmail/BMailScreen').then((m) => ({ default: m.BMailScreen })));
 
 export const AirdropsNavButton = ({ color, ring }: { color: string; ring: string }) => {
-  const { badge } = useAirdrops();
+  const { badge: drops } = useAirdrops();
+  const mail = useBMailUnread();
+  const badge = drops + mail;
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const on = () => setOpen(true);
+    window.addEventListener(OPEN_BMAIL_EVENT, on);
+    return () => window.removeEventListener(OPEN_BMAIL_EVENT, on);
+  }, []);
   return (
     <>
       <button
         type="button"
-        aria-label={badge > 0 ? `Airdrops, ${badge} new` : 'Airdrops'}
+        aria-label={badge > 0 ? `bMail, ${badge} new` : 'bMail'}
         onClick={() => setOpen(true)}
         className="relative w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
         style={{ border: ring }}
       >
-        <Gift size={16} color={color} />
+        <Mailbox size={16} color={color} />
         {badge > 0 && (
           <span
             aria-hidden

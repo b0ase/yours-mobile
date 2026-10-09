@@ -32,6 +32,15 @@ import { App } from '@capacitor/app';
 import { ONESAT, search, type SearchRow } from '../market/indexer';
 import { rememberedTicketIds } from '../wallet/walletTickets';
 import { loadPrefs } from '../settings/prefs';
+import type { WalletInterface } from '@bsv/sdk';
+import { myKey, openMail, peekMail } from '../bmail/client';
+import { route } from '../bmail/route';
+import { loadMail, openBMail, savePending } from '../bmail/store';
+import { fetchPeerBPhone } from '../calls/bphone';
+import { getFriends, isFriend as isCallFriend } from '../calls/friends';
+import { shortKey } from '../calls/machine';
+import { moneyNow, usdToSats } from '../money/money';
+import { cachedExchangeRate } from '../../utils/wallet';
 import {
   allowed,
   countIncreases,
@@ -62,6 +71,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let unsubCalls: (() => void) | null = null;
 let resumeSub: { remove: () => Promise<void> } | null = null;
+let tapSub: { remove: () => Promise<void> } | null = null;
 
 const now = () => Date.now();
 const item = (p: Omit<NotifyItem, 'read' | 'at'> & { at?: number }): NotifyItem => ({ read: false, at: now(), ...p });
@@ -402,6 +412,77 @@ async function myTxids(m: Me): Promise<Set<string>> {
   return out;
 }
 
+// ── bMail ────────────────────────────────────────────────────────────────────
+// Peeks the 'bmail' message box (never acknowledges or internalizes: the bMail screen does that) and notifies
+// only for mail that routes to Inbox. Requests (unstamped, under-priced) stay quiet.
+// TODO(bmail closed-app push, owner 9 Oct): the PHONE decrypts the subject (iOS Notification Service Extension /
+// Android FCM data handler using the wallet's BRC-2 key); the push server only relays the sealed envelope and never
+// sees plaintext. Not built yet: needs push-server work (docs/NOTIFICATIONS.md, bwalletx-push-project).
+
+const bmailLabel = async (key: string): Promise<string> => {
+  const fr = getFriends().find((x) => x.key === key)?.name;
+  if (fr) return fr;
+  const p = await fetchPeerBPhone((u, i) => fetch(u, i), key).catch(() => null);
+  if (p?.paymail) return `$${p.paymail.split('@')[0]}`;
+  return p?.name || shortKey(key);
+};
+
+async function bmail(m: Me, st: PollState, out: NotifyItem[]) {
+  const wallet = m.ctx?.wallet as unknown as WalletInterface | undefined;
+  if (!wallet) return;
+  const me = await myKey(wallet);
+  const mail = loadMail(me);
+  const known = new Set(mail.received.map((r) => r.id));
+  const priceSats = usdToSats(mail.priceUsd, cachedExchangeRate()) ?? 0;
+  const isFriend = (k: string) => isCallFriend(k) || mail.contacts.includes(k);
+  const peek = (await peekMail(wallet, me)).filter((p) => !known.has(p.env.id));
+  const inbox = peek.filter(({ env, sats }) => {
+    const replyCredit =
+      !!env.usesReplyCredit &&
+      mail.sent.some((s) => s.id === env.inReplyTo && s.to === env.from && s.replyPaidSats > 0);
+    return (
+      route({ id: env.id, from: env.from, at: env.at, verifiedSats: sats, replyCredit }, { isFriend, priceSats }) ===
+      'inbox'
+    );
+  });
+  savePending(
+    me,
+    inbox.map((p) => p.env.id),
+  );
+  await source(st, 'bmail.inbox', async (seen) => {
+    const fresh = new Set(seen(inbox.map((p) => p.env.id)));
+    const detail = loadPrefs().bmailDetail;
+    for (const { env, sats } of inbox) {
+      if (!fresh.has(env.id)) continue;
+      if (detail === 'none') {
+        out.push(
+          item({ id: `bmail:${env.id}`, kind: 'bmail', title: 'New bMail', body: '', target: { type: 'bmail' } }),
+        );
+        continue;
+      }
+      const who = await bmailLabel(env.from);
+      const stamp = sats > 0 ? `${moneyNow(sats)} stamp` : isFriend(env.from) ? 'Friend' : 'Reply paid';
+      // Subject is decrypted here, on the phone, with the wallet's BRC-2 key; it never leaves the device.
+      const subject =
+        detail === 'subject'
+          ? await openMail(wallet, env)
+              .then((x) => x.subject)
+              .catch(() => '')
+          : '';
+      out.push(
+        item({
+          id: `bmail:${env.id}`,
+          kind: 'bmail',
+          title: `bMail from ${who}`,
+          body: [stamp, excerpt(subject, 80)].filter(Boolean).join(' · '),
+          at: Math.min(env.at, now()),
+          target: { type: 'bmail' },
+        }),
+      );
+    }
+  });
+}
+
 // ── calls (pushed by the calls store, not polled here) ──────────────────────
 
 function watchCalls() {
@@ -423,7 +504,9 @@ function watchCalls() {
         ]);
     }
     const st = loadPollState();
-    const missed = s.recent.filter((r) => r.direction === 'incoming' && !r.answered_at && r.status !== 'ringing');
+    const missed = s.recent.filter(
+      (r) => r.direction === 'incoming' && !r.answered_at && (r.status === 'missed' || r.status === 'cancelled'),
+    );
     const d = diffSeen(
       st.seen['calls.missed'] ?? [],
       missed.map((r) => r.id),
@@ -439,8 +522,8 @@ function watchCalls() {
           item({
             id: `missed:${r.id}`,
             kind: 'call',
-            title: 'Missed call',
-            body: r.peer_label ?? 'Someone called you',
+            title: `Missed call from ${r.peer_label || shortKey(r.peer_key)}`,
+            body: 'Tap to call back',
             at: Date.parse(r.created_at) || now(),
             target: { type: 'calls' },
           }),
@@ -485,6 +568,7 @@ export async function pollNow(): Promise<void> {
       twetch(m, st, out),
       bchat(m, st, out),
       incoming(m, st, out),
+      bmail(m, st, out),
     ]);
     savePollState(st);
     await deliver(out);
@@ -517,6 +601,13 @@ export function startNotify(next: Me) {
       void App.addListener('resume', () => me && schedule(1_500))
         .then((h) => (resumeSub = h))
         .catch(() => undefined);
+    if (Capacitor.isNativePlatform())
+      void LocalNotifications.addListener('localNotificationActionPerformed', (a) => {
+        const t = (a.notification?.extra as { target?: { type?: string } } | undefined)?.target;
+        if (t?.type === 'bmail') openBMail();
+      })
+        .then((h) => (tapSub = h))
+        .catch(() => undefined);
     schedule(5_000);
   }
 }
@@ -529,6 +620,8 @@ export function stopNotify() {
   unsubCalls = null;
   void resumeSub?.remove();
   resumeSub = null;
+  void tapSub?.remove();
+  tapSub = null;
   if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
 }
 
