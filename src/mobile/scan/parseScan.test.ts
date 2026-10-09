@@ -73,6 +73,11 @@ describe('parseScan', () => {
     // Person pages still win on bwalletx.com; unknown hosts stay text.
     expect(parseScan('https://bwalletx.com/$alice').kind).toBe('person');
     expect(parseScan('https://evil.example/s/abcdefgh23').kind).toBe('text');
-    expect(parseScan('https://bchatx.com/s/bad').kind).toBe('text');
+    // Named Spaces: /s/<ticker> opens the room; /s/<ticker>/<slug> that episode.
+    const n = parseScan('https://bchatx.com/s/lounge');
+    expect(n.kind === 'join' && n.link).toEqual({ kind: 'room', ticker: 'LOUNGE', buy: false });
+    const e = parseScan('https://bchatx.com/s/lounge/abcdefgh23');
+    expect(e.kind === 'join' && e.link).toEqual({ kind: 'space', slug: 'abcdefgh23' });
+    expect(parseScan('https://bchatx.com/s/bad!name').kind).toBe('text');
   });
 });
