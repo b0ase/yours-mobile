@@ -656,6 +656,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Wide web layout (src/mobile/wide, demo/desktop-shell): sidebar + top bar around the same routes; a no-op when off.
     ['<Routes>', '<Suspense fallback={null}><PhoneShell /></Suspense>\n<WideFrame><PhonePage><Routes>'],
     ['</Routes>', '</Routes></PhonePage></WideFrame>'],
+    // Wide layout: unlock in the same composition as the welcome screen (wide/WideAuth.tsx; a no-op otherwise).
+    ['<UnlockWallet onUnlock={handleUnlock} />', '<WideAuth><UnlockWallet onUnlock={handleUnlock} /></WideAuth>'],
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
       "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';",
@@ -666,7 +668,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';\nimport { WideFrame } from './mobile/wide/WideFrame';",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';\nimport { WideFrame } from './mobile/wide/WideFrame';\nimport { WideAuth } from './mobile/wide/WideAuth';",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',

@@ -25,6 +25,7 @@ import { LockCoin } from '../tabs/TopNav';
 import { useWalletFeed } from './walletFeed';
 import { BappHost } from './BappHost';
 import { WidePage } from './WidePage';
+import { WideAuth } from './WideAuth';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
 import './wide.css';
 
@@ -324,13 +325,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     return () => removeEventListener('keydown', onKey);
   }, [navigate, lockWallet]);
 
-  // Create / restore / welcome: no chrome; a centred card over a full-viewport background (mobile.css html.ww-onb).
-  const onboarding = ONBOARDING.includes(pathname);
-  useEffect(() => {
-    document.documentElement.classList.toggle('ww-onb', onboarding);
-    return () => document.documentElement.classList.remove('ww-onb');
-  }, [onboarding]);
-  if (onboarding) return <>{children}</>;
+  // Create / restore / welcome: no chrome; the shared welcome / unlock composition (WideAuth, mobile.css html.ww-onb).
+  if (ONBOARDING.includes(pathname)) return <WideAuth>{children}</WideAuth>;
 
   const bapp = bappFromPath(pathname);
   const view = bapp
