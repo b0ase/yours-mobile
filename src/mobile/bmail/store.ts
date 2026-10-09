@@ -1,0 +1,92 @@
+/**
+ * bMail local state per identity key (localStorage): received mail (envelope + verification), sent mail
+ * (plaintext copy, since the sealed copy is only readable by the recipient… and us, but we keep it simple),
+ * read marks, contacts (people I wrote to) and my price to reach me.
+ */
+import type { Envelope, Sealed } from './envelope';
+import { PENNY_POST_USD, type MailMeta } from './route';
+
+export type Received = MailMeta & {
+  env: Envelope;
+  /** Relay message id (for acknowledge). */
+  relayId?: string;
+  verifyNote?: string;
+  read?: boolean;
+  /** Decrypted on open; kept locally so it opens instantly next time. */
+  opened?: Sealed;
+};
+export type Sent = {
+  id: string;
+  to: string;
+  toLabel: string;
+  at: number;
+  subject: string;
+  body: string;
+  sats: number;
+  replyPaidSats: number;
+  txid?: string;
+  inReplyTo?: string;
+};
+export type MailState = {
+  received: Received[];
+  sent: Sent[];
+  /** Identity keys I wrote to: they count as contacts (free, on top). */
+  contacts: string[];
+  /** Price to reach me in USD (Penny post by default). */
+  priceUsd: number;
+  /** Reply-paid credits others gave me: message id → sats (used when I reply). */
+  usedCredits: string[];
+};
+
+export const emptyMail = (): MailState => ({
+  received: [],
+  sent: [],
+  contacts: [],
+  priceUsd: PENNY_POST_USD,
+  usedCredits: [],
+});
+
+type Store = Pick<Storage, 'getItem' | 'setItem'>;
+const ls = (): Store | null => {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+};
+const key = (me: string) => `bw-bmail:${me}`;
+
+export const loadMail = (me: string, st: Store | null = ls()): MailState => {
+  try {
+    const j = JSON.parse(st?.getItem(key(me)) ?? 'null') as Partial<MailState> | null;
+    return { ...emptyMail(), ...(j ?? {}) };
+  } catch {
+    return emptyMail();
+  }
+};
+
+const listeners = new Set<() => void>();
+export const subscribeMail = (l: () => void) => {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+};
+
+export const saveMail = (me: string, s: MailState, st: Store | null = ls()) => {
+  try {
+    st?.setItem(key(me), JSON.stringify({ ...s, received: s.received.slice(0, 1000), sent: s.sent.slice(0, 1000) }));
+  } catch {
+    /* storage full: still works this session */
+  }
+  listeners.forEach((l) => l());
+};
+
+export const updateMail = (me: string, f: (s: MailState) => MailState) => saveMail(me, f(loadMail(me)));
+
+/** Add received mail, skipping ids we already have. */
+export const addReceived = (s: MailState, items: Received[]): MailState => {
+  const have = new Set(s.received.map((r) => r.id));
+  const fresh = items.filter((i) => !have.has(i.id));
+  return fresh.length ? { ...s, received: [...fresh, ...s.received] } : s;
+};

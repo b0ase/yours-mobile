@@ -89,7 +89,11 @@ function cleanProfile(raw) {
   if (!r) return 'profile must be an object';
   const listing = cleanListing(r.listing);
   if (listing.listed && !listing.title) return 'A listing needs a title';
-  return { v: 1, rate: cleanRate(r.rate), listing, updatedAt: Date.now() };
+  const out = { v: 1, rate: cleanRate(r.rate), listing, updatedAt: Date.now() };
+  // bMail price to reach me (USD, 0–100). Absent = Penny post (1¢).
+  const usd = obj(r.mail)?.usd;
+  if (typeof usd === 'number' && Number.isFinite(usd) && usd >= 0 && usd <= 100) out.mail = { usd };
+  return out;
 }
 
 const BOOKING_MIN = 5;

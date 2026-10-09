@@ -5,8 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Coins, FileCode, Flag, Gift, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { useBackClose } from '../backStack';
+import { Coins, FileCode, Flag, ShieldAlert } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { avatarFor } from '../chat/avatars';
@@ -262,65 +261,48 @@ const Row = ({
   );
 };
 
-export const AirdropsInbox = ({ onClose }: { onClose: () => void }) => {
-  const { items, visible, state, loading, error, refresh, update } = useAirdrops();
+/** The unstamped items (airdrops) list, shown inside bMail › Requests. */
+export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
+  const { items, visible, state, loading, error, update } = useAirdrops();
   const known = keptIssuers(items, state.kept);
-  useBackClose(true, onClose);
-  // Opening the inbox clears the badge (items stay listed until Keep or Hide).
+  // Opening the mailbox clears the badge (items stay listed until Keep or Hide).
   useEffect(() => update((s) => markSeen(s)), [update]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[220] flex flex-col overflow-y-auto"
-      style={{ background: '#0d0e11', paddingTop: 'env(safe-area-inset-top)' }}
-    >
-      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <Gift size={18} color={GOLD} />
-        <h2 className="text-base font-bold text-white flex-1 m-0">Airdrops</h2>
-        <button type="button" aria-label="Refresh" onClick={() => refresh(true)} className="p-1">
-          <RefreshCw size={16} color={MUTED} className={loading ? 'animate-spin' : ''} />
-        </button>
-        <button type="button" aria-label="Close" onClick={onClose} className="p-1">
-          <X size={18} color={MUTED} />
-        </button>
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="flex gap-2 rounded-xl p-3 text-[11px] leading-relaxed"
+        style={{ background: '#2a1408', color: '#FEC84B' }}
+      >
+        <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+        <span>
+          Unstamped: tokens and NFTs people sent you without asking. Never interact with a token that asks you to visit
+          a site and enter your recovery words. Hiding one hides everything from that sender.
+        </span>
       </div>
-      <div className="flex flex-col gap-2 px-4 pb-24">
-        <div
-          className="flex gap-2 rounded-xl p-3 text-[11px] leading-relaxed"
-          style={{ background: '#2a1408', color: '#FEC84B' }}
-        >
-          <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-          <span>
-            Tokens and NFTs people sent you without asking. Never interact with a token that asks you to visit a site
-            and enter your recovery words. Hiding one hides everything from that sender.
-          </span>
-        </div>
-        <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
-          <input
-            type="checkbox"
-            checked={state.onlyKnown}
-            onChange={(e) => update((s) => ({ ...s, onlyKnown: e.target.checked }))}
-          />
-          Only show airdrops from issuers I&apos;ve kept before
-        </label>
-        {error && <p className="text-xs text-[#F97066] m-0">{error}</p>}
-        {!visible.length && (
-          <p className="text-xs text-center py-10 m-0" style={{ color: MUTED }}>
-            {loading ? 'Checking your history…' : 'No new airdrops.'}
-          </p>
-        )}
-        {visible.map((i) => (
-          <Row
-            key={i.key}
-            item={i}
-            issuerKept={known.has(i.issuer)}
-            onLeave={onClose}
-            onKeep={() => update((s) => keep(s, i.key))}
-            onHide={() => update((s) => hide(s, i))}
-          />
-        ))}
-      </div>
-    </div>,
-    document.body,
+      <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
+        <input
+          type="checkbox"
+          checked={state.onlyKnown}
+          onChange={(e) => update((s) => ({ ...s, onlyKnown: e.target.checked }))}
+        />
+        Only show airdrops from issuers I&apos;ve kept before
+      </label>
+      {error && <p className="text-xs text-[#F97066] m-0">{error}</p>}
+      {!visible.length && (
+        <p className="text-xs text-center py-4 m-0" style={{ color: MUTED }}>
+          {loading ? 'Checking your history…' : 'No unstamped items.'}
+        </p>
+      )}
+      {visible.map((i) => (
+        <Row
+          key={i.key}
+          item={i}
+          issuerKept={known.has(i.issuer)}
+          onLeave={onLeave}
+          onKeep={() => update((s) => keep(s, i.key))}
+          onHide={() => update((s) => hide(s, i))}
+        />
+      ))}
+    </div>
   );
 };

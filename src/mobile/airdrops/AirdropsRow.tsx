@@ -3,7 +3,7 @@ import { lazy, Suspense, useState } from 'react';
 import { ChevronRight, Gift } from 'lucide-react';
 import { useAirdrops } from './useAirdrops';
 
-const Inbox = lazy(() => import('./AirdropsInbox').then((m) => ({ default: m.AirdropsInbox })));
+const Inbox = lazy(() => import('../bmail/BMailScreen').then((m) => ({ default: m.BMailScreen })));
 
 // Layout matches the cards above it (HandleOnboarding, SweepPrompt): 92% wide, mt-4, rounded-2xl, no bottom
 // margin, so the Tokens / NFTs / Friends switch's own mt-6 is the gap below (it was mt-0 mb-3: flush on the card
@@ -36,7 +36,7 @@ export const AirdropsRow = () => {
       </button>
       {open && (
         <Suspense fallback={null}>
-          <Inbox onClose={() => setOpen(false)} />
+          <Inbox initialTab="requests" onClose={() => setOpen(false)} />
         </Suspense>
       )}
     </>

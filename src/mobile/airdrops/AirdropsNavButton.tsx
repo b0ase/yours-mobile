@@ -1,9 +1,9 @@
-/** Top-bar Airdrops button (replaces the centred b): mailbox icon + unread badge; opens the Airdrops inbox. */
+/** Top-bar bMail button (replaces the centred b): mailbox icon + badge; opens bMail (airdrops live in Requests). */
 import { lazy, Suspense, useState } from 'react';
 import { Mailbox } from 'lucide-react';
 import { useAirdrops } from './useAirdrops';
 
-const Inbox = lazy(() => import('./AirdropsInbox').then((m) => ({ default: m.AirdropsInbox })));
+const Inbox = lazy(() => import('../bmail/BMailScreen').then((m) => ({ default: m.BMailScreen })));
 
 export const AirdropsNavButton = ({ color, ring }: { color: string; ring: string }) => {
   const { badge } = useAirdrops();
@@ -12,7 +12,7 @@ export const AirdropsNavButton = ({ color, ring }: { color: string; ring: string
     <>
       <button
         type="button"
-        aria-label={badge > 0 ? `Airdrops, ${badge} new` : 'Airdrops'}
+        aria-label={badge > 0 ? `bMail, ${badge} new` : 'bMail'}
         onClick={() => setOpen(true)}
         className="relative w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
         style={{ border: ring }}
