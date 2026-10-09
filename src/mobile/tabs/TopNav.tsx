@@ -125,7 +125,7 @@ const TopNavBar = () => {
     if (!WIDE_ON) return;
     const on = (e: Event) => {
       const w = (e as CustomEvent<WwOpen>).detail;
-      if (w === 'drawer') setDrawer(true);
+      if (w === 'drawer') setDrawer((d) => !d);
       else if (w === 'scan') openScan();
       else if (w === 'pair') setPairOpen(true);
       else if (w === 'tools') setToolsOpen(true);
@@ -142,6 +142,15 @@ const TopNavBar = () => {
   const { switchingTo, switchAccount: handleSwitchAccount } = useAccountSwitch(() => setDrawer(false));
 
   useBackClose(drawer && !switchingTo, () => setDrawer(false));
+  // Wide dropdown: Escape closes it.
+  useEffect(() => {
+    if (!WIDE_ON || !drawer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !switchingTo) setDrawer(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawer, switchingTo]);
   const accountObj = chromeStorageService.getCurrentAccountObject();
   const current = accountObj.account?.addresses.identityAddress;
   // Paired bWalletX CLI / MCP calls run on the open account with this wallet context (pair/agentPairing.ts).
@@ -185,6 +194,108 @@ const TopNavBar = () => {
       {more && <ChevronRight size={16} color="#98A2B3" />}
     </button>
   );
+
+  const signOutBlock = () =>
+    confirmOut ? (
+      <div className="flex flex-col gap-2 px-1">
+        <span className="text-xs" style={{ color: '#D0D5DD' }}>
+          Sign this account out of chat and lock the wallet?
+        </span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setConfirmOut(false)}
+            className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white border-0"
+            style={{ background: '#2b2f36' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmOut(false);
+              setDrawer(false);
+              void signOut(current);
+            }}
+            className="flex-1 rounded-xl py-2.5 text-sm font-bold border-0"
+            style={{ background: '#F04438', color: '#fff' }}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    ) : (
+      <button
+        type="button"
+        onClick={() => setConfirmOut(true)}
+        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left border-0 bg-transparent hover:bg-white/5"
+      >
+        <LogOut size={16} color="#F97066" />
+        <span className="text-sm font-semibold" style={{ color: '#F97066' }}>
+          Sign out
+        </span>
+      </button>
+    );
+
+  const wideMenu = () => {
+    const chip = document.querySelector('.ww-account')?.getBoundingClientRect();
+    const top = chip ? chip.bottom + 6 : 72;
+    const left = chip ? chip.left : 16;
+    return (
+      <div className="fixed inset-0 z-[1000]" onMouseDown={() => !switchingTo && setDrawer(false)}>
+        <div
+          role="dialog"
+          aria-label="Accounts"
+          className="ww-acctmenu fixed flex flex-col rounded-2xl border border-white/10 shadow-2xl"
+          style={{
+            top,
+            left,
+            width: 320,
+            maxHeight: `min(560px, calc(100vh - ${top + 16}px))`,
+            background: '#101114',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2" role="listbox" aria-label="Accounts">
+            {listed.map((a) => (
+              <AccountRow
+                key={a.id}
+                account={a.account}
+                current={current}
+                switchingTo={switchingTo}
+                onSwitch={(id) => void handleSwitchAccount(id)}
+                verified={verified}
+              />
+            ))}
+            {listedAgents.length > 0 && (
+              <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#667085' }}>
+                Agents
+              </div>
+            )}
+            {listedAgents.map((a) => (
+              <AccountRow
+                key={a.id}
+                account={a.account}
+                current={current}
+                switchingTo={switchingTo}
+                onSwitch={(id) => void handleSwitchAccount(id)}
+                verified={verified}
+              />
+            ))}
+          </div>
+          <div className="shrink-0 border-t border-white/5 px-2 py-2">
+            {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
+            {X_MARK &&
+              action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
+                startAgentCreate();
+                go('create-account');
+              })}
+          </div>
+          <div className="shrink-0 border-t border-white/5 px-2 py-2">{signOutBlock()}</div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -296,8 +407,11 @@ const TopNavBar = () => {
         </div>
       )}
 
+      {/* Wide web layout (D7): a dropdown anchored under the sidebar account chip, not the phone drawer. Settings,
+          Connect CLI & MCP and Agent b live in the sidebar, so only accounts, add and sign out are here. */}
+      {WIDE_ON && drawer && createPortal(wideMenu(), document.body)}
       <AnimatePresence>
-        {drawer && (
+        {drawer && !WIDE_ON && (
           <motion.div
             className="fixed inset-0 z-[300] bg-black/60"
             initial={{ opacity: 0 }}
