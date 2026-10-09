@@ -4,8 +4,9 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, Mailbox, PenSquare, RefreshCw, Settings, X } from 'lucide-react';
+import { ChevronLeft, Mailbox, PenSquare, RefreshCw, Settings } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { isFriend as isCallFriend } from '../calls/friends';
 import { AirdropsList } from '../airdrops/AirdropsInbox';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { shortKey } from '../calls/machine';
@@ -743,7 +744,8 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     window.addEventListener(OPEN_BMAIL_EVENT, take);
     return () => window.removeEventListener(OPEN_BMAIL_EVENT, take);
   }, []);
-  const isContact = (k: string) => m.state.contacts.includes(k);
+  // bPhone friends only (owner, 9 Oct): people I wrote to are not pinned for that alone.
+  const isContact = (k: string) => isCallFriend(k);
   const myPriceSats = m.priceSats;
   const sub = reading || draft || settings || example;
   const back = () => {
@@ -829,29 +831,59 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const ptrShow = ptr.pull > 0 || ptr.refreshing;
   const ptrH = ptr.refreshing ? 40 : ptr.pull;
 
-  return createPortal(
+  // In-frame sub-views (reader, settings, example) sit in the content area; Compose is a full-screen sheet over the bars.
+  const inFrameSub = !draft && !!(reading || settings || example);
+  const subHeader = (top: string) => (
+    <div
+      className="sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
+      style={{ background: '#0d0e11', paddingTop: top }}
+    >
+      <button type="button" aria-label="Back" onClick={back} className={roundBtn} style={RING_STYLE}>
+        <ChevronLeft size={22} color="#fff" />
+      </button>
+      <h2 className="m-0 truncate text-center text-base font-bold text-white">{subTitle}</h2>
+      <span aria-hidden />
+    </div>
+  );
+
+  return (
     <div
       ref={scroller}
-      className="fixed inset-0 z-[220] flex flex-col overflow-y-auto"
+      className="relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto"
       style={{ background: '#0d0e11', overscrollBehaviorY: 'contain' }}
-      onTouchStart={sub ? edge.start : undefined}
-      onTouchEnd={sub ? edge.end : undefined}
+      onTouchStart={inFrameSub ? edge.start : undefined}
+      onTouchEnd={inFrameSub ? edge.end : undefined}
     >
-      {sub ? (
-        <div
-          className="sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
-          style={{ background: '#0d0e11', paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
-        >
-          <button type="button" aria-label="Back" onClick={back} className={roundBtn} style={RING_STYLE}>
-            <ChevronLeft size={22} color="#fff" />
-          </button>
-          <h2 className="m-0 truncate text-center text-base font-bold text-white">{subTitle}</h2>
-          <span aria-hidden />
-        </div>
+      {draft &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[220] flex flex-col overflow-y-auto"
+            style={{ background: '#0d0e11', overscrollBehaviorY: 'contain' }}
+            onTouchStart={edge.start}
+            onTouchEnd={edge.end}
+          >
+            {subHeader('calc(env(safe-area-inset-top) + 8px)')}
+            <div className="flex flex-col gap-2 px-4 pb-24">
+              <Compose
+                draft={draft}
+                rate={m.rate}
+                myPriceSats={myPriceSats}
+                send={m.send}
+                onDone={() => {
+                  back();
+                  setTab('sent');
+                }}
+              />
+            </div>
+          </div>,
+          document.body,
+        )}
+      {inFrameSub ? (
+        subHeader('8px')
       ) : (
         <div
           className="sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
-          style={{ background: '#0d0e11', paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
+          style={{ background: '#0d0e11', paddingTop: 8 }}
         >
           <Mailbox size={18} color={GOLD} />
           <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
@@ -863,9 +895,6 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           </button>
           <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
             <Settings size={16} color={MUTED} />
-          </button>
-          <button type="button" aria-label="Close" onClick={onClose} className={iconBtn}>
-            <X size={18} color={MUTED} />
           </button>
         </div>
       )}
@@ -886,20 +915,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         </div>
       )}
       <div className="flex flex-col gap-2 px-4 pb-24">
-        {draft ? (
-          <>
-            <Compose
-              draft={draft}
-              rate={m.rate}
-              myPriceSats={myPriceSats}
-              send={m.send}
-              onDone={() => {
-                back();
-                setTab('sent');
-              }}
-            />
-          </>
-        ) : settings ? (
+        {settings ? (
           <>
             <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
           </>
@@ -918,7 +934,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             }}
           />
         ) : null}
-        {!sub && (
+        {!inFrameSub && (
           <>
             <div
               className="flex items-center gap-3 rounded-2xl px-4 py-3"
@@ -1098,7 +1114,6 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           </>
         )}
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 };

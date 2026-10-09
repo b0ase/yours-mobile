@@ -107,12 +107,25 @@ describe('bMail weighting and amounts', () => {
     const isF = (k: string) => k === K('f');
     const r = { ...m('r', 0, 50), replyCredit: true };
     // Friends and reply-paid replies always pinned on top (newest first), then the chosen sort.
-    expect(sortMail([...list, r], 'paid', isF).map((x) => x.id)).toEqual(['a', 'r', 'b', 'c']);
+    expect(sortMail([...list, r], 'paid', isF).map((x) => x.id)).toEqual(['r', 'a', 'b', 'c']);
     expect(sortMail([...list, r], 'newest', isF).map((x) => x.id)).toEqual(['a', 'r', 'c', 'b']);
     // "Friends" is a filter: only pinned mail.
     expect(sortMail([...list, r], 'friends', isF).map((x) => x.id)).toEqual(['a', 'r']);
     expect(filterMail(list, 'paid').map((x) => x.id)).toEqual(['b', 'c']);
     expect(filterMail(list, 'tokens')).toEqual([]);
+  });
+  test('sortMail: one sender $0.04/$0.01/$0.03 after a reply, Most paid reorders', async () => {
+    const { sortMail, shownSats } = await import('./route');
+    // ~$0.01 = 2000 sats here. Replied-to sender is NOT a friend; a bPhone friend would be pinned but still sorted.
+    const mail = [
+      { id: 'four', from: K('d'), at: 3, verifiedSats: 8000 },
+      { id: 'one', from: K('d'), at: 2, verifiedSats: 2000 },
+      { id: 'three', from: K('d'), at: 1, verifiedSats: 6000 },
+    ];
+    expect(sortMail(mail, 'paid', () => false).map((x) => x.id)).toEqual(['four', 'three', 'one']);
+    expect(sortMail(mail, 'paid', () => true).map((x) => x.id)).toEqual(['four', 'three', 'one']);
+    expect(sortMail(mail, 'newest', () => true).map((x) => x.id)).toEqual(['four', 'one', 'three']);
+    expect(mail.map(shownSats)).toEqual([8000, 2000, 6000]);
   });
   test('examples: amounts, PNEE, tokens, filters', async () => {
     const ex = await import('./examples');

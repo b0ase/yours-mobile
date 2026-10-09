@@ -14,6 +14,8 @@ const FeedTab = lazy(() => import('../feed/FeedTab'));
 const ChatPage = lazy(() => import('./ChatPage'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
 const AgentPage = lazy(() => import('../agent/AgentPage'));
+// The top bar's mailbox: bMail in the content area, between the top bar and the tab bar.
+const BMailPage = lazy(() => import('../bmail/BMailPage'));
 // Phone layout (phone/, Settings › Testing switch): HOME, Games and People swipe screens. Apps stays /browser.
 const HomeScreen = lazy(() => import('../phone/HomeScreen'));
 const PeopleScreen = lazy(() => import('../phone/PeopleScreen'));
@@ -32,6 +34,7 @@ const MobileRoutes = () => (
         <Route path="media" element={<MediaPage />} />
         {/* The top bar's centre b: the b agent. */}
         <Route path="agent" element={<AgentPage />} />
+        <Route path="bmail" element={<BMailPage />} />
         <Route path="lock" element={<LockScreen />} />
         <Route path="lock/verify" element={<LockVerify />} />
         <Route path="home" element={<HomeScreen />} />

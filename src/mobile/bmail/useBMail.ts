@@ -49,7 +49,8 @@ export const useBMail = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const isFriend = useCallback((k: string) => isCallFriend(k) || state.contacts.includes(k), [state.contacts]);
+  // Only bPhone friends pin a sender (owner, 9 Oct): writing to someone does not by itself make them a friend.
+  const isFriend = useCallback((k: string) => isCallFriend(k), []);
   const boxes = useMemo(
     () => split(state.received, { isFriend, priceSats, newest }),
     [state.received, isFriend, priceSats, newest],
@@ -165,7 +166,7 @@ export const useBMailUnread = (): number => {
     if (!me) return 0;
     const s = loadMail(me);
     const priceSats = usdToSats(s.priceUsd, cachedExchangeRate()) ?? 0;
-    const isFriend = (k: string) => isCallFriend(k) || s.contacts.includes(k);
+    const isFriend = (k: string) => isCallFriend(k);
     const have = new Set(s.received.map((r) => r.id));
     const unread = split(s.received, { isFriend, priceSats }).inbox.filter((r) => !r.read).length;
     return unread + loadPending(me).filter((id) => !have.has(id)).length;
