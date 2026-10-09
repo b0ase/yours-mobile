@@ -105,10 +105,10 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
 
     // wallet
     if (!ch) return { ok: false, code: 404, reason: 'no such channel' };
-    if (!ch.paired) {
-      if (!ch.site) return { ok: false, code: 409, reason: 'site not connected' };
-      if (t > ch.expiry) return { ok: false, code: 410, reason: 'qr expired' };
-    }
+    // Unpaired: the QR must still be fresh. The site socket may be away (iOS suspends Safari while the
+    // user switches to bWallet on the same phone); the channel and its origin were fixed when the site
+    // opened it, so the wallet may join and its frames queue for the site like any other away case.
+    if (!ch.paired && t > ch.expiry) return { ok: false, code: 410, reason: 'qr expired' };
     return { ok: true, id, role, ch };
   }
 
