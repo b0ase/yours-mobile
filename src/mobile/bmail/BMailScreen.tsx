@@ -2,9 +2,9 @@
  * bMail (owner, 9 Oct 2026): the top-bar mailbox. Pay to send (postage), Penny post by default, friends free and on
  * top, everything unstamped (airdrops included) in Requests. Postage is utility: a stamp to reach someone.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Mailbox, PenSquare, RefreshCw, Settings, X } from 'lucide-react';
+import { ChevronLeft, Mailbox, PenSquare, RefreshCw, Settings, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { AirdropsList } from '../airdrops/AirdropsInbox';
 import { fetchPeerBPhone } from '../calls/bphone';
@@ -52,8 +52,12 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
 type Tab = 'inbox' | 'requests' | 'sent';
 type Draft = { to?: string; toLabel?: string; subject?: string; inReplyTo?: string; credit?: boolean };
 
-const btn = 'rounded-lg px-3 py-1.5 text-xs font-semibold bg-[#2b2f36] text-white';
-const gold = 'rounded-lg px-3 py-1.5 text-xs font-bold';
+const btn = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
+const gold = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-bold';
+/** Round top-bar back button (same ring style as the wallet top bar), 44px touch target. */
+const roundBtn = 'w-11 h-11 shrink-0 rounded-full flex items-center justify-center bg-transparent cursor-pointer';
+const RING_STYLE = { border: '1px solid rgba(255,255,255,0.18)' };
+const iconBtn = 'w-11 h-11 shrink-0 flex items-center justify-center rounded-full';
 
 const ago = (at: number) => agoLabel(Math.max(1, Math.round((Date.now() - at) / 60_000)));
 
@@ -288,11 +292,8 @@ const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
   />
 );
 
-const ExampleReader = ({ e, onBack, onHide }: { e: ExampleMail; onBack: () => void; onHide: () => void }) => (
+const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) => (
   <div className="flex flex-col gap-3">
-    <button type="button" onClick={onBack} className="self-start text-xs underline" style={{ color: MUTED }}>
-      ← Back
-    </button>
     <div className="rounded-xl p-3 text-xs" style={{ background: '#22252c', color: MUTED }}>
       Example: this shows what a bMail looks like. It is not real mail, so nothing here can be paid, signed or answered.
     </div>
@@ -387,7 +388,6 @@ const Reader = ({
   open,
   creditUsed,
   onReply,
-  onBack,
 }: {
   r: Received;
   label: string;
@@ -395,7 +395,6 @@ const Reader = ({
   open: (r: Received) => Promise<{ subject: string; body: string }>;
   creditUsed: boolean;
   onReply: (d: Draft) => void;
-  onBack: () => void;
 }) => {
   const [mail, setMail] = useState(r.opened ?? null);
   const [err, setErr] = useState('');
@@ -410,9 +409,6 @@ const Reader = ({
   const credit = !!r.env.replyPaidSats && r.verifiedSats > 0 && !creditUsed;
   return (
     <div className="flex flex-col gap-3">
-      <button type="button" onClick={onBack} className="self-start text-xs underline" style={{ color: MUTED }}>
-        ← Back
-      </button>
       <div className="rounded-xl p-3 flex flex-col gap-1" style={{ background: CARD }}>
         <div className="text-sm text-white font-semibold">From {label}</div>
         <div className="text-[11px] break-all" style={{ color: MUTED }}>
@@ -569,7 +565,7 @@ const Compose = ({
             type="button"
             aria-pressed={tier === t.id}
             onClick={() => setTier(t.id)}
-            className="flex-1 rounded-xl py-2 text-xs font-semibold"
+            className="min-h-[44px] flex-1 rounded-xl py-2 text-sm font-semibold"
             style={
               tier === t.id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
             }
@@ -738,6 +734,31 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     setDraft(null);
     setSettings(false);
   };
+  // Android Back closes the open sub-view first (registered after bMail's own closer, so it pops first).
+  useBackClose(!!sub, back);
+  const subTitle = draft
+    ? draft.inReplyTo
+      ? 'Reply'
+      : 'New mail'
+    : settings
+      ? 'Settings'
+      : example
+        ? 'Example'
+        : 'Mail';
+  // Swipe right from the left edge (first 24px) goes back.
+  const edgeStart = useRef<{ x: number; y: number } | null>(null);
+  const edge = {
+    start: (e: TouchEvent) => {
+      const t = e.touches[0];
+      edgeStart.current = t && t.clientX <= 24 ? { x: t.clientX, y: t.clientY } : null;
+    },
+    end: (e: TouchEvent) => {
+      const s0 = edgeStart.current;
+      edgeStart.current = null;
+      const t = e.changedTouches[0];
+      if (s0 && t && t.clientX - s0.x > 60 && Math.abs(t.clientY - s0.y) < 50) back();
+    },
+  };
   const nameOf = useNames(
     m.state.received.map((r) => r.from),
     m.state.sent,
@@ -794,24 +815,42 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     <div
       ref={scroller}
       className="fixed inset-0 z-[220] flex flex-col overflow-y-auto"
-      style={{ background: '#0d0e11', paddingTop: 'env(safe-area-inset-top)', overscrollBehaviorY: 'contain' }}
+      style={{ background: '#0d0e11', overscrollBehaviorY: 'contain' }}
+      onTouchStart={sub ? edge.start : undefined}
+      onTouchEnd={sub ? edge.end : undefined}
     >
-      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <Mailbox size={18} color={GOLD} />
-        <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
-        <button type="button" aria-label="Write" onClick={() => setDraft({})} className="p-1">
-          <PenSquare size={16} color={MUTED} />
-        </button>
-        <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className="p-1">
-          <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
-        </button>
-        <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className="p-1">
-          <Settings size={16} color={MUTED} />
-        </button>
-        <button type="button" aria-label="Close" onClick={onClose} className="p-1">
-          <X size={18} color={MUTED} />
-        </button>
-      </div>
+      {sub ? (
+        <div
+          className="sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
+          style={{ background: '#0d0e11', paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
+        >
+          <button type="button" aria-label="Back" onClick={back} className={roundBtn} style={RING_STYLE}>
+            <ChevronLeft size={22} color="#fff" />
+          </button>
+          <h2 className="m-0 truncate text-center text-base font-bold text-white">{subTitle}</h2>
+          <span aria-hidden />
+        </div>
+      ) : (
+        <div
+          className="sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
+          style={{ background: '#0d0e11', paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
+        >
+          <Mailbox size={18} color={GOLD} />
+          <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
+          <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
+            <PenSquare size={16} color={MUTED} />
+          </button>
+          <button type="button" aria-label="Refresh" onClick={() => void m.refresh()} className={iconBtn}>
+            <RefreshCw size={16} color={MUTED} className={m.loading ? 'animate-spin' : ''} />
+          </button>
+          <button type="button" aria-label="bMail settings" onClick={() => setSettings(true)} className={iconBtn}>
+            <Settings size={16} color={MUTED} />
+          </button>
+          <button type="button" aria-label="Close" onClick={onClose} className={iconBtn}>
+            <X size={18} color={MUTED} />
+          </button>
+        </div>
+      )}
       {ptrShow && (
         <div
           role="status"
@@ -831,9 +870,6 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
       <div className="flex flex-col gap-2 px-4 pb-24">
         {draft ? (
           <>
-            <button type="button" onClick={back} className="self-start text-xs underline" style={{ color: MUTED }}>
-              ← Back
-            </button>
             <Compose
               draft={draft}
               rate={m.rate}
@@ -847,13 +883,10 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           </>
         ) : settings ? (
           <>
-            <button type="button" onClick={back} className="self-start text-xs underline" style={{ color: MUTED }}>
-              ← Back
-            </button>
             <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
           </>
         ) : example ? (
-          <ExampleReader e={example} onBack={back} onHide={hideExamples} />
+          <ExampleReader e={example} onHide={hideExamples} />
         ) : reading ? (
           <Reader
             r={m.state.received.find((x) => x.id === reading.id) ?? reading}
@@ -865,7 +898,6 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
               setReading(null);
               setDraft(d);
             }}
-            onBack={back}
           />
         ) : null}
         {!sub && (
@@ -905,7 +937,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   type="button"
                   aria-pressed={tab === id}
                   onClick={() => setTab(id)}
-                  className="flex-1 rounded-xl py-2 text-xs font-semibold"
+                  className="min-h-[44px] flex-1 rounded-xl py-2 text-sm font-semibold"
                   style={
                     tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
                   }
@@ -930,7 +962,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                       type="button"
                       aria-pressed={mode === id}
                       onClick={() => setSort(id)}
-                      className="flex-1 rounded-lg py-1.5 text-[11px] font-semibold"
+                      className="min-h-[44px] flex-1 rounded-lg py-2 text-xs font-semibold"
                       style={mode === id ? { background: '#2b2f36', color: GOLD } : { color: MUTED }}
                     >
                       {label}
@@ -944,7 +976,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                       type="button"
                       aria-pressed={filter === x.id}
                       onClick={() => setFilter(x.id)}
-                      className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                      className="min-h-[44px] shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold"
                       style={
                         filter === x.id
                           ? { background: GOLD, color: '#1a1300' }
@@ -1033,7 +1065,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   <button
                     type="button"
                     onClick={hideExamples}
-                    className="text-[11px] underline"
+                    className="min-h-[44px] px-2 text-xs underline"
                     style={{ color: MUTED }}
                   >
                     Hide examples

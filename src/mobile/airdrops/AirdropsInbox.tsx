@@ -179,7 +179,7 @@ const Row = ({
         onLeave();
       }
     : null;
-  const small = 'rounded-lg px-2.5 py-1 text-xs font-semibold bg-[#2b2f36] text-white';
+  const small = 'min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
   return (
     <div className="flex flex-col gap-2 rounded-xl px-3 py-3" style={{ background: CARD }}>
       <div className="flex items-center gap-2">
@@ -219,7 +219,7 @@ const Row = ({
         <button
           type="button"
           onClick={onKeep}
-          className="rounded-lg px-3 py-1 text-xs font-bold"
+          className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-bold"
           style={{ background: GOLD, color: '#010101' }}
         >
           Keep
