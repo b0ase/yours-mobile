@@ -114,6 +114,20 @@ describe('bMail weighting and amounts', () => {
     expect(filterMail(list, 'paid').map((x) => x.id)).toEqual(['b', 'c']);
     expect(filterMail(list, 'tokens')).toEqual([]);
   });
+  test('sortMail: a letter I pin moves to the top in every sort mode', async () => {
+    const { sortMail } = await import('./route');
+    const m = (id: string, at: number, verifiedSats: number, from = K('c')) => ({ id, from, at, verifiedSats });
+    const isF = (k: string) => k === K('f');
+    const low = { ...m('low', 0, 10), pinned: true };
+    const list = [m('a', 3, 0, K('f')), m('b', 1, 900), m('c', 2, 300), low];
+    // Pinned first, then friends, then the chosen sort.
+    expect(sortMail(list, 'paid', isF).map((x) => x.id)).toEqual(['low', 'a', 'b', 'c']);
+    expect(sortMail(list, 'newest', isF).map((x) => x.id)).toEqual(['low', 'a', 'c', 'b']);
+    expect(sortMail(list, 'friends', isF).map((x) => x.id)).toEqual(['low', 'a']);
+    // Unpinned it falls back into its place.
+    const unpinned = list.map((x) => (x.id === 'low' ? { ...x, pinned: false } : x));
+    expect(sortMail(unpinned, 'paid', isF).map((x) => x.id)).toEqual(['a', 'b', 'c', 'low']);
+  });
   test('sortMail: one sender $0.04/$0.01/$0.03 after a reply, Most paid reorders', async () => {
     const { sortMail, shownSats } = await import('./route');
     // ~$0.01 = 2000 sats here. Replied-to sender is NOT a friend; a bPhone friend would be pinned but still sorted.
