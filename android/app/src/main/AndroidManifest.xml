@@ -17,6 +17,8 @@
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:exported="true">
 
             <intent-filter>
@@ -51,6 +53,13 @@
 
         </activity>
 
+        <!-- Live Spaces keep playing while you use other apps (SpaceSessionService.java,
+             src/mobile/spaces/background.ts). Microphone type only while on stage. -->
+        <service
+            android:name=".SpaceSessionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback|microphone" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -77,6 +86,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Live Spaces in the background (SpaceSessionService): Android 14 needs the per-type permissions. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- bWallet calls: microphone for 1-to-1 voice; Capacitor's WebChromeClient requests it at runtime. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Video calls (src/mobile/calls) and scanning a website QR code to pair (src/mobile/pair). -->

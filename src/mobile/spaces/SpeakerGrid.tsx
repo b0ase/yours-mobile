@@ -9,11 +9,22 @@
  * stay live; the rest are paused (last frame stays on the tile) via SpaceMedia.setVideoLive.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MoreHorizontal, Users } from 'lucide-react';
+import { MoreHorizontal, PictureInPicture2, Users } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { pipSupported, togglePip } from './background';
 import { LevelBars } from './LevelBars';
 import type { SpaceMedia } from './media';
 import { audienceLine, hostLabel, type Participant } from './model';
 import { gridShape, pagesOf, recentlyActive, spareCells, wantsLiveVideo } from './speakerLayout';
+
+/** Desktop/web only: a PiP button on video tiles. Phones float the video on their own (background.ts). */
+const webPip = (() => {
+  try {
+    return !Capacitor.isNativePlatform() && pipSupported();
+  } catch {
+    return false;
+  }
+})();
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -78,9 +89,24 @@ const Tile = ({
       aria-label={`$${p.handle}`}
     >
       {banner && !video && <div className="absolute inset-0 bg-black/45" />}
+      {video && p.handle !== me && size !== 'small' && webPip && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            void togglePip(ref.current);
+          }}
+          className="absolute left-1.5 top-1.5 z-10 rounded-full bg-black/60 p-1"
+          aria-label="Picture in picture"
+          title="Picture in picture"
+        >
+          <PictureInPicture2 size={16} color="#fff" />
+        </button>
+      )}
       {video ? (
         <video
           ref={ref}
+          data-space-handle={p.handle}
           autoPlay
           playsInline
           muted={p.handle === me}
