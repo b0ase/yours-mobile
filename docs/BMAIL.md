@@ -209,6 +209,26 @@ How bCorp sells them, in two steps:
    the company. Avoid "PNEE backed by our revenue": a company selling a coin backed by its own money is issuing a
    stablecoin (e-money in the UK, needs FCA authorisation). Lawyer check before step 2.
 
+## 6d. Mailing lists on the Exchange (owner, 9 Oct)
+
+Owner: sell mailing lists on the bMail Exchange; the `b` agent can buy big lists and send bMails to them.
+
+**A bMail list is a right to send, not a file of addresses.** Selling people's contact details is what spam and
+data-protection law (UK GDPR / PECR) forbid. bMail avoids it by design:
+
+- **People opt in to a list** ("Indie film fans", "BSV builders in London") and set what they want per mail (their
+  price to reach, Penny post 1¢ default). They can leave any time.
+- **The list owner sells sends, not addresses.** A buyer pays for "one send to this list". The wallet delivers to each
+  member; the buyer never sees who is on it. Each member receives the postage, the list owner takes a fee.
+- **Members get paid for their attention**, so a list of people who want the mail is worth more than a scraped one.
+- **The `b` agent as buyer:** "send this launch announcement to 2,000 people interested in films, budget $40" —
+  b finds lists on the Exchange, shows the quote (members × price + list fee), you approve once, b sends.
+- **Weighting still applies:** list mail lands in Inbox only if the postage meets each member's price; otherwise
+  Requests. Members can mute a list.
+- **Exchange listing:** list name, topic, member count, price per send, open/reply rates (aggregate only).
+
+Wording: lists, sends, postage. No personal data is ever sold or shown.
+
 ## 7. Phases
 
 | # | What | State |
@@ -222,6 +242,7 @@ How bCorp sells them, in two steps:
 | B5 | **Escrow / time locks** in contracts (shared builder with B2; ESCROW-DESIGN models) | needs the bit-sign escrow review |
 | B6 | **Token allocations** (utility) with optional vesting locks; approvals and access grants | — |
 | B1b | Requests sorted by holders / forwards; forwarding carries the note (§6b); PNEE stamps as prepaid postage (§6c) | after B1 |
+| B8 | Opt-in mailing lists on the Exchange; pay per send, members paid postage; b buys sends (§6d) | after stamps + Exchange listing |
 | Later | Subscriptions as mail (1¢/day), pay-per-read, friendship funds, per-kind prices, published envelope spec for other wallets | — |
 | Parked | Stamp issuance / collectible stamps (§6); split-or-steal (PAID-INBOX-PLAN §5) | — |
 
