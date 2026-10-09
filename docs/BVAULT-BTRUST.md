@@ -246,12 +246,37 @@ down to your heirs.. and we can even read the balance for you.. but we don't hav
 - **Wording:** "held in your vault", "watch-only balance". Never "custody", "we hold your BTC", or "wallet"
   for these items.
 
+## 6a. Timelocked savings on any chain (owner idea, 9 Oct)
+
+Owner: generate fresh BTC / Solana keys, put money in, and lock them so they are provably unspendable for a set time.
+
+**Hiding a key on BSV is not proof.** Whoever generated the key had it in full; no one can prove a copy wasn't kept.
+A BSV timelock on an encrypted key proves only that the encrypted copy wasn't released early. So "provable" must come
+from each chain's own lock, which binds even the key holder:
+
+| Chain | Native lock | bVault's part |
+|---|---|---|
+| BTC | `OP_CHECKLOCKTIMEVERIFY` address (block height or date) | Builds the locked address on the device; user funds it; anyone can verify on any explorer |
+| Solana | Stake account **lockup** (epoch/date) | Stake with lockup: provably locked, earns staking rewards meanwhile |
+| ETH / EVM | Minimal audited timelock contract | Deposit; withdrawable only after the date |
+| BSV | Existing Lock BSV | As today |
+
+- bVault stores the unlock details (key + lock script / account / contract) as an encrypted item, with a watch-only
+  balance (§6).
+- A hash of the lock terms goes on BSV: a cross-chain record that this lock existed, with these terms, from this date.
+- bTrust can name these items, so heirs get the unlock details for the date.
+- Optional **time-lock encryption** (drand tlock) for "sealed until <date>" keys and letters: nobody, us included, can
+  decrypt early. Not proof against a copy made at creation, so it is labelled "sealed", never "provably locked".
+- Wording: the chain locks the coins; we never hold them. No send/sign code for other chains beyond building the lock
+  and the unlock transaction on the device at the user's tap.
+
 ## 7. Phases (smallest first)
 
 | Phase | What ships |
 |---|---|
 | **V1** | bVault: upload files, backup-note templates, list/search/view, export recovery file, inside bWalletX via the shell |
 | V1b | Other-chain key items + watch-only balance from the public address/xpub (BTC, Solana first) |
+| V1c | Timelocked savings on any chain (§6a): BTC CLTV address, Solana stake lockup, EVM timelock; lock terms hashed on BSV; optional tlock "sealed until" |
 | V2 | bMail "file to vault" Inbox; optional hash stamp; UHRP mirror |
 | V3 | bit-sign vault migration |
 | **T1** | bTrust: dead-man's switch releasing chosen bVault items to named people, with grace and k-of-n trustees |
@@ -259,7 +284,16 @@ down to your heirs.. and we can even read the balance for you.. but we don't hav
 | T3 | Coins: an on-chain heir lock (owner can spend any time; heir after a height; owner refreshes by re-locking). New script in the ESCROW-DESIGN style, tested like TIME-LOCK-PLAN |
 | Later | Duress/decoy vault; shared family vaults; separate multi-chain wallet bApp if wanted |
 
-## 8. Questions for the owner (product only)
+## 8. Owner answers (9 Oct)
+
+- Price: bVault free to ~100 MB, then 1¢/day; one bTrust plan free.
+- Check-in: 6 months + 30 days' grace; minimum 1 month.
+- Trustees: at least one; 2 of 3 by default when three are named.
+- People without a wallet can be named: invite by email or bMail, they claim later.
+- Name: keep **bTrust**; rename the other two "trust" uses when they come up.
+- Domains: vault.bwalletx.com and trust.bwalletx.com.
+
+## 8b. Original questions (answered above)
 
 1. **Free or paid?** Suggest: bVault free up to e.g. 100 MB, then a small monthly fee (1¢/day pot); bTrust
    free for one plan.
