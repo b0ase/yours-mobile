@@ -81,6 +81,13 @@ describe('Continue with X (bWalletX own OAuth)', () => {
       fakeX,
     );
     expect(beta.startsWith('https://beta.bwalletx.com/#')).toBe(true);
+    const desktop = await social.callback(
+      'x',
+      { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'desktop' }), code: 'c' },
+      ENV,
+      fakeX,
+    );
+    expect(desktop.startsWith('https://desktop.bwalletx.com/#')).toBe(true);
     const testers = await social.callback(
       'x',
       { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'testers' }), code: 'c' },

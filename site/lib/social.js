@@ -78,11 +78,11 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
 // users on "you're signed in" with no way back to the wallet tab).
 // 'testers': the paid Android testers sign-up page (bwalletx.com/testers); the ticket is verified there
 // server-side via /api/social/preview.
-const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/', testers: 'https://bwalletx.com/testers' };
+const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/', desktop: 'https://desktop.bwalletx.com/', testers: 'https://bwalletx.com/testers' };
 const returnUrl = (q, to = 'app') => `${RETURNS[to] || RETURN}#${new URLSearchParams(q).toString()}`;
 
 function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {
-  const r = return_to === 'web' || return_to === 'beta' || return_to === 'testers' ? return_to : undefined;
+  const r = return_to === 'web' || return_to === 'beta' || return_to === 'desktop' || return_to === 'testers' ? return_to : undefined;
   if (provider !== 'x' && provider !== 'google') return [400, { error: 'provider must be x or google' }];
   if (!/^[0-9a-f]{64}$/.test(String(vh || ''))) return [400, { error: 'verifier_hash must be sha256 hex' }];
   const e = now + TTL_MS;
@@ -122,7 +122,7 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
   const st = open(q.state, env);
   if (!st || st.p !== provider || !(st.e > now))
     return returnUrl({ error: 'That sign-in has expired. Please try again.' });
-  const to = st.r === 'web' || st.r === 'beta' || st.r === 'testers' ? st.r : 'app';
+  const to = st.r === 'web' || st.r === 'beta' || st.r === 'desktop' || st.r === 'testers' ? st.r : 'app';
   if (q.error || !q.code)
     return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
   try {
