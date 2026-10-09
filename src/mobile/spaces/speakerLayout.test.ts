@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { gridShape, pagesOf, recentlyActive, spareCells, wantsLiveVideo } from './speakerLayout';
+import { gridShape, pagesOf, recentlyActive, spareCells, tvWidth, wantsLiveVideo } from './speakerLayout';
 
 const P = (n: number) => Array.from({ length: n }, (_, i) => ({ handle: `s${i}` }));
 
@@ -23,6 +23,17 @@ describe('gridShape', () => {
     expect(gridShape(5).small).toBe(true);
     expect(gridShape(9).dense).toBe(false);
     expect(gridShape(10).dense).toBe(true);
+  });
+});
+
+describe('TV-shaped tiles', () => {
+  test('16:9 cells up to 2×2, square from 3×3; never stretched', () => {
+    for (const n of [1, 2, 3, 4]) expect(gridShape(n).aspect).toBe('16 / 9');
+    for (const n of [5, 9, 10, 16, 40]) expect(gridShape(n).aspect).toBe('1 / 1');
+  });
+  test('a single tile is full width but height-capped', () => {
+    expect(tvWidth()).toBe(`min(100%, ${(55 * 16) / 9}vh)`);
+    expect(tvWidth(90)).toBe('min(100%, 160vh)');
   });
 });
 
