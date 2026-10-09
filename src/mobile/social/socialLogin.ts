@@ -33,6 +33,8 @@ type Pending = {
    * pre-fill another account (owner, 8 Oct 2026: Testy's Create Account showed an earlier login's photo).
    */
   owner?: string;
+  /** Just came back from the provider and not yet reopened in Connect (takeSocialReturn). */
+  returned?: boolean;
 };
 
 /** Owner of a sign-in started on Create / Restore / Import, before the account (and its identity) exists. */
@@ -77,6 +79,22 @@ export const onSocialChange = (l: () => void) => (listeners.add(l), () => void l
 export const socialProfile = (owner: string = NEW_ACCOUNT) => read(owner)?.profile ?? null;
 export const socialError = () => lastError;
 export const clearSocial = () => write(null);
+
+/**
+ * Back from X / Google for an existing account (Settings › Connect X / Google): the page reloaded, so the
+ * Connect screen that started it is gone. One-shot: true once for that account, so the app can reopen Connect
+ * (after the normal password unlock) and the verified profile attaches on that first trip, never a second one.
+ * A return for Create Account (NEW_ACCOUNT) is not a Connect return.
+ */
+export const socialReturnWaiting = (owner: string): boolean => {
+  const p = read(owner);
+  return !!(p && owner !== NEW_ACCOUNT && p.returned && p.ticket && p.profile);
+};
+export const takeSocialReturn = (owner: string): boolean => {
+  if (!socialReturnWaiting(owner)) return false;
+  write({ ...read(owner)!, returned: false });
+  return true;
+};
 
 /**
  * Account just created / restored: a sign-in made on that screen now belongs to the new identity, so the
@@ -187,7 +205,7 @@ export async function receiveSocialUrl(url: string): Promise<void> {
   try {
     const profile = await post<SocialProfile>('preview', { ticket, secret: p.secret });
     lastError = '';
-    write({ ...p, ticket, profile });
+    write({ ...p, ticket, profile, returned: true });
   } catch (e) {
     lastError = e instanceof Error ? e.message : 'Sign-in failed';
     write(null);

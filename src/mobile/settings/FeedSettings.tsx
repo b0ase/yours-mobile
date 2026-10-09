@@ -31,6 +31,7 @@ import {
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
 import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
 import { isNative } from '../native';
 import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
@@ -505,6 +506,15 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     window.addEventListener(SIGNINS_OPEN_EVENT, open);
     return () => window.removeEventListener(SIGNINS_OPEN_EVENT, open);
   }, [acct]);
+  // Back from X / Google for this account: reopen Connect so the profile attaches on this trip (socialLogin.ts).
+  const { chromeStorageService: socialStore } = useServiceContext();
+  const socialOwner = socialStore.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  useEffect(() => {
+    if (!acct || !socialOwner) return;
+    const open = () => takeSocialReturn(socialOwner) && setScreen('social');
+    open();
+    return onSocialChange(open);
+  }, [acct, socialOwner]);
   // Long-press on the wallet card's identity line opens the Identity map (settings/signIns.ts).
   useEffect(() => {
     if (takeIdentityMapRequest()) setScreen('idmap');
