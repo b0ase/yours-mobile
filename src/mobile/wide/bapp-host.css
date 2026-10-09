@@ -1,0 +1,132 @@
+/* PROTOTYPE (demo/desktop-shell): a bApp inside the wide shell (BappHost.tsx). */
+/* WideShell sets view-bapp: the bApp takes the whole content area (its sections column + frame). */
+.ww-content.view-bapp {
+  padding: 0;
+  gap: 0;
+}
+.ww-content.view-bapp .ww-colwrap {
+  flex: 1 1 auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--ww-line);
+}
+/* The real screens are shifted up under a clipped phone top bar; a bApp has none. */
+.ww-content.view-bapp .ww-col {
+  inset: 0;
+}
+.bwx-bapp {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+.bwx-bapp-sections {
+  flex: 0 0 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 10, 12, 0.72);
+  backdrop-filter: blur(14px);
+}
+.bwx-bapp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 12px;
+  font-weight: 800;
+  font-size: 15px;
+  color: #f2f2f0;
+}
+.bwx-bapp-head img,
+.bwx-bapp-ph {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #000;
+  flex: none;
+}
+.bwx-bapp-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bwx-bapp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+.bwx-bapp-dot.on {
+  background: #22c55e;
+}
+.bwx-bapp-sections > button {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: #b9b9b4;
+  font-size: 14px;
+  cursor: pointer;
+}
+.bwx-bapp-sections > button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #f2f2f0;
+}
+.bwx-bapp-sections > button.on {
+  background: rgba(255, 210, 77, 0.12);
+  color: #ffd24d;
+  font-weight: 700;
+}
+.bwx-bapp-sections > button:focus-visible {
+  outline: 2px solid #ffd24d;
+  outline-offset: 1px;
+}
+.bwx-bapp-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 0;
+  font-size: 11px;
+  color: #77776f;
+}
+.bwx-bapp-close {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.bwx-bapp-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f2f2f0;
+}
+.bwx-bapp-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: #000;
+}
+.bwx-bapp-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
+}
+.bwx-bapp-msg {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #9a9a94;
+  font-size: 14px;
+}
