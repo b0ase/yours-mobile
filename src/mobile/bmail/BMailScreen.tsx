@@ -912,6 +912,8 @@ export const BMailScreen = ({
     else setReading(r);
   };
   const undoable = (text: string, undo: () => void) => showUndo(text, undo);
+  // Examples dismissed by a swipe this visit (display only; examples are never stored as mail).
+  const [goneExamples, setGoneExamples] = useState<string[]>([]);
   // Paid letters: the postage was internalized into the wallet when the letter arrived (client.ts verifyPostage), so
   // deleting or archiving it does not touch the money. The toast says so (owner, 9 Oct: "where did the money go?").
   const keepsPostage = (ids: string[]) => {
@@ -1289,9 +1291,35 @@ export const BMailScreen = ({
               Hide examples
             </button>
           </div>
-          {(tab === 'inbox' ? exInbox : exRequests).map((e) => (
-            <ExampleRow key={e.id} e={e} onOpen={() => setExample(e)} />
-          ))}
+          {(tab === 'inbox' ? exInbox : exRequests)
+            .filter((e) => !goneExamples.includes(e.id))
+            .map((e) => {
+              // Examples swipe like real mail so the gesture can be tried before any real mail arrives.
+              const dismiss = {
+                id: 'dismiss',
+                label: 'Archive',
+                icon: <Archive size={14} />,
+                color: '#12B76A',
+                removes: true,
+                onPress: () => {
+                  setGoneExamples((g) => [...g, e.id]);
+                  undoable('Example archived', () => setGoneExamples((g) => g.filter((x) => x !== e.id)));
+                },
+              };
+              return (
+                <SwipeRow
+                  key={e.id}
+                  rowId={e.id}
+                  label={`example mail from ${e.name}`}
+                  leftActions={[dismiss]}
+                  rightActions={[{ ...dismiss, id: 'dismiss-r' }]}
+                  fullSwipeLeft="dismiss"
+                  fullSwipeRight="dismiss-r"
+                >
+                  <ExampleRow e={e} onOpen={() => setExample(e)} />
+                </SwipeRow>
+              );
+            })}
         </>
       )}
       {tab === 'quarantine' && (
@@ -1495,7 +1523,7 @@ export const BMailScreen = ({
           {draft || sub ? (
             <>
               {subHeader('8px')}
-              <div className="mx-auto flex w-full max-w-[760px] flex-col gap-2 px-6 pb-12">
+              <div className="flex w-full flex-col gap-2 px-8 pb-12">
                 {draft ? (
                   <Compose
                     draft={draft}
