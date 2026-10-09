@@ -4,7 +4,27 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, Mailbox, PenSquare, RefreshCw, Settings } from 'lucide-react';
+import {
+  Archive,
+  ArchiveRestore,
+  Ban,
+  ChevronLeft,
+  Mail,
+  MailOpen,
+  Mailbox,
+  PenSquare,
+  Pin,
+  PinOff,
+  RefreshCw,
+  Reply,
+  Settings,
+  ShieldAlert,
+  Trash2,
+} from 'lucide-react';
+import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
+import { showUndo, UndoToastHost } from '../swipe/undo';
+import { pinnedFirst } from './store';
+import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
 import { isFriend as isCallFriend } from '../calls/friends';
 import { AirdropsList } from '../airdrops/AirdropsInbox';
@@ -51,7 +71,7 @@ import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
-type Tab = 'inbox' | 'requests' | 'sent';
+type Tab = 'inbox' | 'requests' | 'sent' | 'archive';
 type Draft = { to?: string; toLabel?: string; subject?: string; inReplyTo?: string; credit?: boolean };
 
 const btn = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
@@ -151,7 +171,9 @@ const Row = ({
   onOpen,
   extra,
   amount,
+  pinned,
 }: {
+  pinned?: boolean;
   amount?: Amount;
   avatar: ReactNode;
   title: string;
@@ -174,6 +196,7 @@ const Row = ({
       <div className="flex items-center gap-1.5">
         {bold && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: GOLD }} />}
         <span className={`${ONE} text-sm text-white ${bold ? 'font-bold' : 'font-medium'}`}>{title}</span>
+        {pinned && <Pin size={12} color={GOLD} aria-label="Pinned" className="shrink-0" />}
         {tag && (
           <span
             className="shrink-0 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-[#2b2f36]"
@@ -254,6 +277,7 @@ const MailRow = ({
     ))}
     time={ago(r.at)}
     onOpen={onOpen}
+    pinned={!!r.pinned}
     amount={realAmount(r, rate, friend)}
   />
 );
@@ -802,7 +826,127 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const [sort, setSort] = useState<SortMode>('paid');
   const [filter, setFilter] = useState<MailFilter>('all');
   const mode: SortMode = tab !== 'requests' && sort === 'spreading' ? 'paid' : sort;
-  const view = (box: 'inbox' | 'requests') => sortMail(filterMail(m.boxes[box], filter), mode, isContact);
+  const view = (box: 'inbox' | 'requests') => pinnedFirst(sortMail(filterMail(m.boxes[box], filter), mode, isContact));
+  // Swipe to organise (owner, 9 Oct): left tray Reply · Archive · Delete (full = Archive), right tray Read · Pin
+  // (full = toggle read); Spam / Block in the … menu. Every destructive action has Undo.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const replyTo = (r: Received) => {
+    if (r.opened)
+      setDraft({
+        to: r.from,
+        toLabel: nameOf(r.from),
+        subject: r.opened.subject.startsWith('Re:') ? r.opened.subject : `Re: ${r.opened.subject}`,
+        inReplyTo: r.id,
+        credit: !!r.env.replyPaidSats && r.verifiedSats > 0 && !m.state.usedCredits.includes(r.id),
+      });
+    // Still sealed: open it in the reader, which has the Reply button once it is unsealed.
+    else setReading(r);
+  };
+  const undoable = (text: string, undo: () => void) => showUndo(text, undo);
+  const archive = (ids: string[]) =>
+    undoable(ids.length > 1 ? `Archived ${ids.length}` : 'Archived', m.flag(ids, { archived: true }));
+  const unarchive = (ids: string[]) => undoable('Moved to Inbox', m.flag(ids, { archived: false }));
+  const remove = (ids: string[]) =>
+    undoable(ids.length > 1 ? `Deleted ${ids.length}` : 'Deleted', m.flag(ids, { deleted: true }));
+  const mailActions = (r: Received, inArchive: boolean) => {
+    const left: SwipeAction[] = [
+      { id: 'reply', label: 'Reply', icon: <Reply size={18} />, color: '#475467', onPress: () => replyTo(r) },
+      inArchive
+        ? {
+            id: 'unarchive',
+            label: 'Inbox',
+            icon: <ArchiveRestore size={18} />,
+            color: '#12B76A',
+            removes: true,
+            onPress: () => unarchive([r.id]),
+          }
+        : {
+            id: 'archive',
+            label: 'Archive',
+            icon: <Archive size={18} />,
+            color: '#12B76A',
+            removes: true,
+            onPress: () => archive([r.id]),
+          },
+      {
+        id: 'delete',
+        label: 'Delete',
+        icon: <Trash2 size={18} />,
+        color: '#D92D20',
+        removes: true,
+        onPress: () => remove([r.id]),
+      },
+    ];
+    const right: SwipeAction[] = [
+      {
+        id: 'read',
+        label: r.read ? 'Unread' : 'Read',
+        icon: r.read ? <Mail size={18} /> : <MailOpen size={18} />,
+        color: '#2E90FA',
+        onPress: () => void m.flag([r.id], { read: !r.read }),
+      },
+      {
+        id: 'pin',
+        label: r.pinned ? 'Unpin' : 'Pin',
+        icon: r.pinned ? <PinOff size={18} /> : <Pin size={18} />,
+        color: '#B54708',
+        onPress: () => void m.flag([r.id], { pinned: !r.pinned }),
+      },
+    ];
+    const more: SwipeAction[] = [
+      {
+        id: 'spam',
+        label: 'Spam',
+        icon: <ShieldAlert size={14} />,
+        color: '#7A2E0E',
+        removes: true,
+        onPress: () => undoable('Marked as spam', m.flag([r.id], { spam: true })),
+      },
+      {
+        id: 'block',
+        label: `Block ${nameOf(r.from)}`,
+        icon: <Ban size={14} />,
+        color: '#7A271A',
+        removes: true,
+        onPress: () => undoable(`Blocked ${nameOf(r.from)}`, m.block(r.from)),
+      },
+    ];
+    return { left, right, more, fullLeft: inArchive ? 'unarchive' : 'archive', fullRight: 'read' };
+  };
+  const swipeMail = (r: Received, row: ReactNode, inArchive = false) => {
+    const a = mailActions(r, inArchive);
+    return (
+      <SwipeRow
+        rowId={r.id}
+        label={`mail from ${nameOf(r.from)}`}
+        leftActions={a.left}
+        rightActions={a.right}
+        moreActions={a.more}
+        fullSwipeLeft={a.fullLeft}
+        fullSwipeRight={a.fullRight}
+        selected={selected.has(r.id)}
+        onSelect={(on) =>
+          setSelected((s) => {
+            const n = new Set(s);
+            if (on) n.add(r.id);
+            else n.delete(r.id);
+            return n;
+          })
+        }
+      >
+        {row}
+      </SwipeRow>
+    );
+  };
+  const listKeys = (e: React.KeyboardEvent<HTMLDivElement>) =>
+    listShortcut(e, (id, key) => {
+      const r = m.state.received.find((x) => x.id === id);
+      if (!r) return;
+      if (key === 'archive') (r.archived ? unarchive : archive)([id]);
+      if (key === 'delete') remove([id]);
+      if (key === 'read') m.flag([id], { read: !r.read });
+    });
+  const sel = [...selected].filter((id) => m.state.received.some((r) => r.id === id));
   const exView = (box: 'inbox' | 'requests') =>
     showEx
       ? sortExamples(
@@ -817,7 +961,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const exRequests = exView('requests');
   // Value in view: verified postage on real mail this week, plus example amounts shown (labelled as examples).
   const inView =
-    tab === 'sent'
+    tab === 'sent' || tab === 'archive'
       ? null
       : (() => {
           const real = view(tab).filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
@@ -886,10 +1030,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
       {inFrameSub ? (
         subHeader('8px')
       ) : (
-        <div
-          className="bw-mail-bar sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
-          style={{ paddingTop: 8 }}
-        >
+        <div className="bw-mail-bar sticky top-0 z-10 flex items-center gap-1 px-3 pb-2" style={{ paddingTop: 8 }}>
           <Mailbox size={18} color={GOLD} />
           <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
           <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
@@ -919,7 +1060,50 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           <span>{ptr.refreshing ? 'Refreshing…' : ptr.armed ? 'Release to refresh' : 'Pull to refresh'}</span>
         </div>
       )}
-      <div className="flex flex-col gap-2 px-4 pb-24">
+      <UndoToastHost />
+      <div
+        className={`flex flex-col gap-2 px-4 pb-24${sel.length ? ' bw-swipe-selecting' : ''}`}
+        onKeyDown={inFrameSub ? undefined : listKeys}
+      >
+        {!inFrameSub && sel.length > 0 && (
+          <div
+            className="bw-mail-card sticky top-14 z-10 flex items-center gap-2 px-3 py-2 text-sm text-white"
+            role="toolbar"
+            aria-label="Selected mail"
+          >
+            <span className="flex-1">{sel.length} selected</span>
+            <button
+              type="button"
+              className="min-h-[40px] rounded-lg px-3 font-semibold"
+              style={{ background: '#12B76A' }}
+              onClick={() => {
+                (tab === 'archive' ? unarchive : archive)(sel);
+                setSelected(new Set());
+              }}
+            >
+              {tab === 'archive' ? 'Move to Inbox' : 'Archive'}
+            </button>
+            <button
+              type="button"
+              className="min-h-[40px] rounded-lg px-3 font-semibold"
+              style={{ background: '#D92D20' }}
+              onClick={() => {
+                remove(sel);
+                setSelected(new Set());
+              }}
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              className="min-h-[40px] px-2"
+              style={{ color: MUTED }}
+              onClick={() => setSelected(new Set())}
+            >
+              Clear
+            </button>
+          </div>
+        )}
         {settings ? (
           <>
             <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
@@ -941,9 +1125,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         ) : null}
         {!inFrameSub && (
           <>
-            <div
-              className="bw-mail-card bw-mail-hero flex items-center gap-3 px-4 py-4"
-            >
+            <div className="bw-mail-card bw-mail-hero flex items-center gap-3 px-4 py-4">
               <div className="flex flex-1 flex-col">
                 <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
                   {inView ? 'In view' : 'Postage received this week'}
@@ -968,6 +1150,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
                   ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
                   ['sent', 'Sent'],
+                  ['archive', 'Archive'],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -984,7 +1167,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 </button>
               ))}
             </div>
-            {tab !== 'sent' && (
+            {tab !== 'sent' && tab !== 'archive' && (
               <>
                 <div className="bw-mail-seg flex rounded-xl p-0.5">
                   {(
@@ -1045,13 +1228,16 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                         Everyone else
                       </span>
                     )}
-                    <MailRow
-                      r={r}
-                      rate={m.rate}
-                      friend={isContact(r.from)}
-                      label={nameOf(r.from)}
-                      onOpen={() => setReading(r)}
-                    />
+                    {swipeMail(
+                      r,
+                      <MailRow
+                        r={r}
+                        rate={m.rate}
+                        friend={isContact(r.from)}
+                        label={nameOf(r.from)}
+                        onOpen={() => setReading(r)}
+                      />,
+                    )}
                   </div>
                 ))}
                 {!view('inbox').length && !exInbox.length && (
@@ -1066,7 +1252,16 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
               <>
                 {view('requests').map((r) => (
                   <div key={r.id} className="flex flex-col gap-1">
-                    <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+                    {swipeMail(
+                      r,
+                      <MailRow
+                        r={r}
+                        rate={m.rate}
+                        friend={false}
+                        label={nameOf(r.from)}
+                        onOpen={() => setReading(r)}
+                      />,
+                    )}
                     {r.verifiedSats > 0 && (
                       <span className="text-[10px] px-2" style={{ color: MUTED }}>
                         Below your price to reach ({money(m.priceSats, m.rate)}): the sender can pay the difference.
@@ -1091,7 +1286,30 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   text="Write to a $handle or paymail. Your letter is sealed so only they can open it, and the stamp (1¢ by default) is paid to them from your wallet as you send."
                 />
               ))}
-            {tab !== 'sent' && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
+            {tab === 'archive' &&
+              (m.boxes.archive.length ? (
+                m.boxes.archive.map((r) => (
+                  <div key={r.id}>
+                    {swipeMail(
+                      r,
+                      <MailRow
+                        r={r}
+                        rate={m.rate}
+                        friend={isContact(r.from)}
+                        label={nameOf(r.from)}
+                        onOpen={() => setReading(r)}
+                      />,
+                      true,
+                    )}
+                  </div>
+                ))
+              ) : (
+                <Empty
+                  title="Archive is empty"
+                  text="Swipe a letter left to archive it (or press e on a keyboard). Archived mail stays here, out of your Inbox, until you move it back."
+                />
+              ))}
+            {tab !== 'sent' && tab !== 'archive' && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
               <>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>

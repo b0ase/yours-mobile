@@ -9,6 +9,12 @@ import { split } from './route';
 import { cachedExchangeRate } from '../../utils/wallet';
 import {
   addReceived,
+  isArchived,
+  isLive,
+  pinnedFirst,
+  restoreFlags,
+  setFlags,
+  type MailFlags,
   loadMail,
   loadPending,
   saveMail,
@@ -51,9 +57,38 @@ export const useBMail = () => {
 
   // Only bPhone friends pin a sender (owner, 9 Oct): writing to someone does not by itself make them a friend.
   const isFriend = useCallback((k: string) => isCallFriend(k), []);
-  const boxes = useMemo(
-    () => split(state.received, { isFriend, priceSats, newest }),
-    [state.received, isFriend, priceSats, newest],
+  const boxes = useMemo(() => {
+    const blocked = state.blocked ?? [];
+    const b = split(
+      state.received.filter((r) => isLive(r, blocked)),
+      { isFriend, priceSats, newest },
+    );
+    return {
+      inbox: pinnedFirst(b.inbox),
+      requests: pinnedFirst(b.requests),
+      archive: state.received.filter((r) => isArchived(r, blocked)).sort((a, z) => z.at - a.at),
+    };
+  }, [state.received, state.blocked, isFriend, priceSats, newest]);
+
+  /** Swipe actions: set flags, returning an undo function. */
+  const flag = useCallback(
+    (ids: string[], patch: MailFlags) => {
+      let prev: Record<string, MailFlags> = {};
+      updateMail(me, (s) => {
+        const r = setFlags(s, ids, patch);
+        prev = r.prev;
+        return r.next;
+      });
+      return () => updateMail(me, (s) => restoreFlags(s, prev));
+    },
+    [me],
+  );
+  const block = useCallback(
+    (sender: string) => {
+      updateMail(me, (s) => ({ ...s, blocked: [...new Set([...(s.blocked ?? []), sender])] }));
+      return () => updateMail(me, (s) => ({ ...s, blocked: (s.blocked ?? []).filter((k) => k !== sender) }));
+    },
+    [me],
   );
 
   const refresh = useCallback(async () => {
@@ -140,6 +175,8 @@ export const useBMail = () => {
     send,
     setPrice,
     unread,
+    flag,
+    block,
   };
 };
 
@@ -168,7 +205,10 @@ export const useBMailUnread = (): number => {
     const priceSats = usdToSats(s.priceUsd, cachedExchangeRate()) ?? 0;
     const isFriend = (k: string) => isCallFriend(k);
     const have = new Set(s.received.map((r) => r.id));
-    const unread = split(s.received, { isFriend, priceSats }).inbox.filter((r) => !r.read).length;
+    const unread = split(
+      s.received.filter((r) => isLive(r, s.blocked)),
+      { isFriend, priceSats },
+    ).inbox.filter((r) => !r.read).length;
     return unread + loadPending(me).filter((id) => !have.has(id)).length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, v]);

@@ -1327,3 +1327,20 @@ button.bw-mail-card:active {
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+
+/* SwipeRow (src/mobile/swipe): hover/focus action icons on desktop, hidden on touch until focus. */
+.bw-swipe .bw-swipe-hover { opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.bw-swipe:focus-within .bw-swipe-hover { opacity: 1; pointer-events: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .bw-swipe:hover .bw-swipe-hover { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none) {
+  .bw-swipe .bw-swipe-hover-btn { display: none; }
+}
+.bw-swipe .bw-swipe-check { opacity: 0; }
+.bw-swipe:hover .bw-swipe-check, .bw-swipe:focus-within .bw-swipe-check, .bw-swipe .bw-swipe-check.is-on,
+.bw-swipe-selecting .bw-swipe-check { opacity: 1; }
+.bw-swipe-row-focus { outline: 2px solid #FFC700; outline-offset: -2px; border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .bw-swipe-face, .bw-swipe .bw-swipe-hover { transition: none !important; }
+}

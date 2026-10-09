@@ -14,7 +14,14 @@ export type Received = MailMeta & {
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
+  /** Swipe-to-organise flags (local only: the relay has no per-message state after acknowledge). */
+  archived?: boolean;
+  /** Soft delete: kept (hidden) so a refresh can't bring it back and Undo can restore it. */
+  deleted?: boolean;
+  spam?: boolean;
+  pinned?: boolean;
 };
+export type MailFlags = Pick<Received, 'read' | 'archived' | 'deleted' | 'spam' | 'pinned'>;
 export type Sent = {
   id: string;
   to: string;
@@ -36,6 +43,8 @@ export type MailState = {
   priceUsd: number;
   /** Reply-paid credits others gave me: message id → sats (used when I reply). */
   usedCredits: string[];
+  /** Senders I blocked: their mail is hidden everywhere. */
+  blocked?: string[];
 };
 
 export const emptyMail = (): MailState => ({
@@ -90,6 +99,39 @@ export const addReceived = (s: MailState, items: Received[]): MailState => {
   const fresh = items.filter((i) => !have.has(i.id));
   return fresh.length ? { ...s, received: [...fresh, ...s.received] } : s;
 };
+
+/** Mail that belongs in Inbox/Requests: not archived, deleted, spam, or from a blocked sender. */
+export const isLive = (r: Received, blocked: string[] = []) =>
+  !r.archived && !r.deleted && !r.spam && !blocked.includes(r.from);
+/** The Archive view. */
+export const isArchived = (r: Received, blocked: string[] = []) =>
+  !!r.archived && !r.deleted && !r.spam && !blocked.includes(r.from);
+/** Pinned mail floats to the top, keeping the given order otherwise. */
+export const pinnedFirst = <T extends { pinned?: boolean }>(xs: T[]): T[] => [
+  ...xs.filter((x) => x.pinned),
+  ...xs.filter((x) => !x.pinned),
+];
+
+/** Set flags on some mail; returns the new state and each message's previous flags (for Undo). */
+export const setFlags = (
+  s: MailState,
+  ids: string[],
+  patch: MailFlags,
+): { next: MailState; prev: Record<string, MailFlags> } => {
+  const want = new Set(ids);
+  const prev: Record<string, MailFlags> = {};
+  const received = s.received.map((r) => {
+    if (!want.has(r.id)) return r;
+    prev[r.id] = { read: r.read, archived: r.archived, deleted: r.deleted, spam: r.spam, pinned: r.pinned };
+    return { ...r, ...patch };
+  });
+  return { next: { ...s, received }, prev };
+};
+/** Put flags back exactly as they were (Undo). */
+export const restoreFlags = (s: MailState, prev: Record<string, MailFlags>): MailState => ({
+  ...s,
+  received: s.received.map((r) => (prev[r.id] ? { ...r, ...prev[r.id] } : r)),
+});
 
 /**
  * Inbox-routed mail the notifier has seen on the relay but the bMail screen has not fetched yet (ids). Lets the
