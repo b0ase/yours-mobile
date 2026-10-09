@@ -248,6 +248,14 @@ Wording: lists, sends, postage. No personal data is ever sold or shown.
 
 Store build: B0–B1 plain messaging. Paid features follow the bPhone rule: **bWalletX only** until reviewed (`storeBuild.ts`).
 
+## 8a. Owner answers (9 Oct, rev 3 questions)
+
+- Postage: owner picked **pay to open from day one**, and reframed it: pay to open is a sender option like registered post; what matters most is **signed delivery** (§6a), with a key attested to a (ultimately KYC'd) identity. So: ship the delivery options (Standard / Signed / Pay to open) as sender choices as early as possible.
+- Reply paid: off by default; the sender ticks it.
+- Return stamps: refund only on mail with a deadline (§6a) (owner's later correction overrides the page answer).
+- Contracts: **everything signs inside the wallet** (drawn signature pad + click-to-accept in bWalletX), not a hand-off to bit-sign.
+- Token allocations in bMail: yes, utility tokens only.
+
 ## 8. Questions for the owner (product only)
 
 Answered 9 Oct and folded in: Penny post 1¢ default, tier multiples, built-in stamp designs, receipts only for Certified / pay to open, "Requests", B0 in 5.1.90.
