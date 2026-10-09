@@ -229,6 +229,18 @@ data-protection law (UK GDPR / PECR) forbid. bMail avoids it by design:
 
 Wording: lists, sends, postage. No personal data is ever sold or shown.
 
+## 6e. Where bMail's code lives (owner, 9 Oct; do after 5.1.90 is tested)
+
+- **The mailbox stays inside bWalletX** (`src/mobile/bmail/`): it needs the wallet's keys to decrypt, its payments for
+  stamps, notifications and the top-bar icon. Like Phone and Messages on an iPhone, part of the wallet, not a bApp.
+- **A shared protocol package**, `@bwalletx/bmail` (open source, MIT, published like `@bwalletx/connect`): envelope
+  format, stamp verification, routing/weighting rules, signed-delivery receipts, list sends. Other wallets can then send
+  and receive bMail, which is what makes it a standard.
+- **bitcoin-email becomes bMail on the web**: rebuilt as a bApp on the bApp shell and `@bwalletx/connect`, a full-size
+  mail client for laptops that signs and pays through the user's bWalletX. Old HandCash/CryptoJS code is dropped.
+- Steps: (1) split protocol code out of `src/mobile/bmail/` into the package with its tests; (2) wallet imports the
+  package; (3) rebuild bitcoin-email on it; (4) publish the envelope spec.
+
 ## 7. Phases
 
 | # | What | State |
