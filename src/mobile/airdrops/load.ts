@@ -2,7 +2,7 @@
 import { buildRows, ownOutputs, type RawTx } from '../wallet/txHistory';
 import { fetchAccountTxs, fetchLocalInfo, fetchTokenSymbols } from '../wallet/txHistoryFetch';
 import { classifyEvent, findListings } from '../wallet/historyEvents';
-import { loadItems, saveItems, toItems } from './inbox';
+import { isUnsolicited, loadItems, saveItems, saveSolicited, toItems } from './inbox';
 import { noteForTx } from './note';
 import { poisonDataFrom, savePoisonData } from './poison';
 
@@ -35,6 +35,14 @@ export const refreshAirdrops = (
       classifyEvent(r, byId.get(r.txid), local.get(r.txid), ctx),
     );
     let items = toItems(rows, (t) => local.has(t));
+    // Tokens held by the wallet's own doing never go to Quarantine (quarantine.ts).
+    saveSolicited(account, [
+      ...new Set(
+        rows
+          .filter((r) => r.asset?.kind === 'token' && r.asset.id && !isUnsolicited(r, local.has(r.txid)))
+          .map((r) => r.asset!.id),
+      ),
+    ]);
     const ids = [
       ...new Set(items.map((i) => (i.asset.kind === 'token' && !i.asset.symbol ? i.asset.id : '')).filter(Boolean)),
     ];

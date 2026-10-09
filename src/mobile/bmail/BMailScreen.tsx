@@ -4,7 +4,28 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, Mailbox, PenSquare, RefreshCw, Settings } from 'lucide-react';
+import {
+  Archive,
+  ArchiveRestore,
+  Ban,
+  ChevronLeft,
+  Mail,
+  MailOpen,
+  Mailbox,
+  PenSquare,
+  Pin,
+  PinOff,
+  RefreshCw,
+  Reply,
+  Settings,
+  ShieldAlert,
+  Trash2,
+} from 'lucide-react';
+import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
+import { showUndo, UndoToastHost } from '../swipe/undo';
+import { binDaysLeft, pinnedFirst } from './store';
+import { mailSegments } from './links';
+import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
 import { isFriend as isCallFriend } from '../calls/friends';
 import { AirdropsList } from '../airdrops/AirdropsInbox';
@@ -48,11 +69,10 @@ import { useBMail } from './useBMail';
 import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 
-const CARD = '#17191E';
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
-type Tab = 'inbox' | 'requests' | 'sent';
+type Tab = 'inbox' | 'requests' | 'sent' | 'archive' | 'quarantine' | 'bin';
 type Draft = { to?: string; toLabel?: string; subject?: string; inReplyTo?: string; credit?: boolean };
 
 const btn = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
@@ -112,10 +132,17 @@ const chipsFor = (r: Received, rate: number, friend: boolean): { kind: StampKind
   return out;
 };
 
+/** Reader stamp: a postage stamp (perforated edge, .bw-mail-stamp) in the stamp kind's colour. */
+const PostStamp = ({ kind, text }: { kind: StampKind; text?: string }) => (
+  <span className="bw-mail-stamp" style={{ color: CHIP[kind].color }}>
+    <span>{text ?? CHIP[kind].label}</span>
+  </span>
+);
+
 const Stamp = ({ r, rate }: { r: Received; rate: number }) => (
-  <div className="flex flex-wrap gap-1">
+  <div className="flex flex-wrap gap-2 pt-1">
     {chipsFor(r, rate, false).map((c) => (
-      <Chip key={c.kind} kind={c.kind} text={c.text} />
+      <PostStamp key={c.kind} kind={c.kind} text={c.text} />
     ))}
   </div>
 );
@@ -145,7 +172,9 @@ const Row = ({
   onOpen,
   extra,
   amount,
+  pinned,
 }: {
+  pinned?: boolean;
   amount?: Amount;
   avatar: ReactNode;
   title: string;
@@ -161,14 +190,14 @@ const Row = ({
   <button
     type="button"
     onClick={onOpen}
-    className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left"
-    style={{ background: CARD, border: bold ? `1px solid ${GOLD}40` : '1px solid transparent' }}
+    className={`bw-mail-card flex w-full items-start gap-3 px-3 py-3 text-left${bold ? ' is-unread' : ''}`}
   >
     {avatar}
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <div className="flex items-center gap-1.5">
         {bold && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: GOLD }} />}
         <span className={`${ONE} text-sm text-white ${bold ? 'font-bold' : 'font-medium'}`}>{title}</span>
+        {pinned && <Pin size={12} color={GOLD} aria-label="Pinned" className="shrink-0" />}
         {tag && (
           <span
             className="shrink-0 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-[#2b2f36]"
@@ -249,6 +278,7 @@ const MailRow = ({
     ))}
     time={ago(r.at)}
     onOpen={onOpen}
+    pinned={!!r.pinned}
     amount={realAmount(r, rate, friend)}
   />
 );
@@ -297,10 +327,10 @@ const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
 
 const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) => (
   <div className="flex flex-col gap-3">
-    <div className="rounded-xl p-3 text-xs" style={{ background: '#22252c', color: MUTED }}>
+    <div className="bw-mail-seg rounded-xl p-3 text-xs" style={{ color: MUTED }}>
       Example: this shows what a bMail looks like. It is not real mail, so nothing here can be paid, signed or answered.
     </div>
-    <div className="flex items-center gap-3 rounded-xl p-3" style={{ background: CARD }}>
+    <div className="bw-mail-card flex items-center gap-3 p-4">
       <Avatar label={e.name} color={e.color} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-sm font-semibold text-white">{e.name}</span>
@@ -322,13 +352,13 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         </span>
       </div>
     </div>
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-2">
       {e.stamps.map((k) => (
-        <Chip key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
+        <PostStamp key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
       ))}
     </div>
     {(totalCents(e) > 0 || e.invoiceCents) && (
-      <div className="rounded-xl p-3 flex flex-col gap-1 text-xs" style={{ background: CARD }}>
+      <div className="bw-mail-card p-3 flex flex-col gap-1 text-xs">
         <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
           Money in this mail
         </div>
@@ -353,7 +383,7 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
       </div>
     )}
     {!!e.tokens?.length && (
-      <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
+      <div className="bw-mail-card p-3 flex flex-col gap-2">
         <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
           Tokens attached
         </div>
@@ -370,9 +400,9 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         ))}
       </div>
     )}
-    <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
-      <div className="text-base font-bold text-white">{e.subject}</div>
-      <div className="text-sm text-white whitespace-pre-wrap break-words">{e.body}</div>
+    <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
+      <div className="text-lg font-bold text-white">{e.subject}</div>
+      <div className="bw-mail-body whitespace-pre-wrap break-words">{e.body}</div>
       {e.token && <TokenFacts t={e.token} />}
     </div>
     {e.action && (
@@ -393,6 +423,8 @@ const Reader = ({
   open,
   creditUsed,
   onReply,
+  trusted,
+  onTrust,
 }: {
   r: Received;
   label: string;
@@ -400,6 +432,9 @@ const Reader = ({
   open: (r: Received) => Promise<{ subject: string; body: string }>;
   creditUsed: boolean;
   onReply: (d: Draft) => void;
+  /** Links are clickable only from a trusted sender (links.ts). */
+  trusted: boolean;
+  onTrust: () => void;
 }) => {
   const [mail, setMail] = useState(r.opened ?? null);
   const [err, setErr] = useState('');
@@ -414,7 +449,7 @@ const Reader = ({
   const credit = !!r.env.replyPaidSats && r.verifiedSats > 0 && !creditUsed;
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl p-3 flex flex-col gap-1" style={{ background: CARD }}>
+      <div className="bw-mail-card p-4 flex flex-col gap-1.5">
         <div className="text-sm text-white font-semibold">From {label}</div>
         <div className="text-[11px] break-all" style={{ color: MUTED }}>
           {r.from}
@@ -427,14 +462,44 @@ const Reader = ({
           </div>
         )}
       </div>
-      {!mail ? (
+      {r.erased ? (
+        <p className="text-xs m-0" style={{ color: MUTED }}>
+          This letter was in the Bin for 30 days, so its content was erased from this device.
+        </p>
+      ) : !mail ? (
         <button type="button" disabled={busy} onClick={doOpen} className={gold} style={{ background: GOLD }}>
           {busy ? 'Opening…' : 'Open'}
         </button>
       ) : (
-        <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
-          <div className="text-base font-bold text-white">{mail.subject || '(no subject)'}</div>
-          <div className="text-sm text-white whitespace-pre-wrap break-words">{mail.body}</div>
+        <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
+          <div className="text-lg font-bold text-white">{mail.subject || '(no subject)'}</div>
+          <div className="bw-mail-body whitespace-pre-wrap break-words">
+            {mailSegments(mail.body, trusted).map((seg, n) =>
+              seg.href ? (
+                <a key={n} href={seg.href} target="_blank" rel="noopener noreferrer nofollow" className="underline">
+                  {seg.text}
+                </a>
+              ) : seg.link ? (
+                <span key={n} style={{ color: '#9fb3c8' }} title="Links work once you trust the sender">
+                  {seg.text}
+                </span>
+              ) : (
+                <span key={n}>{seg.text}</span>
+              ),
+            )}
+          </div>
+          {!trusted && mailSegments(mail.body, false).some((x) => x.link) && (
+            <div className="flex items-center gap-2 text-[11px]" style={{ color: MUTED }}>
+              <span className="flex-1">Links from senders you haven&apos;t trusted are shown as text only.</span>
+              <button
+                type="button"
+                onClick={onTrust}
+                className="min-h-[44px] rounded-lg px-3 text-xs font-semibold bg-[#2b2f36] text-white"
+              >
+                Trust sender
+              </button>
+            </div>
+          )}
         </div>
       )}
       {err && <p className="text-xs text-[#F97066] m-0">{err}</p>}
@@ -588,7 +653,7 @@ const Compose = ({
           Reply paid: include their return postage ({money(myPriceSats, rate)}) so answering costs them nothing
         </label>
       )}
-      <div className="rounded-xl p-3 text-xs" style={{ background: CARD, color: '#fff' }}>
+      <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(10,10,11,0.72)', color: '#fff' }}>
         {peer
           ? `${peer.label} · price to reach: ${money(priceSats, rate)}`
           : 'Price to reach: Penny post (1¢) unless they set one'}
@@ -716,7 +781,7 @@ const useNames = (keys: string[], sent: Sent[]) => {
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 const Empty = ({ title, text }: { title: string; text: string }) => (
-  <div className="flex flex-col items-center gap-2 rounded-xl px-6 py-8 text-center" style={{ background: CARD }}>
+  <div className="bw-mail-card flex flex-col items-center gap-2 px-6 py-8 text-center">
     <Mailbox size={28} color={GOLD} />
     <div className="text-sm font-bold text-white">{title}</div>
     <div className="text-xs leading-relaxed" style={{ color: MUTED }}>
@@ -806,7 +871,127 @@ export const BMailScreen = ({
   const [sort, setSort] = useState<SortMode>('paid');
   const [filter, setFilter] = useState<MailFilter>('all');
   const mode: SortMode = tab !== 'requests' && sort === 'spreading' ? 'paid' : sort;
-  const view = (box: 'inbox' | 'requests') => sortMail(filterMail(m.boxes[box], filter), mode, isContact);
+  const view = (box: 'inbox' | 'requests') => pinnedFirst(sortMail(filterMail(m.boxes[box], filter), mode, isContact));
+  // Swipe to organise (owner, 9 Oct): left tray Reply · Archive · Delete (full = Archive), right tray Read · Pin
+  // (full = toggle read); Spam / Block in the … menu. Every destructive action has Undo.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const replyTo = (r: Received) => {
+    if (r.opened)
+      setDraft({
+        to: r.from,
+        toLabel: nameOf(r.from),
+        subject: r.opened.subject.startsWith('Re:') ? r.opened.subject : `Re: ${r.opened.subject}`,
+        inReplyTo: r.id,
+        credit: !!r.env.replyPaidSats && r.verifiedSats > 0 && !m.state.usedCredits.includes(r.id),
+      });
+    // Still sealed: open it in the reader, which has the Reply button once it is unsealed.
+    else setReading(r);
+  };
+  const undoable = (text: string, undo: () => void) => showUndo(text, undo);
+  const archive = (ids: string[]) =>
+    undoable(ids.length > 1 ? `Archived ${ids.length}` : 'Archived', m.flag(ids, { archived: true }));
+  const unarchive = (ids: string[]) => undoable('Moved to Inbox', m.flag(ids, { archived: false }));
+  const remove = (ids: string[]) =>
+    undoable(ids.length > 1 ? `Deleted ${ids.length}` : 'Deleted', m.flag(ids, { deleted: true }));
+  const mailActions = (r: Received, inArchive: boolean) => {
+    const left: SwipeAction[] = [
+      { id: 'reply', label: 'Reply', icon: <Reply size={18} />, color: '#475467', onPress: () => replyTo(r) },
+      inArchive
+        ? {
+            id: 'unarchive',
+            label: 'Inbox',
+            icon: <ArchiveRestore size={18} />,
+            color: '#12B76A',
+            removes: true,
+            onPress: () => unarchive([r.id]),
+          }
+        : {
+            id: 'archive',
+            label: 'Archive',
+            icon: <Archive size={18} />,
+            color: '#12B76A',
+            removes: true,
+            onPress: () => archive([r.id]),
+          },
+      {
+        id: 'delete',
+        label: 'Delete',
+        icon: <Trash2 size={18} />,
+        color: '#D92D20',
+        removes: true,
+        onPress: () => remove([r.id]),
+      },
+    ];
+    const right: SwipeAction[] = [
+      {
+        id: 'read',
+        label: r.read ? 'Unread' : 'Read',
+        icon: r.read ? <Mail size={18} /> : <MailOpen size={18} />,
+        color: '#2E90FA',
+        onPress: () => void m.flag([r.id], { read: !r.read }),
+      },
+      {
+        id: 'pin',
+        label: r.pinned ? 'Unpin' : 'Pin',
+        icon: r.pinned ? <PinOff size={18} /> : <Pin size={18} />,
+        color: '#B54708',
+        onPress: () => void m.flag([r.id], { pinned: !r.pinned }),
+      },
+    ];
+    const more: SwipeAction[] = [
+      {
+        id: 'spam',
+        label: 'Spam',
+        icon: <ShieldAlert size={14} />,
+        color: '#7A2E0E',
+        removes: true,
+        onPress: () => undoable('Marked as spam: future mail from them goes to Quarantine', m.spam(r)),
+      },
+      {
+        id: 'block',
+        label: `Block ${nameOf(r.from)}`,
+        icon: <Ban size={14} />,
+        color: '#7A271A',
+        removes: true,
+        onPress: () => undoable(`Blocked ${nameOf(r.from)}`, m.block(r.from)),
+      },
+    ];
+    return { left, right, more, fullLeft: inArchive ? 'unarchive' : 'archive', fullRight: 'read' };
+  };
+  const swipeMail = (r: Received, row: ReactNode, inArchive = false) => {
+    const a = mailActions(r, inArchive);
+    return (
+      <SwipeRow
+        rowId={r.id}
+        label={`mail from ${nameOf(r.from)}`}
+        leftActions={a.left}
+        rightActions={a.right}
+        moreActions={a.more}
+        fullSwipeLeft={a.fullLeft}
+        fullSwipeRight={a.fullRight}
+        selected={selected.has(r.id)}
+        onSelect={(on) =>
+          setSelected((s) => {
+            const n = new Set(s);
+            if (on) n.add(r.id);
+            else n.delete(r.id);
+            return n;
+          })
+        }
+      >
+        {row}
+      </SwipeRow>
+    );
+  };
+  const listKeys = (e: React.KeyboardEvent<HTMLDivElement>) =>
+    listShortcut(e, (id, key) => {
+      const r = m.state.received.find((x) => x.id === id);
+      if (!r) return;
+      if (key === 'archive') (r.archived ? unarchive : archive)([id]);
+      if (key === 'delete') remove([id]);
+      if (key === 'read') m.flag([id], { read: !r.read });
+    });
+  const sel = [...selected].filter((id) => m.state.received.some((r) => r.id === id));
   const exView = (box: 'inbox' | 'requests') =>
     showEx
       ? sortExamples(
@@ -821,7 +1006,7 @@ export const BMailScreen = ({
   const exRequests = exView('requests');
   // Value in view: verified postage on real mail this week, plus example amounts shown (labelled as examples).
   const inView =
-    tab === 'sent'
+    tab !== 'inbox' && tab !== 'requests'
       ? null
       : (() => {
           const real = view(tab).filter((r) => now - r.at < WEEK_MS && r.verifiedSats > 0);
@@ -844,8 +1029,8 @@ export const BMailScreen = ({
   const inFrameSub = !draft && !!(reading || settings || example);
   const subHeader = (top: string) => (
     <div
-      className="sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
-      style={{ background: '#0d0e11', paddingTop: top }}
+      className="bw-mail-bar sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
+      style={{ paddingTop: top }}
     >
       <button type="button" aria-label="Back" onClick={back} className={roundBtn} style={RING_STYLE}>
         <ChevronLeft size={22} color="#fff" />
@@ -857,15 +1042,51 @@ export const BMailScreen = ({
 
   const list = (
     <>
-      <div
-        className="flex items-center gap-3 rounded-2xl px-4 py-3"
-        style={{ background: `linear-gradient(135deg, ${GOLD}26, ${CARD})`, border: `1px solid ${GOLD}33` }}
-      >
+      {sel.length > 0 && (
+        <div
+          className="bw-mail-card sticky top-14 z-10 flex items-center gap-2 px-3 py-2 text-sm text-white"
+          role="toolbar"
+          aria-label="Selected mail"
+        >
+          <span className="flex-1">{sel.length} selected</span>
+          <button
+            type="button"
+            className="min-h-[40px] rounded-lg px-3 font-semibold"
+            style={{ background: '#12B76A' }}
+            onClick={() => {
+              (tab === 'archive' ? unarchive : archive)(sel);
+              setSelected(new Set());
+            }}
+          >
+            {tab === 'archive' ? 'Move to Inbox' : 'Archive'}
+          </button>
+          <button
+            type="button"
+            className="min-h-[40px] rounded-lg px-3 font-semibold"
+            style={{ background: '#D92D20' }}
+            onClick={() => {
+              remove(sel);
+              setSelected(new Set());
+            }}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            className="min-h-[40px] px-2"
+            style={{ color: MUTED }}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+      <div className="bw-mail-card bw-mail-hero flex items-center gap-3 px-4 py-4">
         <div className="flex flex-1 flex-col">
           <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
             {inView ? 'In view' : 'Postage received this week'}
           </span>
-          <span className="text-xl font-bold" style={{ color: GOLD }}>
+          <span className="text-2xl font-bold tabular-nums leading-tight" style={{ color: GOLD }}>
             {inView ? `${fmtCents(Math.round(inView.usd * 100))} in postage this week` : money(week.sats, m.rate)}
           </span>
           <span className="text-[11px]" style={{ color: MUTED }}>
@@ -879,12 +1100,15 @@ export const BMailScreen = ({
           <span>Penny post</span>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-0.5">
         {(
           [
             ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
             ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
             ['sent', 'Sent'],
+            ['archive', 'Archive'],
+            ['quarantine', `Quarantine${m.boxes.quarantine.length ? ` (${m.boxes.quarantine.length})` : ''}`],
+            ['bin', 'Bin'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -892,16 +1116,18 @@ export const BMailScreen = ({
             type="button"
             aria-pressed={tab === id}
             onClick={() => setTab(id)}
-            className="min-h-[44px] flex-1 rounded-xl py-2 text-sm font-semibold"
-            style={tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }}
+            className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
+            style={
+              tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
+            }
           >
             {label}
           </button>
         ))}
       </div>
-      {tab !== 'sent' && (
+      {(tab === 'inbox' || tab === 'requests') && (
         <>
-          <div className="flex rounded-xl p-0.5" style={{ background: CARD }}>
+          <div className="bw-mail-seg flex rounded-xl p-0.5">
             {(
               [
                 ['paid', 'Most paid'],
@@ -948,7 +1174,10 @@ export const BMailScreen = ({
           {view('inbox').map((r, i, all) => (
             <div key={r.id} className="flex flex-col gap-1">
               {i === 0 && isPinned(r, isContact) && (
-                <span className="text-[10px] font-semibold uppercase tracking-wide px-1" style={{ color: '#6CE9A6' }}>
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-wide px-1"
+                  style={{ color: '#6CE9A6' }}
+                >
                   Friends
                 </span>
               )}
@@ -957,13 +1186,16 @@ export const BMailScreen = ({
                   Everyone else
                 </span>
               )}
-              <MailRow
-                r={r}
-                rate={m.rate}
-                friend={isContact(r.from)}
-                label={nameOf(r.from)}
-                onOpen={() => setReading(r)}
-              />
+              {swipeMail(
+                r,
+                <MailRow
+                  r={r}
+                  rate={m.rate}
+                  friend={isContact(r.from)}
+                  label={nameOf(r.from)}
+                  onOpen={() => setReading(r)}
+                />,
+              )}
             </div>
           ))}
           {!view('inbox').length && !exInbox.length && (
@@ -978,7 +1210,16 @@ export const BMailScreen = ({
         <>
           {view('requests').map((r) => (
             <div key={r.id} className="flex flex-col gap-1">
-              <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+              {swipeMail(
+                r,
+                <MailRow
+                  r={r}
+                  rate={m.rate}
+                  friend={false}
+                  label={nameOf(r.from)}
+                  onOpen={() => setReading(r)}
+                />,
+              )}
               {r.verifiedSats > 0 && (
                 <span className="text-[10px] px-2" style={{ color: MUTED }}>
                   Below your price to reach ({money(m.priceSats, m.rate)}): the sender can pay the difference.
@@ -989,7 +1230,7 @@ export const BMailScreen = ({
           {!view('requests').length && !exRequests.length && (
             <Empty
               title="Requests"
-              text="Unstamped mail, promotions and token airdrops wait here. Nothing is thrown away: keep what you like, hide an issuer to stop more."
+              text="Unstamped mail and promotions wait here. Token airdrops from senders you haven't accepted wait in Quarantine."
             />
           )}
         </>
@@ -1003,7 +1244,30 @@ export const BMailScreen = ({
             text="Write to a $handle or paymail. Your letter is sealed so only they can open it, and the stamp (1¢ by default) is paid to them from your wallet as you send."
           />
         ))}
-      {tab !== 'sent' && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
+      {tab === 'archive' &&
+        (m.boxes.archive.length ? (
+          m.boxes.archive.map((r) => (
+            <div key={r.id}>
+              {swipeMail(
+                r,
+                <MailRow
+                  r={r}
+                  rate={m.rate}
+                  friend={isContact(r.from)}
+                  label={nameOf(r.from)}
+                  onOpen={() => setReading(r)}
+                />,
+                true,
+              )}
+            </div>
+          ))
+        ) : (
+          <Empty
+            title="Archive is empty"
+            text="Swipe a letter left to archive it (or press e on a keyboard). Archived mail stays here, out of your Inbox, until you move it back."
+          />
+        ))}
+      {(tab === 'inbox' || tab === 'requests') && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
         <>
           <div className="mt-2 flex items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
@@ -1026,7 +1290,66 @@ export const BMailScreen = ({
           ))}
         </>
       )}
-      {tab === 'requests' && <AirdropsList onLeave={onClose} />}
+      {tab === 'quarantine' && (
+        <>
+          <p className="m-0 px-1 text-[11px] leading-relaxed" style={{ color: MUTED }}>
+            Mail you marked as spam or from senders you blocked, and tokens from senders you have not accepted.
+            Mail stays sealed until you open it. Quarantined tokens are not in your balance and are never spent
+            with your own coins. Nothing here is burned or moved.
+          </p>
+          {m.boxes.quarantine.map((r) => (
+            <div key={r.id} className="flex flex-col gap-1">
+              <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+              <div className="flex gap-1.5 px-1">
+                <button
+                  type="button"
+                  className="min-h-[44px] rounded-lg px-3 text-xs font-semibold bg-[#2b2f36] text-white"
+                  onClick={() => {
+                    m.flag([r.id], { spam: false });
+                    m.trust(r.from);
+                  }}
+                >
+                  Not spam: trust {nameOf(r.from)}
+                </button>
+                <button
+                  type="button"
+                  className="min-h-[44px] rounded-lg px-3 text-xs font-semibold bg-[#2b2f36] text-white"
+                  onClick={() => remove([r.id])}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+          <AirdropsList onLeave={onClose} />
+        </>
+      )}
+      {tab === 'bin' &&
+        (m.boxes.bin.length ? (
+          m.boxes.bin.map((r) => (
+            <div key={r.id} className="flex flex-col gap-1">
+              <MailRow r={r} rate={m.rate} friend={false} label={nameOf(r.from)} onOpen={() => setReading(r)} />
+              <div className="flex items-center gap-2 px-1">
+                <button
+                  type="button"
+                  className="min-h-[44px] rounded-lg px-3 text-xs font-semibold"
+                  style={{ background: GOLD, color: '#1a1300' }}
+                  onClick={() => m.restore([r.id])}
+                >
+                  Restore
+                </button>
+                <span className="text-[11px]" style={{ color: MUTED }}>
+                  Erased from this device in {binDaysLeft(r)} days
+                </span>
+              </div>
+            </div>
+          ))
+        ) : (
+          <Empty
+            title="Bin is empty"
+            text="Deleted mail waits here for 30 days so you can restore it, then its content is erased from this device. Postage you received stays yours."
+          />
+        ))}
     </>
   );
   const subBody = settings ? (
@@ -1042,6 +1365,8 @@ export const BMailScreen = ({
       rate={m.rate}
       open={m.open}
       creditUsed={m.state.usedCredits.includes(reading.id)}
+      trusted={m.isTrusted(reading.from)}
+      onTrust={() => m.trust(reading.from)}
       onReply={(d) => {
         setReading(null);
         setDraft(d);
@@ -1049,10 +1374,7 @@ export const BMailScreen = ({
     />
   ) : null;
   const mainHeader = (
-    <div
-      className="sticky top-0 z-10 flex items-center gap-1 px-3 pb-2"
-      style={{ background: '#0d0e11', paddingTop: 8 }}
-    >
+    <div className="bw-mail-bar sticky top-0 z-10 flex items-center gap-1 px-3 pb-2" style={{ paddingTop: 8 }}>
       <Mailbox size={18} color={GOLD} />
       <h2 className="text-base font-bold text-white flex-1 m-0">bMail</h2>
       <button type="button" aria-label="Write" onClick={() => setDraft({})} className={iconBtn}>
@@ -1078,7 +1400,13 @@ export const BMailScreen = ({
           style={{ borderRight: '1px solid #1f2127' }}
         >
           {mainHeader}
-          <div className="flex flex-col gap-2 px-4 pb-8">{list}</div>
+          <UndoToastHost />
+          <div
+            className={`flex flex-col gap-2 px-4 pb-8${sel.length ? ' bw-swipe-selecting' : ''}`}
+            onKeyDown={listKeys}
+          >
+            {list}
+          </div>
         </div>
         <div className="relative flex min-h-0 flex-col overflow-y-auto">
           {draft || sub ? (
@@ -1123,7 +1451,7 @@ export const BMailScreen = ({
     <div
       ref={scroller}
       className="relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto"
-      style={{ background: '#0d0e11', overscrollBehaviorY: 'contain' }}
+      style={{ overscrollBehaviorY: 'contain' }}
       onTouchStart={inFrameSub ? edge.start : undefined}
       onTouchEnd={inFrameSub ? edge.end : undefined}
     >
@@ -1168,7 +1496,11 @@ export const BMailScreen = ({
           <span>{ptr.refreshing ? 'Refreshing…' : ptr.armed ? 'Release to refresh' : 'Pull to refresh'}</span>
         </div>
       )}
-      <div className="flex flex-col gap-2 px-4 pb-24">
+      <UndoToastHost />
+      <div
+        className={`flex flex-col gap-2 px-4 pb-24${sel.length ? ' bw-swipe-selecting' : ''}`}
+        onKeyDown={inFrameSub ? undefined : listKeys}
+      >
         {subBody}
         {!inFrameSub && list}
       </div>

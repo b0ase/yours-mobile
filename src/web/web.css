@@ -1,8 +1,7 @@
 /*
  * Web wallet (vite.config.web.ts): the mobile UI hosted as a static site.
- * Phones get the mobile layout under a beta banner. Wider screens get the wallet across the window
- * (up to 1280px, centred) on the black and gold background: no phone-shaped column (owner, 6 Oct 2026:
- * "the web version should be widescreen").
+ * Phones get the mobile layout under a beta banner. Wider screens get one centred 720px column (tool bar,
+ * page and tab bar the same width) on the black and gold background (owner, 9 Oct 2026).
  */
 
 html:root {
@@ -76,7 +75,7 @@ html body #root {
     --wallet-width: 100%;
     --wallet-unlock-width: 420px;
     /* One container for the tool bar, the page and the tab bar (owner, 9 Oct 2026: "it's wonky"). */
-    --web-max: 1200px;
+    --web-max: 720px;
     --wallet-height: calc(100dvh - var(--web-banner-height) - var(--account-strip-height));
   }
 
@@ -84,7 +83,7 @@ html body #root {
     width: 100%;
   }
 
-  /* The portalled tool bar spans the same 1200px column as the page and tab bar, not the window. */
+  /* The portalled tool bar spans the same 720px column as the page and tab bar, not the window. */
   html body > .grid.grid-cols-5.fixed.top-0 {
     left: 0;
     right: 0;
@@ -100,47 +99,11 @@ html body #root {
   }
 }
 
-/* Wide screens (not the wide web layout, src/mobile/wide, which has its own panes): the wallet card on the left, staying in view, and the rest of the wallet page on the right
-   (owner, 6 Oct 2026). Only the Wallet page's scroller holds .bw-wcard-wrap, so other pages are untouched. */
+/* Wide screens: one centred column, like the phone layout but wider (owner, 9 Oct 2026): the card centred at
+   the top, everything else below it. The phone layout's 88/90/92% widths keep their proportions. */
 @media (min-width: 900px) {
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) {
-    display: grid;
-    grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
-    column-gap: 32px;
-    align-items: start;
-    align-content: start;
-    padding-left: 32px;
-    padding-right: 32px;
-  }
-  /* Every in-flow block goes in the right column at full width with one top/bottom rhythm: the phone
-     layout's 88/90/92% widths, side padding and margins gave each block different edges. Fixed layers
-     (background video, sheets) are left out so they cover the whole wallet, not a band starting at the
-     right column. */
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed):not(.bw-wcard-wrap) {
-    grid-column: 2;
-    width: 100%;
-    max-width: none;
-    margin: 0 0 12px;
-  }
-  html:not(.ww-on)
-    .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap)
-    > :not(.fixed)
-    :is([class*='w-[9'], [class*='w-[88%]']) {
-    width: 100%;
-    margin-left: 0;
-    margin-right: 0;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > :not(.fixed) div.w-full.px-4 {
-    padding-left: 0;
-    padding-right: 0;
-  }
-  /* The card shares the first row's top edge and stays in view while the right column scrolls. */
   html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
-    grid-column: 1;
-    grid-row: 1 / span 60;
-    width: 100%;
-    margin: 0;
-    position: sticky;
-    top: 0;
+    margin-left: auto;
+    margin-right: auto;
   }
 }

@@ -27,7 +27,11 @@ type Props = {
 export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absolute' }: Props) => {
   const reduce = useReducedMotion();
   const [prefs] = usePrefs();
-  const still = reduce || !prefs.animatedBackgrounds;
+  // Data saver (Chrome/Android "Lite"): the still poster, no video download.
+  const saveData =
+    typeof navigator !== 'undefined' &&
+    !!(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+  const still = reduce || !prefs.animatedBackgrounds || saveData;
   const video = useRef<HTMLVideoElement>(null);
   const [onScreen, setOnScreen] = useState(true);
   const wrap = useRef<HTMLDivElement>(null);
@@ -43,15 +47,23 @@ export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absol
   useEffect(() => {
     const v = video.current;
     if (!v) return;
+    // iOS (Safari and WKWebView) only autoplays inline when muted/playsinline are real attributes; React sets
+    // `muted` as a property only. Low Power Mode rejects play(): the poster stays, and the first touch retries.
     v.muted = true;
+    v.defaultMuted = true;
+    v.setAttribute('muted', '');
+    v.setAttribute('playsinline', '');
+    v.setAttribute('webkit-playsinline', '');
     const sync = () => {
       if (document.hidden || !onScreen) v.pause();
-      else v.play().catch(() => undefined);
+      else if (v.paused) v.play().catch(() => undefined);
     };
     sync();
     document.addEventListener('visibilitychange', sync);
+    document.addEventListener('touchstart', sync, { passive: true });
     return () => {
       document.removeEventListener('visibilitychange', sync);
+      document.removeEventListener('touchstart', sync);
       v.pause();
     };
   }, [still, onScreen]);

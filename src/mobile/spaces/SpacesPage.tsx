@@ -14,6 +14,7 @@ import { roomTitle, type ChatRoom } from '../chat/messages';
 import { gateOfRoom } from '../chat/tokenRooms';
 import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
 import { SpaceScreen } from './SpaceScreen';
+import { DoorKeeper } from './DoorKeeper';
 import { InviteCard, type SpaceLink } from './InviteCard';
 import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
@@ -197,6 +198,7 @@ const SpacesPage = () => {
         </div>
       )}
 
+      {open && <DoorKeeper client={client} ticker={open.ticker} me={me} />}
       {open && (
         <SpaceScreen
           client={client}

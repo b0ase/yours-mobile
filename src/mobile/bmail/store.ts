@@ -14,7 +14,18 @@ export type Received = MailMeta & {
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
+  /** Swipe-to-organise flags (local only: the relay has no per-message state after acknowledge). */
+  archived?: boolean;
+  /** Soft delete: kept (hidden) so a refresh can't bring it back and Undo can restore it. */
+  deleted?: boolean;
+  spam?: boolean;
+  pinned?: boolean;
+  /** When it went to the Bin (unix ms). After BIN_MS its content is erased locally (purgeBin). */
+  deletedAt?: number;
+  /** Content erased after 30 days in the Bin: only a tombstone (id, sender, postage record) is kept. */
+  erased?: boolean;
 };
+export type MailFlags = Pick<Received, 'read' | 'archived' | 'deleted' | 'spam' | 'pinned' | 'deletedAt'>;
 export type Sent = {
   id: string;
   to: string;
@@ -36,6 +47,10 @@ export type MailState = {
   priceUsd: number;
   /** Reply-paid credits others gave me: message id → sats (used when I reply). */
   usedCredits: string[];
+  /** Senders I blocked or marked as spam: their mail goes straight to Quarantine, unopened. */
+  blocked?: string[];
+  /** Senders I chose to trust ("Trust sender"): links in their mail are clickable. */
+  trusted?: string[];
 };
 
 export const emptyMail = (): MailState => ({
@@ -90,6 +105,106 @@ export const addReceived = (s: MailState, items: Received[]): MailState => {
   const fresh = items.filter((i) => !have.has(i.id));
   return fresh.length ? { ...s, received: [...fresh, ...s.received] } : s;
 };
+
+/** Mail that belongs in Inbox/Requests: not archived, deleted, spam, or from a blocked sender. */
+export const isLive = (r: Received, blocked: string[] = []) =>
+  !r.archived && !r.deleted && !r.spam && !blocked.includes(r.from);
+/** Quarantine: mail marked spam or from a blocked sender (not deleted). Never opened automatically. */
+export const isQuarantined = (r: Received, blocked: string[] = []) =>
+  !r.deleted && (!!r.spam || blocked.includes(r.from));
+/** The Bin view: deleted mail whose content has not been erased yet. */
+export const isInBin = (r: Received) => !!r.deleted && !r.erased;
+/** Deleted mail is kept this long in the Bin (Restore works), then its content is erased locally. */
+export const BIN_MS = 30 * 24 * 60 * 60 * 1000;
+/** Days left before a binned letter is erased (rounded up, never below 0). */
+export const binDaysLeft = (r: Pick<Received, 'deletedAt'>, now = Date.now()) =>
+  Math.max(0, Math.ceil(((r.deletedAt ?? now) + BIN_MS - now) / (24 * 60 * 60 * 1000)));
+/**
+ * Erase the content of mail that has been in the Bin for BIN_MS: the decrypted copy and the sealed ciphertext go,
+ * a tombstone stays so a refresh cannot bring it back. Money is untouched (postage was internalized on arrival).
+ * Deleted mail from before the Bin existed (no deletedAt) starts its 30 days now.
+ */
+export const purgeBin = (s: MailState, now = Date.now()): MailState => {
+  let changed = false;
+  const received = s.received.map((r) => {
+    if (!r.deleted || r.erased) return r;
+    if (r.deletedAt === undefined) {
+      changed = true;
+      return { ...r, deletedAt: now };
+    }
+    if (now - r.deletedAt < BIN_MS) return r;
+    changed = true;
+    const { opened: _o, ...rest } = r;
+    return { ...rest, erased: true, env: { ...r.env, sealed: '' } };
+  });
+  return changed ? { ...s, received } : s;
+};
+/** Restore from the Bin to wherever it was (Inbox/Requests, or Archive if it was archived). */
+export const restoreFromBin = (s: MailState, ids: string[]): MailState => {
+  const want = new Set(ids);
+  return {
+    ...s,
+    received: s.received.map((r) => (want.has(r.id) && !r.erased ? { ...r, deleted: false, deletedAt: undefined } : r)),
+  };
+};
+
+/** A sender whose links are clickable: a bPhone friend, someone I wrote to, or someone I chose to trust. */
+export const isTrustedSender = (
+  s: Pick<MailState, 'contacts' | 'trusted' | 'blocked'>,
+  from: string,
+  isFriend: (k: string) => boolean = () => false,
+) =>
+  !(s.blocked ?? []).includes(from) &&
+  (isFriend(from) || s.contacts.includes(from) || (s.trusted ?? []).includes(from));
+export const trustSender = (s: MailState, from: string): MailState => ({
+  ...s,
+  trusted: [...new Set([...(s.trusted ?? []), from])],
+  blocked: (s.blocked ?? []).filter((k) => k !== from),
+});
+
+/** The Archive view. */
+export const isArchived = (r: Received, blocked: string[] = []) =>
+  !!r.archived && !r.deleted && !r.spam && !blocked.includes(r.from);
+/** Pinned mail floats to the top, keeping the given order otherwise. */
+export const pinnedFirst = <T extends { pinned?: boolean }>(xs: T[]): T[] => [
+  ...xs.filter((x) => x.pinned),
+  ...xs.filter((x) => !x.pinned),
+];
+
+/** Set flags on some mail; returns the new state and each message's previous flags (for Undo). */
+export const setFlags = (
+  s: MailState,
+  ids: string[],
+  patch: MailFlags,
+  now = Date.now(),
+): { next: MailState; prev: Record<string, MailFlags> } => {
+  const want = new Set(ids);
+  const prev: Record<string, MailFlags> = {};
+  const received = s.received.map((r) => {
+    if (!want.has(r.id)) return r;
+    prev[r.id] = {
+      read: r.read,
+      archived: r.archived,
+      deleted: r.deleted,
+      spam: r.spam,
+      pinned: r.pinned,
+      deletedAt: r.deletedAt,
+    };
+    const stamp =
+      patch.deleted === true && !r.deleted
+        ? { deletedAt: now }
+        : patch.deleted === false
+          ? { deletedAt: undefined }
+          : {};
+    return { ...r, ...patch, ...stamp };
+  });
+  return { next: { ...s, received }, prev };
+};
+/** Put flags back exactly as they were (Undo). */
+export const restoreFlags = (s: MailState, prev: Record<string, MailFlags>): MailState => ({
+  ...s,
+  received: s.received.map((r) => (prev[r.id] ? { ...r, ...prev[r.id] } : r)),
+});
 
 /**
  * Inbox-routed mail the notifier has seen on the relay but the bMail screen has not fetched yet (ids). Lets the

@@ -112,11 +112,12 @@ export const inlineAccounts = <T extends MenuAccount>(
   people: T[],
   current: string | undefined,
   recent: Record<string, number> = {},
+  limit = INLINE_LIMIT,
 ): { shown: T[]; more: boolean } => {
-  if (people.length <= INLINE_LIMIT) return { shown: people, more: false };
+  if (people.length <= limit) return { shown: people, more: false };
   const cur = people.find((a) => a.id === current);
   const others = people.filter((a) => a.id !== current);
   const { recent: rec, rest } = orderAccounts(others, { recent });
-  const shown = [...(cur ? [cur] : []), ...rec, ...rest].slice(0, INLINE_LIMIT);
+  const shown = [...(cur ? [cur] : []), ...rec, ...rest].slice(0, limit);
   return { shown, more: true };
 };

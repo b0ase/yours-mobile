@@ -548,6 +548,8 @@ async function deliver(found: NotifyItem[]) {
         body: i.body,
         extra: { notifyId: i.id, target: i.target ?? null },
         group: 'bwallet',
+        // Shown now, not at a set time: never ask Android for "Alarms & reminders".
+        isExactNotification: false,
       })),
     });
   } catch (e) {

@@ -7,13 +7,13 @@ import { useAccountNames } from '../names/accountNames';
 import { AccountRow } from '../account/AccountSwitcher';
 import { AgentsSheet, SwitchAccountSheet } from '../account/AccountSheets';
 import { useMenuAccounts, useSignOut } from '../account/useMenuAccounts';
-import { getRecent, inlineAccounts } from '../account/accountMenu';
+import { getRecent, inlineAccounts, orderAccounts } from '../account/accountMenu';
 import { useAccountSwitch } from '../account/accountSwitch';
 import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, ChevronRight, Lock, LogOut, Menu, Phone, Play, Plus, ScanLine, Settings, Terminal, Users, X } from 'lucide-react';
+import { Bot, ChevronRight, Lock, LogOut, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { startAgentCreate } from '../agents/agentCreate';
@@ -24,6 +24,7 @@ import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
 import { useSpaceInviteLinks } from '../spaces/inviteLinks';
+import { useSubscribeLinks } from '../pots/subscribeLink';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
@@ -101,6 +102,7 @@ const TopNavBar = () => {
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
   // Space invite links (spaces/inviteLinks.ts); PhoneShell owns them in the phone layout.
   useSpaceInviteLinks(!phoneLayoutOn());
+  useSubscribeLinks(!phoneLayoutOn());
   useEffect(() => {
     if (phoneLayoutOn()) return;
     const show = () => {
@@ -156,9 +158,9 @@ const TopNavBar = () => {
   const { people, agents } = useMenuAccounts();
   // Recent order is read when the drawer opens (switching reloads the app anyway).
   const recent = useMemo(getRecent, [drawer]);
-  const inline = inlineAccounts(people, current, recent);
-  // Agents row: bWalletX always; the store build only when it has agent / pot accounts or the classic b agent.
-  const showAgents = X_MARK || agents.length > 0 || showAgentInMenu(phone);
+  // Owner, 9 Oct 2026: every account in one scrolling column (current, recent, then A–Z), agents below them.
+  const listed = inlineAccounts(people, current, recent, Infinity).shown;
+  const listedAgents = orderAccounts(agents, { recent }).recent.concat(orderAccounts(agents, { recent }).rest);
   useEffect(() => {
     if (!drawer) setConfirmOut(false);
   }, [drawer]);
@@ -329,9 +331,7 @@ const TopNavBar = () => {
                 }}
               />
               <div className="flex-1 overflow-y-auto px-2" role="listbox" aria-label="Accounts">
-                {/* Owner, 8 Oct 2026: the current account plus the most recent (up to 4), then "All accounts (N)".
-                    Agent accounts are under Agents, never here (account/accountMenu.ts). */}
-                {inline.shown.map((a) => (
+                {listed.map((a) => (
                   <AccountRow
                     key={a.id}
                     account={a.account}
@@ -341,16 +341,25 @@ const TopNavBar = () => {
                     verified={verified}
                   />
                 ))}
-                {inline.more &&
-                  action(
-                    <Users size={16} color="#fff" />,
-                    `All accounts (${people.length})`,
-                    () => setSheet('accounts'),
-                    true,
-                  )}
+                {listedAgents.length > 0 && (
+                  <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#667085' }}>
+                    Agents
+                  </div>
+                )}
+                {listedAgents.map((a) => (
+                  <AccountRow
+                    key={a.id}
+                    account={a.account}
+                    current={current}
+                    switchingTo={switchingTo}
+                    onSwitch={(id) => void handleSwitchAccount(id)}
+                    verified={verified}
+                  />
+                ))}
               </div>
               <div className="border-t border-white/5 px-2 pt-2">
-                {/* Owner, 9 Oct 2026: agents get their own rows up here; Add account goes back down. bWalletX only. */}
+                {/* Owner, 9 Oct 2026: Add account, Add agent account, Connect CLI & MCP, then Settings. */}
+                {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {X_MARK &&
                   action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
                     startAgentCreate();
@@ -361,15 +370,20 @@ const TopNavBar = () => {
                     setDrawer(false);
                     setToolsOpen(true);
                   })}
-                {showAgents && agents.length > 0 &&
-                  action(<Bot size={16} color="#fff" />, `Agents (${agents.length})`, () => setSheet('agents'), true)}
+                {/* The classic layout reaches the b agent here (the phone layout has the dock b). */}
+                {showAgentInMenu(phone) &&
+                  action(<Sparkles size={16} color="#fff" />, 'Agent b', () => {
+                    setDrawer(false);
+                    const to = agentMenuTarget(pathname);
+                    if (to === -1) navigate(-1);
+                    else navigate(to);
+                  })}
                 {/* Store builds have no agent tools: pairing stays a menu row, as before. */}
                 {!X_MARK &&
                   action(<ScanLine size={16} color="#fff" />, PAIR_LABEL, () => {
                     setDrawer(false);
                     openScan();
                   })}
-                {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
                 {/* Settings is the most important item in this section (owner, 8 Oct 2026). */}
                 <button
                   type="button"

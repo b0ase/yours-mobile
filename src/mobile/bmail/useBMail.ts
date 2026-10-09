@@ -9,6 +9,18 @@ import { split } from './route';
 import { cachedExchangeRate } from '../../utils/wallet';
 import {
   addReceived,
+  isArchived,
+  isInBin,
+  isLive,
+  isQuarantined,
+  isTrustedSender,
+  purgeBin,
+  restoreFromBin,
+  trustSender,
+  pinnedFirst,
+  restoreFlags,
+  setFlags,
+  type MailFlags,
   loadMail,
   loadPending,
   saveMail,
@@ -51,10 +63,65 @@ export const useBMail = () => {
 
   // Only bPhone friends pin a sender (owner, 9 Oct): writing to someone does not by itself make them a friend.
   const isFriend = useCallback((k: string) => isCallFriend(k), []);
-  const boxes = useMemo(
-    () => split(state.received, { isFriend, priceSats, newest }),
-    [state.received, isFriend, priceSats, newest],
+  const boxes = useMemo(() => {
+    const blocked = state.blocked ?? [];
+    const b = split(
+      state.received.filter((r) => isLive(r, blocked)),
+      { isFriend, priceSats, newest },
+    );
+    return {
+      inbox: pinnedFirst(b.inbox),
+      requests: pinnedFirst(b.requests),
+      archive: state.received.filter((r) => isArchived(r, blocked)).sort((a, z) => z.at - a.at),
+      quarantine: state.received.filter((r) => isQuarantined(r, blocked)).sort((a, z) => z.at - a.at),
+      bin: state.received.filter(isInBin).sort((a, z) => (z.deletedAt ?? 0) - (a.deletedAt ?? 0)),
+    };
+  }, [state.received, state.blocked, isFriend, priceSats, newest]);
+
+  /** Swipe actions: set flags, returning an undo function. */
+  const flag = useCallback(
+    (ids: string[], patch: MailFlags) => {
+      let prev: Record<string, MailFlags> = {};
+      updateMail(me, (s) => {
+        const r = setFlags(s, ids, patch);
+        prev = r.prev;
+        return r.next;
+      });
+      return () => updateMail(me, (s) => restoreFlags(s, prev));
+    },
+    [me],
   );
+  const block = useCallback(
+    (sender: string) => {
+      updateMail(me, (s) => ({ ...s, blocked: [...new Set([...(s.blocked ?? []), sender])] }));
+      return () => updateMail(me, (s) => ({ ...s, blocked: (s.blocked ?? []).filter((k) => k !== sender) }));
+    },
+    [me],
+  );
+
+  /** Spam: flag it and send the sender's future mail straight to Quarantine (Undo puts both back). */
+  const spam = useCallback(
+    (r: Received) => {
+      const wasBlocked = (loadMail(me).blocked ?? []).includes(r.from);
+      const undoFlag = flag([r.id], { spam: true });
+      if (!wasBlocked) updateMail(me, (s) => ({ ...s, blocked: [...new Set([...(s.blocked ?? []), r.from])] }));
+      return () => {
+        undoFlag();
+        if (!wasBlocked) updateMail(me, (s) => ({ ...s, blocked: (s.blocked ?? []).filter((k) => k !== r.from) }));
+      };
+    },
+    [me, flag],
+  );
+  const restore = useCallback((ids: string[]) => updateMail(me, (s) => restoreFromBin(s, ids)), [me]);
+  const trust = useCallback((from: string) => updateMail(me, (s) => trustSender(s, from)), [me]);
+  const isTrusted = useCallback((from: string) => isTrustedSender(state, from, isFriend), [state, isFriend]);
+  // Bin: erase the content of mail deleted more than 30 days ago (local only; money untouched).
+  useEffect(() => {
+    if (!me) return;
+    const s = loadMail(me);
+    const next = purgeBin(s);
+    if (next !== s) saveMail(me, next);
+  }, [me]);
 
   const refresh = useCallback(async () => {
     if (!me) return;
@@ -140,6 +207,12 @@ export const useBMail = () => {
     send,
     setPrice,
     unread,
+    flag,
+    block,
+    spam,
+    restore,
+    trust,
+    isTrusted,
   };
 };
 
@@ -168,7 +241,10 @@ export const useBMailUnread = (): number => {
     const priceSats = usdToSats(s.priceUsd, cachedExchangeRate()) ?? 0;
     const isFriend = (k: string) => isCallFriend(k);
     const have = new Set(s.received.map((r) => r.id));
-    const unread = split(s.received, { isFriend, priceSats }).inbox.filter((r) => !r.read).length;
+    const unread = split(
+      s.received.filter((r) => isLive(r, s.blocked)),
+      { isFriend, priceSats },
+    ).inbox.filter((r) => !r.read).length;
     return unread + loadPending(me).filter((id) => !have.has(id)).length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, v]);

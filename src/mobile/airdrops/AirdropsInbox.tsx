@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Coins, FileCode, Flag, ShieldAlert } from 'lucide-react';
+import { Check, Coins, EyeOff, FileCode, Flag, ShieldAlert } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { avatarFor } from '../chat/avatars';
@@ -18,7 +18,10 @@ import { useIssuer } from '../issuer/useIssuer';
 import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { ReportSheet } from '../ugc/UgcSheets';
 import { thumbUrl } from '../market/thumbs';
+import { SwipeRow } from '../swipe/SwipeRow';
+import { showUndo } from '../swipe/undo';
 import { hide, keep, markSeen, type AirdropItem } from './inbox';
+import { trustIssuer } from './quarantine';
 import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
 import { useAirdrops } from './useAirdrops';
 
@@ -153,12 +156,14 @@ const Row = ({
   issuerKept,
   onKeep,
   onHide,
+  onTrust,
   onLeave,
 }: {
   item: AirdropItem;
   issuerKept: boolean;
   onKeep: () => void;
   onHide: () => void;
+  onTrust: () => void;
   onLeave: () => void;
 }) => {
   const { handleSelect } = useBottomMenu();
@@ -227,6 +232,9 @@ const Row = ({
         <button type="button" onClick={onHide} className={small}>
           Hide
         </button>
+        <button type="button" onClick={onTrust} className={small}>
+          Trust this sender
+        </button>
         {who.handle && (
           <button type="button" onClick={reply} className={small}>
             Reply
@@ -275,8 +283,9 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
       >
         <ShieldAlert size={16} className="shrink-0 mt-0.5" />
         <span>
-          Unstamped: tokens and NFTs people sent you without asking. Never interact with a token that asks you to visit
-          a site and enter your recovery words. Hiding one hides everything from that sender.
+          Quarantined tokens and NFTs: sent to you without asking. They are not in your balance and are never spent with
+          your own coins. Keep moves one into your holdings (it stays at the same address); Hide keeps it here, out of
+          sight, with everything else from that sender. Never enter your recovery words on a site a token sends you to.
         </span>
       </div>
       <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
@@ -293,16 +302,72 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
           {loading ? 'Checking your history…' : 'No unstamped items.'}
         </p>
       )}
-      {visible.map((i) => (
-        <Row
-          key={i.key}
-          item={i}
-          issuerKept={known.has(i.issuer)}
-          onLeave={onLeave}
-          onKeep={() => update((s) => keep(s, i.key))}
-          onHide={() => update((s) => hide(s, i))}
-        />
-      ))}
+      {visible.map((i) => {
+        // Swipe (bMail rows): left = Hide (undoable), right = Keep (undoable). Buttons stay on the card too.
+        const doKeep = () => {
+          update((s) => keep(s, i.key));
+          showUndo('Kept', () => update((s) => ({ ...s, kept: s.kept.filter((k) => k !== i.key) })));
+        };
+        const doHide = () => {
+          const issuerWasHidden = state.hiddenIssuers.includes(i.issuer);
+          update((s) => hide(s, i));
+          showUndo('Hidden', () =>
+            update((s) => ({
+              ...s,
+              hidden: s.hidden.filter((k) => k !== i.key),
+              hiddenIssuers: issuerWasHidden ? s.hiddenIssuers : s.hiddenIssuers.filter((x) => x !== i.issuer),
+            })),
+          );
+        };
+        const label = i.asset.kind === 'token' ? `$${i.asset.symbol ?? short(i.asset.id)} airdrop` : 'NFT airdrop';
+        return (
+          <SwipeRow
+            key={i.key}
+            rowId={i.key}
+            label={label}
+            leftActions={[
+              {
+                id: 'hide',
+                label: 'Hide',
+                icon: <EyeOff size={18} />,
+                color: '#D92D20',
+                removes: true,
+                onPress: doHide,
+              },
+            ]}
+            rightActions={[
+              {
+                id: 'keep',
+                label: 'Keep',
+                icon: <Check size={18} />,
+                color: '#12B76A',
+                removes: true,
+                onPress: doKeep,
+              },
+            ]}
+            fullSwipeLeft="hide"
+            fullSwipeRight="keep"
+          >
+            <Row
+              item={i}
+              issuerKept={known.has(i.issuer)}
+              onLeave={onLeave}
+              onKeep={() => update((s) => keep(s, i.key))}
+              onTrust={() => {
+                update((s) => trustIssuer(keep(s, i.key), i.issuer));
+                showUndo('Trusted: their tokens skip Quarantine', () =>
+                  update((s) => ({
+                    ...s,
+                    kept: s.kept.filter((k) => k !== i.key),
+                    trustedIssuers: (s.trustedIssuers ?? []).filter((x) => x !== i.issuer),
+                  })),
+                );
+              }}
+              onHide={() => update((s) => hide(s, i))}
+            />
+          </SwipeRow>
+        );
+      })}
     </div>
   );
 };

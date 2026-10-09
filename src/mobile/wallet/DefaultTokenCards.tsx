@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { MARKET_ENABLED } from '../storeBuild';
 import { useNavigate } from 'react-router-dom';
 import { routeFor } from '../tabs/tabs';
-import { getBsv21Balances } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
@@ -32,8 +32,7 @@ export const DefaultTokenCards = () => {
   useEffect(() => {
     if (!apiContext) return;
     let live = true;
-    void getBsv21Balances
-      .execute(apiContext, {})
+    void heldBsv21Balances(apiContext)
       .then((rows) => {
         if (!live) return;
         setBals(

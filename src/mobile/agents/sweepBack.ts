@@ -1,4 +1,7 @@
-import { getBsv21Balances, listOrdinals, sendAllBsv, sendBsv21, sendOrdinals, type OneSatContext } from '@1sat/actions';
+import { listOrdinals, sendAllBsv, sendBsv21, sendOrdinals, type OneSatContext } from '@1sat/actions';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
+import { activeNftQuarantine } from '../airdrops/inbox';
+import { normId } from '../airdrops/quarantine';
 import { appendAgentLog } from './agentAccounts';
 
 /**
@@ -17,7 +20,7 @@ export async function sweepBack(
   const log = (action: string, detail: string, txid?: string) =>
     appendAgentLog(agentId, { at: Date.now(), action, detail, usd: 0, txid });
 
-  const balances = await getBsv21Balances.execute(ctx, {}).catch(() => []);
+  const balances = await heldBsv21Balances(ctx).catch(() => []);
   for (const b of balances) {
     const amount = BigInt(b.all.confirmed);
     if (amount <= 0n || !b.id) continue;
@@ -31,7 +34,9 @@ export async function sweepBack(
   }
 
   const { outputs } = await listOrdinals.execute(ctx, { limit: 500, offset: 0 }).catch(() => ({ outputs: [] }));
-  const nfts = outputs.filter((o) => !o.tags?.includes('ordlock'));
+  // Quarantined NFTs stay put: sweeping them with yours would link your coins to their sender.
+  const qNfts = activeNftQuarantine();
+  const nfts = outputs.filter((o) => !o.tags?.includes('ordlock') && !qNfts.has(normId(o.outpoint)));
   if (nfts.length) {
     const r = await sendOrdinals
       .execute(ctx, { transfers: nfts.map((o) => ({ id: o.outpoint, address: to.ordAddress })) })

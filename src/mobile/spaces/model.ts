@@ -31,6 +31,10 @@ export interface SpaceState {
   space: Space | null;
   participants: Participant[];
   me: Participant | null;
+  /** A host-started recording is running: show "● Recording" to everyone. */
+  recording?: boolean;
+  /** I may start/stop a recording (room boss: host, room admin, named host). bit-sign decides. */
+  mayRecord?: boolean;
 }
 
 export interface SpaceToken {
@@ -77,8 +81,60 @@ export const parseSpaceState = (data: unknown, me: string): SpaceState => {
     .map(parseParticipant)
     .filter((p): p is Participant => !!p);
   const mine = norm(me);
-  return { space, participants, me: participants.find((p) => p.handle === mine) ?? null };
+  const rec = o.recording && typeof o.recording === 'object' ? (o.recording as Record<string, unknown>) : null;
+  return {
+    space,
+    participants,
+    me: participants.find((p) => p.handle === mine) ?? null,
+    recording: rec?.active === true,
+    mayRecord: o.may_record === true,
+  };
 };
+
+// ── Green room (bit-sign rooms/[ticker]/space/green-room) ──────────────────────────────────
+
+export const ANON_EXPLAINER = "While listening anonymously you won't be visible, can't speak or send reactions.";
+export const RECORDING_NOTICE = 'This Space is being recorded';
+
+export interface GreenRoom {
+  live: boolean;
+  title: string | null;
+  listening: number;
+  anonymous: number | null;
+  stage: { handle: string; role: SpaceRole; avatar: string | null }[];
+  recording: boolean;
+  ticketed: boolean;
+}
+
+export const parseGreenRoom = (data: unknown): GreenRoom | null => {
+  const o = (data && typeof data === 'object' ? data : null) as Record<string, unknown> | null;
+  if (!o || o.live !== true) return null;
+  const stage = (Array.isArray(o.stage) ? o.stage : [])
+    .map((v) => {
+      const p = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+      const handle = str(p.handle);
+      return handle ? { handle: norm(handle), role: roleOf(p.role), avatar: str(p.avatar_url) } : null;
+    })
+    .filter((p): p is GreenRoom['stage'][number] => !!p);
+  const rec = o.recording && typeof o.recording === 'object' ? (o.recording as Record<string, unknown>) : null;
+  return {
+    live: true,
+    title: str(o.title),
+    listening: typeof o.listening === 'number' ? o.listening : 0,
+    anonymous: typeof o.anonymous_listeners === 'number' ? o.anonymous_listeners : null,
+    stage,
+    recording: rec?.active === true,
+    ticketed: o.ticketed === true,
+  };
+};
+
+/** The green room's one button. A ticket still to buy outranks the anonymity choice. */
+export const greenRoomPrimary = (o: { anonymous: boolean; needsTicket: boolean }) =>
+  o.needsTicket ? 'Pay 1¢ to join' : o.anonymous ? 'Start listening anonymously' : 'Start listening';
+
+/** Anonymous listeners have no participant row and no data channel: no hand. */
+export const mayRaiseHand = (o: { anonymous: boolean; role: SpaceRole | null | undefined }) =>
+  !o.anonymous && o.role === 'listener';
 
 export const parseSpaceToken = (data: unknown): SpaceToken | null => {
   const o = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;

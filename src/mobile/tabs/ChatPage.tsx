@@ -1,4 +1,5 @@
 import { claimIssuerAdmin } from '../chat/autoClaim';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
 import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
@@ -26,7 +27,7 @@ import {
   X,
   Loader2,
 } from 'lucide-react';
-import { getBsv21Balances, sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
 import { SendBsv21View } from '../../components/SendBsv21View';
 import { NameInput } from '../names/NameInput';
 import { useTheme } from '../../hooks/useTheme';
@@ -1310,7 +1311,7 @@ const InviteSheet = ({
     if (!raw || raw === '0') return setError('Enter an amount.');
     setBusy('Checking balance…');
     try {
-      const balances = await getBsv21Balances.execute(apiContext, {});
+      const balances = await heldBsv21Balances(apiContext);
       const id = (entry.holding.id || '').toLowerCase().replace('.', '_');
       const info = balances.find((b) => (b.id || '').toLowerCase().replace('.', '_') === id);
       const held = info ? info.all.confirmed : 0n;

@@ -551,6 +551,9 @@ importers:
       '@1sat/wallet-browser':
         specifier: 0.0.102
         version: 0.0.102(@1sat/client@0.0.59(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@bsv/message-box-client':
+        specifier: 2.5.4
+        version: 2.5.4(@bsv/sdk@2.8.11)
       '@bsv/sdk':
         specifier: 2.8.11
         version: 2.8.11

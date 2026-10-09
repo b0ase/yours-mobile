@@ -16,6 +16,21 @@ import { potBalanceSats } from './potSend';
 import { SubscriptionCard } from './SubscriptionCard';
 import { POTS_INTRO } from '../storeBuild';
 import { AddOrderSheet, CreatePotSheet } from './CreatePotSheet';
+import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import {
+  clearSubscribeRequest,
+  onSubscribeRequest,
+  peekSubscribeRequest,
+  requestLabel,
+  type SubscribeRequest,
+} from './subscribeLink';
+
+/** The held subscribe request, if any (always null in a store build). */
+const useSubscribeRequest = (): SubscribeRequest | null => {
+  const [r, setR] = useState<SubscribeRequest | null>(() => peekSubscribeRequest());
+  useEffect(() => (SUBSCRIPTIONS_ENABLED ? onSubscribeRequest(() => setR(peekSubscribeRequest())) : undefined), []);
+  return r;
+};
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -104,6 +119,7 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const pots = listPots();
+  const request = useSubscribeRequest();
 
   const create = (name: string) => {
     startPotCreate(name);
@@ -121,6 +137,27 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
         <p className="text-sm m-0" style={{ color: MUTED }}>
           {POTS_INTRO}
         </p>
+        {SUBSCRIPTIONS_ENABLED && request && (
+          <div
+            className="rounded-2xl p-3 flex flex-col gap-1"
+            style={{ background: '#F5B80018', border: `1px solid ${GOLD}55` }}
+          >
+            <div className="text-sm font-bold text-white">{requestLabel(request)}</div>
+            <div className="text-xs" style={{ color: MUTED }}>
+              {pots.length
+                ? 'Pick the pot to pay it from, or make a new one. You check the amount before anything is set up.'
+                : 'Make a pot to pay it from, put a little in it, then come back here.'}
+            </div>
+            <button
+              type="button"
+              onClick={clearSubscribeRequest}
+              className="self-start text-xs bg-transparent border-0 p-0"
+              style={{ color: MUTED }}
+            >
+              Not now
+            </button>
+          </div>
+        )}
         {pots.length === 0 && (
           <p className="text-sm text-center py-6 m-0" style={{ color: MUTED }}>
             No pots yet.
@@ -144,13 +181,23 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
         </button>
       </div>
       {creating && <CreatePotSheet onClose={() => setCreating(false)} onCreate={create} />}
-      {open && <PotScreen id={open} rate={rate} onClose={() => setOpen(null)} />}
+      {open && <PotScreen id={open} rate={rate} request={request} onClose={() => setOpen(null)} />}
     </div>,
     document.body,
   );
 };
 
-const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: () => void }) => {
+const PotScreen = ({
+  id,
+  rate,
+  onClose,
+  request = null,
+}: {
+  id: string;
+  rate: number;
+  onClose: () => void;
+  request?: SubscribeRequest | null;
+}) => {
   useBackClose(true, onClose);
   useTick();
   const { chromeStorageService } = useServiceContext();
@@ -160,7 +207,8 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
   const accounts = chromeStorageService.getAllAccounts?.() ?? [];
   const acct = accounts.find((x) => x.addresses.identityAddress === id);
   const others = accounts.filter((x) => x.addresses.identityAddress !== id);
-  const [adding, setAdding] = useState(false);
+  // A held subscribe request opens the add sheet prefilled as soon as a pot is picked.
+  const [adding, setAdding] = useState(!!request);
   const [copied, setCopied] = useState(false);
   const subs = listSubs(id).sort((a, b) => a.nextDue - b.nextDue);
   const history = getAgentLog(id).filter((e) => e.action.startsWith('sub-') || e.action === 'topup');
@@ -316,6 +364,7 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
           potName={pot.name}
           balanceUsd={balanceUsd}
           bsvUsd={rate}
+          request={request}
           onClose={() => setAdding(false)}
         />
       )}
