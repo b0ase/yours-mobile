@@ -241,6 +241,41 @@ Wording: lists, sends, postage. No personal data is ever sold or shown.
 - Steps: (1) split protocol code out of `src/mobile/bmail/` into the package with its tests; (2) wallet imports the
   package; (3) rebuild bitcoin-email on it; (4) publish the envelope spec.
 
+## 6f. What happens when you swipe: money, tokens, quarantine, bin (owner, 9 Oct)
+
+Built in 5.1.90 (`test/5.1.90`, commit 64b97a9).
+
+**Swiping never moves money.**
+- **Postage (the stamp)** is checked and internalized into the wallet when the mail arrives (`client.ts` verifyPostage/internalize). It's yours from then on, even if the mail is spam. Deleting the mail doesn't refund it.
+- **Reply-paid credit** belongs to the recipient. A refund is due only when the mail carried a reply deadline that passed without a reply. That's documented here and not built yet; it needs a deadline field in the envelope first.
+
+**Tokens and airdrops are never burned and never swept automatically.**
+- Tokens and NFTs from a sender you haven't accepted go to **Quarantine**. They are left out of your balance, the home and token lists, send pickers, agent views and sweeps. They're never spent together with your own coins, because that would link your coins to the sender on chain.
+- Quarantine is a tab in bMail. Each token shows plain facts we already have: who sent it, the amount, the verified-issuer badge and the note as plain text. There's no investment wording.
+  - **Keep** moves the token into your normal holdings. It stays at the same address.
+  - **Hide** leaves it in Quarantine and out of sight, along with everything else from that sender.
+  - **Trust this sender** releases everything from that issuer, now and later.
+- **Where this is enforced:** `src/mobile/airdrops/quarantine.ts`, at the token-id level.
+  - `heldBsv21Balances` takes the place of `getBsv21Balances` in the wallet home, token list, default cards, Friends, tickets, chat holdings, chat sends, agent pairing and agent sweep.
+  - `SendBsv21View` refuses to send a quarantined token.
+  - Agent sweep skips quarantined NFTs.
+- Nothing is quarantined until History has been scanned once with this version. A token the wallet holds by its own doing (bought, minted, or received in a tx we made) is never quarantined.
+
+**Spam and Block:** marking mail as spam also blocks the sender. Their future mail goes straight to Quarantine and stays sealed until you choose to open it. "Not spam: trust" brings a sender back.
+
+**Links:** in mail from a sender you haven't trusted (not a bPhone friend, not someone you wrote to, not trusted by hand), links show as text and can't be tapped until you tap **Trust sender**. Only http(s) links can ever be tapped.
+
+**Delete sends mail to the Bin.** Deleted mail stays in the Bin tab for 30 days with **Restore**. After that its content (the decrypted copy and the sealed ciphertext) is erased from this device. A small record remains so a refresh can't bring the mail back. Money and tokens are untouched.
+
+**Gaps (not enforced yet):**
+- Quarantine works per token id, because @1sat/actions `sendBsv21` picks token UTXOs by token id and can't leave out single outputs. If someone airdrops more of a token you already hold, those outputs aren't quarantined and can be spent with yours. Fixing this needs an exclude-outpoints option in `sendBsv21` (or a separate toolbox basket/tag).
+- Unsolicited **plain BSV** (dust) in the default basket isn't quarantined. wallet-toolbox `createAction` coin selection has no exclusion hook, so dust can still be spent with your coins. This needs a toolbox change, such as moving dust out of the funding basket or marking it non-spendable.
+- NFT galleries and NFT send screens other than the agent sweep don't filter quarantined NFTs yet.
+- A blocked bMail sender (an identity key) can't be matched to a token issuer (a token id or address). Their tokens stay quarantined anyway, because they were never accepted.
+- Quarantine state is stored on this device only (localStorage), like the rest of bMail's state.
+
+**Later: "Tidy up small change".** Not now. Offer it only when the dust is worth more than the fee to collect it.
+
 ## 7. Phases
 
 | # | What | State |
