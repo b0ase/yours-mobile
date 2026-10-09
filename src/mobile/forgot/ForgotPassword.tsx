@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Theme } from '../../theme.types';
 import { sheet } from '../biometricUnlock';
 import { YoursNative } from '../native';
-import { wipeLocalWallet } from './wipe';
+import { openRestore, wipeLocalWallet } from './wipe';
 
 /** Unlock-screen escape hatch: wipe this device's wallet and restore from the 12 words. */
 export const ForgotPassword = ({ theme }: { theme: Theme }) => {
@@ -21,8 +21,8 @@ export const ForgotPassword = ({ theme }: { theme: Theme }) => {
     try {
       await wipeLocalWallet({ chrome, native: YoursNative });
     } finally {
-      // Same as upstream's sign-out: start fresh; the router opens the restore screen.
-      window.location.reload();
+      // Start fresh in the wallet itself; its router opens the restore screen (wipe.ts).
+      openRestore({ location: window.location, self: window, top: window.top, close: () => window.close(), chrome });
     }
   };
 
