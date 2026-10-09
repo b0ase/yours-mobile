@@ -1,3 +1,4 @@
+import './install';
 /**
  * PROTOTYPE (demo/desktop-shell): the wide web layout. On with ?wide=1, or in a VITE_WIDE_WEB=1 build unless
  * ?wide=0, in a top-level window at least 1100px wide. Decided once at load; everything else is unchanged when off.

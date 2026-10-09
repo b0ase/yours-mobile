@@ -28,6 +28,7 @@ import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { WidePage, WideEmpty } from './WidePage';
 import { WideAuth } from './WideAuth';
+import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
 import './wide.css';
 
@@ -220,6 +221,7 @@ const WalletSide = () => {
 const WideShell = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
+  const canInstall = useCanInstall();
   const bapps = new URLSearchParams(search).get('view') === 'bapps';
   const bmoviesBadge = useBappBadge('bmovies');
   const { chromeStorageService, lockWallet } = useServiceContext();
@@ -443,6 +445,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             <kbd>⌘K</kbd>
           </button>
           <div className="ww-top-right">
+            {canInstall && (
+              <button className="ww-install" title="Install bWalletX Desktop as an app" onClick={() => void installApp()}>
+                Install app
+              </button>
+            )}
             <button className="ww-icon-btn" title="Scan / pay / connect" onClick={() => wwOpen('scan')}>
               <Icon d={I.qr} />
             </button>

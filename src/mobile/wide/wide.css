@@ -1266,3 +1266,19 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   align-items: center;
   justify-content: center;
 }
+
+/* Install as an app (wide/install.ts): shown only while Chrome offers it. */
+.ww-install {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 184, 0, 0.55);
+  background: rgba(245, 184, 0, 0.1);
+  color: #ffd24d;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.ww-install:hover {
+  background: rgba(245, 184, 0, 0.2);
+}

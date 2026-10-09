@@ -22,6 +22,9 @@ const BANNER = 'Web wallet beta — your keys stay in this browser. Connecting o
 const STALE_BUILD = `(function(){var m=document.querySelector('script[type=module][src*="main-"]');if(!m)return;var mine=m.getAttribute('src').split('/').pop(),busy=0;function check(){if(busy||document.visibilityState!=='visible')return;busy=1;fetch('./',{cache:'no-store'}).then(function(r){return r.ok?r.text():''}).then(function(h){var x=/assets\\/(main-[^"']+\\.js)/.exec(h);if(x&&x[1]!==mine)location.reload()}).catch(function(){}).then(function(){busy=0})}document.addEventListener('visibilitychange',check);addEventListener('focus',check)})();`;
 
 const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
+/** The wide build is bWalletX Desktop (owner, 9 Oct 2026: "web" is the classic wallet, the beta becomes "desktop"). */
+const DESKTOP = process.env.VITE_WIDE_WEB === '1';
+const APP_TITLE = DESKTOP ? 'bWalletX Desktop' : 'bWalletX';
 
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
@@ -31,6 +34,7 @@ const webShell = (): Plugin => ({
       // Overlay pages (prompt, sweep, USB) load inside the wallet; only the shell is the site.
       if (!ctx.filename.endsWith('mobile.html')) return html;
       return html
+        .replace(/<title>[^<]*<\/title>/, `<title>${APP_TITLE}</title>`)
         .replace(
           '</head>',
           [
@@ -39,7 +43,7 @@ const webShell = (): Plugin => ({
             '    <link rel="icon" href="./favicon.ico" sizes="any" />',
             '    <link rel="apple-touch-icon" href="./icons/icon192.png" />',
             '    <meta name="apple-mobile-web-app-capable" content="yes" />',
-            '    <meta name="apple-mobile-web-app-title" content="bWalletX" />',
+            `    <meta name="apple-mobile-web-app-title" content="${APP_TITLE}" />`,
             '  </head>',
           ].join('\n'),
         )
@@ -87,8 +91,8 @@ const webShell = (): Plugin => ({
       source: JSON.stringify(
         {
           id: '/',
-          name: 'bWalletX',
-          short_name: 'bWalletX',
+          name: APP_TITLE,
+          short_name: APP_TITLE,
           description: 'The BSV wallet for tokens, media and apps.',
           start_url: './',
           scope: './',
