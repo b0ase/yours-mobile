@@ -13,7 +13,9 @@ const decide = (): boolean => {
 };
 
 export const WIDE_ON = decide();
-if (WIDE_ON) document.documentElement.classList.add('ww-on');
+// ww-onb too, before first paint: the app opens on welcome / unlock, so the first frame is already the auth panel
+// (WideAuth keeps it; WideShell drops it once the unlocked wallet shows). No layout switch after load.
+if (WIDE_ON) document.documentElement.classList.add('ww-on', 'ww-onb');
 
 /** Window events the wide shell sends to TopNav, which owns the account drawer and the scan / pairing sheets. */
 export const WW_OPEN = 'ww:open';

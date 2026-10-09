@@ -13,6 +13,14 @@ import mobileConfig from './vite.config.mobile';
  */
 
 const BANNER = 'Web wallet beta — your keys stay in this browser. Connecting other websites is coming soon.';
+/**
+ * A tab keeps the build it first loaded (an SPA never refetches index.html), so tabs opened before a deploy showed an
+ * older layout next to newer ones (owner, 9 Oct 2026: "sometimes full width, sometimes half"). When the tab comes
+ * back into view, compare this page's main-*.js with the live index.html and reload if a newer build is out. The
+ * wallet's keys stay encrypted in localStorage and the unlock session in sessionStorage, both survive a reload.
+ */
+const STALE_BUILD = `(function(){var m=document.querySelector('script[type=module][src*="main-"]');if(!m)return;var mine=m.getAttribute('src').split('/').pop(),busy=0;function check(){if(busy||document.visibilityState!=='visible')return;busy=1;fetch('./',{cache:'no-store'}).then(function(r){return r.ok?r.text():''}).then(function(h){var x=/assets\\/(main-[^"']+\\.js)/.exec(h);if(x&&x[1]!==mine)location.reload()}).catch(function(){}).then(function(){busy=0})}document.addEventListener('visibilitychange',check);addEventListener('focus',check)})();`;
+
 const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
 
 const webShell = (): Plugin => ({
@@ -35,7 +43,8 @@ const webShell = (): Plugin => ({
             '  </head>',
           ].join('\n'),
         )
-        .replace('<body>', `<body>\n    <div class="bwallet-web-banner" role="status">${BANNER}</div>`);
+        .replace('<body>', `<body>\n    <div class="bwallet-web-banner" role="status">${BANNER}</div>`)
+        .replace('</body>', `    <script>${STALE_BUILD}</script>\n  </body>`);
     },
   },
   generateBundle() {

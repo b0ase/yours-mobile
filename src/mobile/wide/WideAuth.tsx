@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { WIDE_ON } from './flag';
 import { APP_NAME } from '../storeBuild';
@@ -18,36 +18,11 @@ const FEATURES = [
  * panel (~420px, vertically centred, no frame). A no-op outside the wide layout.
  */
 export const WideAuth = ({ children }: { children: ReactNode }) => {
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!WIDE_ON) return;
     document.documentElement.classList.add('ww-onb');
-    // The phone flow lays out in absolute layers inside a zero-height box, so the panel can't size itself in CSS:
-    // measure the content and fit the panel to it (capped to the window; it scrolls beyond that).
-    const root = document.getElementById('root');
-    let frame = 0;
-    const fit = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (!root) return;
-        const top = root.scrollTop;
-        root.style.height = '1px';
-        root.scrollTop = 0;
-        const h = root.scrollHeight;
-        const max = window.innerHeight - 48;
-        root.style.height = `${Math.min(h, max)}px`;
-        // Fits: show it from the top. Taller than the window: keep the reader's place.
-        root.scrollTop = h <= max ? 0 : top;
-      });
-    };
-    fit();
-    const mo = new MutationObserver(fit);
-    if (root) mo.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
-    addEventListener('resize', fit);
+    // One fixed panel size for every step (mobile.css html.ww-onb #root): no measuring, so no height jumps.
     return () => {
-      mo.disconnect();
-      removeEventListener('resize', fit);
-      cancelAnimationFrame(frame);
-      if (root) root.style.height = '';
       document.documentElement.classList.remove('ww-onb');
     };
   }, []);

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import bgVideo from '../brand/bg/wallet-card.mp4';
@@ -354,6 +354,12 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, [navigate, lockWallet]);
+
+  // Unlocked wallet pages: leave the auth composition flag.ts set before first paint.
+  const onAuth = ONBOARDING.includes(pathname);
+  useLayoutEffect(() => {
+    if (!onAuth) document.documentElement.classList.remove('ww-onb');
+  }, [onAuth]);
 
   // Create / restore / welcome: no chrome; the shared welcome / unlock composition (WideAuth, mobile.css html.ww-onb).
   if (ONBOARDING.includes(pathname)) return <WideAuth>{children}</WideAuth>;

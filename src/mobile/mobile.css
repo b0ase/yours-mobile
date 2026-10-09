@@ -1274,8 +1274,10 @@ html.ww-on.ww-onb body #root {
   right: max(32px, calc((50vw - 440px) / 2));
   width: 440px;
   max-width: calc(100vw - 32px);
+  /* One fixed size for every step (welcome, create, restore, import, seed, password, unlock): no height jumps. */
+  height: min(860px, calc(100vh - 48px)) !important;
   min-height: 0 !important;
-  max-height: calc(100vh - 48px);
+  max-height: none;
   overflow: hidden auto;
   margin: 0 !important;
   padding: 20px 10px 8px;
@@ -1291,6 +1293,20 @@ html.ww-on.ww-onb body #root {
 html.ww-on.ww-onb body #root > div,
 html.ww-on.ww-onb body #root > div > div {
   align-items: flex-start !important;
+}
+/* Errors and notices (components/Snackbar: absolute, bottom of a zero-height box, so they showed as a red sliver at
+   the panel's top): pin them to the panel's bottom edge, full text, readable size. #root is transformed, so fixed
+   is relative to the panel. */
+html.ww-on.ww-onb body #root .absolute.bottom-0.z-\[9999\] {
+  position: fixed !important;
+  top: auto !important;
+  bottom: 16px !important;
+  left: 16px !important;
+  right: 16px !important;
+  width: auto !important;
+  margin: 0 !important;
+  font-size: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
 }
 .ww-auth {
   position: fixed;

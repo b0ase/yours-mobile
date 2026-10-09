@@ -41,7 +41,7 @@ Anything not listed as its own entry is inside a real screen that is listed (e.g
 | Display currency USD / GBP                             | Top bar toggle (same setting as Settings)                                   | Real                                                |
 | Tools (locks, sweep / migration, decoder, sponsor)     | Sidebar › Tools                                                             | Real                                                |
 | Scan sheet (pay codes, people, pairing)                | Top bar scan button                                                         | Real (camera may be absent on desktop; paste works) |
-| Onboarding: create / restore / import / master restore | WideAuth: story left, the real flow in a content-sized panel right          | Real                                                |
+| Onboarding: create / restore / import / master restore | WideAuth: story left, the real flow in one fixed-size panel right          | Real                                                |
 | Lock / unlock, forgot password                         | WideAuth (same composition as the welcome screen)                           | Real                                                |
 | Incoming / active calls, mini player, push             | App-wide, unchanged                                                         | Real                                                |
 | Chat room details pane (third column)                  | RoomDetails: kind, live Space card, token gate, members + recently active   | Real (members = count + handles in loaded messages) |
