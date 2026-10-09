@@ -104,7 +104,7 @@ const NotificationsSheet = ({
     handleSelect(asMenuItem(t.type === 'room' ? 'chat' : 'bsv'));
   };
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: '#010101' }}>
+    <div data-ww-fill="" className="fixed inset-0 z-[150] flex flex-col" style={{ background: '#010101' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}

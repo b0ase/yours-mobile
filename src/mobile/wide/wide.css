@@ -998,6 +998,11 @@ html.ww-on:not(.ww-onb)
   box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
   animation: ww-page-in 0.16s ease-out;
 }
+/* Lists that read better wide (notifications): fill the page instead of the reading column (owner, 9 Oct 2026). */
+html.ww-on:not(.ww-onb) body > .fixed.inset-0.flex-col[data-ww-fill] {
+  padding-left: 32px !important;
+  padding-right: 32px !important;
+}
 @keyframes ww-page-in {
   from {
     opacity: 0;
