@@ -10,7 +10,7 @@ import { useServiceContext } from '../hooks/useServiceContext';
 import { ChromeStorageObject } from '../services/types/chromeStorage.types';
 import { Theme } from '../theme.types';
 import { BSV_DECIMAL_CONVERSION, GENERIC_TOKEN_ICON } from '../utils/constants';
-import { showAmount, truncate } from '../utils/format';
+import { showAmount } from '../utils/format';
 import { isUri } from '../utils/uri';
 import { fetchExchangeRate } from '../utils/wallet';
 import { AssetRow } from './AssetRow';
@@ -52,7 +52,7 @@ const TokenAssetRow = ({ t, usdBalance }: { t: Bsv21Balance; usdBalance: number 
       decimals={t.dec}
       showPointer={true}
       icon={icon.url}
-      ticker={truncate(getTokenName(t), 10, 0)}
+      ticker={getTokenName(t)}
       subline={
         <span className="inline-flex items-center">
           {icon.own && <YoursChip />}
