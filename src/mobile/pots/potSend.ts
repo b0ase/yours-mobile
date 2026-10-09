@@ -1,4 +1,4 @@
-import { P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction, Utils } from '@bsv/sdk';
+import { LockingScript, OP, P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction, Utils } from '@bsv/sdk';
 import { OneSatServices } from '@1sat/wallet-browser';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { decrypt } from '../../utils/crypto';
@@ -62,6 +62,7 @@ export const signFromPot = async (
   store: ChromeStorageService,
   potId: string,
   outputs: PotPayment[],
+  memo?: string,
 ): Promise<{ rawTx: string; txid: string }> => {
   const acct = potAccount(store, potId);
   if (!acct?.encryptedKeys) throw new Error('This pot isn’t on this device');
@@ -80,6 +81,8 @@ export const signFromPot = async (
 
   const tx = new Transaction();
   for (const o of outputs) tx.addOutput({ lockingScript: new P2PKH().lock(o.address), satoshis: o.sats });
+  // The service's reference (subscribeLink.ts), so it can tie the payment to the account that asked.
+  if (memo) tx.addOutput({ lockingScript: memoScript(memo), satoshis: 0 });
   tx.addOutput({ lockingScript: new P2PKH().lock(from), change: true });
   let added = 0;
   for (const c of coins.sort((a, b) => b.sats - a.sats)) {
@@ -98,6 +101,13 @@ export const signFromPot = async (
   await tx.fee(new SatoshisPerKilobyte(store.getCustomFeeRate()));
   await tx.sign();
   return { rawTx: tx.toHex(), txid: tx.id('hex') };
+};
+
+/** OP_FALSE OP_RETURN <memo>: a 0-sat data output. */
+export const memoScript = (memo: string) => {
+  const data = Utils.toArray(memo, 'utf8');
+  if (data.length > 75) throw new Error('Memo too long');
+  return new LockingScript([{ op: OP.OP_FALSE }, { op: OP.OP_RETURN }, { op: data.length, data }]);
 };
 
 const REFUSED = new Set(['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFORMED']);

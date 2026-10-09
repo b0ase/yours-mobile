@@ -49,6 +49,8 @@ export type Subscription = {
   mode: 'onOpen' | 'presigned';
   requestId?: string;
   billing?: boolean;
+  /** Service reference put in an OP_RETURN of each payment (subscribeLink.ts), e.g. bChatX Plus. */
+  memo?: string;
   lastError?: string;
 };
 
@@ -300,7 +302,13 @@ const uuid = () => {
   }
 };
 
-export type NewSub = Pick<Subscription, 'potId' | 'payee' | 'amount' | 'period' | 'start' | 'maxCount'>;
+export type NewSub = Pick<Subscription, 'potId' | 'payee' | 'amount' | 'period' | 'start' | 'maxCount'> &
+  Partial<Pick<Subscription, 'memo'>>;
+
+/** A payment memo: only on a service subscription, `<name>:<hex>`, one short OP_RETURN push. */
+export const SUB_MEMO_RE = /^[a-z][a-z0-9-]{1,23}:[0-9a-f]{8,64}$/;
+export const subMemoProblem = (payee: Payee, memo: string | undefined): string | null =>
+  memo === undefined || (payee.service && SUB_MEMO_RE.test(memo)) ? null : 'That subscription reference isn’t valid';
 
 /** Problems with a new standing order, or null. Service payees only when subscriptions are enabled. */
 export const subProblem = (n: NewSub, subsOn = SUBSCRIPTIONS_ENABLED): string | null => {
@@ -314,7 +322,7 @@ export const subProblem = (n: NewSub, subsOn = SUBSCRIPTIONS_ENABLED): string | 
     return 'Number of payments must be 1–1000';
   if (typeof n.period === 'object' && !(n.period.seconds >= 3600)) return 'The period must be at least an hour';
   if (!Number.isFinite(n.start)) return 'Pick a start date';
-  return null;
+  return subMemoProblem(n.payee, n.memo);
 };
 
 export const addSubscription = (n: NewSub, bsvUsd: number, now = Date.now()): Subscription => {

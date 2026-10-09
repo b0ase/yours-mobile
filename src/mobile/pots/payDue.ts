@@ -35,7 +35,11 @@ export type PayDeps = {
   /** Where to pay this payee (address, or a resolved paymail). */
   resolve: (p: Payee) => Promise<string>;
   /** Sign (don't broadcast) one tx from the pot. */
-  sign: (potId: string, outputs: { address: string; sats: number }[]) => Promise<{ rawTx: string; txid: string }>;
+  sign: (
+    potId: string,
+    outputs: { address: string; sats: number }[],
+    memo?: string,
+  ) => Promise<{ rawTx: string; txid: string }>;
   /** Broadcast a signed tx. Must be idempotent: the same raw tx again is fine (already known / mined). */
   broadcast: (rawTx: string) => Promise<void>;
   /** More than MAX_CATCH_UP periods are owed: pay them all? */
@@ -119,6 +123,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       signed = await deps.sign(
         s.potId,
         Array.from({ length: count }, () => ({ address, sats })),
+        s.memo,
       );
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);

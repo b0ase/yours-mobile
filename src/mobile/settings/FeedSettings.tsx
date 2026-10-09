@@ -46,7 +46,9 @@ import {
   potsEnabled,
   socialLoginEnabled,
   SUBSCRIPTIONS_DESC,
+  SUBSCRIPTIONS_ENABLED,
 } from '../storeBuild';
+import { onSubscribeRequest, peekSubscribeRequest } from '../pots/subscribeLink';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -510,6 +512,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     window.addEventListener(IDMAP_OPEN_EVENT, open);
     return () => window.removeEventListener(IDMAP_OPEN_EVENT, open);
   }, []);
+  // A subscribe link from one of our services (pots/subscribeLink.ts) opens Subscriptions. bWalletX only.
+  useEffect(() => {
+    if (!SUBSCRIPTIONS_ENABLED || !wal) return;
+    const open = () => peekSubscribeRequest() && setScreen('pots');
+    open();
+    return onSubscribeRequest(open);
+  }, [wal]);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
   const [takeCwi, setTakeCwiState] = useState(true);
