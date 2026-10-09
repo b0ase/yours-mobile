@@ -129,17 +129,75 @@ Rules:
 
 The Mint (`bcorp-mint`, bitcoin-mint.com: Design / Print / Stamp / Mint) can design and inscribe currency-style artwork, and rev 2 floated collectible stamp designs. Owner, 9 Oct: issuing stamps is largely **for "the state" to decide**. So **stamp issuance by others is parked for later**: no artist- or state-issued stamps, no stamp marketplace. In bMail a stamp is the **postage output** the sender pays (§3.1), shown with one of a **small built-in set of stamp designs** at launch (owner decision; artwork only, the marker carries a design id). Artist designs come later.
 
+## 6a. Delivery options (owner, 9 Oct)
+
+The sender picks a service, like Royal Mail's. Pay to open and signed delivery are separate options.
+
+| Sender picks | What it proves | Payment |
+|---|---|---|
+| **Standard** (Penny post) | It was delivered | Stamp only |
+| **Signed delivery** | **Who** opened it and **when** | None needed beyond the stamp |
+| **Pay to open** | The recipient was paid for their attention | Released on open, refunded after 14 days unopened |
+| **Signed + pay to open** | Both | Both |
+
+**Signed delivery is mostly identity, not money.** Opening is a tap that signs a receipt (message id, content hash, a
+recent block hash for "not before"; the mined block gives "not later than"). The weight of the receipt depends on the
+key that signed it: an anonymous key proves little, a key attested to the recipient's **$401 identity** proves more,
+and a key attested to a **KYC'd identity** is close to legal proof of service. The receipt shows the opener's identity
+level ("opened by $alice · level 3 · 14:02"), and a sender (or a contract) can require a minimum level. bMail only asks
+for "a signature at level N" and shows it; identity lives in $401, KYC in $403, contracts in bit-sign.
+
+**Return stamps.** Reply-paid postage belongs to the recipient, like a stamped addressed envelope; it does not refund.
+It refunds to the sender only when the mail carries a **deadline** ("reply by Friday", an RSVP, a contract offer that
+lapses) and the deadline passes unanswered.
+
+## 6b. Requests: the spam folder that might be worth the most
+
+Owner, 9 Oct: "users can receive any tokens in their bMail account and loads of them will be spam airdrop promotional
+garbage. But some will appreciate in value over time, some will go viral BECAUSE of the content of the attached
+message." Your spam folder could become the most valuable folder in bMail.
+
+In bMail a token is a letter and its note is printed on the envelope. The message and the token travel together, so a
+good message can make a token spread. Design rules:
+
+1. **Never throw airdrops away automatically.** Unknown tokens wait in Requests; keeping one costs nothing. Burn is
+   always the user's own choice, never automatic.
+2. **The message travels with the token.** Forwarding a token forwards the issuer's note (already on chain since
+   airdrop notes), so every later holder reads the same message: chain letters and memes, with postage.
+3. **Show what's spreading.** Requests can sort by plain facts: holders, forwards, last trade (if any). A token
+   everyone is passing around rises to the top of Requests even with no stamp. These facts can also feed the bApp
+   Feed's trending list.
+4. **Spam rules still apply.** Unstamped mail never jumps to Inbox on its own; look-alike address warnings, "hide this
+   issuer" and blocking all stay.
+
+Wording: the app shows facts (holders, forwards, last trade). It never says a token will gain value, and never uses
+investment words.
+
+## 6c. PNEE stamps (owner, 9 Oct)
+
+Postage can be paid in PNEE (Penny Notes, 1 unit = 1¢; see PENNY-NOTES.md) as well as BSV: one PNEE = Penny post.
+PNEE works best when our products price in it (bMail stamps, likes and like-to-fund, bPhone minutes, room entry, tips).
+
+How bCorp sells them, in two steps:
+1. **First: prepaid stamps.** Sold at 1¢, spendable only on our services, no cash-out, like Royal Mail stamps. That
+   is generally a voucher, not e-money.
+2. **Later: real PNEE notes from bCorp's own vaults.** Revenue buys BSV, the BSV is locked in a public vault, the
+   vault mints notes, and the wallet offers "Buy PNEE" at 1¢. The backing is BSV visible on chain, not a promise from
+   the company. Avoid "PNEE backed by our revenue": a company selling a coin backed by its own money is issuing a
+   stablecoin (e-money in the UK, needs FCA authorisation). Lawyer check before step 2.
+
 ## 7. Phases
 
 | # | What | State |
 |---|---|---|
 | **B0 · tonight → 5.1.90** | Rename Airdrops → **bMail** (mailbox icon); tabs **Inbox · Requests · Sent**; **compose with pay to send** (postage + quote sheet); **reply paid**; **weighted sort** (friends on top, then by postage, "Newest" toggle); price to reach me (simple mode: postage is the recipient's on send) | **Being built now on `feat/bmail-basic` by another agent.** This plan describes it; it does not build it |
 | B1 | Sealed mail (BRC-2), signed envelopes, Open / Reply / Block, friends list, Sent › Receipts | next |
-| B2 | **Pay to open**: lock + 14-day refund, signed open receipts, "Opened at…" in Sent; unreplied return stamps refund | after B1 |
+| B2 | **Pay to open**: lock + 14-day refund, signed delivery (identity level on the receipt), "Opened at…" in Sent; deadline mail refunds return stamps when the deadline passes | after B1 |
 | B3 | **Contracts from bit-sign**: .nds.html in mail, click-wrap accept, drawn signature, Sign and seal from bWalletX, return to sender, void | after bit-sign Sign and seal lands |
 | B4 | **Payment on signing**; invoices and receipts as kinds | — |
 | B5 | **Escrow / time locks** in contracts (shared builder with B2; ESCROW-DESIGN models) | needs the bit-sign escrow review |
 | B6 | **Token allocations** (utility) with optional vesting locks; approvals and access grants | — |
+| B1b | Requests sorted by holders / forwards; forwarding carries the note (§6b); PNEE stamps as prepaid postage (§6c) | after B1 |
 | Later | Subscriptions as mail (1¢/day), pay-per-read, friendship funds, per-kind prices, published envelope spec for other wallets | — |
 | Parked | Stamp issuance / collectible stamps (§6); split-or-steal (PAID-INBOX-PLAN §5) | — |
 
@@ -151,6 +209,6 @@ Answered 9 Oct and folded in: Penny post 1¢ default, tier multiples, built-in s
 
 1. **Postage in B0: simple or escrowed?** (a) Postage is the recipient's when sent (simple, tonight); (b) every stranger's postage is pay to open from day one. *Suggested: (a) tonight; pay to open as an option in B2.*
 2. **Reply paid default.** (a) Off, the sender ticks it; (b) on for mail to strangers; (c) on for everything with postage. *Suggested: (a).*
-3. **Unused return stamp.** (a) Refunds to the sender after 14 days; (b) the recipient keeps it. *Suggested: (a): it was paid for a reply.*
+3. ~~Unused return stamp~~ Answered: the recipient keeps it; it refunds only on mail with a deadline (§6a).
 4. **Where contracts are signed.** (a) Click-wrap in the wallet, drawn signatures hand off to bit-sign's signing view; (b) both in the wallet. *Suggested: (a) first, (b) later.*
 5. **Token allocations in bMail.** (a) Utility tokens only; anything share-like stays in bit-sign; (b) leave allocations out of bMail for now. *Suggested: (a).*
