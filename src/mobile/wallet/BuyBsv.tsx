@@ -83,8 +83,42 @@ export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; 
 /** The wallet top row's shared cell style: equal columns, same height, radius and border (owner round 7). */
 const CELL = 'flex-1 basis-0 min-w-0 h-14 rounded-xl flex items-center justify-center border cursor-pointer';
 
-/** Today's BSV price; opens the BSV view, the same as the BSV card below the wallet card. */
-const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
+/**
+ * Today's % change of BSV: the live rate against the WhatsOnChain daily rate from about 24 hours ago (the same
+ * source as the BSV view's chart). Null until known; read once per app run.
+ */
+let dayAgoCache: number | null = null;
+const useDayChange = (rate: number): number | null => {
+  const [dayAgo, setDayAgo] = useState<number | null>(dayAgoCache);
+  useEffect(() => {
+    if (dayAgoCache) return;
+    let live = true;
+    const now = Math.floor(Date.now() / 1000);
+    fetch(`https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical?from=${now - 3 * 86400}&to=${now}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: { rate: number; time: number }[]) => {
+        const target = now - 86400;
+        const best = rows
+          .filter((r) => r.rate > 0)
+          .sort((a, b) => Math.abs(a.time - target) - Math.abs(b.time - target))[0];
+        if (best && live) {
+          dayAgoCache = best.rate;
+          setDayAgo(best.rate);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return dayAgo && rate > 0 ? ((rate - dayAgo) / dayAgo) * 100 : null;
+};
+
+/**
+ * Today's BSV price; opens the BSV view (price chart), the same as the BSV card below the wallet card. With `change`
+ * the small line shows today's % change in green / red instead of "per BSV".
+ */
+const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void; change?: number | null }) => (
   <button
     type="button"
     onClick={onOpen}
@@ -93,38 +127,36 @@ const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
     style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
   >
     <span className="text-[15px] font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
-    <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
-      per BSV
-    </span>
-  </button>
-);
-
-/**
- * Swap cell (owner-approved design, 10 Oct 2026): the wallet's top-left card is "Swap" with today's BSV price in
- * small type. Opens the swap screens (Pick → Deposit → Track). bWalletX only; the store edition keeps PriceCell.
- */
-const SwapCell = ({ rate, onOpen, active }: { rate: number; onOpen: () => void; active: number }) => (
-  <button
-    type="button"
-    onClick={onOpen}
-    aria-label={active ? `Swap, ${active} in progress` : 'Swap into BSV'}
-    className={`${CELL} flex-col leading-tight relative`}
-    style={{ background: '#17191E', borderColor: active ? '#f5b80099' : '#2b2f36', color: '#fff' }}
-  >
-    <span className="text-[15px] font-extrabold">Swap</span>
-    <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
-      BSV {rate > 0 ? formatUSD(rate) : '…'}
-    </span>
-    {active > 0 && (
-      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: GOLD }} aria-hidden="true" />
+    {change == null ? (
+      <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
+        per BSV
+      </span>
+    ) : (
+      <span className="text-[10px] font-bold" style={{ color: change >= 0 ? '#2ecc71' : '#F04438' }}>
+        {change >= 0 ? '+' : ''}
+        {change.toFixed(2)}% today
+      </span>
     )}
   </button>
 );
 
+/** The promo's own dismiss flag (SwapPromo.tsx), read here so the loading placeholder matches what will show. */
+const promoDismissed = () => {
+  try {
+    return localStorage.getItem('bwx.swapPromoDismissed') === '1';
+  } catch {
+    return false;
+  }
+};
+
+/** Same box and margins as the promo card (or its dismissed spacer), so nothing jumps when the chunk loads. */
+const SwapPromoSkeleton = ({ hidden }: { hidden: boolean }) =>
+  hidden ? <div className="-mb-3" aria-hidden="true" /> : <div className="w-[92%] min-h-[52px] -mb-1" aria-hidden="true" />;
+
 /**
- * Wallet top row (owner, rounds 6–7): Swap (or price) · Buy BSV · History, three equal columns. Without swaps the
- * price opens the BSV view (`onPrice`, the BSV card's own handler). `getAddress` gives Swap the wallet's own BSV
- * receive address.
+ * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
+ * The price opens the BSV view (`onPrice`, the BSV card's own handler). The "Swap into BSV" promo card below the row
+ * is the only swap entry; `getAddress` gives Swap the wallet's own BSV receive address.
  */
 export const BsvPriceBar = ({
   onReceive,
@@ -136,6 +168,7 @@ export const BsvPriceBar = ({
   getAddress?: () => Promise<string>;
 }) => {
   const rate = useLivePrice();
+  const change = useDayChange(rate);
   const [open, setOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
   const [resume, setResume] = useState<SwapRecord | null>(null);
@@ -153,7 +186,7 @@ export const BsvPriceBar = ({
   return (
     <>
       <div className="w-[92%] mb-2 flex items-stretch gap-2">
-        {swapOn ? <SwapCell rate={rate} onOpen={openSwap} active={active.length} /> : <PriceCell rate={rate} onOpen={onPrice} />}
+        <PriceCell rate={rate} onOpen={onPrice} change={change} />
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -169,7 +202,8 @@ export const BsvPriceBar = ({
         <HistoryButton className={CELL} />
       </div>
       {swapOn && SwapPromo && (
-        <Suspense fallback={<div className="mb-2" />}>
+        // Equal 8px above and below the promo: the row's mb-2 above; below, the card's own 12px top margin less 4px.
+        <Suspense fallback={<SwapPromoSkeleton hidden={active.length === 0 && promoDismissed()} />}>
           <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
         </Suspense>
       )}

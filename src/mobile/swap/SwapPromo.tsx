@@ -52,11 +52,12 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
       .catch(() => undefined);
   }, [dismissed, active]);
 
-  if (dismissed && !active) return <div className="mb-2" aria-hidden="true" />;
+  // Dismissed: cancel the card's 12px top margin so row → card is 8px, like the other gaps.
+  if (dismissed && !active) return <div className="-mb-3" aria-hidden="true" />;
   const title = active ? 'Swap in progress' : 'Swap into BSV';
   const sub = active ? stageLabel(active.stage) : 'From BTC, ETH, USDT and 1,000+ coins';
   return (
-    <div className="w-[92%] mb-2 relative">
+    <div className="w-[92%] -mb-1 relative">
       <button
         type="button"
         onClick={onOpen}
