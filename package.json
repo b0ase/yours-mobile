@@ -1,6 +1,6 @@
 {
   "name": "yours-wallet",
-  "version": "5.1.93",
+  "version": "5.1.94",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -76,7 +76,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test src site/test",
+    "test": "bun test src site/test relay/e2e && node --test relay/relay.node-test.mjs",
     "verify:build": "tsx scripts/verify-build.ts",
     "package": "tsx scripts/package.ts",
     "release": "tsx scripts/release.ts",

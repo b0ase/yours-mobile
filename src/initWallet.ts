@@ -25,7 +25,8 @@ import { decrypt } from './utils/crypto';
 import type { Keys } from './utils/keys';
 import { initSyncContext, type SyncContext } from './initSyncContext';
 import { refileLegacyBaskets } from './services/legacyBaskets';
-import { reconcileStorage } from './services/storageReconcileBackground';
+import { readReconcileRecord, reconcileStorage } from './services/storageReconcileBackground';
+import { shouldResumeReconcile } from './services/storageReconcile';
 import { showOneSatPrompt } from './services/oneSatPrompt';
 import { runTokenRecovery } from './services/tokenRecoveryWallet';
 import { planAddressScan, resetSyncCursor } from './services/addressScan';
@@ -384,6 +385,26 @@ export const initWallet = async (
       mark('storage reconcile migration done');
     }
     await stampDataVersion(2);
+  }
+
+  // A repair the extension worker was stopped in the middle of (not one that failed) runs again
+  // on the next open, even if its notice was dismissed, up to MAX_RECONCILE_RESUMES times.
+  // The repair overlay shows its progress while it runs.
+  if (dataVersion >= 1) {
+    const config = account?.storageConfig;
+    const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+    const previous = remoteUrl ? await readReconcileRecord().catch(() => undefined) : undefined;
+    if (remoteUrl && previous && shouldResumeReconcile(previous)) {
+      mark('storage reconcile resume start');
+      await reconcileStorage(
+        storage,
+        syncContext.services,
+        remoteUrl,
+        previous.trigger,
+        (previous.resumeAttempts ?? 0) + 1,
+      ).catch((err) => console.error('[initWallet] resumed storage reconcile failed:', err));
+      mark('storage reconcile resume done');
+    }
   }
 
   const recoverTokens = (recoveryOptions?: TokenRecoveryOptions) =>

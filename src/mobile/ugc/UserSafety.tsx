@@ -29,6 +29,7 @@ export const UserSafetyButton = ({
   content,
   onBlocked,
   size = 18,
+  label,
 }: {
   client: BchatClient | null;
   /** The other person's bChat handle. */
@@ -39,6 +40,8 @@ export const UserSafetyButton = ({
   content?: string;
   onBlocked?: () => void;
   size?: number;
+  /** A full-width labelled button (a sheet's row) in place of the flag icon. */
+  label?: string;
 }) => {
   const [open, setOpen] = useState(false);
   const blocked = useBlocked(handle);
@@ -46,13 +49,23 @@ export const UserSafetyButton = ({
   if (!h) return null;
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="p-2 rounded-full active:opacity-60"
-        aria-label={`Report or block $${h}`}
-      >
-        <Flag size={size} color={MUTED} />
-      </button>
+      {label ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="mt-2 w-full rounded-full py-3 font-semibold text-white inline-flex items-center justify-center gap-2"
+          style={{ background: '#1d1e23' }}
+        >
+          <Flag size={16} color={MUTED} /> {label}
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          className="p-2 rounded-full active:opacity-60"
+          aria-label={`Report or block $${h}`}
+        >
+          <Flag size={size} color={MUTED} />
+        </button>
+      )}
       {open && (
         <ReportSheet
           title={`Report or block $${h}`}

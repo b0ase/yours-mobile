@@ -64,6 +64,7 @@ import {
   mayModerate,
   mayRaiseHand,
   moderatable,
+  reportable,
   parseGreenRoom,
   wantsWakeLock,
   type GreenRoom,
@@ -83,6 +84,8 @@ import { SpaceBackground, pipFocus } from './background';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { shareText } from '../chat/shareLink';
 import { ErrorActions } from '../errors/ErrorActions';
+import { UserSafetyButton } from '../ugc/UserSafety';
+import { isBlocked, TERMS_URL } from '../ugc/ugc';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -248,13 +251,26 @@ const SpaceChat = ({
           </p>
         )}
         {(messages ?? [])
-          .filter((m) => m.kind === 'text' && m.body)
+          .filter((m) => m.kind === 'text' && m.body && !isBlocked(m.author_handle))
           .map((m) => (
-            <div key={m.id} className="text-[13px] leading-snug">
-              <span className="font-semibold" style={{ color: `hsl(${hueOf(m.author_handle ?? '')} 70% 70%)` }}>
-                ${m.author_handle}
-              </span>{' '}
-              <span className="text-white">{m.body}</span>
+            <div key={m.id} className="group flex items-start gap-1 text-[13px] leading-snug">
+              <span className="flex-1 min-w-0 break-words">
+                <span className="font-semibold" style={{ color: `hsl(${hueOf(m.author_handle ?? '')} 70% 70%)` }}>
+                  ${m.author_handle}
+                </span>{' '}
+                <span className="text-white">{m.body}</span>
+              </span>
+              {/* Report or block the writer (Apple 1.2 / Play UGC). */}
+              {m.author_handle && m.author_handle !== client.handle && (
+                <UserSafetyButton
+                  client={client}
+                  handle={m.author_handle}
+                  kind="room_message"
+                  target={m.id}
+                  content={m.body ?? undefined}
+                  size={12}
+                />
+              )}
             </div>
           ))}
         <div ref={end} />
@@ -286,6 +302,15 @@ const SpaceChat = ({
           <Send size={16} color="#010101" />
         </button>
       </form>
+      <a
+        href={TERMS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block px-3 pb-2 text-center text-[11px]"
+        style={{ color: MUTED }}
+      >
+        Community rules · report anything that breaks them
+      </a>
     </div>
   );
 };
@@ -887,7 +912,9 @@ const SpaceScreenInner = ({
       raised={raised}
       onRaiseHand={raiseHand}
       menuFor={(p) =>
-        moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) ? () => setMenuFor(p) : null
+        moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) || reportable(p, me)
+          ? () => setMenuFor(p)
+          : null
       }
       avatars={Object.fromEntries((green?.stage ?? []).map((g) => [g.handle, g.avatar]))}
     />
@@ -1391,38 +1418,48 @@ const SpaceScreenInner = ({
       {menuFor && (
         <Sheet onClose={() => setMenuFor(null)}>
           <p className="text-white text-base font-semibold">${menuFor.handle}</p>
-          <button
-            onClick={() => {
-              void act({ action: 'mute', handle: menuFor.handle }).then(() =>
-                setNote(`Muted $${menuFor.handle}. They can unmute themselves.`),
-              );
-              setMenuFor(null);
-            }}
-            className="mt-4 w-full rounded-full py-3 font-semibold text-white"
-            style={{ background: '#1d1e23' }}
-          >
-            Mute
-          </button>
-          <button
-            onClick={() => {
-              void act({ action: 'role', handle: menuFor.handle, role: 'listener' });
-              setMenuFor(null);
-            }}
-            className="mt-2 w-full rounded-full py-3 font-semibold text-white"
-            style={{ background: '#1d1e23' }}
-          >
-            Move to audience
-          </button>
-          <button
-            onClick={() => {
-              void act({ action: 'remove', handle: menuFor.handle });
-              setMenuFor(null);
-            }}
-            className="mt-2 w-full rounded-full py-3 font-semibold"
-            style={{ background: '#1d1e23', color: '#F97066' }}
-          >
-            Remove from Space
-          </button>
+          {moderatable(menuFor, { me, spaceHost: state.space?.host ?? '', moderator }) && (
+            <>
+              <button
+                onClick={() => {
+                  void act({ action: 'mute', handle: menuFor.handle }).then(() =>
+                    setNote(`Muted $${menuFor.handle}. They can unmute themselves.`),
+                  );
+                  setMenuFor(null);
+                }}
+                className="mt-4 w-full rounded-full py-3 font-semibold text-white"
+                style={{ background: '#1d1e23' }}
+              >
+                Mute
+              </button>
+              <button
+                onClick={() => {
+                  void act({ action: 'role', handle: menuFor.handle, role: 'listener' });
+                  setMenuFor(null);
+                }}
+                className="mt-2 w-full rounded-full py-3 font-semibold text-white"
+                style={{ background: '#1d1e23' }}
+              >
+                Move to audience
+              </button>
+              <button
+                onClick={() => {
+                  void act({ action: 'remove', handle: menuFor.handle });
+                  setMenuFor(null);
+                }}
+                className="mt-2 w-full rounded-full py-3 font-semibold"
+                style={{ background: '#1d1e23', color: '#F97066' }}
+              >
+                Remove from Space
+              </button>
+            </>
+          )}
+          <UserSafetyButton
+            client={client}
+            handle={menuFor.handle}
+            label={`Report or block $${menuFor.handle}`}
+            onBlocked={() => setMenuFor(null)}
+          />
         </Sheet>
       )}
     </div>,

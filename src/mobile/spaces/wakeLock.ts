@@ -49,10 +49,10 @@ export class ScreenAwake {
     if (on === this.want) return;
     this.want = on;
     if (on) {
-      if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.onVis);
+      if (typeof document !== 'undefined') document.addEventListener?.('visibilitychange', this.onVis);
       await this.acquire();
     } else {
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVis);
+      if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', this.onVis);
       if (this.nativeHeld) {
         this.nativeHeld = false;
         await this.native?.allowSleep().catch((e) => console.warn('[spaces] allowSleep failed', e));

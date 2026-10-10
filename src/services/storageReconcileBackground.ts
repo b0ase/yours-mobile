@@ -28,6 +28,7 @@ import {
   staleSpends,
   txidsToCheck,
   unspentCandidates,
+  INTERRUPTED_RECONCILE_ERROR,
 } from './storageReconcile';
 
 /**
@@ -195,7 +196,7 @@ export const finishInterruptedReconcile = async (): Promise<void> => {
   await saveRecord({
     ...record,
     finishedAt: new Date().toISOString(),
-    error: 'Interrupted: the wallet restarted before the repair finished',
+    error: INTERRUPTED_RECONCILE_ERROR,
   });
 };
 
@@ -212,10 +213,12 @@ export const reconcileStorage = async (
   services: OneSatServices,
   remoteUrl: string,
   trigger: ReconcileTrigger,
+  resumeAttempts?: number,
 ): Promise<ReconcileRecord> => {
   const record: ReconcileRecord = {
     startedAt: new Date().toISOString(),
     trigger,
+    ...(resumeAttempts ? { resumeAttempts } : {}),
     appVersion: chrome.runtime.getManifest().version,
     remoteUrl,
   };
@@ -231,6 +234,15 @@ export const reconcileStorage = async (
     await saveRecord(record);
   };
 
+  // A long repair can outlast the extension worker's idle limit, which stops it mid-run.
+  // Any extension API call resets that timer, so touch one while the repair runs.
+  const keepAlive = setInterval(() => {
+    try {
+      chrome.runtime?.getPlatformInfo?.(() => undefined);
+    } catch {
+      /* not running in an extension */
+    }
+  }, 20_000);
   try {
     await saveRecord(record);
     const { identityKey } = await storage.getAuth();
@@ -330,6 +342,7 @@ export const reconcileStorage = async (
     record.errorStack = error instanceof Error ? error.stack : undefined;
     throw error;
   } finally {
+    clearInterval(keepAlive);
     record.finishedAt = new Date().toISOString();
     await saveRecord(record);
   }

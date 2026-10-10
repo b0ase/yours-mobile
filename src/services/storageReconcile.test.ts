@@ -15,6 +15,9 @@ import {
   type StoreIndex,
   staleSpends,
   unspentCandidates,
+  INTERRUPTED_RECONCILE_ERROR,
+  MAX_RECONCILE_RESUMES,
+  shouldResumeReconcile,
 } from './storageReconcile';
 
 const A = 'a'.repeat(64);
@@ -228,5 +231,32 @@ describe('stale unspent rescan', () => {
     expect(matchesVerdict(fixed, `${A}.0`, { kind: 'spent', txid: B })).toBe(true);
     const still = index({ transactions: [tx(1, A)], outputs: [out(1, 1, A, 0)] });
     expect(matchesVerdict(still, `${A}.0`, { kind: 'spent', txid: B })).toBe(false);
+  });
+});
+
+describe('shouldResumeReconcile', () => {
+  const base = {
+    startedAt: '2026-10-06T00:55:59.022Z',
+    finishedAt: '2026-10-07T03:40:32.374Z',
+    trigger: 'migration' as const,
+    appVersion: '5.1.65',
+    remoteUrl: 'https://wallet.1sat.app',
+  };
+
+  test('resumes a run the worker stopped, even after its notice was dismissed', () => {
+    expect(shouldResumeReconcile({ ...base, error: INTERRUPTED_RECONCILE_ERROR, acknowledged: true })).toBe(true);
+  });
+
+  test('stops resuming after the limit', () => {
+    expect(
+      shouldResumeReconcile({ ...base, error: INTERRUPTED_RECONCILE_ERROR, resumeAttempts: MAX_RECONCILE_RESUMES }),
+    ).toBe(false);
+  });
+
+  test('leaves real failures, clean runs, running runs and no record alone', () => {
+    expect(shouldResumeReconcile({ ...base, error: 'Remote storage is not connected' })).toBe(false);
+    expect(shouldResumeReconcile(base)).toBe(false);
+    expect(shouldResumeReconcile({ ...base, finishedAt: undefined, error: INTERRUPTED_RECONCILE_ERROR })).toBe(false);
+    expect(shouldResumeReconcile(undefined)).toBe(false);
   });
 });

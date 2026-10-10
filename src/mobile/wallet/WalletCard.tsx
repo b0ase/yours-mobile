@@ -1,5 +1,4 @@
 import * as qr from 'qrcode';
-import { createPortal } from 'react-dom';
 import {
   Component,
   lazy,
@@ -13,7 +12,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
+import { Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
 import { myPayUri } from '../scan/payUri';
 import { isBWalletX } from '../storeBuild';
 
@@ -41,9 +40,8 @@ import { PixelGhost } from '../agents/PixelGhost';
 import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
 import { cardGoldLevel } from './cardGold';
-import { saveSession } from '../chat/api';
-import { accountIdentityLine, keyFingerprint } from './identityLine';
-import { syncBchatHandle } from '../names/bchatHandle';
+import { keyFingerprint } from './identityLine';
+import { useBchatFollow } from './useBchatFollow';
 import { useChatIdentity } from './useChatIdentity';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { asMenuItem } from '../tabs/tabs';
@@ -172,7 +170,7 @@ const WalletCardInner = ({
     const t = window.setTimeout(() => refreshRef.current?.(false), 1_500);
     return () => window.clearTimeout(t);
   }, [live.pending.length]);
-  const { chromeStorageService, apiContext } = useServiceContext();
+  const { chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
   const [unit, setUnit] = useState<CardUnit>(loadCardUnit);
@@ -246,25 +244,10 @@ const WalletCardInner = ({
   const sig = useCardSignature(id);
   // `$handle · 02cbe7…6ed8` under the name: which chat identity this account is using (identityLine.ts).
   const chat = useChatIdentity(id);
-  // One handle per account (owner, 10 Oct 2026): never show another account's or a `yours-*` handle as this one's.
-  const idLine = accountIdentityLine(chat.handle, chat.identityKey, names.paymail);
+  // bChatX follows this wallet account (owner, 10 Oct 2026): the card shows $handle + fingerprint only;
+  // mismatches are fixed quietly here and choice/privacy live in Settings › bChatX (bchatFollow.ts).
+  useBchatFollow(id, chat, names.paymail);
   const fingerprint = keyFingerprint(chat.identityKey);
-  const [fixingHandle, setFixingHandle] = useState(false);
-  const fixChatHandle = (e: MouseEvent) => {
-    e.stopPropagation();
-    const issue = idLine.issue;
-    if (!issue || !apiContext || fixingHandle) return;
-    setFixingHandle(true);
-    // Another account's session: drop it so the next sign-in is this wallet's own.
-    if (issue.kind === 'other') saveSession(null);
-    syncBchatHandle(apiContext, names.paymail, { signIn: true })
-      .then((h) =>
-        addSnackbar(h ? `bChatX now calls you @${h.replace(/^\$/, '')}` : 'Open Chat to sign in to bChatX', 'info'),
-      )
-      .catch(() => addSnackbar('Could not update your bChatX name', 'error'))
-      .finally(() => setFixingHandle(false));
-  };
-  const [mismatchOpen, setMismatchOpen] = useState(false);
   // Long-press the identity line: Settings › Identity map. Tap still copies the key.
   const selectTab = useContext(BottomMenuContext)?.handleSelect;
   const pressTimer = useRef<number | null>(null);
@@ -374,7 +357,7 @@ const WalletCardInner = ({
                 </button>
               </div>
             </div>
-            {(fingerprint || idLine.issue || chat.mismatch) && (
+            {fingerprint && (
               <div className="bw-wcard-idline">
                 {/* Fingerprint only: not selectable, not copyable (the full key is on the back). */}
                 <span
@@ -384,25 +367,6 @@ const WalletCardInner = ({
                 >
                   {fingerprint}
                 </span>
-                {idLine.issue && (
-                  <button type="button" className="bw-wcard-idwarn" onClick={fixChatHandle} disabled={fixingHandle}>
-                    <AlertTriangle size={11} aria-hidden="true" />
-                    {fixingHandle ? 'Updating…' : idLine.issue.text}
-                  </button>
-                )}
-                {!idLine.issue && chat.mismatch && (
-                  <button
-                    type="button"
-                    className="bw-wcard-idwarn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMismatchOpen(true);
-                    }}
-                  >
-                    <AlertTriangle size={11} aria-hidden="true" />
-                    Chat identity mismatch
-                  </button>
-                )}
               </div>
             )}
           </div>
@@ -524,35 +488,45 @@ const WalletCardInner = ({
               )}
             </div>
           </div>
+          {/* A plain pen, right-centre (owner, 10 Oct 2026): flips to the back, where the signature lives. */}
           <button
             type="button"
-            className="bw-wcard-sidebtn"
+            className="bw-wcard-penflip"
             aria-label="Show the back of the card"
+            title="Show the back of the card"
             tabIndex={flipped ? -1 : 0}
             onClick={(e) => {
               e.stopPropagation();
               flip();
             }}
           >
-            Sign
+            <PenLine size={20} aria-hidden="true" />
           </button>
         </div>
 
         {/* ── Back ── */}
         <div className="bw-wcard-face bw-wcard-back" aria-hidden={!flipped}>
-          <div className="bw-wcard-stripe" />
-          <button
-            type="button"
-            className="bw-wcard-sidebtn"
-            aria-label="Show the front of the card"
-            tabIndex={flipped ? 0 : -1}
-            onClick={(e) => {
-              e.stopPropagation();
-              flip();
-            }}
-          >
-            Front
-          </button>
+          {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon. */}
+          <div className="bw-wcard-stripe">
+            {chat.identityKey && (
+              <div className="bw-wcard-stripe-key" onClick={stop}>
+                <span className="bw-wcard-stripe-text">
+                  <span className="bw-wcard-stripe-label">IDENTITY KEY</span>
+                  <span className="bw-wcard-stripe-hex">{chat.identityKey}</span>
+                </span>
+                <button
+                  type="button"
+                  className="bw-wcard-stripe-copy"
+                  onClick={copy(chat.identityKey)}
+                  aria-label="Copy identity key"
+                  title="Copy identity key"
+                  tabIndex={flipped ? 0 : -1}
+                >
+                  <Copy size={13} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+          </div>
           <div className="bw-wcard-backbody">
             <div className="bw-wcard-qr" onClick={stop}>
               {qrUrl ? <img src={qrUrl} alt="Receive QR code" /> : <div className="bw-wcard-qr-empty" />}
@@ -607,58 +581,12 @@ const WalletCardInner = ({
                   <span>{sig.svgPath ? 'Edit' : 'Sign'}</span>
                 </button>
               </div>
-              {chat.identityKey && (
-                <div className="bw-wcard-idkey" onClick={stop}>
-                  <span className="bw-wcard-label">Identity key</span>
-                  <span className="bw-wcard-idkey-hex">{chat.identityKey}</span>
-                  <button
-                    type="button"
-                    className="bw-wcard-addr"
-                    onClick={copy(chat.identityKey)}
-                    aria-label="Copy identity key"
-                  >
-                    <Copy size={13} color="var(--bw-wcard-muted, #98A2B3)" />
-                    <span>Copy</span>
-                  </button>
-                </div>
-              )}
-              <span className="bw-wcard-sig-line">Signed by identity key</span>
-              <span className="bw-wcard-sig-line" title={id}>
-                {shortAddr(id ?? '')}
-              </span>
             </div>
           </div>
         </div>
       </div>
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
-      {mismatchOpen &&
-        createPortal(
-          <div className="bw-idwarn-sheet" role="dialog" aria-modal="true" aria-label="Chat identity mismatch">
-            <div className="bw-idwarn-card">
-              <p className="bw-idwarn-title">Chat identity mismatch</p>
-              <p className="bw-idwarn-body">
-                This account is signed in to chat as {idLine.handle ?? 'another handle'}, which doesn’t belong to this
-                account. Sign out of chat; it signs this account in fresh next time you open it.
-              </p>
-              <button
-                type="button"
-                className="bw-idwarn-go"
-                onClick={() => {
-                  saveSession(null);
-                  setMismatchOpen(false);
-                  addSnackbar('Signed out of chat', 'success');
-                }}
-              >
-                Sign out of chat
-              </button>
-              <button type="button" className="bw-idwarn-cancel" onClick={() => setMismatchOpen(false)}>
-                Not now
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )}
       {sig.ui}
       {scanOpen && (
         <Suspense fallback={null}>
