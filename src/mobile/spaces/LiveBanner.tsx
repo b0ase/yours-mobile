@@ -9,7 +9,17 @@ import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from '../chat/api';
 import { claimIssuerAdmin, onIssuerClaimed } from '../chat/autoClaim';
 import { claimDepsFor } from '../chat/claimDeps';
-import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
+import {
+  alwaysOpenBarText,
+  audienceCount,
+  audienceLine,
+  canHostRoom,
+  parseRoomSpaceMeta,
+  parseSpaceState,
+  stageOf,
+  type RoomSpaceMeta,
+  type SpaceState,
+} from './model';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 
@@ -41,7 +51,8 @@ export const LiveBanner = ({
 }) => {
   const [state, setState] = useState<SpaceState | null>(null);
   const [issuer, setIssuer] = useState(false);
-  const [open, setOpen] = useState<{ start?: string } | null>(null);
+  const [open, setOpen] = useState<{ start?: string; always?: boolean } | null>(null);
+  const [meta, setMeta] = useState<RoomSpaceMeta | null>(null);
   const [naming, setNaming] = useState(false);
 
   useEffect(() => {
@@ -50,7 +61,11 @@ export const LiveBanner = ({
     const load = () =>
       client
         .space(ticker)
-        .then((d) => live && setState(parseSpaceState(d, me)))
+        .then((d) => {
+          if (!live) return;
+          setState(parseSpaceState(d, me));
+          setMeta(parseRoomSpaceMeta(d, ticker));
+        })
         .catch(() => undefined);
     void load();
     const id = setInterval(load, POLL_MS);
@@ -94,7 +109,28 @@ export const LiveBanner = ({
 
   return (
     <>
-      {space ? (
+      {meta?.alwaysOpen ? (
+        // Always-open room (the Lounge): one Join bar for everyone, live or not. Never "Start a Space".
+        <button
+          onClick={() => setOpen({ always: true })}
+          className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
+          style={{ background: 'linear-gradient(90deg, #2a1d05, #1a1408)', border: `1px solid ${GOLD}55` }}
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: space ? '#D92D20' : '#2a2b30' }}>
+            <Radio size={16} color="#fff" />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[13px] font-semibold text-white truncate">{alwaysOpenBarText(ticker, roomName)}</span>
+            <span className="block text-[11px] truncate" style={{ color: MUTED }}>
+              {meta.hostLabel ? `Hosted by ${meta.hostLabel}` : 'Open 24/7'}
+              {space ? ` · ${audienceLine(audienceCount(state!))}` : ''}
+            </span>
+          </span>
+          <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: GOLD, color: '#010101' }}>
+            Join
+          </span>
+        </button>
+      ) : space ? (
         <button
           onClick={() => setOpen({})}
           className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
@@ -161,6 +197,7 @@ export const LiveBanner = ({
           roomName={roomName}
           me={me}
           startTitle={open.start}
+          alwaysOpen={!!open.always}
           spaceOpen={spaceOpen}
           canInvite={canHostRoom({ me, createdBy, youAreIssuer: issuer })}
           onClaimAdmin={claimAdmin}

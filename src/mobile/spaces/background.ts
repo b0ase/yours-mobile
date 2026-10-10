@@ -19,6 +19,11 @@ export interface SpaceSessionPlugin {
   start(o: { title: string; onStage: boolean; micOn: boolean }): Promise<void>;
   stop(): Promise<void>;
   setPip(o: { enabled: boolean; portrait: boolean; onStage: boolean; micOn: boolean }): Promise<void>;
+  /** Android 13+: ask for POST_NOTIFICATIONS (the service's notification); older: whether they're on. */
+  requestNotifications(): Promise<{ granted: boolean }>;
+  isIgnoringBatteryOptimizations(): Promise<{ ignoring: boolean }>;
+  /** The system "let this app run in the background?" dialog (falls back to the battery settings list). */
+  requestIgnoreBatteryOptimizations(): Promise<void>;
   addListener(ev: 'action', fn: (e: { action: 'mute' | 'leave' }) => void): Promise<PluginListenerHandle>;
   addListener(ev: 'pip', fn: (e: { active: boolean }) => void): Promise<PluginListenerHandle>;
 }
@@ -155,10 +160,9 @@ export class SpaceBackground {
       return;
     }
     if (!this.started || prev.title !== next.title || prev.onStage !== next.onStage || prev.micOn !== next.micOn) {
+      const first = !this.started;
       this.started = true;
-      this.plugin
-        .start({ title: next.title, onStage: next.onStage, micOn: next.micOn })
-        .catch((e) => console.warn('[spaces] background service failed', e));
+      void this.startNative({ title: next.title, onStage: next.onStage, micOn: next.micOn }, first);
     }
     const el = next.focus ? videoFor(next.focus) : null;
     const pip = {
@@ -174,6 +178,32 @@ export class SpaceBackground {
   }
 
   private pipKey = '';
+  private notifAsked = false;
+
+  /**
+   * Start (or refresh) the foreground service — for listeners too. The first time, Android 13+ is
+   * asked for POST_NOTIFICATIONS first: without it the service still runs but its notification is
+   * hidden, and some phones then kill it with the screen off.
+   */
+  private async startNative(o: { title: string; onStage: boolean; micOn: boolean }, first: boolean) {
+    if (first && !this.notifAsked) {
+      this.notifAsked = true;
+      try {
+        const { granted } = await this.plugin.requestNotifications();
+        if (!granted)
+          console.warn('[spaces] notification permission denied: the Space notification is hidden and Android may stop the Space when the screen is off');
+      } catch (e) {
+        console.warn('[spaces] notification permission check failed', e);
+      }
+      if (!this.s.live || this.closed) return;
+    }
+    try {
+      await this.plugin.start(o);
+      console.info(`[spaces] foreground service ${first ? 'started' : 'updated'} (${o.onStage ? 'on stage' : 'listening'})`);
+    } catch (e) {
+      console.warn('[spaces] background service failed', e);
+    }
+  }
 
   private stopNative() {
     this.started = false;

@@ -43,13 +43,18 @@ test('isPortrait', () => {
   expect(isPortrait(0, 0)).toBe(false);
 });
 
-const fakePlugin = () => {
+const flush = () => new Promise((r) => setTimeout(r, 0));
+const fakePlugin = (granted = true) => {
   const calls: [string, unknown][] = [];
   const handlers: Record<string, (e: never) => void> = {};
   const plugin = {
     start: async (o: unknown) => void calls.push(['start', o]),
     stop: async () => void calls.push(['stop', null]),
     setPip: async (o: unknown) => void calls.push(['setPip', o]),
+    requestNotifications: async () => {
+      calls.push(['notify', null]);
+      return { granted };
+    },
     addListener: async (ev: string, fn: (e: never) => void) => {
       handlers[ev] = fn;
       return { remove: async () => void delete handlers[ev] };
@@ -60,16 +65,19 @@ const fakePlugin = () => {
 
 describe('SpaceBackground (android)', () => {
   const live = { live: true, title: 'T', onStage: false, micOn: false, focus: null };
-  test('starts once when live, refreshes on role/mic change, stops on leave', () => {
+  test('starts once when live, refreshes on role/mic change, stops on leave', async () => {
     const f = fakePlugin();
     const bg = new SpaceBackground({ onMute: () => {}, onLeave: () => {}, onPip: () => {} }, f.plugin, 'android');
     bg.update({ ...live, live: false });
     expect(f.calls.filter((c) => c[0] === 'start')).toHaveLength(0);
     bg.update(live);
     bg.update(live);
+    await flush();
     expect(f.calls.filter((c) => c[0] === 'start')).toHaveLength(1);
     bg.update({ ...live, onStage: true, micOn: true });
+    await flush();
     expect(f.calls.filter((c) => c[0] === 'start')).toHaveLength(2);
+    expect(f.calls.filter((c) => c[0] === 'notify')).toHaveLength(1);
     bg.close();
     expect(f.calls.at(-1)?.[0]).toBe('stop');
   });
@@ -86,6 +94,23 @@ describe('SpaceBackground (android)', () => {
     (f.handlers.action as (e: { action: string }) => void)({ action: 'leave' });
     (f.handlers.pip as (e: { active: boolean }) => void)({ active: true });
     expect(got).toEqual(['mute', 'leave', 'pip:true']);
+  });
+  test('a listener: notification permission asked first, service starts even if denied', async () => {
+    const f = fakePlugin(false);
+    const warn = console.warn;
+    const warned: unknown[] = [];
+    console.warn = (...a: unknown[]) => void warned.push(a[0]);
+    try {
+      const bg = new SpaceBackground({ onMute: () => {}, onLeave: () => {}, onPip: () => {} }, f.plugin, 'android');
+      bg.update(live);
+      await flush();
+      expect(f.calls.map((c) => c[0]).filter((c) => c !== 'setPip').slice(0, 2)).toEqual(['notify', 'start']);
+      expect((f.calls.find((c) => c[0] === 'start')?.[1] as { onStage: boolean }).onStage).toBe(false);
+      expect(String(warned[0])).toContain('notification permission denied');
+      bg.close();
+    } finally {
+      console.warn = warn;
+    }
   });
   test('web: never touches the native plugin', () => {
     const f = fakePlugin();

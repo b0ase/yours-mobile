@@ -33,6 +33,8 @@ export interface SpaceState {
   me: Participant | null;
   /** A host-started recording is running: show "● Recording" to everyone. */
   recording?: boolean;
+  /** When the recording started (bit-sign recording.started_at), if sent. */
+  recordingSince?: string | null;
   /** I may start/stop a recording (room boss: host, room admin, named host). bit-sign decides. */
   mayRecord?: boolean;
 }
@@ -87,6 +89,7 @@ export const parseSpaceState = (data: unknown, me: string): SpaceState => {
     participants,
     me: participants.find((p) => p.handle === mine) ?? null,
     recording: rec?.active === true,
+    recordingSince: rec?.active === true ? str(rec.started_at) : null,
     mayRecord: o.may_record === true,
   };
 };
@@ -208,6 +211,58 @@ export const roomSpaceOpen = (room: { ticker?: string | null; metadata?: unknown
   if (m && (m.space_open === true || m.spaceOpen === true)) return true;
   return OPEN_STAGE_TICKERS.includes(String(room.ticker ?? '').replace(/^\$/, '').toUpperCase());
 };
+
+// ── Always-open rooms (bit-sign PR #117: always_open, room_host, host_label, always_here) ──────
+
+/** A non-person always on stage (today only b, the bWalletX agent). Never a listener, never speaks. */
+export interface AlwaysHere {
+  handle: string;
+  kind: 'agent' | string;
+  label: string;
+}
+
+export interface RoomSpaceMeta {
+  /** The room's Space never ends: Join, never "Start a Space"; Leave, never End. */
+  alwaysOpen: boolean;
+  /** "Hosted by …" for an always-open room (bWalletX for the Lounge). */
+  hostLabel: string | null;
+  alwaysHere: AlwaysHere[];
+}
+
+/** Rooms that are always open before bit-sign says so (the Lounge). */
+export const ALWAYS_OPEN_TICKERS = ['LOUNGE'];
+const tickerKey = (t: string | null | undefined) => String(t ?? '').replace(/^\$/, '').toUpperCase();
+export const isAlwaysOpenTicker = (t: string | null | undefined) => ALWAYS_OPEN_TICKERS.includes(tickerKey(t));
+
+/**
+ * The room half of GET rooms/[ticker]/space, read even when `space` is null. Older servers send none
+ * of it (all false/empty); a server with always_open but no host_label (pre #117) gets "bWalletX"
+ * for the Lounge, whose room_host is 'bwalletx'.
+ */
+export const parseRoomSpaceMeta = (data: unknown, ticker?: string | null): RoomSpaceMeta => {
+  const o = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  const alwaysOpen = o.always_open === true;
+  let hostLabel = str(o.host_label);
+  if (alwaysOpen && !hostLabel && (o.room_host === 'bwalletx' || isAlwaysOpenTicker(ticker))) hostLabel = 'bWalletX';
+  const alwaysHere = (Array.isArray(o.always_here) ? o.always_here : [])
+    .map((v): AlwaysHere | null => {
+      const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+      const handle = str(r.handle);
+      return handle ? { handle: norm(handle), kind: str(r.kind) ?? 'agent', label: str(r.label) ?? norm(handle) } : null;
+    })
+    .filter((v): v is AlwaysHere => !!v);
+  return { alwaysOpen, hostLabel: alwaysOpen ? hostLabel : null, alwaysHere: alwaysOpen ? alwaysHere : [] };
+};
+
+/** The always-open room's one bar: Join, whether or not anyone is on stage yet. */
+export const alwaysOpenBarText = (ticker: string, roomName: string) =>
+  `Join ${tickerKey(ticker) === 'LOUNGE' ? 'the Lounge' : roomName} · Open 24/7`;
+
+/** The agent tile's caption (b on an always-open stage). */
+export const alwaysHereCaption = (a: AlwaysHere) => (a.handle === 'b' ? 'bWalletX agent · always here' : `${a.label} · always here`);
+
+/** Always-open rooms have no host to end it: whoever started is just on stage. */
+export const mayEndSpace = (o: { isHost: boolean; alwaysOpen: boolean }) => o.isHost && !o.alwaysOpen;
 
 /** "1 listening", "12 listening". */
 export const audienceLine = (n: number) => `${n} listening`;

@@ -28,9 +28,12 @@ import {
   LifeBuoy,
   Wrench,
   Volume2,
+  Radio,
   Receipt,
   Coins,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { requestIgnoreBattery } from '../mobile/spaces/battery';
 import { FaEnvelope } from 'react-icons/fa';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -1000,6 +1003,17 @@ export const Settings = () => {
           }
         />
         <Divider />
+        {Capacitor.getPlatform() === 'android' && (
+          <>
+            <SettingRow
+              icon={<Radio size={16} />}
+              label="Spaces with the screen off"
+              description="Let bWalletX keep a live Space running when the screen sleeps"
+              onClick={() => void requestIgnoreBattery()}
+            />
+            <Divider />
+          </>
+        )}
         <SettingRow
           icon={<Volume2 size={16} />}
           label="Sounds"
