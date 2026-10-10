@@ -39,7 +39,25 @@ async function ticketSocialCheck(alias, proof, env = process.env) {
   if (!p) return 'That sign-in has expired. Please sign in again.';
   return p.alias === alias ? null : 'That name does not match your sign-in';
 }
+/** A renamed name keeps forwarding to the new one this long, then is released (owner, 9 Oct 2026). */
+const FORWARD_MS = 90 * 24 * 60 * 60 * 1000;
 const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
+/** Anti-squatting (owner, 10 Oct 2026): one name change per 30 days per wallet (the first claim is free
+ * of it), and at most NAME_IP_DAILY new names per client IP per day (env PAYMAIL_NAMES_PER_IP_DAY). */
+const CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+const NAME_IP_DAILY = 5;
+const nameFee = require('./nameFee');
+const crypto = require('crypto');
+const hashIp = (ip, env = process.env) =>
+  ip
+    ? crypto
+        .createHash('sha256')
+        .update(`bwallet-paymail|${env.PAYMAIL_IP_SALT || ''}|${ip}`)
+        .digest('hex')
+        .slice(0, 32)
+    : null;
+const dayText = (ms) =>
+  new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const RESERVED = new Set([
   // Impersonation and technical names.
   'admin', 'administrator', 'root', 'support', 'help', 'helpdesk', 'security', 'system', 'staff',
@@ -202,25 +220,89 @@ function matchOutputs(tx, expected) {
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
+/**
+ * A renamed handle (bit-sign self-serve rename, PR #102): bit-sign's public profile API answers an old
+ * name with the current handle for 90 days, so `$old@ourdomain` keeps receiving for the new name.
+ * Public, read-only, no credentials. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
+ * Returns the new alias, or null (unknown, not renamed, or bit-sign unreachable).
+ */
+async function bitsignRenamed(alias, env = process.env, f = fetch) {
+  if (!ALIAS_RE.test(alias)) return null;
+  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bitcoinchat.online').replace(/\/$/, '');
+  try {
+    const r = await f(`${base}/api/public/profile/${encodeURIComponent(alias)}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return null;
+    const to = String((await r.json())?.handle || '')
+      .replace(/^\$/, '')
+      .toLowerCase();
+    return to && to !== alias && ALIAS_RE.test(to) ? to : null;
+  } catch {
+    return null;
+  }
+}
+
 function makeHandlers({
   store,
   env = process.env,
   broadcast,
   now = () => Date.now(),
   socialCheck = ticketSocialCheck,
+  // Off under `bun test` (NODE_ENV=test) so unit tests never call the network; tests inject their own.
+  renamed = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => null
+    : (alias) => bitsignRenamed(alias, env),
+  // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
+  feeChain = nameFee.chain,
 }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
+  // A live forward (rename within 90 days, or a permanent extra name). Expired ones are released.
+  const liveForward = async (alias) => {
+    const fw = store.getForward ? await store.getForward(alias).catch(() => null) : null;
+    if (!fw) return null;
+    if (fw.expires_at && Date.parse(fw.expires_at) <= now()) {
+      await store.deleteForward?.(alias).catch(() => {});
+      return null;
+    }
+    return fw;
+  };
   const publicAlias = async (handle) => {
     const p = parseHandleParts(handle, env);
     if (!p) return [404, { error: 'not-found' }];
-    const row = await store.getAlias(p.alias);
+    let row = await store.getAlias(p.alias);
+    // An old (or extra) name forwards to the wallet's name (one hop), so payments to it still arrive.
+    if (!row) {
+      const fw = await liveForward(p.alias);
+      if (fw) {
+        row = await store.getAlias(fw.to_alias);
+        if (row && row.identity_key !== fw.identity_key) row = null;
+      }
+    }
+    if (!row) {
+      const to = await renamed(p.alias).catch(() => null);
+      if (to) row = await store.getAlias(to);
+    }
     if (!row) return [404, { error: 'not-found' }];
     return [200, { ...row, _domain: p.domain }];
   };
 
   return {
     caps: async () => [200, capabilities(env)],
+
+    // What the app needs before claiming a name: where the 1 cent fee goes (null = no fee).
+    config: async () => {
+      const address = nameFee.feeAddress(env);
+      return [
+        200,
+        {
+          nameFee: address ? { address, usd: nameFee.FEE_USD } : null,
+          nameChangeDays: CHANGE_COOLDOWN_MS / 86_400_000,
+        },
+      ];
+    },
 
     pki: async ({ handle }) => {
       const [s, row] = await publicAlias(handle);
@@ -314,7 +396,7 @@ function makeHandlers({
     },
 
     // ---- wallet-authenticated ------------------------------------------------
-    register: async (_q, body) => {
+    register: async (_q, body, ctx = {}) => {
       body = body || {};
       const f = body.fields || {};
       const alias = String(f.alias || '').toLowerCase();
@@ -336,24 +418,76 @@ function makeHandlers({
         if (refused) return [403, { error: refused }];
       }
       if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
+      // A name still forwarding (renamed < 90 days ago, or an extra name) belongs to its wallet.
+      const fwd = taken ? null : await liveForward(alias);
+      if (fwd && fwd.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
       // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
       // added, boase stays. A plain name still renames, keeping the inbox.
       const kind = SOCIAL_RE.test(alias) ? (alias.endsWith('.x') ? 'x' : 'gmail') : 'plain';
       // One identity per wallet (owner, 4 Oct 2026): a verified X / Google name always wins, so a
       // wallet that has one can't also take a plain name. Plain-name identities are separate accounts.
-      if (kind === 'plain') {
-        const social =
-          (await store.getAliasByKeyKind?.(identityKey, 'x')) ||
-          (await store.getAliasByKeyKind?.(identityKey, 'gmail'));
-        if (social)
-          return [
-            409,
-            { error: `This wallet's name is ${handleOf(social.alias)}. Add another account for a different name.` },
-          ];
-      }
+      // Owner, 9 Oct 2026 (handle rule): users choose their handle. A wallet with a verified .x / .gmail
+      // name may take ONE plain handle of its choosing (it becomes the main name); the social name keeps
+      // receiving. New .gmail names are no longer issued (they published the address); existing ones work.
+      if (kind === 'gmail' && !ownsIt) return [403, { error: 'Choose a handle instead of your email name.' }];
       const mine =
         kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
-      if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) await store.renameAlias(mine.alias, alias);
+      // A new plain name for this wallet (first claim or rename; not a profile update of its own name).
+      const newName = kind === 'plain' && !ownsIt;
+      const isRename = newName && !!mine && (mine.kind ?? 'plain') === 'plain' && mine.alias !== alias;
+      const ipHash = hashIp(ctx.ip, env);
+      let fee = null;
+      if (newName) {
+        store.deleteExpiredForwards?.(new Date(now()).toISOString()).catch(() => {});
+        if (isRename && store.lastRename) {
+          const last = await store.lastRename(identityKey);
+          const next = last ? Date.parse(last) + CHANGE_COOLDOWN_MS : 0;
+          if (next > now())
+            return [
+              429,
+              { error: `You can change your name again on ${dayText(next)}.`, retryAt: new Date(next).toISOString() },
+            ];
+        }
+        if (ipHash && store.countIpClaims) {
+          const max = Number(env.PAYMAIL_NAMES_PER_IP_DAY) || NAME_IP_DAILY;
+          const since = new Date(now() - 86_400_000).toISOString();
+          if ((await store.countIpClaims(ipHash, since)) >= max)
+            return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
+        }
+        const address = nameFee.feeAddress(env);
+        if (address) {
+          const txid = String(f.feeTxid || '').toLowerCase();
+          const chk = await nameFee.checkFeeTx({
+            txid,
+            txHex: body.feeTx,
+            address,
+            c: feeChain,
+            broadcast,
+            parse: parseIncoming,
+          });
+          if (!chk.ok) return [402, { error: chk.error, nameFee: { address, usd: nameFee.FEE_USD } }];
+          if (
+            store.useFeeTx &&
+            !(await store.useFeeTx({ txid, identity_key: identityKey, alias, satoshis: chk.satoshis }))
+          )
+            return [409, { error: 'That payment already paid for a name' }];
+          fee = txid;
+        }
+      }
+      if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
+        await store.renameAlias(mine.alias, alias);
+        // The old name keeps receiving for 90 days, then is released.
+        if (store.putForward) {
+          if (fwd) await store.deleteForward(alias);
+          await store.retargetForwards?.(mine.alias, alias);
+          await store.putForward({
+            from_alias: mine.alias,
+            to_alias: alias,
+            identity_key: identityKey,
+            expires_at: new Date(now() + FORWARD_MS).toISOString(),
+          });
+        }
+      }
       const row = await store.upsertAlias({
         kind,
         alias,
@@ -363,7 +497,20 @@ function makeHandlers({
         display_name: String(f.name || '').slice(0, 64) || (ownsIt ? taken.display_name : null) || null,
         avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
       });
-      return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
+      if (newName) {
+        // Legacy .gmail names published the owner's email: once the wallet has a plain name, the
+        // .gmail one forwards to it for 90 days, then is released (migrations/20261010_retire_gmail_names.sql).
+        const gmail = await store.getAliasByKeyKind?.(identityKey, 'gmail');
+        if (gmail && store.retireToForward)
+          await store.retireToForward(gmail.alias, alias, identityKey, new Date(now() + FORWARD_MS).toISOString());
+        await store.recordNameEvent?.({
+          identity_key: identityKey,
+          alias,
+          kind: isRename ? 'rename' : 'claim',
+          ip_hash: ipHash,
+        });
+      }
+      return [200, { paymail: handleOf(row.alias), pubkey: identityKey, ...(fee ? { feeTxid: fee } : {}) }];
     },
 
     // Market › Social: names whose owners may have a personal token. provider=all → every kind.
@@ -378,11 +525,9 @@ function makeHandlers({
     lookup: async (q) => {
       const key = String(q.key || '').toLowerCase();
       if (!PUBKEY_RE.test(key)) return [400, { error: 'invalid-key' }];
-      // The wallet's identity: its verified social name wins over an older plain one.
-      const row =
-        (await store.getAliasByKeyKind?.(key, 'x')) ||
-        (await store.getAliasByKeyKind?.(key, 'gmail')) ||
-        (await store.getAliasByKey(key));
+      // The wallet's identity: the handle its owner chose (plain) first (owner, 9 Oct 2026), else a
+      // verified .x / .gmail name. getAliasByKey already prefers plain and falls back to any kind.
+      const row = await store.getAliasByKey(key);
       if (!row) return [404, { error: 'not-found' }];
       // All names that receive for this wallet, so none is invisible (owner, 4 Oct 2026).
       const all = store.listByKey ? await store.listByKey(key) : [row];
@@ -640,6 +785,10 @@ const bookingOut = (r) => ({
 });
 
 module.exports = {
+  FORWARD_MS,
+  CHANGE_COOLDOWN_MS,
+  hashIp,
+  bitsignRenamed,
   socialAliasFor,
   ANYONE_PUB,
   BRC29,

@@ -3,6 +3,7 @@ import { loadSession } from '../chat/api';
 import { isNative } from '../native';
 import { deviceTimeZone, DEFAULT_UI_PREFS, fromServerPrefs, toServerPrefs, type UiPrefs } from './logic';
 import { onPushState, PUSH_PLATFORM, PushApi, pushEnabled, pushRegistered, setPushEnabled } from './register';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * Settings › Notifications › Push notifications. The master switch is this device's (on by default in the
@@ -175,7 +176,9 @@ export const PushSettings = ({ Toggle }: { Toggle: ToggleC }) => {
           {saved}
         </p>
       )}
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="mt-2 text-xs text-red-400">{error}</p><ErrorActions message={String(error)} /></div>
+)}
     </div>
   );
 };

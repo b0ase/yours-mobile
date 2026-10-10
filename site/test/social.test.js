@@ -34,6 +34,10 @@ describe('Continue with X (bWalletX own OAuth)', () => {
     const t = q.get('t');
     const p = social.openTicket(t, secret, ENV);
     expect(p).toMatchObject({ provider: 'x', name: 'b0asex', alias: 'b0asex.x', avatar: 'https://pbs/x_400x400.jpg' });
+    expect(p).toMatchObject({ choose_handle: true, suggested_handle: 'b0asex' });
+    // Never a handle from an email.
+    expect(social.suggestedHandleFor('google', 'their.name@gmail.com')).toBeNull();
+    expect(social.suggestedHandleFor('x', 'B0ase_X')).toBe('b0ase-x');
     expect(social.openTicket(t, 'wrong', ENV)).toBeNull();
     expect(social.openTicket(t, secret, ENV, Date.now() + social.TTL_MS + 1)).toBeNull();
     expect(social.openTicket(t.slice(0, -3) + 'AAA', secret, ENV)).toBeNull();
@@ -74,6 +78,13 @@ describe('Continue with X (bWalletX own OAuth)', () => {
       ENV,
     );
     expect(cancelled).toBe('https://web.bwalletx.com/#error=cancelled');
+    const beta = await social.callback(
+      'x',
+      { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'beta' }), code: 'c' },
+      ENV,
+      fakeX,
+    );
+    expect(beta.startsWith('https://beta.bwalletx.com/#')).toBe(true);
     const testers = await social.callback(
       'x',
       { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'testers' }), code: 'c' },
@@ -81,5 +92,12 @@ describe('Continue with X (bWalletX own OAuth)', () => {
       fakeX,
     );
     expect(testers.startsWith('https://bwalletx.com/testers#')).toBe(true);
+    const desktop = await social.callback(
+      'x',
+      { state: stateOf({ provider: 'x', verifier_hash: vh, return_to: 'desktop' }), code: 'c' },
+      ENV,
+      fakeX,
+    );
+    expect(desktop.startsWith('https://desktop.bwalletx.com/#')).toBe(true);
   });
 });

@@ -41,6 +41,19 @@ const memStore = () => {
       aliases.set(to, { ...r, alias: to });
       for (const p of pays.values()) if (p.alias === from) p.alias = to;
     },
+    forwards: new Map(),
+    getForward: async function (a) {
+      return this.forwards.get(a) ?? null;
+    },
+    putForward: async function (r) {
+      this.forwards.set(r.from_alias, { ...r });
+    },
+    deleteForward: async function (a) {
+      this.forwards.delete(a);
+    },
+    retargetForwards: async function (from, to) {
+      for (const r of this.forwards.values()) if (r.to_alias === from) r.to_alias = to;
+    },
     insertPayment: async (r) => void pays.set(r.reference, { ...r }),
     getPayment: async (ref) => pays.get(ref) ?? null,
     updatePayment: async (ref, patch) => void Object.assign(pays.get(ref), patch),
@@ -164,20 +177,47 @@ describe('register', () => {
     expect(store.aliases.get('w-x.x').avatar).toBe('https://img.test/a.png');
     // Nobody else can, without proof.
     expect((await h.register({}, await v.sign('register', { alias: 'w-x.x' })))[0]).toBe(403);
-    // The verified name is now the wallet's identity, and it can't take another plain name.
-    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('w-x.x');
+    // The wallet already had a plain name it chose, so that stays its main name; the X name also receives.
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
     // Market › Social: every kind of name, tagged with its kind.
     const people = (await h.social({ provider: 'all' }))[1].accounts;
     expect(people.find((a) => a.alias === 'w-x.x')?.kind).toBe('x');
     expect(people.find((a) => a.alias === 'wplain')?.kind).toBe('plain');
     expect((await h.social({ provider: 'x' }))[1].accounts.every((a) => a.kind === 'x')).toBe(true);
-    // Both names are listed, so the older plain one never receives invisibly.
+    // Both names are listed, so neither receives invisibly.
     expect((await h.lookup({ key: w.identityKey }))[1].names).toEqual([
-      { paymail: 'wplain@pay.test', kind: 'plain', main: false },
-      { paymail: 'w-x.x@pay.test', kind: 'x', main: true },
+      { paymail: 'wplain@pay.test', kind: 'plain', main: true },
+      { paymail: 'w-x.x@pay.test', kind: 'x', main: false },
     ]);
-    expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(409);
-    expect(store.aliases.has('wother')).toBe(false);
+    // Users choose their handle (owner, 9 Oct 2026): a plain rename keeps the X name receiving.
+    expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(200);
+    expect(store.aliases.has('wother')).toBe(true);
+    expect(store.aliases.has('wplain')).toBe(false);
+    expect(store.aliases.get('w-x.x').kind).toBe('x');
+    // A wallet with only a verified X name can still choose a plain handle.
+    const x = user();
+    allowed.set('xonly.x', 'ticket-x');
+    expect(
+      (
+        await h.register(
+          {},
+          { ...(await x.sign('register', { alias: 'xonly.x' })), social: { ticket: 'ticket-x', secret: 's' } },
+        )
+      )[0],
+    ).toBe(200);
+    expect((await h.register({}, await x.sign('register', { alias: 'chosen' })))[0]).toBe(200);
+    expect((await h.lookup({ key: x.identityKey }))[1].alias).toBe('chosen');
+    expect((await h.pki({ handle: 'xonly.x@pay.test' }))[1].pubkey).toBe(x.identityKey);
+    // New .gmail names are no longer issued (they published the address), even with a valid proof.
+    allowed.set('someone.gmail', 'ticket-g');
+    expect(
+      (
+        await h.register(
+          {},
+          { ...(await x.sign('register', { alias: 'someone.gmail' })), social: { ticket: 'ticket-g', secret: 's' } },
+        )
+      )[0],
+    ).toBe(403);
     // Apps › Add app: signed save and load, https only.
     const apps = JSON.stringify([{ url: 'https://zanaadu.com', name: 'Zanaadu' }]);
     expect((await h.appsPut({}, await w.sign('apps-put', { apps })))[0]).toBe(200);
@@ -191,7 +231,7 @@ describe('register', () => {
     expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(404);
     expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(200);
     expect(store.aliases.has('w-x.x')).toBe(false);
-    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
+    expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wother');
     // Once taken, the same X name can't be registered to a second wallet.
     expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
     expect(pm.socialAliasFor('x', 'B0ase_X')).toBe('b0ase-x.x');
@@ -420,5 +460,246 @@ describe('reserved names (owner, 9 Oct 2026)', () => {
   });
   test('ordinary names, including look-alikes, still pass', () => {
     for (const a of ['b0asex.x', 'alice', 'bcorpfan', 'theirname.gmail', 'craig.x']) expect(pm.validAlias(a)).toBeNull();
+  });
+});
+
+describe('renamed handles keep receiving', () => {
+  test('an old name answers as the new one via bit-sign', async () => {
+    const store = memStore();
+    const h0 = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    expect((await h0.register({}, await u.sign('register', { alias: 'newname' })))[0]).toBe(200);
+    const h = pm.makeHandlers({ store, env: ENV, renamed: async (a) => (a === 'oldname' ? 'newname' : null) });
+    const [s, r] = await h.pki({ handle: 'oldname@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+    expect(r.handle).toBe('newname@pay.test');
+    expect((await h.pki({ handle: 'nobody@pay.test' }))[0]).toBe(404);
+  });
+
+  test('a wallet rename forwards the old name for 90 days, then releases it', async () => {
+    const store = memStore();
+    let t = Date.now();
+    const h = pm.makeHandlers({ store, env: ENV, now: () => t });
+    const u = user();
+    const other = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'firstname' })))[0]).toBe(200);
+    expect((await h.register({}, await u.sign('register', { alias: 'secondname' })))[0]).toBe(200);
+    for (const fn of ['pki', 'profile', 'p2pDestination'].filter((k) => h[k])) {
+      const [s] = await h[fn]({ handle: 'firstname@pay.test' }, { satoshis: 1000 });
+      expect(s).toBe(200);
+    }
+    const [s, r] = await h.pki({ handle: 'firstname@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+    expect(r.handle).toBe('secondname@pay.test');
+    // Nobody else can take it while it forwards.
+    expect((await h.register({}, await other.sign('register', { alias: 'firstname' })))[0]).toBe(409);
+    // A second rename keeps both old names pointing at the newest.
+    expect((await h.register({}, await u.sign('register', { alias: 'thirdname' })))[0]).toBe(200);
+    expect((await h.pki({ handle: 'firstname@pay.test' }))[1].handle).toBe('thirdname@pay.test');
+    expect((await h.pki({ handle: 'secondname@pay.test' }))[1].handle).toBe('thirdname@pay.test');
+    const fw = await store.getForward('firstname');
+    expect(Date.parse(fw.expires_at) - t).toBe(pm.FORWARD_MS);
+    // After 90 days it's released.
+    t += pm.FORWARD_MS + 1000;
+    expect((await h.pki({ handle: 'firstname@pay.test' }))[0]).toBe(404);
+    expect(await store.getForward('firstname')).toBeNull();
+    t = Date.now(); // signatures are checked against real time
+    expect((await h.register({}, await other.sign('register', { alias: 'firstname' })))[0]).toBe(200);
+  });
+
+  test('a permanent extra name (no expiry) receives for the wallet', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'mainname' })))[0]).toBe(200);
+    await store.putForward({
+      from_alias: 'extraname',
+      to_alias: 'mainname',
+      identity_key: u.identityKey,
+      expires_at: null,
+    });
+    const [s, r] = await h.pki({ handle: 'extraname@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+    // A forward whose key doesn't own the target is ignored.
+    await store.putForward({
+      from_alias: 'spoof',
+      to_alias: 'mainname',
+      identity_key: user().identityKey,
+      expires_at: null,
+    });
+    expect((await h.pki({ handle: 'spoof@pay.test' }))[0]).toBe(404);
+  });
+
+  test('bitsignRenamed reads the public profile API', async () => {
+    const f = async (url) => ({
+      ok: true,
+      json: async () => ({ handle: url.endsWith('/oldname') ? 'NewName' : 'same' }),
+    });
+    expect(await pm.bitsignRenamed('oldname', { BITSIGN_PUBLIC_URL: 'https://bs.test/' }, f)).toBe('newname');
+    expect(await pm.bitsignRenamed('same', {}, f)).toBeNull();
+    expect(await pm.bitsignRenamed('b0asex.x', {}, f)).toBeNull();
+    expect(await pm.bitsignRenamed('x', {}, async () => ({ ok: false }))).toBeNull();
+  });
+});
+
+// ---- anti-squatting (owner, 10 Oct 2026) ----
+const antiStore = () => {
+  const s = memStore();
+  s.events = [];
+  s.fees = new Set();
+  s.lastRename = async (k) =>
+    s.events
+      .filter((e) => e.identity_key === k && e.kind === 'rename')
+      .map((e) => e.created_at)
+      .sort()
+      .pop() ?? null;
+  s.countIpClaims = async (ip, since) => s.events.filter((e) => e.ip_hash === ip && e.created_at >= since).length;
+  s.recordNameEvent = async (r) => void s.events.push({ ...r, created_at: new Date(s.clock()).toISOString() });
+  s.useFeeTx = async (r) => (s.fees.has(r.txid) ? false : (s.fees.add(r.txid), true));
+  s.retireToForward = async (from, to, k, exp) => {
+    await s.putForward({ from_alias: from, to_alias: to, identity_key: k, expires_at: exp });
+    for (const p of s.pays.values()) if (p.alias === from) p.alias = to;
+    s.aliases.delete(from);
+  };
+  s.clock = () => Date.now();
+  return s;
+};
+const DAY = 86_400_000;
+
+describe('name limits', () => {
+  test('first claim is free of the cooldown; one rename per 30 days with a dated message', async () => {
+    const store = antiStore();
+    let t = Date.now();
+    store.clock = () => t;
+    const h = pm.makeHandlers({ store, env: ENV, now: () => t });
+    const u = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'first' }, t), { ip: '1.1.1.1' }))[0]).toBe(200);
+    expect((await h.register({}, await u.sign('register', { alias: 'second' }, t), { ip: '1.1.1.1' }))[0]).toBe(200);
+    const [s, r] = await h.register({}, await u.sign('register', { alias: 'third' }, t), { ip: '1.1.1.1' });
+    expect(s).toBe(429);
+    expect(r.error).toMatch(/^You can change your name again on \d+ \w+ \d{4}\.$/);
+    // A profile update of its own name is not a change.
+    expect((await h.register({}, await u.sign('register', { alias: 'second', name: 'Me' }, t), {}))[0]).toBe(200);
+    t += 31 * DAY;
+    expect((await h.register({}, await u.sign('register', { alias: 'third' }, t), { ip: '2.2.2.2' }))[0]).toBe(200);
+  });
+
+  test('caps new names per IP per day (hashed IP)', async () => {
+    const store = antiStore();
+    const h = pm.makeHandlers({ store, env: { ...ENV, PAYMAIL_NAMES_PER_IP_DAY: '2' } });
+    for (const a of ['ipa', 'ipb'])
+      expect((await h.register({}, await user().sign('register', { alias: a }), { ip: '9.9.9.9' }))[0]).toBe(200);
+    const [s, r] = await h.register({}, await user().sign('register', { alias: 'ipc' }), { ip: '9.9.9.9' });
+    expect(s).toBe(429);
+    expect(r.error).toMatch(/Too many new names/);
+    expect(store.events[0].ip_hash).not.toContain('9.9.9.9');
+    expect((await h.register({}, await user().sign('register', { alias: 'ipc' }), { ip: '8.8.8.8' }))[0]).toBe(200);
+  });
+
+  test('an expired forward is released; a live one blocks others', async () => {
+    const store = antiStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const owner = user();
+    await store.putForward({
+      from_alias: 'held',
+      to_alias: 'x1',
+      identity_key: owner.identityKey,
+      expires_at: new Date(Date.now() + DAY).toISOString(),
+    });
+    await store.putForward({
+      from_alias: 'gone',
+      to_alias: 'x1',
+      identity_key: owner.identityKey,
+      expires_at: new Date(Date.now() - 1).toISOString(),
+    });
+    expect((await h.register({}, await user().sign('register', { alias: 'held' })))[0]).toBe(409);
+    expect((await h.register({}, await user().sign('register', { alias: 'gone' })))[0]).toBe(200);
+    expect(await store.getForward('gone')).toBeNull();
+  });
+
+  test('a .gmail-only wallet that picks a name: the .gmail name becomes a 90-day forward', async () => {
+    const store = antiStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    await store.upsertAlias({ kind: 'gmail', alias: 'someone.gmail', identity_key: u.identityKey });
+    expect((await h.lookup({ key: u.identityKey }))[1].alias).toBe('someone.gmail');
+    expect((await h.register({}, await u.sign('register', { alias: 'someone' })))[0]).toBe(200);
+    expect(store.aliases.has('someone.gmail')).toBe(false);
+    const fw = await store.getForward('someone.gmail');
+    expect(fw.to_alias).toBe('someone');
+    expect(Date.parse(fw.expires_at) - Date.now()).toBeGreaterThan(89 * DAY);
+    expect((await h.pki({ handle: 'someone.gmail@pay.test' }))[1].pubkey).toBe(u.identityKey);
+    expect(store.events[0].kind).toBe('claim');
+  });
+});
+
+describe('1 cent name fee', () => {
+  const FEE_ADDR = PrivateKey.fromRandom().toAddress();
+  const FENV = { ...ENV, BWALLET_NAME_FEE_ADDRESS: FEE_ADDR };
+  const RATE = 50; // $50/BSV → 1¢ = 20,000 sats
+  const payTx = (sats, to = FEE_ADDR) => {
+    const tx = new Transaction();
+    tx.addOutput({ lockingScript: new P2PKH().lock(to), satoshis: sats });
+    return tx;
+  };
+  const mockChain = (txs) => ({
+    tx: async (id) => txs.find((t) => t.id('hex') === id) ?? null,
+    bsvUsd: async () => RATE,
+  });
+
+  test('config: off without the env var, on with it', async () => {
+    expect((await pm.makeHandlers({ store: memStore(), env: ENV }).config())[1].nameFee).toBeNull();
+    expect((await pm.makeHandlers({ store: memStore(), env: FENV }).config())[1].nameFee).toEqual({
+      address: FEE_ADDR,
+      usd: 0.01,
+    });
+  });
+
+  test('no fee configured: claims work as before', async () => {
+    const h = pm.makeHandlers({ store: antiStore(), env: ENV, feeChain: mockChain([]) });
+    expect((await h.register({}, await user().sign('register', { alias: 'freebie' })))[0]).toBe(200);
+  });
+
+  test('needs a paying txid, allows 20% slippage, refuses reuse and underpayment', async () => {
+    const good = payTx(16_500); // ≥ 80% of 20,000
+    const low = payTx(15_000);
+    const wrong = payTx(30_000, PrivateKey.fromRandom().toAddress());
+    const store = antiStore();
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good, low, wrong]) });
+    const [s0, r0] = await h.register({}, await user().sign('register', { alias: 'paid' }));
+    expect(s0).toBe(402);
+    expect(r0.nameFee.address).toBe(FEE_ADDR);
+    expect((await h.register({}, await user().sign('register', { alias: 'paid', feeTxid: low.id('hex') })))[0]).toBe(
+      402,
+    );
+    expect((await h.register({}, await user().sign('register', { alias: 'paid', feeTxid: wrong.id('hex') })))[0]).toBe(
+      402,
+    );
+    const u = user();
+    const [s1, r1] = await h.register({}, await u.sign('register', { alias: 'paid', feeTxid: good.id('hex') }));
+    expect(s1).toBe(200);
+    expect(r1.feeTxid).toBe(good.id('hex'));
+    expect((await h.register({}, await user().sign('register', { alias: 'paid2', feeTxid: good.id('hex') })))[0]).toBe(
+      409,
+    );
+    // Updating your own name's profile pays nothing.
+    expect((await h.register({}, await u.sign('register', { alias: 'paid', name: 'P' })))[0]).toBe(200);
+  });
+
+  test('a tx the indexers have not seen is accepted from the app once our broadcast takes it', async () => {
+    const tx = payTx(20_000);
+    const sent = [];
+    const h = pm.makeHandlers({
+      store: antiStore(),
+      env: FENV,
+      feeChain: mockChain([]),
+      broadcast: async (t) => void sent.push(t.id('hex')),
+    });
+    const body = { ...(await user().sign('register', { alias: 'fresh', feeTxid: tx.id('hex') })), feeTx: tx.toHex() };
+    expect((await h.register({}, body))[0]).toBe(200);
+    expect(sent).toEqual([tx.id('hex')]);
   });
 });

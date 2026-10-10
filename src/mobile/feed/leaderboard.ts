@@ -1,5 +1,6 @@
 import type { PostLock } from './locks';
 import type { Author, FeedPost } from './post';
+import { currentFx, formatFiat } from '../../utils/displayCurrency';
 
 /**
  * "Most locked" leaderboard (Twetch-leaderboard style): pure ranking / aggregation / caching.
@@ -106,7 +107,7 @@ export const isMe = (a: Pick<Author, 'bapId' | 'address'>, me: { bapId: string |
 export const formatUsd = (sats: number, rate: number) => {
   if (!(rate > 0)) return '';
   const usd = (sats / 1e8) * rate;
-  return `≈ $${usd >= 100 ? Math.round(usd).toLocaleString() : usd.toFixed(2)}`;
+  return `≈ ${formatFiat(usd, currentFx(), { wholeAbove100: true })}`;
 };
 
 // ── cache (in-memory + short localStorage TTL) ───────────────────────────────

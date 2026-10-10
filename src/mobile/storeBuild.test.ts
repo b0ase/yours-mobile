@@ -256,6 +256,27 @@ describe('store build has no Market', () => {
     const s = src('./storeBuild.ts');
     expect(cond(s, 'MARKET_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
+  test('Swap: SWAP_ENABLED mirrors MARKET_ENABLED; the top row is always the price card; Swap is only the promo card (dropped in the store edition)', async () => {
+    const { SWAP_ENABLED } = await import('./storeBuild');
+    expect(SWAP_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'SWAP_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+    expect(storeEval('s.SWAP_ENABLED')).toBe(false);
+    expect(storeEval('s.SWAP_ENABLED', { VITE_CHANNEL: 'android-play' })).toBe(false);
+    expect(storeEval('s.SWAP_ENABLED', {})).toBe(true);
+    const bar = src('./wallet/BuyBsv.tsx');
+    expect(bar).toMatch(/const SwapFlow = SWAP_ENABLED \? lazy\(/);
+    expect(bar).not.toMatch(/SwapCell/);
+    expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{\(\) => setPortfolioOpen\(true\)\} change=\{change\} \/>/);
+    expect(bar).toMatch(/import\('..\/portfolio\/PortfolioScreen'\)/);
+    expect(bar).toMatch(/swapOn && SwapPromo && \(/);
+    // Permanent card (owner, 10 Oct 2026): no × and no dismissed flag, so nobody is left without a swap entry.
+    const promo = src('./swap/SwapPromo.tsx');
+    expect(promo).not.toMatch(/Hide the swap card|setDismissed|localStorage/);
+    expect(bar).not.toMatch(/swapPromoDismissed/);
+    const w = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
+    expect(w).toMatch(/\{!BUY_CRYPTO_ENABLED && <BsvHistoryBar/);
+  });
   test('store tabs: no Market tab, and market ids land on Wallet', () => {
     const t = storeEval(
       '{ order: t.TAB_ORDER, tab: t.tabFor("market"), route: t.routeFor("market"), m: s.MARKET_ENABLED }',
@@ -281,7 +302,8 @@ describe('store build has no Market', () => {
     expect(src('./wallet/FriendToken.tsx')).toMatch(/!MARKET_ENABLED \? null/);
     const cards = src('./wallet/DefaultTokenCards.tsx');
     expect(cards).toMatch(/PNEE_TOKEN_ID && MARKET_ENABLED/);
-    expect(cards).toMatch(/MARKET_ENABLED && backing/);
+    expect(cards).toMatch(/MARKET_ENABLED\s*\?\s*\{ label: BACK_PNEE_LABEL/);
+    expect(src('./locks/LockScreen.tsx')).toMatch(/MARKET_ENABLED && backPnee === 'card' && \(\s*<BackPneeSheet/);
     expect(src('./radarApps.ts')).toMatch(/const BUY_APPS[^=]*= MARKET_ENABLED\s*\?/);
   });
   test('Apps tab: no exchange / swap tiles or market / on-ramp groups in a store build', async () => {
@@ -418,7 +440,7 @@ describe('BSPACES_ENABLED: bSpaces is bWalletX only', () => {
     expect(src('./tabs/MobileRoutes.tsx')).toContain(
       "BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null",
     );
-    expect(src('./tabs/ChatPage.tsx')).toMatch(/BSPACES_ENABLED && entry/);
+    expect(src('./tabs/ChatPage.tsx')).toMatch(/BSPACES_ENABLED && \(\s*<LiveBanner/);
     // The Chat tab's Spaces filter: chips and list both behind the flag.
     expect(src('./tabs/ChatPage.tsx').match(/BSPACES_ENABLED && ROOMS && handle && rooms/g)?.length).toBe(2);
   });

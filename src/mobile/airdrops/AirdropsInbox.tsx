@@ -5,8 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Coins, FileCode, Flag, Gift, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { useBackClose } from '../backStack';
+import { Check, Coins, EyeOff, FileCode, Flag, ShieldAlert } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { avatarFor } from '../chat/avatars';
@@ -19,9 +18,13 @@ import { useIssuer } from '../issuer/useIssuer';
 import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { ReportSheet } from '../ugc/UgcSheets';
 import { thumbUrl } from '../market/thumbs';
+import { SwipeRow } from '../swipe/SwipeRow';
+import { showUndo } from '../swipe/undo';
 import { hide, keep, markSeen, type AirdropItem } from './inbox';
+import { trustIssuer } from './quarantine';
 import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
 import { useAirdrops } from './useAirdrops';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const CARD = '#17191E';
 const MUTED = '#98A2B3';
@@ -154,12 +157,14 @@ const Row = ({
   issuerKept,
   onKeep,
   onHide,
+  onTrust,
   onLeave,
 }: {
   item: AirdropItem;
   issuerKept: boolean;
   onKeep: () => void;
   onHide: () => void;
+  onTrust: () => void;
   onLeave: () => void;
 }) => {
   const { handleSelect } = useBottomMenu();
@@ -180,7 +185,7 @@ const Row = ({
         onLeave();
       }
     : null;
-  const small = 'rounded-lg px-2.5 py-1 text-xs font-semibold bg-[#2b2f36] text-white';
+  const small = 'min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
   return (
     <div className="flex flex-col gap-2 rounded-xl px-3 py-3" style={{ background: CARD }}>
       <div className="flex items-center gap-2">
@@ -220,13 +225,16 @@ const Row = ({
         <button
           type="button"
           onClick={onKeep}
-          className="rounded-lg px-3 py-1 text-xs font-bold"
+          className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-bold"
           style={{ background: GOLD, color: '#010101' }}
         >
           Keep
         </button>
         <button type="button" onClick={onHide} className={small}>
           Hide
+        </button>
+        <button type="button" onClick={onTrust} className={small}>
+          Trust this sender
         </button>
         {who.handle && (
           <button type="button" onClick={reply} className={small}>
@@ -262,65 +270,107 @@ const Row = ({
   );
 };
 
-export const AirdropsInbox = ({ onClose }: { onClose: () => void }) => {
-  const { items, visible, state, loading, error, refresh, update } = useAirdrops();
+/** The unstamped items (airdrops) list, shown inside bMail › Requests. */
+export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
+  const { items, visible, state, loading, error, update } = useAirdrops();
   const known = keptIssuers(items, state.kept);
-  useBackClose(true, onClose);
-  // Opening the inbox clears the badge (items stay listed until Keep or Hide).
+  // Opening the mailbox clears the badge (items stay listed until Keep or Hide).
   useEffect(() => update((s) => markSeen(s)), [update]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[220] flex flex-col overflow-y-auto"
-      style={{ background: '#0d0e11', paddingTop: 'env(safe-area-inset-top)' }}
-    >
-      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <Gift size={18} color={GOLD} />
-        <h2 className="text-base font-bold text-white flex-1 m-0">Airdrops</h2>
-        <button type="button" aria-label="Refresh" onClick={() => refresh(true)} className="p-1">
-          <RefreshCw size={16} color={MUTED} className={loading ? 'animate-spin' : ''} />
-        </button>
-        <button type="button" aria-label="Close" onClick={onClose} className="p-1">
-          <X size={18} color={MUTED} />
-        </button>
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="flex gap-2 rounded-xl p-3 text-[11px] leading-relaxed"
+        style={{ background: '#2a1408', color: '#FEC84B' }}
+      >
+        <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+        <span>
+          Quarantined tokens and NFTs: sent to you without asking. They are not in your balance and are never spent with
+          your own coins. Keep moves one into your holdings (it stays at the same address); Hide keeps it here, out of
+          sight, with everything else from that sender. Never enter your recovery words on a site a token sends you to.
+        </span>
       </div>
-      <div className="flex flex-col gap-2 px-4 pb-24">
-        <div
-          className="flex gap-2 rounded-xl p-3 text-[11px] leading-relaxed"
-          style={{ background: '#2a1408', color: '#FEC84B' }}
-        >
-          <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-          <span>
-            Tokens and NFTs people sent you without asking. Never interact with a token that asks you to visit a site
-            and enter your recovery words. Hiding one hides everything from that sender.
-          </span>
-        </div>
-        <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
-          <input
-            type="checkbox"
-            checked={state.onlyKnown}
-            onChange={(e) => update((s) => ({ ...s, onlyKnown: e.target.checked }))}
-          />
-          Only show airdrops from issuers I&apos;ve kept before
-        </label>
-        {error && <p className="text-xs text-[#F97066] m-0">{error}</p>}
-        {!visible.length && (
-          <p className="text-xs text-center py-10 m-0" style={{ color: MUTED }}>
-            {loading ? 'Checking your history…' : 'No new airdrops.'}
-          </p>
-        )}
-        {visible.map((i) => (
-          <Row
+      <label className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
+        <input
+          type="checkbox"
+          checked={state.onlyKnown}
+          onChange={(e) => update((s) => ({ ...s, onlyKnown: e.target.checked }))}
+        />
+        Only show airdrops from issuers I&apos;ve kept before
+      </label>
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{error}</p><ErrorActions message={String(error)} /></div>
+)}
+      {!visible.length && (
+        <p className="text-xs text-center py-4 m-0" style={{ color: MUTED }}>
+          {loading ? 'Checking your history…' : 'No unstamped items.'}
+        </p>
+      )}
+      {visible.map((i) => {
+        // Swipe (bMail rows): left = Hide (undoable), right = Keep (undoable). Buttons stay on the card too.
+        const doKeep = () => {
+          update((s) => keep(s, i.key));
+          showUndo('Kept', () => update((s) => ({ ...s, kept: s.kept.filter((k) => k !== i.key) })));
+        };
+        const doHide = () => {
+          const issuerWasHidden = state.hiddenIssuers.includes(i.issuer);
+          update((s) => hide(s, i));
+          showUndo('Hidden', () =>
+            update((s) => ({
+              ...s,
+              hidden: s.hidden.filter((k) => k !== i.key),
+              hiddenIssuers: issuerWasHidden ? s.hiddenIssuers : s.hiddenIssuers.filter((x) => x !== i.issuer),
+            })),
+          );
+        };
+        const label = i.asset.kind === 'token' ? `$${i.asset.symbol ?? short(i.asset.id)} airdrop` : 'NFT airdrop';
+        return (
+          <SwipeRow
             key={i.key}
-            item={i}
-            issuerKept={known.has(i.issuer)}
-            onLeave={onClose}
-            onKeep={() => update((s) => keep(s, i.key))}
-            onHide={() => update((s) => hide(s, i))}
-          />
-        ))}
-      </div>
-    </div>,
-    document.body,
+            rowId={i.key}
+            label={label}
+            leftActions={[
+              {
+                id: 'hide',
+                label: 'Hide',
+                icon: <EyeOff size={18} />,
+                color: '#D92D20',
+                removes: true,
+                onPress: doHide,
+              },
+            ]}
+            rightActions={[
+              {
+                id: 'keep',
+                label: 'Keep',
+                icon: <Check size={18} />,
+                color: '#12B76A',
+                removes: true,
+                onPress: doKeep,
+              },
+            ]}
+            fullSwipeLeft="hide"
+            fullSwipeRight="keep"
+          >
+            <Row
+              item={i}
+              issuerKept={known.has(i.issuer)}
+              onLeave={onLeave}
+              onKeep={() => update((s) => keep(s, i.key))}
+              onTrust={() => {
+                update((s) => trustIssuer(keep(s, i.key), i.issuer));
+                showUndo('Trusted: their tokens skip Quarantine', () =>
+                  update((s) => ({
+                    ...s,
+                    kept: s.kept.filter((k) => k !== i.key),
+                    trustedIssuers: (s.trustedIssuers ?? []).filter((x) => x !== i.issuer),
+                  })),
+                );
+              }}
+              onHide={() => update((s) => hide(s, i))}
+            />
+          </SwipeRow>
+        );
+      })}
+    </div>
   );
 };

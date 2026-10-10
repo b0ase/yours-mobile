@@ -1,10 +1,27 @@
 import * as qr from 'qrcode';
 import { createPortal } from 'react-dom';
-import { useContext, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw } from 'lucide-react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  type ErrorInfo,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
+import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
+import { myPayUri } from '../scan/payUri';
+
+const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
+import { fiatSymbol } from '../../utils/displayCurrency';
+import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AccountAvatar } from '../names/AccountAvatar';
@@ -73,7 +90,7 @@ const markSigHintSeen = () => {
  * would go. Tap to flip: receive QR, and a signature strip with the identity key fingerprint.
  * Replaces WalletIdentity + the "Total balance" header. Styles in src/mobile/mobile.css (.bw-wcard*).
  */
-export const WalletCard = ({
+const WalletCardInner = ({
   usd,
   sats,
   view,
@@ -88,6 +105,7 @@ export const WalletCard = ({
 }: WalletCardProps) => {
   // Live balance (owner, 8 Oct 2026: "see my balance ticking down as I pay … or ticking up as I'm paid").
   // Spends the wallet just signed come off at once; the next fetch reconciles (live/liveBus.ts).
+  const fx = useDisplayCurrency();
   const live = useLive();
   const sessionsOpen = Object.keys(live.sessions).length;
   const known = view === 'amount';
@@ -158,6 +176,7 @@ export const WalletCard = ({
     saveCardUnit(u);
   };
   const [handleOpen, setHandleOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
@@ -177,8 +196,9 @@ export const WalletCard = ({
 
   useEffect(() => {
     if (!flipped || !receiveAddress) return;
+    // BIP21 so other wallets (and another bWallet's Scan) read it as a payment code.
     qr.toDataURL(
-      receiveAddress,
+      myPayUri(receiveAddress),
       { margin: 1, width: 240, color: { dark: '#000000', light: '#ffffff' } },
       (err, url) => {
         if (!err) setQrUrl(url);
@@ -290,7 +310,7 @@ export const WalletCard = ({
           <div className="bw-wcard-head">
             <div className="bw-wcard-top">
               <div className="bw-wcard-holder">
-                <AccountAvatar src={avatar} size={22} id={id} />
+                <AccountAvatar src={avatar} size={31} id={id} />
                 {t.tag ? (
                   <>
                     <span className="bw-wcard-handle">{t.tag}</span>
@@ -321,18 +341,22 @@ export const WalletCard = ({
                   </button>
                 )}
               </div>
-              <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
-                {(['usd', 'bsv'] as const).map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    aria-pressed={unit === u}
-                    className={unit === u ? 'is-on' : undefined}
-                    onClick={pickUnit(u)}
-                  >
-                    {u === 'usd' ? '$' : 'BSV'}
-                  </button>
-                ))}
+              <div className="bw-wcard-tr">
+                {/* Scan to pay (owner, 9 Oct 2026): 44px target, gold-ring icon like the top bar. */}
+                <button
+                  type="button"
+                  aria-label="Scan to pay"
+                  title="Scan to pay"
+                  className="bw-wcard-scan"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setScanOpen(true);
+                  }}
+                >
+                  <span>
+                    <ScanLine size={16} />
+                  </span>
+                </button>
               </div>
             </div>
             {(chat.identityKey || chat.handle) && (
@@ -428,32 +452,52 @@ export const WalletCard = ({
             )}
           </div>
           <div className="bw-wcard-bottom">
-            {receiveAddress && !backedUp && (
-              <div className="bw-wcard-addrrow">
-                <span className="bw-wcard-addr">Back up to show your address</span>
+            <div className="bw-wcard-bl">
+              <div className="bw-wcard-addrline">
+                <div className="bw-wcard-addrslot">
+                  {receiveAddress && !backedUp && (
+                    <div className="bw-wcard-addrrow">
+                      <span className="bw-wcard-addr">Back up to show your address</span>
+                    </div>
+                  )}
+                  {receiveAddress && backedUp && (
+                    <div className="bw-wcard-addrrow">
+                      <span className="bw-wcard-addr" aria-label="Your BSV address">
+                        {receiveAddress}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={copy(receiveAddress)}
+                        aria-label="Copy BSV address"
+                        className="bw-wcard-icon"
+                      >
+                        <Copy size={14} color="#98A2B3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {/* $/BSV switch: same row as the address, right (owner, 9 Oct 2026). */}
+                <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
+                  {(['usd', 'bsv'] as const).map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      aria-pressed={unit === u}
+                      className={unit === u ? 'is-on' : undefined}
+                      onClick={pickUnit(u)}
+                    >
+                      {u === 'usd' ? fiatSymbol(fx) : 'BSV'}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
-            {receiveAddress && backedUp && (
-              <div className="bw-wcard-addrrow">
-                <span className="bw-wcard-addr" aria-label="Your BSV address">
-                  {receiveAddress}
-                </span>
-                <button
-                  type="button"
-                  onClick={copy(receiveAddress)}
-                  aria-label="Copy BSV address"
-                  className="bw-wcard-icon"
-                >
-                  <Copy size={14} color="#98A2B3" />
-                </button>
-              </div>
-            )}
-            {since && (
-              <div className="bw-wcard-since">
-                <span>MEMBER SINCE</span>
-                <b>{since}</b>
-              </div>
-            )}
+              {since && (
+                <div className="bw-wcard-since">
+                  <span>MEMBER SINCE</span>
+                  <b>{since}</b>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -552,6 +596,59 @@ export const WalletCard = ({
           document.body,
         )}
       {sig.ui}
+      {scanOpen && (
+        <Suspense fallback={null}>
+          <ScanSheet receiveAddress={receiveAddress} onClose={() => setScanOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 };
+
+/** If the card ever throws while rendering, show a plain fallback card (balance + retry) instead of nothing. */
+class WalletCardBoundary extends Component<
+  { children: ReactNode; usd: number; sats: number; onRetry: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('[WalletCard] render failed', error, info.componentStack);
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    const { usd, sats, onRetry } = this.props;
+    return (
+      <div className="bw-wcard-wrap">
+        <div className="bw-wcard" role="group" aria-label="Wallet balance">
+          <div className="bw-wcard-face bw-wcard-front">
+            <div className="bw-wcard-centre">
+              <span className="bw-wcard-usd">{Number.isFinite(usd) ? `$${usd.toFixed(2)}` : '—'}</span>
+              <span className="bw-wcard-sats">
+                {Number.isFinite(sats) ? `${Math.round(sats).toLocaleString('en-US')} sats` : ''}
+              </span>
+              <button
+                type="button"
+                className="bw-wcard-retry"
+                onClick={() => {
+                  this.setState({ failed: false });
+                  onRetry();
+                }}
+              >
+                Tap to reload the card
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+export const WalletCard = (p: WalletCardProps) => (
+  <WalletCardBoundary usd={p.usd} sats={p.sats} onRetry={p.onRetry}>
+    <WalletCardInner {...p} />
+  </WalletCardBoundary>
+);

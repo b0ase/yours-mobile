@@ -11,12 +11,13 @@ import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { roomTitle, type ChatRoom } from '../chat/messages';
-import { gateOfRoom } from '../chat/tokenRooms';
-import { audienceCount, audienceLine, canHostRoom, parseSpaceState, stageOf, type SpaceState } from './model';
+import { audienceCount, audienceLine, canHostRoom, parseSpaceState, roomSpaceOpen, stageOf, type SpaceState, isAlwaysOpenTicker } from './model';
 import { SpaceScreen } from './SpaceScreen';
+import { DoorKeeper } from './DoorKeeper';
 import { InviteCard, type SpaceLink } from './InviteCard';
 import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -30,13 +31,21 @@ const SpacesPage = () => {
   const me = client.handle ?? '';
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState('');
-  const [open, setOpen] = useState<{ ticker: string; name: string; start?: string; admin?: boolean } | null>(null);
+  const [open, setOpen] = useState<{
+    ticker: string;
+    name: string;
+    start?: string;
+    admin?: boolean;
+    spaceOpen?: boolean;
+    hostName?: string | null;
+  } | null>(null);
   const openRoom = (room: ChatRoom, start?: string) =>
     setOpen({
       ticker: room.ticker,
       name: roomTitle(room, me),
       start,
       admin: canHostRoom({ me, createdBy: room.created_by_handle }),
+      spaceOpen: roomSpaceOpen(room),
     });
   // A link (inviteLinks.ts) lands here as ?invite=<code> (ephemeral) or ?space=<slug> (the Space page).
   const [params, setParams] = useSearchParams();
@@ -64,7 +73,7 @@ const SpacesPage = () => {
     if (!client.handle) return;
     setError('');
     try {
-      const rooms = (await client.rooms()).filter((r) => gateOfRoom(r)).slice(0, MAX_ROOMS);
+      const rooms = (await client.rooms()).slice(0, MAX_ROOMS);
       const got = await inBatches(rooms, PARALLEL, async (room) => ({
         room,
         state: parseSpaceState(await client.space(room.ticker).catch(() => null), me),
@@ -84,7 +93,7 @@ const SpacesPage = () => {
 
   const live = (rows ?? []).filter((r) => r.state.space);
   const hostable = (rows ?? []).filter(
-    (r) => !r.state.space && canHostRoom({ me, createdBy: r.room.created_by_handle }),
+    (r) => !r.state.space && canHostRoom({ me, createdBy: r.room.created_by_handle, spaceOpen: roomSpaceOpen(r.room) }),
   );
 
   return (
@@ -109,7 +118,7 @@ const SpacesPage = () => {
           client={client}
           link={spaceLink}
           me={me}
-          onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName })}
+          onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName, hostName: inv.kind === 'space' ? inv.hostName : null })}
           onOpenSpacePage={showSpacePage}
           onClose={clearInvite}
         />
@@ -190,13 +199,14 @@ const SpacesPage = () => {
             space.
           </p>
           {error && (
-            <p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
+<div className="flex flex-col gap-1.5"><p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
               {error}
-            </p>
-          )}
+            </p><ErrorActions message={String(error)} /></div>
+)}
         </div>
       )}
 
+      {open && <DoorKeeper client={client} ticker={open.ticker} me={me} />}
       {open && (
         <SpaceScreen
           client={client}
@@ -205,6 +215,9 @@ const SpacesPage = () => {
           me={me}
           startTitle={open.start}
           canInvite={open.admin}
+          spaceOpen={open.spaceOpen}
+          alwaysOpen={isAlwaysOpenTicker(open.ticker)}
+          hostName={open.hostName}
           onClose={() => {
             setOpen(null);
             void load();

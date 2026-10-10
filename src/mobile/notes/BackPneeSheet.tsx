@@ -1,7 +1,8 @@
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { Lock, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { PNEE_ICON } from './pnee';
+import { BACK_PNEE_LABEL } from './backPnee';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -19,8 +20,17 @@ const Box = ({ title, children }: { title: string; children: React.ReactNode }) 
 /**
  * Wallet › PNEE › Back PNEE (owner, 5 Oct 2026): what backing Penny Notes means and what backers get, like a
  * MakerDAO vault. Honest: no promised yield. Opening vaults from the app comes after the mainnet pilot.
+ * Owner, 10 Oct 2026: this card is the FIRST thing the PNEEs lock icon opens; its button goes on to the amount
+ * sheet and the lock, which shows on Pots & Locks as the PNEEs pot.
  */
-export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
+export const BackPneeSheet = ({
+  onClose,
+  onLock,
+}: {
+  onClose: () => void;
+  /** Lock screen: go on to "how much BSV to lock". */
+  onLock?: () => void;
+}) => {
   useBackClose(true, onClose);
   return createPortal(
     <div className="fixed inset-0 z-[300] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
@@ -55,9 +65,20 @@ export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
           a small mainnet pilot; back only what you can afford to lose.
         </Box>
         <div className="rounded-xl p-3 text-xs" style={{ background: '#F5B80014', color: GOLD }}>
-          Opening a vault from the wallet is coming after the pilot. Today the first vault is run by bCorp; see
-          bwalletx.com/pnee.
+          {onLock
+            ? 'Lock BSV now and it shows on Pots & Locks as your PNEEs pot. Minting PNEEs against it from the wallet comes after the pilot; today the first vault is run by bCorp (bwalletx.com/pnee).'
+            : 'Opening a vault from the wallet is coming after the pilot. Today the first vault is run by bCorp; see bwalletx.com/pnee.'}
         </div>
+        {onLock && (
+          <button
+            type="button"
+            onClick={onLock}
+            className="rounded-xl py-3 text-sm font-bold border-0 cursor-pointer flex items-center justify-center gap-2"
+            style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+          >
+            <Lock size={16} /> {BACK_PNEE_LABEL}
+          </button>
+        )}
       </div>
     </div>,
     document.body,

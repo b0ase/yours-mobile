@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import type { BchatClient } from './api';
 import { HISTORY_OFF_NOTE, HISTORY_ON_NOTE, HISTORY_TOGGLE_LABEL, type HistoryVisibility } from './history';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const LINE = '#1f2127';
@@ -67,10 +68,10 @@ export const HistoryToggle = ({ client, ticker }: { client: BchatClient; ticker:
         {on ? HISTORY_ON_NOTE : HISTORY_OFF_NOTE}
       </p>
       {error && (
-        <p className="text-xs mt-1" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-1" style={{ color: RED }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
     </div>
   );
 };

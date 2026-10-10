@@ -150,7 +150,7 @@ export const SocialSignIn = ({
               <BadgeCheck size={14} color="#F5B800" />
             </div>
             <div className="text-[11px]" style={{ color: '#98A2B3' }}>
-              {profile.alias ? `Your name will be ${profile.alias}` : 'Verified'}
+              Verified · you choose your handle next
             </div>
           </div>
           <button

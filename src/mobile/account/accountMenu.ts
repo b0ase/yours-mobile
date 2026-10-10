@@ -101,6 +101,19 @@ export const clearChatSessionFor = (id: string | undefined, store = ls()) => {
   }
 };
 
+/**
+ * Sign out (drawer, accounts dropdown, Settings › Sign Out): this account out of chat, then lock. Only the chat
+ * session goes; the encrypted keys and seed stay in storage, so coming back is the password, never the 12 words.
+ */
+export const signOutAndLock = async (
+  current: string | undefined,
+  deps: { saveSession: (s: null) => void; lockWallet: () => Promise<void>; store?: Storage },
+) => {
+  deps.saveSession(null);
+  clearChatSessionFor(current, deps.store ?? ls());
+  await deps.lockWallet();
+};
+
 /** Accounts shown inline in the drawer (owner, 8 Oct 2026): the current one plus the most recent. */
 export const INLINE_LIMIT = 4;
 
@@ -112,11 +125,12 @@ export const inlineAccounts = <T extends MenuAccount>(
   people: T[],
   current: string | undefined,
   recent: Record<string, number> = {},
+  limit = INLINE_LIMIT,
 ): { shown: T[]; more: boolean } => {
-  if (people.length <= INLINE_LIMIT) return { shown: people, more: false };
+  if (people.length <= limit) return { shown: people, more: false };
   const cur = people.find((a) => a.id === current);
   const others = people.filter((a) => a.id !== current);
   const { recent: rec, rest } = orderAccounts(others, { recent });
-  const shown = [...(cur ? [cur] : []), ...rec, ...rest].slice(0, INLINE_LIMIT);
+  const shown = [...(cur ? [cur] : []), ...rec, ...rest].slice(0, limit);
   return { shown, more: true };
 };

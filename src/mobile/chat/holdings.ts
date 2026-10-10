@@ -8,7 +8,8 @@
  * to send) and posts the proofs. This is the wallet signing with its own keys — no transaction,
  * nothing spent.
  */
-import { getBsv21Balances, type OneSatContext } from '@1sat/actions';
+import { type OneSatContext } from '@1sat/actions';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { BSV21_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
 import { baseDerivations, rememberDeployKey, rememberedDeployKeys } from './issuerKey';
 import { Utils } from '@bsv/sdk';
@@ -57,10 +58,7 @@ const bsv21IdOf = (o: Out): string | null => {
 
 /** BSV-21 balances (confirmed) and 1Sat collections (item counts) this wallet holds. */
 export async function walletHoldings(ctx: OneSatContext): Promise<Holding[]> {
-  const [tokens, items] = await Promise.all([
-    getBsv21Balances.execute(ctx, {}).catch(() => []),
-    basket(ctx, ONESAT_BASKET),
-  ]);
+  const [tokens, items] = await Promise.all([heldBsv21Balances(ctx).catch(() => []), basket(ctx, ONESAT_BASKET)]);
   const out: Holding[] = [];
   for (const t of tokens) {
     const id = normOutpoint(t.id);

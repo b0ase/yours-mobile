@@ -7,21 +7,27 @@
  * check is the gate) and the media half is LiveKit via /space/token, which bit-sign mints only for a
  * member who has joined, with publish rights read from their participant row.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Camera,
   CameraOff,
   ChevronDown,
   Hand,
+  Maximize2,
   MessageSquare,
+  Monitor,
   Mic,
   MicOff,
+  Volume2,
+  VolumeX,
   PhoneOff,
   Radio,
   RefreshCw,
   Send,
   Share2,
+  Smartphone,
+  QrCode,
   Users,
   X,
 } from 'lucide-react';
@@ -30,8 +36,10 @@ import { isAdminRefusal as adminRefusal } from '../chat/autoClaim';
 import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
 import { SpaceMedia, type Facing } from './media';
+import { rejoinWithBackoff, SpaceOverError } from './reconnect';
+import { useOnResume } from '../permissions/useOnResume';
 import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
-import { LevelBars } from './LevelBars';
+import { SpeakerGrid } from './SpeakerGrid';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import {
   audienceCount,
@@ -48,8 +56,33 @@ import {
   type SpaceState,
 } from './model';
 import { inviteShareText, parsePage } from './invite';
+import { GreenRoomSheet, RecordingBadge } from './GreenRoom';
+import {
+  applyParticipantsReply,
+  defaultJoinAs,
+  joinAsSpeakerOutcome,
+  mayModerate,
+  mayRaiseHand,
+  moderatable,
+  parseGreenRoom,
+  wantsWakeLock,
+  type GreenRoom,
+} from './model';
+import { ScreenAwake, wakeLockSupported } from './wakeLock';
+import {
+  alwaysHereCaption,
+  isAlwaysOpenTicker,
+  mayEndSpace,
+  parseRoomSpaceMeta,
+  type AlwaysHere,
+  type RoomSpaceMeta,
+} from './model';
+import { B_AVATAR, B_HANDLE } from '../chat/avatars';
+import { BATTERY_TEXT, BATTERY_TITLE, markBatteryAsked, needsBatteryAsk, requestIgnoreBattery } from './battery';
+import { SpaceBackground, pipFocus } from './background';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
-import { shareLink } from '../chat/shareLink';
+import { shareText } from '../chat/shareLink';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -80,81 +113,35 @@ const useLandscape = () => {
   return !!on;
 };
 
-const StageTile = ({
-  p,
-  video,
-  speaking,
-  media,
-  me,
-  big,
-  onTap,
-  micOff = false,
-}: {
-  micOff?: boolean;
-  p: Participant;
-  video: boolean;
-  speaking: boolean;
-  media: SpaceMedia;
-  me: string;
-  big: boolean;
-  onTap: (() => void) | null;
-}) => {
+/**
+ * A shared screen (live coding): the big tile. `object-contain` so lines of code are not
+ * cropped; `muted playsInline autoPlay` so WKWebView / Android WebView start it without a tap
+ * (the audio arrives on its own elements). Fullscreen is the zoom: native fullscreen allows
+ * pinch-zoom, and iOS only fullscreens the <video> itself (`webkitEnterFullscreen`).
+ */
+const ScreenTile = ({ owner, media }: { owner: string; media: SpaceMedia }) => {
   const ref = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!video) return;
-    media.bindVideo(p.handle, ref.current);
-    return () => media.bindVideo(p.handle, null);
-  }, [video, media, p.handle]);
-  const hue = hueOf(p.handle);
+    media.bindScreen(ref.current);
+    return () => media.bindScreen(null);
+  }, [media, owner]);
+  const full = () => {
+    const v = ref.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    const b = box.current;
+    if (b?.requestFullscreen) b.requestFullscreen().catch(() => v?.webkitEnterFullscreen?.());
+    else v?.webkitEnterFullscreen?.();
+  };
   return (
-    <button
-      onClick={onTap ?? undefined}
-      disabled={!onTap}
-      className="relative overflow-hidden rounded-2xl flex items-center justify-center"
-      style={{
-        aspectRatio: big ? '16 / 10' : '1 / 1',
-        background: `radial-gradient(120% 100% at 50% 0%, hsl(${hue} 35% 18%) 0%, #0b0b0d 70%)`,
-        boxShadow: speaking ? `0 0 0 3px ${GOLD}, 0 0 24px rgba(255,210,77,.35)` : `0 0 0 1px ${LINE}`,
-        transition: 'box-shadow .15s',
-      }}
-      aria-label={p.handle}
-    >
-      {video ? (
-        <video
-          ref={ref}
-          autoPlay
-          playsInline
-          muted={p.handle === me}
-          className="absolute inset-0 h-full w-full object-cover"
-          style={p.handle === me ? { transform: 'scaleX(-1)' } : undefined}
-        />
-      ) : (
-        <div
-          className="rounded-full flex items-center justify-center font-bold text-white"
-          style={{
-            width: big ? 96 : 64,
-            height: big ? 96 : 64,
-            fontSize: big ? 38 : 26,
-            background: `hsl(${hue} 55% 42%)`,
-            boxShadow: speaking ? `0 0 0 4px #010101, 0 0 0 7px ${GOLD}` : undefined,
-          }}
-        >
-          {p.handle[0]?.toUpperCase() ?? '?'}
-        </div>
-      )}
-      <div
-        className="absolute left-2 bottom-2 right-2 flex items-center gap-1 text-[12px] text-white"
-        style={{ textShadow: '0 1px 3px #000' }}
-      >
-        <LevelBars read={() => media.levelOf(p.handle)} speaking={speaking} muted={micOff} />
-        <span className="truncate">${p.handle}</span>
-        {p.role === 'host' && (
-          <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
-            HOST
-          </span>
-        )}
-      </div>
-    </button>
+    <div ref={box} className="relative mb-3 overflow-hidden rounded-2xl bg-black" style={{ boxShadow: `0 0 0 1px ${LINE}` }}>
+      <video ref={ref} autoPlay playsInline muted onDoubleClick={full} className="block w-full object-contain" style={{ maxHeight: '70vh' }} />
+      <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
+        <Monitor size={12} /> ${owner}&rsquo;s screen
+      </span>
+      <button onClick={full} aria-label="Fullscreen" className="absolute bottom-2 right-2 rounded-full bg-black/70 p-2 text-white">
+        <Maximize2 size={16} />
+      </button>
+    </div>
   );
 };
 
@@ -257,10 +244,10 @@ const SpaceChat = ({
         <div ref={end} />
       </div>
       {error && (
-        <p className="px-3 text-[11px]" style={{ color: '#F97066' }}>
+<div className="flex flex-col gap-1.5"><p className="px-3 text-[11px]" style={{ color: '#F97066' }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
       <form
         className="flex items-center gap-2 p-2"
         style={{ paddingBottom: side ? 8 : 'max(8px, env(safe-area-inset-bottom))' }}
@@ -310,6 +297,41 @@ const CtlButton = ({
   </button>
 );
 
+/** The one tile shown inside the Android PiP window. */
+const PipVideo = ({ media, handle }: { media: SpaceMedia; handle: string }) => {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    media.bindVideo(handle, ref.current);
+    media.setVideoLive(handle, true);
+    return () => media.bindVideo(handle, null);
+  }, [media, handle]);
+  return <video ref={ref} data-space-handle={handle} autoPlay playsInline muted className="h-full w-full object-cover" />;
+};
+
+/**
+ * b on an always-open stage: the bWalletX mark, no mic, no speaking ring, never counted as a
+ * listener (bit-sign `always_here`).
+ */
+const AlwaysHereTile = ({ agent }: { agent: AlwaysHere }) => (
+  <div
+    className="mt-3 mx-auto flex items-center gap-3 rounded-2xl px-3 py-2"
+    style={{ maxWidth: 480, boxShadow: `0 0 0 1px ${LINE}`, background: '#0b0b0d' }}
+    aria-label={alwaysHereCaption(agent)}
+  >
+    <img
+      src={B_AVATAR}
+      alt=""
+      className="h-10 w-10 rounded-full object-cover"
+    />
+    <div className="min-w-0">
+      <div className="text-sm font-semibold text-white truncate">{agent.handle === B_HANDLE ? 'b' : agent.label}</div>
+      <div className="text-[11px]" style={{ color: MUTED }}>
+        {alwaysHereCaption(agent)}
+      </div>
+    </div>
+  </div>
+);
+
 export interface SpaceScreenProps {
   client: BchatClient;
   ticker: string;
@@ -322,29 +344,114 @@ export interface SpaceScreenProps {
   onClaimAdmin?: () => Promise<boolean>;
   /** Room admin (issuer / creator): may share an invite even when someone else hosts. */
   canInvite?: boolean;
+  /** Open-stage room (model.ts roomSpaceOpen): "Join as speaker" goes straight on stage. */
+  spaceOpen?: boolean;
+  /** The host's display name if the caller already has it (Space page `host_name`). */
+  hostName?: string | null;
+  /**
+   * An always-open room (the Lounge; model.ts parseRoomSpaceMeta): join straight in with the mic off,
+   * no green room, Leave only. The server's `always_open` turns this on too.
+   */
+  alwaysOpen?: boolean;
   onClose: () => void;
 }
 
-type Phase = 'joining' | 'live' | 'ended' | 'error';
+/** 'green': the green room, before entering a live Space someone else started. */
+type Phase = 'green' | 'joining' | 'live' | 'ended' | 'error';
 
-export const SpaceScreen = ({
+/**
+ * The Space screen behind an error boundary: a render error shows "Something went wrong" with Back
+ * and Reload instead of a black screen (owner, 9 Oct 2026: raising a hand blanked the app).
+ */
+export const SpaceScreen = (props: SpaceScreenProps) => (
+  <SpaceBoundary onClose={props.onClose}>
+    <SpaceScreenInner {...props} />
+  </SpaceBoundary>
+);
+
+export class SpaceBoundary extends Component<{ onClose: () => void; children?: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('[bwallet] Space screen failed to render', error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children ?? null;
+    return createPortal(
+      <div
+        role="alert"
+        className="fixed inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center"
+        style={{ zIndex: 1000, background: '#050505' }}
+      >
+        <p className="text-white text-base font-semibold m-0">Something went wrong</p>
+        <p className="text-xs m-0 break-words" style={{ color: MUTED }}>
+          {this.state.error}
+        </p>
+        <div className="mt-2 flex gap-3">
+          <button
+            onClick={() => this.props.onClose()}
+            className="rounded-full px-5 py-2 font-semibold text-white"
+            style={{ background: '#1d1e23' }}
+          >
+            Back
+          </button>
+          <button
+            onClick={() => window.location.reload()}
+            className="rounded-full px-5 py-2 font-semibold"
+            style={{ background: GOLD, color: '#010101' }}
+          >
+            Reload
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+}
+
+const SpaceScreenInner = ({
   client,
   ticker,
   roomName,
   me,
   startTitle,
   canInvite,
+  spaceOpen = false,
+  hostName: hostNameProp,
+  alwaysOpen: alwaysOpenProp = false,
   onClaimAdmin,
   onClose,
 }: SpaceScreenProps) => {
   const [needsClaim, setNeedsClaim] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const media = useMemo(() => new SpaceMedia(), []);
-  const [phase, setPhase] = useState<Phase>('joining');
+  const [phase, setPhase] = useState<Phase>(startTitle ? 'joining' : 'green');
+  /** The green room's data; null until loaded (or if the server has no green room yet). */
+  const [green, setGreen] = useState<GreenRoom | null>(null);
+  const [greenAnon, setGreenAnon] = useState(false);
+  /**
+   * Listening anonymously: hidden listen-only token, NO participant row. So no heartbeat, no
+   * hand, and leaving never calls the space route (there is nothing of mine to remove).
+   */
+  const [anon, setAnon] = useState(false);
+  const anonRef = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [error, setError] = useState('');
   const [state, setState] = useState<SpaceState>({ space: null, participants: [], me: null });
   const prev = useRef<SpaceState | null>(null);
   const [videos, setVideos] = useState<string[]>([]);
+  const [screenOwner, setScreenOwner] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<string[]>([]);
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
@@ -352,6 +459,26 @@ export const SpaceScreen = ({
   const [invited, setInvited] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [menuFor, setMenuFor] = useState<Participant | null>(null);
+  /** "Mute the room": all incoming audio silenced on this phone (my mic is separate). */
+  const [deaf, setDeaf] = useState(false);
+  /** Keep the screen on in this Space (screen icon, top right). */
+  const [awakeOn, setAwakeOn] = useState(true);
+  const [hostName, setHostName] = useState<string | null>(hostNameProp ?? null);
+  /** always_open / host_label / always_here, from any space reply that carries them. */
+  const [roomMeta, setRoomMeta] = useState<RoomSpaceMeta>(() => ({
+    alwaysOpen: alwaysOpenProp,
+    hostLabel: alwaysOpenProp && isAlwaysOpenTicker(ticker) ? 'bWalletX' : null,
+    alwaysHere: [],
+  }));
+  const noteMeta = useCallback(
+    (raw: unknown) => {
+      const m = parseRoomSpaceMeta(raw, ticker);
+      if (m.alwaysOpen) setRoomMeta(m);
+    },
+    [ticker],
+  );
+  const open24 = alwaysOpenProp || roomMeta.alwaysOpen;
+  const awake = useMemo(() => new ScreenAwake(), []);
   const [note, setNote] = useState('');
   // A denied mic/camera stays on screen (with Open Settings) until fixed or dismissed.
   const [denied, setDenied] = useState<MediaKind | null>(null);
@@ -360,12 +487,20 @@ export const SpaceScreen = ({
   const [, tick] = useState(0);
   const landscape = useLandscape();
   const left = useRef(false);
+  /** "Reconnecting…": LiveKit resuming by itself, or our own rejoin loop (reconnect.ts). */
+  const [reconnecting, setReconnecting] = useState(false);
+  const recovering = useRef(false);
+  const recoverRef = useRef<() => Promise<void>>(async () => undefined);
+  // Mirrors for the rejoin loop, which outlives a render: republish exactly what was on.
+  const micRef = useRef(false);
+  const camRef = useRef(false);
+  const facingRef = useRef<Facing>('user');
 
   const leave = useCallback(
     async (end = false) => {
       if (left.current) return;
       left.current = true;
-      await client.spaceAction(ticker, { action: end ? 'end' : 'leave' }).catch(() => undefined);
+      if (!anonRef.current) await client.spaceAction(ticker, { action: end ? 'end' : 'leave' }).catch(() => undefined);
       await media.close();
       onClose();
     },
@@ -400,63 +535,171 @@ export const SpaceScreen = ({
     [media],
   );
 
-  // Join → token → connect.
-  useEffect(() => {
-    let live = true;
-    (async () => {
+  /**
+   * Enter: named (join → token → connect) or anonymous (anon token → connect, no row).
+   * Starting a space goes straight here; joining someone else's goes through the green room.
+   */
+  const enter = async (anonymous: boolean, asSpeaker = false) => {
+    setPhase('joining');
+    if (anonymous) {
       try {
-        const joined = parseSpaceState(
-          await client.spaceAction(ticker, { action: 'join', ...(startTitle ? { title: startTitle } : {}) }),
-          me,
-        );
-        if (!joined.space) throw new Error('This space has ended.');
-        if (!supportedTransport(joined.space)) {
-          throw new Error('This space is running peer-to-peer. Join it from bChat on the web.');
-        }
-        const tok = parseSpaceToken(await client.spaceToken(ticker));
+        const tok = parseSpaceToken(await client.spaceAnonToken(ticker));
         if (!tok) throw new Error('Could not get into the space.');
         await media.connect(tok.url, tok.token, {
-          onVideos: (v) => live && setVideos(v),
-          onSpeakers: (s) => live && setSpeakers(s),
-          onCanPublish: (can) => {
-            if (!live) return;
-            if (!can) {
-              setMicOn(false);
-              setCamOn(false);
-            }
-          },
-          onDisconnected: () => live && !left.current && setPhase((p) => (p === 'live' ? 'ended' : p)),
+          onVideos: (v) => mounted.current && setVideos(v),
+          onScreen: (o) => mounted.current && setScreenOwner(o),
+          onSpeakers: (s) => mounted.current && setSpeakers(s),
+          onCanPublish: () => undefined,
+          onDisconnected: () => mounted.current && !left.current && void recoverRef.current(),
+          onReconnecting: () => mounted.current && setReconnecting(true),
+          onReconnected: () => mounted.current && !recovering.current && setReconnecting(false),
         });
-        if (!live) return void media.close();
+        if (!mounted.current) return void media.close();
+        anonRef.current = true;
+        setAnon(true);
         prev.current = null;
-        apply(joined);
+        apply(parseSpaceState(await client.space(ticker), me));
         setPhase('live');
-        // The host starts speaking straight away (they started the space); the OS asks for the mic.
-        if (joined.me?.role === 'host') {
-          await media
-            .setMic(true)
-            .then(() => setMicOn(true))
-            .catch((e) => refused('mic', e, 'Couldn’t start the microphone.'));
-        }
       } catch (e) {
-        if (!live) return;
-        const msg =
-          // 403 not_host: bit-sign lets only the token issuer or a room admin start a space.
-          e instanceof ChatApiError && e.status === 403 && (e.data as { code?: unknown } | null)?.code === 'not_host'
-            ? errText(e)
-            : e instanceof ChatApiError && e.status === 403
-              ? 'You need to hold this room’s token to join its space.'
-              : errText(e);
-        setError(msg);
-        setNeedsClaim(!!startTitle && adminRefusal(e));
+        if (!mounted.current) return;
+        setError(errText(e));
         setPhase('error');
         void media.close();
       }
-    })();
-    return () => {
-      live = false;
-    };
-    // Join once per mount.
+      return;
+    }
+    try {
+      const title = startTitle ?? (open24 ? roomName : undefined);
+      const raw = await client.spaceAction(ticker, {
+        action: 'join',
+        ...(title ? { title } : {}),
+        ...(asSpeaker ? { as: 'speaker' } : {}),
+      });
+      noteMeta(raw);
+      const joined = parseSpaceState(raw, me);
+      if (!joined.space) throw new Error('This space has ended.');
+      if (!supportedTransport(joined.space)) {
+        throw new Error('This space is running peer-to-peer. Join it from bChat on the web.');
+      }
+      const tok = parseSpaceToken(await client.spaceToken(ticker));
+      if (!tok) throw new Error('Could not get into the space.');
+      await media.connect(tok.url, tok.token, {
+        onVideos: (v) => mounted.current && setVideos(v),
+        onScreen: (o) => mounted.current && setScreenOwner(o),
+        onSpeakers: (s) => mounted.current && setSpeakers(s),
+        onCanPublish: (can) => {
+          if (!mounted.current) return;
+          if (!can) {
+            setMicOn(false);
+            setCamOn(false);
+          }
+        },
+        onDisconnected: () => mounted.current && !left.current && void recoverRef.current(),
+          onReconnecting: () => mounted.current && setReconnecting(true),
+          onReconnected: () => mounted.current && !recovering.current && setReconnecting(false),
+      });
+      if (!mounted.current) return void media.close();
+      prev.current = null;
+      apply(joined);
+      setPhase('live');
+      if (asSpeaker && joined.me?.role === 'speaker') setNote('You’re on stage, muted. Tap Unmute to talk.');
+      else if (asSpeaker && joined.me?.handRaisedAt) setNote('Hand raised. The host can bring you on stage.');
+      // The host starts speaking straight away (they started the space); the OS asks for the mic.
+      // Always-open rooms (the Lounge): everyone comes in with the mic off, whoever opened it.
+      if (joined.me?.role === 'host' && !open24) {
+        await media
+          .setMic(true)
+          .then(() => setMicOn(true))
+          .catch((e) => refused('mic', e, 'Couldn’t start the microphone.'));
+      }
+    } catch (e) {
+      if (!mounted.current) return;
+      const msg =
+        // 403 not_host: bit-sign lets only the token issuer or a room admin start a space.
+        e instanceof ChatApiError && e.status === 403 && (e.data as { code?: unknown } | null)?.code === 'not_host'
+          ? errText(e)
+          : e instanceof ChatApiError && e.status === 403
+            ? 'You need to hold this room’s token to join its space.'
+            : errText(e);
+      setError(msg);
+      setNeedsClaim(!!startTitle && adminRefusal(e));
+      setPhase('error');
+      void media.close();
+    }
+  };
+
+  useEffect(() => {
+    micRef.current = micOn;
+    camRef.current = camOn;
+    facingRef.current = facing;
+  }, [micOn, camOn, facing]);
+
+  /**
+   * The SFU connection died (LiveKit gave up resuming). Rejoin the SAME Space with a fresh token,
+   * backing off for ~60 s, mic/camera as they were. Never starts a new Space: if the one I was in
+   * is gone, that is the end. Giving up leaves properly, so bit-sign is not left with a ghost.
+   */
+  recoverRef.current = async () => {
+    if (recovering.current || left.current || !mounted.current) return;
+    recovering.current = true;
+    setReconnecting(true);
+    const spaceId = prev.current?.space?.id ?? null;
+    const out = await rejoinWithBackoff({
+      cancelled: () => left.current || !mounted.current,
+      attempt: async () => {
+        let tok;
+        if (anonRef.current) {
+          tok = parseSpaceToken(await client.spaceAnonToken(ticker));
+        } else {
+          const now = parseSpaceState(await client.space(ticker), me);
+          if (!now.space || (spaceId && now.space.id !== spaceId)) throw new SpaceOverError('ended');
+          const joined = parseSpaceState(await client.spaceAction(ticker, { action: 'join' }), me);
+          if (!joined.space || (spaceId && joined.space.id !== spaceId)) throw new SpaceOverError('ended');
+          tok = parseSpaceToken(await client.spaceToken(ticker));
+        }
+        if (!tok) throw new Error('No token');
+        await media.rejoin(tok.url, tok.token, { mic: micRef.current, camera: camRef.current, facing: facingRef.current });
+      },
+    });
+    recovering.current = false;
+    if (!mounted.current || left.current) return;
+    setReconnecting(false);
+    if (out === 'rejoined') {
+      setMicOn(media.micOn);
+      setCamOn(media.cameraOn);
+      setNote('Reconnected.');
+      client
+        .space(ticker)
+        .then((d) => apply(parseSpaceState(d, me)))
+        .catch(() => undefined);
+      return;
+    }
+    if (out === 'gave-up') {
+      setNote('Lost the connection to the Space.');
+      if (!anonRef.current) void client.spaceAction(ticker, { action: 'leave' }).catch(() => undefined);
+    }
+    setPhase('ended');
+    void media.close();
+  };
+
+  // Back from the background / lock screen with a dead connection: rejoin straight away.
+  useOnResume(() => {
+    if (media.disconnected && !left.current) void recoverRef.current();
+  }, phase === 'live');
+
+  // Starting: go straight in. Joining: load the green room first.
+  useEffect(() => {
+    if (startTitle || alwaysOpenProp) return void enter(false);
+    client
+      .spaceGreenRoom(ticker)
+      .then((d) => {
+        if (!mounted.current) return;
+        const g = parseGreenRoom(d);
+        if (g) setGreen(g);
+        else void enter(false); // No green room (older server / not live): the old path explains.
+      })
+      .catch(() => mounted.current && void enter(false));
+    // Once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -468,27 +711,31 @@ export const SpaceScreen = ({
     const poll = setInterval(() => {
       client
         .space(ticker)
-        .then((d) => apply(parseSpaceState(d, me)))
+        .then((d) => {
+          noteMeta(d);
+          apply(parseSpaceState(d, me));
+        })
         .catch(() => undefined);
       tick((n) => n + 1);
     }, POLL_MS);
+    // Anonymous listeners have no row to keep fresh.
     const hb = setInterval(
-      () => void client.spaceAction(ticker, { action: 'heartbeat' }).catch(() => undefined),
+      () => !anonRef.current && void client.spaceAction(ticker, { action: 'heartbeat' }).catch(() => undefined),
       HEARTBEAT_MS,
     );
     return () => {
       clearInterval(poll);
       clearInterval(hb);
     };
-  }, [phase, client, ticker, me, apply]);
+  }, [phase, client, ticker, me, apply, noteMeta]);
 
   const act = (body: Record<string, unknown>) =>
     client
       .spaceAction(ticker, body)
       .then((d) => {
-        const o = d as { participants?: unknown };
-        if (o && Array.isArray(o.participants))
-          apply(parseSpaceState({ space: rawSpace(state), participants: o.participants }, me));
+        // From the latest state (not this render's), keeping the recording flags (model.ts).
+        const next = applyParticipantsReply(prev.current ?? state, d, me);
+        if (next) apply(next);
       })
       .catch((e) => setNote(errText(e)));
 
@@ -499,6 +746,37 @@ export const SpaceScreen = ({
   const hands = handQueue(state);
   const audience = audienceCount(state);
   const raised = !!state.me?.handRaisedAt;
+  const canHand = mayRaiseHand({ anonymous: anon, role: myRole });
+  const recording = !!state.recording;
+  const moderator = mayModerate({ isHost, roomBoss: canInvite });
+  /** Always-open: whoever started is just "on stage"; nobody ends it. */
+  const canEnd = mayEndSpace({ isHost, alwaysOpen: open24 });
+
+  // Mute the room: applies to voices already playing and any that join later (media.ts).
+  useEffect(() => media.setDeafened(deaf), [media, deaf]);
+
+  // Screen stays on for anyone in the Space (host, speaker, listener); released on leave or end.
+  const wake = wantsWakeLock({ live: phase === 'live', enabled: awakeOn });
+  useEffect(() => {
+    void awake.set(wake);
+  }, [awake, wake]);
+  useEffect(() => () => void awake.set(false), [awake]);
+
+  // The host's chosen display name (bit-sign #95 host_name), when the caller did not pass it.
+  useEffect(() => {
+    if (phase !== 'live' || hostName || !(isHost || canInvite)) return;
+    let live = true;
+    client
+      .spacePageLink(ticker)
+      .then((d) => {
+        const p = parsePage(d);
+        if (live && p?.kind === 'space' && p.hostName) setHostName(p.hostName);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [phase, hostName, isHost, canInvite, client, ticker]);
 
   const toggleMic = async () => {
     try {
@@ -537,33 +815,84 @@ export const SpaceScreen = ({
   };
 
   const title = state.space?.title || roomName;
-  const tiles = stage.length ? stage : [];
-  const many = tiles.length > 4;
+  const myHandle = me.replace(/^\$/, '').toLowerCase();
 
-  const stageView = !tiles.length ? (
-    <p className="pt-10 text-center text-sm" style={{ color: MUTED }}>
-      Waiting for the host to come back on stage…
-    </p>
-  ) : (
-    <div className={`grid gap-3 ${tiles.length <= 1 ? 'grid-cols-1' : many ? 'grid-cols-3' : 'grid-cols-2'}`}>
-      {tiles.map((p) => (
-        <StageTile
-          key={p.handle}
-          p={p}
-          me={me.replace(/^\$/, '').toLowerCase()}
-          media={media}
-          video={videos.includes(p.handle)}
-          speaking={speakers.includes(p.handle)}
-          micOff={p.handle === me.replace(/^\$/, '').toLowerCase() && !micOn}
-          big={tiles.length <= 1}
-          onTap={isHost && p.role === 'speaker' ? () => setMenuFor(p) : null}
-        />
-      ))}
-    </div>
+  // Ducking out to other apps (background.ts): Android foreground service + notification, PiP for
+  // live video, lock-screen controls. The buttons there call the latest mute/leave below.
+  const [pip, setPip] = useState(false);
+  const bgActs = useRef({ mute: () => undefined as unknown, leave: () => undefined as unknown });
+  bgActs.current = {
+    mute: () => onStage && void toggleMic(),
+    leave: () => void leave(false),
+  };
+  const bg = useMemo(
+    () =>
+      new SpaceBackground({
+        onMute: () => bgActs.current.mute(),
+        onLeave: () => bgActs.current.leave(),
+        onPip: setPip,
+      }),
+    [],
+  );
+  const focus = phase === 'live' ? pipFocus({ stage, videos, speaking: speakers, me: myHandle }) : null;
+  useEffect(() => {
+    bg.update({ live: phase === 'live', title, onStage, micOn, focus });
+  }, [bg, phase, title, onStage, micOn, focus]);
+  useEffect(() => () => bg.close(), [bg]);
+  // Android, first Space on this install: explain, then the system battery-optimisation dialog (battery.ts).
+  const [batteryAsk, setBatteryAsk] = useState(false);
+  const batteryChecked = useRef(false);
+  useEffect(() => {
+    if (phase !== 'live' || batteryChecked.current) return;
+    batteryChecked.current = true;
+    void needsBatteryAsk().then((ask) => mounted.current && ask && setBatteryAsk(true));
+  }, [phase]);
+  const raiseHand = () => {
+    if (!raised) setNote('Hand raised. The host can bring you on stage.');
+    void act({ action: 'hand', raised: !raised });
+  };
+  const stageView = (
+    <SpeakerGrid
+      speakers={stage}
+      me={myHandle}
+      media={media}
+      videos={videos}
+      speaking={speakers}
+      micOn={micOn}
+      hostName={open24 ? null : hostName}
+      noHost={open24}
+      listeners={audience}
+      canHand={canHand}
+      raised={raised}
+      onRaiseHand={raiseHand}
+      menuFor={(p) => (moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) ? () => setMenuFor(p) : null)}
+      avatars={Object.fromEntries((green?.stage ?? []).map((g) => [g.handle, g.avatar]))}
+    />
   );
 
   const body =
-    phase === 'joining' ? (
+    phase === 'green' ? (
+      green ? (
+        <GreenRoomSheet
+          data={green}
+          fallbackTitle={roomName}
+          anonymous={greenAnon}
+          onAnonymous={setGreenAnon}
+          onStart={() => void enter(greenAnon)}
+          onStartSpeaker={greenAnon ? undefined : () => void enter(false, true)}
+          speakerFirst={defaultJoinAs({ spaceOpen, roomBoss: !!canInvite }) === 'speaker'}
+          speakerLine={
+            joinAsSpeakerOutcome({ spaceOpen, roomBoss: !!canInvite }) === 'speaker'
+              ? 'Join as speaker: on stage, mic muted until you tap.'
+              : 'Join as speaker: you join with your hand up; the host brings you on stage.'
+          }
+        />
+      ) : (
+        <Centered>
+          <Radio size={36} color={GOLD} className="animate-pulse" />
+        </Centered>
+      )
+    ) : phase === 'joining' ? (
       <Centered>
         <Radio size={36} color={GOLD} className="animate-pulse" />
         <p className="mt-3 text-sm" style={{ color: MUTED }}>
@@ -576,10 +905,10 @@ export const SpaceScreen = ({
           {phase === 'ended' ? 'This space has ended' : 'Couldn’t join'}
         </p>
         {error && (
-          <p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
+<div className="flex flex-col gap-1.5"><p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
             {error}
-          </p>
-        )}
+          </p><ErrorActions message={String(error)} /></div>
+)}
         {phase === 'error' && needsClaim && onClaimAdmin && (
           <button
             disabled={claiming}
@@ -605,8 +934,12 @@ export const SpaceScreen = ({
       </Centered>
     ) : (
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+        {screenOwner && <ScreenTile owner={screenOwner} media={media} />}
         {stageView}
-        {isHost && hands.length > 0 && (
+        {roomMeta.alwaysHere.map((a) => (
+          <AlwaysHereTile key={a.handle} agent={a} />
+        ))}
+        {moderator && hands.length > 0 && (
           <section className="mt-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: MUTED }}>
               Raised hands
@@ -632,7 +965,36 @@ export const SpaceScreen = ({
         )}
         <div className="mt-5 flex items-center gap-2 text-sm" style={{ color: MUTED }}>
           <Users size={16} />
-          {audienceLine(audience)}
+          <span className="flex-1">{audienceLine(audience)}</span>
+          {state.mayRecord && !anon ? (
+            <button
+              onClick={() => {
+                if (!recording) setNote('Recording. Everyone in the Space sees ● Recording.');
+                void client
+                  .spaceAction(ticker, { action: recording ? 'record_stop' : 'record_start' })
+                  .then(() => client.space(ticker))
+                  .then((d) => apply(parseSpaceState(d, me)))
+                  .catch((e) => setNote(errText(e)));
+              }}
+              className="shrink-0 flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+              style={recording ? { background: '#D92D20', color: '#fff' } : { border: '1px solid #ef4444', color: '#fff' }}
+              aria-label={recording ? 'Stop recording' : 'Record'}
+            >
+              {recording ? (
+                <>■ Stop{state.recordingSince ? ` · ${elapsed(state.recordingSince)}` : ''}</>
+              ) : (
+                <>
+                  <span style={{ color: '#ef4444' }}>●</span> Record
+                </>
+              )}
+            </button>
+          ) : (
+            recording && (
+              <span className="shrink-0 text-xs font-semibold" style={{ color: '#ef4444' }}>
+                ● Recording
+              </span>
+            )
+          )}
         </div>
       </div>
     );
@@ -647,9 +1009,27 @@ export const SpaceScreen = ({
     try {
       const page = parsePage(await client.spacePageLink(ticker));
       if (!page?.url) throw new Error('No link came back.');
-      const r = await shareLink({ title: page.title, text: inviteShareText(page), url: page.url });
+      const r = await shareText(inviteShareText(page));
       if (r === 'copied') setNote('Space page link copied.');
       if (r === 'failed') setNote(page.url);
+    } catch (e) {
+      setNote(
+        e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e),
+      );
+    } finally {
+      setSharing(false);
+    }
+  };
+  // QR of the permanent Space page, for a second phone or a screen to scan (Scan in bWalletX or the camera app).
+  const [qrUrl, setQrUrl] = useState<{ url: string; img: string } | null>(null);
+  const showQr = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const page = parsePage(await client.spacePageLink(ticker));
+      if (!page?.url) throw new Error('No link came back.');
+      const qr = await import('qrcode');
+      setQrUrl({ url: page.url, img: await qr.toDataURL(page.url, { margin: 1, width: 480 }) });
     } catch (e) {
       setNote(
         e instanceof ChatApiError && e.status === 403 ? 'Only the host or the room admin can share.' : errText(e),
@@ -701,26 +1081,39 @@ export const SpaceScreen = ({
             </CtlButton>
           )}
         </>
+      ) : !canHand ? (
+        <span className="self-center px-2 text-[11px] text-center" style={{ color: MUTED }}>
+          Listening anonymously
+        </span>
       ) : (
         <CtlButton
           label={raised ? 'Lower hand' : 'Raise hand'}
-          onClick={() => {
-            if (!raised) setNote('Hand raised. The host can bring you on stage.');
-            void act({ action: 'hand', raised: !raised });
-          }}
+          onClick={raiseHand}
           active={raised}
         >
           <Hand size={20} color={raised ? '#010101' : '#fff'} />
         </CtlButton>
       )}
+      <CtlButton label={deaf ? 'Room muted' : 'Mute room'} onClick={() => setDeaf((d) => !d)} active={deaf}>
+        {deaf ? <VolumeX size={20} color="#010101" /> : <Volume2 size={20} color="#fff" />}
+      </CtlButton>
       <CtlButton label="Chat" onClick={() => setChatOpen((o) => !o)} active={chatOpen}>
         <MessageSquare size={20} color={chatOpen ? '#010101' : '#fff'} />
       </CtlButton>
-      <CtlButton label={isHost ? 'End' : 'Leave'} onClick={() => void leave(isHost)} danger>
+      <CtlButton label={canEnd ? 'End' : 'Leave'} onClick={() => void leave(canEnd)} danger>
         <PhoneOff size={20} color="#fff" />
       </CtlButton>
     </div>
   );
+
+  // Android picture-in-picture: only the focus speaker's video, full-bleed.
+  if (pip && focus)
+    return createPortal(
+      <div className="fixed inset-0 bg-black" style={{ zIndex: 1000 }}>
+        <PipVideo media={media} handle={focus} />
+      </div>,
+      document.body,
+    );
 
   return createPortal(
     <div
@@ -729,6 +1122,39 @@ export const SpaceScreen = ({
       role="dialog"
       aria-label="bSpace"
     >
+      {batteryAsk && (
+        <div className="absolute inset-0 z-20 flex items-end" style={{ background: 'rgba(0,0,0,.55)' }}>
+          <div
+            className="w-full rounded-t-2xl p-5"
+            style={{ background: '#121316', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }}
+          >
+            <p className="text-white font-semibold">{BATTERY_TITLE}</p>
+            <p className="mt-1 text-xs" style={{ color: MUTED }}>
+              {BATTERY_TEXT}
+            </p>
+            <button
+              onClick={() => {
+                setBatteryAsk(false);
+                void requestIgnoreBattery();
+              }}
+              className="mt-4 w-full rounded-full py-3 font-semibold"
+              style={{ background: GOLD, color: '#010101' }}
+            >
+              Continue
+            </button>
+            <button
+              onClick={() => {
+                setBatteryAsk(false);
+                markBatteryAsked();
+              }}
+              className="mt-2 w-full rounded-full py-3 text-sm"
+              style={{ color: MUTED }}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
       <header
         className="flex items-center gap-2 px-3 pb-2 shrink-0"
         style={{ paddingTop: landscape ? 8 : 'max(10px, env(safe-area-inset-top))' }}
@@ -747,23 +1173,54 @@ export const SpaceScreen = ({
               </span>
             )}
             <span className="text-[15px] font-semibold text-white truncate">{title}</span>
+            {phase === 'live' && recording && <RecordingBadge />}
           </div>
           <div className="text-[11px]" style={{ color: MUTED }}>
             ${ticker.replace(/^\$/, '')}{' '}
             {state.space ? `· ${elapsed(state.space.startedAt)} · ${audienceLine(audience)}` : ''}
           </div>
+          {open24 && roomMeta.hostLabel && (
+            <div className="text-[11px]" style={{ color: GOLD }}>
+              Hosted by {roomMeta.hostLabel}
+            </div>
+          )}
         </div>
         {phase === 'live' && (isHost || canInvite) && (
           <button
             onClick={() => setShareOpen(true)}
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold"
+            className="shrink-0 flex items-center justify-center rounded-full h-9 w-9"
             style={{ border: `1px solid ${GOLD}`, color: GOLD }}
             aria-label="Share"
           >
-            <Share2 size={14} />
-            Share
+            <Share2 size={16} />
           </button>
         )}
+        <button
+          role="switch"
+          aria-checked={awakeOn}
+          aria-label="Keep screen on in this Space"
+          title={
+            wakeLockSupported()
+              ? 'Keep screen on in this Space'
+              : 'This phone can’t keep the screen on from here; turn auto-lock off in Settings'
+          }
+          onClick={() => {
+            const next = !awakeOn;
+            setAwakeOn(next);
+            setNote(next ? 'Screen stays on' : 'Screen can sleep');
+          }}
+          className="relative shrink-0 flex items-center justify-center rounded-full h-9 w-9"
+          style={{ background: awakeOn ? 'rgba(255,210,77,.14)' : 'transparent', opacity: awakeOn ? 1 : 0.5 }}
+        >
+          <Smartphone size={18} color={awakeOn ? GOLD : MUTED} />
+          {!awakeOn && (
+            <span
+              aria-hidden
+              className="absolute h-[2px] w-6 rotate-45 rounded"
+              style={{ background: MUTED }}
+            />
+          )}
+        </button>
       </header>
 
       <div className={`flex-1 min-h-0 relative ${landscape ? 'flex' : 'flex flex-col'}`}>
@@ -782,6 +1239,21 @@ export const SpaceScreen = ({
         )}
       </div>
       {!landscape && controls}
+      {phase === 'live' && wake && (
+        <p className="text-center text-[10px] pb-1 m-0" style={{ color: MUTED }}>
+          Screen stays on while you speak
+        </p>
+      )}
+
+      {phase === 'live' && reconnecting && (
+        <div
+          role="status"
+          className="absolute left-4 right-4 rounded-xl px-4 py-3 text-sm text-center"
+          style={{ top: 64, background: '#3a2f12', color: '#ffd76a', zIndex: 11 }}
+        >
+          Reconnecting…
+        </div>
+      )}
 
       {note && (
         <button
@@ -838,8 +1310,24 @@ export const SpaceScreen = ({
             >
               <Share2 size={15} /> Share Space page
             </button>
+            <button
+              onClick={() => void showQr()}
+              disabled={sharing}
+              className="mt-2 w-full h-11 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ border: `1px solid ${LINE}`, color: '#fff' }}
+            >
+              <QrCode size={15} /> Show QR code
+            </button>
+            {qrUrl && (
+              <div className="mt-3 flex flex-col items-center">
+                <img src={qrUrl.img} alt="QR code for the Space page" className="w-56 h-56 rounded-lg bg-white" />
+                <p className="mt-1 text-[11px] break-all text-center" style={{ color: MUTED }}>
+                  {qrUrl.url}
+                </p>
+              </div>
+            )}
             <p className="mt-1 mb-4 text-[11px]" style={{ color: MUTED }}>
-              The permanent page for this Space: live now, ended later.
+              The permanent page for this Space: live now, ended later. Scan the QR in bWalletX or with a phone camera.
             </p>
             <InviteLinksPanel
               create={createInvite}
@@ -885,13 +1373,33 @@ export const SpaceScreen = ({
           <p className="text-white text-base font-semibold">${menuFor.handle}</p>
           <button
             onClick={() => {
-              void act({ action: 'role', handle: menuFor.handle, role: 'listener' });
+              void act({ action: 'mute', handle: menuFor.handle }).then(() => setNote(`Muted $${menuFor.handle}. They can unmute themselves.`));
               setMenuFor(null);
             }}
             className="mt-4 w-full rounded-full py-3 font-semibold text-white"
             style={{ background: '#1d1e23' }}
           >
+            Mute
+          </button>
+          <button
+            onClick={() => {
+              void act({ action: 'role', handle: menuFor.handle, role: 'listener' });
+              setMenuFor(null);
+            }}
+            className="mt-2 w-full rounded-full py-3 font-semibold text-white"
+            style={{ background: '#1d1e23' }}
+          >
             Move to audience
+          </button>
+          <button
+            onClick={() => {
+              void act({ action: 'remove', handle: menuFor.handle });
+              setMenuFor(null);
+            }}
+            className="mt-2 w-full rounded-full py-3 font-semibold"
+            style={{ background: '#1d1e23', color: '#F97066' }}
+          >
+            Remove from Space
           </button>
         </Sheet>
       )}
@@ -900,20 +1408,6 @@ export const SpaceScreen = ({
   );
 };
 
-/** The participants reply carries no space; keep ours so the state stays whole. */
-const rawSpace = (s: SpaceState) =>
-  s.space
-    ? {
-        id: s.space.id,
-        title: s.space.title,
-        host_handle: s.space.host,
-        status: 'live',
-        transport: s.space.transport,
-        max_participants: s.space.max,
-        started_at: s.space.startedAt,
-        mode: s.space.mode,
-      }
-    : null;
 
 const Centered = ({ children }: { children: React.ReactNode }) => (
   <div className="flex-1 flex flex-col items-center justify-center">{children}</div>

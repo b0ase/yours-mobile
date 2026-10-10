@@ -49,6 +49,74 @@ function supabaseStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ alias: to, updated_at: new Date().toISOString() }),
       }),
+    // Name forwards (migrations/20261009_bwallet_paymail_forwards.sql): old/extra name -> main name.
+    getForward: (from) => one(`bwallet_paymail_forwards?from_alias=eq.${q(from)}&limit=1`),
+    putForward: (row) =>
+      req('bwallet_paymail_forwards?on_conflict=from_alias', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    deleteForward: (from) =>
+      req(`bwallet_paymail_forwards?from_alias=eq.${q(from)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      }),
+    // Point every forward that targeted `from` at `to` (a renamed main name keeps its old names).
+    retargetForwards: (from, to) =>
+      req(`bwallet_paymail_forwards?to_alias=eq.${q(from)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ to_alias: to }),
+      }),
+    // Expired rename forwards, released in bulk (lookups also release them one by one).
+    deleteExpiredForwards: (nowIso) =>
+      req(`bwallet_paymail_forwards?expires_at=lt.${q(nowIso)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      }),
+    // A retired social name (.gmail) becomes a forward: its payment records move to the plain name first.
+    retireToForward: async (from, to, identityKey, expiresAt) => {
+      await req('bwallet_paymail_forwards?on_conflict=from_alias', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ from_alias: from, to_alias: to, identity_key: identityKey, expires_at: expiresAt }),
+      });
+      await req(`bwallet_paymail_payments?alias=eq.${q(from)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ alias: to }),
+      });
+      await req(`bwallet_paymail_aliases?alias=eq.${q(from)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    },
+    // Anti-squatting (migrations/20261010_bwallet_paymail_anti_squat.sql).
+    lastRename: async (k) =>
+      (await one(`bwallet_paymail_name_events?identity_key=eq.${q(k)}&kind=eq.rename&order=created_at.desc&limit=1`))
+        ?.created_at ?? null,
+    countIpClaims: async (ipHash, since) =>
+      (
+        (await req(
+          `bwallet_paymail_name_events?ip_hash=eq.${q(ipHash)}&created_at=gte.${q(since)}&select=id&limit=1000`,
+        )) ?? []
+      ).length,
+    recordNameEvent: (row) =>
+      req('bwallet_paymail_name_events', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    // true when this txid had not paid for a name before (and is now recorded), false when reused.
+    useFeeTx: async (row) =>
+      (
+        (await req('bwallet_paymail_name_fees?on_conflict=txid', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+          body: JSON.stringify(row),
+        })) ?? []
+      ).length > 0,
     insertPayment: (row) =>
       req('bwallet_paymail_payments', {
         method: 'POST',
@@ -136,6 +204,7 @@ function supabaseStore(env = process.env, f = fetch) {
         })) ?? [];
       const payments = (await del('bwallet_paymail_payments')).length;
       const aliases = (await del('bwallet_paymail_aliases')).length;
+      await del('bwallet_paymail_forwards');
       return { aliases, payments };
     },
     countRecentPayments: async (alias, since) => {

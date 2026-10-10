@@ -16,6 +16,7 @@ import { ChromeStorageObject } from './types/chromeStorage.types';
 import { SupportedWalletImports, WifKeys } from './types/keys.types';
 import { P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction, Utils } from '@bsv/sdk';
 import { OneSatServices } from '@1sat/wallet-browser';
+import { AccountExistsError } from './accountErrors';
 
 export class KeysService {
   bsvAddress: string;
@@ -116,6 +117,10 @@ export class KeysService {
     }
 
     const keys = getKeys(mnemonic, walletDerivation, ordDerivation, identityDerivation);
+    // Adding to an existing wallet must not silently overwrite an account it already has.
+    if (!isNewWallet && this.chromeStorageService.getAllAccounts().some((a) => a?.addresses?.identityAddress === keys.identityAddress)) {
+      throw new AccountExistsError();
+    }
     if (mnemonic) {
       this.sweepLegacy(keys);
     }

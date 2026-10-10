@@ -17,7 +17,8 @@ import {
   type ExpiryChoice,
   type ManagedInvite,
 } from '../spaces/invite';
-import { copyLink, shareLink } from './shareLink';
+import { copyLink, shareText } from './shareLink';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -59,7 +60,7 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
       if (!inv?.url) throw new Error('No link came back.');
       const r =
         how === 'share'
-          ? await shareLink({ title, text: `${inv.target.live ? 'Live now: ' : ''}${title}`, url: inv.url })
+          ? await shareText(`${inv.target.live ? 'Live now: ' : ''}${title}\n${inv.url}`)
           : await copyLink(inv.url);
       if (r === 'copied') onNote('Invite link copied.');
       if (r === 'failed') onNote(inv.url);
@@ -134,7 +135,9 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
           <Copy size={15} /> Copy
         </button>
       </div>
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
 
       <div className="text-[11px] font-semibold uppercase tracking-wide mt-5 mb-2" style={{ color: MUTED }}>
         Invites

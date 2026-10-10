@@ -11,6 +11,7 @@ import { busy, type Peer } from './machine';
 import { BOOKING_MINUTES, bookingSlots, categoryLabel, DAYS, isOpenAt, nextOpening, rateShort } from './rateCard';
 import { dial } from './store';
 import { useCalls } from './useCalls';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#F5B800';
 const GREEN = '#2ecc71';
@@ -76,7 +77,7 @@ const ServiceCard = ({
   const name = serviceName(p);
   const status = openLabel(p, now);
   return (
-    <article className="rounded-2xl border border-[#23262c] bg-[#121316] p-3 flex flex-col gap-2.5">
+    <article className="bw-mail-card p-3 flex flex-col gap-2.5">
       <div className="flex items-start gap-3">
         <Avatar title={name} src={p.avatar} size={44} />
         <div className="flex-1 min-w-0">
@@ -183,7 +184,9 @@ export const Directory = ({
           <Loader2 size={20} className="animate-spin" color="#98A2B3" />
         </div>
       )}
-      {error && <p className="text-xs text-[#ff6b6b]">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#ff6b6b]">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       {shown && shown.length === 0 && !error && (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p className="text-sm text-[#98A2B3]">No listings yet.</p>

@@ -28,8 +28,12 @@ import {
   LifeBuoy,
   Wrench,
   Volume2,
+  Radio,
   Receipt,
+  Coins,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { requestIgnoreBattery } from '../mobile/spaces/battery';
 import { FaEnvelope } from 'react-icons/fa';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -41,8 +45,7 @@ import { useBottomMenu } from '../hooks/useBottomMenu';
 import { useIdentity, resolveImageUrl } from '../hooks/useIdentity';
 import { useTheme } from '../hooks/useTheme';
 import { useServiceContext } from '../hooks/useServiceContext';
-import { YoursEventName } from '../inject';
-import { sendMessage } from '../utils/chromeHelpers';
+import { useSignOut } from '../mobile/account/useMenuAccounts';
 import { FEE_PER_KB, SUPPORT_EMAIL_URL } from '../utils/constants';
 import { ChromeStorageObject, UsbBackupAccountStatus, UsbSecurity } from '../services/types/chromeStorage.types';
 import {
@@ -70,6 +73,7 @@ import ProgressBar from '@ramonak/react-progress-bar';
 
 import { derivePasswordKey } from '../services/passKey';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { getDisplayCurrency, setDisplayCurrency, type DisplayCurrency } from '../utils/displayCurrency';
 import { usePrefs } from '../mobile/settings/usePrefs';
 import {
   runUsbBackup,
@@ -313,6 +317,7 @@ export const Settings = () => {
   const [backupError, setBackupError] = useState('');
   const currentAccount = chromeStorageService.getCurrentAccountObject();
   const [customFeeRate, setCustomFeeRate] = useState(currentAccount.account?.settings.customFeeRate ?? FEE_PER_KB);
+  const [displayCurrency, setDisplayCurrencyState] = useState<DisplayCurrency>(getDisplayCurrency);
   const [lockTimeout, setLockTimeout] = useState(currentAccount.account?.settings.lockTimeout ?? 10);
   const [selectedAccountIdentityAddress, setSelectedAccountIdentityAddress] = useState<string | undefined>();
 
@@ -508,7 +513,7 @@ export const Settings = () => {
 
   const handleSignOutIntent = () => {
     setDecisionType('sign-out');
-    setSpeedBumpMessage('Make sure you have your seed phrase backed up!');
+    setSpeedBumpMessage('Sign this account out of chat and lock the wallet? Your keys stay on this device.');
     setShowSpeedBump(true);
   };
 
@@ -702,14 +707,15 @@ export const Settings = () => {
     }, 10000);
   };
 
+  // Sign out = sign this account out of chat and lock the wallet. It never removes the encrypted keys: that was
+  // upstream's chromeStorageService.clear() + SIGNED_OUT (IndexedDB deleted), which on bWalletX Desktop / web
+  // made the next visit ask for the 12 words (owner, 9 Oct 2026, D8). Removing a wallet is Forgot password or
+  // Delete account, both of which say so.
+  const signOutAndLock = useSignOut();
   const signOut = async () => {
-    await chromeStorageService.clear();
-    wallet?.close?.();
     setDecisionType(undefined);
-    sendMessage({
-      action: YoursEventName.SIGNED_OUT,
-    });
-    setTimeout(() => window.location.reload(), 100);
+    setShowSpeedBump(false);
+    await signOutAndLock(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress);
   };
 
   const handleCancel = () => {
@@ -997,6 +1003,17 @@ export const Settings = () => {
           }
         />
         <Divider />
+        {Capacitor.getPlatform() === 'android' && (
+          <>
+            <SettingRow
+              icon={<Radio size={16} />}
+              label="Spaces with the screen off"
+              description="Let bWalletX keep a live Space running when the screen sleeps"
+              onClick={() => void requestIgnoreBattery()}
+            />
+            <Divider />
+          </>
+        )}
         <SettingRow
           icon={<Volume2 size={16} />}
           label="Sounds"
@@ -1007,6 +1024,27 @@ export const Settings = () => {
               on={appPrefs.sounds}
               onChange={() => setAppPrefs({ sounds: !appPrefs.sounds })}
             />
+          }
+        />
+        <Divider />
+        <SettingRow
+          icon={<Coins size={16} />}
+          label="Currency"
+          description="Show amounts in (payments are unchanged)"
+          right={
+            <select
+              aria-label="Display currency"
+              value={displayCurrency}
+              onChange={(e) => {
+                const c: DisplayCurrency = e.target.value === 'GBP' ? 'GBP' : 'USD';
+                setDisplayCurrency(c);
+                setDisplayCurrencyState(c);
+              }}
+              style={{ border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
+            >
+              <option value="USD">US dollar ($)</option>
+              <option value="GBP">British pound (£)</option>
+            </select>
           }
         />
         <Divider />
@@ -1055,7 +1093,7 @@ export const Settings = () => {
         <SettingRow
           icon={<LogOut size={16} />}
           label="Sign Out"
-          description={`Sign out of ${theme.settings.displayName ?? `${theme.settings.walletName} Wallet`} completely`}
+          description="Sign out of chat and lock the wallet. Your keys stay on this device"
           onClick={handleSignOutIntent}
           isFirst
           isLast
@@ -1085,6 +1123,10 @@ export const Settings = () => {
     const before = repairRecord?.startedAt;
     try {
       const response = await runRepair();
+      const recovered = response?.data?.tokensRecovered ?? 0;
+      if (recovered > 0) {
+        addSnackbar(`Found ${recovered} token ${recovered === 1 ? 'output' : 'outputs'} this wallet had missed`, 'success');
+      }
       if (response?.success) return;
       const after = (await chrome.storage.local.get(RECONCILE_RECORD_KEY))[RECONCILE_RECORD_KEY] as
         | ReconcileRecord
@@ -1169,19 +1211,13 @@ export const Settings = () => {
       <SubPageHeader title="Manage Accounts" onBack={() => setPage('main')} />
       <motion.div variants={stagger} initial="initial" animate="animate" className="w-full">
         <Section title="Actions">
+          {/* One Add account screen: New account on top, then restore / import (owner, 10 Oct 2026). */}
           <SettingRow
             icon={<Plus size={16} />}
-            label="Create Account"
-            description="Create a new account"
-            onClick={() => setPage('create-account')}
-            isFirst
-          />
-          <Divider />
-          <SettingRow
-            icon={<Download size={16} />}
-            label="Restore / Import"
-            description="Import or restore an existing account"
+            label="Add account"
+            description="New, or restore from 12 words or a backup"
             onClick={() => setPage('restore-account')}
+            isFirst
           />
           <Divider />
           <SettingRow
@@ -1839,7 +1875,7 @@ export const Settings = () => {
                 exit="exit"
                 className="w-full pb-4"
               >
-                <RestoreAccount onNavigateBack={(p: SettingsPage) => setPage(p)} />
+                <RestoreAccount onNavigateBack={(p: SettingsPage) => setPage(p)} onNewAccount={() => setPage('create-account')} />
               </motion.div>
             )}
 

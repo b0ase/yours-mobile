@@ -12,7 +12,8 @@ import { SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { loadFollows } from '../feed/store';
 import { getFriends, onFriends, refreshFriends } from '../calls/friends';
 import { onDmRequest, onRoomTicker, takeDmRequest, takeRoomTicker } from './segmentNav';
-import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from './api';
+import { BchatClient, ChatApiError, defaultHttp, loadSession, needsHandle, saveSession } from './api';
+import { HandleFlow } from '../names/HandleFlow';
 import { walletSigner } from './signer';
 import { listTimeLabel, previewText, roomTitle, type ChatRoom } from './messages';
 import { Avatar, ContactRow, SourceBadges } from './ContactViews';
@@ -123,11 +124,30 @@ export const DmsPage = ({
       saveSession(s);
       setHandle(s.handle);
     } catch (e) {
-      setAuthError(errText(e));
+      // A wallet bChat hasn't seen and no handle chosen yet: open Choose your handle right here.
+      const need = needsHandle(e);
+      if (need) setHandleClaim(need);
+      else setAuthError(errText(e));
     } finally {
       setSigningIn(false);
     }
   }, [client, apiContext]);
+  const [handleClaim, setHandleClaim] = useState<{ claimToken: string; address: string } | null>(null);
+  // After the handle is chosen, finish the sign-in with bit-sign's claim token (falls back to a fresh
+  // sign-in, which now finds the chosen name, if the token has expired).
+  const finishClaim = useCallback(
+    async (paymail: string) => {
+      if (!handleClaim) return;
+      const name = paymail.split('@')[0];
+      const s = await client
+        .claimHandle(handleClaim.claimToken, name, handleClaim.address)
+        .catch(() => client.signIn(walletSigner(apiContext)));
+      saveSession(s);
+      setHandle(s.handle);
+      setHandleClaim(null);
+    },
+    [client, apiContext, handleClaim],
+  );
 
   const authLost = useCallback(() => {
     client.signOut();
@@ -312,6 +332,7 @@ export const DmsPage = ({
               {signingIn ? 'Signing in…' : 'Sign in with wallet'}
             </button>
             {authError && <p className="text-xs text-[#F97066]">{authError}</p>}
+            {handleClaim && <HandleFlow onClose={() => setHandleClaim(null)} onClaimed={finishClaim} />}
           </div>
         )}
 

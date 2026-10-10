@@ -1,4 +1,5 @@
 import { toToken, toTokenSat } from 'satoshi-token';
+import { formatFiat } from './displayCurrency';
 
 export function showAmount(amt: bigint, dec: number): string {
   if (!Number.isFinite(dec) || dec < 0) {
@@ -14,12 +15,8 @@ export function normalize(amt: string, dec: number): string {
   return toTokenSat(amt, dec, 'string');
 }
 
-export const formatUSD = (value: number): string => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(value);
-};
+/** A US-dollar amount in the display currency (Settings › Currency): "$12.34" or "£9.12". */
+export const formatUSD = (value: number): string => formatFiat(value);
 
 export const truncate = (str: string, startLength: number, endLength: number) => {
   if (typeof str !== 'string') {

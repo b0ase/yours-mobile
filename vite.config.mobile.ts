@@ -132,25 +132,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { MintButton } from '../mobile/mint/MintButton';",
       "import { MintButton } from '../mobile/mint/MintButton';\nimport { CreditsRow } from '../mobile/credits/CreditsRow';",
     ],
-    // Send to a name: $handle / paymail / OpNS recipient box with resolve + confirm (src/mobile/names).
+    // Send to a name now lives in the Send card itself (src/mobile/wallet/send/SendCard → NameInput).
     [
       "import { MintButton } from '../mobile/mint/MintButton';",
-      "import { MintButton } from '../mobile/mint/MintButton';\nimport { NameInput } from '../mobile/names/NameInput';\nimport { ReceiveName } from '../mobile/names/MyNameBadge';",
-    ],
-    [
-      `<Input
-                theme={theme}
-                placeholder="Enter Address or Paymail"
-                type="text"
-                onChange={(e) => updateRecipient(recipient.id, 'address', e.target.value)}
-                value={recipient.address}
-              />`,
-      `<NameInput
-                theme={theme}
-                asset="bsv"
-                onChange={(v) => updateRecipient(recipient.id, 'address', v)}
-                value={recipient.address}
-              />`,
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { ReceiveName } from '../mobile/names/MyNameBadge';",
     ],
     // Receive screen shows the account's name.
     [
@@ -333,8 +318,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { useNavigate } from 'react-router-dom';\nimport { checkRestoreMatchesName } from '../../mobile/social/restoreGuard';",
     ],
     [
-      '      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,',
-      "      const nameMismatch = await checkRestoreMatchesName(seedWords, walletDerivation, ordDerivation, identityDerivation, importWallet);\n      console.log('[restore] name check at', at());\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        seedWords,",
+      '      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        normalizePhrase(seedWords),',
+      "      const nameMismatch = await checkRestoreMatchesName(normalizePhrase(seedWords), walletDerivation, ordDerivation, identityDerivation, importWallet);\n      console.log('[restore] name check at', at());\n      if (nameMismatch) {\n        addSnackbar(nameMismatch, 'error');\n        return;\n      }\n      await sleep(50);\n      const keys = await keysService.generateSeedAndStoreEncrypted(\n        password,\n        newWallet,\n        normalizePhrase(seedWords),",
     ],
     // Confirm field also when adding to an existing wallet.
     [
@@ -343,15 +328,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // Password asked twice for every restore (owner, 6 Oct 2026).
     ['      if (newWallet && password !== passwordConfirm) {', '      if (password !== passwordConfirm) {'],
-    [
-      "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
-    ],
-    // Say why it failed (src/mobile/onboardingError.ts) instead of always blaming the password.
-    [
-      "      console.log(error);\n      addSnackbar('An error occurred while restoring the account!', 'error');",
-      "      console.log(error);\n      addSnackbar(onboardingError('restore', error), 'error');",
-    ],
+    // (Why it failed is now in the source: pages/onboarding/restoreHelpers.ts restoreErrorMessage, same wording.)
     // Colour on the RelayX tile (white mark on its #2669FF blue) and Twetch's real icon (its brand is monochrome).
     [
       "import relayXLogo from '../../assets/relayx.svg';",
@@ -429,7 +406,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer"',
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer bw-pill bw-pill-gold"',
     ],
-    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="flex items-center gap-3 mt-6 w-[90%]"'],
+    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="flex items-center gap-3 mt-3 w-[90%]"'],
     // Section label.
     [
       '              Assets\n            </span>\n            <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />',
@@ -657,7 +634,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Phone layout (src/mobile/phone, behind the Settings › Testing switch): the dock, page swipes and the hold-b
     // agent, mounted once inside the router. Renders nothing while the switch is off.
     // PhonePage wraps the routed page so the phone layout can drag it sideways (phone/pager.tsx).
-    ['<Routes>', '<Suspense fallback={null}><PhoneShell /></Suspense>\n<PhonePage><Routes>'],
+    // ErrorNavBridge: errors outside the router (the snackbar) can open b with the error typed in (errors/).
+    ['<Routes>', '<ErrorNavBridge /><Suspense fallback={null}><PhoneShell /></Suspense>\n<PhonePage><Routes>'],
     ['</Routes>', '</Routes></PhonePage>'],
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
@@ -669,7 +647,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';\nimport { ErrorNavBridge } from './mobile/errors/ErrorNavBridge';",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',

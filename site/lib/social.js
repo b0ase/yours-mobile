@@ -69,8 +69,20 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
     name: t.name,
     display: t.d || null,
     avatar: t.a || null,
-    alias: socialAliasFor(t.p, t.name),
+    // Deprecated (owner, 9 Oct 2026: users choose their handle). Kept for app builds that still
+    // register `<name>.x`; never a Gmail-derived name now, since that published the address.
+    alias: t.p === 'x' ? socialAliasFor(t.p, t.name) : null,
+    // New clients: open "Choose your handle" prefilled with suggested_handle (the X @name only).
+    choose_handle: true,
+    suggested_handle: suggestedHandleFor(t.p, t.name),
   };
+}
+
+/** The handle to prefill: the X @name as a plain alias (`B0ase_X` → `b0ase-x`); never anything from an email. */
+function suggestedHandleFor(provider, name) {
+  if (provider !== 'x') return null;
+  const n = String(name || '').trim().toLowerCase();
+  return /^[a-z0-9_]{1,15}$/.test(n) ? n.replace(/_/g, '-').replace(/^-+|-+$/g, '') || null : null;
 }
 
 // Where the browser lands after the provider. A fixed list, never a caller-supplied URL (no open redirect).
@@ -78,11 +90,11 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
 // users on "you're signed in" with no way back to the wallet tab).
 // 'testers': the paid Android testers sign-up page (bwalletx.com/testers); the ticket is verified there
 // server-side via /api/social/preview.
-const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/', testers: 'https://bwalletx.com/testers' };
+const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/', desktop: 'https://desktop.bwalletx.com/', testers: 'https://bwalletx.com/testers' };
 const returnUrl = (q, to = 'app') => `${RETURNS[to] || RETURN}#${new URLSearchParams(q).toString()}`;
 
 function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {
-  const r = return_to === 'web' || return_to === 'testers' ? return_to : undefined;
+  const r = Object.hasOwn(RETURNS, return_to) && return_to !== 'app' ? return_to : undefined;
   if (provider !== 'x' && provider !== 'google') return [400, { error: 'provider must be x or google' }];
   if (!/^[0-9a-f]{64}$/.test(String(vh || ''))) return [400, { error: 'verifier_hash must be sha256 hex' }];
   const e = now + TTL_MS;
@@ -122,7 +134,7 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
   const st = open(q.state, env);
   if (!st || st.p !== provider || !(st.e > now))
     return returnUrl({ error: 'That sign-in has expired. Please try again.' });
-  const to = st.r === 'web' || st.r === 'testers' ? st.r : 'app';
+  const to = st.r && Object.hasOwn(RETURNS, st.r) ? st.r : 'app';
   if (q.error || !q.code)
     return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
   try {
@@ -190,4 +202,4 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
   }
 }
 
-module.exports = { start, callback, openTicket, socialAliasFor, seal, open, sha256Hex, TTL_MS };
+module.exports = { start, callback, openTicket, socialAliasFor, suggestedHandleFor, seal, open, sha256Hex, TTL_MS };

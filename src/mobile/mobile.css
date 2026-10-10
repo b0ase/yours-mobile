@@ -203,10 +203,16 @@ select {
    staggered entry (opacity + translateY layers on each section) Chromium can
    leave a stale raster tile of the Receive/Send/Mint row painted inside it,
    below the asset rows. Giving the scroller its own layer makes it repaint
-   its contents itself. Nothing inside uses position:fixed (MintSheet portals
-   to body), so the new containing block is harmless. */
+   its contents itself.
+   No transform / filter / perspective / will-change:transform / contain here:
+   any of them makes the scroller the containing block for position:fixed, and
+   the wallet's video background (VideoBackground position='fixed') then rides
+   inside the scrolled content instead of staying pinned to the screen, which
+   made the Wallet page scroll on past its last row (owner, 10 Oct 2026).
+   backface-visibility gives the same own layer without that side effect. */
 .pt-14.pb-16.overflow-y-auto {
-  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   isolation: isolate;
 }
 
@@ -501,6 +507,7 @@ body,
   letter-spacing: -0.02em;
 }
 .bw-wcard-sats {
+  margin-top: 3px;
   font-size: 12px;
   color: var(--bw-wcard-muted, #8e8e89);
 }
@@ -926,6 +933,39 @@ body,
   white-space: nowrap;
 }
 
+/* Top-right of the card: Scan to pay. */
+.bw-wcard-tr {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -10px;
+}
+.bw-wcard-scan {
+  width: 44px;
+  height: 44px;
+  margin: -8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.bw-wcard-scan > span {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffd24d;
+  border: 1px solid rgba(255, 210, 77, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+.bw-wcard-scan:active > span {
+  background: rgba(255, 210, 77, 0.18);
+}
 .bw-wcard-unit {
   display: inline-flex;
   padding: 2px;
@@ -946,6 +986,39 @@ body,
 .bw-wcard-unit button.is-on {
   background: #ffd24d;
   color: #111;
+}
+/* Bottom-left block (address, member since) beside the unit switch in the bottom-right corner. */
+.bw-wcard-bl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+/* Address (left) and $/BSV switch (right) share one row, centred together. */
+.bw-wcard-addrline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+.bw-wcard-addrslot {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.bw-wcard-addrline > .bw-wcard-unit {
+  flex-shrink: 0;
+  margin-right: -4px;
+}
+/* 44px tap target around each small pill. */
+.bw-wcard-unit button {
+  position: relative;
+}
+.bw-wcard-unit button::after {
+  content: '';
+  position: absolute;
+  inset: -13px -2px;
 }
 
 /* Public BSV address on the card front (in place of a card number). */
@@ -969,7 +1042,7 @@ body,
 }
 
 .bw-wcard-addrrow {
-  margin-bottom: 16px;
+  margin-bottom: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1060,6 +1133,18 @@ body,
     animation: none;
   }
 }
+/* Holding the b: listening. A full gold ring that pulses (Dock.tsx HomeButton). */
+.bw-listen-ring {
+  stroke-dashoffset: 0;
+  animation: bw-listen-pulse 1.1s ease-in-out infinite;
+}
+@keyframes bw-listen-pulse {
+  0%, 100% { opacity: 1; stroke-width: 3; }
+  50% { opacity: 0.45; stroke-width: 5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-listen-ring { animation: none; }
+}
 .bw-hold-ring {
   stroke-dashoffset: 100;
   animation-name: bw-hold-fill;
@@ -1148,4 +1233,132 @@ select optgroup {
 /* Receive › Airdrops tab (src/mobile/airdrops/ReceiveTabs.tsx): hide the payment QR and copy row after it. */
 .bw-rcv-airdrop ~ * {
   display: none !important;
+}
+
+/* bMail and bPhone Calls (src/mobile/bmail, src/mobile/calls): the Wallet card's black-and-gold finish on translucent cards over the wallet clip. */
+.bw-mail-bar {
+  background: linear-gradient(180deg, rgba(5, 5, 6, 0.86) 0%, rgba(5, 5, 6, 0.62) 100%);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.bw-mail-card {
+  position: relative;
+  border-radius: 16px;
+  background:
+    /* The wallet card's diagonal gold sheen (.bw-wcard-face), quieter on rows. */
+    linear-gradient(115deg, transparent 30%, rgba(255, 210, 77, 0.05) 46%, rgba(255, 236, 170, 0.08) 50%, transparent 64%),
+    radial-gradient(120% 90% at 0% 0%, rgba(42, 42, 44, 0.55) 0%, transparent 60%),
+    linear-gradient(160deg, rgba(27, 27, 29, 0.78) 0%, rgba(11, 11, 12, 0.82) 55%, rgba(5, 5, 5, 0.86) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+button.bw-mail-card {
+  transition: border-color 0.2s ease, transform 0.12s ease;
+}
+button.bw-mail-card:active {
+  transform: scale(0.99);
+}
+.bw-mail-card.is-unread {
+  background:
+    linear-gradient(115deg, transparent 30%, rgba(255, 210, 77, 0.08) 46%, rgba(255, 236, 170, 0.12) 50%, transparent 64%),
+    radial-gradient(120% 90% at 0% 0%, rgba(58, 54, 44, 0.6) 0%, transparent 60%),
+    linear-gradient(160deg, rgba(34, 33, 30, 0.82) 0%, rgba(16, 15, 13, 0.85) 55%, rgba(6, 6, 5, 0.88) 100%);
+  border-color: rgba(255, 210, 77, 0.3);
+}
+/* Header summary: full wallet-card sheen plus a slow shimmer (none with reduced motion). */
+.bw-mail-hero {
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    linear-gradient(115deg, transparent 30%, rgba(255, 210, 77, 0.1) 46%, rgba(255, 236, 170, 0.16) 50%, transparent 64%),
+    radial-gradient(140% 120% at 30% 55%, transparent 35%, rgba(0, 0, 0, 0.3) 100%),
+    linear-gradient(160deg, rgba(176, 132, 44, 0.16) 0%, rgba(92, 64, 12, 0.1) 100%),
+    radial-gradient(120% 90% at 0% 0%, #2a2a2c 0%, transparent 60%),
+    linear-gradient(160deg, rgba(27, 27, 29, 0.9) 0%, rgba(11, 11, 12, 0.92) 55%, rgba(5, 5, 5, 0.94) 100%);
+  border-color: rgba(255, 210, 77, 0.32);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.bw-mail-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 40%, rgba(255, 236, 170, 0.1) 50%, transparent 60%);
+  background-size: 250% 100%;
+  animation: bw-mail-shimmer 7s ease-in-out infinite;
+}
+@keyframes bw-mail-shimmer {
+  0% {
+    background-position: 130% 0;
+  }
+  60%,
+  100% {
+    background-position: -30% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-mail-hero::after {
+    animation: none;
+    display: none;
+  }
+}
+.bw-mail-seg {
+  background: rgba(10, 10, 11, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+/* Reader: the letter. */
+.bw-mail-letter {
+  padding: 20px 18px 22px;
+  border-radius: 18px;
+}
+.bw-mail-body {
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.65;
+  color: #ecebe6;
+}
+/* Postage stamp: perforated edge (half-circle bites from a mask on a 3px band), inner frame in the stamp colour. */
+.bw-mail-stamp {
+  display: inline-flex;
+  padding: 3px;
+  background: color-mix(in srgb, currentColor 22%, #0b0b0c);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    radial-gradient(circle at center, transparent 1.6px, #000 1.9px) -3px -3px / 6px 6px;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    radial-gradient(circle at center, transparent 1.6px, #000 1.9px) -3px -3px / 6px 6px;
+}
+.bw-mail-stamp > span {
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* SwipeRow (src/mobile/swipe): hover/focus action icons on desktop, hidden on touch until focus. */
+.bw-swipe .bw-swipe-hover { opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.bw-swipe:focus-within .bw-swipe-hover { opacity: 1; pointer-events: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .bw-swipe:hover .bw-swipe-hover { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none) {
+  .bw-swipe .bw-swipe-hover-btn { display: none; }
+}
+.bw-swipe .bw-swipe-check { opacity: 0; }
+.bw-swipe:hover .bw-swipe-check, .bw-swipe:focus-within .bw-swipe-check, .bw-swipe .bw-swipe-check.is-on,
+.bw-swipe-selecting .bw-swipe-check { opacity: 1; }
+.bw-swipe-row-focus { outline: 2px solid #FFC700; outline-offset: -2px; border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .bw-swipe-face, .bw-swipe .bw-swipe-hover { transition: none !important; }
 }

@@ -1,11 +1,21 @@
-import { APP_NAME } from '../storeBuild';
-import { useEffect, useState } from 'react';
+import { APP_NAME, SWAP_ENABLED } from '../storeBuild';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { useSnackbar } from '../../hooks/useSnackbar';
+import { useSwapWatcher } from '../swap/useSwapWatcher';
+import type { SwapRecord } from '../swap/swapApi';
+
+// Portfolio vs market (owner, 10 Oct 2026): the price tile opens it; its own chunk.
+const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
+// Swap into BSV (bWalletX only): the chunk is dropped from a store build (SWAP_ENABLED).
+const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
+const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { HistoryButton } from './HistoryButton';
+import { formatUSD } from '../../utils/format';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -47,7 +57,7 @@ export const BuyBsvCard = ({
   >
     <span className="text-base font-extrabold">Buy BSV</span>
     <span className="text-sm font-bold">
-      {rate > 0 ? `$${rate.toFixed(2)}` : '…'} <span className="font-semibold opacity-70">per BSV</span>
+      {rate > 0 ? formatUSD(rate) : '…'} <span className="font-semibold opacity-70">per BSV</span>
     </span>
   </button>
 );
@@ -75,8 +85,42 @@ export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; 
 /** The wallet top row's shared cell style: equal columns, same height, radius and border (owner round 7). */
 const CELL = 'flex-1 basis-0 min-w-0 h-14 rounded-xl flex items-center justify-center border cursor-pointer';
 
-/** Today's BSV price; opens the BSV view, the same as the BSV card below the wallet card. */
-const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
+/**
+ * Today's % change of BSV: the live rate against the WhatsOnChain daily rate from about 24 hours ago (the same
+ * source as the BSV view's chart). Null until known; read once per app run.
+ */
+let dayAgoCache: number | null = null;
+const useDayChange = (rate: number): number | null => {
+  const [dayAgo, setDayAgo] = useState<number | null>(dayAgoCache);
+  useEffect(() => {
+    if (dayAgoCache) return;
+    let live = true;
+    const now = Math.floor(Date.now() / 1000);
+    fetch(`https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical?from=${now - 3 * 86400}&to=${now}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: { rate: number; time: number }[]) => {
+        const target = now - 86400;
+        const best = rows
+          .filter((r) => r.rate > 0)
+          .sort((a, b) => Math.abs(a.time - target) - Math.abs(b.time - target))[0];
+        if (best && live) {
+          dayAgoCache = best.rate;
+          setDayAgo(best.rate);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return dayAgo && rate > 0 ? ((rate - dayAgo) / dayAgo) * 100 : null;
+};
+
+/**
+ * Today's BSV price; opens the BSV view (price chart), the same as the BSV card below the wallet card. With `change`
+ * the small line shows today's % change in green / red instead of "per BSV".
+ */
+const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void; change?: number | null }) => (
   <button
     type="button"
     onClick={onOpen}
@@ -84,24 +128,66 @@ const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
     className={`${CELL} flex-col leading-tight`}
     style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
   >
-    <span className="text-[15px] font-extrabold">{rate > 0 ? `$${rate.toFixed(2)}` : '…'}</span>
-    <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
-      per BSV
-    </span>
+    <span className="text-[15px] font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
+    {change == null ? (
+      <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
+        per BSV
+      </span>
+    ) : (
+      <span className="text-[10px] font-bold" style={{ color: change >= 0 ? '#2ecc71' : '#F04438' }}>
+        {change >= 0 ? '+' : ''}
+        {change.toFixed(2)}% today
+      </span>
+    )}
   </button>
 );
 
+/** Same box and margins as the promo card, so nothing jumps when the chunk loads. */
+const SwapPromoSkeleton = () => <div className="w-[92%] min-h-[52px] -mb-1" aria-hidden="true" />;
+
 /**
- * Wallet top row (owner, rounds 6–7): price · Buy BSV · History, three equal columns. The price opens the BSV view
- * (`onPrice`, the BSV card's own handler).
+ * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
+ * The price opens the BSV view (`onPrice`, the BSV card's own handler). The "Swap into BSV" promo card below the row
+ * is the only swap entry; `getAddress` gives Swap the wallet's own BSV receive address.
  */
-export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onPrice: () => void }) => {
+export const BsvPriceBar = ({
+  onReceive,
+  onPrice,
+  getAddress,
+  bsvSats = 0,
+  mneeUsd = 0,
+  tokenCount = 0,
+}: {
+  onReceive: () => void;
+  /** Opens the BSV view with its chart (from the Portfolio screen's "BSV chart" button). */
+  onPrice: () => void;
+  getAddress?: () => Promise<string>;
+  /** For Portfolio vs market (the price tile opens it): spendable BSV, MNEE dollars, unpriced tokens. */
+  bsvSats?: number;
+  mneeUsd?: number;
+  tokenCount?: number;
+}) => {
   const rate = useLivePrice();
+  const change = useDayChange(rate);
   const [open, setOpen] = useState(false);
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
+  const [resume, setResume] = useState<SwapRecord | null>(null);
+  const { addSnackbar } = useSnackbar();
+  const { swaps, active } = useSwapWatcher((s) => {
+    if (s.stage === 'done') addSnackbar(`Swap finished: ${s.toAmount ?? ''} BSV is in your wallet`, 'success');
+    else if (s.stage === 'refunded') addSnackbar('Your swap was refunded', 'info');
+    else if (s.stage === 'failed') addSnackbar('A swap needs attention. Open Swap to see it.', 'error');
+  });
+  const swapOn = SWAP_ENABLED && !!SwapFlow && !!getAddress;
+  const openSwap = () => {
+    setResume(active[0] ?? (swaps[0] && !swaps[0].notified ? swaps[0] : null));
+    setSwapOpen(true);
+  };
   return (
     <>
-      <div className="w-[92%] mb-4 flex items-stretch gap-2">
-        <PriceCell rate={rate} onOpen={onPrice} />
+      <div className="w-[92%] mb-2 flex items-stretch gap-2">
+        <PriceCell rate={rate} onOpen={() => setPortfolioOpen(true)} change={change} />
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -116,6 +202,13 @@ export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onP
         </button>
         <HistoryButton className={CELL} />
       </div>
+      {swapOn && SwapPromo && (
+        // Equal 8px above and below the promo: the row's mb-2 above; below, the card's own 12px top margin less 4px.
+        <Suspense fallback={<SwapPromoSkeleton />}>
+          <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
+        </Suspense>
+      )}
+      {!swapOn && <div className="mb-2" />}
       {open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
@@ -124,6 +217,27 @@ export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onP
             onReceive();
           }}
         />
+      )}
+      {portfolioOpen && (
+        <Suspense fallback={null}>
+          <PortfolioScreen
+            onClose={() => setPortfolioOpen(false)}
+            onBsvChart={() => {
+              setPortfolioOpen(false);
+              onPrice();
+            }}
+            bsvSats={bsvSats}
+            mneeUsd={mneeUsd}
+            tokenCount={tokenCount}
+            price={rate}
+            dayChange={change}
+          />
+        </Suspense>
+      )}
+      {swapOn && swapOpen && SwapFlow && getAddress && (
+        <Suspense fallback={null}>
+          <SwapFlow getAddress={getAddress} resume={resume} onClose={() => setSwapOpen(false)} />
+        </Suspense>
       )}
     </>
   );

@@ -74,7 +74,15 @@ export const claimPaymail = async (
   f: Fetch,
   wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
   alias: string,
-  extra: { ordAddress?: string; name?: string; avatar?: string; social?: { ticket: string; secret: string } } = {},
+  extra: {
+    ordAddress?: string;
+    name?: string;
+    avatar?: string;
+    social?: { ticket: string; secret: string };
+    /** The 1¢ name-fee payment (paymailConfig().nameFee): txid is signed; the tx hex helps a fresh tx through. */
+    feeTxid?: string;
+    feeTx?: string;
+  } = {},
 ): Promise<string> => {
   if (!paymailEnabled()) throw new Error('Paymail is not configured');
   if (!PAYMAIL_ALIAS_RE.test(alias) && !SOCIAL_ALIAS_RE.test(alias)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
@@ -82,9 +90,14 @@ export const claimPaymail = async (
   if (extra.ordAddress) fields.ordAddress = extra.ordAddress;
   if (extra.name) fields.name = extra.name.slice(0, 64);
   if (extra.avatar) fields.avatar = extra.avatar.slice(0, 512);
+  if (extra.feeTxid) fields.feeTxid = extra.feeTxid;
   const signed = await signRequest(wallet, 'register', fields);
   // A verified social name (b0asex.x) carries the Continue with X / Google proof (src/mobile/social).
-  const j = await postJson(f, api('register'), extra.social ? { ...signed, social: extra.social } : signed);
+  const j = await postJson(f, api('register'), {
+    ...signed,
+    ...(extra.social ? { social: extra.social } : {}),
+    ...(extra.feeTx ? { feeTx: extra.feeTx } : {}),
+  });
   return String(j.paymail);
 };
 
@@ -209,16 +222,34 @@ export const collectPaymailInbox = async (
   return { collected: done.length, satoshis };
 };
 
-/**
- * Why the paymail can't be changed to `alias`, or null if it can. Mirrors the paymail server's
- * rule (site/lib/paymail.js `register`, owner 4 Oct 2026): a wallet whose name is a verified
- * X / Google name (`b0asex.x`) can't also take a plain name, so offering "Change to <plain>"
- * only to have the server refuse it is wrong. A plain name still renames freely.
- */
+/** Why the paymail can't be changed to `alias`, or null if it can (mirrors site/lib/paymail.js `register`). */
 export const nameChangeBlocked = (current: string | null | undefined, alias: string): string | null => {
+  // Owner, 9 Oct 2026 (handle rule): users choose their handle, and a wallet with a verified .x / .gmail
+  // name may pick a plain one (the verified name keeps receiving). Only a NEW .x / .gmail name is refused:
+  // those come from a provider, not a choice.
   const now = (current ?? '').split('@')[0];
-  if (!now || !alias || now === alias) return null;
-  if (!SOCIAL_ALIAS_RE.test(now) || SOCIAL_ALIAS_RE.test(alias)) return null;
-  const via = now.endsWith('.x') ? 'X' : 'Google';
-  return `Your name is $${now}, verified with ${via}. A wallet with a verified name keeps it, so it can't switch to a plain name. To use ${alias}, add another account.`;
+  if (!alias || now === alias || !SOCIAL_ALIAS_RE.test(alias)) return null;
+  return 'Choose a plain handle (a-z, 0-9, - or _).';
 };
+
+export type NameFee = { address: string; usd: number };
+/** The server's name rules: where the 1¢ fee for a new name goes (null = no fee). Never throws. */
+export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null }> => {
+  if (!paymailEnabled()) return { nameFee: null };
+  try {
+    const r = await f(api('config'));
+    const j = r.ok ? await r.json() : null;
+    const nf = j?.nameFee;
+    return {
+      nameFee:
+        nf && typeof nf.address === 'string' && Number(nf.usd) > 0
+          ? { address: nf.address, usd: Number(nf.usd) }
+          : null,
+    };
+  } catch {
+    return { nameFee: null };
+  }
+};
+
+/** A legacy .gmail name shows the owner's Gmail address: the app asks them to choose a name. */
+export const isGmailName = (paymail: string | null | undefined) => /\.gmail@/.test(paymail ?? '');

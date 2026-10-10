@@ -1,5 +1,6 @@
 /* global chrome */
 import { mirrorToMiner } from './mobile/minerMirror';
+import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
@@ -48,6 +49,13 @@ import {
   initOneSatPromptBridge,
 } from './services/oneSatPrompt';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
+import {
+  allowanceSats,
+  DEFAULT_ALLOWANCE_USD,
+  PermissionBundler,
+  type BundleRequest,
+} from './services/permissionBundle';
+import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -56,6 +64,8 @@ import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/
 import { finishInterruptedReconcile, reconcileStorage } from './services/storageReconcileBackground';
 import { reconcileOutcome } from './services/storageReconcile';
 import { USB_HANDLE_DB_NAME } from './services/UsbKey.service';
+import { CALL_NOTIFICATION_PREFIX, CALL_RING_ALARM, callNotification, callsToAnnounce, fetchIncoming } from './services/callRinger';
+import { openCallsWindow } from './mobile/calls/popout';
 import {
   isUsbRecoverySession,
   readUsbLastSeen,
@@ -84,6 +94,13 @@ const activePopupPorts = new Set<chrome.runtime.Port>();
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'extension-popup') {
     activePopupPorts.add(port);
+    if (panelPromptOnConnect) {
+      const { kind, requestID } = panelPromptOnConnect;
+      panelPromptOnConnect = undefined;
+      promptInPanel = true;
+      // Give the panel's listener a moment to attach before posting.
+      setTimeout(() => postToPanels({ action: 'SHOW_PROMPT_PANEL', kind, requestID }), 300);
+    }
     port.onDisconnect.addListener(() => {
       activePopupPorts.delete(port);
       if (promptInPanel && activePopupPorts.size === 0) {
@@ -492,6 +509,17 @@ const pendingPermissionRequests = new Map<
   }
 >();
 
+// One sheet per action (docs/ONE-SHEET-PERMISSIONS.md): single permission requests from one site are
+// merged into one bundle and shown as one sheet. Each request stays in pendingPermissionRequests and is
+// still answered through the manager's grantPermission / denyPermission.
+type BundledRequest = PermissionRequest & { requestID: string };
+const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>({
+  onReady: (bundle) => showPromptUi('bundle', bundle.id),
+  // A request joined an open sheet: the sheet reloads its payload ("+1 more").
+  onUpdate: (bundle) => notifyPromptUpdated('bundle', bundle.id),
+});
+let notifyPromptUpdated: (kind: PromptKind, requestID: string) => void = () => undefined;
+
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
   resolve: (wallet: WalletInterface) => void;
@@ -547,6 +575,21 @@ let denyAllPendingPrompts: () => void = () => undefined;
 // prompt.html) instead of a separate popup window (owner, 6 Oct 2026). activePopupPorts are the open
 // panels (App.tsx connects 'extension-popup'); the window remains the fallback when no panel is open.
 let promptInPanel = false;
+// The prompt the open prompt UI is showing (set when it loads its payload); see services/promptQueue.ts.
+let shownPrompt: ShownPrompt | undefined;
+// Set when the background opened the side panel itself: the prompt shows once the panel connects.
+let panelPromptOnConnect: { kind: PromptKind; requestID?: string } | undefined;
+
+// In-page sheet (docs/ONE-SHEET-PERMISSIONS.md §3d): prompt.html in an iframe the content script puts over
+// the site, used when the side panel is closed and Chrome won't open it without a click in the wallet.
+const dappTabs = new Map<string, { tabId: number; windowId: number }>();
+let inPageSheet: { tabId: number; token: string } | undefined;
+const hideInPageSheet = () => {
+  if (!inPageSheet) return;
+  const { tabId } = inPageSheet;
+  inPageSheet = undefined;
+  chrome.tabs?.sendMessage(tabId, { action: 'BWX_INPAGE_SHEET_HIDE' }).catch(() => undefined);
+};
 const postToPanels = (msg: unknown) =>
   activePopupPorts.forEach((p) => {
     try {
@@ -555,9 +598,11 @@ const postToPanels = (msg: unknown) =>
       /* panel closing */
     }
   });
+// Always tell an open panel to drop its prompt overlay: a stale one (its request gone) would otherwise sit over
+// the panel's own screens, e.g. hiding the unlock screen a waiting site needs.
 const hidePanelPrompt = () => {
-  if (!promptInPanel) return;
   promptInPanel = false;
+  shownPrompt = undefined;
   postToPanels({ action: 'HIDE_PROMPT_PANEL' });
 };
 
@@ -578,6 +623,7 @@ const hasQueuedDappUi = (): boolean =>
 
 const closeDappPopup = (): void => {
   hidePanelPrompt();
+  hideInPageSheet();
   if (!popupWindowId) return;
   selfClosedWindowIds.add(popupWindowId);
   removeWindow(popupWindowId);
@@ -592,7 +638,7 @@ const closeDappPopup = (): void => {
  * Never touches the browser-action popup (activePopupPorts).
  */
 const closeDappPopupIfNoUi = (): void => {
-  if (!popupWindowId && !promptInPanel) return;
+  if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
   closeDappPopup();
@@ -603,7 +649,7 @@ const closeDappPopupIfNoUi = (): void => {
  * unlock waiters, and no in-flight dApp CWI requests.
  */
 const closeDappPopupIfIdle = (): void => {
-  if (!popupWindowId && !promptInPanel) return;
+  if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (inFlightDappRequests > 0) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
@@ -615,6 +661,10 @@ const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
   switch (kind) {
     case 'permission':
       return requestID ? pendingPermissionRequests.get(requestID)?.request : undefined;
+    case 'bundle': {
+      const bundle = requestID ? permissionBundler.get(requestID) : undefined;
+      return bundle ? { bundleID: bundle.id, originator: bundle.originator, items: bundle.items } : undefined;
+    }
     case 'groupedPermission':
       return requestID ? pendingGroupedPermissionRequests.get(requestID)?.request : undefined;
     case 'counterpartyPermission':
@@ -633,6 +683,11 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   // A key check is holding up a call that already passed permission: first.
   const usbCheck = pendingUsbChecks.keys().next();
   if (!usbCheck.done) return { kind: 'usbCheck', requestID: usbCheck.value };
+  const bundle = permissionBundler.list()[0];
+  if (bundle) {
+    permissionBundler.flush(bundle.id); // the sheet is asking now: no need to wait out the merge window
+    return { kind: 'bundle', requestID: bundle.id };
+  }
   const permission = pendingPermissionRequests.keys().next();
   if (!permission.done) return { kind: 'permission', requestID: permission.value };
   const grouped = pendingGroupedPermissionRequests.keys().next();
@@ -660,6 +715,44 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await chromeStorageService.clearPassKey();
     await chromeStorageService.update({ isLocked: true });
   }
+});
+
+// Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
+// panel or calls window is open, a notification per new incoming call; clicking opens the Calls window.
+chrome.alarms.create(CALL_RING_ALARM, { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== CALL_RING_ALARM || !accountContext) return;
+  const base = accountContext.baseWallet;
+  try {
+    const incoming = await fetchIncoming((u, i) => fetch(u, i), {
+      identityKey: async () => (await base.getPublicKey({ identityKey: true })).publicKey,
+      sign: async (message) => {
+        const { signature } = await base.createSignature({
+          data: Array.from(new TextEncoder().encode(message)),
+          protocolID: [2, 'bwallet calls'],
+          keyID: '1',
+          counterparty: 'anyone',
+        });
+        return signature.map((b) => b.toString(16).padStart(2, '0')).join('');
+      },
+    });
+    const stored = await chrome.storage.session.get('bwxRungCalls').catch(() => ({}) as Record<string, unknown>);
+    const seen = new Set<string>(Array.isArray(stored.bwxRungCalls) ? (stored.bwxRungCalls as string[]) : []);
+    const fresh = callsToAnnounce(incoming, seen, activePopupPorts.size > 0);
+    for (const c of fresh) {
+      const n = callNotification(c);
+      chrome.notifications?.create(n.id, n.options);
+      seen.add(c.id);
+    }
+    if (fresh.length) await chrome.storage.session.set({ bwxRungCalls: [...seen].slice(-50) }).catch(() => undefined);
+  } catch (e) {
+    console.warn('[background] call ring check failed:', e instanceof Error ? e.message : e);
+  }
+});
+chrome.notifications?.onClicked?.addListener((id) => {
+  if (!id.startsWith(CALL_NOTIFICATION_PREFIX)) return;
+  chrome.notifications.clear(id);
+  openCallsWindow(chrome as never);
 });
 
 // Forward declarations for the prompt-window launchers (defined inside the
@@ -724,7 +817,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
   return new Promise((resolve, reject) => {
     pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-    showPromptUi('permission', request.requestID);
+    permissionBundler.add(request as BundledRequest & BundleRequest);
   });
 };
 
@@ -812,9 +905,17 @@ if (isInServiceWorker) {
   };
 
   const notifyPromptWindow = (kind: PromptKind, requestID?: string) => {
+    // One approval at a time: a prompt still being answered is never replaced; this one waits in the queue and
+    // the UI loads it next (prompt-tab advance → GET_NEXT_PROMPT).
+    const stillPending = !!shownPrompt && !!getPendingPromptPayload(shownPrompt.kind, shownPrompt.requestID);
+    if (!shouldPushPrompt(shownPrompt, stillPending, { kind, requestID })) return;
     chrome.runtime.sendMessage({ action: 'SHOW_PROMPT', kind, requestID }).catch(() => {
       // No listener (window still booting); it reads its URL params on mount
     });
+  };
+
+  notifyPromptUpdated = (kind, requestID) => {
+    notifyPromptWindow(kind, requestID);
   };
 
   showPromptUi = (kind, requestID) => {
@@ -827,6 +928,69 @@ if (isInServiceWorker) {
       notifyPromptWindow(kind, requestID); // an overlay that is already up loads the next prompt
       return;
     }
+
+    // A sheet is already over the site: it loads the next prompt in place.
+    if (inPageSheet) {
+      notifyPromptWindow(kind, requestID);
+      return;
+    }
+
+    // Desktop extension only (the phone build has no side panel and shows its own overlay).
+    const tab = kind === 'usbCheck' ? undefined : tabForPrompt(kind, requestID);
+    if (tab && (chrome as unknown as { sidePanel?: unknown }).sidePanel) {
+      void openInsideWallet(kind, requestID, tab).then((shown) => {
+        if (!shown) showPromptWindow(kind, requestID);
+      });
+      return;
+    }
+    showPromptWindow(kind, requestID);
+  };
+
+  /** The site's tab for a prompt, from the request's originator (or the last site that called). */
+  const tabForPrompt = (kind: PromptKind, requestID?: string) => {
+    const payload = requestID ? (getPendingPromptPayload(kind, requestID) as { originator?: string } | undefined) : undefined;
+    const origin = payload?.originator;
+    if (origin && dappTabs.has(origin)) return dappTabs.get(origin);
+    return undefined;
+  };
+
+  /**
+   * Try the side panel (Chrome may refuse without a click in the wallet), then the in-page sheet.
+   * Resolves false when neither showed, so the caller falls back to the separate window.
+   */
+  const openInsideWallet = async (
+    kind: PromptKind,
+    requestID: string | undefined,
+    tab: { tabId: number; windowId: number },
+  ): Promise<boolean> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sp = (chrome as any).sidePanel;
+    try {
+      await sp.open({ tabId: tab.tabId, windowId: tab.windowId });
+      // The panel connects its port in a moment; show the prompt there once it does.
+      panelPromptOnConnect = { kind, requestID };
+      return true;
+    } catch {
+      /* no user gesture: fall through to the in-page sheet */
+    }
+    const token = crypto.randomUUID();
+    const params = new URLSearchParams({ kind, inpage: token });
+    if (requestID) params.set('requestID', requestID);
+    inPageSheet = { tabId: tab.tabId, token }; // before the frame loads: it checks the token on boot
+    try {
+      const res = (await chrome.tabs.sendMessage(tab.tabId, {
+        action: 'BWX_INPAGE_SHEET_SHOW',
+        query: params.toString(),
+      })) as { ok?: boolean } | undefined;
+      if (res?.ok) return true;
+    } catch {
+      /* no content script here (chrome://, Web Store, tab gone) */
+    }
+    if (inPageSheet?.token === token) inPageSheet = undefined;
+    return false;
+  };
+
+  const showPromptWindow = (kind: PromptKind, requestID?: string) => {
 
     // Check if any popup window with our extension URL is already open
     chrome.windows.getAll({ populate: true }, (windows) => {
@@ -879,7 +1043,11 @@ if (isInServiceWorker) {
     // The browser-action popup renders its own unlock UI; never force a
     // window over it just to unlock.
     if (activePopupPorts.size > 0) {
-      console.log('[background] showUnlockUi: extension popup is connected, skipping window creation');
+      // The panel shows its own unlock screen, but only if told (it may think it is unlocked after the
+      // inactivity lock) and only if no stale prompt overlay covers it.
+      promptInPanel = false;
+      shownPrompt = undefined;
+      panelUnlockMessages().forEach((m) => postToPanels(m));
       return;
     }
     showPromptUi('unlock');
@@ -924,6 +1092,11 @@ if (isInServiceWorker) {
       }
     }
 
+    // Remember which tab each site talks from, so its sheet can open over that tab (in-page sheet).
+    if (!isFromExtension && message.originator && sender.tab?.id !== undefined) {
+      dappTabs.set(message.originator, { tabId: sender.tab.id, windowId: sender.tab.windowId });
+    }
+
     // Actions that don't require authorization
     const noAuthRequired = [
       YoursEventName.SWITCH_ACCOUNT,
@@ -934,6 +1107,8 @@ if (isInServiceWorker) {
       CWIEventName.GET_VERSION,
       // Permission responses from popup
       'PERMISSION_RESPONSE',
+      'BUNDLE_PERMISSION_RESPONSE',
+      'GET_BUNDLE_ALLOWANCE',
       'GROUPED_PERMISSION_RESPONSE',
       'COUNTERPARTY_PERMISSION_RESPONSE',
       'ONE_SAT_PERMISSION_RESPONSE',
@@ -942,6 +1117,7 @@ if (isInServiceWorker) {
       'GET_PROMPT_PAYLOAD',
       'GET_NEXT_PROMPT',
       'CLOSE_PROMPT_WINDOW',
+      'INPAGE_SHEET_CHECK',
       // Internal UI requests (no external domain)
       YoursEventName.GET_BALANCE,
       YoursEventName.GET_PUB_KEYS,
@@ -1014,6 +1190,21 @@ if (isInServiceWorker) {
         // Permission responses from popup UI
         case 'PERMISSION_RESPONSE':
           return processPermissionResponse(message as { requestID: string; granted: boolean; expiry?: number });
+        case 'BUNDLE_PERMISSION_RESPONSE':
+          return processBundlePermissionResponse(
+            message as {
+              bundleID: string;
+              decisions: Record<string, boolean>;
+              allowanceUsd?: number;
+              remember?: boolean;
+            },
+            sendResponse,
+          );
+        case 'GET_BUNDLE_ALLOWANCE':
+          getBundleAllowance((message as { originator: string }).originator)
+            .then((data) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: true, data }))
+            .catch((error) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: false, error: String(error) }));
+          return true;
         case 'GROUPED_PERMISSION_RESPONSE':
           return processGroupedPermissionResponse(
             message as { requestID: string; granted: Partial<GroupedPermissions> | null; expiry?: number },
@@ -1043,6 +1234,7 @@ if (isInServiceWorker) {
         case 'GET_PROMPT_PAYLOAD': {
           const { kind, requestID } = message as { kind: string; requestID?: string };
           const payload = getPendingPromptPayload(kind, requestID);
+          if (payload) shownPrompt = { kind, requestID };
           console.log('[background] GET_PROMPT_PAYLOAD', kind, requestID, 'found:', !!payload);
           sendResponse({ type: 'GET_PROMPT_PAYLOAD', success: !!payload, data: payload });
           return true;
@@ -1060,9 +1252,17 @@ if (isInServiceWorker) {
         // back the next prompt to render. This removes the race where a prompt
         // queued between "nothing pending" and the actual close was denied as a
         // user dismissal by windows.onRemoved.
+        case 'INPAGE_SHEET_CHECK': {
+          // The in-page sheet proves it was put there by us (token from showInPageSheet), not framed by the site.
+          const { token } = message as { token?: string };
+          const ok = !!token && !!inPageSheet && token === inPageSheet.token;
+          sendResponse({ type: 'INPAGE_SHEET_CHECK', success: ok });
+          return true;
+        }
         case 'DISMISS_PROMPT_PANEL': {
           promptInPanel = false;
           postToPanels({ action: 'HIDE_PROMPT_PANEL' });
+          hideInPageSheet();
           denyAllPendingPrompts();
           sendResponse({ type: 'DISMISS_PROMPT_PANEL', success: true });
           return true;
@@ -1077,8 +1277,12 @@ if (isInServiceWorker) {
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: false, data: { prompt: { kind: 'unlock' } } });
             return true;
           }
-          if (promptInPanel) {
+          shownPrompt = undefined;
+          // Nothing left: an open panel always drops its overlay (even if it was shown via another path).
+          if (activePopupPorts.size > 0) hidePanelPrompt();
+          if (promptInPanel || inPageSheet) {
             hidePanelPrompt();
+            hideInPageSheet();
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: true });
             return true;
           }
@@ -1620,11 +1824,24 @@ if (isInServiceWorker) {
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config: StorageConfig = account?.storageConfig ?? { remotes: [] };
       const remoteUrl = config.activeRemote || config.remotes?.[0];
+      // After the reconcile (or alone, with no remote): token outputs on chain
+      // that no store recorded, searched over the wider window too.
+      const recoverTokens = async () => {
+        try {
+          const r = await accountContext!.recoverTokens({ thorough: true });
+          return r.imported.length;
+        } catch (err) {
+          console.error('[STORAGE_REPAIR_SYNC] token recovery failed:', err);
+          return 0;
+        }
+      };
       if (!remoteUrl) {
+        const tokensRecovered = await recoverTokens();
         sendResponse({
           type: 'STORAGE_REPAIR_SYNC',
-          success: false,
-          error: 'No remote configured to repair',
+          success: tokensRecovered > 0,
+          data: { tokensRecovered },
+          error: tokensRecovered > 0 ? undefined : 'No remote configured to repair',
         });
         return;
       }
@@ -1635,11 +1852,12 @@ if (isInServiceWorker) {
         remoteUrl,
         'manual',
       );
+      const tokensRecovered = await recoverTokens();
 
       sendResponse({
         type: 'STORAGE_REPAIR_SYNC',
         success: true,
-        data: { outcome: reconcileOutcome(record) },
+        data: { outcome: reconcileOutcome(record), tokensRecovered },
       });
     } catch (error) {
       console.error('[STORAGE_REPAIR_SYNC] reconcile failed:', error);
@@ -1886,6 +2104,7 @@ if (isInServiceWorker) {
     }
 
     pendingPermissionRequests.delete(response.requestID);
+    permissionBundler.removeRequest(response.requestID);
 
     if (response.granted) {
       // Grant the permission through the manager
@@ -1914,6 +2133,98 @@ if (isInServiceWorker) {
     }
 
     closeDappPopupIfNoUi();
+    return true;
+  };
+
+  /** USD per BSV from the wallet's price cache, if it has one. */
+  const cachedUsdPerBsv = async (): Promise<number | undefined> => {
+    // Callback form: the phone build's chrome shim may not return a promise.
+    const r = await new Promise<Record<string, unknown>>((res) =>
+      chrome.storage.local.get('exchangeRateCache', (v) => res(v ?? {})),
+    );
+    const rate = (r?.exchangeRateCache as { rate?: number } | undefined)?.rate;
+    return typeof rate === 'number' && rate > 0 ? rate : undefined;
+  };
+
+  /** What the sheet needs for the allowance line: the price, and whether the site already has an allowance. */
+  const getBundleAllowance = async (originator: string) => {
+    const usdPerBsv = await cachedUsdPerBsv();
+    let existingSats: number | undefined;
+    const store = accountContext?.permissionStore;
+    if (store && originator) {
+      const grant = await store.findGrant({ type: 'spending', originator: normalizeOriginator(originator) });
+      const live = grant && (grant.expiry === 0 || grant.expiry * 1000 > Date.now());
+      if (live && grant.authorizedAmount != null) existingSats = grant.authorizedAmount;
+    }
+    return { usdPerBsv, existingSats, defaultUsd: DEFAULT_ALLOWANCE_USD };
+  };
+
+  /**
+   * The answer to one sheet. Each request is still granted or denied through the manager, exactly as the
+   * one-prompt-per-permission flow did. A ticked allowance is stored as the site's monthly spending grant
+   * (the same record a manifest's grouped grant writes), so later payments under it need no sheet.
+   */
+  const processBundlePermissionResponse = (
+    response: { bundleID: string; decisions: Record<string, boolean>; allowanceUsd?: number; remember?: boolean },
+    sendResponse: CallbackResponse,
+  ) => {
+    const bundle = permissionBundler.get(response.bundleID);
+    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {});
+    if (!bundle || !result) {
+      sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
+      return true;
+    }
+    const remember = response.remember !== false;
+    // Not remembered: the grants last this visit (an hour), then the site asks again.
+    const expiry = remember ? 0 : Math.floor(Date.now() / 1000) + 3600;
+    const wallet = accountContext?.wallet;
+
+    const work = (async () => {
+      const usd = Number(response.allowanceUsd ?? 0);
+      if (result.granted.length > 0 && usd > 0 && accountContext?.permissionStore) {
+        const sats = allowanceSats(usd, await cachedUsdPerBsv());
+        if (sats > 0) {
+          await accountContext.permissionStore.putGrant({
+            key: { type: 'spending', originator: normalizeOriginator(bundle.originator) },
+            expiry,
+            grantedAt: Date.now(),
+            authorizedAmount: sats,
+            reason: `Up to $${usd} a month without asking`,
+          });
+        }
+      }
+      await Promise.all([
+        ...result.granted.map(async (r) => {
+          const pending = pendingPermissionRequests.get(r.requestID);
+          pendingPermissionRequests.delete(r.requestID);
+          if (!pending) return;
+          try {
+            if (!wallet) throw new Error('Wallet is locked');
+            await wallet.grantPermission({ requestID: r.requestID, expiry });
+            pending.resolve();
+          } catch (error) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        }),
+        ...result.denied.map(async (r) => {
+          const pending = pendingPermissionRequests.get(r.requestID);
+          pendingPermissionRequests.delete(r.requestID);
+          if (!pending) return;
+          try {
+            await wallet?.denyPermission(r.requestID);
+          } finally {
+            pending.reject(new Error('Permission denied by user'));
+          }
+        }),
+      ]);
+    })();
+
+    work
+      .catch((error) => console.error('[background] bundle response failed:', error))
+      .finally(() => {
+        sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: true });
+        closeDappPopupIfNoUi();
+      });
     return true;
   };
 
@@ -3192,6 +3503,7 @@ if (isInServiceWorker) {
         pending.reject(new Error('User dismissed the request'));
       }
       pendingPermissionRequests.clear();
+      permissionBundler.clear();
 
       for (const [requestID, pending] of pendingGroupedPermissionRequests) {
         accountContext?.wallet.denyGroupedPermission(requestID).catch(console.error);
@@ -3215,6 +3527,18 @@ if (isInServiceWorker) {
       }
 
   };
+
+  // In-page sheet: the site's tab closed or navigated away, so the sheet is gone. Deny what it was showing.
+  chrome.tabs?.onRemoved?.addListener((tabId) => {
+    if (inPageSheet?.tabId !== tabId) return;
+    inPageSheet = undefined;
+    denyAllPendingPrompts();
+  });
+  chrome.tabs?.onUpdated?.addListener((tabId, info) => {
+    if (inPageSheet?.tabId !== tabId || info.status !== 'loading') return;
+    inPageSheet = undefined;
+    denyAllPendingPrompts();
+  });
 
   // HANDLE WINDOW CLOSE *****************************************
   chrome.windows.onRemoved.addListener((closedWindowId) => {

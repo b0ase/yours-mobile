@@ -13,8 +13,11 @@ import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } fro
 import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
+import { payNameFee } from './nameFee';
 import {
   claimPaymail,
+  type NameFee,
+  paymailConfig,
   nameChangeBlocked,
   paymailAvailable,
   paymailEnabled,
@@ -254,11 +257,20 @@ export const GetYourName = ({
     return () => clearTimeout(t);
   }, [alias, ownPaymail]);
 
-  const claim = async () => {
+  // 1¢ to claim a new name when the server asks for it (anti-squatting, owner 10 Oct 2026).
+  const [nameFee, setNameFee] = useState<NameFee | null>(null);
+  const [feeConfirm, setFeeConfirm] = useState(false);
+  useEffect(() => {
+    if (paymailEnabled()) void paymailConfig(f).then((c) => setNameFee(c.nameFee));
+  }, []);
+  const claim = async (paid = false) => {
+    setFeeConfirm(false);
+    if (nameFee && !ownPaymail && !paid) return setFeeConfirm(true);
     setBusy(true);
     setMsg('');
     try {
-      const pm = await claimPaymail(f, apiContext.wallet, alias, { ordAddress, name: profileName });
+      const fee = nameFee && !ownPaymail ? await payNameFee(apiContext, nameFee) : {};
+      const pm = await claimPaymail(f, apiContext.wallet, alias, { ordAddress, name: profileName, ...fee });
       setPaymail(identityAddress, pm);
       setPm(pm);
       await syncBchatHandle(apiContext, pm, { signIn: true });
@@ -418,7 +430,7 @@ export const GetYourName = ({
               <button
                 type="button"
                 disabled={busy || aliasState !== 'free' || ownPaymail}
-                onClick={claim}
+                onClick={() => void claim()}
                 className={btn}
                 style={{ background: gold, color: '#000' }}
               >
@@ -649,6 +661,15 @@ export const GetYourName = ({
         </p>
       )}
 
+      <SendConfirmation
+        show={feeConfirm}
+        theme={theme}
+        lineItems={[{ address: `Claim $${alias}`.slice(0, 16), amount: '1¢' }]}
+        total="1¢"
+        isProcessing={busy}
+        onConfirm={() => void claim(true)}
+        onCancel={() => setFeeConfirm(false)}
+      />
       <SendConfirmation
         show={!!pending}
         theme={theme}

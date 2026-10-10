@@ -12,6 +12,15 @@ class YoursBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(YoursNativePlugin())
     }
+
+    /// Live Spaces (src/mobile/spaces/background.ts) float the active speaker's <video> as
+    /// picture-in-picture when the app goes to the background. WebKit's default is already true on
+    /// iPhone; set explicitly so a future Capacitor default can't turn it off.
+    override open func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
+        let config = super.webViewConfiguration(for: instanceConfiguration)
+        config.allowsPictureInPictureMediaPlayback = true
+        return config
+    }
 }
 
 /// Native side of src/mobile/native.ts.

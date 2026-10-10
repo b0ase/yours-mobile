@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { CornerUpLeft, MoreHorizontal, Share2, X } from 'lucide-react';
+import { CornerUpLeft, MoreHorizontal, Pencil, Share2, X } from 'lucide-react';
 import type { ReplyRef } from './api';
 import { mentionParts, QUICK_REACTIONS } from './social';
 
@@ -98,6 +98,7 @@ export const ReactionBar = ({
   onReact,
   onReply,
   onShare,
+  onEdit = null,
   onMore,
   onClose,
 }: {
@@ -105,6 +106,8 @@ export const ReactionBar = ({
   onReact: ((emoji: string) => void) | null;
   onReply: (() => void) | null;
   onShare: (() => void) | null;
+  /** Your own sent text message: edit it in place. */
+  onEdit?: (() => void) | null;
   onMore: (() => void) | null;
   onClose: () => void;
 }) =>
@@ -149,6 +152,7 @@ export const ReactionBar = ({
         <div className="flex flex-col gap-2">
           {onReply && <Row onClick={onReply} icon={<CornerUpLeft size={16} />} label="Reply" />}
           {onShare && <Row onClick={onShare} icon={<Share2 size={16} />} label="Share to room" gold />}
+          {onEdit && <Row onClick={onEdit} icon={<Pencil size={16} />} label="Edit" />}
           {onMore && <Row onClick={onMore} icon={<MoreHorizontal size={16} />} label="Report, block…" />}
         </div>
       </div>

@@ -14,6 +14,7 @@ import { deployToken, openTokenRoom, type MintedToken } from './mintToken';
 import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } from './token';
 import { money, moneyWithSats } from '../money/money';
 import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -251,7 +252,9 @@ export const TokenMint = ({
         {moneyWithSats(cost.totalSats, exchangeRate)}. Its room and Market listing can be set up later (Settings › My
         tokens).
       </p>
-      {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p style={{ color: '#ff6b6b' }}>{error}</p><ErrorActions message={String(error)} /></div>
+)}
       <button
         type="button"
         onClick={review}

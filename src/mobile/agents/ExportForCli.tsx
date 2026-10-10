@@ -3,6 +3,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { encryptAgentKeyFile, MIN_PASSPHRASE } from './agentKeyFile';
 import { isAgentAccount } from './agentAccounts';
 import { saveTextFile } from './saveText';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -124,10 +125,10 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
             style={style}
           />
           {error && (
-            <div className="text-xs" style={{ color: '#FDA29B' }}>
+<div className="flex flex-col gap-1.5"><div className="text-xs" style={{ color: '#FDA29B' }}>
               {error}
-            </div>
-          )}
+            </div><ErrorActions message={String(error)} /></div>
+)}
           <button
             type="button"
             disabled={busy || !password}

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  B_HOLD_MS,
   bHold,
   B_HOLD_IDLE,
   B_HOLD_SLOP,
@@ -130,5 +131,29 @@ describe('b hold to talk', () => {
   test('a late timer or a second down is ignored', () => {
     expect(run([down, { type: 'up' }, { type: 'timer' }]).effects).toEqual(['home']);
     expect(run([down, { type: 'timer' }, down, { type: 'up' }]).effects).toEqual(['listen', 'send']);
+  });
+});
+
+describe('b hold timing (owner, 10 Oct 2026)', () => {
+  const at = (events: BHoldEvent[]) => events.reduce((acc, e) => {
+    const r = bHold(acc.s, e);
+    return { s: r.state, fx: r.effect === 'none' ? acc.fx : [...acc.fx, r.effect] };
+  }, { s: B_HOLD_IDLE, fx: [] as string[] });
+  test('the hold is about 400ms: long enough not to steal taps, short enough to feel instant', () => {
+    expect(B_HOLD_MS).toBe(400);
+  });
+  test('release before the timer = tap = Apps (home)', () => {
+    expect(at([{ type: 'down', x: 0, y: 0 }, { type: 'up' }]).fx).toEqual(['home']);
+  });
+  test('timer fires = listen (opens b + mic), release = send', () => {
+    expect(at([{ type: 'down', x: 0, y: 0 }, { type: 'timer' }, { type: 'up' }]).fx).toEqual(['listen', 'send']);
+  });
+  test('slide away while listening, release = cancel; slide back = send', () => {
+    const d = { type: 'down', x: 0, y: 0 } as const;
+    expect(at([d, { type: 'timer' }, { type: 'move', x: 0, y: -200 }, { type: 'up' }]).fx).toEqual(['listen', 'cancel']);
+    expect(at([d, { type: 'timer' }, { type: 'move', x: 0, y: -200 }, { type: 'move', x: 0, y: -5 }, { type: 'up' }]).fx).toEqual(['listen', 'send']);
+  });
+  test('a late timer after release does nothing', () => {
+    expect(at([{ type: 'down', x: 0, y: 0 }, { type: 'up' }, { type: 'timer' }]).fx).toEqual(['home']);
   });
 });

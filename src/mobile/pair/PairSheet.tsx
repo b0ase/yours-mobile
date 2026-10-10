@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import jsQR from 'jsqr';
 import { ArrowLeft, Check, Link2, Loader2, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { beginPairing, type PendingPair } from './sessions';
 import { CliPairConfirm } from './CliPairConfirm';
 import { CLI_ORIGIN } from './agentPairing';
 import { IS_EXTENSION } from '../extension';
+import { Scanner } from '../scan/Scanner';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -215,69 +215,5 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
       </div>
     </div>,
     document.body,
-  );
-}
-
-/** Rear camera + jsQR. Stops the camera as soon as it reads a code, or when it unmounts. */
-function Scanner({ onCode }: { onCode: (text: string) => void }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    let stream: MediaStream | undefined;
-    let raf = 0;
-    let done = false;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const tick = () => {
-      const v = video.current;
-      if (done || !v || !ctx) return;
-      if (v.readyState >= 2 && v.videoWidth) {
-        const w = Math.min(640, v.videoWidth);
-        const h = Math.round((v.videoHeight / v.videoWidth) * w);
-        canvas.width = w;
-        canvas.height = h;
-        ctx.drawImage(v, 0, 0, w, h);
-        const hit = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
-        if (hit?.data) {
-          done = true;
-          stream?.getTracks().forEach((t) => t.stop());
-          return onCode(hit.data);
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    if (!navigator.mediaDevices?.getUserMedia) setErr('Camera not available here. Paste the link below.');
-    else
-      navigator.mediaDevices
-        .getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-        .then((s) => {
-          stream = s;
-          if (done) return s.getTracks().forEach((t) => t.stop());
-          if (video.current) {
-            video.current.srcObject = s;
-            void video.current.play();
-            raf = requestAnimationFrame(tick);
-          }
-        })
-        .catch(() => setErr('Camera not available. Allow camera access for bWallet, or paste the link below.'));
-    return () => {
-      done = true;
-      cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [onCode]);
-  return (
-    <div className="relative mt-4 aspect-square w-full overflow-hidden rounded-2xl" style={{ background: '#0b0c0f' }}>
-      <video ref={video} playsInline muted className="h-full w-full object-cover" />
-      <div
-        className="pointer-events-none absolute inset-[18%] rounded-2xl"
-        style={{ border: `3px solid ${GOLD}`, boxShadow: '0 0 0 9999px rgba(0,0,0,0.35)' }}
-      />
-      {err && (
-        <p className="absolute inset-x-4 bottom-4 text-center text-xs" style={{ color: MUTED }}>
-          {err}
-        </p>
-      )}
-    </div>
   );
 }

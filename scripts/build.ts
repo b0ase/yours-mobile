@@ -50,6 +50,13 @@ function brandManifest() {
   manifest.action = { ...action, default_title: NAME, default_icon: iconSet };
   manifest.side_panel = { default_path: 'index.html' };
   manifest.permissions = [...new Set([...manifest.permissions, 'sidePanel'])];
+  // In-page wallet sheet (docs/ONE-SHEET-PERMISSIONS.md §3d): when the side panel can't open, the content
+  // script shows prompt.html in an iframe over the site. The page refuses to act without a one-time token
+  // from the background and keeps its buttons off until it is fully visible, so a site framing it gains nothing.
+  manifest.web_accessible_resources = [
+    ...(manifest.web_accessible_resources ?? []),
+    { resources: ['prompt.html'], matches: ['<all_urls>'] },
+  ];
   // 1Sat overlay submit sends an x-topics header api.1sat.app's CORS rejects; host access skips CORS.
   manifest.host_permissions = [
     ...new Set([...(manifest.host_permissions ?? []), 'https://api.1sat.app/*', ...BAPP_HOSTS]),

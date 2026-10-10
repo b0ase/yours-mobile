@@ -8,6 +8,7 @@
 
 /** ~10 minute blocks. */
 import { curveLabel, curveWeights, mergeSmall, splitByWeights, type Curve } from './curves';
+import { formatFiat } from '../../utils/displayCurrency';
 
 export const BLOCKS_PER_DAY = 144;
 export const BLOCK_MS = 10 * 60 * 1000;
@@ -318,8 +319,7 @@ export function fmtBsv(sats: number): string {
   if (sats >= 100_000) return `${Number((sats / 1e8).toFixed(8)).toString()} BSV`;
   return `${sats.toLocaleString('en-US')} sats`;
 }
-export const fmtUsd = (n: number) =>
-  `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const fmtUsd = (n: number) => formatFiat(n);
 
 // ── percentage payouts ──────────────────────────────────────────────────────
 
@@ -456,6 +456,8 @@ export type LockPlan = {
   surplusTo?: 'next' | 'extend';
   /** Gradual schedules: the unlock curve (missing = linear). */
   curve?: Curve;
+  /** Pots & Locks: the pot this lock belongs to ('pnee' = backs PNEEs, else a template id). Missing = Other locks. */
+  pot?: string;
 };
 
 export type PlanStatus = 'Locked' | 'Ready to claim' | 'Partly claimed' | 'Finished';

@@ -27,10 +27,13 @@ import {
   ShieldCheck,
   LogOut,
   Network,
+  AtSign,
 } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
+import { HandleFlow } from '../names/HandleFlow';
+import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
 import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
 import { isNative } from '../native';
 import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
@@ -46,7 +49,9 @@ import {
   potsEnabled,
   socialLoginEnabled,
   SUBSCRIPTIONS_DESC,
+  SUBSCRIPTIONS_ENABLED,
 } from '../storeBuild';
+import { onSubscribeRequest, peekSubscribeRequest } from '../pots/subscribeLink';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { useBackClose } from '../backStack';
@@ -503,6 +508,15 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     window.addEventListener(SIGNINS_OPEN_EVENT, open);
     return () => window.removeEventListener(SIGNINS_OPEN_EVENT, open);
   }, [acct]);
+  // Back from X / Google for this account: reopen Connect so the profile attaches on this trip (socialLogin.ts).
+  const { chromeStorageService: socialStore } = useServiceContext();
+  const socialOwner = socialStore.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  useEffect(() => {
+    if (!acct || !socialOwner) return;
+    const open = () => takeSocialReturn(socialOwner) && setScreen('social');
+    open();
+    return onSocialChange(open);
+  }, [acct, socialOwner]);
   // Long-press on the wallet card's identity line opens the Identity map (settings/signIns.ts).
   useEffect(() => {
     if (takeIdentityMapRequest()) setScreen('idmap');
@@ -510,6 +524,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     window.addEventListener(IDMAP_OPEN_EVENT, open);
     return () => window.removeEventListener(IDMAP_OPEN_EVENT, open);
   }, []);
+  // A subscribe link from one of our services (pots/subscribeLink.ts) opens Subscriptions. bWalletX only.
+  useEffect(() => {
+    if (!SUBSCRIPTIONS_ENABLED || !wal) return;
+    const open = () => peekSubscribeRequest() && setScreen('pots');
+    open();
+    return onSubscribeRequest(open);
+  }, [wal]);
   const rate = useBsvUsd();
   // bWalletX extension: take window.CWI over another wallet (src/brand/cwi.ts, content.ts). Reloads apply it.
   const [takeCwi, setTakeCwiState] = useState(true);
@@ -524,6 +545,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   // Limits are stored and enforced in sats; shown in USD at the live rate (sats when the rate is unknown).
   const limits = ONE_CLICK_LIMITS.map((v) => ({ id: v, label: money(v, rate) }));
   const [chatSignedOut, setChatSignedOut] = useState(false);
+  const [handleOpen, setHandleOpen] = useState(false);
   const paidLikes = PAID_LIKE_OPTIONS.map((v) => ({ id: v as number, label: money(v, rate) }));
   return (
     <>
@@ -539,9 +561,16 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           />
           <Divider />
           <Row
+            icon={<AtSign size={16} />}
+            label="Change handle"
+            description="Choose the name people pay and find you by; your old name keeps receiving"
+            onClick={() => setHandleOpen(true)}
+          />
+          <Divider />
+          <Row
             icon={<BadgeCheck size={16} />}
             label="Connect X or Google"
-            description="Get a verified name like yourname.x; it becomes the main name"
+            description="Verify it's you and bring your photo; you still choose your handle"
             onClick={() => setScreen('social')}
           />
           <Divider />
@@ -957,6 +986,25 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             <Divider />
             <Row
               icon={<Bell size={16} />}
+              label="bMail notification detail"
+              description="What a new bMail notification shows. The subject is opened on this phone only."
+              right={
+                <select
+                  aria-label="bMail notification detail"
+                  value={prefs.bmailDetail}
+                  onChange={(e) => setPrefs({ bmailDetail: e.target.value as 'subject' | 'sender' | 'none' })}
+                  className="rounded-lg px-2 py-1 text-xs text-white outline-none"
+                  style={{ background: PANEL, border: `1px solid ${LINE}` }}
+                >
+                  <option value="subject">Sender and subject</option>
+                  <option value="sender">Sender only</option>
+                  <option value="none">Just "New bMail"</option>
+                </select>
+              }
+            />
+            <Divider />
+            <Row
+              icon={<Bell size={16} />}
               label="Your Twetch user number"
               description="From twetch.com/u/<number>: lets replies and likes on your Twetch posts reach you"
               right={
@@ -984,6 +1032,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
+      {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (

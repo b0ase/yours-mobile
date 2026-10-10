@@ -5,6 +5,8 @@ import { parseUsdInput } from '../money/money';
 import { POT_NAME_PLACEHOLDER, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { OWN_SERVICE_PAYEES, addSubscription, subProblem, type NewSub, type Period } from './pots';
 import { reschedulePotReminders } from './notifyPots';
+import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -76,18 +78,22 @@ export const AddOrderSheet = ({
   balanceUsd,
   bsvUsd,
   onClose,
+  request,
 }: {
   potId: string;
   potName: string;
   balanceUsd: number | null;
   bsvUsd: number;
   onClose: () => void;
+  /** A subscribe link from one of our services (subscribeLink.ts): prefills service, amount, period, memo. */
+  request?: SubscribeRequest | null;
 }) => {
-  const [service, setService] = useState('');
+  const req = SUBSCRIPTIONS_ENABLED ? (request ?? null) : null;
+  const [service, setService] = useState(req?.service ?? '');
   const [to, setTo] = useState('');
   const [label, setLabel] = useState('');
-  const [usd, setUsd] = useState('');
-  const [period, setPeriod] = useState<Exclude<Period, object>>('month');
+  const [usd, setUsd] = useState(req ? String(req.usd) : '');
+  const [period, setPeriod] = useState<Exclude<Period, object>>(req?.period ?? 'month');
   const [start, setStart] = useState(today());
   const [max, setMax] = useState('');
   const [error, setError] = useState('');
@@ -109,6 +115,7 @@ export const AddOrderSheet = ({
     period,
     start: startAt,
     maxCount: max.trim() ? Number(max) : null,
+    ...(req && svc && req.service === svc.service ? { memo: req.memo } : {}),
   };
 
   const save = () => {
@@ -117,6 +124,10 @@ export const AddOrderSheet = ({
     try {
       addSubscription(n, bsvUsd);
       void reschedulePotReminders();
+      if (req) {
+        clearSubscribeRequest();
+        if (req.returnUrl) window.open(req.returnUrl, '_blank', 'noopener');
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -125,6 +136,11 @@ export const AddOrderSheet = ({
 
   return (
     <Sheet title={`Subscription from ${potName}`} onClose={onClose}>
+      {req && (
+        <p className="text-xs m-0" style={{ color: MUTED }}>
+          {requestLabel(req)} asked for this subscription. Check the amount, then Set up. Nothing is paid until you do.
+        </p>
+      )}
       {SUBSCRIPTIONS_ENABLED && OWN_SERVICE_PAYEES.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           {[{ service: '', name: 'A person' }, ...OWN_SERVICE_PAYEES].map((p) => (
@@ -203,10 +219,10 @@ export const AddOrderSheet = ({
         Pause or cancel any time.
       </p>
       {error && (
-        <div className="text-xs" style={{ color: '#FDA29B' }}>
+<div className="flex flex-col gap-1.5"><div className="text-xs" style={{ color: '#FDA29B' }}>
           {error}
-        </div>
-      )}
+        </div><ErrorActions message={String(error)} /></div>
+)}
       <button
         type="button"
         onClick={save}

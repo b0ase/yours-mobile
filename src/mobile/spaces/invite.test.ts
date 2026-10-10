@@ -25,7 +25,13 @@ describe('parseAppLink', () => {
     expect(parseAppLink('https://evil.example/s/abcdefgh23')).toBeNull();
     expect(parseAppLink('https://bchatx.com.evil.example/i/abcdefgh23')).toBeNull();
     expect(parseAppLink('http://bwalletx.com/s/abcdefgh23')).toBeNull();
-    expect(parseAppLink('https://bwalletx.com/s/abcdefgh2')).toBeNull();
+    expect(parseAppLink('https://bwalletx.com/s/abc.defgh2')).toBeNull();
+  });
+  test('named Spaces: /s/<ticker> opens the room, /s/<ticker>/<slug> the episode', () => {
+    expect(parseAppLink('https://bchatx.com/s/lounge')).toEqual({ kind: 'room', ticker: 'LOUNGE', buy: false });
+    expect(parseAppLink('https://bchatx.com/s/lounge/abcdefgh23')).toEqual({ kind: 'space', slug: 'abcdefgh23' });
+    expect(parseAppLink('https://bchatx.com/s/lounge/nope')).toBeNull();
+    expect(parseAppLink('bwalletx://space/lounge')).toBeNull();
     expect(parseAppLink('https://bwalletx.com/i/ABCDEFGH23')).toBeNull();
     expect(parseAppLink('https://bwalletx.com/r/..%2Fx')).toBeNull();
     expect(parseAppLink('https://bwalletx.com/x/abcdefgh23')).toBeNull();

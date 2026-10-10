@@ -89,6 +89,18 @@ export interface IssuerChallenge {
 export interface ChatSigner {
   address: () => Promise<string>;
   sign: (message: string) => Promise<{ address: string; pubKey: string; sig: string }>;
+  /**
+   * The handle this wallet's owner already chose (their plain paymail name), for a wallet bChat has not
+   * seen yet: bit-sign answers `needs_handle` + `claim_token` and the account is made under this name.
+   * Never derived from an email or a provider (owner, 9 Oct 2026: users choose their handle).
+   */
+  handle?: () => Promise<string | null>;
+  /**
+   * The wallet's identity key and its BRC-43 signature over this sign-in's nonce (bit-sign
+   * lib/adopt-wallet-name.ts). Lets bit-sign swap an auto `yours-xxxxxxxx` handle for the
+   * paymail name the owner chose; the server looks the name up itself from the key.
+   */
+  identityProof?: (nonce: string) => Promise<{ identity_key: string; identity_signature: string } | null>;
 }
 
 export interface SignInItem {
@@ -130,6 +142,15 @@ export interface MessagePage {
   hiddenBefore?: string | null;
 }
 
+/** bit-sign's "Choose your handle first" refusal from signIn: open HandleFlow, then claimHandle with these. */
+export const needsHandle = (e: unknown): { claimToken: string; address: string } | null => {
+  if (!(e instanceof ChatApiError) || e.status !== 409) return null;
+  const d = e.data as { needs_handle?: boolean; claim_token?: unknown; address?: unknown } | null;
+  return d?.needs_handle && typeof d.claim_token === 'string' && typeof d.address === 'string'
+    ? { claimToken: d.claim_token, address: d.address }
+    : null;
+};
+
 const errorOf = (data: unknown, fallback: string) =>
   (data && typeof data === 'object' && typeof (data as { error?: unknown }).error === 'string'
     ? (data as { error: string }).error
@@ -140,8 +161,12 @@ export interface SocialProfile {
   name: string;
   display?: string | null;
   avatar?: string | null;
-  /** The paymail alias it may claim: `b0asex.x`, `theirname.gmail` (null if the name can't be one). */
+  /** @deprecated users choose their handle (owner, 9 Oct 2026). Old servers: `b0asex.x`; never .gmail now. */
   alias: string | null;
+  /** New servers: open "Choose your handle"… */
+  choose_handle?: boolean;
+  /** …prefilled with this: the X @name only, never anything from an email. */
+  suggested_handle?: string | null;
 }
 
 export class BchatClient {
@@ -196,13 +221,20 @@ export class BchatClient {
         false,
       );
       const signed = await signer.sign(ch.message);
+      const proof = await signer.identityProof?.(ch.nonce).catch(() => null);
       // The nonce is bound to the address it was issued for; if the wallet
       // signed with a different key, ask again for that one.
       if (signed.address !== address) {
         address = signed.address;
         continue;
       }
-      const v = await this.call<{ token?: string; handle?: string; needs_handle?: boolean; error?: string }>(
+      const v = await this.call<{
+        token?: string;
+        handle?: string;
+        needs_handle?: boolean;
+        claim_token?: string;
+        error?: string;
+      }>(
         'POST',
         '/api/bitsign/auth/wallet/verify',
         // intent=sign-in: sign in as this wallet's owner, ignoring any stale cookie session in the
@@ -216,20 +248,44 @@ export class BchatClient {
           intent: 'sign-in',
           // For the "New sign-in to bChat" alert only (bit-sign lib/sign-in-alert.ts); not used for auth.
           client: signInClient(),
+          ...(proof ?? {}),
         },
         false,
       );
-      if (!v.token || !v.handle) {
-        throw new ChatApiError(
-          v.needs_handle ? 'Choose a bChat handle at bitcoinchat.online first.' : 'bChat sign-in failed',
-          401,
-        );
+      if (v.needs_handle && v.claim_token) {
+        // A wallet bit-sign hasn't seen (bit-sign PR #102): no default handle any more, the owner's
+        // chosen one makes the account. Without one, the caller shows "Choose your handle".
+        const chosen = await signer.handle?.().catch(() => null);
+        if (chosen) return this.claimHandle(v.claim_token, chosen, address);
+        throw new ChatApiError('Choose your handle first.', 409, {
+          needs_handle: true,
+          claim_token: v.claim_token,
+          address,
+        });
       }
+      if (!v.token || !v.handle) throw new ChatApiError('bChat sign-in failed', 401);
       const account = getChatAccount();
       this.session = { token: v.token, handle: v.handle, address, ...(account ? { account } : {}) };
       return this.session;
     }
     throw new ChatApiError('The wallet signed with an unexpected key', 401);
+  }
+
+  /**
+   * Make the account for a proven-but-new wallet under the handle its owner chose
+   * (bit-sign POST /api/bitsign/auth/wallet/handle; the address comes from the claim token).
+   */
+  async claimHandle(claimToken: string, handle: string, address: string): Promise<ChatSession> {
+    const r = await this.call<{ token?: string; handle?: string }>(
+      'POST',
+      '/api/bitsign/auth/wallet/handle',
+      { claim_token: claimToken, handle: handle.replace(/^\$/, '') },
+      false,
+    );
+    if (!r.token || !r.handle) throw new ChatApiError('bChat sign-in failed', 401);
+    const account = getChatAccount();
+    this.session = { token: r.token, handle: r.handle, address, ...(account ? { account } : {}) };
+    return this.session;
   }
 
   /**
@@ -407,6 +463,16 @@ export class BchatClient {
   /** LiveKit join token. The server mints it from your participant row, never from the request. */
   async spaceToken(ticker: string): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
+  }
+
+  /** The green room shown before entering: title, stage, counts, recording notice. */
+  async spaceGreenRoom(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/green-room`);
+  }
+
+  /** Listen anonymously: a hidden, listen-only token. No participant row; still member-gated (ticket). */
+  async spaceAnonToken(ticker: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/anon-token`, {});
   }
 
   /** The live space's permanent page `/s/<slug>` (host or room admin only). `{ page }`. */
@@ -794,6 +860,17 @@ export class BchatClient {
   /** The room card: description, role, members, and (owner / moderators) the invite code. */
   async openRoomCard(ticker: string): Promise<unknown> {
     return this.call('GET', `/api/bitsign/rooms/open/${encodeURIComponent(ticker.replace(/^\$/, ''))}`);
+  }
+
+  /**
+   * Edit your own text message. The server APPENDS a version (nothing is overwritten) and
+   * returns it: a new row whose `supersedes_id` is the one edited — merge it and it replaces
+   * the old bubble in place (messages.ts mergeMessages). Author / text-only / latest-version
+   * rules are the server's.
+   */
+  async editMessage(ticker: string, id: string, body: string): Promise<ChatMessage> {
+    const r = await this.call<{ message: ChatMessage }>('PATCH', `${BchatClient.path(ticker)}/messages`, { id, body });
+    return { ...r.message, edited: true };
   }
 
   async openRoomAction(

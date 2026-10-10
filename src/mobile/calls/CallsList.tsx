@@ -148,7 +148,7 @@ const RecentRow = ({
 }) => {
   const hold = useLongPress(onDelete);
   return (
-    <div className="flex items-center gap-3 py-3 border-b border-[#1f2127]" {...hold}>
+    <div className="bw-mail-card flex items-center gap-3 px-3 py-2 mb-2 min-h-[56px]" {...hold}>
       {editing ? (
         <button aria-label="Delete from recents" className="p-1" onClick={onDelete}>
           <Trash2 size={16} color="#ff6b6b" />
@@ -189,25 +189,24 @@ const BPhoneCard = ({ profile, onOpen }: { profile: BPhoneProfile | null; onOpen
     <button
       onClick={onOpen}
       aria-label="bPhone settings"
-      className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 text-left"
-      style={{ background: `linear-gradient(135deg, ${GOLD} 0%, #FFD24D 100%)`, color: '#1a1300' }}
+      className="bw-mail-card bw-mail-hero w-full px-4 py-4 flex items-center gap-3 text-left text-white"
     >
       <span
-        className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: '#1a1300' }}
+        className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+        style={{ background: 'rgba(255,210,77,0.12)', border: '1px solid rgba(255,210,77,0.35)' }}
       >
         <Phone size={17} color={GOLD} />
       </span>
       <span className="flex-1 min-w-0">
-        <span className="block text-[11px] font-bold uppercase tracking-[0.08em] opacity-70">bPhone</span>
-        <span className={`block text-[15px] font-bold ${CLIP}`}>
+        <span className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[#98A2B3]">bPhone</span>
+        <span className={`block text-[17px] font-bold ${CLIP}`} style={{ color: GOLD }}>
           {profile === null ? 'Loading…' : rate ? `Your rate: ${rateShort(rate)}` : 'Free calls · set a price'}
         </span>
       </span>
       {rate && (
         <span
           className="shrink-0 rounded-full px-2 py-[3px] text-[11px] font-bold flex items-center gap-1"
-          style={{ background: '#1a1300', color: listed ? GREEN : '#a3a8b1' }}
+          style={{ background: 'rgba(0,0,0,0.45)', color: listed ? GREEN : '#a3a8b1' }}
         >
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: listed ? GREEN : '#5b6069' }} />
           {listed ? 'On' : 'Off'}
@@ -229,8 +228,7 @@ const TabBar = ({ tab, onTab }: { tab: PhoneTab; onTab: (t: PhoneTab) => void })
   <nav
     role="tablist"
     aria-label="Calls"
-    className="shrink-0 -mx-4 px-4 pt-2 pb-2 flex items-center gap-1 border-t border-[#1f2127]"
-    style={{ background: '#0d0e11' }}
+    className="bw-mail-bar shrink-0 -mx-4 px-4 pt-2 pb-2 flex items-center gap-1 border-t border-[#1f2127]"
   >
     {TABS.map((t) => {
       const I = TAB_ICON[t.id];
@@ -517,7 +515,7 @@ export const CallsList = ({
     <div ref={fill.ref} className="w-full px-4 flex flex-col gap-3 min-h-0" style={fill.style}>
       {PAID_CALLS_ENABLED && <BPhoneCard profile={wallet ? mine : EMPTY_CARD} onOpen={() => setSettings(true)} />}
 
-      <label className="flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5">
+      <label className="bw-mail-seg flex items-center gap-2 rounded-xl px-3 py-2.5 min-h-[44px]">
         <Search size={16} color="#6b7079" className="shrink-0" />
         <input
           value={query}
@@ -564,7 +562,7 @@ export const CallsList = ({
                   return (
                     <button
                       key={p.key}
-                      className="flex items-center gap-3 py-2 border-b border-[#1f2127] text-left"
+                      className="bw-mail-card flex items-center gap-3 px-3 py-2 mb-2 text-left"
                       onClick={() => switchTab('services')}
                     >
                       <Avatar title={name} src={p.avatar} size={40} />
@@ -633,7 +631,7 @@ export const CallsList = ({
                     <p className="text-sm text-[#98A2B3] text-center py-8">Nobody blocked.</p>
                   ) : (
                     blocks.map((b) => (
-                      <div key={b.key} className="flex items-center justify-between py-3 border-b border-[#1f2127]">
+                      <div key={b.key} className="bw-mail-card flex items-center justify-between px-3 py-3 mb-2">
                         <span className={`text-sm text-white ${CLIP}`}>
                           {b.label ? bareName(b.label) : shortKey(b.key)}
                         </span>
@@ -687,7 +685,7 @@ export const CallsList = ({
                       </button>
                     </div>
                     {favs.map((f) => (
-                      <div key={f.id} className="flex items-center gap-3 py-2 border-b border-[#1f2127]">
+                      <div key={f.id} className="bw-mail-card flex items-center gap-3 px-3 py-2 mb-2">
                         <Avatar title={f.name} src={f.avatar} size={40} />
                         <button
                           className="flex-1 min-w-0 text-left"

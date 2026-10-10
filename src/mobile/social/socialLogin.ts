@@ -7,15 +7,16 @@ import { YoursNative } from '../native';
 
 /**
  * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bWalletX's own sign-in service
- * (paymail server, site/lib/social.js) proves the X @name or Gmail address; the new wallet then records it and may claim the matching verified paymail
- * (b0asex.x@bwalletx.com, theirname.gmail@bwalletx.com) with its personal token and room.
+ * (paymail server, site/lib/social.js) proves the X @name or Google account; the wallet uses its photo and
+ * display name, and the user chooses their own handle.
  *
  * 1. start: a random secret stays here; the sign-in service gets only its sha256 and returns the
  *    provider's sign-in URL, opened in the system browser (Google refuses embedded web views).
  * 2. return: pay server → www.bwallet.space/social#t=<ticket> → the app (universal link, or the
  *    bwalletx:// scheme from that page; the extension reads the tab). preview() fills name + photo.
- * 3. Choose your handle: the paymail server registers <name>.x / <name>.gmail with the ticket +
- *    secret. bWalletX keeps the record; bit-sign plays no part.
+ * 3. Choose your handle (owner, 9 Oct 2026): nothing is registered automatically any more. HandleFlow
+ *    opens prefilled with `suggested_handle` (the X @name; never anything from an email) and the user
+ *    picks, with a live availability check. Existing <name>.x / <name>.gmail names keep receiving.
  */
 
 export type SocialProvider = 'x' | 'google';
@@ -33,6 +34,8 @@ type Pending = {
    * pre-fill another account (owner, 8 Oct 2026: Testy's Create Account showed an earlier login's photo).
    */
   owner?: string;
+  /** Just came back from the provider and not yet reopened in Connect (takeSocialReturn). */
+  returned?: boolean;
 };
 
 /** Owner of a sign-in started on Create / Restore / Import, before the account (and its identity) exists. */
@@ -79,6 +82,22 @@ export const socialError = () => lastError;
 export const clearSocial = () => write(null);
 
 /**
+ * Back from X / Google for an existing account (Settings › Connect X / Google): the page reloaded, so the
+ * Connect screen that started it is gone. One-shot: true once for that account, so the app can reopen Connect
+ * (after the normal password unlock) and the verified profile attaches on that first trip, never a second one.
+ * A return for Create Account (NEW_ACCOUNT) is not a Connect return.
+ */
+export const socialReturnWaiting = (owner: string): boolean => {
+  const p = read(owner);
+  return !!(p && owner !== NEW_ACCOUNT && p.returned && p.ticket && p.profile);
+};
+export const takeSocialReturn = (owner: string): boolean => {
+  if (!socialReturnWaiting(owner)) return false;
+  write({ ...read(owner)!, returned: false });
+  return true;
+};
+
+/**
  * Account just created / restored: a sign-in made on that screen now belongs to the new identity, so the
  * next Create Account (or another account) never sees it.
  */
@@ -111,7 +130,7 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
   const { authorizeUrl: url } = await post<{ authorizeUrl: string }>('start', {
     provider,
     verifier_hash: vh,
-    ...(web ? { return_to: 'web' } : {}),
+    ...(web ? { return_to: webReturnKey() } : {}),
   });
   write({ provider, secret, at: Date.now(), owner });
   if (web) {
@@ -153,11 +172,15 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
 }
 
 const RETURN = 'https://www.bwallet.space/social';
-const WEB_RETURN = 'https://web.bwalletx.com/';
+// Web wallet origins the sign-in server returns to (exact list; the server maps the key, never a caller URL).
+const WEB_RETURNS = { web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/' } as const;
+const webReturnKey = (): keyof typeof WEB_RETURNS =>
+  typeof location !== 'undefined' && location.origin === 'https://beta.bwalletx.com' ? 'beta' : 'web';
+const isWebReturn = (url: string) => Object.values(WEB_RETURNS).some((r) => url.startsWith(r));
 const isReturn = (url: string) =>
   url.startsWith(RETURN) ||
   url.startsWith('bwalletx://social') ||
-  (url.startsWith(WEB_RETURN) && /#(.*&)?(t|error)=/.test(url));
+  (isWebReturn(url) && /#(.*&)?(t|error)=/.test(url));
 
 /** A return URL (universal link, bwalletx://, or the extension's tab): keep the ticket, fetch the profile. */
 export async function receiveSocialUrl(url: string): Promise<void> {
@@ -176,7 +199,7 @@ export async function receiveSocialUrl(url: string): Promise<void> {
   try {
     const profile = await post<SocialProfile>('preview', { ticket, secret: p.secret });
     lastError = '';
-    write({ ...p, ticket, profile });
+    write({ ...p, ticket, profile, returned: true });
   } catch (e) {
     lastError = e instanceof Error ? e.message : 'Sign-in failed';
     write(null);
@@ -201,7 +224,7 @@ if (
   !Capacitor.isNativePlatform() &&
   !IS_EXTENSION &&
   typeof location !== 'undefined' &&
-  location.href.startsWith(WEB_RETURN)
+  isWebReturn(location.href)
 ) {
   const here = location.href;
   if (isReturn(here)) {

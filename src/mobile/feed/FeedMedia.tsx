@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { ExternalLink, Music, Play } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import type { FeedMedia, LinkEmbed } from './media';
+import { isOwnHost, ownLinkPreview, type OgPreview } from './unfurl';
 import { usePrefs } from '../settings/usePrefs';
 
 /**
@@ -242,7 +243,7 @@ const open = (url: string) => (e: MouseEvent) => {
   void openDappBrowser(url);
 };
 
-/** YouTube lite thumbnail (opens in the in-app browser), Vimeo / plain link cards. No page fetches. */
+/** YouTube lite thumbnail (opens in the in-app browser), Vimeo / plain link cards. No page fetches, except OG previews of our own sites (unfurl.ts). */
 export const LinkCard = ({ l, blur }: { l: LinkEmbed; blur: boolean }) => {
   const [shown, setShown] = useState(!blur);
   if (l.kind === 'youtube')
@@ -281,6 +282,7 @@ export const LinkCard = ({ l, blur }: { l: LinkEmbed; blur: boolean }) => {
         </button>
       </div>
     );
+  if (l.kind === 'link' && isOwnHost(l.url)) return <OwnLinkCard l={l} />;
   const host = l.kind === 'vimeo' ? 'vimeo.com' : l.host;
   const label = l.kind === 'vimeo' ? 'Vimeo video' : decodeURI(l.url.replace(/^https?:\/\/(www\.)?/, '')).slice(0, 80);
   return (
@@ -294,6 +296,52 @@ export const LinkCard = ({ l, blur }: { l: LinkEmbed; blur: boolean }) => {
         <span className="block text-[12px] font-bold text-white truncate">{host}</span>
         <span className="block text-[11px] truncate" style={{ color: MUTED }}>
           {label}
+        </span>
+      </span>
+    </button>
+  );
+};
+
+/** A link to one of our own sites: OG image + title from bit-sign's unfurl, plain card until it loads. */
+const OwnLinkCard = ({ l }: { l: Extract<LinkEmbed, { kind: 'link' }> }) => {
+  const [og, setOg] = useState<OgPreview | null>(null);
+  const [imgOk, setImgOk] = useState(true);
+  useEffect(() => {
+    let live = true;
+    void ownLinkPreview(l.url).then((p) => live && setOg(p));
+    return () => {
+      live = false;
+    };
+  }, [l.url]);
+  const label = decodeURI(l.url.replace(/^https?:\/\/(www\.)?/, '')).slice(0, 80);
+  return (
+    <button
+      onClick={open(l.url)}
+      className="mt-2 block w-full overflow-hidden rounded-2xl text-left"
+      style={{ border: `1px solid ${LINE}`, background: PANEL }}
+    >
+      {og?.image && imgOk && (
+        <img
+          src={og.image}
+          alt=""
+          loading="lazy"
+          className="block w-full object-cover"
+          style={{ aspectRatio: '1200 / 630' }}
+          onError={() => setImgOk(false)}
+        />
+      )}
+      <span className="flex items-center gap-3 px-3 py-2">
+        {!og?.image || !imgOk ? <ExternalLink size={18} color={MUTED} /> : null}
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] truncate" style={{ color: MUTED }}>
+            {og?.site ?? l.host}
+          </span>
+          <span className="block text-[12px] font-bold text-white truncate">{og?.title ?? label}</span>
+          {og?.description && (
+            <span className="block text-[11px] truncate" style={{ color: MUTED }}>
+              {og.description}
+            </span>
+          )}
         </span>
       </span>
     </button>

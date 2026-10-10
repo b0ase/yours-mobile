@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { startRoute } from '../calls/popout';
 import { YoursEventName } from '../../inject';
 import type { YoursNativePlugin } from '../native';
 
@@ -80,5 +81,6 @@ export const initialRoute = (): string => {
   } catch {
     /* no sessionStorage */
   }
-  return '/';
+  // The extension's popped-out Calls window opens on /m/calls (calls/popout.ts).
+  return startRoute();
 };

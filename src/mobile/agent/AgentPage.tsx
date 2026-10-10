@@ -35,7 +35,7 @@ const AgentPage = () => {
           <ArrowLeft size={20} color="#fff" />
         </button>
         <img src={bGlyph} alt="" width={22} height={22} />
-        <h1 className="text-lg font-bold text-white shrink-0">b agent</h1>
+        <h1 className="text-lg font-bold text-white shrink-0">Agent b</h1>
       </div>
       <AgentConversation />
     </div>

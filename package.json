@@ -1,6 +1,6 @@
 {
   "name": "yours-wallet",
-  "version": "5.1.89",
+  "version": "5.1.90",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -16,8 +16,10 @@
     "@1sat/utils": "0.0.40",
     "@1sat/wallet": "0.0.116",
     "@1sat/wallet-browser": "0.0.102",
+    "@bsv/message-box-client": "2.5.4",
     "@bsv/sdk": "^2.5.0",
     "@bsv/wallet-toolbox-client": "npm:@bopen-io/wallet-toolbox-client@2.14.5",
+    "@capacitor-community/keep-awake": "8.0.1",
     "@capacitor/android": "^8.5.2",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.2",

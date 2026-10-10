@@ -6,6 +6,7 @@ import { requestRoomByTicker } from '../chat/segmentNav';
 import { asMenuItem } from '../tabs/tabs';
 import { requestSignIns } from '../settings/signIns';
 import { isNative } from '../native';
+import { onSocialChange, socialReturnWaiting } from '../social/socialLogin';
 import { routeFromQuery, type PushRoute } from './logic';
 import { onPushRoute, syncPush, takeRouteFrom } from './register';
 
@@ -33,6 +34,15 @@ const PushEngine = () => {
     window.addEventListener(SESSION_EVENT, onSession);
     return () => window.removeEventListener(SESSION_EVENT, onSession);
   }, [identityAddress]);
+
+  // Back from X / Google (Settings › Connect, which the page reload closed): after the password unlock, go to
+  // Settings, where Connect reopens with the verified profile (FeedSettings takes the return). One trip.
+  useEffect(() => {
+    if (!identityAddress) return;
+    const go = () => socialReturnWaiting(identityAddress) && handleSelect(asMenuItem('settings'));
+    go();
+    return onSocialChange(go);
+  }, [identityAddress, handleSelect]);
 
   // Tap → Chat tab → the room (or the DM) → open it.
   useEffect(() => {

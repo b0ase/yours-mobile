@@ -7,6 +7,7 @@
  */
 import type { Asset } from '../wallet/historyEvents';
 import type { HistoryRow } from '../wallet/txHistory';
+import { quarantinedNfts, quarantinedTokenIds } from './quarantine';
 
 export type AirdropItem = {
   /** `txid:assetId`, stable across reloads. */
@@ -29,6 +30,8 @@ export type InboxState = {
   hiddenIssuers: string[];
   /** Only show airdrops from issuers whose airdrops you kept before. */
   onlyKnown: boolean;
+  /** Issuers you chose to trust ("Trust this sender"): their airdrops skip Quarantine. */
+  trustedIssuers?: string[];
 };
 export const emptyInbox = (): InboxState => ({ seenAt: 0, kept: [], hidden: [], hiddenIssuers: [], onlyKnown: false });
 
@@ -55,12 +58,14 @@ export const visibleItems = (items: AirdropItem[], s: InboxState): AirdropItem[]
   const kept = new Set(s.kept);
   const hidden = new Set(s.hidden);
   const badIssuers = new Set(s.hiddenIssuers);
+  const trusted = new Set(s.trustedIssuers ?? []);
   const knownIssuers = new Set(items.filter((i) => kept.has(i.key)).map((i) => i.issuer));
   return items.filter(
     (i) =>
       !kept.has(i.key) &&
       !hidden.has(i.key) &&
       !badIssuers.has(i.issuer) &&
+      !trusted.has(i.issuer) &&
       (!s.onlyKnown || knownIssuers.has(i.issuer)),
   );
 };
@@ -123,6 +128,43 @@ export const saveItems = (account: string, items: AirdropItem[], at: number, st:
   }
   emit();
 };
+
+/** Token ids the wallet holds by its own doing (History rows that are not unsolicited transfers in). */
+const solicitedKey = (account: string) => `bw-airdrops-solicited:${account}`;
+/** null until the first History scan since Quarantine shipped (then nothing is quarantined: see quarantineFor). */
+export const loadSolicited = (account: string, st: Store | null = store()): string[] | null => {
+  try {
+    const j = JSON.parse(st?.getItem(solicitedKey(account)) ?? 'null') as unknown;
+    return Array.isArray(j) ? j.filter((x): x is string => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
+};
+export const saveSolicited = (account: string, ids: string[], st: Store | null = store()) => {
+  try {
+    st?.setItem(solicitedKey(account), JSON.stringify(ids.slice(0, 2000)));
+  } catch {
+    /* ignore */
+  }
+};
+
+/**
+ * Quarantined token ids for an account (quarantine.ts), from local state only. Until History has been scanned
+ * once with Quarantine (solicited unknown) nothing is quarantined, so a token you bought is never hidden by mistake.
+ */
+export const quarantineFor = (account: string, st: Store | null = store()): Set<string> => {
+  const solicited = account ? loadSolicited(account, st) : null;
+  return solicited ? quarantinedTokenIds(loadItems(account, st).items, loadInbox(account, st), solicited) : new Set();
+};
+let activeAccount = '';
+/** The account whose Quarantine the send/list paths honour (set by useAirdrops and the wallet page). */
+export const setQuarantineAccount = (account: string) => {
+  activeAccount = account || activeAccount;
+};
+export const activeQuarantine = (): Set<string> => quarantineFor(activeAccount);
+/** Quarantined NFT outpoints (normalised txid_vout) for the active account. */
+export const activeNftQuarantine = (st: Store | null = store()): Set<string> =>
+  activeAccount ? quarantinedNfts(loadItems(activeAccount, st).items, loadInbox(activeAccount, st)) : new Set();
 
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());

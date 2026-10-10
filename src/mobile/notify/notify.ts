@@ -5,7 +5,7 @@ import { cachedExchangeRate } from '../../utils/wallet';
  * last time" diffs, mention matching and per-category filtering. engine.ts does the polling.
  */
 
-export type NotifyCategory = 'social' | 'mentions' | 'chat' | 'calls' | 'payments' | 'sales';
+export type NotifyCategory = 'bmail' | 'social' | 'mentions' | 'chat' | 'calls' | 'payments' | 'sales';
 export type NotifyKind =
   | 'reply'
   | 'quote'
@@ -16,7 +16,8 @@ export type NotifyKind =
   | 'call'
   | 'payment'
   | 'token'
-  | 'sale';
+  | 'sale'
+  | 'bmail';
 
 export const KIND_CATEGORY: Record<NotifyKind, NotifyCategory> = {
   reply: 'social',
@@ -29,9 +30,11 @@ export const KIND_CATEGORY: Record<NotifyKind, NotifyCategory> = {
   payment: 'payments',
   token: 'payments',
   sale: 'sales',
+  bmail: 'bmail',
 };
 
 export const CATEGORY_LABELS: Record<NotifyCategory, { label: string; description: string }> = {
+  bmail: { label: 'bMail', description: 'New mail that reaches your Inbox (not Requests)' },
   social: { label: 'Replies, quotes, likes & locks', description: 'On your Twetch, Treechat and bChat posts' },
   mentions: { label: 'Mentions', description: 'Posts and room messages that name you' },
   chat: { label: 'Room messages', description: 'New messages in your bChat rooms' },
@@ -47,7 +50,8 @@ export type NotifyTarget =
   | { type: 'post'; txid: string; twetchId?: number }
   | { type: 'room'; ticker: string }
   | { type: 'wallet' }
-  | { type: 'calls' };
+  | { type: 'calls' }
+  | { type: 'bmail' };
 
 export type NotifyItem = {
   /** Stable id: the same event polled twice yields the same id (deduped). */

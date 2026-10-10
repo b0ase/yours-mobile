@@ -93,7 +93,7 @@ export const notifyIfPermitted = async (title: string, body: string) => {
     const { display } = await LocalNotifications.checkPermissions();
     if (display !== 'granted') return;
     await LocalNotifications.schedule({
-      notifications: [{ id: 41_000 + Math.floor(Math.random() * 1000), title, body }],
+      notifications: [{ id: 41_000 + Math.floor(Math.random() * 1000), title, body, isExactNotification: false }],
     });
   } catch {
     /* notifications unavailable */

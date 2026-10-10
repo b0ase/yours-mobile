@@ -1,5 +1,6 @@
 import { MAX_PER_MINUTE, WINDOW_MS, type Approval } from '../settings/oneClick';
 import { loadPrefs, type Prefs } from '../settings/prefs';
+import { currentFx, formatFiat } from '../../utils/displayCurrency';
 
 /**
  * One-tap pay for the indexing fee of the user's OWN tokens (personal $NAME, tickets, any token
@@ -54,5 +55,4 @@ export const createIndexAutoPayGuard = (getPrefs: () => Pick<Prefs, 'indexAutoPa
 export const indexAutoPay = createIndexAutoPayGuard();
 
 /** "$0.0006" for tiny amounts, "$0.12" otherwise. */
-export const formatSmallUsd = (usd: number) =>
-  usd > 0 && usd < 0.01 ? `$${usd.toPrecision(1).replace(/^0\./, '0.')}` : `$${usd.toFixed(2)}`;
+export const formatSmallUsd = (usd: number) => formatFiat(usd, currentFx(), { small: true });

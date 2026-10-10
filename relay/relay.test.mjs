@@ -7,9 +7,9 @@ import { createRelay, acceptableOrigin } from './relay.mjs';
 const C = 'AAAAAAAAAAAAAAAAAAAAAA'; // 22 chars
 const exp = () => Math.floor(Date.now() / 1000) + 120;
 
-async function boot() {
+async function boot(opts = {}) {
   const server = http.createServer();
-  const relay = createRelay({ server });
+  const relay = createRelay({ server, ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `ws://127.0.0.1:${server.address().port}`;
   return { base, done: () => (relay.close(), new Promise((r) => server.close(r))) };
@@ -85,5 +85,35 @@ test('queues frames while the phone is away (app in background)', async () => {
   assert.equal(p2.inbox[1].d, 'queued');
   site.ws.close();
   p2.ws.close();
+  await done();
+});
+
+test('same-phone pairing: wallet joins while the site is away (Safari suspended), frames wait for the site', async () => {
+  const { base, done } = await boot();
+  const s1 = await open(`${base}/v1/c/${C}?role=site&e=${exp()}`, 'https://a.lol');
+  s1.ws.close();
+  await new Promise((r) => setTimeout(r, 50));
+  const phone = await open(`${base}/v1/c/${C}?role=wallet`);
+  await until(() => phone.inbox.length);
+  assert.deepEqual(phone.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol' });
+  phone.ws.send(JSON.stringify({ t: 'hello', k: '02cd' }));
+  await new Promise((r) => setTimeout(r, 50));
+  // Origin is still enforced when the site comes back.
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site`, 'https://evil.lol'), /403/);
+  const s2 = await open(`${base}/v1/c/${C}?role=site`, 'https://a.lol');
+  await until(() => s2.inbox.some((m) => m.t === 'hello'));
+  assert.deepEqual(s2.inbox.find((m) => m.t === 'hello'), { t: 'hello', k: '02cd' });
+  s2.ws.close();
+  phone.ws.close();
+  await done();
+});
+
+test('unpaired wallet join still refused once the QR has expired (site away or not)', async () => {
+  let clock = Date.now();
+  const { base, done } = await boot({ now: () => clock });
+  const s1 = await open(`${base}/v1/c/${C}?role=site&e=${exp()}`, 'https://a.lol');
+  s1.ws.close();
+  clock += 10 * 60_000;
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet`), /410/);
   await done();
 });

@@ -11,11 +11,36 @@ import { useBsvUsd } from '../money/money';
 import { PixelGhost } from '../agents/PixelGhost';
 import { getAgentAccount, getAgentLog, ghostColorOf, onAgentsChange, setAgentStopped } from '../agents/agentAccounts';
 import { startPotCreate } from '../agents/agentCreate';
-import { getPot, isLowFunds, listPots, listSubs, onPotsChange, potCovers } from './pots';
+import {
+  getPot,
+  isLowFunds,
+  listPots,
+  listSubs,
+  monthlyUsd,
+  onPotsChange,
+  pauseAllSubs,
+  potCovers,
+  resumeAllSubs,
+} from './pots';
 import { potBalanceSats } from './potSend';
 import { SubscriptionCard } from './SubscriptionCard';
 import { POTS_INTRO } from '../storeBuild';
 import { AddOrderSheet, CreatePotSheet } from './CreatePotSheet';
+import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import {
+  clearSubscribeRequest,
+  onSubscribeRequest,
+  peekSubscribeRequest,
+  requestLabel,
+  type SubscribeRequest,
+} from './subscribeLink';
+
+/** The held subscribe request, if any (always null in a store build). */
+const useSubscribeRequest = (): SubscribeRequest | null => {
+  const [r, setR] = useState<SubscribeRequest | null>(() => peekSubscribeRequest());
+  useEffect(() => (SUBSCRIPTIONS_ENABLED ? onSubscribeRequest(() => setR(peekSubscribeRequest())) : undefined), []);
+  return r;
+};
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -104,6 +129,11 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const pots = listPots();
+  const request = useSubscribeRequest();
+  const allSubs = listSubs()
+    .filter((x) => x.status !== 'cancelled' && x.status !== 'ended')
+    .sort((a, b) => a.nextDue - b.nextDue);
+  const anyLive = allSubs.some((x) => x.status === 'active' || x.status === 'lowFunds');
 
   const create = (name: string) => {
     startPotCreate(name);
@@ -121,6 +151,58 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
         <p className="text-sm m-0" style={{ color: MUTED }}>
           {POTS_INTRO}
         </p>
+        {SUBSCRIPTIONS_ENABLED && request && (
+          <div
+            className="rounded-2xl p-3 flex flex-col gap-1"
+            style={{ background: '#F5B80018', border: `1px solid ${GOLD}55` }}
+          >
+            <div className="text-sm font-bold text-white">{requestLabel(request)}</div>
+            <div className="text-xs" style={{ color: MUTED }}>
+              {pots.length
+                ? 'Pick the pot to pay it from, or make a new one. You check the amount before anything is set up.'
+                : 'Make a pot to pay it from, put a little in it, then come back here.'}
+            </div>
+            <button
+              type="button"
+              onClick={clearSubscribeRequest}
+              className="self-start text-xs bg-transparent border-0 p-0"
+              style={{ color: MUTED }}
+            >
+              Not now
+            </button>
+          </div>
+        )}
+        {SUBSCRIPTIONS_ENABLED && allSubs.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-white">
+                All subscriptions{rate > 0 ? ` · about $${monthlyUsd(allSubs, rate).toFixed(2)} a month` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => (anyLive ? pauseAllSubs() : resumeAllSubs())}
+                className="text-xs font-bold bg-transparent border-0 p-0"
+                style={{ color: GOLD }}
+              >
+                {anyLive ? 'Pause all' : 'Resume all'}
+              </button>
+            </div>
+            <p className="text-xs m-0" style={{ color: MUTED }}>
+              Priced in dollars. Each time one is due, your wallet pays that amount in BSV at the day&apos;s rate when
+              you open it. Nothing is paid up front. Cancel any time.
+            </p>
+            {allSubs.map((sub) => (
+              <SubscriptionCard key={sub.id} sub={sub} rate={rate} pots={pots} />
+            ))}
+            <div className="rounded-xl p-2.5 text-xs" style={{ border: `1px dashed ${GOLD}55`, color: MUTED }}>
+              Coming later: pay in PNEEs, so $1 is always exactly $1 with no price swings.
+            </div>
+            <p className="text-[11px] m-0 text-center" style={{ color: MUTED }}>
+              You approve each subscription once. The service can only take the agreed dollar amount, once per period.
+              Pausing a pot pauses everything that pays from it.
+            </p>
+          </div>
+        )}
         {pots.length === 0 && (
           <p className="text-sm text-center py-6 m-0" style={{ color: MUTED }}>
             No pots yet.
@@ -144,13 +226,23 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
         </button>
       </div>
       {creating && <CreatePotSheet onClose={() => setCreating(false)} onCreate={create} />}
-      {open && <PotScreen id={open} rate={rate} onClose={() => setOpen(null)} />}
+      {open && <PotScreen id={open} rate={rate} request={request} onClose={() => setOpen(null)} />}
     </div>,
     document.body,
   );
 };
 
-const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: () => void }) => {
+const PotScreen = ({
+  id,
+  rate,
+  onClose,
+  request = null,
+}: {
+  id: string;
+  rate: number;
+  onClose: () => void;
+  request?: SubscribeRequest | null;
+}) => {
   useBackClose(true, onClose);
   useTick();
   const { chromeStorageService } = useServiceContext();
@@ -160,7 +252,8 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
   const accounts = chromeStorageService.getAllAccounts?.() ?? [];
   const acct = accounts.find((x) => x.addresses.identityAddress === id);
   const others = accounts.filter((x) => x.addresses.identityAddress !== id);
-  const [adding, setAdding] = useState(false);
+  // A held subscribe request opens the add sheet prefilled as soon as a pot is picked.
+  const [adding, setAdding] = useState(!!request);
   const [copied, setCopied] = useState(false);
   const subs = listSubs(id).sort((a, b) => a.nextDue - b.nextDue);
   const history = getAgentLog(id).filter((e) => e.action.startsWith('sub-') || e.action === 'topup');
@@ -249,7 +342,7 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
           </p>
         )}
         {subs.map((s) => (
-          <SubscriptionCard key={s.id} sub={s} />
+          <SubscriptionCard key={s.id} sub={s} rate={rate} />
         ))}
 
         <div className={section} style={{ background: CARD }}>
@@ -316,6 +409,7 @@ const PotScreen = ({ id, rate, onClose }: { id: string; rate: number; onClose: (
           potName={pot.name}
           balanceUsd={balanceUsd}
           bsvUsd={rate}
+          request={request}
           onClose={() => setAdding(false)}
         />
       )}

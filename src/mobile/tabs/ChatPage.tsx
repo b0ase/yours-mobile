@@ -1,4 +1,5 @@
 import { claimIssuerAdmin } from '../chat/autoClaim';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
 import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
@@ -26,7 +27,7 @@ import {
   X,
   Loader2,
 } from 'lucide-react';
-import { getBsv21Balances, sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
 import { SendBsv21View } from '../../components/SendBsv21View';
 import { NameInput } from '../names/NameInput';
 import { useTheme } from '../../hooks/useTheme';
@@ -39,7 +40,8 @@ import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from '../chat/api';
+import { BchatClient, ChatApiError, defaultHttp, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
+import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import type { ReplyRef } from '../chat/api';
 import {
@@ -79,6 +81,8 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
+import { NewSpaceSheet } from '../spaces/NewSpaceSheet';
+import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -169,6 +173,7 @@ import { blockedHandles, onUgcChange } from '../ugc/ugc';
 import {
   browseList,
   byActivity,
+  loungeFirst,
   isOpenRoom,
   isStaff,
   openInfo,
@@ -180,6 +185,7 @@ import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets
 import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -351,6 +357,8 @@ const Conversation = ({
   // Facebook / WhatsApp parity (chat/social.ts): reply quote, reaction bar, typing, mentions.
   const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
   const [acting, setActing] = useState<ChatMessage | null>(null);
+  /** Inline edit of one of your own messages: the bubble becomes a text box (Save / Cancel). */
+  const [editing, setEditing] = useState<{ id: string; text: string; busy?: boolean } | null>(null);
   const [typing, setTyping] = useState<string[]>([]);
   const lastTypingPing = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
@@ -420,7 +428,7 @@ const Conversation = ({
       .then((fresh) => {
         const shown = visibleMessages(fresh, viewerIsAdmin);
         if (!shown.length) return;
-        setMessages((cur) => mergeMessages(cur, shown));
+        setMessages((cur) => mergeMessages(cur, shown, { dropOrphanEdits: true }));
         void client.markRead(room.ticker).catch(() => {});
       })
       .catch(() => {});
@@ -432,6 +440,30 @@ const Conversation = ({
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
     lastTypingPing.current = Date.now();
     void client.typing(room.ticker).catch(() => {});
+  };
+  // The server appends a new version and returns it; merging replaces the old bubble in place
+  // (its supersedes_id), marked "edited". Same text → nothing to do.
+  const saveEdit = () => {
+    if (!editing || editing.busy) return;
+    const text = editing.text.trim();
+    const original = messages.find((x) => x.id === editing.id);
+    if (!text || !original || text === (original.body || '').trim()) {
+      setEditing(null);
+      return;
+    }
+    setEditing({ ...editing, busy: true });
+    client
+      .editMessage(room.ticker, editing.id, text)
+      .then((saved) => {
+        // Dated as the original (it is placed there anyway): the edit's own created_at is
+        // "now" and would move the `since` cursor past messages the poll has not fetched yet.
+        setMessages((cur) => mergeMessages(cur, [{ ...saved, created_at: original.created_at }]));
+        setEditing(null);
+      })
+      .catch((e) => {
+        setEditing((cur) => (cur ? { ...cur, busy: false } : cur));
+        fail(e);
+      });
   };
   const react = (m: ChatMessage, emoji: string) => {
     const mineNow = (reactions.get(m.id) ?? []).some((r) => r.emoji === emoji && r.handles.includes(normHandle(me)));
@@ -668,7 +700,7 @@ const Conversation = ({
       </div>
 
       {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
-      {BSPACES_ENABLED && entry && (
+      {BSPACES_ENABLED && (
         <LiveBanner
           client={client}
           ctx={apiContext}
@@ -676,6 +708,8 @@ const Conversation = ({
           roomName={title}
           me={me}
           createdBy={room.created_by_handle}
+          gated={!!entry}
+          spaceOpen={roomSpaceOpen(room)}
         />
       )}
       <div
@@ -768,7 +802,7 @@ const Conversation = ({
                     <div className="shrink-0" style={{ width: 28 }} />
                   ))}
                 <div
-                  {...(!it.message.pending && !isEphemeral(it.message)
+                  {...(!it.message.pending && !isEphemeral(it.message) && editing?.id !== it.message.id
                     ? bubbleGestures(
                         () => setActing(it.message),
                         isPrivateB(it.message) ? null : () => setReplyTo(replyRefFor(it.message)),
@@ -799,7 +833,50 @@ const Conversation = ({
                       Shared by ${(it.message.event_payload as { shared_by?: string }).shared_by}
                     </div>
                   )}
-                  <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                  {editing?.id === it.message.id ? (
+                    <div className="flex flex-col gap-2 min-w-[220px]">
+                      <textarea
+                        autoFocus
+                        value={editing.text}
+                        onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            saveEdit();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditing(null);
+                          }
+                        }}
+                        maxLength={4000}
+                        rows={Math.min(6, Math.max(2, editing.text.split('\n').length))}
+                        aria-label="Edit message"
+                        className="w-full resize-none rounded-xl px-3 py-2 text-[15px] outline-none"
+                        style={{ background: 'rgba(0,0,0,0.18)', color: 'inherit' }}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(null)}
+                          className="rounded-full px-3 py-1 text-[13px] font-semibold"
+                          style={{ background: 'rgba(0,0,0,0.15)' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveEdit}
+                          disabled={!editing.text.trim() || editing.busy}
+                          className="rounded-full px-3 py-1 text-[13px] font-semibold disabled:opacity-50"
+                          style={{ background: '#1a1300', color: GOLD }}
+                        >
+                          {editing.busy ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                  )}
                   {isPrivateB(it.message) && (
                     <div
                       className="text-[11px] mt-1 flex items-center gap-2"
@@ -825,7 +902,13 @@ const Conversation = ({
                     className="text-[10px] ml-2 float-right mt-[6px]"
                     style={{ color: it.mine ? '#5c4800' : MUTED }}
                   >
-                    {it.message.edited ? 'edited · ' : ''}
+                    {it.message.edited ? (
+                      <span title={it.message.edited_at ? `Edited ${new Date(it.message.edited_at).toLocaleString()}` : 'Edited'}>
+                        edited ·{' '}
+                      </span>
+                    ) : (
+                      ''
+                    )}
                     {it.message.failed ? (
                       <button
                         className="underline text-[#b42318]"
@@ -998,6 +1081,19 @@ const Conversation = ({
                 }
               : null
           }
+          onEdit={
+            normHandle(acting.author_handle ?? '') === normHandle(me) &&
+            acting.kind === 'text' &&
+            !acting.pending &&
+            !acting.failed &&
+            !isPrivateB(acting) &&
+            !isEphemeral(acting)
+              ? () => {
+                  setEditing({ id: acting.id, text: acting.body || '' });
+                  setActing(null);
+                }
+              : null
+          }
           onMore={
             onMessageMenu && !isPrivateB(acting)
               ? () => {
@@ -1095,10 +1191,10 @@ const PayToPostSheet = ({
         </div>
       )}
       {err && (
-        <p className="text-xs mb-2" style={{ color: '#f87171' }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mb-2" style={{ color: '#f87171' }}>
           {err}
-        </p>
-      )}
+        </p><ErrorActions message={String(err)} /></div>
+)}
       <div className="flex gap-2 pb-4">
         <button onClick={onCancel} className="flex-1 rounded-2xl py-3 text-white" style={{ background: PANEL }}>
           Cancel
@@ -1259,7 +1355,7 @@ const InviteSheet = ({
     if (!raw || raw === '0') return setError('Enter an amount.');
     setBusy('Checking balance…');
     try {
-      const balances = await getBsv21Balances.execute(apiContext, {});
+      const balances = await heldBsv21Balances(apiContext);
       const id = (entry.holding.id || '').toLowerCase().replace('.', '_');
       const info = balances.find((b) => (b.id || '').toLowerCase().replace('.', '_') === id);
       const held = info ? info.all.confirmed : 0n;
@@ -1378,7 +1474,9 @@ const InviteSheet = ({
         >
           {busy || 'Next'}
         </button>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
         {note && (
           <button
             onClick={() => setNote('')}
@@ -1472,7 +1570,9 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
           );
         })}
       </ul>
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
     </Sheet>
   );
 };
@@ -1658,7 +1758,9 @@ const BountiesSheet = ({
             {busy || 'Pay'}
           </button>
         </div>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       </Sheet>
     );
   }
@@ -1705,7 +1807,9 @@ const BountiesSheet = ({
             {busy || 'Claim'}
           </button>
         </div>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       </Sheet>
     );
   }
@@ -1768,7 +1872,9 @@ const BountiesSheet = ({
           </div>
         ))}
       </div>
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
     </Sheet>
   );
 };
@@ -1909,6 +2015,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   // Open rooms (no token): every build, store build included.
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([]);
   const [newRoom, setNewRoom] = useState(false);
+  const [newSpace, setNewSpace] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [msgMenu, setMsgMenu] = useState<ChatMessage | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -1954,11 +2061,30 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       saveSession(s);
       setHandle(s.handle);
     } catch (e) {
-      setAuthError(errText(e));
+      // A wallet bChat hasn't seen and no handle chosen yet: open Choose your handle right here.
+      const need = needsHandle(e);
+      if (need) setHandleClaim(need);
+      else setAuthError(errText(e));
     } finally {
       setSigningIn(false);
     }
   }, [client, apiContext]);
+  const [handleClaim, setHandleClaim] = useState<{ claimToken: string; address: string } | null>(null);
+  // After the handle is chosen, finish the sign-in with bit-sign's claim token (falls back to a fresh
+  // sign-in, which now finds the chosen name, if the token has expired).
+  const finishClaim = useCallback(
+    async (paymail: string) => {
+      if (!handleClaim) return;
+      const name = paymail.split('@')[0];
+      const s = await client
+        .claimHandle(handleClaim.claimToken, name, handleClaim.address)
+        .catch(() => client.signIn(walletSigner(apiContext)));
+      saveSession(s);
+      setHandle(s.handle);
+      setHandleClaim(null);
+    },
+    [client, apiContext, handleClaim],
+  );
 
   // Tapping the Chat tab inside a room goes back to the room list.
   useEffect(() => {
@@ -1975,6 +2101,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setHandle(null);
     setOpen(null);
     setRooms(null);
+  }, [client]);
+
+  // Settings › Sign out of chat clears the stored session while this tab stays mounted: drop the
+  // in-memory one too, or chat keeps using the old token and never signs in again.
+  useEffect(() => {
+    const onSession = () => {
+      if (client.current && !loadSession()) {
+        client.signOut();
+        setHandle(null);
+        setOpen(null);
+        setRooms(null);
+        autoTried.current = false;
+      }
+    };
+    window.addEventListener(SESSION_EVENT, onSession);
+    return () => window.removeEventListener(SESSION_EVENT, onSession);
   }, [client]);
 
   useEffect(() => {
@@ -2115,9 +2257,11 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    return list.sort(
+    const sorted = list.sort(
       (a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room),
     );
+    // The bWallet Lounge is pinned at the top (owner, 9 Oct 2026).
+    return loungeFirst(sorted, (x) => (x.kind === 'open' ? x.room.ticker : x.item.e.room?.ticker));
   }, [myOpen, tokenMine]);
 
   const openOpenRoom = (room: ChatRoom) => {
@@ -2420,11 +2564,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               {signingIn ? 'Signing in…' : 'Sign in with wallet'}
             </button>
             {authError && <p className="text-xs text-[#F97066]">{authError}</p>}
+            {handleClaim && <HandleFlow onClose={() => setHandleClaim(null)} onClaimed={finishClaim} />}
           </div>
         )}
 
         {handle && (
-          <div className="px-4 pb-1 flex">
+          <div className="px-4 pb-1 flex gap-2">
             <button
               onClick={() => setNewRoom(true)}
               className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
@@ -2432,6 +2577,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             >
               <Plus size={16} strokeWidth={2.6} /> New room
             </button>
+            {BSPACES_ENABLED && (
+              <button
+                onClick={() => setNewSpace(true)}
+                className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+                style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+              >
+                <Plus size={16} strokeWidth={2.6} /> New Space
+              </button>
+            )}
           </div>
         )}
         {handle && rooms === null && !listError && (
@@ -2625,13 +2779,26 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           }}
         />
       )}
+      {newSpace && handle && (
+        <NewSpaceSheet
+          client={client}
+          me={handle}
+          rooms={rooms ?? []}
+          onClose={() => setNewSpace(false)}
+          onNewRoom={() => {
+            setNewSpace(false);
+            setNewRoom(true);
+          }}
+        />
+      )}
       {newRoom && handle && (
         <NewRoomSheet
           client={client}
           onClose={() => setNewRoom(false)}
           onDone={(r) => {
             setNewRoom(false);
-            openOpenRoom(stubRoom(r.ticker, r.name));
+            // The creator is the room's admin: say so, or the room's "Start a Space" bar stays hidden.
+            openOpenRoom(stubRoom(r.ticker, r.name, { created_by_handle: handle }));
             refresh();
           }}
         />
