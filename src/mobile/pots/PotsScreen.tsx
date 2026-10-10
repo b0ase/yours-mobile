@@ -11,7 +11,17 @@ import { useBsvUsd } from '../money/money';
 import { PixelGhost } from '../agents/PixelGhost';
 import { getAgentAccount, getAgentLog, ghostColorOf, onAgentsChange, setAgentStopped } from '../agents/agentAccounts';
 import { startPotCreate } from '../agents/agentCreate';
-import { getPot, isLowFunds, listPots, listSubs, onPotsChange, potCovers } from './pots';
+import {
+  getPot,
+  isLowFunds,
+  listPots,
+  listSubs,
+  monthlyUsd,
+  onPotsChange,
+  pauseAllSubs,
+  potCovers,
+  resumeAllSubs,
+} from './pots';
 import { potBalanceSats } from './potSend';
 import { SubscriptionCard } from './SubscriptionCard';
 import { POTS_INTRO } from '../storeBuild';
@@ -120,6 +130,10 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
   const [creating, setCreating] = useState(false);
   const pots = listPots();
   const request = useSubscribeRequest();
+  const allSubs = listSubs()
+    .filter((x) => x.status !== 'cancelled' && x.status !== 'ended')
+    .sort((a, b) => a.nextDue - b.nextDue);
+  const anyLive = allSubs.some((x) => x.status === 'active' || x.status === 'lowFunds');
 
   const create = (name: string) => {
     startPotCreate(name);
@@ -156,6 +170,37 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
             >
               Not now
             </button>
+          </div>
+        )}
+        {SUBSCRIPTIONS_ENABLED && allSubs.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-white">
+                All subscriptions{rate > 0 ? ` · about $${monthlyUsd(allSubs, rate).toFixed(2)} a month` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => (anyLive ? pauseAllSubs() : resumeAllSubs())}
+                className="text-xs font-bold bg-transparent border-0 p-0"
+                style={{ color: GOLD }}
+              >
+                {anyLive ? 'Pause all' : 'Resume all'}
+              </button>
+            </div>
+            <p className="text-xs m-0" style={{ color: MUTED }}>
+              Priced in dollars. Each time one is due, your wallet pays that amount in BSV at the day&apos;s rate when
+              you open it. Nothing is paid up front. Cancel any time.
+            </p>
+            {allSubs.map((sub) => (
+              <SubscriptionCard key={sub.id} sub={sub} rate={rate} pots={pots} />
+            ))}
+            <div className="rounded-xl p-2.5 text-xs" style={{ border: `1px dashed ${GOLD}55`, color: MUTED }}>
+              Coming later: pay in PNEEs, so $1 is always exactly $1 with no price swings.
+            </div>
+            <p className="text-[11px] m-0 text-center" style={{ color: MUTED }}>
+              You approve each subscription once. The service can only take the agreed dollar amount, once per period.
+              Pausing a pot pauses everything that pays from it.
+            </p>
           </div>
         )}
         {pots.length === 0 && (
@@ -297,7 +342,7 @@ const PotScreen = ({
           </p>
         )}
         {subs.map((s) => (
-          <SubscriptionCard key={s.id} sub={s} />
+          <SubscriptionCard key={s.id} sub={s} rate={rate} />
         ))}
 
         <div className={section} style={{ background: CARD }}>

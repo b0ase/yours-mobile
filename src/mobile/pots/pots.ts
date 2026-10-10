@@ -392,3 +392,45 @@ export const formatAmount = (a: Subscription['amount']) =>
     : a.currency === 'SAT'
       ? `${a.value.toLocaleString()} sats`
       : `${a.value} ${a.value === 1 ? 'PNEE' : 'PNEEs'}`;
+
+// ── Pots & Locks › Subscriptions (owner, 10 Oct 2026) ──────────────────────────────────────────────────────
+
+const liveSub = (s: Subscription) => s.status === 'active' || s.status === 'lowFunds';
+
+/** Pays from: move a subscription to another pot. Its schedule and approval stay the same. */
+export const moveSub = (id: string, potId: string, now = Date.now()) => {
+  const s = getSub(id);
+  if (!s || s.potId === potId || !getPot(potId)) return;
+  saveSub({ ...s, potId, lastError: undefined });
+  appendAgentLog(potId, { at: now, action: 'sub-move', detail: `${s.payee.name} now pays from here`, usd: 0 });
+};
+
+/** Pause all: every live subscription; returns how many were paused. */
+export const pauseAllSubs = (now = Date.now()) => {
+  const live = listSubs().filter(liveSub);
+  live.forEach((s) => pauseSub(s.id, now));
+  return live.length;
+};
+
+/** Resume all paused subscriptions; returns how many. */
+export const resumeAllSubs = (now = Date.now()) => {
+  const paused = listSubs().filter((s) => s.status === 'paused');
+  paused.forEach((s) => resumeSub(s.id, now));
+  return paused.length;
+};
+
+const PER_MONTH: Record<'day' | 'week' | 'month' | 'year', number> = {
+  day: 30.44,
+  week: 30.44 / 7,
+  month: 1,
+  year: 1 / 12,
+};
+
+/** What the live subscriptions cost per month, in dollars at `bsvUsd`. */
+export const monthlyUsd = (subs: Subscription[], bsvUsd: number) =>
+  Math.round(
+    subs.filter(liveSub).reduce((a, s) => {
+      const per = typeof s.period === 'object' ? (30.44 * 86_400) / Math.max(1, s.period.seconds) : PER_MONTH[s.period];
+      return a + amountUsd(s.amount, bsvUsd) * per;
+    }, 0) * 100,
+  ) / 100;
