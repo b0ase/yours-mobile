@@ -53,6 +53,8 @@ import {
   allowanceSats,
   DEFAULT_ALLOWANCE_USD,
   PermissionBundler,
+  isAutoGrantable,
+  TRUST_SITE_BASKET,
   type BundleRequest,
 } from './services/permissionBundle';
 import { normalizeOriginator } from '@1sat/wallet';
@@ -815,10 +817,38 @@ const bindPermissionCallbacks = (manager: LocalWalletPermissionsManager) => {
  */
 const showPermissionPrompt = (request: PermissionRequest & { requestID: string }): Promise<void> => {
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
-  return new Promise((resolve, reject) => {
-    pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-    permissionBundler.add(request as BundledRequest & BundleRequest);
-  });
+  return siteTrustedFor(request).then(
+    (trusted) =>
+      new Promise<void>((resolve, reject) => {
+        if (trusted && accountContext?.wallet) {
+          // A site the user said "don't ask again" for: routine requests go through without a sheet.
+          accountContext.wallet
+            .grantPermission({ requestID: request.requestID, expiry: 0 })
+            .then(() => resolve())
+            .catch((error: unknown) => reject(error instanceof Error ? error : new Error(String(error))));
+          return;
+        }
+        pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
+        permissionBundler.add(request as BundledRequest & BundleRequest);
+      }),
+  );
+};
+
+/** True when the user ticked "Don't ask again" for this site and this request is a routine kind. */
+const siteTrustedFor = async (request: PermissionRequest & { requestID: string }): Promise<boolean> => {
+  if (!isAutoGrantable(request as BundledRequest & BundleRequest)) return false;
+  const store = accountContext?.permissionStore;
+  if (!store || !request.originator) return false;
+  try {
+    const grant = await store.findGrant({
+      type: 'basket',
+      originator: normalizeOriginator(request.originator),
+      basket: TRUST_SITE_BASKET,
+    });
+    return !!grant && (grant.expiry === 0 || grant.expiry * 1000 > Date.now());
+  } catch {
+    return false;
+  }
 };
 
 const showGroupedPermissionPrompt = (request: GroupedPermissionRequest): Promise<void> => {
@@ -1197,6 +1227,7 @@ if (isInServiceWorker) {
               decisions: Record<string, boolean>;
               allowanceUsd?: number;
               remember?: boolean;
+              trustSite?: boolean;
             },
             sendResponse,
           );
@@ -2165,7 +2196,13 @@ if (isInServiceWorker) {
    * (the same record a manifest's grouped grant writes), so later payments under it need no sheet.
    */
   const processBundlePermissionResponse = (
-    response: { bundleID: string; decisions: Record<string, boolean>; allowanceUsd?: number; remember?: boolean },
+    response: {
+      bundleID: string;
+      decisions: Record<string, boolean>;
+      allowanceUsd?: number;
+      remember?: boolean;
+      trustSite?: boolean;
+    },
     sendResponse: CallbackResponse,
   ) => {
     const bundle = permissionBundler.get(response.bundleID);
@@ -2192,6 +2229,15 @@ if (isInServiceWorker) {
             reason: `Up to $${usd} a month without asking`,
           });
         }
+      }
+      // "Don't ask again": routine requests from this site are granted without a sheet from now on.
+      if (response.trustSite && remember && result.granted.length > 0 && accountContext?.permissionStore) {
+        await accountContext.permissionStore.putGrant({
+          key: { type: 'basket', originator: normalizeOriginator(bundle.originator), basket: TRUST_SITE_BASKET },
+          expiry: 0,
+          grantedAt: Date.now(),
+          reason: 'Sign-in and signing without asking',
+        });
       }
       await Promise.all([
         ...result.granted.map(async (r) => {
