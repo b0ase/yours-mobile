@@ -72,6 +72,8 @@ export const OWN_SERVICE_PAYEES: readonly ServicePayee[] = SUBSCRIPTIONS_ENABLED
   ? [
       { service: 'bchat', name: 'bChat', address: BCORP_ADDRESS },
       { service: 'b-agent', name: '$b agent', address: BCORP_ADDRESS },
+      // Back bWalletX (pots/fund.ts): monthly support for development, memo bwalletx-fund:<hash160>.
+      { service: 'bwalletx-fund', name: 'bWalletX development fund', address: BCORP_ADDRESS },
     ].filter((p) => p.address)
   : [];
 export const servicePayee = (service?: string) => OWN_SERVICE_PAYEES.find((p) => p.service === service) ?? null;

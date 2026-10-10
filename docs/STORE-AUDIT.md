@@ -277,6 +277,9 @@ All gates are in `src/mobile/storeBuild.ts` (tested in `storeBuild.test.ts`):
   payees, and later "Subscribe with bWalletX" requests) are gated by the literal-env `SUBSCRIPTIONS_ENABLED`, so the
   payee data is not in the store bundle; the bWalletX billing subscription is gated by `BILLING_ENABLED` (always
   false in a store build) and is OFF everywhere. `storeBuild.test.ts` checks both ways.
+- **Back bWalletX** (10 Oct 2026, `src/mobile/pots/fund.ts`): the monthly development-fund pot and its subscription
+  are bWalletX only. Every entry point is behind the literal `SUBSCRIPTIONS_ENABLED`, so it is not in the store
+  bundle; the release store-bundle grep includes `Back bWalletX|bwalletx-fund`.
 
 Build: `pnpm release:ios-store` / `pnpm release:android-play` (store rules) and `pnpm release:ios-private` /
 `pnpm release:android-direct` (everything on), via `scripts/channel-build.sh` and `src/mobile/channel.ts`.
