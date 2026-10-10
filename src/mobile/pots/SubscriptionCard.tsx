@@ -1,4 +1,15 @@
-import { cancelSub, formatAmount, formatPeriod, nextDue, pauseSub, resumeSub, type Subscription } from './pots';
+import {
+  amountSats,
+  cancelSub,
+  formatAmount,
+  formatPeriod,
+  moveSub,
+  nextDue,
+  pauseSub,
+  resumeSub,
+  type Pot,
+  type Subscription,
+} from './pots';
 
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
@@ -15,8 +26,11 @@ const STATUS: Record<Subscription['status'], { label: string; color: string }> =
 const day = (t: number) =>
   new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
-/** One standing order: payee, amount, next payment, Pause/Resume (one tap), Cancel. */
-export const SubscriptionCard = ({ sub }: { sub: Subscription }) => {
+/**
+ * One standing order: payee, amount, next payment, Pause/Resume (one tap), Cancel. With `rate`, a dollar order shows
+ * about how much BSV it would take today (it pays that day's rate when due); with `pots`, a Pays-from picker.
+ */
+export const SubscriptionCard = ({ sub, rate, pots }: { sub: Subscription; rate?: number; pots?: Pot[] }) => {
   const st = STATUS[sub.status];
   const next = nextDue(sub);
   const live = sub.status === 'active' || sub.status === 'lowFunds';
@@ -41,7 +55,27 @@ export const SubscriptionCard = ({ sub }: { sub: Subscription }) => {
       {!over && next !== null && (
         <div className="text-xs text-white">
           Next: {day(next)} · {formatAmount(sub.amount)}
+          {sub.amount.currency === 'USD' && rate && rate > 0 && amountSats(sub.amount, rate) !== null
+            ? ` · about ${(amountSats(sub.amount, rate)! / 1e8).toFixed(5)} BSV today`
+            : ''}
         </div>
+      )}
+      {!over && pots && pots.length > 1 && (
+        <label className="flex items-center justify-between gap-2 text-xs" style={{ color: MUTED }}>
+          Pays from
+          <select
+            value={sub.potId}
+            onChange={(e) => moveSub(sub.id, e.target.value)}
+            className="rounded-lg px-2 py-1.5 text-xs font-bold text-white"
+            style={{ background: LINE, border: 0 }}
+          >
+            {pots.map((p) => (
+              <option key={p.identityAddress} value={p.identityAddress}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
       {sub.lastError && !over && (
         <div className="text-xs" style={{ color: '#FDA29B' }}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BIG_LOCK_QUESTION,
   EMPTY_AMOUNTS,
@@ -64,7 +64,10 @@ import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
 import { BackPneeSheet } from '../notes/BackPneeSheet';
 import { groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
-import { MARKET_ENABLED } from '../storeBuild';
+import { MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { listSubs, monthlyUsd } from '../pots/pots';
+
+const PotsScreen = lazy(() => import('../pots/PotsScreen'));
 import { verifyLockTx, type VerifyResult } from './verify';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
 import {
@@ -152,6 +155,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   /** The pot the lock being built goes into (LockPlan.pot); undefined = Other locks. */
   const [pot, setPot] = useState<string | undefined>(undefined);
   const [openPot, setOpenPot] = useState<string | null>(null);
+  const [showSubs, setShowSubs] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -710,6 +714,22 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               </div>
             );
           })}
+          {SUBSCRIPTIONS_ENABLED && (
+            <button onClick={() => setShowSubs(true)} className={`${card} text-left`} style={cardStyle}>
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-sm font-bold text-white">Subscriptions</span>
+                <ChevronDown size={16} color={MUTED} className="-rotate-90" />
+              </div>
+              <div className="text-xs" style={{ color: MUTED }}>
+                {(() => {
+                  const live = listSubs().filter((x) => x.status === 'active' || x.status === 'lowFunds');
+                  return live.length
+                    ? `${live.length} paying from your pots${rate > 0 ? ` · about $${monthlyUsd(live, rate).toFixed(2)} a month` : ''}`
+                    : 'Priced in dollars, paid from a pot you choose. Pause or cancel any time.';
+                })()}
+              </div>
+            </button>
+          )}
           {(plans.length === 0 || openPot === '__start') && (
             <div className={card} style={cardStyle}>
               <div className="text-sm font-bold text-white">Start a pot</div>
@@ -1202,6 +1222,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
+      {showSubs && (
+        <Suspense fallback={null}>
+          <PotsScreen onClose={() => setShowSubs(false)} />
+        </Suspense>
+      )}
       {MARKET_ENABLED && backPnee === 'card' && (
         <BackPneeSheet onClose={() => setBackPnee(null)} onLock={() => setBackPnee('amount')} />
       )}

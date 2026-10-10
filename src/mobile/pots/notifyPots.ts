@@ -52,7 +52,13 @@ export const reschedulePotReminders = async (now = Date.now()) => {
     const next = plannedReminders(listSubs(), (id) => names.get(id) ?? 'pot', now);
     if (next.length)
       await LocalNotifications.schedule({
-        notifications: next.map((n) => ({ id: n.id, title: n.title, body: n.body, schedule: { at: new Date(n.at) }, isExactNotification: false })),
+        notifications: next.map((n) => ({
+          id: n.id,
+          title: n.title,
+          body: n.body,
+          schedule: { at: new Date(n.at) },
+          isExactNotification: false,
+        })),
       });
   } catch {
     /* notifications unavailable */
