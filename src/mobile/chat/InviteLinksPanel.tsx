@@ -18,6 +18,7 @@ import {
   type ManagedInvite,
 } from '../spaces/invite';
 import { copyLink, shareText } from './shareLink';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -134,7 +135,9 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
           <Copy size={15} /> Copy
         </button>
       </div>
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
 
       <div className="text-[11px] font-semibold uppercase tracking-wide mt-5 mb-2" style={{ color: MUTED }}>
         Invites

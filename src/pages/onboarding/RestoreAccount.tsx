@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, CheckCircle, ChevronRight, Upload, Usb } from 'lucide-react';
+import { ArrowLeft, CheckCircle, ChevronRight, FileUp, Plus, Upload, Usb } from 'lucide-react';
 import { isUsbSupported, openUsbWindow } from '../../services/UsbKey.service';
 import relayXLogo from '../../assets/relayx.svg';
 import twetchLogo from '../../assets/twetch.svg';
@@ -23,10 +23,13 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { SupportedWalletImports } from '../../services/types/keys.types';
 import { SettingsPage } from '../Settings';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
+import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
 
 export type RestoreAccountProps = {
   onNavigateBack: (page: SettingsPage) => void;
   newWallet?: boolean;
+  /** Add account (an existing wallet): a "New account" row at the top opens the fresh-keys flow. */
+  onNewAccount?: () => void;
 };
 
 const stepVariants = {
@@ -35,7 +38,7 @@ const stepVariants = {
   exit: { opacity: 0, x: -24 },
 };
 
-export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAccountProps) => {
+export const RestoreAccount = ({ onNavigateBack, newWallet = false, onNewAccount }: RestoreAccountProps) => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
@@ -54,6 +57,14 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
   const [accountName, setAccountName] = useState('');
   const [iconURL, setIconURL] = useState('');
   const hiddenYoursFileInput = useRef<HTMLInputElement>(null);
+  const currentAccountName = (() => {
+    if (newWallet) return '';
+    try {
+      return chromeStorageService.getCurrentAccountObject().account?.name ?? '';
+    } catch {
+      return '';
+    }
+  })();
 
   useEffect(() => {
     if (newWallet) hideMenu();
@@ -101,7 +112,13 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
       const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
 
       if (password.length < 8) {
-        addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');
+        addSnackbar(newWallet ? 'The password must be at least 8 characters!' : restoreErrorMessage(new Error('Unauthorized!')), 'error');
+        return;
+      }
+      const problem = phraseProblem(seedWords);
+      if (problem) {
+        addSnackbar(problem, 'error');
+        setStep(2);
         return;
       }
 
@@ -114,14 +131,14 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
       const keys = await keysService.generateSeedAndStoreEncrypted(
         password,
         newWallet,
-        seedWords,
+        normalizePhrase(seedWords),
         walletDerivation,
         ordDerivation,
         identityDerivation,
         importWallet,
       );
       if (!keys?.mnemonic) {
-        addSnackbar('An error occurred while creating the account! Make sure your password is correct.', 'error');
+        addSnackbar("Couldn't add the account.", 'error');
         return;
       }
 
@@ -138,7 +155,7 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
       setStep(4);
     } catch (error) {
       console.log(error);
-      addSnackbar('An error occurred while restoring the account!', 'error');
+      addSnackbar(restoreErrorMessage(error), 'error');
     } finally {
       setLoading(false);
     }
@@ -315,11 +332,37 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
   const selectImportWallet = (
     <div className={`flex flex-col items-center w-full ${newWallet ? 'pb-6' : 'pb-20'}`}>
       <PageHeader
-        title="Restore a Wallet"
+        title={newWallet ? 'Restore a Wallet' : 'Add account'}
         onClick={() => (newWallet ? navigate('/') : onNavigateBack('manage-accounts'))}
       />
+      {!newWallet && onNewAccount && (
+        <div className="w-full flex flex-col gap-2.5 mb-4">
+          <WalletRow
+            onClick={onNewAccount}
+            element={
+              <div className="flex items-center gap-3 w-full">
+                <div
+                  className="flex items-center justify-center rounded-lg"
+                  style={{ backgroundColor: accentLeft, width: '2.25rem', height: '2.25rem' }}
+                >
+                  <Plus size={18} color="#000" />
+                </div>
+                <span className="flex-1 flex flex-col">
+                  <span className="text-sm font-semibold" style={{ color: contrast }}>
+                    New account
+                  </span>
+                  <span className="text-xs" style={{ color: gray }}>
+                    Fresh 12 words, same password
+                  </span>
+                </span>
+                <ChevronRight size={16} style={{ color: gray }} />
+              </div>
+            }
+          />
+        </div>
+      )}
       <p className="text-xs mb-4 text-center px-4" style={{ color: gray }}>
-        Select the wallet you'd like to restore from
+        {newWallet ? "Select the wallet you'd like to restore from" : 'Or restore one from 12 words'}
       </p>
 
       <div className="w-full flex flex-col gap-2.5 mb-3">
@@ -340,7 +383,36 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
             />
           ) : null,
         )}
+        {!newWallet && (
+          <WalletRow
+            onClick={() => {
+              setImportWallet('yours');
+              hiddenYoursFileInput.current?.click();
+            }}
+            element={
+              <div className="flex items-center gap-3 w-full">
+                <div
+                  className="flex items-center justify-center rounded-lg"
+                  style={{ backgroundColor: '#17191E', width: '2.25rem', height: '2.25rem' }}
+                >
+                  <FileUp size={18} color="#FFFFFF" />
+                </div>
+                <span className="text-sm font-semibold flex-1" style={{ color: contrast }}>
+                  Import a backup file
+                </span>
+                <ChevronRight size={16} style={{ color: gray }} />
+              </div>
+            }
+          />
+        )}
       </div>
+      <input
+        type="file"
+        ref={step === 1 ? hiddenYoursFileInput : undefined}
+        onChange={handleYoursJsonUpload}
+        style={{ display: 'none' }}
+        accept="application/json"
+      />
     </div>
   );
 
@@ -355,6 +427,11 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
+          const problem = phraseProblem(seedWords);
+          if (problem) {
+            addSnackbar(problem, 'error');
+            return;
+          }
           setStep(3);
         }}
         className="flex flex-col items-center w-full"
@@ -454,9 +531,11 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
 
   const passwordStep = (
     <div className={`flex flex-col items-center w-full ${newWallet ? 'pb-6' : 'pb-20'}`}>
-      <SubStepHeader title={newWallet ? 'Create Password' : 'Import Account'} onBack={() => setStep(2)} />
-      <p className="text-xs mb-4 text-center" style={{ color: gray }}>
-        {newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}
+      <SubStepHeader title={newWallet ? 'Create Password' : 'Your bWalletX password'} onBack={() => setStep(2)} />
+      <p className="text-xs mb-4 text-center px-4" style={{ color: gray }}>
+        {newWallet
+          ? 'This will be used to unlock your wallet.'
+          : `The password you use to unlock bWalletX${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
       </p>
 
       <form onSubmit={handleRestore} className="flex flex-col items-center w-full">
@@ -476,7 +555,7 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false }: RestoreAcc
         />
         <Input
           theme={theme}
-          placeholder="Password"
+          placeholder={newWallet ? 'Password' : 'bWalletX password'}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

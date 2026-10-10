@@ -18,6 +18,7 @@ import {
   resendDoorRequest,
   type DoorRequest,
 } from './door';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -253,10 +254,10 @@ export const DoorButton = ({
       )}
 
       {err && (
-        <p className="mt-2 text-xs" style={{ color: '#F97066' }}>
+<div className="flex flex-col gap-1.5"><p className="mt-2 text-xs" style={{ color: '#F97066' }}>
           {err}
-        </p>
-      )}
+        </p><ErrorActions message={String(err)} /></div>
+)}
     </div>
   );
 };

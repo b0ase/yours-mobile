@@ -27,6 +27,7 @@ import {
   type TicketForm,
 } from './tickets';
 import { hasRate, money, moneyWithSats, satsNote, usdToSats } from '../money/money';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * MINT → "Start a room": mint a ticket (BSV-21, fixed supply, 0 decimals) and open its holders'
@@ -388,7 +389,9 @@ export const TicketMint = ({
         {moneyWithSats(cost.totalSats, exchangeRate)}. Its room and Market listing can be set up later (Settings › My
         tokens).
       </p>
-      {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p style={{ color: '#ff6b6b' }}>{error}</p><ErrorActions message={String(error)} /></div>
+)}
       <button
         type="button"
         onClick={review}

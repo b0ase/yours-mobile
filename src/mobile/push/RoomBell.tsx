@@ -5,6 +5,7 @@ import { loadSession } from '../chat/api';
 import { useBackClose } from '../backStack';
 import { ROOM_NOTIFY_OPTIONS, roomNotifyFor, type RoomNotify } from './logic';
 import { PushApi } from './register';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * Chat room header bell: All / Mentions / Off for this group (PUT /v1/rooms/:ticker/prefs). Groups
@@ -82,7 +83,9 @@ const Sheet = ({
             {value === o.id && <Check size={18} color={GOLD} />}
           </button>
         ))}
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-red-400">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       </div>
     </div>,
     document.body,

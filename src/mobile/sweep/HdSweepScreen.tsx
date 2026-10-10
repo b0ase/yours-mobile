@@ -29,6 +29,7 @@ import {
   splitSpendable,
   type SfpOutput,
 } from './moneybutton';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -444,10 +445,10 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
               </>
             )}
             {error && (
-              <p className="text-xs" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs" style={{ color: RED }}>
                 {error}
-              </p>
-            )}
+              </p><ErrorActions message={String(error)} /></div>
+)}
             <button
               onClick={() => void scan()}
               disabled={!phrase.trim()}
