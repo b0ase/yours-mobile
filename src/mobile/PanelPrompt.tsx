@@ -17,7 +17,7 @@ export const PanelPrompt = () => {
     const on = (e: Event) => {
       const d = (e as CustomEvent<{ action: string } & Show>).detail;
       if (d.action === 'SHOW_PROMPT_PANEL') setShow((cur) => cur ?? { kind: d.kind, requestID: d.requestID });
-      if (d.action === 'HIDE_PROMPT_PANEL') setShow(null);
+      if (d.action === 'HIDE_PROMPT_PANEL' || d.action === 'SHOW_UNLOCK_PANEL') setShow(null);
     };
     window.addEventListener(PANEL_PROMPT_EVENT, on);
     return () => window.removeEventListener(PANEL_PROMPT_EVENT, on);

@@ -287,22 +287,22 @@ const PromptApp = () => {
         )}
         {screen.kind === 'unlock' && <UnlockWallet onUnlock={() => void advance()} />}
         {screen.kind === 'permission' && (
-          <PermissionRequestPage request={screen.payload} onResponse={() => void advance()} />
+          <PermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'bundle' && (
           <BundleSheet key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'groupedPermission' && (
-          <GroupedPermissionRequestPage request={screen.payload} onResponse={() => void advance()} />
+          <GroupedPermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'counterpartyPermission' && (
-          <CounterpartyPermissionRequestPage request={screen.payload} onResponse={() => void advance()} />
+          <CounterpartyPermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'oneSatPermission' && (
-          <OneSatPermissionRequestPage request={screen.payload} onResponse={() => void advance()} />
+          <OneSatPermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'usbCheck' && (
-          <UsbCheckRequestPage request={screen.payload} onResponse={() => void advance()} />
+          <UsbCheckRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
       </div>
     </MemoryRouter>
