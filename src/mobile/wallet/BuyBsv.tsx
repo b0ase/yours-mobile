@@ -140,18 +140,8 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
   </button>
 );
 
-/** The promo's own dismiss flag (SwapPromo.tsx), read here so the loading placeholder matches what will show. */
-const promoDismissed = () => {
-  try {
-    return localStorage.getItem('bwx.swapPromoDismissed') === '1';
-  } catch {
-    return false;
-  }
-};
-
-/** Same box and margins as the promo card (or its dismissed spacer), so nothing jumps when the chunk loads. */
-const SwapPromoSkeleton = ({ hidden }: { hidden: boolean }) =>
-  hidden ? <div className="-mb-3" aria-hidden="true" /> : <div className="w-[92%] min-h-[52px] -mb-1" aria-hidden="true" />;
+/** Same box and margins as the promo card, so nothing jumps when the chunk loads. */
+const SwapPromoSkeleton = () => <div className="w-[92%] min-h-[52px] -mb-1" aria-hidden="true" />;
 
 /**
  * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
@@ -203,7 +193,7 @@ export const BsvPriceBar = ({
       </div>
       {swapOn && SwapPromo && (
         // Equal 8px above and below the promo: the row's mb-2 above; below, the card's own 12px top margin less 4px.
-        <Suspense fallback={<SwapPromoSkeleton hidden={active.length === 0 && promoDismissed()} />}>
+        <Suspense fallback={<SwapPromoSkeleton />}>
           <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
         </Suspense>
       )}
