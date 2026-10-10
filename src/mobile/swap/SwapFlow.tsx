@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import * as qr from 'qrcode';
-import { ArrowDown, Check, ChevronLeft, Copy, Loader2, Search, X } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, ChevronLeft, Copy, Loader2, Search, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { useOnResume } from '../permissions/useOnResume';
@@ -29,6 +29,7 @@ import {
   type SwapNotice,
   type SwapRecord,
 } from './swapApi';
+import { pickGate, type AddressState } from './pickGate';
 
 /** Black / gold, as the approved design (bWalletX palette). */
 const C = {
@@ -158,43 +159,193 @@ const CoinIcon = ({ coin, size = 40 }: { coin: SwapCoin; size?: number }) => {
   );
 };
 
-const CoinTile = ({ coin, on, onPick }: { coin: SwapCoin; on: boolean; onPick: () => void }) => {
-  const { ticker, network } = coinTileText(coin);
+// ── Coin menu (drop-down from the "You send" button: popover on wide screens, bottom sheet on phones) ──
+const coinKey = (c: SwapCoin) => `${c.ticker}:${c.network}`;
+const coinMatches = (c: SwapCoin, q: string) => {
+  const t = q.trim().toLowerCase();
+  if (!t) return true;
+  return [c.ticker, c.network, c.label, c.name ?? '', networkName(c)].some((x) => x.toLowerCase().includes(t));
+};
+
+const CoinMenu = ({
+  popular,
+  all,
+  current,
+  onPick,
+  onClose,
+}: {
+  popular: SwapCoin[];
+  all: SwapCoin[];
+  current: SwapCoin;
+  onPick: (c: SwapCoin) => void;
+  onClose: () => void;
+}) => {
+  const [q, setQ] = useState('');
+  const [remote, setRemote] = useState<SwapCoin[]>([]);
+  const [hi, setHi] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => inputRef.current?.focus(), []);
+  useEffect(() => {
+    if (q.trim().length < 2) return setRemote([]);
+    const t = setTimeout(() => {
+      api
+        .currencies(q.trim())
+        .then((r) => setRemote(Array.isArray(r.currencies) ? r.currencies : []))
+        .catch(() => setRemote([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { coin: SwapCoin; popular: boolean }[] = [];
+    const add = (c: SwapCoin, p: boolean) => {
+      const k = coinKey(c);
+      if (seen.has(k) || !coinMatches(c, q)) return;
+      seen.add(k);
+      out.push({ coin: c, popular: p });
+    };
+    popular.forEach((c) => add(c, true));
+    all.forEach((c) => add(c, false));
+    remote.forEach((c) => {
+      const k = coinKey(c);
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push({ coin: c, popular: false });
+      }
+    });
+    return out.slice(0, 300);
+  }, [popular, all, remote, q]);
+  useEffect(() => setHi(0), [q]);
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [hi]);
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHi((h) => Math.min(items.length - 1, h + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHi((h) => Math.max(0, h - 1));
+    } else if (e.key === 'Enter' && items[hi]) {
+      e.preventDefault();
+      onPick(items[hi].coin);
+    }
+  };
+  const firstOther = items.findIndex((i) => !i.popular);
+
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      aria-pressed={on}
-      aria-label={network ? `${ticker} on ${network}` : ticker}
-      className="min-h-[76px] min-w-[44px] flex flex-col items-center justify-start gap-1 pt-1.5 pb-1 rounded-xl border-0 bg-transparent cursor-pointer"
-    >
-      <span className="rounded-full p-[2px]" style={{ boxShadow: on ? `0 0 0 2px ${C.gold}` : 'none' }}>
-        <CoinIcon coin={coin} />
-      </span>
-      <span className="text-[12px] font-bold leading-tight" style={{ color: on ? C.gold : C.text }}>
-        {ticker}
-      </span>
-      {network && (
-        <span className="text-[10px] leading-tight truncate max-w-full" style={{ color: C.muted }}>
-          {network}
-        </span>
-      )}
-    </button>
+    <>
+      <div className="fixed inset-0 z-20 sm:bg-transparent" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={onClose} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose the coin you send"
+        onKeyDown={onKey}
+        className="fixed z-30 inset-x-0 bottom-0 max-h-[75vh] rounded-t-2xl sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[340px] sm:max-h-[420px] sm:rounded-2xl flex flex-col shadow-2xl"
+        style={{ background: C.card, border: `1px solid ${C.line}`, paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="p-3 flex items-center gap-2">
+          <label className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl" style={{ border: `1px solid ${C.chip}`, background: C.bg }}>
+            <Search size={16} color={C.muted} />
+            <span className="sr-only">Search coins</span>
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search coins"
+              role="combobox"
+              aria-expanded="true"
+              aria-controls="swap-coin-list"
+              aria-activedescendant={items[hi] ? `swap-coin-${hi}` : undefined}
+              className="flex-1 min-w-0 border-0 bg-transparent outline-none text-sm"
+              style={{ color: C.text }}
+            />
+          </label>
+          <button type="button" aria-label="Close coin list" onClick={onClose} className="w-11 h-11 grid place-items-center border-0 bg-transparent cursor-pointer">
+            <X size={18} color={C.muted} />
+          </button>
+        </div>
+        <ul ref={listRef} id="swap-coin-list" role="listbox" aria-label="Coins" className="m-0 p-0 pb-2 list-none overflow-y-auto flex-1">
+          {items.length === 0 && (
+            <li className="px-4 py-3 text-sm" style={{ color: C.muted }}>
+              No coins match “{q}”
+            </li>
+          )}
+          {items.map(({ coin: c, popular: p }, i) => {
+            const { ticker } = coinTileText(c);
+            const on = coinKey(c) === coinKey(current);
+            return (
+              <li key={coinKey(c)} role="presentation">
+                {i === 0 && p && (
+                  <div className="px-4 pt-1 pb-1 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.gold }}>
+                    Popular
+                  </div>
+                )}
+                {i === firstOther && (
+                  <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.gold }}>
+                    All coins
+                  </div>
+                )}
+                <div
+                  id={`swap-coin-${i}`}
+                  data-i={i}
+                  role="option"
+                  aria-selected={on}
+                  tabIndex={-1}
+                  onMouseEnter={() => setHi(i)}
+                  onClick={() => onPick(c)}
+                  className="mx-2 px-2 min-h-[48px] flex items-center gap-3 rounded-xl cursor-pointer"
+                  style={{ background: i === hi ? C.cardHi : 'transparent' }}
+                >
+                  <CoinIcon coin={c} size={28} />
+                  <span className="flex-1 min-w-0 flex flex-col leading-tight">
+                    <span className="text-sm font-bold" style={{ color: on ? C.gold : C.text }}>
+                      {ticker}
+                      {c.name && (
+                        <span className="ml-1.5 font-normal" style={{ color: C.muted }}>
+                          {c.name}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[11px] truncate" style={{ color: C.muted }}>
+                      {networkName(c)}
+                    </span>
+                  </span>
+                  {on && <Check size={16} color={C.gold} aria-hidden="true" />}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </>
   );
 };
 
 // ── Pick ────────────────────────────────────────────────────────────────────────────────────
 const Pick = ({
   address,
+  addressState,
+  onRetryAddress,
   notice,
   onBack,
   onCreated,
   handle,
   popular,
+  all,
 }: {
   address: string;
+  addressState: AddressState;
+  onRetryAddress: () => void;
   notice: SwapNotice;
   popular: SwapCoin[];
+  all: SwapCoin[];
   onBack: () => void;
   onCreated: (r: SwapRecord) => void;
   handle?: string;
@@ -203,38 +354,47 @@ const Pick = ({
   const [amount, setAmount] = useState('');
   const [refund, setRefund] = useState('');
   const [est, setEst] = useState<{ toAmount: number | null; minAmount: number; belowMin?: boolean; warning?: string | null } | null>(null);
+  const [estLoading, setEstLoading] = useState(false);
+  const [estError, setEstError] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<SwapCoin[]>([]);
+  const [menu, setMenu] = useState(false);
+  const coinBtn = useRef<HTMLButtonElement>(null);
   const n = parseTyped(amount);
+  // Show the server's images on the picked coin once they arrive.
+  const shown = useMemo(() => popular.concat(all).find((c) => coinKey(c) === coinKey(coin) && c.image) ?? coin, [coin, popular, all]);
 
+  // Quote: asked for the minimum as soon as a coin is picked (amount 0), then for the typed amount.
   useEffect(() => {
-    setEst(null);
-    setErr('');
+    let live = true;
+    setEstError('');
+    setEstLoading(true);
     const t = setTimeout(() => {
       api
         .estimate(coin, n ?? 0)
-        .then(setEst)
-        .catch((e: Error) => setErr(e.message));
+        .then((r) => live && setEst(r))
+        .catch((e: Error) => live && (setEst(null), setEstError(e.message)))
+        .finally(() => live && setEstLoading(false));
     }, 450);
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
   }, [coin, n]);
 
-  useEffect(() => {
-    if (search.trim().length < 2) return setResults([]);
-    const t = setTimeout(() => {
-      api
-        .currencies(search.trim())
-        .then((r) => setResults(r.currencies.slice(0, 12)))
-        .catch(() => setResults([]));
-    }, 350);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  const canGo = !!address && n !== null && !!est && !est.belowMin && est.toAmount !== null && !busy;
+  const gate = pickGate({
+    amount: n,
+    typed: amount,
+    addressState,
+    est: n !== null && !estLoading ? est : null,
+    estError,
+    estLoading: estLoading || (n !== null && !est),
+    busy,
+    ticker: coin.ticker,
+    fmt: (x) => fmtAmount(x),
+  });
   const go = async () => {
-    if (!canGo || n === null) return;
+    if (!gate.ok || n === null) return;
     setBusy(true);
     setErr('');
     try {
@@ -265,7 +425,11 @@ const Pick = ({
 
   const rate = cachedExchangeRate();
   const usd = est?.toAmount && rate > 0 ? formatUSD(est.toAmount * rate) : null;
-  const chipOn = (c: SwapCoin) => c.ticker === coin.ticker && c.network === coin.network;
+  const below = !!est && n !== null && (est.belowMin || n < est.minAmount);
+  const closeMenu = () => {
+    setMenu(false);
+    coinBtn.current?.focus();
+  };
 
   return (
     <>
@@ -287,13 +451,40 @@ const Pick = ({
                 style={{ color: C.text }}
               />
             </label>
-            <span className="h-11 pl-1.5 pr-3 rounded-full flex items-center gap-2 text-sm font-bold whitespace-nowrap" style={{ border: `1px solid ${C.chip}`, color: C.text }}>
-              <CoinIcon coin={coin} size={30} />
-              {coin.ticker.toUpperCase()} · {networkName(coin)}
-            </span>
+            <div className="relative">
+              <button
+                ref={coinBtn}
+                type="button"
+                onClick={() => setMenu((m) => !m)}
+                aria-haspopup="dialog"
+                aria-expanded={menu}
+                aria-label={`You send ${coin.ticker.toUpperCase()} on ${networkName(coin)}. Change coin`}
+                className="h-11 pl-1.5 pr-2.5 rounded-full flex items-center gap-2 text-sm font-bold whitespace-nowrap cursor-pointer bg-transparent"
+                style={{ border: `1px solid ${menu ? C.gold : C.chip}`, color: C.text }}
+              >
+                <CoinIcon coin={shown} size={30} />
+                {coinTileText(coin).ticker}
+                <span className="text-xs font-normal" style={{ color: C.muted }}>
+                  {networkName(coin)}
+                </span>
+                <ChevronDown size={16} color={C.muted} aria-hidden="true" />
+              </button>
+              {menu && (
+                <CoinMenu
+                  popular={popular}
+                  all={all}
+                  current={coin}
+                  onClose={closeMenu}
+                  onPick={(c) => {
+                    setCoin(c);
+                    closeMenu();
+                  }}
+                />
+              )}
+            </div>
           </div>
-          <div className="text-xs" style={{ color: est?.belowMin ? '#ff8a7a' : C.muted }}>
-            {est ? `Minimum ${fmtAmount(est.minAmount)} ${coin.ticker.toUpperCase()}` : '…'}
+          <div className="text-xs" style={{ color: below ? '#ff8a7a' : C.muted }}>
+            {est ? `Minimum ${fmtAmount(est.minAmount)} ${coin.ticker.toUpperCase()}` : estError ? 'Minimum unavailable' : '…'}
           </div>
         </div>
         <div className="grid place-items-center h-9">
@@ -305,9 +496,9 @@ const Pick = ({
           </div>
           <div className="flex justify-between items-baseline">
             <span className="text-[30px] font-bold" style={{ color: C.text }}>
-              ≈ {est?.toAmount ? fmtAmount(est.toAmount, 4) : '…'} BSV
+              ≈ {n !== null && est?.toAmount ? fmtAmount(est.toAmount, 4) : '…'} BSV
             </span>
-            {usd && (
+            {usd && n !== null && (
               <span className="text-sm" style={{ color: C.muted }}>
                 {usd}
               </span>
@@ -323,41 +514,7 @@ const Pick = ({
           )}
         </div>
 
-        <div className="mx-4 mt-4 text-xs uppercase tracking-[0.1em]" style={{ color: C.gold }}>
-          Popular
-        </div>
-        <div className="mx-4 mt-2 grid grid-cols-4 gap-x-2 gap-y-1">
-          {popular.map((c) => (
-            <CoinTile key={`${c.ticker}-${c.network}`} coin={c} on={chipOn(c)} onPick={() => setCoin(c)} />
-          ))}
-        </div>
-        <label className="mx-4 mt-3 flex items-center gap-2 h-11 px-3 rounded-xl" style={{ border: `1px solid ${C.chip}`, background: C.bg }}>
-          <Search size={16} color={C.muted} />
-          <span className="sr-only">Search coins</span>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search other coins"
-            className="flex-1 min-w-0 border-0 bg-transparent outline-none text-sm"
-            style={{ color: C.text }}
-          />
-        </label>
-        {results.length > 0 && (
-          <div className="mx-4 mt-2 grid grid-cols-4 gap-x-2 gap-y-1">
-            {results.map((c) => (
-              <CoinTile
-                key={`${c.ticker}-${c.network}`}
-                coin={c}
-                on={chipOn(c)}
-                onPick={() => {
-                  setCoin(c);
-                  setSearch('');
-                }}
-              />
-            ))}
-          </div>
-        )}
-        <label className="mx-4 mt-3.5 flex flex-col gap-1 text-xs" style={{ color: C.muted }}>
+        <label className="mx-4 mt-4 flex flex-col gap-1 text-xs" style={{ color: C.muted }}>
           Refund address ({coin.ticker.toUpperCase()}), optional, used if the swap can’t finish
           <input
             value={refund}
@@ -374,14 +531,28 @@ const Pick = ({
         )}
       </div>
       <div className="px-4 pt-3 pb-2">
-        <Cta onClick={() => void go()} disabled={!canGo}>
+        <Cta onClick={() => void go()} disabled={!gate.ok}>
           {busy ? <Loader2 className="inline animate-spin" size={18} /> : 'Get deposit address'}
         </Cta>
+        {!gate.ok && !busy && (
+          <p role="status" aria-live="polite" className="m-0 mt-2 text-[12px] text-center" style={{ color: gate.retryAddress ? '#ff8a7a' : C.muted }}>
+            {gate.reason}
+            {gate.retryAddress && (
+              <>
+                {' '}
+                <button type="button" onClick={onRetryAddress} className="p-0 border-0 bg-transparent underline cursor-pointer text-[12px]" style={{ color: C.gold }}>
+                  Try again
+                </button>
+              </>
+            )}
+          </p>
+        )}
       </div>
       <Notice notice={notice} />
     </>
   );
 };
+
 
 // ── Deposit ─────────────────────────────────────────────────────────────────────────────────
 const Deposit = ({ swap, notice, onBack, onSent }: { swap: SwapRecord; notice: SwapNotice; onBack: () => void; onSent: () => void }) => {
@@ -536,22 +707,36 @@ export const SwapFlow = ({
   handle?: string;
 }) => {
   const [address, setAddress] = useState('');
+  const [addressState, setAddressState] = useState<AddressState>('loading');
+  const [all, setAll] = useState<SwapCoin[]>([]);
   const [notice, setNotice] = useState<SwapNotice>(FALLBACK_NOTICE);
   const [popular, setPopular] = useState<SwapCoin[]>(POPULAR_COINS);
   const [swap, setSwap] = useState<SwapRecord | null>(resume ?? null);
   const [step, setStep] = useState<'pick' | 'deposit' | 'track'>(resume ? 'track' : 'pick');
   useBackClose(true, onClose);
 
+  /** The wallet's BSV address for the payout; a failure is shown under the button with "Try again". */
+  const loadAddress = useCallback(() => {
+    setAddressState('loading');
+    getAddress()
+      .then((a) => {
+        setAddress(a);
+        setAddressState(a ? 'ok' : 'error');
+      })
+      .catch(() => setAddressState('error'));
+  }, [getAddress]);
+
   useEffect(() => {
     if (resume) return;
-    getAddress()
-      .then(setAddress)
-      .catch(() => undefined);
+    loadAddress();
     api
       .currencies()
       .then((r) => {
         if (r.notice) setNotice(r.notice);
-        if (Array.isArray(r.currencies)) setPopular((p) => withImages(p, r.currencies));
+        if (Array.isArray(r.currencies)) {
+          setPopular((p) => withImages(p, r.currencies));
+          setAll(r.currencies);
+        }
       })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -562,8 +747,11 @@ export const SwapFlow = ({
       return (
         <Pick
           address={address}
+          addressState={addressState}
+          onRetryAddress={loadAddress}
           notice={notice}
           popular={popular}
+          all={all}
           handle={handle}
           onBack={onClose}
           onCreated={(r) => {
@@ -574,7 +762,7 @@ export const SwapFlow = ({
       );
     if (step === 'deposit') return <Deposit swap={swap} notice={notice} onBack={() => setStep('pick')} onSent={() => setStep('track')} />;
     return <Track swap={swap} onBack={onClose} onUpdate={setSwap} />;
-  }, [step, swap, address, notice, popular, handle, onClose]);
+  }, [step, swap, address, addressState, loadAddress, notice, popular, all, handle, onClose]);
 
   return createPortal(
     <div
