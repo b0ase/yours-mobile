@@ -37,7 +37,8 @@ import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
 import { cardGoldLevel } from './cardGold';
 import { saveSession } from '../chat/api';
-import { identityLine } from './identityLine';
+import { accountIdentityLine, keyFingerprint } from './identityLine';
+import { syncBchatHandle } from '../names/bchatHandle';
 import { useChatIdentity } from './useChatIdentity';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { asMenuItem } from '../tabs/tabs';
@@ -166,7 +167,7 @@ const WalletCardInner = ({
     const t = window.setTimeout(() => refreshRef.current?.(false), 1_500);
     return () => window.clearTimeout(t);
   }, [live.pending.length]);
-  const { chromeStorageService } = useServiceContext();
+  const { chromeStorageService, apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
   const [unit, setUnit] = useState<CardUnit>(loadCardUnit);
@@ -240,7 +241,24 @@ const WalletCardInner = ({
   const sig = useCardSignature(id);
   // `$handle · 02cbe7…6ed8` under the name: which chat identity this account is using (identityLine.ts).
   const chat = useChatIdentity(id);
-  const idLine = identityLine(chat.handle, chat.identityKey);
+  // One handle per account (owner, 10 Oct 2026): never show another account's or a `yours-*` handle as this one's.
+  const idLine = accountIdentityLine(chat.handle, chat.identityKey, names.paymail);
+  const fingerprint = keyFingerprint(chat.identityKey);
+  const [fixingHandle, setFixingHandle] = useState(false);
+  const fixChatHandle = (e: MouseEvent) => {
+    e.stopPropagation();
+    const issue = idLine.issue;
+    if (!issue || !apiContext || fixingHandle) return;
+    setFixingHandle(true);
+    // Another account's session: drop it so the next sign-in is this wallet's own.
+    if (issue.kind === 'other') saveSession(null);
+    syncBchatHandle(apiContext, names.paymail, { signIn: true })
+      .then((h) =>
+        addSnackbar(h ? `bChatX now calls you @${h.replace(/^\$/, '')}` : 'Open Chat to sign in to bChatX', 'info'),
+      )
+      .catch(() => addSnackbar('Could not update your bChatX name', 'error'))
+      .finally(() => setFixingHandle(false));
+  };
   const [mismatchOpen, setMismatchOpen] = useState(false);
   // Long-press the identity line: Settings › Identity map. Tap still copies the key.
   const selectTab = useContext(BottomMenuContext)?.handleSelect;
@@ -271,18 +289,6 @@ const WalletCardInner = ({
     },
   };
   useEffect(() => clearPress, []);
-  const copyKey = (e: MouseEvent) => {
-    e.stopPropagation();
-    if (longPressed.current) {
-      longPressed.current = false;
-      return;
-    }
-    if (!chat.identityKey) return;
-    navigator.clipboard
-      ?.writeText(chat.identityKey)
-      .then(() => addSnackbar('Identity key copied', 'success'))
-      .catch(() => undefined);
-  };
   // More golden as the BSV balance grows (cardGold.ts); drives --gold in mobile.css.
   const gold = cardGoldLevel(sats / 100_000_000, {
     hidden: balanceHidden,
@@ -359,19 +365,23 @@ const WalletCardInner = ({
                 </button>
               </div>
             </div>
-            {(chat.identityKey || chat.handle) && (
+            {(fingerprint || idLine.issue || chat.mismatch) && (
               <div className="bw-wcard-idline">
-                <button
-                  type="button"
-                  className="bw-wcard-idtext"
-                  onClick={copyKey}
+                {/* Fingerprint only: not selectable, not copyable (the full key is on the back). */}
+                <span
+                  className="bw-wcard-idtext bw-wcard-fingerprint"
                   {...idLinePress}
-                  aria-label="Copy identity key. Long-press for the identity map"
-                  title={chat.identityKey ? `${chat.identityKey} (hold for identity map)` : 'Hold for identity map'}
+                  aria-label={`Identity key fingerprint ${fingerprint}. Long-press for the identity map`}
                 >
-                  {idLine.text}
-                </button>
-                {chat.mismatch && (
+                  {fingerprint}
+                </span>
+                {idLine.issue && (
+                  <button type="button" className="bw-wcard-idwarn" onClick={fixChatHandle} disabled={fixingHandle}>
+                    <AlertTriangle size={11} aria-hidden="true" />
+                    {fixingHandle ? 'Updating…' : idLine.issue.text}
+                  </button>
+                )}
+                {!idLine.issue && chat.mismatch && (
                   <button
                     type="button"
                     className="bw-wcard-idwarn"
@@ -499,11 +509,35 @@ const WalletCardInner = ({
               )}
             </div>
           </div>
+          <button
+            type="button"
+            className="bw-wcard-sidebtn"
+            aria-label="Show the back of the card"
+            tabIndex={flipped ? -1 : 0}
+            onClick={(e) => {
+              e.stopPropagation();
+              flip();
+            }}
+          >
+            Sign
+          </button>
         </div>
 
         {/* ── Back ── */}
         <div className="bw-wcard-face bw-wcard-back" aria-hidden={!flipped}>
           <div className="bw-wcard-stripe" />
+          <button
+            type="button"
+            className="bw-wcard-sidebtn"
+            aria-label="Show the front of the card"
+            tabIndex={flipped ? 0 : -1}
+            onClick={(e) => {
+              e.stopPropagation();
+              flip();
+            }}
+          >
+            Front
+          </button>
           <div className="bw-wcard-backbody">
             <div className="bw-wcard-qr" onClick={stop}>
               {qrUrl ? <img src={qrUrl} alt="Receive QR code" /> : <div className="bw-wcard-qr-empty" />}
@@ -558,6 +592,21 @@ const WalletCardInner = ({
                   <span>{sig.svgPath ? 'Edit' : 'Sign'}</span>
                 </button>
               </div>
+              {chat.identityKey && (
+                <div className="bw-wcard-idkey" onClick={stop}>
+                  <span className="bw-wcard-label">Identity key</span>
+                  <span className="bw-wcard-idkey-hex">{chat.identityKey}</span>
+                  <button
+                    type="button"
+                    className="bw-wcard-addr"
+                    onClick={copy(chat.identityKey)}
+                    aria-label="Copy identity key"
+                  >
+                    <Copy size={13} color="var(--bw-wcard-muted, #98A2B3)" />
+                    <span>Copy</span>
+                  </button>
+                </div>
+              )}
               <span className="bw-wcard-sig-line">Signed by identity key</span>
               <span className="bw-wcard-sig-line" title={id}>
                 {shortAddr(id ?? '')}

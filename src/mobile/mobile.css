@@ -1581,3 +1581,54 @@ button.bw-mail-card:active {
     -webkit-user-drag: none;
   }
 }
+
+/* Identity key fingerprint (card front): display only, never selected or copied. */
+.bw-wcard-fingerprint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--bw-wcard-muted, #98a2b3);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+/* Full identity key (card back): selectable, wraps, with Copy. */
+.bw-wcard-idkey {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.bw-wcard-idkey-hex {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* "Sign" on the front / "Front" on the back: flips the card (same as tapping it). Right side, centred. */
+.bw-wcard-sidebtn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 210, 77, 0.55);
+  background: rgba(11, 11, 12, 0.55);
+  color: #ffd24d;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bw-wcard.is-yellow .bw-wcard-sidebtn {
+  border-color: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.08);
+  color: #0b0b0c;
+}
+.bw-wcard-sidebtn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
