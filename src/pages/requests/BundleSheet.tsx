@@ -11,6 +11,7 @@ import {
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
+  sheetCanTrust,
   type BundleRequest,
 } from '../../services/permissionBundle';
 
@@ -52,6 +53,9 @@ export const BundleSheet = (props: {
   const [allowanceUsd, setAllowanceUsd] = useState<number>(DEFAULT_ALLOWANCE_USD);
   const [allowanceOn, setAllowanceOn] = useState(true);
   const [remember, setRemember] = useState(true);
+  // "Don't ask again": later sign-in, signing and basket requests from this site need no sheet.
+  const canTrust = useMemo(() => sheetCanTrust(request), [request]);
+  const [trustSite, setTrustSite] = useState(true);
   const [details, setDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [usbError, setUsbError] = useState('');
@@ -99,6 +103,7 @@ export const BundleSheet = (props: {
         decisions,
         allowanceUsd: approve && showAllowance && allowanceOn ? allowanceUsd : 0,
         remember,
+        trustSite: approve && remember && canTrust && trustSite,
       });
       onResponse();
     } catch (error) {
@@ -108,7 +113,17 @@ export const BundleSheet = (props: {
   };
 
   const title = model.mode === 'pay' ? 'asks you to pay' : 'wants to connect';
-  const primary = model.mode === 'pay' ? 'Pay' : model.mode === 'connectAndPay' ? 'Connect & pay' : 'Connect';
+  const many = model.lines.length + (model.payment ? 1 : 0) > 1;
+  const primary =
+    model.mode === 'pay'
+      ? 'Pay'
+      : model.mode === 'connectAndPay'
+        ? many
+          ? 'Allow all & pay'
+          : 'Connect & pay'
+        : many
+          ? 'Allow all'
+          : 'Connect';
   const nextAllowance = () => {
     const i = ALLOWANCE_CHOICES_USD.indexOf(allowanceUsd as (typeof ALLOWANCE_CHOICES_USD)[number]);
     const next = ALLOWANCE_CHOICES_USD[(i + 1) % ALLOWANCE_CHOICES_USD.length];
@@ -220,6 +235,20 @@ export const BundleSheet = (props: {
           Remember this site
         </span>
       </label>
+      {canTrust && remember && (
+        <label className="flex items-start gap-2 mb-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={trustSite}
+            onChange={() => setTrustSite(!trustSite)}
+            className="mt-0.5 accent-green-400"
+          />
+          <span className="text-xs" style={{ color: gray }}>
+            Don&apos;t ask again on {request.originator} for sign-in and signing. Payments stay within the allowance;
+            your personal details always ask.
+          </span>
+        </label>
+      )}
 
       {usbError && (
         <p className="text-xs text-center m-0 mb-2" style={{ color: RED }}>
