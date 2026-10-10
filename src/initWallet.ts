@@ -30,6 +30,7 @@ import { showOneSatPrompt } from './services/oneSatPrompt';
 import { runTokenRecovery } from './services/tokenRecoveryWallet';
 import { planAddressScan, resetSyncCursor } from './services/addressScan';
 import { checkReceiveAddresses, normOutpoint, setArriving } from './services/receiveGuard';
+import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -316,6 +317,17 @@ export const initWallet = async (
   const actionCtx = createActionContext(adminWallet, { chain, services: syncContext.services });
 
   const sendSyncStatus = (data: { status: string; [key: string]: unknown }) => {
+    // Remember the outcome for the storage badge on Settings (services/storageHealth.ts).
+    if (['complete', 'error', 'sweep-failed', 'receive-failed', 'arriving'].includes(data.status)) {
+      const health = {
+        status: data.status,
+        at: Date.now(),
+        error:
+          typeof data.message === 'string' ? data.message : typeof data.error === 'string' ? data.error : undefined,
+        satoshis: typeof data.satoshis === 'number' ? data.satoshis : undefined,
+      };
+      chrome.storage.local.set({ [SYNC_HEALTH_KEY(keys.identityAddress)]: health }).catch(() => undefined);
+    }
     chrome.runtime
       .sendMessage({
         action: 'syncStatusUpdate',
