@@ -42,7 +42,11 @@ export const useStorageRepair = () => {
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
-  const runRepair = useCallback(() => sendMessageAsync<RepairResponse>({ action: 'STORAGE_REPAIR_SYNC' }), []);
+  /** tokenIds: also walk these tokens from their genesis (a token this storage never saw). */
+  const runRepair = useCallback(
+    (tokenIds?: string[]) => sendMessageAsync<RepairResponse>({ action: 'STORAGE_REPAIR_SYNC', tokenIds }),
+    [],
+  );
 
   /** Dismiss a finished run's result so the overlay stops showing it. */
   const acknowledge = useCallback(async () => {

@@ -17,6 +17,13 @@
  * the output valid (or queued) before it is imported. Spent outputs on the way
  * are followed the same way, a few hops deep.
  *
+ * A wallet whose storage never recorded any of a token's outputs (a fresh
+ * browser, another device did the mint) has nowhere to start. So the frontier
+ * is also seeded with outpoints from the indexer (seedOutpoints): the genesis
+ * of every token this wallet touched or was asked about, and token outputs
+ * found at its own addresses. Seeds are only starting points: they are walked
+ * like known outputs but never treated as the wallet's own.
+ *
  * Every step is read-only on chain. Results are cached, so a search runs at
  * most once per transaction and window, and nothing is imported twice.
  */
@@ -50,6 +57,11 @@ export interface KeyHit {
 
 export interface TokenRecoveryDeps {
   knownTokenOutputs(): Promise<KnownTokenOutput[]>;
+  /**
+   * Extra starting outpoints (txid.vout or txid_vout) from the indexer: token
+   * genesis outputs and token outputs at the wallet's addresses. Optional.
+   */
+  seedOutpoints?(opts: { thorough: boolean; tokenIds: string[] }): Promise<string[]>;
   /** Spending txid per outpoint (txid.vout), null when unspent. */
   getSpends(outpoints: string[]): Promise<Map<string, string | null>>;
   getTxTokenOutputs(txid: string): Promise<TxTokenOutput[]>;
@@ -71,6 +83,8 @@ export interface TokenRecoveryOptions {
   /** Repair Sync: search the wider window too, and retry searches cached as not found. */
   thorough?: boolean;
   maxHops?: number;
+  /** Tokens to walk from their genesis even if this storage knows none of their outputs. */
+  tokenIds?: string[];
 }
 
 export interface TokenRecoveryResult {
@@ -109,7 +123,19 @@ export const recoverTokenOutputs = async (
   const knownSet = new Set(known.map((k) => normOutpoint(k.outpoint)));
   const spendableSet = new Set(known.filter((k) => k.spendable).map((k) => normOutpoint(k.outpoint)));
 
-  let frontier = [...knownSet];
+  // A token id is its genesis outpoint (txid_vout).
+  const genesis = (opts.tokenIds ?? []).filter((t) => /^[0-9a-f]{64}[._]\d+$/i.test(t)).map(normOutpoint);
+  let seeds: string[] = [];
+  if (deps.seedOutpoints) {
+    try {
+      seeds = (await deps.seedOutpoints({ thorough: !!opts.thorough, tokenIds: opts.tokenIds ?? [] })).map(
+        normOutpoint,
+      );
+    } catch (err) {
+      log(`seed lookup failed: ${String(err)}`);
+    }
+  }
+  let frontier = [...new Set([...knownSet, ...genesis, ...seeds])];
   const checked = new Set<string>();
   const visitedTx = new Set<string>();
 
