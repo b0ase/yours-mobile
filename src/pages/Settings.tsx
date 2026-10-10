@@ -1085,6 +1085,10 @@ export const Settings = () => {
     const before = repairRecord?.startedAt;
     try {
       const response = await runRepair();
+      const recovered = response?.data?.tokensRecovered ?? 0;
+      if (recovered > 0) {
+        addSnackbar(`Found ${recovered} token ${recovered === 1 ? 'output' : 'outputs'} this wallet had missed`, 'success');
+      }
       if (response?.success) return;
       const after = (await chrome.storage.local.get(RECONCILE_RECORD_KEY))[RECONCILE_RECORD_KEY] as
         | ReconcileRecord
