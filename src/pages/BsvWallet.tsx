@@ -1258,6 +1258,24 @@ export const BsvWallet = () => {
   );
 
   /** The BSV view (price chart, send): the BSV card's tap, and the top row's price (owner round 7). */
+  /**
+   * Swap into BSV pays a fresh deposit address of this wallet (tracked by the address manager, so the BSV shows in
+   * the balance); falls back to the current receive address.
+   */
+  const getSwapAddress = async (): Promise<string> => {
+    try {
+      const r = await sendMessageAsync<{ success: boolean; data?: { address: string } }>({ action: 'GENERATE_NEW_ADDRESS' });
+      if (r?.success && r.data?.address) {
+        const fresh = r.data as { address: string; index: number; derivationPrefix: string; derivationSuffix: string };
+        setDepositAddresses((prev) => [...prev, fresh]);
+        return fresh.address;
+      }
+    } catch {
+      /* fall back below */
+    }
+    return receiveAddress;
+  };
+
   const openBsvView = () => {
     setSendSource('main');
     setPageState('send');
@@ -1286,6 +1304,7 @@ export const BsvWallet = () => {
           <BsvPriceBar
             onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
             onPrice={openBsvView}
+            getAddress={getSwapAddress}
           />
         )}
         {!BUY_CRYPTO_ENABLED && <BsvHistoryBar onPrice={openBsvView} />}
