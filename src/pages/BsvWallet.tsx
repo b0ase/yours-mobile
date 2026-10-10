@@ -77,6 +77,7 @@ import { getMneeBalance, sendMnee, deriveDepositAddresses, ONESAT_MAINNET_CONTEN
 import { MNEE_PROTOCOLS, mneeKeyDerivations } from '../utils/mneeDerivations';
 import { MneeClient } from '@1sat/client';
 import { PrivateKey } from '@bsv/sdk';
+import { planAddressScan } from '../services/addressScan';
 import { getLegacyMneeBalance, sweepLegacyMnee } from '../utils/sweepLegacyMnee';
 import { cancelOwnedOrdLockListings } from '../utils/cancelOrdLockListings';
 import { decrypt } from '../utils/crypto';
@@ -684,7 +685,8 @@ export const BsvWallet = () => {
     let synced = true;
     try {
       const { account: acct } = chromeStorageService.getCurrentAccountObject();
-      const count = (acct?.settings?.maxKeyIndex ?? 4) + 1;
+      // Same window as the startup sync, so addresses handed out on other devices count too (services/addressScan.ts).
+      const { count } = planAddressScan(acct?.settings?.maxKeyIndex, acct?.settings?.addressScanThrough);
       if (apiContext) {
         // Bounded: a hung sync held the whole refresh (and the balance after it) indefinitely (owner, 6 Oct 2026).
         await withTimeout(syncAddresses.execute(apiContext, { count }), BALANCE_TIMEOUT_MS, 'Address sync');
