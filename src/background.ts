@@ -1452,7 +1452,7 @@ if (isInServiceWorker) {
           processStorageSyncBackups(sendResponse);
           return true;
         case 'STORAGE_REPAIR_SYNC':
-          processStorageRepairSync(sendResponse);
+          processStorageRepairSync(sendResponse, Array.isArray(message.tokenIds) ? message.tokenIds : undefined);
           return true;
         case 'STORAGE_SET_ACTIVE_STORAGE':
           processStorageSetActiveStorage(message.target, sendResponse);
@@ -1835,7 +1835,7 @@ if (isInServiceWorker) {
   };
 
   /** Reconcile local and remote storage to the union of both; see storageReconcileBackground. */
-  const processStorageRepairSync = async (sendResponse: CallbackResponse) => {
+  const processStorageRepairSync = async (sendResponse: CallbackResponse, tokenIds?: string[]) => {
     try {
       await ensureWallet(true);
     } catch (err) {
@@ -1859,7 +1859,7 @@ if (isInServiceWorker) {
       // that no store recorded, searched over the wider window too.
       const recoverTokens = async () => {
         try {
-          const r = await accountContext!.recoverTokens({ thorough: true });
+          const r = await accountContext!.recoverTokens({ thorough: true, tokenIds });
           return r.imported.length;
         } catch (err) {
           console.error('[STORAGE_REPAIR_SYNC] token recovery failed:', err);

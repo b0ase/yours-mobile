@@ -1116,13 +1116,16 @@ export const Settings = () => {
     </motion.div>
   );
 
-  const handleRepairSync = async () => {
+  const [missingTokenId, setMissingTokenId] = useState('');
+  const missingTokenValid = /^[0-9a-f]{64}[._]\d+$/i.test(missingTokenId.trim());
+
+  const handleRepairSync = async (tokenIds?: string[]) => {
     if (repairOutcome === 'running') return;
     // Once a run starts, the overlay shows its result; only a refusal before
     // that (no remote, wallet unavailable) needs a snackbar.
     const before = repairRecord?.startedAt;
     try {
-      const response = await runRepair();
+      const response = await runRepair(tokenIds);
       const recovered = response?.data?.tokensRecovered ?? 0;
       if (recovered > 0) {
         addSnackbar(`Found ${recovered} token ${recovered === 1 ? 'output' : 'outputs'} this wallet had missed`, 'success');
@@ -1159,10 +1162,35 @@ export const Settings = () => {
             icon={<Wrench size={16} />}
             label={repairOutcome === 'running' ? 'Repairing...' : 'Repair Sync'}
             description="Check local and remote storage against each other and fix differences"
-            onClick={repairOutcome === 'running' ? undefined : handleRepairSync}
+            onClick={repairOutcome === 'running' ? undefined : () => void handleRepairSync()}
             isFirst
-            isLast={!repairRecord}
+            isLast={false}
           />
+          <Divider />
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <span className="text-sm font-semibold">Find a missing token</span>
+            <span className="text-xs opacity-70">
+              A token you hold doesn&apos;t show? Paste its token ID (txid_0). The wallet follows that token from its
+              start and adds any outputs that belong to you.
+            </span>
+            <div className="flex gap-2">
+              <Input
+                theme={theme}
+                id="missing-token-id"
+                placeholder="Token ID"
+                value={missingTokenId}
+                onChange={(e) => setMissingTokenId(e.target.value)}
+                style={{ flex: 1, margin: 0 }}
+              />
+              <Button
+                theme={theme}
+                type="secondary"
+                label="Search"
+                disabled={!missingTokenValid || repairOutcome === 'running'}
+                onClick={() => void handleRepairSync([missingTokenId.trim()])}
+              />
+            </div>
+          </div>
           {repairRecord && repairOutcome && (
             <>
               <Divider />

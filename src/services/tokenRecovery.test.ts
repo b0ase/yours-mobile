@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { BSV21 } from '@1sat/templates';
 import { P2PKH, PrivateKey } from '@bsv/sdk';
 import { recoverTokenOutputs, searchWindow, type TokenRecoveryDeps, type TxTokenOutput } from './tokenRecovery';
-import { parseTokenOutput } from './tokenRecoveryWallet';
+import { lookupSeedOutpoints, parseTokenOutput, tokenIdsFromEvents, WATCH_TOKENS_KEY } from './tokenRecoveryWallet';
 
 const TOKEN = '8cc12904e6d7491077d6d511d9846ac39e58f058603f6b2cc710e216ab89f012_0';
 const DEPLOY = '8cc12904e6d7491077d6d511d9846ac39e58f058603f6b2cc710e216ab89f012';
@@ -173,5 +173,105 @@ describe('parseTokenOutput', () => {
   test('ignores plain P2PKH', () => {
     const lock = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
     expect(parseTokenOutput(lock.toHex(), SEND, 2)).toBeNull();
+  });
+});
+
+describe('recovery from seeds the storage never recorded (TERANODE on a fresh wallet)', () => {
+  test('nothing known and no seeds: nothing found', async () => {
+    const { deps, imported } = makeDeps({ knownTokenOutputs: async () => [] });
+    const r = await recoverTokenOutputs(deps);
+    expect(r.imported).toEqual([]);
+    expect(imported).toEqual([]);
+  });
+
+  test('a token ID from Repair Sync walks from its genesis to the change', async () => {
+    const { deps, imported } = makeDeps({ knownTokenOutputs: async () => [] });
+    const r = await recoverTokenOutputs(deps, { thorough: true, tokenIds: [TOKEN] });
+    expect(r.imported).toEqual([{ outpoint: `${SEND}.1`, tokenId: TOKEN, amt: '20999000' }]);
+    expect(imported[0]).toEqual({ txid: SEND, vout: 1, keyID: `${TOKEN}-${CHANGE_MS}` });
+  });
+
+  test('indexer seeds start the walk without any token ID', async () => {
+    const { deps } = makeDeps({
+      knownTokenOutputs: async () => [],
+      seedOutpoints: async () => [TOKEN],
+    });
+    const r = await recoverTokenOutputs(deps);
+    expect(r.imported.map((i) => i.outpoint)).toEqual([`${SEND}.1`]);
+  });
+
+  test('a seed is never treated as stale or as the wallet own output', async () => {
+    const { deps, dropped } = makeDeps({ knownTokenOutputs: async () => [], seedOutpoints: async () => [TOKEN] });
+    const r = await recoverTokenOutputs(deps);
+    expect(r.stale).toEqual([]);
+    expect(dropped).toEqual([]);
+  });
+
+  test('a failing seed lookup still runs the known outputs', async () => {
+    const { deps } = makeDeps({
+      seedOutpoints: async () => {
+        throw new Error('indexer down');
+      },
+    });
+    const r = await recoverTokenOutputs(deps);
+    expect(r.imported.map((i) => i.outpoint)).toEqual([`${SEND}.1`]);
+  });
+
+  test('malformed token IDs are ignored', async () => {
+    const { deps } = makeDeps({ knownTokenOutputs: async () => [] });
+    const r = await recoverTokenOutputs(deps, { tokenIds: ['not-a-token', 'abc_0'] });
+    expect(r.imported).toEqual([]);
+  });
+});
+
+describe('lookupSeedOutpoints', () => {
+  const OWN = '1BjTE7Az3eUWQn4K56SxHJUwwy6zoHYp5g';
+  const mk = (now = 1_000_000_000_000) => {
+    const cache = new Map<string, string>();
+    const asked: string[] = [];
+    const deps = {
+      addresses: () => [OWN],
+      ownerTokenOutputs: async (a: string) => {
+        asked.push(a);
+        return [
+          { outpoint: `${SEND}.1`, events: [`txid:${SEND}`, `bsv21:${TOKEN}`, `own:${OWN}`] },
+          { outpoint: 'f'.repeat(64) + '.0', events: ['insc'] },
+        ];
+      },
+      cacheGet: async (k: string) => cache.get(k) ?? null,
+      cacheSet: async (k: string, v: string) => {
+        cache.set(k, v);
+      },
+      now: () => now,
+    };
+    return { deps, cache, asked };
+  };
+
+  test('finds the token output and its genesis at the wallet own address', async () => {
+    const { deps } = mk();
+    const seeds = await lookupSeedOutpoints(deps, { thorough: false, tokenIds: [] });
+    expect(seeds.sort()).toEqual([`${DEPLOY}.0`, `${SEND}.1`].sort());
+  });
+
+  test('asks the indexer at most once a day unless thorough', async () => {
+    const { deps, asked } = mk();
+    await lookupSeedOutpoints(deps, { thorough: false, tokenIds: [] });
+    await lookupSeedOutpoints(deps, { thorough: false, tokenIds: [] });
+    expect(asked.length).toBe(1);
+    await lookupSeedOutpoints(deps, { thorough: true, tokenIds: [] });
+    expect(asked.length).toBe(2);
+  });
+
+  test('remembers token IDs asked for and seeds them on later runs', async () => {
+    const { deps, cache } = mk();
+    const other = 'a'.repeat(64) + '_0';
+    await lookupSeedOutpoints(deps, { thorough: true, tokenIds: [other] });
+    expect(JSON.parse(cache.get(WATCH_TOKENS_KEY) ?? '[]')).toEqual([other]);
+    const later = await lookupSeedOutpoints(deps, { thorough: false, tokenIds: [] });
+    expect(later).toContain('a'.repeat(64) + '.0');
+  });
+
+  test('reads token ids only from bsv21 events', () => {
+    expect(tokenIdsFromEvents(['insc', `bsv21:${TOKEN}`, 'bsv21:junk'])).toEqual([TOKEN]);
   });
 });
