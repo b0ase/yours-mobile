@@ -21,6 +21,7 @@ import { refileLegacyBaskets } from './services/legacyBaskets';
 import { reconcileStorage } from './services/storageReconcileBackground';
 import { showOneSatPrompt } from './services/oneSatPrompt';
 import { runTokenRecovery } from './services/tokenRecoveryWallet';
+import { planAddressScan, resetSyncCursor } from './services/addressScan';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -374,18 +375,47 @@ export const initWallet = async (
       options: recoveryOptions,
     });
 
+  // Scan past maxKeyIndex (addresses handed out on other devices) and rescan history once whenever that window
+  // reaches indexes this device never scanned: the sync's one resume cursor would otherwise skip their payments
+  // (owner, 10 Oct 2026: 0.254 BSV at a fresh address never showed). services/addressScan.ts.
+  const scanPlan = planAddressScan(maxKeyIndex, account?.settings?.addressScanThrough);
+  if (scanPlan.resetCursor) {
+    try {
+      const { publicKey: idKey } = await adminWallet.getPublicKey({ identityKey: true });
+      const reset = await resetSyncCursor(idKey);
+      console.log(
+        `[initWallet] Address scan widened to ${scanPlan.count}; history rescan ${reset ? 'queued' : 'not needed'}`,
+      );
+    } catch (err) {
+      console.error('[initWallet] sync cursor reset failed:', err);
+    }
+  }
+  const persistScanThrough = () => {
+    const { account: acct, selectedAccount } = chromeStorageService.getCurrentAccountObject();
+    if (!acct || !selectedAccount || (acct.settings?.addressScanThrough ?? -1) >= scanPlan.through) return;
+    chromeStorageService
+      .updateNested('accounts', {
+        [selectedAccount]: {
+          settings: { ...acct.settings, addressScanThrough: scanPlan.through },
+        } as unknown as Account,
+      })
+      .catch((err: unknown) => console.error('[initWallet] saving addressScanThrough failed:', err));
+  };
+
   console.log('[initWallet] Starting address sync...');
-  sendSyncStatus({ status: 'start', addressCount: maxKeyIndex + 1 });
+  sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
 
   syncAddresses
     .execute(actionCtx, {
-      count: maxKeyIndex + 1,
+      count: scanPlan.count,
       onProgress: (progress) => {
         sendSyncStatus({ status: 'progress', ...progress });
       },
     })
     .then(async (result) => {
       sendSyncStatus({ status: 'complete', ...result });
+      // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.
+      if (result.failed === 0) persistScanThrough();
       console.log('[initWallet] Address sync complete:', result);
       // Token outputs no address scan can see (change of a send this storage
       // never recorded). Cheap when there is nothing to find; cached per tx.
