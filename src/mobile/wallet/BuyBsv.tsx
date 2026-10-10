@@ -6,6 +6,7 @@ import type { SwapRecord } from '../swap/swapApi';
 
 // Swap into BSV (bWalletX only): the chunk is dropped from a store build (SWAP_ENABLED).
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
+const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -167,26 +168,10 @@ export const BsvPriceBar = ({
         </button>
         <HistoryButton className={CELL} />
       </div>
-      {swapOn && (
-        <button
-          type="button"
-          onClick={() => {
-            setResume(null);
-            setSwapOpen(true);
-          }}
-          className="w-[92%] mb-4 p-0 border-0 bg-transparent text-left text-xs cursor-pointer"
-          style={{ color: MUTED }}
-        >
-          {active.length > 0 ? (
-            <>
-              <span style={{ color: GOLD, fontWeight: 700 }}>Swap in progress</span> · tap Swap to track it
-            </>
-          ) : (
-            <>
-              Have BTC, ETH or USDT? <span style={{ color: GOLD, fontWeight: 700 }}>Swap it into BSV here</span>
-            </>
-          )}
-        </button>
+      {swapOn && SwapPromo && (
+        <Suspense fallback={<div className="mb-4" />}>
+          <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
+        </Suspense>
       )}
       {!swapOn && <div className="mb-2" />}
       {open && (

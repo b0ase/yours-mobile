@@ -8,7 +8,7 @@ import { phoneLayoutOn } from '../mobile/phone/flag';
 import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { notifyMinted } from '../mobile/mint/mint';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   List,
@@ -162,6 +162,8 @@ export const BsvWallet = () => {
   // Get identityAddress from chrome storage (selected account)
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress || '';
   const [receiveAddress, setReceiveAddress] = useState<string>('');
+  const receiveAddressRef = useRef('');
+  receiveAddressRef.current = receiveAddress;
   // All derived MNEE deposit addresses for the account (not just the currently selected
   // receiveAddress), used so MNEE balance/history aggregate deposits made to any address.
   const [mneeAddresses, setMneeAddresses] = useState<string[]>([]);
@@ -1263,8 +1265,17 @@ export const BsvWallet = () => {
    * the balance); falls back to the current receive address.
    */
   const getSwapAddress = async (): Promise<string> => {
+    // Android report (10 Oct): "Get deposit address" stayed grey. GENERATE_NEW_ADDRESS can wait on the background's
+    // startup or the in-progress lock and never answer, and the fallback read a stale `receiveAddress` from the
+    // render that created this function (often still ''). Now: time-boxed, then the latest receive address (ref),
+    // then ask the background for it. Empty → SwapFlow shows "Couldn't get your BSV address — try again".
+    const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+      Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
     try {
-      const r = await sendMessageAsync<{ success: boolean; data?: { address: string } }>({ action: 'GENERATE_NEW_ADDRESS' });
+      const r = await withTimeout(
+        sendMessageAsync<{ success: boolean; data?: { address: string } }>({ action: 'GENERATE_NEW_ADDRESS' }),
+        8000,
+      );
       if (r?.success && r.data?.address) {
         const fresh = r.data as { address: string; index: number; derivationPrefix: string; derivationSuffix: string };
         setDepositAddresses((prev) => [...prev, fresh]);
@@ -1273,7 +1284,17 @@ export const BsvWallet = () => {
     } catch {
       /* fall back below */
     }
-    return receiveAddress;
+    if (receiveAddressRef.current) return receiveAddressRef.current;
+    try {
+      const r = await withTimeout(
+        sendMessageAsync<{ success: boolean; data?: string }>({ action: YoursEventName.GET_RECEIVE_ADDRESS }),
+        8000,
+      );
+      if (r?.success && r.data) return r.data;
+    } catch {
+      /* reported by SwapFlow */
+    }
+    return '';
   };
 
   const openBsvView = () => {

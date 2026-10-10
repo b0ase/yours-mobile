@@ -187,6 +187,10 @@ export const applyStatus = (
 
 /** Parse a typed amount ("0,01" too). */
 export const parseTyped = (v: string): number | null => {
-  const n = Number(v.trim().replace(',', '.'));
+  let t = v.trim().replace(/\s/g, '');
+  if (!t) return null;
+  // "1,000.5" → thousands commas; "0,5" → decimal comma.
+  t = t.includes('.') ? t.replace(/,/g, '') : t.replace(',', '.');
+  const n = Number(t);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
