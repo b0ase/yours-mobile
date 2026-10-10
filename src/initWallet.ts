@@ -8,7 +8,7 @@ import {
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
-import { syncAddresses, syncMessages, createContext as createActionContext } from '@1sat/actions';
+import { syncAddresses, syncMessages, sweepDeposit, createContext as createActionContext } from '@1sat/actions';
 import { createAssetPermissionModules } from '@1sat/permission-module';
 import type { WalletInterface } from '@bsv/sdk';
 import { ChromeStorageService } from './services/ChromeStorage.service';
@@ -401,6 +401,20 @@ export const initWallet = async (
       })
       .catch((err: unknown) => console.error('[initWallet] saving addressScanThrough failed:', err));
   };
+
+  // Sweep anything already waiting in the deposit basket now, not only after a sync that finds new payments: a
+  // sweep that failed before (or never ran) otherwise leaves received money unspendable until the next payment
+  // arrives (owner, 10 Oct 2026, the new $vexvoid account). The balance counts the basket either way
+  // (services/depositBalance.ts).
+  sweepDeposit
+    .execute(actionCtx, {})
+    .then((r) => {
+      if (r.swept) console.log(`[initWallet] Swept ${r.swept} waiting deposit(s) into the wallet`, r.txid);
+    })
+    .catch((err: unknown) => {
+      console.error('[initWallet] deposit sweep failed:', err);
+      sendSyncStatus({ status: 'sweep-failed', error: err instanceof Error ? err.message : String(err) });
+    });
 
   console.log('[initWallet] Starting address sync...');
   sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
