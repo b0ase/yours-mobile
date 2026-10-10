@@ -1,5 +1,5 @@
 /**
- * End-to-end: real relay + TokenBlaster's site side (../../../tokenblaster.lol/src/lib/pair/site.ts)
+ * End-to-end: real relay + TokenBlaster's site side (vendored: relay/e2e/fixtures/site/site.ts)
  * + bWallet's phone side (src/mobile/pair/sessions.ts), with the wallet call stubbed.
  * Run from the bwallet repo: bun test relay/e2e
  */
@@ -62,7 +62,7 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   const realStoreBuild = await import(storeBuildPath);
   mock.module(storeBuildPath, () => ({ ...realStoreBuild, appNameFor: () => 'bWalletX' }));
 
-  const site = await import('../../../tokenblaster.lol/src/lib/pair/site.ts');
+  const site = await import('./fixtures/site/site.ts');
   const phone = await import('../../src/mobile/pair/sessions.ts');
 
   const states: { k: string; [x: string]: unknown }[] = [];
