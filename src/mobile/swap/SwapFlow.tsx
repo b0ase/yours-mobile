@@ -14,6 +14,9 @@ import {
   FINAL,
   fmtAmount,
   networkName,
+  coinTileText,
+  safeCoinImage,
+  withImages,
   parseTyped,
   POLL_MS,
   POPULAR_COINS,
@@ -123,6 +126,63 @@ const CopyRow = ({ label, value }: { label: string; value: string }) => {
   );
 };
 
+// ── Coin icon (lazy logo, letter circle if it fails) ──
+const CoinIcon = ({ coin, size = 40 }: { coin: SwapCoin; size?: number }) => {
+  const src = safeCoinImage(coin.image);
+  const [bad, setBad] = useState(false);
+  useEffect(() => setBad(false), [src]);
+  const t = coinTileText(coin).ticker;
+  if (!src || bad)
+    return (
+      <span
+        aria-hidden="true"
+        className="rounded-full grid place-items-center font-bold shrink-0"
+        style={{ width: size, height: size, background: C.chip, color: C.text, fontSize: Math.round(size * 0.42) }}
+      >
+        {t.charAt(0)}
+      </span>
+    );
+  return (
+    <img
+      src={src}
+      alt={`${t} logo`}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      width={size}
+      height={size}
+      onError={() => setBad(true)}
+      className="rounded-full shrink-0 object-contain"
+      style={{ width: size, height: size, background: '#fff' }}
+    />
+  );
+};
+
+const CoinTile = ({ coin, on, onPick }: { coin: SwapCoin; on: boolean; onPick: () => void }) => {
+  const { ticker, network } = coinTileText(coin);
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      aria-pressed={on}
+      aria-label={network ? `${ticker} on ${network}` : ticker}
+      className="min-h-[76px] min-w-[44px] flex flex-col items-center justify-start gap-1 pt-1.5 pb-1 rounded-xl border-0 bg-transparent cursor-pointer"
+    >
+      <span className="rounded-full p-[2px]" style={{ boxShadow: on ? `0 0 0 2px ${C.gold}` : 'none' }}>
+        <CoinIcon coin={coin} />
+      </span>
+      <span className="text-[12px] font-bold leading-tight" style={{ color: on ? C.gold : C.text }}>
+        {ticker}
+      </span>
+      {network && (
+        <span className="text-[10px] leading-tight truncate max-w-full" style={{ color: C.muted }}>
+          {network}
+        </span>
+      )}
+    </button>
+  );
+};
+
 // ── Pick ────────────────────────────────────────────────────────────────────────────────────
 const Pick = ({
   address,
@@ -130,9 +190,11 @@ const Pick = ({
   onBack,
   onCreated,
   handle,
+  popular,
 }: {
   address: string;
   notice: SwapNotice;
+  popular: SwapCoin[];
   onBack: () => void;
   onCreated: (r: SwapRecord) => void;
   handle?: string;
@@ -225,7 +287,8 @@ const Pick = ({
                 style={{ color: C.text }}
               />
             </label>
-            <span className="h-11 px-3 rounded-full grid place-items-center text-sm font-bold whitespace-nowrap" style={{ border: `1px solid ${C.chip}`, color: C.text }}>
+            <span className="h-11 pl-1.5 pr-3 rounded-full flex items-center gap-2 text-sm font-bold whitespace-nowrap" style={{ border: `1px solid ${C.chip}`, color: C.text }}>
+              <CoinIcon coin={coin} size={30} />
               {coin.ticker.toUpperCase()} · {networkName(coin)}
             </span>
           </div>
@@ -263,21 +326,9 @@ const Pick = ({
         <div className="mx-4 mt-4 text-xs uppercase tracking-[0.1em]" style={{ color: C.gold }}>
           Popular
         </div>
-        <div className="mx-4 mt-2 flex flex-wrap gap-2">
-          {POPULAR_COINS.map((c) => (
-            <button
-              key={`${c.ticker}-${c.network}`}
-              type="button"
-              onClick={() => setCoin(c)}
-              className="px-3 py-2 rounded-full text-[13px] cursor-pointer"
-              style={
-                chipOn(c)
-                  ? { background: C.gold, color: C.bg, fontWeight: 700, border: 0 }
-                  : { background: 'transparent', color: C.text, border: `1px solid ${C.chip}` }
-              }
-            >
-              {c.label}
-            </button>
+        <div className="mx-4 mt-2 grid grid-cols-4 gap-x-2 gap-y-1">
+          {popular.map((c) => (
+            <CoinTile key={`${c.ticker}-${c.network}`} coin={c} on={chipOn(c)} onPick={() => setCoin(c)} />
           ))}
         </div>
         <label className="mx-4 mt-3 flex items-center gap-2 h-11 px-3 rounded-xl" style={{ border: `1px solid ${C.chip}`, background: C.bg }}>
@@ -292,20 +343,17 @@ const Pick = ({
           />
         </label>
         {results.length > 0 && (
-          <div className="mx-4 mt-2 flex flex-wrap gap-2">
+          <div className="mx-4 mt-2 grid grid-cols-4 gap-x-2 gap-y-1">
             {results.map((c) => (
-              <button
+              <CoinTile
                 key={`${c.ticker}-${c.network}`}
-                type="button"
-                onClick={() => {
+                coin={c}
+                on={chipOn(c)}
+                onPick={() => {
                   setCoin(c);
                   setSearch('');
                 }}
-                className="px-3 py-2 rounded-full text-[13px] cursor-pointer"
-                style={{ background: 'transparent', color: C.text, border: `1px solid ${C.chip}` }}
-              >
-                {c.label}
-              </button>
+              />
             ))}
           </div>
         )}
@@ -489,6 +537,7 @@ export const SwapFlow = ({
 }) => {
   const [address, setAddress] = useState('');
   const [notice, setNotice] = useState<SwapNotice>(FALLBACK_NOTICE);
+  const [popular, setPopular] = useState<SwapCoin[]>(POPULAR_COINS);
   const [swap, setSwap] = useState<SwapRecord | null>(resume ?? null);
   const [step, setStep] = useState<'pick' | 'deposit' | 'track'>(resume ? 'track' : 'pick');
   useBackClose(true, onClose);
@@ -500,7 +549,10 @@ export const SwapFlow = ({
       .catch(() => undefined);
     api
       .currencies()
-      .then((r) => r.notice && setNotice(r.notice))
+      .then((r) => {
+        if (r.notice) setNotice(r.notice);
+        if (Array.isArray(r.currencies)) setPopular((p) => withImages(p, r.currencies));
+      })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -511,6 +563,7 @@ export const SwapFlow = ({
         <Pick
           address={address}
           notice={notice}
+          popular={popular}
           handle={handle}
           onBack={onClose}
           onCreated={(r) => {
@@ -521,7 +574,7 @@ export const SwapFlow = ({
       );
     if (step === 'deposit') return <Deposit swap={swap} notice={notice} onBack={() => setStep('pick')} onSent={() => setStep('track')} />;
     return <Track swap={swap} onBack={onClose} onUpdate={setSwap} />;
-  }, [step, swap, address, notice, handle, onClose]);
+  }, [step, swap, address, notice, popular, handle, onClose]);
 
   return createPortal(
     <div

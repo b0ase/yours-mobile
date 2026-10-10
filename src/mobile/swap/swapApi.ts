@@ -81,6 +81,30 @@ export const saveSwap = (r: SwapRecord) => {
   }
 };
 
+// ── Coin icons ──
+/** Ticker label + optional network line for a coin tile ("USDT" / "Tron"); network shown only when the ticker lives on several chains. */
+export const coinTileText = (c: Pick<SwapCoin, 'ticker' | 'network' | 'label'>): { ticker: string; network: string | null } => {
+  const ticker = c.ticker.toUpperCase();
+  const dot = c.label.indexOf(' · ');
+  if (dot >= 0) return { ticker: c.label.slice(0, dot), network: c.label.slice(dot + 3) };
+  return { ticker, network: c.ticker === c.network ? null : networkName(c) };
+};
+/** Only https icons from a known CDN are shown; anything else falls back to the letter circle. */
+export const safeCoinImage = (u: string | null | undefined): string | null => {
+  if (!u) return null;
+  try {
+    const url = new URL(u);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+};
+/** Fill the built-in popular list with the server's images (matched on ticker + network); keeps local order and labels. */
+export const withImages = (local: SwapCoin[], server: SwapCoin[]): SwapCoin[] => {
+  const img = new Map(server.map((c) => [`${c.ticker}:${c.network}`, c.image]));
+  return local.map((c) => (img.get(`${c.ticker}:${c.network}`) ? { ...c, image: img.get(`${c.ticker}:${c.network}`) } : c));
+};
+
 // ── Text helpers ──
 export const fmtAmount = (n: number | null | undefined, max = 8) =>
   n === null || n === undefined || !Number.isFinite(n) ? '…' : Number(n.toFixed(max)).toString();
