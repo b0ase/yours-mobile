@@ -8,7 +8,8 @@ import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
 import { getPersonalLink, onPersonalChange } from '../names/personalToken';
 import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID, unindexedPnee } from '../notes/pnee';
-import { BackPneeSheet } from '../notes/BackPneeSheet';
+import { BACK_PNEE_LABEL, BACK_PNEE_ROUTE } from '../notes/backPnee';
+import { Lock } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
 
 type Bal = { id: string; amount: number; icon: string | null };
@@ -27,7 +28,6 @@ export const DefaultTokenCards = () => {
   const [pending, setPending] = useState(0);
   const [link, setLink] = useState(() => getPersonalLink(id));
   const [bals, setBals] = useState<Bal[]>([]);
-  const [backing, setBacking] = useState(false);
   useEffect(() => onPersonalChange(() => setLink(getPersonalLink(id))), [id]);
   useEffect(() => {
     if (!apiContext) return;
@@ -71,7 +71,6 @@ export const DefaultTokenCards = () => {
 
   return (
     <>
-      {MARKET_ENABLED && backing && <BackPneeSheet onClose={() => setBacking(false)} />}
       <AssetRow
         icon={PNEE_ICON}
         ticker="PNEEs · USD¢"
@@ -87,8 +86,13 @@ export const DefaultTokenCards = () => {
             ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') }
             : undefined
         }
-        // Back PNEEs sits left of Get PNEEs, same size and line (owner, 6 Oct 2026).
-        secondaryAction={MARKET_ENABLED ? { label: 'Back PNEEs', onClick: () => setBacking(true) } : undefined}
+        // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
+        // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
+        secondaryAction={
+          MARKET_ENABLED
+            ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
+            : undefined
+        }
       />
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (
