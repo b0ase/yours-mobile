@@ -6,7 +6,7 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test relay.test.mjs"
+    "test": "node --test relay.node-test.mjs"
   },
   "dependencies": {
     "ws": "8.21.3"
