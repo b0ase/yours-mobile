@@ -30,6 +30,7 @@ import {
   type SwapRecord,
 } from './swapApi';
 import { pickGate, type AddressState } from './pickGate';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /** Black / gold, as the approved design (bWalletX palette). */
 const C = {
@@ -525,10 +526,10 @@ const Pick = ({
           />
         </label>
         {err && (
-          <div className="mx-4 mt-3 text-sm" style={{ color: '#ff8a7a' }}>
+<div className="flex flex-col gap-1.5"><div className="mx-4 mt-3 text-sm" style={{ color: '#ff8a7a' }}>
             {err}
-          </div>
-        )}
+          </div><ErrorActions message={String(err)} /></div>
+)}
       </div>
       <div className="px-4 pt-3 pb-2">
         <Cta onClick={() => void go()} disabled={!gate.ok}>

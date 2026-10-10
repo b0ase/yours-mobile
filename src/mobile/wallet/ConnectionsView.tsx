@@ -9,6 +9,7 @@ import {
   type ConnectionRow,
   type PermissionGroup as Group,
 } from './connectionLog';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const CARD = '#17191E';
 const LINE = '#2b2f36';
@@ -76,10 +77,10 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
         recorded from this version on; earlier use shows only as permissions.
       </p>
       {error && (
-        <div className="text-sm mt-2" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><div className="text-sm mt-2" style={{ color: RED }}>
           {error}
-        </div>
-      )}
+        </div><ErrorActions message={String(error)} /></div>
+)}
       {loading && (
         <div className="text-sm mt-6 text-center" style={{ color: MUTED }}>
           Loading…

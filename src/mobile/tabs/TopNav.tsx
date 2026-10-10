@@ -345,7 +345,7 @@ const TopNavBar = () => {
               </div>
               <div className="shrink-0 border-t border-white/5 px-2 pt-2 pb-2">
                 {/* Owner, 9 Oct 2026: Add account, Add agent account, Connect CLI & MCP, then Settings. */}
-                {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
+                {action(<Plus size={16} color="#fff" />, 'Add account', () => go('restore-account'))}
                 {X_MARK &&
                   action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
                     startAgentCreate();
@@ -456,7 +456,7 @@ const TopNavBar = () => {
           verified={verified}
           onAdd={() => {
             setSheet(null);
-            go('create-account');
+            go('restore-account');
           }}
           onImport={() => {
             setSheet(null);

@@ -82,6 +82,7 @@ import { BATTERY_TEXT, BATTERY_TITLE, markBatteryAsked, needsBatteryAsk, request
 import { SpaceBackground, pipFocus } from './background';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { shareText } from '../chat/shareLink';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -243,10 +244,10 @@ const SpaceChat = ({
         <div ref={end} />
       </div>
       {error && (
-        <p className="px-3 text-[11px]" style={{ color: '#F97066' }}>
+<div className="flex flex-col gap-1.5"><p className="px-3 text-[11px]" style={{ color: '#F97066' }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
       <form
         className="flex items-center gap-2 p-2"
         style={{ paddingBottom: side ? 8 : 'max(8px, env(safe-area-inset-bottom))' }}
@@ -904,10 +905,10 @@ const SpaceScreenInner = ({
           {phase === 'ended' ? 'This space has ended' : 'Couldn’t join'}
         </p>
         {error && (
-          <p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
+<div className="flex flex-col gap-1.5"><p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
             {error}
-          </p>
-        )}
+          </p><ErrorActions message={String(error)} /></div>
+)}
         {phase === 'error' && needsClaim && onClaimAdmin && (
           <button
             disabled={claiming}

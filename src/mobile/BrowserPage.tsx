@@ -66,6 +66,7 @@ import { useKeyboardInset } from './ui/keyboardInset';
 import { usePhoneLayout } from './phone/flag';
 import { PHONE_ADD_TO_DOCK } from './phone/events';
 import type { DockItem } from './phone/dockModel';
+import { ErrorActions } from './errors/ErrorActions';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -1185,7 +1186,9 @@ const BrowserPage = ({
                 <ArrowRight size={17} style={{ color: '#FFD24D' }} />
               </button>
             </div>
-            {error && <p className="text-xs text-[#F97066] px-2">{error}</p>}
+            {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] px-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
           </form>
         </div>
       </div>

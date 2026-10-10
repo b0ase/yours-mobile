@@ -6,6 +6,7 @@ import { POT_NAME_PLACEHOLDER, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { OWN_SERVICE_PAYEES, addSubscription, subProblem, type NewSub, type Period } from './pots';
 import { reschedulePotReminders } from './notifyPots';
 import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -218,10 +219,10 @@ export const AddOrderSheet = ({
         Pause or cancel any time.
       </p>
       {error && (
-        <div className="text-xs" style={{ color: '#FDA29B' }}>
+<div className="flex flex-col gap-1.5"><div className="text-xs" style={{ color: '#FDA29B' }}>
           {error}
-        </div>
-      )}
+        </div><ErrorActions message={String(error)} /></div>
+)}
       <button
         type="button"
         onClick={save}

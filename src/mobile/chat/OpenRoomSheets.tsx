@@ -22,6 +22,7 @@ import {
   type OpenRoomCard,
   type OpenVisibility,
 } from './openRooms';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const PANEL = '#121316';
@@ -211,10 +212,10 @@ export const NewRoomSheet = ({
         </div>
       )}
       {error && (
-        <p className="text-xs mt-2" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
     </OSheet>
   );
 };
@@ -456,10 +457,10 @@ export const OpenRoomSheet = ({
         )}
       </div>
       {error && (
-        <p className="text-xs mt-2" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
       {reporting && (
         <ReportSheet
           title={`Report ${card.name}`}
@@ -560,10 +561,10 @@ export const MessageMenu = ({
         </>
       </div>
       {error && (
-        <p className="text-xs mt-2" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
       {reporting && (
         <ReportSheet
           title="Report message"

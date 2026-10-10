@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Camera } from 'lucide-react';
 import { resizeAvatar, resolveAvatarUrl, toAvatarUri } from './avatar';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * New-account avatar (Create / Restore / Import), in place of upstream's "Icon URL" box: upload a
@@ -79,7 +80,9 @@ export const AccountIconField = ({ value, onChange }: { value: string; onChange:
           Use an NFT or a link
         </button>
       )}
-      {error && <p className="text-[11px] text-[#F97066]">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-[11px] text-[#F97066]">{error}</p><ErrorActions message={String(error)} /></div>
+)}
     </div>
   );
 };

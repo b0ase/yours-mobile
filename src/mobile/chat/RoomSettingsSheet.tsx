@@ -33,6 +33,7 @@ import {
   type TokenRoomLookup,
 } from './tokenRooms';
 import type { Derivation } from './tokenRooms';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const PANEL = '#121316';
@@ -357,10 +358,10 @@ export const RoomSettingsSheet = ({
         </p>
       )}
       {error && (
-        <p className="text-xs mt-2" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
     </SSheet>
   );
 };

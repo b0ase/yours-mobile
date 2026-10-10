@@ -185,6 +185,7 @@ import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets
 import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
+import { ErrorActions } from '../errors/ErrorActions';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -1190,10 +1191,10 @@ const PayToPostSheet = ({
         </div>
       )}
       {err && (
-        <p className="text-xs mb-2" style={{ color: '#f87171' }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mb-2" style={{ color: '#f87171' }}>
           {err}
-        </p>
-      )}
+        </p><ErrorActions message={String(err)} /></div>
+)}
       <div className="flex gap-2 pb-4">
         <button onClick={onCancel} className="flex-1 rounded-2xl py-3 text-white" style={{ background: PANEL }}>
           Cancel
@@ -1473,7 +1474,9 @@ const InviteSheet = ({
         >
           {busy || 'Next'}
         </button>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
         {note && (
           <button
             onClick={() => setNote('')}
@@ -1567,7 +1570,9 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
           );
         })}
       </ul>
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
     </Sheet>
   );
 };
@@ -1753,7 +1758,9 @@ const BountiesSheet = ({
             {busy || 'Pay'}
           </button>
         </div>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       </Sheet>
     );
   }
@@ -1800,7 +1807,9 @@ const BountiesSheet = ({
             {busy || 'Claim'}
           </button>
         </div>
-        {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+        {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       </Sheet>
     );
   }
@@ -1863,7 +1872,9 @@ const BountiesSheet = ({
           </div>
         ))}
       </div>
-      {error && <p className="text-xs text-[#F97066] mt-2">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
+)}
     </Sheet>
   );
 };

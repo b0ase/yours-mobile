@@ -1211,19 +1211,13 @@ export const Settings = () => {
       <SubPageHeader title="Manage Accounts" onBack={() => setPage('main')} />
       <motion.div variants={stagger} initial="initial" animate="animate" className="w-full">
         <Section title="Actions">
+          {/* One Add account screen: New account on top, then restore / import (owner, 10 Oct 2026). */}
           <SettingRow
             icon={<Plus size={16} />}
-            label="Create Account"
-            description="Create a new account"
-            onClick={() => setPage('create-account')}
-            isFirst
-          />
-          <Divider />
-          <SettingRow
-            icon={<Download size={16} />}
-            label="Restore / Import"
-            description="Import or restore an existing account"
+            label="Add account"
+            description="New, or restore from 12 words or a backup"
             onClick={() => setPage('restore-account')}
+            isFirst
           />
           <Divider />
           <SettingRow
@@ -1881,7 +1875,7 @@ export const Settings = () => {
                 exit="exit"
                 className="w-full pb-4"
               >
-                <RestoreAccount onNavigateBack={(p: SettingsPage) => setPage(p)} />
+                <RestoreAccount onNavigateBack={(p: SettingsPage) => setPage(p)} onNewAccount={() => setPage('create-account')} />
               </motion.div>
             )}
 
