@@ -40,7 +40,7 @@ import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import { BchatClient, ChatApiError, defaultHttp, loadSession, needsHandle, saveSession } from '../chat/api';
+import { BchatClient, ChatApiError, defaultHttp, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import type { ReplyRef } from '../chat/api';
@@ -2002,6 +2002,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setHandle(null);
     setOpen(null);
     setRooms(null);
+  }, [client]);
+
+  // Settings › Sign out of chat clears the stored session while this tab stays mounted: drop the
+  // in-memory one too, or chat keeps using the old token and never signs in again.
+  useEffect(() => {
+    const onSession = () => {
+      if (client.current && !loadSession()) {
+        client.signOut();
+        setHandle(null);
+        setOpen(null);
+        setRooms(null);
+        autoTried.current = false;
+      }
+    };
+    window.addEventListener(SESSION_EVENT, onSession);
+    return () => window.removeEventListener(SESSION_EVENT, onSession);
   }, [client]);
 
   useEffect(() => {
