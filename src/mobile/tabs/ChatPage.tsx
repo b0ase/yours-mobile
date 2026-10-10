@@ -83,6 +83,7 @@ import { RoomBell } from '../push/RoomBell';
 import {
   APP_NAME,
   BSPACES_ENABLED,
+  roomSpacesAllowed,
   MARKET_ENABLED,
   STORE_ROOM_NOTE,
   marketLabel,
@@ -707,8 +708,8 @@ const Conversation = ({
         )}
       </div>
 
-      {/* bSpaces: Live now / Join, or Start for the issuer or admin (token rooms, bWalletX only). */}
-      {BSPACES_ENABLED && (
+      {/* Spaces: Live now / Join, or Start for the issuer or admin. bWalletX: any room; store: open rooms (free Spaces). */}
+      {(BSPACES_ENABLED || roomSpacesAllowed(room)) && (
         <LiveBanner
           client={client}
           ctx={apiContext}

@@ -22,6 +22,7 @@ import {
 } from './model';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
+import { BSPACES_ENABLED } from '../storeBuild';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -194,7 +195,8 @@ export const LiveBanner = ({
         />
       )}
 
-      {open && <DoorKeeper client={client} ticker={ticker} me={me} />}
+      {/* Paid entry is bWalletX only (BSPACES_ENABLED inlines false in a store build, dropping DoorKeeper). */}
+      {BSPACES_ENABLED && open && <DoorKeeper client={client} ticker={ticker} me={me} />}
       {open && (
         <SpaceScreen
           client={client}

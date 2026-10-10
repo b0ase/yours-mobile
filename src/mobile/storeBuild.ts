@@ -113,19 +113,45 @@ export const radarGroupShown = (group: string, store = STORE_BUILD) =>
 
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
-export const STORE_ROOM_NOTE = 'Token rooms aren’t available in this version of bWallet.';
+export const STORE_ROOM_NOTE = 'This room is for token holders. Open it in bWalletX or on bchatx.com.';
 
 /**
- * bSpaces (docs/BSPACES-PLAN.md): live audio/video spaces inside token rooms, bWalletX only. Spaces
- * live in token rooms, which a store build does not have, and live video to an audience needs
- * Apple 1.2 / Play UGC moderation plus the paid-ticket decision first. Literal env check so Vite
- * inlines it and Rollup drops the lazy SpacesPage chunk and the in-room banner.
+ * bSpaces (docs/BSPACES-PLAN.md), the full set: Spaces in token rooms, the Spaces home and its tile,
+ * New Space, paid entry ("Pay at the door"), tickets. bWalletX only: token rooms are off in a store
+ * build (Apple 3.1.1 bars crypto ownership unlocking features) and paid entry is a digital sale.
+ * Literal env check so Vite inlines it and Rollup drops the lazy SpacesPage chunk and DoorKeeper.
  */
 export const BSPACES_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Free Spaces (owner, 10 Oct 2026): every edition, the store one included, can listen, ask to speak,
+ * speak and chat in the bWallet Lounge and other open (non-token) rooms. Nothing is bought, sold or
+ * unlocked by holding a token there. Moderation (report / block on people and messages, host remove
+ * and mute, the community rules link) is in the Space screen for everyone (Apple 1.2 / Play UGC).
+ */
+export const FREE_SPACES_ENABLED = true;
+
+/** An open room (metadata.kind 'open', or an always-open one like the Lounge): no token gate. */
+export const isOpenRoom = (room: { ticker?: string | null; metadata?: unknown } | null | undefined): boolean => {
+  if (!room) return false;
+  const m = room.metadata as { kind?: unknown; tokenGate?: unknown } | null | undefined;
+  if (m?.tokenGate) return false;
+  return m?.kind === 'open' || String(room.ticker ?? '').toUpperCase() === 'LOUNGE';
+};
+
+/** Can this room show its Space (Live now / Join / Start)? bWalletX: any room. Store: open rooms only. */
+export const roomSpacesAllowed = (
+  room: { ticker?: string | null; metadata?: unknown } | null | undefined,
+  store = STORE_BUILD,
+): boolean => !store || (FREE_SPACES_ENABLED && isOpenRoom(room));
+
+/** What a store build says where a token room's Space would be. */
+export const storeTokenSpaceNote = (symbol?: string | null) =>
+  `This room is for ${symbol ? `$${symbol}` : 'token'} holders. Open it in bWalletX or on bchatx.com.`;
 
 /**
  * bPhone paid calls (docs/BPHONE-PLAN.md): charging to receive a call, the directory of people who
