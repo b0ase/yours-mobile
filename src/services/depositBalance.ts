@@ -9,6 +9,7 @@
  * every unlock (initWallet) so the money also becomes spendable without waiting for the next sync.
  */
 import { DEPOSIT_BASKET } from '@1sat/types';
+import { arrivingSats } from './receiveGuard';
 
 interface DepositLister {
   listOutputs(args: { basket: string; limit?: number; offset?: number }): Promise<{
@@ -33,5 +34,6 @@ export async function depositBasketSats(wallet: DepositLister): Promise<number> 
 /** Funding balance plus anything still waiting in the deposit basket. A failed deposit read never hides the rest. */
 export async function balanceWithDeposits(wallet: DepositLister & { balance(): Promise<number> }): Promise<number> {
   const [funded, waiting] = await Promise.all([wallet.balance(), depositBasketSats(wallet).catch(() => 0)]);
-  return funded + waiting;
+  // Plus anything on chain at our receive addresses that storage still lacks (services/receiveGuard.ts).
+  return funded + waiting + arrivingSats();
 }
