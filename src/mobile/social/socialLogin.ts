@@ -231,6 +231,7 @@ if (
   !Capacitor.isNativePlatform() &&
   !IS_EXTENSION &&
   typeof location !== 'undefined' &&
+  typeof location.href === 'string' &&
   isWebReturn(location.href)
 ) {
   const here = location.href;
