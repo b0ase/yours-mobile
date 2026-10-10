@@ -24,6 +24,8 @@ export type Settings = {
   keysBackedUp?: boolean;
   /** Highest deposit address index derived so far. Defaults to 4 (5 addresses). */
   maxKeyIndex?: number;
+  /** Highest deposit index this device has scanned with full history (services/addressScan.ts). */
+  addressScanThrough?: number;
   /**
    * Sweep migration: true once the user has either tapped the home-screen
    * migration banner OR tapped the CTA on the migration intro page. Used to
