@@ -53,6 +53,8 @@ const RESERVED = new Set([
   'bitcoin', 'bsv', 'btc', 'bitcoinsv', 'bitcoin-sv', 'satoshi', 'satoshinakamoto', 'nakamoto',
   'craigwright', 'drcraigwright', 'csw', 'nchain', 'bsvassociation', 'bsva', 'metanet', 'teranode',
   'handcash', 'relayx', 'twetch', 'centbee',
+  // Held for the owner (10 Oct 2026); assign it to his wallet by hand when he wants it.
+  'richard',
 ]);
 /**
  * ⚠ A SOCIAL ALIAS IS RESERVED BY ITS BASE NAME. `bcorp.x` is proven by whoever holds X @bcorp,
