@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { activeSwaps, applyStatus, landedText, parseTyped, stepIndex, SwapApi, upsertSwap, type SwapRecord } from './swapApi';
+import { activeSwaps, applyStatus, coinTileText, landedText, parseTyped, safeCoinImage, stepIndex, SwapApi, upsertSwap, withImages, type SwapRecord } from './swapApi';
 import type { Http } from '../chat/api';
 
 const rec = (o: Partial<SwapRecord> = {}): SwapRecord => ({
@@ -61,5 +61,31 @@ describe('swaps', () => {
     expect((await api.status('x1y2z3a4b5')).stage).toBe('sending');
     await expect(api.estimate({ ticker: 'btc', network: 'btc', label: 'BTC' }, 1)).rejects.toThrow('Pick a coin');
     expect(seen.every((s) => !s.url.includes('changenow') && !JSON.stringify(s.headers ?? {}).toLowerCase().includes('api-key'))).toBe(true);
+  });
+});
+
+describe('coin icons', () => {
+  test('tile text splits ticker and network', () => {
+    expect(coinTileText({ ticker: 'usdt', network: 'trx', label: 'USDT · Tron' })).toEqual({ ticker: 'USDT', network: 'Tron' });
+    expect(coinTileText({ ticker: 'btc', network: 'btc', label: 'BTC' })).toEqual({ ticker: 'BTC', network: null });
+    expect(coinTileText({ ticker: 'usdc', network: 'eth', label: 'USDC' })).toEqual({ ticker: 'USDC', network: 'Ethereum' });
+  });
+  test('only https images pass', () => {
+    expect(safeCoinImage('https://content-api.changenow.io/uploads/btc.svg')).toBe('https://content-api.changenow.io/uploads/btc.svg');
+    expect(safeCoinImage('http://x.io/a.png')).toBeNull();
+    expect(safeCoinImage('javascript:alert(1)')).toBeNull();
+    expect(safeCoinImage('')).toBeNull();
+    expect(safeCoinImage(null)).toBeNull();
+  });
+  test('server images merge into the local popular list by ticker + network', () => {
+    const out = withImages(
+      [
+        { ticker: 'usdt', network: 'trx', label: 'USDT · Tron' },
+        { ticker: 'usdt', network: 'eth', label: 'USDT · Ethereum' },
+      ],
+      [{ ticker: 'usdt', network: 'eth', label: 'x', image: 'https://i/usdt.svg' }],
+    );
+    expect(out[0].image).toBeUndefined();
+    expect(out[1]).toEqual({ ticker: 'usdt', network: 'eth', label: 'USDT · Ethereum', image: 'https://i/usdt.svg' });
   });
 });
