@@ -746,6 +746,28 @@ export class BchatClient {
    * Who the server says this token is (GET /api/bitsign/whoami). With `address`, also whether that wallet
    * address is a credential of that handle (null when the server can't say). Wallet card mismatch chip.
    */
+  /** Is `name` free to use as this account's bChatX handle? (GET /api/bitsign/me/handle?check=). */
+  async checkHandle(name: string): Promise<{ handle: string; available: boolean; error?: string }> {
+    const r = await this.call<{ handle?: string; available?: boolean; error?: string }>(
+      'GET',
+      `/api/bitsign/me/handle?check=${encodeURIComponent(name.replace(/^[$@]/, ''))}`,
+    );
+    return { handle: r.handle ?? name, available: !!r.available, error: r.error };
+  }
+
+  /** Change this account's bChatX handle (POST /api/bitsign/me/handle). Returns the new session. */
+  async changeHandle(name: string): Promise<ChatSession> {
+    const r = await this.call<{ ok?: boolean; token?: string; handle?: string; error?: string }>(
+      'POST',
+      '/api/bitsign/me/handle',
+      { handle: name.replace(/^[$@]/, '') },
+    );
+    if (!r.token || !r.handle || !this.session)
+      throw new ChatApiError(r.error || 'Could not change your bChatX name', 400);
+    this.session = { ...this.session, token: r.token, handle: r.handle };
+    return this.session;
+  }
+
   async whoami(address?: string): Promise<{ handle: string; addressLinked: boolean | null }> {
     const q = address ? `?address=${encodeURIComponent(address)}` : '';
     const r = await this.call<{ handle?: string; address_linked?: boolean | null }>('GET', `/api/bitsign/whoami${q}`);

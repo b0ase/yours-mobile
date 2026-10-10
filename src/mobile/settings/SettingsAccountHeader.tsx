@@ -7,6 +7,7 @@ import { useAvatar } from '../names/useAvatar';
 import { AccountList, AgentMark } from '../account/AccountSwitcher';
 import { useAccountSwitch } from '../account/accountSwitch';
 import { StorageBadge } from './StorageBadge';
+import { BchatAccountSettings } from './BchatAccountSettings';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -52,6 +53,7 @@ export const SettingsAccountHeader = () => {
         </div>
       )}
       <StorageBadge />
+      <BchatAccountSettings />
     </div>
   );
 };
