@@ -8,9 +8,16 @@ import {
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
-import { syncAddresses, syncMessages, createContext as createActionContext } from '@1sat/actions';
+import {
+  syncAddresses,
+  syncMessages,
+  sweepDeposit,
+  internalizeBeef,
+  createContext as createActionContext,
+} from '@1sat/actions';
+import { BSV21_BASKET, DEPOSIT_BASKET, FUNDING_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
 import { createAssetPermissionModules } from '@1sat/permission-module';
-import type { WalletInterface } from '@bsv/sdk';
+import { Transaction, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
 import { ChromeStorageService } from './services/ChromeStorage.service';
 import { MESSAGEBOX_URL } from './utils/constants';
 import type { Account, StorageConfig } from './services/types/chromeStorage.types';
@@ -21,6 +28,9 @@ import { refileLegacyBaskets } from './services/legacyBaskets';
 import { reconcileStorage } from './services/storageReconcileBackground';
 import { showOneSatPrompt } from './services/oneSatPrompt';
 import { runTokenRecovery } from './services/tokenRecoveryWallet';
+import { planAddressScan, resetSyncCursor } from './services/addressScan';
+import { checkReceiveAddresses, normOutpoint, setArriving } from './services/receiveGuard';
+import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -307,6 +317,17 @@ export const initWallet = async (
   const actionCtx = createActionContext(adminWallet, { chain, services: syncContext.services });
 
   const sendSyncStatus = (data: { status: string; [key: string]: unknown }) => {
+    // Remember the outcome for the storage badge on Settings (services/storageHealth.ts).
+    if (['complete', 'error', 'sweep-failed', 'receive-failed', 'arriving'].includes(data.status)) {
+      const health = {
+        status: data.status,
+        at: Date.now(),
+        error:
+          typeof data.message === 'string' ? data.message : typeof data.error === 'string' ? data.error : undefined,
+        satoshis: typeof data.satoshis === 'number' ? data.satoshis : undefined,
+      };
+      chrome.storage.local.set({ [SYNC_HEALTH_KEY(keys.identityAddress)]: health }).catch(() => undefined);
+    }
     chrome.runtime
       .sendMessage({
         action: 'syncStatusUpdate',
@@ -375,22 +396,145 @@ export const initWallet = async (
       addresses: () => [...syncContext.addressManager.getAddresses(), keys.identityAddress],
     });
 
+  // Scan past maxKeyIndex (addresses handed out on other devices) and rescan history once whenever that window
+  // reaches indexes this device never scanned: the sync's one resume cursor would otherwise skip their payments
+  // (owner, 10 Oct 2026: 0.254 BSV at a fresh address never showed). services/addressScan.ts.
+  const scanPlan = planAddressScan(maxKeyIndex, account?.settings?.addressScanThrough);
+  if (scanPlan.resetCursor) {
+    try {
+      const { publicKey: idKey } = await adminWallet.getPublicKey({ identityKey: true });
+      const reset = await resetSyncCursor(idKey);
+      console.log(
+        `[initWallet] Address scan widened to ${scanPlan.count}; history rescan ${reset ? 'queued' : 'not needed'}`,
+      );
+    } catch (err) {
+      console.error('[initWallet] sync cursor reset failed:', err);
+    }
+  }
+  const persistScanThrough = () => {
+    const { account: acct, selectedAccount } = chromeStorageService.getCurrentAccountObject();
+    if (!acct || !selectedAccount || (acct.settings?.addressScanThrough ?? -1) >= scanPlan.through) return;
+    chromeStorageService
+      .updateNested('accounts', {
+        [selectedAccount]: {
+          settings: { ...acct.settings, addressScanThrough: scanPlan.through },
+        } as unknown as Account,
+      })
+      .catch((err: unknown) => console.error('[initWallet] saving addressScanThrough failed:', err));
+  };
+
+  // Sweep anything already waiting in the deposit basket now, not only after a sync that finds new payments: a
+  // sweep that failed before (or never ran) otherwise leaves received money unspendable until the next payment
+  // arrives (owner, 10 Oct 2026, the new $vexvoid account). The balance counts the basket either way
+  // (services/depositBalance.ts).
+  sweepDeposit
+    .execute(actionCtx, {})
+    .then((r) => {
+      if (r.swept) console.log(`[initWallet] Swept ${r.swept} waiting deposit(s) into the wallet`, r.txid);
+    })
+    .catch((err: unknown) => {
+      console.error('[initWallet] deposit sweep failed:', err);
+      sendSyncStatus({ status: 'sweep-failed', error: err instanceof Error ? err.message : String(err) });
+    });
+
+  // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
+  // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
+  const runReceiveGuard = async () => {
+    const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
+    const addresses = [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
+    const walletOutpoints = async () => {
+      const all: string[] = [];
+      for (const basket of [FUNDING_BASKET, DEPOSIT_BASKET, ONESAT_BASKET, BSV21_BASKET]) {
+        try {
+          const r = await baseWallet.listOutputs({ basket, limit: 10000 });
+          for (const o of r.outputs) all.push(o.outpoint);
+        } catch {
+          /* a basket that can't be read just isn't counted as known */
+        }
+      }
+      return all;
+    };
+    const outputSats = async (outpoint: string) => {
+      const [txid, vout] = normOutpoint(outpoint).split('.');
+      const raw = await syncContext.services.beef.getRawTx(txid);
+      return Transaction.fromBinary(Array.from(raw)).outputs[Number(vout)]?.satoshis ?? 0;
+    };
+    const first = await checkReceiveAddresses(addresses, {
+      ownerSync: (a) => syncContext.services.owner.sync(a),
+      outputSats,
+      walletOutpoints,
+    });
+    if (!first.satoshis) {
+      setArriving(0);
+      return;
+    }
+    console.warn(
+      `[receiveGuard] ${first.satoshis} sats at our receive addresses missing from storage; retrying`,
+      first,
+    );
+    const { publicKey: senderIdentityKey } = await adminWallet.getPublicKey({ identityKey: true });
+    const derivations = new Map<string, unknown>();
+    for (const address of syncContext.addressManager.getAddresses()) {
+      const d = syncContext.addressManager.getDerivation(address);
+      if (!d) continue;
+      derivations.set(address, {
+        outputIndex: 0,
+        derivationPrefix: d.derivationPrefix,
+        derivationSuffix: d.derivationSuffix,
+        senderIdentityKey,
+        protocolID: ONESAT_PROTOCOL as WalletProtocol,
+        counterparty: 'self',
+      });
+    }
+    for (const txid of first.txids) {
+      try {
+        const beef = await syncContext.services.beef.getBeef(txid);
+        await internalizeBeef({
+          beef,
+          addressDerivations: derivations as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
+          wallet: adminWallet,
+          services: syncContext.services,
+          chain,
+        });
+        console.log(`[receiveGuard] internalized ${txid}`);
+      } catch (err) {
+        console.error(`[receiveGuard] internalize ${txid} failed:`, err);
+        sendSyncStatus({ status: 'receive-failed', txid, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    await sweepDeposit
+      .execute(actionCtx, {})
+      .catch((err: unknown) => console.error('[receiveGuard] sweep failed:', err));
+    const after = await checkReceiveAddresses(addresses, {
+      ownerSync: (a) => syncContext.services.owner.sync(a),
+      outputSats,
+      walletOutpoints,
+    });
+    // Whatever is still missing counts as arriving, so the balance never shows $0 for it.
+    setArriving(after.satoshis);
+    if (after.satoshis) sendSyncStatus({ status: 'arriving', satoshis: after.satoshis });
+  };
+  const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
+
   console.log('[initWallet] Starting address sync...');
-  sendSyncStatus({ status: 'start', addressCount: maxKeyIndex + 1 });
+  sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
 
   syncAddresses
     .execute(actionCtx, {
-      count: maxKeyIndex + 1,
+      count: scanPlan.count,
       onProgress: (progress) => {
         sendSyncStatus({ status: 'progress', ...progress });
       },
     })
     .then(async (result) => {
       sendSyncStatus({ status: 'complete', ...result });
+      // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.
+      if (result.failed === 0) persistScanThrough();
       console.log('[initWallet] Address sync complete:', result);
       // Token outputs no address scan can see (change of a send this storage
       // never recorded). Cheap when there is nothing to find; cached per tx.
       recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
+      void guard();
       if (options?.afterSync) {
         try {
           await options.afterSync({ storage });
@@ -403,6 +547,7 @@ export const initWallet = async (
       const message = error instanceof Error ? error.message : String(error);
       sendSyncStatus({ status: 'error', message });
       console.error('[initWallet] Address sync failed:', error);
+      void guard();
       recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
     });
 

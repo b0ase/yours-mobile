@@ -1,3 +1,4 @@
+import { keyFingerprint } from '../wallet/identityLine';
 import { accountTag } from './accountSwitch';
 import { Check, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -8,7 +9,6 @@ import { AccountAvatar } from '../names/AccountAvatar';
 import { getLocalAvatar, isDefaultAvatar, pickAvatar, resolveAvatarUrl } from '../names/avatar';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
-const short = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 export const AgentMark = ({ id }: { id?: string }) =>
   id && isAgentAccount(id) ? (
@@ -73,20 +73,15 @@ export const AccountRow = ({
         )}
         <div className="min-w-0 flex-1">
           <div className={`flex items-center gap-1 text-sm font-semibold text-white ${ELLIPSIS}`}>
-            <span className={ELLIPSIS}>{n.displayName || n.label}</span>
+            <span className={ELLIPSIS}>{tag || n.displayName || n.label}</span>
             {id === current && verified && <Check size={13} strokeWidth={3} color="#2ecc71" />}
             <AgentMark id={id} />
           </div>
-          {tag && (
-            <div
-              className={`${compact ? 'text-xs' : 'text-[15px]'} font-extrabold ${ELLIPSIS}`}
-              style={{ color: '#FFD24D' }}
-            >
-              {tag}
+          {/* Handle + identity-key fingerprint only (owner, 10 Oct 2026): never another handle, never copyable. */}
+          {!compact && keyFingerprint(account.pubKeys?.identityPubKey) && (
+            <div className="text-[11px] font-mono text-[#98A2B3] select-none">
+              {keyFingerprint(account.pubKeys?.identityPubKey)}
             </div>
-          )}
-          {!compact && (
-            <div className="text-[11px] font-mono text-[#98A2B3]">{short(account.primaryAddress ?? id)}</div>
           )}
         </div>
         {id === current && <Check size={16} color="#A1FF8B" />}
