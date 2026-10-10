@@ -9,7 +9,7 @@ import {
   needsSizeCheck,
   valuesEntered,
 } from './builderForm';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -62,6 +62,7 @@ import {
 } from './lockApi';
 import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
 import { BackPneeSheet } from '../notes/BackPneeSheet';
+import { BackPneeDoneSheet } from '../notes/BackPneeDoneSheet';
 import { groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
 import { MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
@@ -133,6 +134,7 @@ const Seg = <T extends string>({
 
 const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const acct = chromeStorageService.getCurrentAccountObject().account;
@@ -141,7 +143,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [view, setView] = useState<View>(
     initialVerify != null ? { kind: 'verify', tx: initialVerify } : { kind: 'list' },
   );
-  useBackClose(true, () => (view.kind === 'list' ? navigate(-1) : setView({ kind: 'list' })));
+  useBackClose(true, () =>
+    view.kind === 'list' ? navigate(-1) : view.kind === 'new' ? backFromNew() : setView({ kind: 'list' }),
+  );
 
   const [height, setHeight] = useState(0);
   const [rate, setRate] = useState(cachedExchangeRate());
@@ -149,9 +153,17 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [busy, setBusy] = useState(false);
   // Wallet › PNEEs lock icon opens /m/lock?back=pnee: the Back PNEEs card first, then how much BSV, then the
   // builder filled in for the PNEEs pot (owner, 10 Oct 2026).
+  // The router is a MemoryRouter, so the ?back=pnee lives on the router location, never window.location.
   const [backPnee, setBackPnee] = useState<'card' | 'amount' | null>(() =>
-    isBackPneeMode(window.location.search) ? 'card' : null,
+    isBackPneeMode(location.search) ? 'card' : null,
   );
+  /** Entered from Wallet › PNEEs: closing returns to the Wallet, and a finished lock shows the done card. */
+  const [pneeFromWallet, setPneeFromWallet] = useState(() => isBackPneeMode(location.search));
+  const [pneeDone, setPneeDone] = useState<number | null>(null);
+  const leavePneeFlow = () => {
+    setBackPnee(null);
+    if (pneeFromWallet) navigate(-1);
+  };
   /** The pot the lock being built goes into (LockPlan.pot); undefined = Other locks. */
   const [pot, setPot] = useState<string | undefined>(undefined);
   const [openPot, setOpenPot] = useState<string | null>(null);
@@ -352,6 +364,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       addSnackbar('Locked. It cannot be undone.', 'success');
       setTyped('');
       setView({ kind: 'list' });
+      if (pneeFromWallet && pot === PNEE_POT) setPneeDone(Number(amountBsv));
       await refresh();
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : 'Lock failed', 'error');
@@ -523,6 +536,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setPot(PNEE_POT);
     setBackPnee(null);
     setView({ kind: 'new' });
+  };
+  /** Back from the builder: in the Back PNEEs flow that is the amount sheet, otherwise the list. */
+  const backFromNew = () => {
+    setView({ kind: 'list' });
+    if (pneeFromWallet && pot === PNEE_POT) setBackPnee('amount');
   };
   const renderPlan = (p: LockPlan) => {
     const s = planStatus(p, height);
@@ -774,7 +792,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     const pr = schedule as PercentResult | null;
     body = (
       <>
-        {header(pot ? `New lock · ${potName(pot)}` : 'New lock', () => setView({ kind: 'list' }))}
+        {header(pot ? `New lock · ${potName(pot)}` : 'New lock', backFromNew)}
         <div className="px-4 flex flex-col gap-3">
           <div
             className="rounded-2xl p-3 text-xs font-semibold flex gap-2"
@@ -1228,10 +1246,17 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
         </Suspense>
       )}
       {MARKET_ENABLED && backPnee === 'card' && (
-        <BackPneeSheet onClose={() => setBackPnee(null)} onLock={() => setBackPnee('amount')} />
+        <BackPneeSheet onClose={leavePneeFlow} onLock={() => setBackPnee('amount')} />
       )}
       {MARKET_ENABLED && backPnee === 'amount' && (
-        <BackPneeAmountSheet rate={rate} onClose={() => setBackPnee(null)} onContinue={lockForPnee} />
+        <BackPneeAmountSheet rate={rate} onClose={leavePneeFlow} onContinue={lockForPnee} />
+      )}
+      {pneeDone != null && (
+        <BackPneeDoneSheet
+          bsv={pneeDone}
+          onWallet={() => (setPneeDone(null), navigate(-1))}
+          onPots={() => (setPneeDone(null), setPneeFromWallet(false))}
+        />
       )}
     </div>
   );
