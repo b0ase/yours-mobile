@@ -267,7 +267,8 @@ describe('store build has no Market', () => {
     const bar = src('./wallet/BuyBsv.tsx');
     expect(bar).toMatch(/const SwapFlow = SWAP_ENABLED \? lazy\(/);
     expect(bar).not.toMatch(/SwapCell/);
-    expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{onPrice\} change=\{change\} \/>/);
+    expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{\(\) => setPortfolioOpen\(true\)\} change=\{change\} \/>/);
+    expect(bar).toMatch(/import\('..\/portfolio\/PortfolioScreen'\)/);
     expect(bar).toMatch(/swapOn && SwapPromo && \(/);
     // Permanent card (owner, 10 Oct 2026): no × and no dismissed flag, so nobody is left without a swap entry.
     const promo = src('./swap/SwapPromo.tsx');

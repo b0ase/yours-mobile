@@ -4,6 +4,8 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { useSwapWatcher } from '../swap/useSwapWatcher';
 import type { SwapRecord } from '../swap/swapApi';
 
+// Portfolio vs market (owner, 10 Oct 2026): the price tile opens it; its own chunk.
+const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
 // Swap into BSV (bWalletX only): the chunk is dropped from a store build (SWAP_ENABLED).
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
@@ -152,15 +154,24 @@ export const BsvPriceBar = ({
   onReceive,
   onPrice,
   getAddress,
+  bsvSats = 0,
+  mneeUsd = 0,
+  tokenCount = 0,
 }: {
   onReceive: () => void;
+  /** Opens the BSV view with its chart (from the Portfolio screen's "BSV chart" button). */
   onPrice: () => void;
   getAddress?: () => Promise<string>;
+  /** For Portfolio vs market (the price tile opens it): spendable BSV, MNEE dollars, unpriced tokens. */
+  bsvSats?: number;
+  mneeUsd?: number;
+  tokenCount?: number;
 }) => {
   const rate = useLivePrice();
   const change = useDayChange(rate);
   const [open, setOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
   const [resume, setResume] = useState<SwapRecord | null>(null);
   const { addSnackbar } = useSnackbar();
   const { swaps, active } = useSwapWatcher((s) => {
@@ -176,7 +187,7 @@ export const BsvPriceBar = ({
   return (
     <>
       <div className="w-[92%] mb-2 flex items-stretch gap-2">
-        <PriceCell rate={rate} onOpen={onPrice} change={change} />
+        <PriceCell rate={rate} onOpen={() => setPortfolioOpen(true)} change={change} />
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -206,6 +217,22 @@ export const BsvPriceBar = ({
             onReceive();
           }}
         />
+      )}
+      {portfolioOpen && (
+        <Suspense fallback={null}>
+          <PortfolioScreen
+            onClose={() => setPortfolioOpen(false)}
+            onBsvChart={() => {
+              setPortfolioOpen(false);
+              onPrice();
+            }}
+            bsvSats={bsvSats}
+            mneeUsd={mneeUsd}
+            tokenCount={tokenCount}
+            price={rate}
+            dayChange={change}
+          />
+        </Suspense>
       )}
       {swapOn && swapOpen && SwapFlow && getAddress && (
         <Suspense fallback={null}>

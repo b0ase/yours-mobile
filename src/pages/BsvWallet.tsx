@@ -1326,6 +1326,9 @@ export const BsvWallet = () => {
             onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
             onPrice={openBsvView}
             getAddress={getSwapAddress}
+            bsvSats={Math.round(bsvBalance * 100_000_000)}
+            mneeUsd={services.mnee ? mneeBalance : 0}
+            tokenCount={bsv21s.length}
           />
         )}
         {!BUY_CRYPTO_ENABLED && <BsvHistoryBar onPrice={openBsvView} />}
