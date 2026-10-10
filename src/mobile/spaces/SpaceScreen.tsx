@@ -69,6 +69,16 @@ import {
   type GreenRoom,
 } from './model';
 import { ScreenAwake, wakeLockSupported } from './wakeLock';
+import {
+  alwaysHereCaption,
+  isAlwaysOpenTicker,
+  mayEndSpace,
+  parseRoomSpaceMeta,
+  type AlwaysHere,
+  type RoomSpaceMeta,
+} from './model';
+import { B_AVATAR, B_HANDLE } from '../chat/avatars';
+import { BATTERY_TEXT, BATTERY_TITLE, markBatteryAsked, needsBatteryAsk, requestIgnoreBattery } from './battery';
 import { SpaceBackground, pipFocus } from './background';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { shareText } from '../chat/shareLink';
@@ -297,6 +307,30 @@ const PipVideo = ({ media, handle }: { media: SpaceMedia; handle: string }) => {
   return <video ref={ref} data-space-handle={handle} autoPlay playsInline muted className="h-full w-full object-cover" />;
 };
 
+/**
+ * b on an always-open stage: the bWalletX mark, no mic, no speaking ring, never counted as a
+ * listener (bit-sign `always_here`).
+ */
+const AlwaysHereTile = ({ agent }: { agent: AlwaysHere }) => (
+  <div
+    className="mt-3 mx-auto flex items-center gap-3 rounded-2xl px-3 py-2"
+    style={{ maxWidth: 480, boxShadow: `0 0 0 1px ${LINE}`, background: '#0b0b0d' }}
+    aria-label={alwaysHereCaption(agent)}
+  >
+    <img
+      src={B_AVATAR}
+      alt=""
+      className="h-10 w-10 rounded-full object-cover"
+    />
+    <div className="min-w-0">
+      <div className="text-sm font-semibold text-white truncate">{agent.handle === B_HANDLE ? 'b' : agent.label}</div>
+      <div className="text-[11px]" style={{ color: MUTED }}>
+        {alwaysHereCaption(agent)}
+      </div>
+    </div>
+  </div>
+);
+
 export interface SpaceScreenProps {
   client: BchatClient;
   ticker: string;
@@ -313,6 +347,11 @@ export interface SpaceScreenProps {
   spaceOpen?: boolean;
   /** The host's display name if the caller already has it (Space page `host_name`). */
   hostName?: string | null;
+  /**
+   * An always-open room (the Lounge; model.ts parseRoomSpaceMeta): join straight in with the mic off,
+   * no green room, Leave only. The server's `always_open` turns this on too.
+   */
+  alwaysOpen?: boolean;
   onClose: () => void;
 }
 
@@ -383,6 +422,7 @@ const SpaceScreenInner = ({
   canInvite,
   spaceOpen = false,
   hostName: hostNameProp,
+  alwaysOpen: alwaysOpenProp = false,
   onClaimAdmin,
   onClose,
 }: SpaceScreenProps) => {
@@ -423,6 +463,20 @@ const SpaceScreenInner = ({
   /** Keep the screen on in this Space (screen icon, top right). */
   const [awakeOn, setAwakeOn] = useState(true);
   const [hostName, setHostName] = useState<string | null>(hostNameProp ?? null);
+  /** always_open / host_label / always_here, from any space reply that carries them. */
+  const [roomMeta, setRoomMeta] = useState<RoomSpaceMeta>(() => ({
+    alwaysOpen: alwaysOpenProp,
+    hostLabel: alwaysOpenProp && isAlwaysOpenTicker(ticker) ? 'bWalletX' : null,
+    alwaysHere: [],
+  }));
+  const noteMeta = useCallback(
+    (raw: unknown) => {
+      const m = parseRoomSpaceMeta(raw, ticker);
+      if (m.alwaysOpen) setRoomMeta(m);
+    },
+    [ticker],
+  );
+  const open24 = alwaysOpenProp || roomMeta.alwaysOpen;
   const awake = useMemo(() => new ScreenAwake(), []);
   const [note, setNote] = useState('');
   // A denied mic/camera stays on screen (with Open Settings) until fixed or dismissed.
@@ -514,14 +568,14 @@ const SpaceScreenInner = ({
       return;
     }
     try {
-      const joined = parseSpaceState(
-        await client.spaceAction(ticker, {
-          action: 'join',
-          ...(startTitle ? { title: startTitle } : {}),
-          ...(asSpeaker ? { as: 'speaker' } : {}),
-        }),
-        me,
-      );
+      const title = startTitle ?? (open24 ? roomName : undefined);
+      const raw = await client.spaceAction(ticker, {
+        action: 'join',
+        ...(title ? { title } : {}),
+        ...(asSpeaker ? { as: 'speaker' } : {}),
+      });
+      noteMeta(raw);
+      const joined = parseSpaceState(raw, me);
       if (!joined.space) throw new Error('This space has ended.');
       if (!supportedTransport(joined.space)) {
         throw new Error('This space is running peer-to-peer. Join it from bChat on the web.');
@@ -550,7 +604,8 @@ const SpaceScreenInner = ({
       if (asSpeaker && joined.me?.role === 'speaker') setNote('You’re on stage, muted. Tap Unmute to talk.');
       else if (asSpeaker && joined.me?.handRaisedAt) setNote('Hand raised. The host can bring you on stage.');
       // The host starts speaking straight away (they started the space); the OS asks for the mic.
-      if (joined.me?.role === 'host') {
+      // Always-open rooms (the Lounge): everyone comes in with the mic off, whoever opened it.
+      if (joined.me?.role === 'host' && !open24) {
         await media
           .setMic(true)
           .then(() => setMicOn(true))
@@ -633,7 +688,7 @@ const SpaceScreenInner = ({
 
   // Starting: go straight in. Joining: load the green room first.
   useEffect(() => {
-    if (startTitle) return void enter(false);
+    if (startTitle || alwaysOpenProp) return void enter(false);
     client
       .spaceGreenRoom(ticker)
       .then((d) => {
@@ -655,7 +710,10 @@ const SpaceScreenInner = ({
     const poll = setInterval(() => {
       client
         .space(ticker)
-        .then((d) => apply(parseSpaceState(d, me)))
+        .then((d) => {
+          noteMeta(d);
+          apply(parseSpaceState(d, me));
+        })
         .catch(() => undefined);
       tick((n) => n + 1);
     }, POLL_MS);
@@ -668,7 +726,7 @@ const SpaceScreenInner = ({
       clearInterval(poll);
       clearInterval(hb);
     };
-  }, [phase, client, ticker, me, apply]);
+  }, [phase, client, ticker, me, apply, noteMeta]);
 
   const act = (body: Record<string, unknown>) =>
     client
@@ -690,6 +748,8 @@ const SpaceScreenInner = ({
   const canHand = mayRaiseHand({ anonymous: anon, role: myRole });
   const recording = !!state.recording;
   const moderator = mayModerate({ isHost, roomBoss: canInvite });
+  /** Always-open: whoever started is just "on stage"; nobody ends it. */
+  const canEnd = mayEndSpace({ isHost, alwaysOpen: open24 });
 
   // Mute the room: applies to voices already playing and any that join later (media.ts).
   useEffect(() => media.setDeafened(deaf), [media, deaf]);
@@ -778,6 +838,14 @@ const SpaceScreenInner = ({
     bg.update({ live: phase === 'live', title, onStage, micOn, focus });
   }, [bg, phase, title, onStage, micOn, focus]);
   useEffect(() => () => bg.close(), [bg]);
+  // Android, first Space on this install: explain, then the system battery-optimisation dialog (battery.ts).
+  const [batteryAsk, setBatteryAsk] = useState(false);
+  const batteryChecked = useRef(false);
+  useEffect(() => {
+    if (phase !== 'live' || batteryChecked.current) return;
+    batteryChecked.current = true;
+    void needsBatteryAsk().then((ask) => mounted.current && ask && setBatteryAsk(true));
+  }, [phase]);
   const raiseHand = () => {
     if (!raised) setNote('Hand raised. The host can bring you on stage.');
     void act({ action: 'hand', raised: !raised });
@@ -790,7 +858,8 @@ const SpaceScreenInner = ({
       videos={videos}
       speaking={speakers}
       micOn={micOn}
-      hostName={hostName}
+      hostName={open24 ? null : hostName}
+      noHost={open24}
       listeners={audience}
       canHand={canHand}
       raised={raised}
@@ -866,6 +935,9 @@ const SpaceScreenInner = ({
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
         {screenOwner && <ScreenTile owner={screenOwner} media={media} />}
         {stageView}
+        {roomMeta.alwaysHere.map((a) => (
+          <AlwaysHereTile key={a.handle} agent={a} />
+        ))}
         {moderator && hands.length > 0 && (
           <section className="mt-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: MUTED }}>
@@ -892,7 +964,36 @@ const SpaceScreenInner = ({
         )}
         <div className="mt-5 flex items-center gap-2 text-sm" style={{ color: MUTED }}>
           <Users size={16} />
-          {audienceLine(audience)}
+          <span className="flex-1">{audienceLine(audience)}</span>
+          {state.mayRecord && !anon ? (
+            <button
+              onClick={() => {
+                if (!recording) setNote('Recording. Everyone in the Space sees ● Recording.');
+                void client
+                  .spaceAction(ticker, { action: recording ? 'record_stop' : 'record_start' })
+                  .then(() => client.space(ticker))
+                  .then((d) => apply(parseSpaceState(d, me)))
+                  .catch((e) => setNote(errText(e)));
+              }}
+              className="shrink-0 flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+              style={recording ? { background: '#D92D20', color: '#fff' } : { border: '1px solid #ef4444', color: '#fff' }}
+              aria-label={recording ? 'Stop recording' : 'Record'}
+            >
+              {recording ? (
+                <>■ Stop{state.recordingSince ? ` · ${elapsed(state.recordingSince)}` : ''}</>
+              ) : (
+                <>
+                  <span style={{ color: '#ef4444' }}>●</span> Record
+                </>
+              )}
+            </button>
+          ) : (
+            recording && (
+              <span className="shrink-0 text-xs font-semibold" style={{ color: '#ef4444' }}>
+                ● Recording
+              </span>
+            )
+          )}
         </div>
       </div>
     );
@@ -992,30 +1093,13 @@ const SpaceScreenInner = ({
           <Hand size={20} color={raised ? '#010101' : '#fff'} />
         </CtlButton>
       )}
-      {state.mayRecord && !anon && (
-        <CtlButton
-          label={recording ? 'Stop rec' : 'Record'}
-          onClick={() => {
-            if (!recording) setNote('Recording. Everyone in the Space sees ● Recording.');
-            void client
-              .spaceAction(ticker, { action: recording ? 'record_stop' : 'record_start' })
-              .then(() => client.space(ticker))
-              .then((d) => apply(parseSpaceState(d, me)))
-              .catch((e) => setNote(errText(e)));
-          }}
-          active={recording}
-          danger={recording}
-        >
-          <span className="text-base leading-none" style={{ color: recording ? '#fff' : '#ef4444' }}>●</span>
-        </CtlButton>
-      )}
       <CtlButton label={deaf ? 'Room muted' : 'Mute room'} onClick={() => setDeaf((d) => !d)} active={deaf}>
         {deaf ? <VolumeX size={20} color="#010101" /> : <Volume2 size={20} color="#fff" />}
       </CtlButton>
       <CtlButton label="Chat" onClick={() => setChatOpen((o) => !o)} active={chatOpen}>
         <MessageSquare size={20} color={chatOpen ? '#010101' : '#fff'} />
       </CtlButton>
-      <CtlButton label={isHost ? 'End' : 'Leave'} onClick={() => void leave(isHost)} danger>
+      <CtlButton label={canEnd ? 'End' : 'Leave'} onClick={() => void leave(canEnd)} danger>
         <PhoneOff size={20} color="#fff" />
       </CtlButton>
     </div>
@@ -1037,6 +1121,39 @@ const SpaceScreenInner = ({
       role="dialog"
       aria-label="bSpace"
     >
+      {batteryAsk && (
+        <div className="absolute inset-0 z-20 flex items-end" style={{ background: 'rgba(0,0,0,.55)' }}>
+          <div
+            className="w-full rounded-t-2xl p-5"
+            style={{ background: '#121316', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }}
+          >
+            <p className="text-white font-semibold">{BATTERY_TITLE}</p>
+            <p className="mt-1 text-xs" style={{ color: MUTED }}>
+              {BATTERY_TEXT}
+            </p>
+            <button
+              onClick={() => {
+                setBatteryAsk(false);
+                void requestIgnoreBattery();
+              }}
+              className="mt-4 w-full rounded-full py-3 font-semibold"
+              style={{ background: GOLD, color: '#010101' }}
+            >
+              Continue
+            </button>
+            <button
+              onClick={() => {
+                setBatteryAsk(false);
+                markBatteryAsked();
+              }}
+              className="mt-2 w-full rounded-full py-3 text-sm"
+              style={{ color: MUTED }}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
       <header
         className="flex items-center gap-2 px-3 pb-2 shrink-0"
         style={{ paddingTop: landscape ? 8 : 'max(10px, env(safe-area-inset-top))' }}
@@ -1061,6 +1178,11 @@ const SpaceScreenInner = ({
             ${ticker.replace(/^\$/, '')}{' '}
             {state.space ? `· ${elapsed(state.space.startedAt)} · ${audienceLine(audience)}` : ''}
           </div>
+          {open24 && roomMeta.hostLabel && (
+            <div className="text-[11px]" style={{ color: GOLD }}>
+              Hosted by {roomMeta.hostLabel}
+            </div>
+          )}
         </div>
         {phase === 'live' && (isHost || canInvite) && (
           <button

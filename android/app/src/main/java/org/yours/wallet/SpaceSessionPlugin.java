@@ -4,6 +4,14 @@ import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
 import android.app.RemoteAction;
 import android.content.Intent;
+import android.net.Uri;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.util.Log;
+import androidx.core.app.NotificationManagerCompat;
+import com.getcapacitor.PermissionState;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.util.Rational;
@@ -21,10 +29,15 @@ import java.util.ArrayList;
  * start/update/stop  the SpaceSessionService foreground service + its notification.
  * setPip             whether leaving the app should float the Space's video (picture-in-picture),
  *                    and its shape. MainActivity enters PiP on onUserLeaveHint when this is on.
+ * requestNotifications  Android 13+ POST_NOTIFICATIONS before the service starts (logs if denied).
+ * isIgnoringBatteryOptimizations / requestIgnoreBatteryOptimizations  Doze exemption, so a Space
+ *                    keeps going with the screen off (src/mobile/spaces/battery.ts asks once).
  * events             "action" {action: "mute"|"leave"} from notification/PiP buttons;
  *                    "pip" {active} when the window goes in or out of picture-in-picture.
  */
-@CapacitorPlugin(name = "SpaceSession")
+@CapacitorPlugin(
+        name = "SpaceSession",
+        permissions = { @Permission(strings = { "android.permission.POST_NOTIFICATIONS" }, alias = "notifications") })
 public class SpaceSessionPlugin extends Plugin {
     private static SpaceSessionPlugin instance;
     static volatile boolean pipWanted = false;
@@ -89,6 +102,67 @@ public class SpaceSessionPlugin extends Plugin {
         pipMicOn = Boolean.TRUE.equals(call.getBoolean("micOn", false));
         updatePipParams();
         call.resolve();
+    }
+
+    private boolean notificationsOn() {
+        return NotificationManagerCompat.from(getContext()).areNotificationsEnabled();
+    }
+
+    /** Android 13+: the runtime prompt for POST_NOTIFICATIONS. Older: just whether notifications are on. */
+    @PluginMethod
+    public void requestNotifications(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 33 || getPermissionState("notifications") == PermissionState.GRANTED) {
+            resolveNotifications(call);
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "notificationsCallback");
+    }
+
+    @PermissionCallback
+    private void notificationsCallback(PluginCall call) {
+        resolveNotifications(call);
+    }
+
+    private void resolveNotifications(PluginCall call) {
+        boolean granted = notificationsOn();
+        if (!granted) Log.w("SpaceSession", "Notification permission denied: the Space notification is hidden; the Space may stop with the screen off");
+        JSObject o = new JSObject();
+        o.put("granted", granted);
+        call.resolve(o);
+    }
+
+    @PluginMethod
+    public void isIgnoringBatteryOptimizations(PluginCall call) {
+        boolean ignoring = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+            ignoring = pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+        }
+        JSObject o = new JSObject();
+        o.put("ignoring", ignoring);
+        call.resolve(o);
+    }
+
+    /** The system "Let app always run in background?" dialog; the battery settings list if a phone lacks it. */
+    @PluginMethod
+    public void requestIgnoreBatteryOptimizations(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            call.resolve();
+            return;
+        }
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(Uri.parse("package:" + getContext().getPackageName()));
+            getActivity().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            try {
+                getActivity().startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                call.resolve();
+            } catch (Exception e2) {
+                call.reject("Couldn't open battery settings: " + e2.getMessage());
+            }
+        }
     }
 
     @PluginMethod

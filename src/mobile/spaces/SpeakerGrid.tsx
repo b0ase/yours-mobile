@@ -49,6 +49,7 @@ const Tile = ({
   banner,
   onTap,
   onMenu,
+  noHost = false,
 }: {
   p: Participant;
   video: boolean;
@@ -62,6 +63,7 @@ const Tile = ({
   banner?: string | null;
   onTap: () => void;
   onMenu: (() => void) | null;
+  noHost?: boolean;
 }) => {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -146,7 +148,7 @@ const Tile = ({
         ) : (
           <span className="truncate">${p.handle}</span>
         )}
-        {p.role === 'host' && size !== 'small' && (
+        {p.role === 'host' && !noHost && size !== 'small' && (
           <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
             HOST
           </span>
@@ -190,6 +192,8 @@ export interface SpeakerGridProps {
   speaking: string[];
   micOn: boolean;
   hostName?: string | null;
+  /** Always-open room: no HOST badge (whoever started is just on stage). */
+  noHost?: boolean;
   listeners: number;
   /** I may raise a hand (a signed-in listener). */
   canHand: boolean;
@@ -212,6 +216,7 @@ export const SpeakerGrid = ({
   speaking,
   micOn,
   hostName,
+  noHost = false,
   listeners,
   canHand,
   raised,
@@ -261,7 +266,7 @@ export const SpeakerGrid = ({
   if (!n)
     return (
       <p className="pt-10 text-center text-sm" style={{ color: MUTED }}>
-        Waiting for the host to come back on stage…
+        {noHost ? 'Nobody on stage yet. Request to speak to go up.' : 'Waiting for the host to come back on stage…'}
       </p>
     );
 
@@ -280,6 +285,7 @@ export const SpeakerGrid = ({
       banner={banner}
       onTap={() => setExpanded((x) => (x === p.handle ? null : p.handle))}
       onMenu={menuFor(p)}
+      noHost={noHost}
     />
   );
 

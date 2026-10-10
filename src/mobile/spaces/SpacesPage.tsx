@@ -11,7 +11,7 @@ import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { roomTitle, type ChatRoom } from '../chat/messages';
-import { audienceCount, audienceLine, canHostRoom, parseSpaceState, roomSpaceOpen, stageOf, type SpaceState } from './model';
+import { audienceCount, audienceLine, canHostRoom, parseSpaceState, roomSpaceOpen, stageOf, type SpaceState, isAlwaysOpenTicker } from './model';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 import { InviteCard, type SpaceLink } from './InviteCard';
@@ -215,6 +215,7 @@ const SpacesPage = () => {
           startTitle={open.start}
           canInvite={open.admin}
           spaceOpen={open.spaceOpen}
+          alwaysOpen={isAlwaysOpenTicker(open.ticker)}
           hostName={open.hostName}
           onClose={() => {
             setOpen(null);

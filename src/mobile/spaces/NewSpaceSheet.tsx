@@ -8,7 +8,7 @@ import { Mic, X } from 'lucide-react';
 import type { BchatClient } from '../chat/api';
 import { roomTitle, type ChatRoom } from '../chat/messages';
 import { gateOfRoom } from '../chat/tokenRooms';
-import { canHostRoom, roomSpaceOpen } from './model';
+import { alwaysOpenBarText, canHostRoom, isAlwaysOpenTicker, roomSpaceOpen } from './model';
 import { NameSpaceSheet } from './LiveBanner';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
@@ -46,7 +46,9 @@ export const NewSpaceSheet = ({
           ticker={picked.ticker}
           roomName={roomTitle(picked, me)}
           me={me}
-          startTitle={start}
+          startTitle={isAlwaysOpenTicker(picked.ticker) ? undefined : start}
+          alwaysOpen={isAlwaysOpenTicker(picked.ticker)}
+          spaceOpen={roomSpaceOpen(picked)}
           onClose={onClose}
         />
       </>
@@ -84,16 +86,20 @@ export const NewSpaceSheet = ({
               {list.map((r) => (
                 <button
                   key={r.ticker}
-                  onClick={() => setPicked(r)}
+                  onClick={() => {
+                    setPicked(r);
+                    // Always-open (the Lounge): no naming, just join.
+                    if (isAlwaysOpenTicker(r.ticker)) setStart('');
+                  }}
                   className="flex items-center gap-3 rounded-xl px-3 py-3 text-left"
                   style={{ background: '#1a1b1f' }}
                 >
                   <Mic size={16} color={GOLD} />
                   <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-white">
-                    {roomTitle(r, me)}
+                    {isAlwaysOpenTicker(r.ticker) ? alwaysOpenBarText(r.ticker, roomTitle(r, me)) : roomTitle(r, me)}
                   </span>
                   <span className="text-xs font-bold" style={{ color: GOLD }}>
-                    Go live
+                    {isAlwaysOpenTicker(r.ticker) ? 'Join' : 'Go live'}
                   </span>
                 </button>
               ))}
