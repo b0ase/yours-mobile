@@ -5,7 +5,24 @@ import { formatLargeNumber, formatUSD } from '../utils/format';
 import { Show } from './Show';
 import { BSV_DECIMAL_CONVERSION } from '../utils/constants';
 
-type Action = { label: string; onClick: () => void };
+/** `icon`: render as a compact round icon button with `label` as aria-label and tooltip (PNEEs' lock, 10 Oct 2026). */
+type Action = { label: string; onClick: () => void; icon?: ReactNode };
+
+const IconButton = ({ action }: { action: Action }) => (
+  <button
+    type="button"
+    aria-label={action.label}
+    title={action.label}
+    onClick={(e) => {
+      e.stopPropagation();
+      action.onClick();
+    }}
+    className="flex-shrink-0 w-10 h-10 mr-2 max-[379px]:mr-1.5 rounded-full border flex items-center justify-center bg-transparent cursor-pointer"
+    style={{ borderColor: '#F5B800', color: '#F5B800' }}
+  >
+    {action.icon}
+  </button>
+);
 
 // Yours' "Get MNEE" button: same size, inset and centring (owner, 6 Oct 2026). Outlined for the secondary action.
 const GradientButton = ({
@@ -25,11 +42,11 @@ const GradientButton = ({
       e.stopPropagation();
       action.onClick();
     }}
-    className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer outline-none ${outlined ? 'border bg-transparent' : 'border-0'}`}
+    className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer outline-none ${outlined ? 'border bg-transparent' : 'border-0 min-w-[7rem] max-[379px]:min-w-0 max-[379px]:px-3'}`}
     style={
       outlined
         ? { borderColor: '#F5B80088', color: '#F5B800' }
-        : { background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: theme.color.global.row, minWidth: '7rem' }
+        : { background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: theme.color.global.row }
     }
   >
     {action.label}
@@ -83,6 +100,9 @@ export const AssetRow = (props: AssetRowProps) => {
   const displayDecimals = decimals ?? (isDisplaySat ? 0 : 3);
   // At zero the buttons replace the balance, centred like Yours' Get MNEE.
   const showButtonsOnly = !!button && balance === 0;
+  // An icon secondary action sits on its own between the name and the right column, so it never covers the name.
+  const iconAction = secondaryAction?.icon ? secondaryAction : undefined;
+  const textSecondary = iconAction ? undefined : secondaryAction;
 
   return (
     <motion.div
@@ -115,6 +135,8 @@ export const AssetRow = (props: AssetRowProps) => {
         </div>
       </div>
 
+      {iconAction && <IconButton action={iconAction} />}
+
       {/* Right: balance */}
       <Show
         when={showButtonsOnly}
@@ -131,17 +153,17 @@ export const AssetRow = (props: AssetRowProps) => {
             </span>
             {button ? (
               <div className="flex items-center gap-1.5 mt-1">
-                {secondaryAction && (
+                {textSecondary && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      secondaryAction.onClick();
+                      textSecondary.onClick();
                     }}
                     className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border cursor-pointer bg-transparent"
                     style={{ borderColor: '#F5B80088', color: '#F5B800' }}
                   >
-                    {secondaryAction.label}
+                    {textSecondary.label}
                   </button>
                 )}
               <button
@@ -165,7 +187,7 @@ export const AssetRow = (props: AssetRowProps) => {
         }
       >
         <div className="flex items-center gap-2 mr-3">
-          {secondaryAction && <GradientButton action={secondaryAction} theme={theme} outlined />}
+          {textSecondary && <GradientButton action={textSecondary} theme={theme} outlined />}
           {button && <GradientButton action={button} theme={theme} />}
         </div>
       </Show>

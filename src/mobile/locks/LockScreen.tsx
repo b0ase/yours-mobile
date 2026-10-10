@@ -51,6 +51,9 @@ import {
   syncClaimed,
   walletLockOutpoints,
 } from './lockApi';
+import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
+import { isBackPneeMode } from '../notes/backPnee';
+import { MARKET_ENABLED } from '../storeBuild';
 import { verifyLockTx, type VerifyResult } from './verify';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
 import {
@@ -130,6 +133,8 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [rate, setRate] = useState(cachedExchangeRate());
   const [plans, setPlans] = useState<LockPlan[]>(() => loadPlans(account, chromeStorageService));
   const [busy, setBusy] = useState(false);
+  // Wallet › PNEEs lock icon opens /m/lock?back=pnee: the amount sheet first, then the Back PNEEs flow.
+  const [backPnee, setBackPnee] = useState(() => isBackPneeMode(window.location.search));
 
   const refresh = useCallback(async () => {
     try {
@@ -1080,6 +1085,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
+      {MARKET_ENABLED && backPnee && <BackPneeAmountSheet rate={rate} onClose={() => setBackPnee(false)} />}
     </div>
   );
 };

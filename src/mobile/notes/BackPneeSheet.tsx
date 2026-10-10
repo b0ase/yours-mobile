@@ -20,7 +20,16 @@ const Box = ({ title, children }: { title: string; children: React.ReactNode }) 
  * Wallet › PNEE › Back PNEE (owner, 5 Oct 2026): what backing Penny Notes means and what backers get, like a
  * MakerDAO vault. Honest: no promised yield. Opening vaults from the app comes after the mainnet pilot.
  */
-export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
+export const BackPneeSheet = ({
+  onClose,
+  amountBsv,
+  amountUsd,
+}: {
+  onClose: () => void;
+  /** From the Lock screen's Back PNEEs amount sheet: the BSV the user chose to lock. */
+  amountBsv?: number;
+  amountUsd?: number;
+}) => {
   useBackClose(true, onClose);
   return createPortal(
     <div className="fixed inset-0 z-[300] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
@@ -36,6 +45,11 @@ export const BackPneeSheet = ({ onClose }: { onClose: () => void }) => {
             <X size={18} color={MUTED} />
           </button>
         </div>
+        {amountBsv ? (
+          <div className="rounded-xl p-3 text-sm font-bold" style={{ background: '#F5B80014', color: GOLD }}>
+            You chose to lock {amountBsv} BSV{amountUsd ? ` (about $${amountUsd.toFixed(2)})` : ''}.
+          </div>
+        ) : null}
         <p className="text-sm m-0" style={{ color: '#D0D5DD' }}>
           Every PNEE is a cent backed by BSV that someone locked in a vault. Backers are those people: you lock BSV and
           create new PNEE against it, like a MakerDAO vault creates DAI.
