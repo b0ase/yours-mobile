@@ -56,7 +56,7 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
   const title = active ? 'Swap in progress' : 'Swap into BSV';
   const sub = active ? stageLabel(active.stage) : 'From BTC, ETH, USDT and 1,000+ coins';
   return (
-    <div className="w-[92%] mb-4 relative">
+    <div className="w-[92%] mb-2 relative">
       <button
         type="button"
         onClick={onOpen}

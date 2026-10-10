@@ -72,7 +72,7 @@ export const WalletKindSwitch = () => {
   return (
     <div
       ref={ref}
-      className="w-[92%] mx-auto mt-6 mb-3 flex gap-1 rounded-xl p-1 bg-[#17191E]"
+      className="w-[92%] mx-auto mt-3 mb-3 flex gap-1 rounded-xl p-1 bg-[#17191E]"
       role="tablist"
       aria-label="Wallet type"
     >
