@@ -68,10 +68,13 @@ export const HistoryToggle = ({ client, ticker }: { client: BchatClient; ticker:
         {on ? HISTORY_ON_NOTE : HISTORY_OFF_NOTE}
       </p>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-1" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-1" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </div>
   );
 };

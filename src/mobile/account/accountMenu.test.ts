@@ -168,7 +168,11 @@ describe('sign out keeps the keys (D8)', () => {
     });
     let locked = false;
     let session: unknown = 'x';
-    await signOutAndLock('A', { saveSession: (v) => (session = v), lockWallet: async () => void (locked = true), store: s });
+    await signOutAndLock('A', {
+      saveSession: (v) => (session = v),
+      lockWallet: async () => void (locked = true),
+      store: s,
+    });
     expect(locked).toBe(true);
     expect(session).toBeNull();
     expect(m.get(keys)).toContain('ciphertext');

@@ -77,10 +77,13 @@ export const ConnectionsView = ({ rows }: { rows: HistoryRow[] }) => {
         recorded from this version on; earlier use shows only as permissions.
       </p>
       {error && (
-<div className="flex flex-col gap-1.5"><div className="text-sm mt-2" style={{ color: RED }}>
-          {error}
-        </div><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-sm mt-2" style={{ color: RED }}>
+            {error}
+          </div>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {loading && (
         <div className="text-sm mt-6 text-center" style={{ color: MUTED }}>
           Loading…

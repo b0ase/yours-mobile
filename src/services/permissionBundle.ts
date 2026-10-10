@@ -198,7 +198,8 @@ export const DEFAULT_ALLOWANCE_USD = 5;
 /** Choices offered by [change] on the allowance line. 0 = none (every payment asks). */
 export const ALLOWANCE_CHOICES_USD = [0, 1, 5, 20] as const;
 
-const PRIVATE_CERT_FIELDS = /e-?mail|phone|mobile|kyc|passport|licen[cs]e|birth|dob|address|ssn|national|tax|id_?number/i;
+const PRIVATE_CERT_FIELDS =
+  /e-?mail|phone|mobile|kyc|passport|licen[cs]e|birth|dob|address|ssn|national|tax|id_?number/i;
 
 export interface SheetLine {
   requestID: string;

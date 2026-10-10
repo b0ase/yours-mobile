@@ -358,10 +358,13 @@ export const RoomSettingsSheet = ({
         </p>
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </SSheet>
   );
 };

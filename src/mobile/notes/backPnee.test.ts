@@ -36,7 +36,10 @@ describe('Back PNEEs entry', () => {
 
 describe('Back PNEEs flow order (owner, 10 Oct 2026)', () => {
   const run = (evs: Parameters<typeof nextBackPneeStep>[1][]) =>
-    evs.reduce<ReturnType<typeof nextBackPneeStep>[]>((acc, ev) => [...acc, nextBackPneeStep(acc[acc.length - 1], ev)], ['card']);
+    evs.reduce<ReturnType<typeof nextBackPneeStep>[]>(
+      (acc, ev) => [...acc, nextBackPneeStep(acc[acc.length - 1], ev)],
+      ['card'],
+    );
   test('card → amount → build → done → wallet', () => {
     expect(run(['lock', 'continue', 'locked', 'toWallet'])).toEqual(['card', 'amount', 'build', 'done', 'wallet']);
   });
@@ -56,7 +59,11 @@ describe('Back PNEEs flow order (owner, 10 Oct 2026)', () => {
   });
   test('Pots & Locks only when chosen on the done card', () => {
     expect(nextBackPneeStep('done', 'toPots')).toBe('pots');
-    expect(['card', 'amount', 'build'].map((s) => nextBackPneeStep(s as never, 'toPots'))).toEqual(['card', 'amount', 'build']);
+    expect(['card', 'amount', 'build'].map((s) => nextBackPneeStep(s as never, 'toPots'))).toEqual([
+      'card',
+      'amount',
+      'build',
+    ]);
   });
   test('done card text', () => {
     expect(backPneeDoneTitle(0.5)).toBe('Locked 0.5 BSV to back PNEEs.');

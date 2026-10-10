@@ -1187,8 +1187,11 @@ const BrowserPage = ({
               </button>
             </div>
             {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] px-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs text-[#F97066] px-2">{error}</p>
+                <ErrorActions message={String(error)} />
+              </div>
+            )}
           </form>
         </div>
       </div>

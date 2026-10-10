@@ -11,7 +11,16 @@ import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { roomTitle, type ChatRoom } from '../chat/messages';
-import { audienceCount, audienceLine, canHostRoom, parseSpaceState, roomSpaceOpen, stageOf, type SpaceState, isAlwaysOpenTicker } from './model';
+import {
+  audienceCount,
+  audienceLine,
+  canHostRoom,
+  parseSpaceState,
+  roomSpaceOpen,
+  stageOf,
+  type SpaceState,
+  isAlwaysOpenTicker,
+} from './model';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 import { InviteCard, type SpaceLink } from './InviteCard';
@@ -118,7 +127,9 @@ const SpacesPage = () => {
           client={client}
           link={spaceLink}
           me={me}
-          onJoin={(inv) => setOpen({ ticker: inv.ticker, name: inv.roomName, hostName: inv.kind === 'space' ? inv.hostName : null })}
+          onJoin={(inv) =>
+            setOpen({ ticker: inv.ticker, name: inv.roomName, hostName: inv.kind === 'space' ? inv.hostName : null })
+          }
           onOpenSpacePage={showSpacePage}
           onClose={clearInvite}
         />
@@ -199,10 +210,13 @@ const SpacesPage = () => {
             space.
           </p>
           {error && (
-<div className="flex flex-col gap-1.5"><p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
-              {error}
-            </p><ErrorActions message={String(error)} /></div>
-)}
+            <div className="flex flex-col gap-1.5">
+              <p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
+                {error}
+              </p>
+              <ErrorActions message={String(error)} />
+            </div>
+          )}
         </div>
       )}
 

@@ -81,7 +81,9 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
 /** The handle to prefill: the X @name as a plain alias (`B0ase_X` → `b0ase-x`); never anything from an email. */
 function suggestedHandleFor(provider, name) {
   if (provider !== 'x') return null;
-  const n = String(name || '').trim().toLowerCase();
+  const n = String(name || '')
+    .trim()
+    .toLowerCase();
   return /^[a-z0-9_]{1,15}$/.test(n) ? n.replace(/_/g, '-').replace(/^-+|-+$/g, '') || null : null;
 }
 
@@ -90,7 +92,13 @@ function suggestedHandleFor(provider, name) {
 // users on "you're signed in" with no way back to the wallet tab).
 // 'testers': the paid Android testers sign-up page (bwalletx.com/testers); the ticket is verified there
 // server-side via /api/social/preview.
-const RETURNS = { app: RETURN, web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/', desktop: 'https://desktop.bwalletx.com/', testers: 'https://bwalletx.com/testers' };
+const RETURNS = {
+  app: RETURN,
+  web: 'https://web.bwalletx.com/',
+  beta: 'https://beta.bwalletx.com/',
+  desktop: 'https://desktop.bwalletx.com/',
+  testers: 'https://bwalletx.com/testers',
+};
 const returnUrl = (q, to = 'app') => `${RETURNS[to] || RETURN}#${new URLSearchParams(q).toString()}`;
 
 function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {

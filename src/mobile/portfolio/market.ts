@@ -19,7 +19,10 @@ export const parseCoinGecko = (j: unknown): PricePoint[] => {
   const prices = (j as { prices?: unknown })?.prices;
   if (!Array.isArray(prices)) return [];
   return prices
-    .filter((x): x is [number, number] => Array.isArray(x) && typeof x[0] === 'number' && typeof x[1] === 'number' && x[1] > 0)
+    .filter(
+      (x): x is [number, number] =>
+        Array.isArray(x) && typeof x[0] === 'number' && typeof x[1] === 'number' && x[1] > 0,
+    )
     .map(([t, p]) => ({ t, p }))
     .sort((a, b) => a.t - b.t);
 };
@@ -60,7 +63,9 @@ export const fetchSeries = async (coin: Coin, range: RangeId, fromMs: number, f:
   const key = `${coin}:${range}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL) return hit.data;
-  let data = parseCoinGecko(await getJson(`${CG}/${COIN_IDS[coin]}/market_chart?vs_currency=usd&days=${DAYS[range]}`, f));
+  let data = parseCoinGecko(
+    await getJson(`${CG}/${COIN_IDS[coin]}/market_chart?vs_currency=usd&days=${DAYS[range]}`, f),
+  );
   if (!data.length && coin === 'bsv' && range !== '1D') data = await wocBsv(fromMs, f);
   if (data.length) cache.set(key, { at: Date.now(), data });
   return data;

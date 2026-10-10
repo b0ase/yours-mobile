@@ -177,8 +177,11 @@ export const PushSettings = ({ Toggle }: { Toggle: ToggleC }) => {
         </p>
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="mt-2 text-xs text-red-400">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="mt-2 text-xs text-red-400">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </div>
   );
 };

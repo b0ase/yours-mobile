@@ -265,10 +265,13 @@ const TopUpSheet = ({
             : 'Price not set yet'}
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><div className="text-xs mt-2" style={{ color: '#F97066' }}>
-          {error}
-        </div><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs mt-2" style={{ color: '#F97066' }}>
+            {error}
+          </div>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         onClick={send}
         disabled={!!busy || !input.trim()}
@@ -300,10 +303,13 @@ const HistorySheet = ({ onClose }: { onClose: () => void }) => {
   return (
     <Sheet title="Credit history" onClose={onClose}>
       {error && (
-<div className="flex flex-col gap-1.5"><div className="text-xs" style={{ color: '#F97066' }}>
-          {error}
-        </div><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs" style={{ color: '#F97066' }}>
+            {error}
+          </div>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {!error && !rows && (
         <div className="text-xs" style={{ color: MUTED }}>
           Loading…

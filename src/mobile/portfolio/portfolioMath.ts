@@ -12,7 +12,12 @@ export type PricePoint = { t: number; p: number };
 export type RangeId = '1D' | '1W' | '1M' | '1Y' | 'ALL';
 
 const DAY = 86_400_000;
-export const RANGE_MS: Record<Exclude<RangeId, 'ALL'>, number> = { '1D': DAY, '1W': 7 * DAY, '1M': 30 * DAY, '1Y': 365 * DAY };
+export const RANGE_MS: Record<Exclude<RangeId, 'ALL'>, number> = {
+  '1D': DAY,
+  '1W': 7 * DAY,
+  '1M': 30 * DAY,
+  '1Y': 365 * DAY,
+};
 
 /** Start of a range. ALL starts at the first history row (or a year back when there is no history). */
 export const rangeStart = (range: RangeId, now: number, firstRow?: number) =>
@@ -82,7 +87,8 @@ export const twrSeries = (values: ValuePoint[], rows: HistoryRow[], bsv: PricePo
       const b = values[i];
       let flowUsd = 0;
       for (const r of rows)
-        if (r.time > a.t && r.time <= b.t) flowUsd += (externalFlowSats(r) / 1e8) * (r.usdRate ?? priceAt(bsv, r.time) ?? 0);
+        if (r.time > a.t && r.time <= b.t)
+          flowUsd += (externalFlowSats(r) / 1e8) * (r.usdRate ?? priceAt(bsv, r.time) ?? 0);
       // Nothing held at the start of the step: no return to measure (the deposit just arrives).
       if (a.usd > 0) idx *= Math.max(0, (b.usd - flowUsd) / a.usd);
     }
@@ -129,4 +135,5 @@ export const rankHoldings = (list: Holding[]) => {
 
 /** Is the line partly estimated? (prices filled from today's rate, or the history may be missing coins) */
 export const isEstimated = (rows: HistoryRow[], values: ValuePoint[], nowSats: number) =>
-  rows.some((r) => r.usdRateIsCurrent) || (values.length > 0 && values[0].sats === 0 && nowSats > 0 && rows.length === 0);
+  rows.some((r) => r.usdRateIsCurrent) ||
+  (values.length > 0 && values[0].sats === 0 && nowSats > 0 && rows.length === 0);

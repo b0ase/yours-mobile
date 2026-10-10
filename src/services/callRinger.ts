@@ -18,14 +18,20 @@ export interface RingCandidate {
 }
 
 /** The calls to announce now: new ones only, and none while a panel/window is open (it rings itself). */
-export function callsToAnnounce(incoming: RingCandidate[], seen: ReadonlySet<string>, panelOpen: boolean): RingCandidate[] {
+export function callsToAnnounce(
+  incoming: RingCandidate[],
+  seen: ReadonlySet<string>,
+  panelOpen: boolean,
+): RingCandidate[] {
   if (panelOpen) return [];
   return incoming.filter((c) => c && typeof c.id === 'string' && !seen.has(c.id));
 }
 
 /** The notification for one incoming call. */
 export function callNotification(c: RingCandidate) {
-  const who = String(c.peer_label || '').replace(/^\$/, '').trim();
+  const who = String(c.peer_label || '')
+    .replace(/^\$/, '')
+    .trim();
   return {
     id: `${CALL_NOTIFICATION_PREFIX}${c.id}`,
     options: {
@@ -46,7 +52,9 @@ export function callNotification(c: RingCandidate) {
  */
 export const RING_ORIGIN = 'https://www.bitcoinchat.online';
 export const ringProofMessage = (identityKey: string, timestamp: number, nonce: string) =>
-  ['bwallet-calls', 'v1', 'session', `identityKey=${identityKey}`, `nonce=${nonce}`, `timestamp=${timestamp}`].join('|');
+  ['bwallet-calls', 'v1', 'session', `identityKey=${identityKey}`, `nonce=${nonce}`, `timestamp=${timestamp}`].join(
+    '|',
+  );
 
 export interface RingSigner {
   identityKey: () => Promise<string>;
@@ -58,7 +66,8 @@ type FetchFn = (url: string, init?: RequestInit) => Promise<{ status: number; js
 
 let ringToken: { token: string; key: string; exp: number } | null = null;
 
-const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, '0')).join('');
+const hex = (n: number) =>
+  Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, '0')).join('');
 
 async function ringSession(f: FetchFn, s: RingSigner, origin: string, force = false): Promise<string> {
   const key = (await s.identityKey()).toLowerCase();
@@ -81,7 +90,9 @@ async function ringSession(f: FetchFn, s: RingSigner, origin: string, force = fa
 export async function fetchIncoming(f: FetchFn, s: RingSigner, origin = RING_ORIGIN): Promise<RingCandidate[]> {
   for (const force of [false, true]) {
     const token = await ringSession(f, s, origin, force);
-    const r = await f(`${origin}/api/bitsign/wallet-calls`, { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` } });
+    const r = await f(`${origin}/api/bitsign/wallet-calls`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
     if (r.status === 401 && !force) continue;
     if (r.status !== 200) throw new Error(`calls list ${r.status}`);
     const d = (await r.json().catch(() => ({}))) as { incoming?: RingCandidate[] };

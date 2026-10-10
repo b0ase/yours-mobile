@@ -308,7 +308,12 @@ export const CallScreen = () => {
               </Round>
             )}
             {call.phase === 'active' && layout.remote === 'full' && pipSupported(remoteRef.current) && (
-              <Round label="Float video" onClick={() => void togglePip(remoteRef.current).catch(() => setNote('Picture-in-picture is not available here'))}>
+              <Round
+                label="Float video"
+                onClick={() =>
+                  void togglePip(remoteRef.current).catch(() => setNote('Picture-in-picture is not available here'))
+                }
+              >
                 <PictureInPicture2 size={24} color="#fff" />
               </Round>
             )}

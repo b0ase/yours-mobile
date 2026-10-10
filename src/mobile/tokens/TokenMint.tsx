@@ -253,8 +253,11 @@ export const TokenMint = ({
         tokens).
       </p>
       {error && (
-<div className="flex flex-col gap-1.5"><p style={{ color: '#ff6b6b' }}>{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p style={{ color: '#ff6b6b' }}>{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         type="button"
         onClick={review}

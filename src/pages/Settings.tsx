@@ -277,7 +277,7 @@ export const Settings = () => {
   const { record: repairRecord, outcome: repairOutcome, runRepair } = useStorageRepair();
   const { query, handleSelect } = useBottomMenu();
   const [showSpeedBump, setShowSpeedBump] = useState(false);
-  const { chromeStorageService, keysService, lockWallet, wallet, apiContext } = useServiceContext();
+  const { chromeStorageService, keysService, lockWallet, apiContext } = useServiceContext();
   // The USB Security Key page is reachable from two places; back returns to whichever opened it.
   const [usbBackTo, setUsbBackTo] = useState<SettingsPage>('main');
   const [page, setPage] = useState<SettingsPage>(() => {

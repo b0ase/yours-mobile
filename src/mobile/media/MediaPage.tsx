@@ -200,8 +200,11 @@ const MediaPage = () => {
           ))}
         </div>
         {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066]">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-[#F97066]">{error}</p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
         {!loading && playable.length === 0 && (
           <p className="text-sm text-center py-10" style={{ color: MUTED }}>
             No music or video in this wallet yet. Mint some from the Wallet tab.

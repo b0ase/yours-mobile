@@ -66,7 +66,13 @@ describe('pagesOf', () => {
 });
 
 describe('live video', () => {
-  const recent = recentlyActive(new Map([['a', 1_000], ['b', 20_000]]), 25_000);
+  const recent = recentlyActive(
+    new Map([
+      ['a', 1_000],
+      ['b', 20_000],
+    ]),
+    25_000,
+  );
   test('recent window is ~10 s', () => expect([...recent]).toEqual(['b']));
   const base = { recent, expanded: null, me: 'me', onPage: true };
   test('everyone below 4×4', () => expect(wantsLiveVideo({ ...base, handle: 'a', count: 9 })).toBe(true));
@@ -78,5 +84,6 @@ describe('live video', () => {
     expect(wantsLiveVideo({ ...base, handle: 'me', count: 12 })).toBe(true);
     expect(wantsLiveVideo({ ...base, handle: 'a', count: 12, expanded: 'a' })).toBe(true);
   });
-  test('off-page tiles pause', () => expect(wantsLiveVideo({ ...base, handle: 'b', count: 20, onPage: false })).toBe(false));
+  test('off-page tiles pause', () =>
+    expect(wantsLiveVideo({ ...base, handle: 'b', count: 20, onPage: false })).toBe(false));
 });

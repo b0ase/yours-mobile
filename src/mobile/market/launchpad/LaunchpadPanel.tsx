@@ -419,8 +419,11 @@ const CoinSheet = ({
         {tooBig && <p className="text-xs text-[#F97066] m-0">Maximum buy is {fmtSats(MAX_BUY)} BSV.</p>}
         {overHeld && held !== null && <p className="text-xs text-[#F97066] m-0">That's more than you hold.</p>}
         {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0 break-words">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-[#F97066] m-0 break-words">{error}</p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
         {done && (
           <div className="text-xs text-[#A1FF8B] break-all">
             Done{done.graduated ? ' — this trade graduated the coin!' : ''}. Txid {done.txid}

@@ -713,8 +713,11 @@ const MarketPage = () => {
       )}
       {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066]">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066]">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {tokenFilter === 'social' && xRows === null && (
         <p className="text-xs text-[#98A2B3] text-center py-8">Loading people's tokens…</p>
       )}
@@ -820,8 +823,11 @@ const MarketPage = () => {
       {rooms === null && <p className="text-xs text-[#98A2B3] text-center py-8">Loading the order book…</p>}
       {loadingBoard && rooms !== null && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066]">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066]">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {rooms?.length === 0 && !error && (
         <p className="text-xs text-[#98A2B3] text-center py-8">Nothing trending right now.</p>
       )}

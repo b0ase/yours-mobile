@@ -26,7 +26,8 @@ export const pickGate = (g: PickGateInput): PickGate => {
   if (!g.typed.trim()) return { ok: false, reason: 'Enter an amount' };
   if (g.amount === null) return { ok: false, reason: 'Enter a valid amount, like 0.5' };
   if (g.addressState === 'loading') return { ok: false, reason: 'Getting your BSV address…' };
-  if (g.addressState === 'error') return { ok: false, reason: 'Couldn’t get your BSV address — try again', retryAddress: true };
+  if (g.addressState === 'error')
+    return { ok: false, reason: 'Couldn’t get your BSV address — try again', retryAddress: true };
   if (g.estError) return { ok: false, reason: `Couldn’t get a quote: ${g.estError}` };
   if (g.estLoading || !g.est) return { ok: false, reason: 'Getting a quote…' };
   if (g.est.belowMin || (g.est.minAmount > 0 && g.amount < g.est.minAmount))

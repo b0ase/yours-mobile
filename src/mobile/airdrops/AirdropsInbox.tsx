@@ -298,8 +298,11 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
         Only show airdrops from issuers I&apos;ve kept before
       </label>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] m-0">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {!visible.length && (
         <p className="text-xs text-center py-4 m-0" style={{ color: MUTED }}>
           {loading ? 'Checking your history…' : 'No unstamped items.'}

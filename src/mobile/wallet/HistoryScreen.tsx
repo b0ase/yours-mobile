@@ -17,13 +17,7 @@ import {
   type RangePreset,
 } from './txHistory';
 import type { Progress } from './txHistoryFetch';
-import {
-  CATEGORIES,
-  assetText,
-  filterCategory,
-  historyLooksIncomplete,
-  type Category,
-} from './historyEvents';
+import { CATEGORIES, assetText, filterCategory, historyLooksIncomplete, type Category } from './historyEvents';
 import { loadLastBalance } from './balanceLoad';
 import { ConnectionsView } from './ConnectionsView';
 import { GainsView } from './GainsView';

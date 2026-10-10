@@ -10,7 +10,9 @@ describe('battery optimisation ask', () => {
     expect(shouldAskBattery({ os: 'ios', ignoring: false, asked: false })).toBe(false);
   });
   test('old native build without the method counts as exempt (no sheet)', async () => {
-    const p = { isIgnoringBatteryOptimizations: async () => Promise.reject(new Error('not implemented')) } as unknown as SpaceSessionPlugin;
+    const p = {
+      isIgnoringBatteryOptimizations: async () => Promise.reject(new Error('not implemented')),
+    } as unknown as SpaceSessionPlugin;
     const warn = console.warn;
     console.warn = () => undefined;
     try {

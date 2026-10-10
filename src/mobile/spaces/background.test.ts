@@ -104,7 +104,12 @@ describe('SpaceBackground (android)', () => {
       const bg = new SpaceBackground({ onMute: () => {}, onLeave: () => {}, onPip: () => {} }, f.plugin, 'android');
       bg.update(live);
       await flush();
-      expect(f.calls.map((c) => c[0]).filter((c) => c !== 'setPip').slice(0, 2)).toEqual(['notify', 'start']);
+      expect(
+        f.calls
+          .map((c) => c[0])
+          .filter((c) => c !== 'setPip')
+          .slice(0, 2),
+      ).toEqual(['notify', 'start']);
       expect((f.calls.find((c) => c[0] === 'start')?.[1] as { onStage: boolean }).onStage).toBe(false);
       expect(String(warned[0])).toContain('notification permission denied');
       bg.close();

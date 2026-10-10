@@ -120,7 +120,9 @@ const notify = async (title: string, body: string) => {
       ({ display } = await LocalNotifications.requestPermissions());
     }
     if (display !== 'granted') return;
-    await LocalNotifications.schedule({ notifications: [{ id: notificationId++, title, body, isExactNotification: false }] });
+    await LocalNotifications.schedule({
+      notifications: [{ id: notificationId++, title, body, isExactNotification: false }],
+    });
   } catch (error) {
     console.warn('[notification] failed', error);
   }

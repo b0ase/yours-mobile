@@ -47,15 +47,24 @@ export function openCallsWindow(c = chromeApi()): boolean {
   return true;
 }
 
-type PipDoc = Document & { pictureInPictureEnabled?: boolean; pictureInPictureElement?: Element | null; exitPictureInPicture?: () => Promise<void> };
+type PipDoc = Document & {
+  pictureInPictureEnabled?: boolean;
+  pictureInPictureElement?: Element | null;
+  exitPictureInPicture?: () => Promise<void>;
+};
 type PipVideo = HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> };
 
 /** Picture-in-picture is available for this video (Chrome desktop, Safari; not every phone webview). */
-export const pipSupported = (v: HTMLVideoElement | null, d: PipDoc | undefined = typeof document !== 'undefined' ? document : undefined) =>
-  !!v && !!d?.pictureInPictureEnabled && typeof (v as PipVideo).requestPictureInPicture === 'function';
+export const pipSupported = (
+  v: HTMLVideoElement | null,
+  d: PipDoc | undefined = typeof document !== 'undefined' ? document : undefined,
+) => !!v && !!d?.pictureInPictureEnabled && typeof (v as PipVideo).requestPictureInPicture === 'function';
 
 /** Float `v` above every window, or bring it back if it is already floating. */
-export async function togglePip(v: HTMLVideoElement | null, d: PipDoc | undefined = typeof document !== 'undefined' ? document : undefined): Promise<void> {
+export async function togglePip(
+  v: HTMLVideoElement | null,
+  d: PipDoc | undefined = typeof document !== 'undefined' ? document : undefined,
+): Promise<void> {
   if (!v || !d) return;
   if (d.pictureInPictureElement === v) {
     await d.exitPictureInPicture?.();

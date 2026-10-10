@@ -133,12 +133,28 @@ const ScreenTile = ({ owner, media }: { owner: string; media: SpaceMedia }) => {
     else v?.webkitEnterFullscreen?.();
   };
   return (
-    <div ref={box} className="relative mb-3 overflow-hidden rounded-2xl bg-black" style={{ boxShadow: `0 0 0 1px ${LINE}` }}>
-      <video ref={ref} autoPlay playsInline muted onDoubleClick={full} className="block w-full object-contain" style={{ maxHeight: '70vh' }} />
+    <div
+      ref={box}
+      className="relative mb-3 overflow-hidden rounded-2xl bg-black"
+      style={{ boxShadow: `0 0 0 1px ${LINE}` }}
+    >
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        muted
+        onDoubleClick={full}
+        className="block w-full object-contain"
+        style={{ maxHeight: '70vh' }}
+      />
       <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
         <Monitor size={12} /> ${owner}&rsquo;s screen
       </span>
-      <button onClick={full} aria-label="Fullscreen" className="absolute bottom-2 right-2 rounded-full bg-black/70 p-2 text-white">
+      <button
+        onClick={full}
+        aria-label="Fullscreen"
+        className="absolute bottom-2 right-2 rounded-full bg-black/70 p-2 text-white"
+      >
         <Maximize2 size={16} />
       </button>
     </div>
@@ -244,10 +260,13 @@ const SpaceChat = ({
         <div ref={end} />
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="px-3 text-[11px]" style={{ color: '#F97066' }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="px-3 text-[11px]" style={{ color: '#F97066' }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <form
         className="flex items-center gap-2 p-2"
         style={{ paddingBottom: side ? 8 : 'max(8px, env(safe-area-inset-bottom))' }}
@@ -305,7 +324,9 @@ const PipVideo = ({ media, handle }: { media: SpaceMedia; handle: string }) => {
     media.setVideoLive(handle, true);
     return () => media.bindVideo(handle, null);
   }, [media, handle]);
-  return <video ref={ref} data-space-handle={handle} autoPlay playsInline muted className="h-full w-full object-cover" />;
+  return (
+    <video ref={ref} data-space-handle={handle} autoPlay playsInline muted className="h-full w-full object-cover" />
+  );
 };
 
 /**
@@ -318,11 +339,7 @@ const AlwaysHereTile = ({ agent }: { agent: AlwaysHere }) => (
     style={{ maxWidth: 480, boxShadow: `0 0 0 1px ${LINE}`, background: '#0b0b0d' }}
     aria-label={alwaysHereCaption(agent)}
   >
-    <img
-      src={B_AVATAR}
-      alt=""
-      className="h-10 w-10 rounded-full object-cover"
-    />
+    <img src={B_AVATAR} alt="" className="h-10 w-10 rounded-full object-cover" />
     <div className="min-w-0">
       <div className="text-sm font-semibold text-white truncate">{agent.handle === B_HANDLE ? 'b' : agent.label}</div>
       <div className="text-[11px]" style={{ color: MUTED }}>
@@ -595,8 +612,8 @@ const SpaceScreenInner = ({
           }
         },
         onDisconnected: () => mounted.current && !left.current && void recoverRef.current(),
-          onReconnecting: () => mounted.current && setReconnecting(true),
-          onReconnected: () => mounted.current && !recovering.current && setReconnecting(false),
+        onReconnecting: () => mounted.current && setReconnecting(true),
+        onReconnected: () => mounted.current && !recovering.current && setReconnecting(false),
       });
       if (!mounted.current) return void media.close();
       prev.current = null;
@@ -658,7 +675,11 @@ const SpaceScreenInner = ({
           tok = parseSpaceToken(await client.spaceToken(ticker));
         }
         if (!tok) throw new Error('No token');
-        await media.rejoin(tok.url, tok.token, { mic: micRef.current, camera: camRef.current, facing: facingRef.current });
+        await media.rejoin(tok.url, tok.token, {
+          mic: micRef.current,
+          camera: camRef.current,
+          facing: facingRef.current,
+        });
       },
     });
     recovering.current = false;
@@ -865,7 +886,9 @@ const SpaceScreenInner = ({
       canHand={canHand}
       raised={raised}
       onRaiseHand={raiseHand}
-      menuFor={(p) => (moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) ? () => setMenuFor(p) : null)}
+      menuFor={(p) =>
+        moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) ? () => setMenuFor(p) : null
+      }
       avatars={Object.fromEntries((green?.stage ?? []).map((g) => [g.handle, g.avatar]))}
     />
   );
@@ -905,10 +928,13 @@ const SpaceScreenInner = ({
           {phase === 'ended' ? 'This space has ended' : 'Couldn’t join'}
         </p>
         {error && (
-<div className="flex flex-col gap-1.5"><p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
-            {error}
-          </p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="mt-2 text-sm text-center px-8" style={{ color: MUTED }}>
+              {error}
+            </p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
         {phase === 'error' && needsClaim && onClaimAdmin && (
           <button
             disabled={claiming}
@@ -977,7 +1003,9 @@ const SpaceScreenInner = ({
                   .catch((e) => setNote(errText(e)));
               }}
               className="shrink-0 flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
-              style={recording ? { background: '#D92D20', color: '#fff' } : { border: '1px solid #ef4444', color: '#fff' }}
+              style={
+                recording ? { background: '#D92D20', color: '#fff' } : { border: '1px solid #ef4444', color: '#fff' }
+              }
               aria-label={recording ? 'Stop recording' : 'Record'}
             >
               {recording ? (
@@ -1086,11 +1114,7 @@ const SpaceScreenInner = ({
           Listening anonymously
         </span>
       ) : (
-        <CtlButton
-          label={raised ? 'Lower hand' : 'Raise hand'}
-          onClick={raiseHand}
-          active={raised}
-        >
+        <CtlButton label={raised ? 'Lower hand' : 'Raise hand'} onClick={raiseHand} active={raised}>
           <Hand size={20} color={raised ? '#010101' : '#fff'} />
         </CtlButton>
       )}
@@ -1214,11 +1238,7 @@ const SpaceScreenInner = ({
         >
           <Smartphone size={18} color={awakeOn ? GOLD : MUTED} />
           {!awakeOn && (
-            <span
-              aria-hidden
-              className="absolute h-[2px] w-6 rotate-45 rounded"
-              style={{ background: MUTED }}
-            />
+            <span aria-hidden className="absolute h-[2px] w-6 rotate-45 rounded" style={{ background: MUTED }} />
           )}
         </button>
       </header>
@@ -1373,7 +1393,9 @@ const SpaceScreenInner = ({
           <p className="text-white text-base font-semibold">${menuFor.handle}</p>
           <button
             onClick={() => {
-              void act({ action: 'mute', handle: menuFor.handle }).then(() => setNote(`Muted $${menuFor.handle}. They can unmute themselves.`));
+              void act({ action: 'mute', handle: menuFor.handle }).then(() =>
+                setNote(`Muted $${menuFor.handle}. They can unmute themselves.`),
+              );
               setMenuFor(null);
             }}
             className="mt-4 w-full rounded-full py-3 font-semibold text-white"
@@ -1407,7 +1429,6 @@ const SpaceScreenInner = ({
     document.body,
   );
 };
-
 
 const Centered = ({ children }: { children: React.ReactNode }) => (
   <div className="flex-1 flex flex-col items-center justify-center">{children}</div>

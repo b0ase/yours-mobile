@@ -64,10 +64,13 @@ export function Scanner({ onCode }: { onCode: (text: string) => void }) {
         style={{ border: `3px solid ${GOLD}`, boxShadow: '0 0 0 9999px rgba(0,0,0,0.35)' }}
       />
       {err && (
-<div className="flex flex-col gap-1.5"><p className="absolute inset-x-4 bottom-4 text-center text-xs" style={{ color: MUTED }}>
-          {err}
-        </p><ErrorActions message={String(err)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="absolute inset-x-4 bottom-4 text-center text-xs" style={{ color: MUTED }}>
+            {err}
+          </p>
+          <ErrorActions message={String(err)} />
+        </div>
+      )}
     </div>
   );
 }

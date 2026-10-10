@@ -76,7 +76,8 @@ export const BundleSheet = (props: {
 
   // The allowance line shows when the price is known and the site has none yet.
   const showAllowance = !!allowance?.usdPerBsv && allowance.existingSats === undefined;
-  const payUsd = model.payment && allowance?.usdPerBsv ? (model.payment.satoshis / 1e8) * allowance.usdPerBsv : undefined;
+  const payUsd =
+    model.payment && allowance?.usdPerBsv ? (model.payment.satoshis / 1e8) * allowance.usdPerBsv : undefined;
 
   const send = async (approve: boolean) => {
     setBusy(true);
@@ -178,7 +179,9 @@ export const BundleSheet = (props: {
               aria-label="Monthly allowance"
             />
             <span className="text-xs flex-1" style={{ color: contrast }}>
-              {allowanceUsd > 0 ? `Spend up to ${fmtUsd(allowanceUsd)} a month without asking` : 'Ask me before every payment'}
+              {allowanceUsd > 0
+                ? `Spend up to ${fmtUsd(allowanceUsd)} a month without asking`
+                : 'Ask me before every payment'}
             </span>
             <button
               type="button"
@@ -215,7 +218,12 @@ export const BundleSheet = (props: {
       )}
 
       <label className="flex items-center gap-2 mb-3 cursor-pointer">
-        <input type="checkbox" checked={remember} onChange={() => setRemember(!remember)} className="accent-green-400" />
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={() => setRemember(!remember)}
+          className="accent-green-400"
+        />
         <span className="text-xs" style={{ color: gray }}>
           Remember this site
         </span>

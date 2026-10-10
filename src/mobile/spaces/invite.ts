@@ -51,7 +51,8 @@ export const parseAppLink = (url: string | null | undefined): AppLink | null => 
     arg = decodeURIComponent(arg);
     if (kind === 'space' && isSpaceSlug(arg)) return { kind, slug: arg };
     // Named Space (owner, 9 Oct 2026): /s/<ticker> is the room's permanent Space address → open the room.
-    if (kind === 'space' && u.protocol === 'https:' && isRoomTicker(arg)) return { kind: 'room', ticker: arg.toUpperCase(), buy: false };
+    if (kind === 'space' && u.protocol === 'https:' && isRoomTicker(arg))
+      return { kind: 'room', ticker: arg.toUpperCase(), buy: false };
     if (kind === 'invite' && isSpaceInviteCode(arg)) return { kind, code: arg };
     if (kind === 'room' && isRoomTicker(arg)) return { kind, ticker: arg, buy: u.searchParams.get('buy') === '1' };
     return null;
@@ -142,7 +143,9 @@ const pageOf = (d: Record<string, unknown>): SpacePage | RoomPage | null => {
   };
   if (d.kind === 'space') {
     const slug = str(d.slug);
-    return isSpaceSlug(slug) ? { ...base, kind: 'space', slug, host: str(d.host) || null, hostName: str(d.host_name) || null } : null;
+    return isSpaceSlug(slug)
+      ? { ...base, kind: 'space', slug, host: str(d.host) || null, hostName: str(d.host_name) || null }
+      : null;
   }
   if (d.kind === 'room')
     return { ...base, kind: 'room', members: typeof d.members === 'number' ? d.members : null, host: null };

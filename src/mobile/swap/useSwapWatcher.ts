@@ -3,7 +3,17 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { useOnResume } from '../permissions/useOnResume';
 import { recordPayment, updateConnectionLog } from '../wallet/connectionLog';
-import { activeSwaps, applyStatus, FINAL, landedText, loadSwaps, POLL_MS, saveSwap, SwapApi, type SwapRecord } from './swapApi';
+import {
+  activeSwaps,
+  applyStatus,
+  FINAL,
+  landedText,
+  loadSwaps,
+  POLL_MS,
+  saveSwap,
+  SwapApi,
+  type SwapRecord,
+} from './swapApi';
 
 const api = new SwapApi();
 /** Local notification ids for swaps (clear of pots' 43000–48000). */
@@ -17,7 +27,9 @@ const notifyLanded = async (s: SwapRecord) => {
     if ((await LocalNotifications.checkPermissions()).display !== 'granted') return;
     let h = 0;
     for (const ch of s.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    await LocalNotifications.schedule({ notifications: [{ id: NOTIFY_BASE + (h % 1000), title: t.title, body: t.body }] });
+    await LocalNotifications.schedule({
+      notifications: [{ id: NOTIFY_BASE + (h % 1000), title: t.title, body: t.body }],
+    });
   } catch {
     /* notifications unavailable */
   }
@@ -53,7 +65,12 @@ export const useSwapWatcher = (onLanded?: (s: SwapRecord) => void) => {
       onLanded?.(s);
       if (s.stage === 'done' && s.payoutTxid) {
         void updateConnectionLog((l) =>
-          recordPayment(l, 'changenow.io', { at: Date.now(), txid: s.payoutTxid!, sats: 0, description: `Swap ${s.label} → BSV` }),
+          recordPayment(l, 'changenow.io', {
+            at: Date.now(),
+            txid: s.payoutTxid!,
+            sats: 0,
+            description: `Swap ${s.label} → BSV`,
+          }),
         );
       }
     }

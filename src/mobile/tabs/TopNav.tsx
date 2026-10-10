@@ -13,7 +13,21 @@ import { AccountStrip } from '../account/AccountStrip';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, ChevronRight, Lock, LogOut, Menu, Phone, Play, Plus, ScanLine, Settings, Sparkles, Terminal, X } from 'lucide-react';
+import {
+  Bot,
+  ChevronRight,
+  Lock,
+  LogOut,
+  Menu,
+  Phone,
+  Play,
+  Plus,
+  ScanLine,
+  Settings,
+  Sparkles,
+  Terminal,
+  X,
+} from 'lucide-react';
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { startAgentCreate } from '../agents/agentCreate';
@@ -328,7 +342,10 @@ const TopNavBar = () => {
                   />
                 ))}
                 {listedAgents.length > 0 && (
-                  <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#667085' }}>
+                  <div
+                    className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider"
+                    style={{ color: '#667085' }}
+                  >
                     Agents
                   </div>
                 )}

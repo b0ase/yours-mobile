@@ -21,9 +21,23 @@ const Logo = ({ coin, i }: { coin: SwapCoin; i: number }) => {
   const t = coin.ticker.toUpperCase();
   const common = { width: 22, height: 22, marginLeft: i ? -7 : 0, zIndex: 3 - i, border: '2px solid #17191E' } as const;
   return src && !bad ? (
-    <img src={src} alt="" width={22} height={22} loading="lazy" referrerPolicy="no-referrer" onError={() => setBad(true)} className="rounded-full object-contain relative" style={{ ...common, background: '#fff' }} />
+    <img
+      src={src}
+      alt=""
+      width={22}
+      height={22}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setBad(true)}
+      className="rounded-full object-contain relative"
+      style={{ ...common, background: '#fff' }}
+    />
   ) : (
-    <span aria-hidden="true" className="rounded-full grid place-items-center text-[10px] font-bold relative" style={{ ...common, background: '#4A3F25', color: '#F1EAD9' }}>
+    <span
+      aria-hidden="true"
+      className="rounded-full grid place-items-center text-[10px] font-bold relative"
+      style={{ ...common, background: '#4A3F25', color: '#F1EAD9' }}
+    >
       {t.charAt(0)}
     </span>
   );
@@ -69,7 +83,12 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
         <span className="flex-1 min-w-0 flex flex-col leading-tight">
           <span className="text-[14px] font-bold" style={{ color: active ? GOLD : '#fff' }}>
             {title}
-            {active && <span className="font-semibold" style={{ color: '#fff' }}> · {sub}</span>}
+            {active && (
+              <span className="font-semibold" style={{ color: '#fff' }}>
+                {' '}
+                · {sub}
+              </span>
+            )}
           </span>
           {!active && (
             <span className="text-[11px] truncate" style={{ color: MUTED }}>

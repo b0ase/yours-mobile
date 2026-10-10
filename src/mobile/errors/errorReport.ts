@@ -12,11 +12,13 @@ import { AGENT_HANDOFF_EVENT, setAgentDraft } from '../agent/handoff';
  */
 
 const WORDS = new Set(bip39.wordlists.english);
-const SECRET_LABEL = /\b(password|passphrase|pass|pin|seed|mnemonic|recovery words?|private key|priv(?:ate)?key|wif|secret)\s*[:=]\s*\S+/gi;
+const SECRET_LABEL =
+  /\b(password|passphrase|pass|pin|seed|mnemonic|recovery words?|private key|priv(?:ate)?key|wif|secret)\s*[:=]\s*\S+/gi;
 const WIF = /\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b/g;
 const XPRV = /\b[xt]prv[1-9A-HJ-NP-Za-km-z]{100,112}\b/g;
 const HEX64 = /\b(?:0x)?[0-9a-fA-F]{64}\b/g;
-const BALANCE = /\b(balance|total|you have|available)\b([^.\n]{0,40}?)\d[\d,]*(?:\.\d+)?\s*(bsv|sats?|satoshis|usd|\$)?/gi;
+const BALANCE =
+  /\b(balance|total|you have|available)\b([^.\n]{0,40}?)\d[\d,]*(?:\.\d+)?\s*(bsv|sats?|satoshis|usd|\$)?/gi;
 const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:bsv|sats?|satoshis)\b)/gi;
 
 /** Runs of 11+ consecutive BIP39 words look like a recovery phrase (12/24 words, maybe one mistyped). */
@@ -86,7 +88,11 @@ export const errorContext = (): ErrorContext => {
 
 /** The text Copy puts on the clipboard: the error plus where it happened, redacted. */
 export const errorReportText = (error: string, ctx: ErrorContext = errorContext()): string => {
-  const where = [ctx.screen && `Screen: ${ctx.screen}`, ctx.version && `Version: ${ctx.version}`, ctx.edition && `Edition: ${ctx.edition}`]
+  const where = [
+    ctx.screen && `Screen: ${ctx.screen}`,
+    ctx.version && `Version: ${ctx.version}`,
+    ctx.edition && `Edition: ${ctx.edition}`,
+  ]
     .filter(Boolean)
     .join(' · ');
   return `${redactSecrets(error)}${where ? `\n${where}` : ''}`;

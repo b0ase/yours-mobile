@@ -40,9 +40,13 @@ const DOWN = '#F97066';
 const RANGES: RangeId[] = ['1D', '1W', '1M', '1Y', 'ALL'];
 
 const pct = (v: number | null | undefined) =>
-  v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(Math.abs(v) < 10 ? 2 : 1)}%`;
-const tone = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? MUTED : v >= 0 ? UP : DOWN);
-const rangeWord = (r: RangeId) => ({ '1D': 'today', '1W': 'this week', '1M': 'this month', '1Y': 'this year', ALL: 'since your first coin' })[r];
+  v === null || v === undefined || !Number.isFinite(v)
+    ? '—'
+    : `${v >= 0 ? '+' : ''}${v.toFixed(Math.abs(v) < 10 ? 2 : 1)}%`;
+const tone = (v: number | null | undefined) =>
+  v === null || v === undefined || !Number.isFinite(v) ? MUTED : v >= 0 ? UP : DOWN;
+const rangeWord = (r: RangeId) =>
+  ({ '1D': 'today', '1W': 'this week', '1M': 'this month', '1Y': 'this year', ALL: 'since your first coin' })[r];
 
 // History rows are slow to rebuild (the whole account), so keep them for the app run per account.
 const rowsCache = new Map<string, { at: number; rows: HistoryRow[] }>();
@@ -72,7 +76,9 @@ const CompareChart = ({ series, times }: { series: Series[]; times: number[] }) 
         aria-label={series.map((s) => `${s.name} ${pct(s.ys[s.ys.length - 1])}`).join(', ')}
         onPointerMove={(e) => {
           const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-          setHover(Math.max(0, Math.min(times.length - 1, Math.round(((e.clientX - r.left) / r.width) * (times.length - 1)))));
+          setHover(
+            Math.max(0, Math.min(times.length - 1, Math.round(((e.clientX - r.left) / r.width) * (times.length - 1)))),
+          );
         }}
         onPointerLeave={() => setHover(null)}
       >
@@ -82,7 +88,15 @@ const CompareChart = ({ series, times }: { series: Series[]; times: number[] }) 
             <stop offset="100%" stopColor={GOLD} stopOpacity="0" />
           </linearGradient>
         </defs>
-        <line x1="0" x2={W} y1={y(0)} y2={y(0)} stroke="#ffffff22" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+        <line
+          x1="0"
+          x2={W}
+          y1={y(0)}
+          y2={y(0)}
+          stroke="#ffffff22"
+          strokeDasharray="3 4"
+          vectorEffect="non-scaling-stroke"
+        />
         {series.map((s) => {
           const pts = s.ys.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
           return (
@@ -101,7 +115,9 @@ const CompareChart = ({ series, times }: { series: Series[]; times: number[] }) 
             </g>
           );
         })}
-        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1="0" y2={H} stroke="#ffffff44" vectorEffect="non-scaling-stroke" />}
+        {hover !== null && (
+          <line x1={x(hover)} x2={x(hover)} y1="0" y2={H} stroke="#ffffff44" vectorEffect="non-scaling-stroke" />
+        )}
       </svg>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs">
         {series.map((s) => (
@@ -113,7 +129,12 @@ const CompareChart = ({ series, times }: { series: Series[]; times: number[] }) 
         ))}
         {hover !== null && (
           <span style={{ color: MUTED }}>
-            {new Date(times[hover]).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: times[times.length - 1] - times[0] <= 2 * 86_400_000 ? '2-digit' : undefined, minute: times[times.length - 1] - times[0] <= 2 * 86_400_000 ? '2-digit' : undefined })}
+            {new Date(times[hover]).toLocaleString(undefined, {
+              day: 'numeric',
+              month: 'short',
+              hour: times[times.length - 1] - times[0] <= 2 * 86_400_000 ? '2-digit' : undefined,
+              minute: times[times.length - 1] - times[0] <= 2 * 86_400_000 ? '2-digit' : undefined,
+            })}
           </span>
         )}
       </div>
@@ -131,7 +152,13 @@ const ValueChart = ({ ys }: { ys: number[] }) => {
   const y = (v: number) => H - 6 - ((v - min) / (max - min || 1)) * (H - 24);
   const pts = ys.map((v, i) => `${((i / (ys.length - 1)) * W).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-48 block" role="img" aria-label={`Value from ${formatUSD(ys[0])} to ${formatUSD(ys[ys.length - 1])}`}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="w-full h-48 block"
+      role="img"
+      aria-label={`Value from ${formatUSD(ys[0])} to ${formatUSD(ys[ys.length - 1])}`}
+    >
       <defs>
         <linearGradient id="pf-val" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={GOLD} stopOpacity="0.35" />
@@ -139,7 +166,14 @@ const ValueChart = ({ ys }: { ys: number[] }) => {
         </linearGradient>
       </defs>
       <polygon points={`0,${H} ${pts} ${W},${H}`} fill="url(#pf-val)" />
-      <polyline points={pts} fill="none" stroke={GOLD} strokeWidth="2.4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={GOLD}
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   );
 };
@@ -174,7 +208,8 @@ export const PortfolioScreen = ({
   const lockedSats = useMemo(() => {
     if (!idAddr) return 0;
     let s = 0;
-    for (const p of loadPlans(idAddr, chromeStorageService)) for (const piece of p.pieces) if (!piece.claimed) s += piece.sats;
+    for (const p of loadPlans(idAddr, chromeStorageService))
+      for (const piece of p.pieces) if (!piece.claimed) s += piece.sats;
     return s;
   }, [idAddr, chromeStorageService]);
   const nowSats = bsvSats + lockedSats;
@@ -272,7 +307,8 @@ export const PortfolioScreen = ({
 
   const verdict = (() => {
     if (youPct === null) return null;
-    const vs = btcPct !== null ? { name: 'BTC', v: btcPct } : bsvPct !== null ? { name: 'holding BSV', v: bsvPct } : null;
+    const vs =
+      btcPct !== null ? { name: 'BTC', v: btcPct } : bsvPct !== null ? { name: 'holding BSV', v: bsvPct } : null;
     if (!vs) return null;
     const d = youPct - vs.v;
     if (Math.abs(d) < 0.05) return `You kept pace with ${vs.name} ${rangeWord(range)}.`;
@@ -306,12 +342,21 @@ export const PortfolioScreen = ({
         >
           <RefreshCw size={18} className={loadingHistory ? 'animate-spin' : ''} />
         </button>
-        <button type="button" aria-label="Close" onClick={onClose} className="p-2 bg-transparent border-0 cursor-pointer" style={{ color: '#fff' }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="p-2 bg-transparent border-0 cursor-pointer"
+          style={{ color: '#fff' }}
+        >
           <X size={20} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-10" style={{ paddingBottom: 'calc(2.5rem + env(safe-area-inset-bottom))' }}>
+      <div
+        className="flex-1 overflow-y-auto px-4 pb-10"
+        style={{ paddingBottom: 'calc(2.5rem + env(safe-area-inset-bottom))' }}
+      >
         {/* Hero: what it's worth now and how the range went */}
         <div className="pt-5 pb-3">
           <div className="text-xs" style={{ color: MUTED }}>
@@ -348,7 +393,11 @@ export const PortfolioScreen = ({
               aria-selected={range === r}
               onClick={() => setRange(r)}
               className="flex-1 h-9 rounded-lg text-xs font-bold border cursor-pointer"
-              style={{ background: range === r ? GOLD : 'transparent', color: range === r ? '#1a1300' : '#fff', borderColor: range === r ? GOLD : LINE }}
+              style={{
+                background: range === r ? GOLD : 'transparent',
+                color: range === r ? '#1a1300' : '#fff',
+                borderColor: range === r ? GOLD : LINE,
+              }}
             >
               {r === 'ALL' ? 'All' : r}
             </button>
@@ -429,15 +478,28 @@ export const PortfolioScreen = ({
         <div className="mt-5 text-sm font-bold">What you hold</div>
         {rank.held.length > 0 ? (
           <>
-            <div className="mt-2 h-2.5 rounded-full overflow-hidden flex" aria-hidden="true" style={{ background: LINE }}>
+            <div
+              className="mt-2 h-2.5 rounded-full overflow-hidden flex"
+              aria-hidden="true"
+              style={{ background: LINE }}
+            >
               {rank.held.map((h) => (
-                <span key={h.id} style={{ width: `${rank.share(h)}%`, background: h.id === 'bsv' ? GOLD : h.id === 'locked' ? '#B8860B' : '#7DD3FC' }} />
+                <span
+                  key={h.id}
+                  style={{
+                    width: `${rank.share(h)}%`,
+                    background: h.id === 'bsv' ? GOLD : h.id === 'locked' ? '#B8860B' : '#7DD3FC',
+                  }}
+                />
               ))}
             </div>
             <div className="mt-2 rounded-2xl border divide-y" style={{ background: CARD, borderColor: LINE }}>
               {rank.held.map((h) => (
                 <div key={h.id} className="flex items-center gap-3 px-3 py-2.5" style={{ borderColor: LINE }}>
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: h.id === 'bsv' ? GOLD : h.id === 'locked' ? '#B8860B' : '#7DD3FC' }} />
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ background: h.id === 'bsv' ? GOLD : h.id === 'locked' ? '#B8860B' : '#7DD3FC' }}
+                  />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold">{h.name}</span>
                     <span className="block text-xs" style={{ color: MUTED }}>
@@ -469,18 +531,25 @@ export const PortfolioScreen = ({
             )}
           </>
         ) : (
-          <div className="mt-2 rounded-2xl border px-4 py-5 text-sm text-center" style={{ background: CARD, borderColor: LINE, color: MUTED }}>
+          <div
+            className="mt-2 rounded-2xl border px-4 py-5 text-sm text-center"
+            style={{ background: CARD, borderColor: LINE, color: MUTED }}
+          >
             Nothing here yet. Buy or receive some BSV and this screen will start tracking how it does.
           </div>
         )}
         {tokenCount > 0 && (
           <div className="mt-2 text-xs" style={{ color: MUTED }}>
-            Plus {tokenCount} token{tokenCount === 1 ? '' : 's'} with no market price here, so they aren't counted in the total.
+            Plus {tokenCount} token{tokenCount === 1 ? '' : 's'} with no market price here, so they aren't counted in
+            the total.
           </div>
         )}
 
         {/* BSV price + the chart */}
-        <div className="mt-5 rounded-2xl border p-4 flex items-center gap-3" style={{ background: CARD, borderColor: LINE }}>
+        <div
+          className="mt-5 rounded-2xl border p-4 flex items-center gap-3"
+          style={{ background: CARD, borderColor: LINE }}
+        >
           <div className="flex-1">
             <div className="text-xs" style={{ color: MUTED }}>
               BSV price

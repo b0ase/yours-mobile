@@ -35,7 +35,13 @@ export function isOwnHost(raw: string): boolean {
   }
 }
 
-export type OgPreview = { url: string; title: string | null; description: string | null; image: string | null; site: string | null };
+export type OgPreview = {
+  url: string;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  site: string | null;
+};
 
 /** Parse bit-sign's `{ previews: [...] }`; only `ok` rows with something to show, https images only. */
 export function parsePreviews(data: unknown): OgPreview[] {
@@ -57,12 +63,19 @@ export function parsePreviews(data: unknown): OgPreview[] {
 const cache = new Map<string, Promise<OgPreview | null>>();
 
 /** OG preview of an own-site link (null for other hosts or when unavailable). Cached per session. */
-export function ownLinkPreview(url: string, http: Http = defaultHttp(Capacitor.isNativePlatform())): Promise<OgPreview | null> {
+export function ownLinkPreview(
+  url: string,
+  http: Http = defaultHttp(Capacitor.isNativePlatform()),
+): Promise<OgPreview | null> {
   if (!isOwnHost(url)) return Promise.resolve(null);
   let p = cache.get(url);
   if (!p) {
     p = http({ method: 'GET', url: `${BCHAT_ORIGIN}/api/bitsign/unfurl?url=${encodeURIComponent(url)}`, headers: {} })
-      .then((r) => (r.status === 200 ? (parsePreviews(r.data).find((x) => x.url === url) ?? parsePreviews(r.data)[0] ?? null) : null))
+      .then((r) =>
+        r.status === 200
+          ? (parsePreviews(r.data).find((x) => x.url === url) ?? parsePreviews(r.data)[0] ?? null)
+          : null,
+      )
       .catch(() => null);
     p.then((v) => {
       if (!v) cache.delete(url); // retry next time the card mounts

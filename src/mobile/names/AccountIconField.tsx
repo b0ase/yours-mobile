@@ -81,8 +81,11 @@ export const AccountIconField = ({ value, onChange }: { value: string; onChange:
         </button>
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-[11px] text-[#F97066]">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-[11px] text-[#F97066]">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </div>
   );
 };

@@ -518,8 +518,11 @@ const Reader = ({
         </div>
       )}
       {err && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{err}</p><ErrorActions message={String(err)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] m-0">{err}</p>
+          <ErrorActions message={String(err)} />
+        </div>
+      )}
       {mail && (
         <button
           type="button"
@@ -682,8 +685,11 @@ const Compose = ({
           : `You pay ${money(q.total, rate)} postage to them, from your wallet, when you send.`}
       </div>
       {err && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{err}</p><ErrorActions message={String(err)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] m-0">{err}</p>
+          <ErrorActions message={String(err)} />
+        </div>
+      )}
       <button type="button" disabled={!!busy} onClick={() => void go()} className={gold} style={{ background: GOLD }}>
         {busy || (q.total ? `Send · ${money(q.total, rate)}` : 'Send')}
       </button>
@@ -746,8 +752,11 @@ const PriceSettings = ({
         </div>
       )}
       {err && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{err}</p><ErrorActions message={String(err)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] m-0">{err}</p>
+          <ErrorActions message={String(err)} />
+        </div>
+      )}
       <button
         type="button"
         disabled={busy || n === null || n > 100}
@@ -915,7 +924,9 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   // Paid letters: the postage was internalized into the wallet when the letter arrived (client.ts verifyPostage), so
   // deleting or archiving it does not touch the money. The toast says so (owner, 9 Oct: "where did the money go?").
   const keepsPostage = (ids: string[]) => {
-    const sats = m.state.received.filter((r) => ids.includes(r.id)).reduce((a, r) => a + Math.max(0, r.verifiedSats), 0);
+    const sats = m.state.received
+      .filter((r) => ids.includes(r.id))
+      .reduce((a, r) => a + Math.max(0, r.verifiedSats), 0);
     return sats > 0 ? ` · the ${money(sats, m.rate)} postage stays in your wallet` : '';
   };
   const archive = (ids: string[]) =>
@@ -925,7 +936,10 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     );
   const unarchive = (ids: string[]) => undoable('Moved to Inbox', m.flag(ids, { archived: false }));
   const remove = (ids: string[]) =>
-    undoable(`${ids.length > 1 ? `Deleted ${ids.length}` : 'Deleted'}${keepsPostage(ids)}`, m.flag(ids, { deleted: true }));
+    undoable(
+      `${ids.length > 1 ? `Deleted ${ids.length}` : 'Deleted'}${keepsPostage(ids)}`,
+      m.flag(ids, { deleted: true }),
+    );
   const mailActions = (r: Received, inArchive: boolean) => {
     const left: SwipeAction[] = [
       { id: 'reply', label: 'Reply', icon: <Reply size={18} />, color: '#475467', onPress: () => replyTo(r) },
@@ -978,7 +992,10 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         removes: true,
         // Same as Spam: this letter goes to Quarantine and so does their future mail (Undo puts both back).
         onPress: () =>
-          undoable(`Quarantined · future mail from ${nameOf(r.from)} goes to Quarantine${keepsPostage([r.id])}`, m.spam(r)),
+          undoable(
+            `Quarantined · future mail from ${nameOf(r.from)} goes to Quarantine${keepsPostage([r.id])}`,
+            m.spam(r),
+          ),
       },
     ];
     const more: SwipeAction[] = [
@@ -1298,7 +1315,9 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     onClick={() => setTab(id)}
                     className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
                     style={
-                      tab === id ? { background: GOLD, color: '#1a1300' } : { border: '1px solid #2b2f36', color: '#fff' }
+                      tab === id
+                        ? { background: GOLD, color: '#1a1300' }
+                        : { border: '1px solid #2b2f36', color: '#fff' }
                     }
                   >
                     {label}

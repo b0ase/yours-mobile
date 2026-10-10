@@ -185,8 +185,11 @@ export const Directory = ({
         </div>
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#ff6b6b]">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#ff6b6b]">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {shown && shown.length === 0 && !error && (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p className="text-sm text-[#98A2B3]">No listings yet.</p>

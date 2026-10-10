@@ -11,10 +11,12 @@ let seq = 0;
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const showUndo = (text: string, undo: () => void) => {
   current = { id: ++seq, text, undo };
   emit();
 };
+// eslint-disable-next-line react-refresh/only-export-components
 export const dismissUndo = () => {
   current = null;
   emit();

@@ -254,10 +254,13 @@ export const DoorButton = ({
       )}
 
       {err && (
-<div className="flex flex-col gap-1.5"><p className="mt-2 text-xs" style={{ color: '#F97066' }}>
-          {err}
-        </p><ErrorActions message={String(err)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="mt-2 text-xs" style={{ color: '#F97066' }}>
+            {err}
+          </p>
+          <ErrorActions message={String(err)} />
+        </div>
+      )}
     </div>
   );
 };

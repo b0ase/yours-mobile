@@ -120,7 +120,11 @@ const Tile = ({
           src={avatar}
           alt=""
           className="relative rounded-full object-cover"
-          style={{ width: face, height: face, boxShadow: speaking ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}` : undefined }}
+          style={{
+            width: face,
+            height: face,
+            boxShadow: speaking ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}` : undefined,
+          }}
         />
       ) : (
         <div
@@ -174,7 +178,11 @@ const RequestButton = ({ raised, onRaise, small }: { raised: boolean; onRaise: (
   <button
     onClick={onRaise}
     className={`rounded-full font-semibold ${small ? 'px-2 py-1 text-[10px]' : 'px-4 py-2 text-sm'}`}
-    style={raised ? { background: 'transparent', color: GOLD, boxShadow: `0 0 0 1px ${GOLD}` } : { background: GOLD, color: '#010101' }}
+    style={
+      raised
+        ? { background: 'transparent', color: GOLD, boxShadow: `0 0 0 1px ${GOLD}` }
+        : { background: GOLD, color: '#010101' }
+    }
   >
     {raised ? '✋ Hand raised' : '✋ Request to speak'}
   </button>
@@ -308,7 +316,10 @@ export const SpeakerGrid = ({
   if (big)
     return (
       <div>
-        <div className="mx-auto" style={{ width: tvWidth(75), aspectRatio: '16 / 9', minHeight: '45vh', maxWidth: '100%' }}>
+        <div
+          className="mx-auto"
+          style={{ width: tvWidth(75), aspectRatio: '16 / 9', minHeight: '45vh', maxWidth: '100%' }}
+        >
           {tile(big, 'big')}
         </div>
         {under}
@@ -397,11 +408,7 @@ export const SpeakerGrid = ({
       </div>
       <div className="mt-2 flex justify-center gap-1.5" aria-label={`Page ${curPage + 1} of ${pages.length}`}>
         {pages.map((_, i) => (
-          <span
-            key={i}
-            className="h-1.5 w-1.5 rounded-full"
-            style={{ background: i === curPage ? GOLD : LINE }}
-          />
+          <span key={i} className="h-1.5 w-1.5 rounded-full" style={{ background: i === curPage ? GOLD : LINE }} />
         ))}
       </div>
       {under}

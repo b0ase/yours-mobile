@@ -293,13 +293,25 @@ const PromptApp = () => {
           <BundleSheet key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
         )}
         {screen.kind === 'groupedPermission' && (
-          <GroupedPermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
+          <GroupedPermissionRequestPage
+            key={screen.requestID}
+            request={screen.payload}
+            onResponse={() => void advance()}
+          />
         )}
         {screen.kind === 'counterpartyPermission' && (
-          <CounterpartyPermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
+          <CounterpartyPermissionRequestPage
+            key={screen.requestID}
+            request={screen.payload}
+            onResponse={() => void advance()}
+          />
         )}
         {screen.kind === 'oneSatPermission' && (
-          <OneSatPermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
+          <OneSatPermissionRequestPage
+            key={screen.requestID}
+            request={screen.payload}
+            onResponse={() => void advance()}
+          />
         )}
         {screen.kind === 'usbCheck' && (
           <UsbCheckRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
