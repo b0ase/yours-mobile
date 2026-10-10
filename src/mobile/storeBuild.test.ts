@@ -427,7 +427,7 @@ describe('phone layout store gates', () => {
   });
 });
 
-describe('BSPACES_ENABLED: bSpaces is bWalletX only', () => {
+describe('BSPACES_ENABLED: full bSpaces (token rooms, paid entry) is bWalletX only', () => {
   const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
   const cond = (text: string, name: string) =>
     (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
@@ -444,7 +444,12 @@ describe('BSPACES_ENABLED: bSpaces is bWalletX only', () => {
     expect(src('./tabs/MobileRoutes.tsx')).toContain(
       "BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null",
     );
-    expect(src('./tabs/ChatPage.tsx')).toMatch(/BSPACES_ENABLED && \(\s*<LiveBanner/);
+    // The in-room banner: bWalletX in every room; the store edition only in open rooms (free Spaces).
+    expect(src('./tabs/ChatPage.tsx')).toMatch(
+      /\(BSPACES_ENABLED \|\| roomSpacesAllowed\(room\)\) && \(\s*<LiveBanner/,
+    );
+    // Paid entry stays bWalletX only.
+    expect(src('./spaces/LiveBanner.tsx')).toContain("BSPACES_ENABLED ? lazy(() => import('./DoorKeeper')");
     // The Chat tab's Spaces filter: chips and list both behind the flag.
     expect(src('./tabs/ChatPage.tsx').match(/BSPACES_ENABLED && ROOMS && handle && rooms/g)?.length).toBe(2);
   });
@@ -477,5 +482,32 @@ describe('PAID_CALLS_ENABLED: bPhone paid calls are bWalletX only', () => {
     expect(src('./calls/store.ts')).toContain('if (PAID_CALLS_ENABLED) {');
     expect(src('./calls/store.ts')).toMatch(/PAID_CALLS_ENABLED\) await meterTick/);
     expect(src('./calls/CallScreen.tsx')).toContain("PAID_CALLS_ENABLED && call.phase === 'quote' && <QuoteSheet");
+  });
+});
+
+describe('Free Spaces in the store edition (owner, 10 Oct 2026)', () => {
+  test('open rooms and the Lounge allow a Space in a store build; token rooms do not', async () => {
+    const { roomSpacesAllowed, isOpenRoom, FREE_SPACES_ENABLED } = await import('./storeBuild');
+    expect(FREE_SPACES_ENABLED).toBe(true);
+    const lounge = { ticker: 'LOUNGE', metadata: null };
+    const open = { ticker: 'CHAT1', metadata: { kind: 'open', open: { visibility: 'public' } } };
+    const token = { ticker: 'SATOSHI', metadata: { tokenGate: { key: 'bsv21:x_0', symbol: 'SATOSHI' } } };
+    const openButGated = { ticker: 'ODD', metadata: { kind: 'open', tokenGate: { key: 'k' } } };
+    expect(isOpenRoom(lounge)).toBe(true);
+    expect(isOpenRoom(open)).toBe(true);
+    expect(isOpenRoom(token)).toBe(false);
+    expect(isOpenRoom(openButGated)).toBe(false);
+    expect(isOpenRoom(null)).toBe(false);
+    for (const r of [lounge, open]) expect(roomSpacesAllowed(r, true)).toBe(true);
+    for (const r of [token, openButGated]) expect(roomSpacesAllowed(r, true)).toBe(false);
+    for (const r of [lounge, open, token]) expect(roomSpacesAllowed(r, false)).toBe(true);
+  });
+  test('token rooms point store users to bWalletX or bchatx.com', async () => {
+    const { storeTokenSpaceNote, STORE_ROOM_NOTE } = await import('./storeBuild');
+    expect(storeTokenSpaceNote('SATOSHI')).toBe(
+      'This room is for $SATOSHI holders. Open it in bWalletX or on bchatx.com.',
+    );
+    expect(storeTokenSpaceNote()).toContain('token holders');
+    expect(STORE_ROOM_NOTE).toContain('bchatx.com');
   });
 });

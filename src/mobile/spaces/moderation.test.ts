@@ -170,3 +170,12 @@ describe('host label', () => {
     expect(hostLabel('ana', null)).toBe('$ana');
   });
 });
+
+describe('reportable: anyone can report or block someone else in a Space', () => {
+  test('others yes, yourself no, case and $ ignored', async () => {
+    const { reportable } = await import('./model');
+    expect(reportable({ handle: 'alice' }, 'bob')).toBe(true);
+    expect(reportable({ handle: 'bob' }, '$Bob')).toBe(false);
+    expect(reportable({ handle: '' }, 'bob')).toBe(false);
+  });
+});

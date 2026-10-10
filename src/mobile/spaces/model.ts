@@ -313,6 +313,12 @@ export const moderatable = (p: Participant, o: { me: string; spaceHost: string; 
   o.moderator && p.role === 'speaker' && p.handle !== norm(o.me) && p.handle !== norm(o.spaceHost);
 
 /**
+ * Anyone in a Space can open the person menu for someone else, to report or block them (Apple 1.2 /
+ * Play UGC: the store edition has free Spaces). Host tools in that menu still need `moderatable`.
+ */
+export const reportable = (p: Pick<Participant, 'handle'>, me: string) => !!p.handle && p.handle !== norm(me);
+
+/**
  * "Join as speaker": straight on stage in an open-stage room or for a room boss (mic muted until you
  * tap), otherwise a listener with the hand already up. bit-sign decides for real (`as: 'speaker'`).
  */
