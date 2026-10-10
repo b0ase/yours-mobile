@@ -372,6 +372,7 @@ export const initWallet = async (
       identityWif: keys.identityWif,
       chain,
       options: recoveryOptions,
+      addresses: () => [...syncContext.addressManager.getAddresses(), keys.identityAddress],
     });
 
   console.log('[initWallet] Starting address sync...');

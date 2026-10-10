@@ -95,6 +95,74 @@ const listKnownTokenOutputs = async (wallet: WalletInterface): Promise<KnownToke
   return out;
 };
 
+/** Tokens the user asked Repair Sync to look for; walked on every later run. */
+export const WATCH_TOKENS_KEY = 'tokenRecovery:watchTokens';
+/** When the wallet's addresses were last asked about tokens (ms). */
+const ADDRESS_SEED_AT_KEY = 'tokenRecovery:addressSeedAt';
+const ADDRESS_SEED_EVERY_MS = 24 * 3600_000;
+const MAX_SEED_ADDRESSES = 30;
+const MAX_SEED_TOKENS = 50;
+
+/** `bsv21:<txid>_<vout>` events name the token an output carries. */
+export const tokenIdsFromEvents = (events: string[] | undefined): string[] =>
+  (events ?? []).filter((e) => /^bsv21:[0-9a-f]{64}_\d+$/i.test(e)).map((e) => e.slice(6));
+
+export interface SeedLookupDeps {
+  addresses(): string[];
+  /** Token outputs (any state) owned by an address, with their events. */
+  ownerTokenOutputs(address: string): Promise<{ outpoint: string; events?: string[] }[]>;
+  cacheGet(key: string): Promise<string | null>;
+  cacheSet(key: string, value: string): Promise<void>;
+  now(): number;
+  log?(msg: string): void;
+}
+
+/**
+ * Starting points for recovery the wallet's own storage may not have: the
+ * genesis of each token the user asked about (remembered), and, once a day or
+ * on Repair Sync, every token output at the wallet's own addresses plus the
+ * genesis of its token. Read-only; bounded so one run asks the indexer at
+ * most MAX_SEED_ADDRESSES times.
+ */
+export const lookupSeedOutpoints = async (
+  deps: SeedLookupDeps,
+  opts: { thorough: boolean; tokenIds: string[] },
+): Promise<string[]> => {
+  const log = deps.log ?? (() => {});
+  let watched: string[] = [];
+  try {
+    watched = JSON.parse((await deps.cacheGet(WATCH_TOKENS_KEY)) ?? '[]') as string[];
+  } catch {
+    watched = [];
+  }
+  const asked = opts.tokenIds.filter((t) => /^[0-9a-f]{64}[._]\d+$/i.test(t)).map((t) => t.replace('.', '_'));
+  if (asked.some((t) => !watched.includes(t))) {
+    watched = [...new Set([...watched, ...asked])].slice(-MAX_SEED_TOKENS);
+    await deps.cacheSet(WATCH_TOKENS_KEY, JSON.stringify(watched));
+  }
+  const tokenIds = new Set<string>([...watched, ...asked]);
+  const outpoints = new Set<string>();
+
+  const last = Number((await deps.cacheGet(ADDRESS_SEED_AT_KEY)) ?? 0);
+  if (opts.thorough || deps.now() - last > ADDRESS_SEED_EVERY_MS) {
+    for (const address of deps.addresses().slice(0, MAX_SEED_ADDRESSES)) {
+      try {
+        for (const o of await deps.ownerTokenOutputs(address)) {
+          const ids = tokenIdsFromEvents(o.events);
+          if (ids.length === 0) continue;
+          outpoints.add(o.outpoint);
+          ids.forEach((id) => tokenIds.add(id));
+        }
+      } catch (err) {
+        log(`token lookup for ${address} failed: ${String(err)}`);
+      }
+    }
+    await deps.cacheSet(ADDRESS_SEED_AT_KEY, String(deps.now()));
+  }
+  for (const id of [...tokenIds].slice(0, MAX_SEED_TOKENS)) outpoints.add(id);
+  return [...outpoints].map(normOutpoint);
+};
+
 let running: Promise<TokenRecoveryResult> | null = null;
 
 export interface RunTokenRecoveryArgs {
@@ -104,6 +172,8 @@ export interface RunTokenRecoveryArgs {
   identityWif: string;
   chain: 'main' | 'test';
   options?: TokenRecoveryOptions;
+  /** The wallet's own addresses (deposit addresses + identity), for indexer seeds. */
+  addresses?: () => string[];
 }
 
 /** Single flight: a second call while one runs gets the running one's result. */
@@ -115,7 +185,18 @@ export const runTokenRecovery = (args: RunTokenRecoveryArgs): Promise<TokenRecov
   return running;
 };
 
-const doRun = async ({ wallet, services, identityWif, chain, options }: RunTokenRecoveryArgs) => {
+/** Every output (spent or not) an address has held that carries a BSV-21 token. */
+const ownerTokenOutputs = async (services: OneSatServices, address: string) => {
+  const out: { outpoint: string; events?: string[] }[] = [];
+  for await (const ev of services.owner.getTxos(address, { tags: ['bsv21'], events: true, limit: 200 })) {
+    if (ev.type === 'txo') out.push({ outpoint: ev.data.outpoint, events: ev.data.events });
+    else if (ev.type === 'error') throw ev.error;
+    else if (ev.type === 'done') break;
+  }
+  return out;
+};
+
+const doRun = async ({ wallet, services, identityWif, chain, options, addresses }: RunTokenRecoveryArgs) => {
   const deriver = new KeyDeriver(PrivateKey.fromWif(identityWif));
   const invoicePrefix = invoicePrefixFor(P1SAT_PROTOCOL);
   const setup = buildKeySearchSetup(identityWif, invoicePrefix);
@@ -133,6 +214,18 @@ const doRun = async ({ wallet, services, identityWif, chain, options }: RunToken
   const result = await recoverTokenOutputs(
     {
       knownTokenOutputs: () => listKnownTokenOutputs(wallet),
+      seedOutpoints: (seedOpts) =>
+        lookupSeedOutpoints(
+          {
+            addresses: () => addresses?.() ?? [],
+            ownerTokenOutputs: (address) => ownerTokenOutputs(services, address),
+            cacheGet: chromeCache.get,
+            cacheSet: chromeCache.set,
+            now: () => Date.now(),
+            log: (m) => console.log(`[tokenRecovery] ${m}`),
+          },
+          seedOpts,
+        ),
       async getSpends(outpoints) {
         const map = new Map<string, string | null>();
         for (let i = 0; i < outpoints.length; i += 100) {
