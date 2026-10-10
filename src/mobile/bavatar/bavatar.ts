@@ -280,8 +280,11 @@ export class SvgCtx {
     if (s.tx || s.ty) a.push(`transform="translate(${n2(s.tx)} ${n2(s.ty)})"`);
     if (s.globalAlpha !== 1) a.push(`opacity="${n2(s.globalAlpha)}"`);
     if (s.composite === 'lighter') a.push('style="mix-blend-mode:screen"');
-    if (s.clip) a.push(`clip-path="url(#${s.clip})"`);
     return a.join(' ');
+  }
+  /** A clip lives in the page's space, so it wraps the (possibly translated) shape in a group. */
+  private emit(el: string) {
+    this.body.push(this.st.clip ? `<g clip-path="url(#${this.st.clip})">${el}</g>` : el);
   }
   private blur(sd: number) {
     const key = n2(sd);
@@ -296,21 +299,21 @@ export class SvgCtx {
     return id;
   }
   fill() {
-    if (this.d) this.body.push(`<path d="${this.d}" fill="${this.paint(this.st.fillStyle)}" ${this.common()}/>`);
+    if (this.d) this.emit(`<path d="${this.d}" fill="${this.paint(this.st.fillStyle)}" ${this.common()}/>`);
   }
   stroke() {
     if (!this.d) return;
     const s = this.st,
       base = `fill="none" stroke-width="${n2(s.lineWidth)}" stroke-linecap="${s.lineCap}" stroke-linejoin="round"`;
     if (s.shadowBlur > 0 && s.shadowColor !== 'transparent') {
-      this.body.push(
+      this.emit(
         `<path d="${this.d}" ${base} stroke="${color(s.shadowColor)}" filter="url(#${this.blur(s.shadowBlur / 2)})" ${this.common()}/>`,
       );
     }
-    this.body.push(`<path d="${this.d}" ${base} stroke="${this.paint(s.strokeStyle)}" ${this.common()}/>`);
+    this.emit(`<path d="${this.d}" ${base} stroke="${this.paint(s.strokeStyle)}" ${this.common()}/>`);
   }
   fillRect(x: number, y: number, w: number, h: number) {
-    this.body.push(
+    this.emit(
       `<rect x="${n2(x)}" y="${n2(y)}" width="${n2(w)}" height="${n2(h)}" fill="${this.paint(this.st.fillStyle)}" ${this.common()}/>`,
     );
   }
@@ -324,7 +327,7 @@ export class SvgCtx {
   fillText(text: string, x: number, y: number) {
     const size = /(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? '16';
     const esc = text.replace(/[<&>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-    this.body.push(
+    this.emit(
       `<text x="${n2(x)}" y="${n2(y)}" font-size="${size}" font-weight="800" font-family="Georgia, serif" text-anchor="middle" dominant-baseline="middle" fill="${this.paint(this.st.fillStyle)}" ${this.common()}>${esc}</text>`,
     );
   }
