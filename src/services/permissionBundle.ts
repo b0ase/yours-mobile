@@ -319,3 +319,31 @@ export const allowanceSats = (usd: number, usdPerBsv: number | undefined): numbe
   if (!usd || !usdPerBsv || usdPerBsv <= 0 || !Number.isFinite(usdPerBsv)) return 0;
   return Math.floor((usd / usdPerBsv) * 1e8);
 };
+
+// ─── "Don't ask again on this site" (owner, 10 Oct 2026: fewer popups, more "allow all") ───
+
+/**
+ * A site the user trusts for routine requests is recorded as a grant in the same permission store,
+ * under this reserved basket name, so "Forget site" and per-grant revoke in Settings remove it too.
+ * Nothing in the wallet uses a basket with this name.
+ */
+export const TRUST_SITE_BASKET = 'bwalletx.trust-site';
+
+/**
+ * Requests a trusted site may get without a sheet: signing and key use for this app only (protocol
+ * level 0-1, or level 2 with itself), and its own baskets. Never: payments (they go through the
+ * monthly allowance instead), certificates (personal details), privileged keys, signing for anyone,
+ * or sharing keys with a named counterparty.
+ */
+export const isAutoGrantable = (r: BundleRequest): boolean => {
+  if (isRiskyRequest(r)) return false;
+  if (r.type === 'basket') return !!r.basket && r.basket !== TRUST_SITE_BASKET;
+  if (r.type !== 'protocol') return false;
+  const level = protoLevel(r);
+  if (level <= 1) return true;
+  return level === 2 && (r.counterparty === 'self' || r.counterparty === undefined);
+};
+
+/** The sheet offers "Don't ask again" when at least one ticked line is the routine kind. */
+export const sheetCanTrust = (bundle: Pick<PermissionBundle, 'items'>): boolean =>
+  bundle.items.some((r) => isAutoGrantable(r));
