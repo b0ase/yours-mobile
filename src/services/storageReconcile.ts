@@ -316,7 +316,25 @@ export interface ReconcileRecord {
   errorStack?: string;
   /** Set once the user has dismissed the result of a migration run. */
   acknowledged?: boolean;
+  /** How many times an interrupted run has been started again automatically. */
+  resumeAttempts?: number;
 }
+
+/** The message finishInterruptedReconcile writes when the worker stopped mid-run. */
+export const INTERRUPTED_RECONCILE_ERROR = 'Interrupted: the wallet restarted before the repair finished';
+/** Automatic re-runs of an interrupted repair before it is left for the user to retry in Settings. */
+export const MAX_RECONCILE_RESUMES = 3;
+
+/**
+ * A repair the worker never finished (it was stopped, not failed) is run again on the next open,
+ * whether or not the user dismissed its result: dismissing a notice is not the same as the repair
+ * having completed. Real failures stay for the user to retry from Settings › Troubleshooting.
+ */
+export const shouldResumeReconcile = (record: ReconcileRecord | undefined): boolean =>
+  !!record &&
+  !!record.finishedAt &&
+  record.error === INTERRUPTED_RECONCILE_ERROR &&
+  (record.resumeAttempts ?? 0) < MAX_RECONCILE_RESUMES;
 
 export type ReconcileOutcome = 'running' | 'clean' | 'differences' | 'failed';
 
