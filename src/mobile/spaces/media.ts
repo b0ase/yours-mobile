@@ -4,6 +4,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPresets,
   type Participant as LkParticipant,
   type RemoteParticipant,
   type RemoteTrack,
@@ -75,10 +76,26 @@ export class SpaceMedia {
 
   async connect(url: string, token: string, cb: SpaceMediaCallbacks): Promise<void> {
     const room = new Room({
-      adaptiveStream: true,
+      // pixelDensity 'screen': pick the simulcast layer for DEVICE pixels. The default (1) sized
+      // a full-width tile on a 3x phone as ~390px and pulled the 360p layer, then upscaled it.
+      adaptiveStream: { pixelDensity: 'screen' },
       dynacast: true,
       audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      publishDefaults: { stopMicTrackOnMute: true, simulcast: true },
+      // Capture at 720p30 explicitly: mobile WebViews otherwise hand back whatever the camera
+      // defaults to (often 640x480), and the top layer can be no sharper than the capture.
+      videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
+      publishDefaults: {
+        stopMicTrackOnMute: true,
+        simulcast: true,
+        // Top layer 720p at 2 Mbps (LiveKit's default is 1.7); lower layers for small tiles.
+        videoEncoding: { maxBitrate: 2_000_000, maxFramerate: 30 },
+        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+        // 'balanced' drops a little frame rate before resolution on a weak uplink, instead of
+        // the browser default for camera tracks which sheds resolution first (the blocky look).
+        degradationPreference: 'balanced',
+        // Screen share: 1080p, 15fps, enough bitrate for text.
+        screenShareEncoding: { maxBitrate: 2_500_000, maxFramerate: 15 },
+      },
     });
     this.room = room;
     this.cb = cb;
