@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, X } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { POPULAR_COINS, safeCoinImage, SwapApi, type SwapCoin, type SwapRecord } from './swapApi';
 import { stageLabel } from './promo';
 
@@ -7,21 +7,13 @@ import { stageLabel } from './promo';
  * Wallet-screen promo card under the Swap · Buy · History row (owner, 10 Oct 2026): replaces the plain text line
  * "Have BTC, ETH or USDT? Swap it into BSV here". Slim black/gold card, three overlapping coin logos, title,
  * subtitle, chevron; the whole card opens Swap. While a swap runs it shows "Swap in progress · <stage>" with the
- * gold pulse dot and can't be dismissed. bWalletX only (lazy chunk, SWAP_ENABLED in BuyBsv.tsx).
+ * gold pulse dot. Permanent (owner, 10 Oct 2026: no close button; people who hid it couldn't get it back, so an
+ * old 'bwx.swapPromoDismissed' flag is ignored). bWalletX only (lazy chunk, SWAP_ENABLED in BuyBsv.tsx).
  */
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
-const DISMISS_KEY = 'bwx.swapPromoDismissed';
 const PROMO: SwapCoin[] = [POPULAR_COINS[0], POPULAR_COINS[1], POPULAR_COINS[2]]; // BTC, ETH, USDT
 let imgCache: SwapCoin[] | null = null;
-
-const readDismissed = () => {
-  try {
-    return localStorage.getItem(DISMISS_KEY) === '1';
-  } catch {
-    return false;
-  }
-};
 
 const Logo = ({ coin, i }: { coin: SwapCoin; i: number }) => {
   const src = safeCoinImage(coin.image);
@@ -38,10 +30,9 @@ const Logo = ({ coin, i }: { coin: SwapCoin; i: number }) => {
 };
 
 export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpen: () => void }) => {
-  const [dismissed, setDismissed] = useState(readDismissed);
   const [coins, setCoins] = useState<SwapCoin[]>(imgCache ?? PROMO);
   useEffect(() => {
-    if (imgCache || (dismissed && !active)) return;
+    if (imgCache) return;
     new SwapApi()
       .currencies()
       .then((r) => {
@@ -50,19 +41,17 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
         setCoins(imgCache);
       })
       .catch(() => undefined);
-  }, [dismissed, active]);
+  }, []);
 
-  // Dismissed: cancel the card's 12px top margin so row → card is 8px, like the other gaps.
-  if (dismissed && !active) return <div className="-mb-3" aria-hidden="true" />;
   const title = active ? 'Swap in progress' : 'Swap into BSV';
   const sub = active ? stageLabel(active.stage) : 'From BTC, ETH, USDT and 1,000+ coins';
   return (
-    <div className="w-[92%] -mb-1 relative">
+    <div className="w-[92%] -mb-1">
       <button
         type="button"
         onClick={onOpen}
         aria-label={active ? `${title}, ${sub}. Open to track it` : `${title}. ${sub}`}
-        className="w-full min-h-[52px] pl-3 pr-11 py-2 rounded-xl border flex items-center gap-3 text-left cursor-pointer"
+        className="w-full min-h-[52px] pl-3 pr-3 py-2 rounded-xl border flex items-center gap-3 text-left cursor-pointer"
         style={{ background: '#17191E', borderColor: active ? '#f5b80099' : '#2b2f36' }}
       >
         {active ? (
@@ -88,30 +77,8 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
             </span>
           )}
         </span>
-        {active && <ChevronRight size={18} color={MUTED} aria-hidden="true" />}
+        <ChevronRight size={18} color={MUTED} aria-hidden="true" className="shrink-0" />
       </button>
-      {!active && (
-        <>
-          <span className="absolute right-9 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true">
-            <ChevronRight size={18} color={MUTED} />
-          </span>
-          <button
-            type="button"
-            aria-label="Hide the swap card"
-            onClick={() => {
-              try {
-                localStorage.setItem(DISMISS_KEY, '1');
-              } catch {
-                /* not remembered */
-              }
-              setDismissed(true);
-            }}
-            className="absolute right-0 top-0 w-11 h-full grid place-items-center border-0 bg-transparent cursor-pointer"
-          >
-            <X size={15} color={MUTED} />
-          </button>
-        </>
-      )}
     </div>
   );
 };

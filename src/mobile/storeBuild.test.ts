@@ -269,6 +269,10 @@ describe('store build has no Market', () => {
     expect(bar).not.toMatch(/SwapCell/);
     expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{onPrice\} change=\{change\} \/>/);
     expect(bar).toMatch(/swapOn && SwapPromo && \(/);
+    // Permanent card (owner, 10 Oct 2026): no × and no dismissed flag, so nobody is left without a swap entry.
+    const promo = src('./swap/SwapPromo.tsx');
+    expect(promo).not.toMatch(/Hide the swap card|setDismissed|localStorage/);
+    expect(bar).not.toMatch(/swapPromoDismissed/);
     const w = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
     expect(w).toMatch(/\{!BUY_CRYPTO_ENABLED && <BsvHistoryBar/);
   });
