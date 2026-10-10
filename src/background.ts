@@ -1767,11 +1767,24 @@ if (isInServiceWorker) {
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config: StorageConfig = account?.storageConfig ?? { remotes: [] };
       const remoteUrl = config.activeRemote || config.remotes?.[0];
+      // After the reconcile (or alone, with no remote): token outputs on chain
+      // that no store recorded, searched over the wider window too.
+      const recoverTokens = async () => {
+        try {
+          const r = await accountContext!.recoverTokens({ thorough: true });
+          return r.imported.length;
+        } catch (err) {
+          console.error('[STORAGE_REPAIR_SYNC] token recovery failed:', err);
+          return 0;
+        }
+      };
       if (!remoteUrl) {
+        const tokensRecovered = await recoverTokens();
         sendResponse({
           type: 'STORAGE_REPAIR_SYNC',
-          success: false,
-          error: 'No remote configured to repair',
+          success: tokensRecovered > 0,
+          data: { tokensRecovered },
+          error: tokensRecovered > 0 ? undefined : 'No remote configured to repair',
         });
         return;
       }
@@ -1782,11 +1795,12 @@ if (isInServiceWorker) {
         remoteUrl,
         'manual',
       );
+      const tokensRecovered = await recoverTokens();
 
       sendResponse({
         type: 'STORAGE_REPAIR_SYNC',
         success: true,
-        data: { outcome: reconcileOutcome(record) },
+        data: { outcome: reconcileOutcome(record), tokensRecovered },
       });
     } catch (error) {
       console.error('[STORAGE_REPAIR_SYNC] reconcile failed:', error);

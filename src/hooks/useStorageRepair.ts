@@ -19,7 +19,12 @@ export const REPAIR_PHASE_LABELS: Record<ReconcilePhase, string> = {
   verify: 'Verifying both stores match',
 };
 
-export type RepairResponse = { success: boolean; error?: string; data?: { outcome: ReconcileOutcome } };
+export type RepairResponse = {
+  success: boolean;
+  error?: string;
+  /** tokensRecovered: token outputs found on chain that no store had recorded (tokenRecovery.ts). */
+  data?: { outcome?: ReconcileOutcome; tokensRecovered?: number };
+};
 
 /**
  * The last storage repair (reconcile) run on this device, live: the background
