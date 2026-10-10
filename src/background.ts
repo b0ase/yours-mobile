@@ -1,4 +1,5 @@
 /* global chrome */
+import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
@@ -720,6 +721,33 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+// Keep the address sync running while the wallet is open (services/addressResync.ts): a payment that lands while
+// the wallet is open shows within about a minute, not only after a refresh or unlock. Quiet (no spinner); shares
+// one in-flight run with the startup sync and the refresh button. On web and phones (chromeShim alarms) it skips
+// while the page is hidden and runs straight away when the page comes back.
+const maybeResyncAddresses = () => {
+  const ctx = accountContext;
+  if (
+    !ctx ||
+    !shouldResync({
+      unlocked: true,
+      hidden: pageHidden(),
+      busy: ctx.addressSyncBusy(),
+      lastFinishedAt: ctx.lastAddressSyncAt(),
+      now: Date.now(),
+    })
+  )
+    return;
+  ctx.resyncAddresses({ quiet: true }).catch((err) => console.error('[background] address resync failed:', err));
+};
+chrome.alarms.create(ADDRESS_RESYNC_ALARM, { periodInMinutes: ADDRESS_RESYNC_PERIOD_MINUTES });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ADDRESS_RESYNC_ALARM) maybeResyncAddresses();
+});
+(globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
+  if (pageHidden() === false) maybeResyncAddresses();
+});
+
 // Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
 // panel or calls window is open, a notification per new incoming call; clicking opens the Calls window.
 chrome.alarms.create(CALL_RING_ALARM, { periodInMinutes: 0.5 });
@@ -1289,6 +1317,26 @@ if (isInServiceWorker) {
           const { token } = message as { token?: string };
           const ok = !!token && !!inPageSheet && token === inPageSheet.token;
           sendResponse({ type: 'INPAGE_SHEET_CHECK', success: ok });
+          return true;
+        }
+        case 'RESYNC_ADDRESSES': {
+          // The refresh button's address sync runs here, sharing the one in-flight run with the startup sync and
+          // the alarm (services/addressResync.ts), so two syncs never overlap.
+          const ctx = accountContext;
+          if (!ctx) {
+            sendResponse({ type: 'RESYNC_ADDRESSES', success: false, error: 'locked' });
+            return true;
+          }
+          ctx
+            .resyncAddresses({ quiet: true })
+            .then(() => sendResponse({ type: 'RESYNC_ADDRESSES', success: true }))
+            .catch((err: unknown) =>
+              sendResponse({
+                type: 'RESYNC_ADDRESSES',
+                success: false,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
           return true;
         }
         case 'DISMISS_PROMPT_PANEL': {

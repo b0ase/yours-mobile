@@ -687,7 +687,17 @@ export const BsvWallet = () => {
       const { account: acct } = chromeStorageService.getCurrentAccountObject();
       // Same window as the startup sync, so addresses handed out on other devices count too (services/addressScan.ts).
       const { count } = planAddressScan(acct?.settings?.maxKeyIndex, acct?.settings?.addressScanThrough);
-      if (apiContext) {
+      // The wallet's own sync runs it (sharing one run with the startup sync and the background alarm,
+      // services/addressResync.ts); a wallet that can't take the message falls back to syncing from here.
+      const viaWallet = await withTimeout(
+        chrome.runtime
+          .sendMessage({ action: 'RESYNC_ADDRESSES' })
+          .then((r: { success?: boolean } | undefined) => r?.success === true)
+          .catch(() => false),
+        BALANCE_TIMEOUT_MS,
+        'Address sync',
+      );
+      if (!viaWallet && apiContext) {
         // Bounded: a hung sync held the whole refresh (and the balance after it) indefinitely (owner, 6 Oct 2026).
         await withTimeout(syncAddresses.execute(apiContext, { count }), BALANCE_TIMEOUT_MS, 'Address sync');
       }
