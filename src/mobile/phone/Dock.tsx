@@ -212,7 +212,7 @@ export const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; 
     setSheet(null);
     if (text) setAgentVoice(text);
     else setAgentNote(r.ok ? voiceNote('empty', 'web') : r.note);
-    onAgent();
+    // b's page is already open (since the hold): the handoff event delivers the message to it.
     if (!text) window.setTimeout(focusComposer, 50);
   };
 
@@ -226,11 +226,10 @@ export const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; 
         return onHome();
       case 'listen':
         hapticTick();
+        // Owner, 10 Oct 2026: the hold opens b's chat at once; keep holding to talk, the reply lands there.
+        onAgent();
         legacy.current = supported.current === false;
-        if (legacy.current) {
-          setAgentNote(voiceNote('unavailable', 'web'));
-          return onAgent();
-        }
+        if (legacy.current) return setAgentNote(voiceNote('unavailable', 'web'));
         setSheet({ text: '', level: 0 });
         voice.current = startVoice({
           onText: (text) => setSheet((s) => (s ? { ...s, text } : s)),
@@ -297,7 +296,7 @@ export const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; 
               ))}
             </div>
             <p className="m-0 text-center text-[15px] leading-snug text-white min-h-[1.4em] max-h-24 overflow-hidden">
-              {sheet.note ?? (sheet.text || (sheet.sending ? '' : 'Listening…'))}
+              {sheet.note ?? (sheet.text || (sheet.sending ? '' : 'Listening… release to send'))}
             </p>
             <p className="m-0 text-[11px]" style={{ color: phase === 'cancelling' ? '#F04438' : MUTED }}>
               {sheet.sending
@@ -370,7 +369,7 @@ export const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; 
               pathLength={100}
               strokeDasharray="100"
               transform="rotate(-90 31 31)"
-              className={phase === 'pressing' ? 'bw-hold-ring' : undefined}
+              className={phase === 'pressing' ? 'bw-hold-ring' : phase === 'listening' ? 'bw-listen-ring' : undefined}
               style={phase === 'pressing' ? { animationDuration: `${B_HOLD_MS}ms` } : undefined}
             />
           </svg>
