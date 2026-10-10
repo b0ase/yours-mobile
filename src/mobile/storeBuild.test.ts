@@ -98,7 +98,9 @@ describe('store build: no buying, no personal token, no bWalletX text', () => {
     expect(BUY_CRYPTO_ENABLED).toBe(buyCryptoEnabled());
     expect(PAID_FEATURES_ENABLED).toBe(paidFeaturesEnabled());
     const wallet = src('../pages/BsvWallet.tsx');
-    expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && \(\s*<BsvPriceBar/);
+    // Store parity: both editions show the same top row; the bar itself swaps Buy BSV for Receive.
+    expect(wallet).toMatch(/<BsvPriceBar/);
+    expect(wallet).not.toMatch(/BsvHistoryBar/);
     expect(wallet).toMatch(/BUY_CRYPTO_ENABLED && \(\s*<BuyBsvButton/);
     expect(wallet).toContain('bsvBalance === 0 && BUY_CRYPTO_ENABLED');
     expect(wallet).toContain('BUY_CRYPTO_ENABLED && getBsvOpen &&');
@@ -275,7 +277,9 @@ describe('store build has no Market', () => {
     expect(promo).not.toMatch(/Hide the swap card|setDismissed|localStorage/);
     expect(bar).not.toMatch(/swapPromoDismissed/);
     const w = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
-    expect(w).toMatch(/\{!BUY_CRYPTO_ENABLED && <BsvHistoryBar/);
+    expect(w).not.toMatch(/BsvHistoryBar/);
+    expect(bar).toMatch(/BUY_CRYPTO_ENABLED \? 'Buy BSV' : 'Receive'/);
+    expect(bar).toMatch(/BUY_CRYPTO_ENABLED && open && \(/);
   });
   test('store tabs: no Market tab, and market ids land on Wallet', () => {
     const t = storeEval(

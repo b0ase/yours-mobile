@@ -57,14 +57,13 @@ import { useLocation, useNavigate } from 'react-router-dom';
  * b agent (/m/agent).
  * Switching reuses upstream TopNav's sequence verbatim.
  */
-// Logo (owner, 4 Oct 2026): no x in any logo. bWalletX = gold b on black; the store bWallet flips it:
-// a yellow bar with a black b and black icons. The tab (Exchange / Market) and titles say which app it is.
+// Logo (owner, 4 Oct 2026): no x in any logo. Both editions now share bWalletX's look, gold b on black (store
+// parity, 10 Oct 2026: the yellow store bar looked unfinished beside bWalletX). X_MARK still gates the agent tools.
 const X_MARK = isBWalletX();
-const FLIP = !X_MARK;
-const BAR_BG = FLIP ? '#F5B800' : undefined;
-const ICON = FLIP ? '#010101' : '#F2F2F0';
-const ACCENT = FLIP ? '#010101' : '#F5B800';
-const RING = FLIP ? '1px solid #01010133' : '1px solid #2A2A2C';
+const BAR_BG: string | undefined = undefined;
+const ICON = '#F2F2F0';
+const ACCENT = '#F5B800';
+const RING = '1px solid #2A2A2C';
 const PAIR_LABEL = IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website';
 
 /** Padlock with a coin: Lock BSV (time-locks), not "lock the app". */

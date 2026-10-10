@@ -8,6 +8,7 @@ import type { HistoryRow } from '../wallet/txHistory';
 import type { Progress } from '../wallet/txHistoryFetch';
 import { loadPlans } from '../locks/lockApi';
 import { fetchSeries } from './market';
+import { BUY_CRYPTO_ENABLED } from '../storeBuild';
 import {
   isEstimated,
   profitUsd,
@@ -535,7 +536,8 @@ export const PortfolioScreen = ({
             className="mt-2 rounded-2xl border px-4 py-5 text-sm text-center"
             style={{ background: CARD, borderColor: LINE, color: MUTED }}
           >
-            Nothing here yet. Buy or receive some BSV and this screen will start tracking how it does.
+            Nothing here yet. {BUY_CRYPTO_ENABLED ? 'Buy or receive' : 'Receive'} some BSV and this screen will start
+            tracking how it does.
           </div>
         )}
         {tokenCount > 0 && (

@@ -1,4 +1,4 @@
-import { APP_NAME, SWAP_ENABLED } from '../storeBuild';
+import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useSwapWatcher } from '../swap/useSwapWatcher';
@@ -69,7 +69,7 @@ export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; 
   return (
     <>
       <BuyBsvCard rate={rate} onClick={() => setOpen(true)} className={className} />
-      {open && (
+      {BUY_CRYPTO_ENABLED && open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
           onReceive={() => {
@@ -147,6 +147,7 @@ const SwapPromoSkeleton = () => <div className="w-[92%] min-h-[52px] -mb-1" aria
 
 /**
  * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
+ * The store edition has the same row with Receive in place of Buy BSV and no Swap card (store parity, 10 Oct 2026).
  * The price opens the BSV view (`onPrice`, the BSV card's own handler). The "Swap into BSV" promo card below the row
  * is the only swap entry; `getAddress` gives Swap the wallet's own BSV receive address.
  */
@@ -188,9 +189,10 @@ export const BsvPriceBar = ({
     <>
       <div className="w-[92%] mb-2 flex items-stretch gap-2">
         <PriceCell rate={rate} onOpen={() => setPortfolioOpen(true)} change={change} />
+        {/* Store edition (no buying, Apple 3.1.5 / Play): the same gold cell receives instead of buying. */}
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={BUY_CRYPTO_ENABLED ? () => setOpen(true) : onReceive}
           className={`${CELL} text-sm font-extrabold`}
           style={{
             background: 'linear-gradient(135deg, #de973f, #f9dd63)',
@@ -198,7 +200,7 @@ export const BsvPriceBar = ({
             color: '#1a1300',
           }}
         >
-          Buy BSV
+          {BUY_CRYPTO_ENABLED ? 'Buy BSV' : 'Receive'}
         </button>
         <HistoryButton className={CELL} />
       </div>
@@ -240,17 +242,6 @@ export const BsvPriceBar = ({
         </Suspense>
       )}
     </>
-  );
-};
-
-/** Store edition (no Buy BSV): price · History, two equal halves. */
-export const BsvHistoryBar = ({ onPrice }: { onPrice: () => void }) => {
-  const rate = useLivePrice();
-  return (
-    <div className="w-[92%] mb-4 flex items-stretch gap-2">
-      <PriceCell rate={rate} onOpen={onPrice} />
-      <HistoryButton className={CELL} />
-    </div>
   );
 };
 
@@ -302,7 +293,7 @@ const Row = ({
   </button>
 );
 
-export const BuyBsvSheet = ({ onClose, onReceive }: { onClose: () => void; onReceive: () => void }) => {
+const BuyBsvSheetImpl = ({ onClose, onReceive }: { onClose: () => void; onReceive: () => void }) => {
   useBackClose(true, onClose);
   return createPortal(
     <div className="fixed inset-0 z-[300] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
@@ -351,3 +342,15 @@ export const BuyBsvSheet = ({ onClose, onReceive }: { onClose: () => void; onRec
     document.body,
   );
 };
+
+/**
+ * Get BSV sheet (third-party on-ramps): bWalletX only. In a store build it is a no-op component so the provider list
+ * and "Buy with a card" text are not in the bundle (Apple 3.1.5, Play), whatever the call site's own gate does.
+ */
+export const BuyBsvSheet: (p: { onClose: () => void; onReceive: () => void }) => React.ReactNode = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+)
+  ? BuyBsvSheetImpl
+  : () => null;

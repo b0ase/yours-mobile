@@ -26,6 +26,8 @@ import { potBalanceSats } from './potSend';
 import { SubscriptionCard } from './SubscriptionCard';
 import { POTS_INTRO } from '../storeBuild';
 import { AddOrderSheet, CreatePotSheet } from './CreatePotSheet';
+import { BackFundSheet } from './BackFundSheet';
+import { fundAvailable } from './fund';
 import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import {
   clearSubscribeRequest,
@@ -120,14 +122,16 @@ const PotRow = ({ id, onOpen, rate }: { id: string; onOpen: () => void; rate: nu
 };
 
 /** Settings › Pots: Monzo-style pots with standing orders (docs/POTS-SUBSCRIPTIONS-PLAN.md). */
-export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
+export const PotsScreen = ({ onClose, openFund = false }: { onClose: () => void; openFund?: boolean }) => {
   useBackClose(true, onClose);
   useTick();
   const { handleSelect } = useBottomMenu();
+  const { chromeStorageService } = useServiceContext();
   const navigate = useNavigate();
   const rate = useBsvUsd();
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [funding, setFunding] = useState(SUBSCRIPTIONS_ENABLED && openFund && fundAvailable());
   const pots = listPots();
   const request = useSubscribeRequest();
   const allSubs = listSubs()
@@ -135,6 +139,14 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
     .sort((a, b) => a.nextDue - b.nextDue);
   const anyLive = allSubs.some((x) => x.status === 'active' || x.status === 'lowFunds');
 
+  const openAddAccount = () => {
+    setCreating(false);
+    setFunding(false);
+    onClose();
+    handleSelect('settings', 'create-account');
+    const route = routeFor('settings');
+    if (route) navigate(route);
+  };
   const create = (name: string) => {
     startPotCreate(name);
     setCreating(false);
@@ -203,6 +215,19 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
             </p>
           </div>
         )}
+        {SUBSCRIPTIONS_ENABLED && fundAvailable() && (
+          <button
+            type="button"
+            onClick={() => setFunding(true)}
+            className="rounded-2xl p-3 flex flex-col gap-1 text-left"
+            style={{ background: '#F5B80018', border: `1px solid ${GOLD}55` }}
+          >
+            <span className="text-sm font-bold text-white">Back bWalletX</span>
+            <span className="text-xs" style={{ color: MUTED }}>
+              Support development with a monthly amount from its own pot. Stop any time.
+            </span>
+          </button>
+        )}
         {pots.length === 0 && (
           <p className="text-sm text-center py-6 m-0" style={{ color: MUTED }}>
             No pots yet.
@@ -226,6 +251,14 @@ export const PotsScreen = ({ onClose }: { onClose: () => void }) => {
         </button>
       </div>
       {creating && <CreatePotSheet onClose={() => setCreating(false)} onCreate={create} />}
+      {SUBSCRIPTIONS_ENABLED && funding && (
+        <BackFundSheet
+          rate={rate}
+          identityPubKey={chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey}
+          onClose={() => setFunding(false)}
+          onCreatePot={openAddAccount}
+        />
+      )}
       {open && <PotScreen id={open} rate={rate} request={request} onClose={() => setOpen(null)} />}
     </div>,
     document.body,

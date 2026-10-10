@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   allowanceSats,
   buildSheetModel,
+  isAutoGrantable,
   isRiskyRequest,
+  sheetCanTrust,
+  TRUST_SITE_BASKET,
   PermissionBundler,
   type BundleRequest,
   type PermissionBundle,
@@ -235,6 +238,52 @@ describe('allowanceSats', () => {
   test('no rate or no allowance gives 0', () => {
     expect(allowanceSats(5, undefined)).toBe(0);
     expect(allowanceSats(5, 0)).toBe(0);
+    expect(allowanceSats(0, 50)).toBe(0);
+  });
+});
+
+describe("Don't ask again on this site", () => {
+  const base = { requestID: 'r', originator: 'bchatx.com' };
+  test('routine signing and baskets can be granted without a sheet', () => {
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [1, 'bitsign auth'], counterparty: 'self' })).toBe(
+      true,
+    );
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [0, 'feed post'] })).toBe(true);
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [2, 'own key'], counterparty: 'self' })).toBe(true);
+    expect(isAutoGrantable({ ...base, type: 'basket', basket: 'bchat posts' })).toBe(true);
+  });
+  test('payments, personal details and risky key use still ask', () => {
+    expect(isAutoGrantable({ ...base, type: 'spending', spending: { satoshis: 50 } })).toBe(false);
+    expect(
+      isAutoGrantable({
+        ...base,
+        type: 'certificate',
+        certificate: { verifier: 'v', certType: 't', fields: ['email'] },
+      }),
+    ).toBe(false);
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [1, 'x'], counterparty: 'anyone' })).toBe(false);
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [1, 'x'], privileged: true })).toBe(false);
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [2, 'x'], counterparty: '02abc' })).toBe(false);
+    expect(isAutoGrantable({ ...base, type: 'basket', basket: TRUST_SITE_BASKET })).toBe(false);
+  });
+  test('the sheet offers it only when something routine is asked', () => {
+    expect(sheetCanTrust({ items: [{ ...base, type: 'spending', spending: { satoshis: 5 } }] })).toBe(false);
+    expect(
+      sheetCanTrust({
+        items: [
+          { ...base, type: 'spending', spending: { satoshis: 5 } },
+          { ...base, requestID: 'r2', type: 'protocol', protocolID: [1, 'post'] },
+        ],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('allowance in dollars', () => {
+  test('converts at the given rate and refuses a missing rate', () => {
+    expect(allowanceSats(5, 50)).toBe(10_000_000);
+    expect(allowanceSats(1, 20)).toBe(5_000_000);
+    expect(allowanceSats(5, undefined)).toBe(0);
     expect(allowanceSats(0, 50)).toBe(0);
   });
 });

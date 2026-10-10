@@ -67,6 +67,7 @@ import { groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
 import { MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { listSubs, monthlyUsd } from '../pots/pots';
+import { fundAvailable } from '../pots/fund';
 
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
 import { verifyLockTx, type VerifyResult } from './verify';
@@ -168,6 +169,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [pot, setPot] = useState<string | undefined>(undefined);
   const [openPot, setOpenPot] = useState<string | null>(null);
   const [showSubs, setShowSubs] = useState(false);
+  const [openFund, setOpenFund] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -732,6 +734,21 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               </div>
             );
           })}
+          {SUBSCRIPTIONS_ENABLED && fundAvailable() && (
+            <button
+              onClick={() => {
+                setOpenFund(true);
+                setShowSubs(true);
+              }}
+              className={`${card} text-left`}
+              style={{ ...cardStyle, border: `1px solid ${GOLD}55`, background: '#F5B80014' }}
+            >
+              <span className="text-sm font-bold text-white">Back bWalletX</span>
+              <div className="text-xs" style={{ color: MUTED }}>
+                Support development with a monthly amount from its own pot. Stop any time.
+              </div>
+            </button>
+          )}
           {SUBSCRIPTIONS_ENABLED && (
             <button onClick={() => setShowSubs(true)} className={`${card} text-left`} style={cardStyle}>
               <div className="flex justify-between items-center gap-2">
@@ -1242,7 +1259,13 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
       {showSubs && (
         <Suspense fallback={null}>
-          <PotsScreen onClose={() => setShowSubs(false)} />
+          <PotsScreen
+            openFund={openFund}
+            onClose={() => {
+              setShowSubs(false);
+              setOpenFund(false);
+            }}
+          />
         </Suspense>
       )}
       {MARKET_ENABLED && backPnee === 'card' && (

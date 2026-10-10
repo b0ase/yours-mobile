@@ -3,7 +3,6 @@ import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { useBackClose } from '../backStack';
-import { isBWalletX } from '../storeBuild';
 import { dockKey, moveInDock, removeFromDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
 import { hapticTick, startVoice, voiceSupported, type VoiceStart } from '../agent/voice';
@@ -32,7 +31,6 @@ import { itemIcon, itemLabel } from './icons';
  */
 const GOLD = '#FFD24D';
 const MUTED = '#98A2B3';
-const FLIP = !isBWalletX();
 
 type Props = {
   items: DockItem[];
@@ -347,8 +345,8 @@ const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent
         // Snug in the bar, centred, ring fully inside (owner, 8 Oct 2026; bChatX copies it).
         className="relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
-          background: FLIP ? '#F5B800' : '#010101',
-          boxShadow: `0 0 0 2px ${FLIP ? '#010101' : GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
+          background: '#010101',
+          boxShadow: `0 0 0 2px ${GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
           transform: phase === 'pressing' ? 'scale(0.94)' : listening ? 'scale(1.04)' : undefined,
           WebkitTouchCallout: 'none',
           WebkitUserSelect: 'none',
@@ -363,7 +361,7 @@ const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent
               cy="31"
               r="29"
               fill="none"
-              stroke={phase === 'cancelling' ? MUTED : FLIP ? '#010101' : GOLD}
+              stroke={phase === 'cancelling' ? MUTED : GOLD}
               strokeWidth="3"
               strokeLinecap="round"
               pathLength={100}
@@ -374,20 +372,7 @@ const HomeButton = ({ onHome, onAgent, disabled }: { onHome: () => void; onAgent
             />
           </svg>
         )}
-        {FLIP ? (
-          <svg viewBox="23 8 74 100" width={22} height={30} aria-hidden>
-            <mask id="bdock">
-              <rect x="0" y="0" width="140" height="140" fill="#fff" />
-              <circle cx="60" cy="72" r="15" fill="#000" />
-            </mask>
-            <g fill="#010101" mask="url(#bdock)">
-              <polygon points="45,12 45,76 27,76 27,30" />
-              <circle cx="60" cy="72" r="33" />
-            </g>
-          </svg>
-        ) : (
-          <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
-        )}
+        <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
       </button>
     </>
   );
