@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { resolveImageUrl } from '../../hooks/useIdentity';
-import { getLocalAvatar, onAvatarChange, pickAvatar, resolveAvatarUrl } from './avatar';
+import { bavatarDataUri, getLocalAvatar, onAvatarChange, pickAvatar, resolveAvatarUrl } from './avatar';
 
-/** The current (or given) account's avatar URL, '' = default gold b. Re-renders on change. */
+/** The current (or given) account's avatar URL; with no picture, its bAvatar ('' = gold b). Re-renders on change. */
 export const useAvatar = (identityAddress?: string) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const read = () => {
@@ -16,7 +16,8 @@ export const useAvatar = (identityAddress?: string) => {
       socialAvatar: acct?.settings?.socialProfile?.avatar,
       accountIcon: acct?.icon,
     });
-    if (!raw) return '';
+    // No picture of its own: the account's generated bAvatar (computed locally from its identity key).
+    if (!raw) return bavatarDataUri(acct?.pubKeys?.identityPubKey);
     try {
       return apiContext?.services ? resolveImageUrl(raw, apiContext) : resolveAvatarUrl(raw);
     } catch {

@@ -377,7 +377,11 @@ function makeHandlers({
       if (s !== 200) return [s, row];
       // No picture of their own: their generated bAvatar, drawn from the identity key (bChatX
       // /api/bavatar, the same picture the wallet draws), so other BSV apps show one too.
-      const avatar = row.avatar || (/^0[23][0-9a-f]{64}$/.test(row.identity_key || '') ? `https://www.bchatx.com/api/bavatar/${row.identity_key}.png` : '');
+      const avatar =
+        row.avatar ||
+        (/^0[23][0-9a-f]{64}$/.test(row.identity_key || '')
+          ? `https://www.bchatx.com/api/bavatar/${row.identity_key}.png`
+          : '');
       return [200, { name: row.display_name || row.alias, avatar }];
     },
 

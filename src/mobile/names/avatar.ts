@@ -1,3 +1,4 @@
+import { bavatarSvg } from '../bavatar/bavatar';
 /**
  * Account avatar. Shown next to the handle in the identity row under the TopNav, the account
  * drawer and the handle flow. Sources, first one set wins:
@@ -115,4 +116,21 @@ export async function resizeAvatar(file: File, max = 256, quality = 0.85): Promi
   canvas.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
   bmp.close?.();
   return canvas.toDataURL('image/jpeg', quality);
+}
+
+/**
+ * bAvatars phase 1 (owner, 11 Oct 2026): an account with no picture of its own shows its generated
+ * bAvatar, drawn here from the identity key with the same code bChatX uses (../bavatar/bavatar.ts,
+ * a copy of bit-sign's lib/bavatar), so the wallet and bChatX show the same picture with no network.
+ */
+const bavatarCache = new Map<string, string>();
+export function bavatarDataUri(identityPubKey: string | null | undefined): string {
+  const key = String(identityPubKey || '').toLowerCase();
+  if (!/^0[23][0-9a-f]{64}$/.test(key)) return '';
+  let uri = bavatarCache.get(key);
+  if (!uri) {
+    uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(bavatarSvg(key, { size: 128 }));
+    bavatarCache.set(key, uri);
+  }
+  return uri;
 }

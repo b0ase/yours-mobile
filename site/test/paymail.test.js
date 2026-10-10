@@ -115,7 +115,9 @@ describe('register', () => {
     expect((await h.verify({ handle: 'alice@pay.test', pubkey: '02' + '1'.repeat(64) }))[1].match).toBe(false);
     expect((await h.profile({ handle: 'alice@pay.test' }))[1].name).toBe('Alice');
     // No picture of her own: the profile points at her generated bAvatar, by identity key.
-    expect((await h.profile({ handle: 'alice@pay.test' }))[1].avatar).toBe(`https://www.bchatx.com/api/bavatar/${u.identityKey}.png`);
+    expect((await h.profile({ handle: 'alice@pay.test' }))[1].avatar).toBe(
+      `https://www.bchatx.com/api/bavatar/${u.identityKey}.png`,
+    );
     expect((await h.ord({ handle: 'alice@pay.test' }))[1].address).toBe(ord);
     expect((await h.lookup({ key: u.identityKey }))[1].paymail).toBe('alice@pay.test');
   });
