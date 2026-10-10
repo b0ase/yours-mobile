@@ -95,6 +95,12 @@ export interface ChatSigner {
    * Never derived from an email or a provider (owner, 9 Oct 2026: users choose their handle).
    */
   handle?: () => Promise<string | null>;
+  /**
+   * The wallet's identity key and its BRC-43 signature over this sign-in's nonce (bit-sign
+   * lib/adopt-wallet-name.ts). Lets bit-sign swap an auto `yours-xxxxxxxx` handle for the
+   * paymail name the owner chose; the server looks the name up itself from the key.
+   */
+  identityProof?: (nonce: string) => Promise<{ identity_key: string; identity_signature: string } | null>;
 }
 
 export interface SignInItem {
@@ -215,6 +221,7 @@ export class BchatClient {
         false,
       );
       const signed = await signer.sign(ch.message);
+      const proof = await signer.identityProof?.(ch.nonce).catch(() => null);
       // The nonce is bound to the address it was issued for; if the wallet
       // signed with a different key, ask again for that one.
       if (signed.address !== address) {
@@ -241,6 +248,7 @@ export class BchatClient {
           intent: 'sign-in',
           // For the "New sign-in to bChat" alert only (bit-sign lib/sign-in-alert.ts); not used for auth.
           client: signInClient(),
+          ...(proof ?? {}),
         },
         false,
       );
