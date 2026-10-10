@@ -106,6 +106,7 @@ const friendlyBasketName = (name?: string): string => {
     'admin basket-access': 'Basket access (admin)',
     'admin spending-authorization': 'Spending authorizations (admin)',
     'admin certificate-access': 'Certificate access (admin)',
+    'bwalletx.trust-site': 'Sign-in and signing without asking',
   };
   return map[name] ?? name;
 };
@@ -123,6 +124,7 @@ const formatPermissionDetail = (perm: PermissionToken, spent?: number): string =
       return `${name}${level}`;
     }
     case 'basket':
+      if (perm.basketName === 'bwalletx.trust-site') return friendlyBasketName(perm.basketName);
       return `Can access: ${friendlyBasketName(perm.basketName)}`;
     case 'spending': {
       const limit =
