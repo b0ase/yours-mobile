@@ -8,9 +8,16 @@ import {
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
-import { syncAddresses, syncMessages, sweepDeposit, createContext as createActionContext } from '@1sat/actions';
+import {
+  syncAddresses,
+  syncMessages,
+  sweepDeposit,
+  internalizeBeef,
+  createContext as createActionContext,
+} from '@1sat/actions';
+import { BSV21_BASKET, DEPOSIT_BASKET, FUNDING_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
 import { createAssetPermissionModules } from '@1sat/permission-module';
-import type { WalletInterface } from '@bsv/sdk';
+import { Transaction, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
 import { ChromeStorageService } from './services/ChromeStorage.service';
 import { MESSAGEBOX_URL } from './utils/constants';
 import type { Account, StorageConfig } from './services/types/chromeStorage.types';
@@ -22,6 +29,7 @@ import { reconcileStorage } from './services/storageReconcileBackground';
 import { showOneSatPrompt } from './services/oneSatPrompt';
 import { runTokenRecovery } from './services/tokenRecoveryWallet';
 import { planAddressScan, resetSyncCursor } from './services/addressScan';
+import { checkReceiveAddresses, normOutpoint, setArriving } from './services/receiveGuard';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -416,6 +424,85 @@ export const initWallet = async (
       sendSyncStatus({ status: 'sweep-failed', error: err instanceof Error ? err.message : String(err) });
     });
 
+  // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
+  // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
+  const runReceiveGuard = async () => {
+    const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
+    const addresses = [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
+    const walletOutpoints = async () => {
+      const all: string[] = [];
+      for (const basket of [FUNDING_BASKET, DEPOSIT_BASKET, ONESAT_BASKET, BSV21_BASKET]) {
+        try {
+          const r = await baseWallet.listOutputs({ basket, limit: 10000 });
+          for (const o of r.outputs) all.push(o.outpoint);
+        } catch {
+          /* a basket that can't be read just isn't counted as known */
+        }
+      }
+      return all;
+    };
+    const outputSats = async (outpoint: string) => {
+      const [txid, vout] = normOutpoint(outpoint).split('.');
+      const raw = await syncContext.services.beef.getRawTx(txid);
+      return Transaction.fromBinary(Array.from(raw)).outputs[Number(vout)]?.satoshis ?? 0;
+    };
+    const first = await checkReceiveAddresses(addresses, {
+      ownerSync: (a) => syncContext.services.owner.sync(a),
+      outputSats,
+      walletOutpoints,
+    });
+    if (!first.satoshis) {
+      setArriving(0);
+      return;
+    }
+    console.warn(
+      `[receiveGuard] ${first.satoshis} sats at our receive addresses missing from storage; retrying`,
+      first,
+    );
+    const { publicKey: senderIdentityKey } = await adminWallet.getPublicKey({ identityKey: true });
+    const derivations = new Map<string, unknown>();
+    for (const address of syncContext.addressManager.getAddresses()) {
+      const d = syncContext.addressManager.getDerivation(address);
+      if (!d) continue;
+      derivations.set(address, {
+        outputIndex: 0,
+        derivationPrefix: d.derivationPrefix,
+        derivationSuffix: d.derivationSuffix,
+        senderIdentityKey,
+        protocolID: ONESAT_PROTOCOL as WalletProtocol,
+        counterparty: 'self',
+      });
+    }
+    for (const txid of first.txids) {
+      try {
+        const beef = await syncContext.services.beef.getBeef(txid);
+        await internalizeBeef({
+          beef,
+          addressDerivations: derivations as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
+          wallet: adminWallet,
+          services: syncContext.services,
+          chain,
+        });
+        console.log(`[receiveGuard] internalized ${txid}`);
+      } catch (err) {
+        console.error(`[receiveGuard] internalize ${txid} failed:`, err);
+        sendSyncStatus({ status: 'receive-failed', txid, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    await sweepDeposit
+      .execute(actionCtx, {})
+      .catch((err: unknown) => console.error('[receiveGuard] sweep failed:', err));
+    const after = await checkReceiveAddresses(addresses, {
+      ownerSync: (a) => syncContext.services.owner.sync(a),
+      outputSats,
+      walletOutpoints,
+    });
+    // Whatever is still missing counts as arriving, so the balance never shows $0 for it.
+    setArriving(after.satoshis);
+    if (after.satoshis) sendSyncStatus({ status: 'arriving', satoshis: after.satoshis });
+  };
+  const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
+
   console.log('[initWallet] Starting address sync...');
   sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
 
@@ -434,6 +521,7 @@ export const initWallet = async (
       // Token outputs no address scan can see (change of a send this storage
       // never recorded). Cheap when there is nothing to find; cached per tx.
       recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
+      void guard();
       if (options?.afterSync) {
         try {
           await options.afterSync({ storage });
@@ -446,6 +534,7 @@ export const initWallet = async (
       const message = error instanceof Error ? error.message : String(error);
       sendSyncStatus({ status: 'error', message });
       console.error('[initWallet] Address sync failed:', error);
+      void guard();
       recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
     });
 
