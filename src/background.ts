@@ -64,6 +64,8 @@ import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/
 import { finishInterruptedReconcile, reconcileStorage } from './services/storageReconcileBackground';
 import { reconcileOutcome } from './services/storageReconcile';
 import { USB_HANDLE_DB_NAME } from './services/UsbKey.service';
+import { CALL_NOTIFICATION_PREFIX, CALL_RING_ALARM, callNotification, callsToAnnounce, fetchIncoming } from './services/callRinger';
+import { openCallsWindow } from './mobile/calls/popout';
 import {
   isUsbRecoverySession,
   readUsbLastSeen,
@@ -713,6 +715,44 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await chromeStorageService.clearPassKey();
     await chromeStorageService.update({ isLocked: true });
   }
+});
+
+// Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
+// panel or calls window is open, a notification per new incoming call; clicking opens the Calls window.
+chrome.alarms.create(CALL_RING_ALARM, { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== CALL_RING_ALARM || !accountContext) return;
+  const base = accountContext.baseWallet;
+  try {
+    const incoming = await fetchIncoming((u, i) => fetch(u, i), {
+      identityKey: async () => (await base.getPublicKey({ identityKey: true })).publicKey,
+      sign: async (message) => {
+        const { signature } = await base.createSignature({
+          data: Array.from(new TextEncoder().encode(message)),
+          protocolID: [2, 'bwallet calls'],
+          keyID: '1',
+          counterparty: 'anyone',
+        });
+        return signature.map((b) => b.toString(16).padStart(2, '0')).join('');
+      },
+    });
+    const stored = await chrome.storage.session.get('bwxRungCalls').catch(() => ({}) as Record<string, unknown>);
+    const seen = new Set<string>(Array.isArray(stored.bwxRungCalls) ? (stored.bwxRungCalls as string[]) : []);
+    const fresh = callsToAnnounce(incoming, seen, activePopupPorts.size > 0);
+    for (const c of fresh) {
+      const n = callNotification(c);
+      chrome.notifications?.create(n.id, n.options);
+      seen.add(c.id);
+    }
+    if (fresh.length) await chrome.storage.session.set({ bwxRungCalls: [...seen].slice(-50) }).catch(() => undefined);
+  } catch (e) {
+    console.warn('[background] call ring check failed:', e instanceof Error ? e.message : e);
+  }
+});
+chrome.notifications?.onClicked?.addListener((id) => {
+  if (!id.startsWith(CALL_NOTIFICATION_PREFIX)) return;
+  chrome.notifications.clear(id);
+  openCallsWindow(chrome as never);
 });
 
 // Forward declarations for the prompt-window launchers (defined inside the
