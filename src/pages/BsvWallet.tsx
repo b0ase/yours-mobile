@@ -2,7 +2,7 @@ import { validate } from 'bitcoin-address-validation';
 import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
 import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
 import { withoutQuarantined } from '../mobile/airdrops/quarantine';
-import { BsvHistoryBar, BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
+import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
 import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
 import { phoneLayoutOn } from '../mobile/phone/flag';
 import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
@@ -1321,17 +1321,15 @@ export const BsvWallet = () => {
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
-        {BUY_CRYPTO_ENABLED && (
-          <BsvPriceBar
-            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
-            onPrice={openBsvView}
-            getAddress={getSwapAddress}
-            bsvSats={Math.round(bsvBalance * 100_000_000)}
-            mneeUsd={services.mnee ? mneeBalance : 0}
-            tokenCount={bsv21s.length}
-          />
-        )}
-        {!BUY_CRYPTO_ENABLED && <BsvHistoryBar onPrice={openBsvView} />}
+        {/* One top row for both editions (store parity): the store build swaps Buy BSV for Receive, no Swap card. */}
+        <BsvPriceBar
+          onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+          onPrice={openBsvView}
+          getAddress={getSwapAddress}
+          bsvSats={Math.round(bsvBalance * 100_000_000)}
+          mneeUsd={services.mnee ? mneeBalance : 0}
+          tokenCount={bsv21s.length}
+        />
 
         {/* ── Profile avatar ── */}
         <Show when={avatarReady}>

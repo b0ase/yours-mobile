@@ -179,8 +179,18 @@ export const APP_NAME = appNameFor();
  * The same gates as plain constants, for JSX: Rollup folds `!STORE_BUILD` at build time, so the store bundle
  * doesn't even contain the hidden screens' text (a function call isn't folded).
  */
-export const BUY_CRYPTO_ENABLED: boolean = !STORE_BUILD;
-export const PAID_FEATURES_ENABLED: boolean = !STORE_BUILD;
+// Literal env checks (like the gates above): `!STORE_BUILD` was not folded, so the Buy BSV sheet and its provider
+// list were still in the store bundle (store parity, 10 Oct 2026).
+export const BUY_CRYPTO_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+export const PAID_FEATURES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 
 /**
  * Feed bad language (feed/language.ts). Store edition: slurs hidden with no reveal (names read "Hidden
