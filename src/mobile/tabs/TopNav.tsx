@@ -284,7 +284,7 @@ const TopNavBar = () => {
             ))}
           </div>
           <div className="shrink-0 border-t border-white/5 px-2 py-2">
-            {action(<Plus size={16} color="#fff" />, 'Add account', () => go('create-account'))}
+            {action(<Plus size={16} color="#fff" />, 'Add account', () => go('restore-account'))}
             {X_MARK &&
               action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
                 startAgentCreate();
