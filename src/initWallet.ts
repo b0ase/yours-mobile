@@ -20,6 +20,8 @@ import { initSyncContext, type SyncContext } from './initSyncContext';
 import { refileLegacyBaskets } from './services/legacyBaskets';
 import { reconcileStorage } from './services/storageReconcileBackground';
 import { showOneSatPrompt } from './services/oneSatPrompt';
+import { runTokenRecovery } from './services/tokenRecoveryWallet';
+import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
 // extension ID, as ChromeCWI sends it: toolbox permission checks reject a URL
@@ -81,6 +83,8 @@ export interface AccountContext {
   permissionStore: IndexedDbPermissionStore;
   setActiveStorage: (target: 'local' | string) => Promise<void>;
   addRemote: (url: string) => Promise<void>;
+  /** Find and import token outputs the wallet owns on chain but has no record of (tokenRecovery.ts). */
+  recoverTokens: (options?: TokenRecoveryOptions) => Promise<TokenRecoveryResult>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -361,6 +365,15 @@ export const initWallet = async (
     await stampDataVersion(2);
   }
 
+  const recoverTokens = (recoveryOptions?: TokenRecoveryOptions) =>
+    runTokenRecovery({
+      wallet: adminWallet,
+      services: syncContext.services,
+      identityWif: keys.identityWif,
+      chain,
+      options: recoveryOptions,
+    });
+
   console.log('[initWallet] Starting address sync...');
   sendSyncStatus({ status: 'start', addressCount: maxKeyIndex + 1 });
 
@@ -374,6 +387,9 @@ export const initWallet = async (
     .then(async (result) => {
       sendSyncStatus({ status: 'complete', ...result });
       console.log('[initWallet] Address sync complete:', result);
+      // Token outputs no address scan can see (change of a send this storage
+      // never recorded). Cheap when there is nothing to find; cached per tx.
+      recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
       if (options?.afterSync) {
         try {
           await options.afterSync({ storage });
@@ -386,6 +402,7 @@ export const initWallet = async (
       const message = error instanceof Error ? error.message : String(error);
       sendSyncStatus({ status: 'error', message });
       console.error('[initWallet] Address sync failed:', error);
+      recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
     });
 
   // Sync incoming paymail payments from the message box (fire-and-forget)
@@ -414,6 +431,7 @@ export const initWallet = async (
     permissionStore,
     setActiveStorage,
     addRemote,
+    recoverTokens,
     close,
   };
 };
