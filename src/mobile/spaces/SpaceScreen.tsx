@@ -66,9 +66,11 @@ import {
   moderatable,
   reportable,
   parseGreenRoom,
+  takeStageNote,
   wantsWakeLock,
   type GreenRoom,
 } from './model';
+import { ModeratorsSheet } from './ModeratorsSheet';
 import { ScreenAwake, wakeLockSupported } from './wakeLock';
 import {
   alwaysHereCaption,
@@ -522,6 +524,7 @@ const SpaceScreenInner = ({
   const open24 = alwaysOpenProp || roomMeta.alwaysOpen;
   const awake = useMemo(() => new ScreenAwake(), []);
   const [note, setNote] = useState('');
+  const [modsOpen, setModsOpen] = useState(false);
   // A denied mic/camera stays on screen (with Open Settings) until fixed or dismissed.
   const [denied, setDenied] = useState<MediaKind | null>(null);
   const refused = (kind: MediaKind, e: unknown, other: string) =>
@@ -794,7 +797,9 @@ const SpaceScreenInner = ({
   const raised = !!state.me?.handRaisedAt;
   const canHand = mayRaiseHand({ anonymous: anon, role: myRole });
   const recording = !!state.recording;
-  const moderator = mayModerate({ isHost, roomBoss: canInvite });
+  const moderator = mayModerate({ isHost, roomBoss: canInvite || !!state.mayModerate });
+  /** Open stage (the Lounge): "Join the stage" takes a seat; full → the queue. */
+  const openStage = !!state.openStage || open24;
   /** Always-open: whoever started is just "on stage"; nobody ends it. */
   const canEnd = mayEndSpace({ isHost, alwaysOpen: open24 });
 
@@ -894,6 +899,19 @@ const SpaceScreenInner = ({
     void needsBatteryAsk().then((ask) => mounted.current && ask && setBatteryAsk(true));
   }, [phase]);
   const raiseHand = () => {
+    if (openStage && !raised) {
+      void client
+        .spaceAction(ticker, { action: 'take_stage' })
+        .then((d) => {
+          const o = (d && typeof d === 'object' ? d : {}) as Record<string, unknown>;
+          const n = takeStageNote(o.outcome, o.error);
+          if (n) setNote(n);
+          const next = applyParticipantsReply(prev.current ?? state, d, me);
+          if (next) apply(next);
+        })
+        .catch((e) => setNote(errText(e)));
+      return;
+    }
     if (!raised) setNote('Hand raised. The host can bring you on stage.');
     void act({ action: 'hand', raised: !raised });
   };
@@ -911,6 +929,7 @@ const SpaceScreenInner = ({
       canHand={canHand}
       raised={raised}
       onRaiseHand={raiseHand}
+      openStage={openStage}
       menuFor={(p) =>
         moderatable(p, { me, spaceHost: state.space?.host ?? '', moderator }) || reportable(p, me)
           ? () => setMenuFor(p)
@@ -1019,6 +1038,24 @@ const SpaceScreenInner = ({
         <div className="mt-5 flex items-center gap-2 text-sm" style={{ color: MUTED }}>
           <Users size={16} />
           <span className="flex-1">{audienceLine(audience)}</span>
+          {state.mayAppoint && !anon ? (
+            <button
+              onClick={() => setModsOpen(true)}
+              className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
+              style={{ border: '1px solid #ffffff2a', color: '#fff' }}
+            >
+              Moderators
+            </button>
+          ) : null}
+          {modsOpen ? (
+            <ModeratorsSheet
+              ticker={ticker}
+              client={client}
+              initial={state.moderators ?? []}
+              onClose={() => setModsOpen(false)}
+              onChange={(moderators) => apply({ ...(prev.current ?? state), moderators })}
+            />
+          ) : null}
           {state.mayRecord && !anon ? (
             <button
               onClick={() => {
@@ -1141,7 +1178,11 @@ const SpaceScreenInner = ({
           Listening anonymously
         </span>
       ) : (
-        <CtlButton label={raised ? 'Lower hand' : 'Raise hand'} onClick={raiseHand} active={raised}>
+        <CtlButton
+          label={openStage ? (raised ? 'Leave the queue' : 'Join the stage') : raised ? 'Lower hand' : 'Raise hand'}
+          onClick={openStage && raised ? () => void act({ action: 'hand', raised: false }) : raiseHand}
+          active={raised}
+        >
           <Hand size={20} color={raised ? '#010101' : '#fff'} />
         </CtlButton>
       )}

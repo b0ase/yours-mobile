@@ -37,6 +37,16 @@ export interface SpaceState {
   recordingSince?: string | null;
   /** I may start/stop a recording (room boss: host, room admin, named host). bit-sign decides. */
   mayRecord?: boolean;
+  /** Open stage (the always-open Lounge, or an open room): one tap takes a seat, full → queue. */
+  openStage?: boolean;
+  /** Stage seats in this Space (16 on the Lounge's open stage). */
+  stageCap?: number;
+  /** I may mute / move / remove speakers (host, room admin, named host or appointed moderator). */
+  mayModerate?: boolean;
+  /** I may appoint moderators (room owner's people). */
+  mayAppoint?: boolean;
+  /** The appointed moderators; only sent to people who may appoint. */
+  moderators?: string[];
 }
 
 export interface SpaceToken {
@@ -91,7 +101,37 @@ export const parseSpaceState = (data: unknown, me: string): SpaceState => {
     recording: rec?.active === true,
     recordingSince: rec?.active === true ? str(rec.started_at) : null,
     mayRecord: o.may_record === true,
+    ...parseStageFacts(o),
   };
+};
+
+/** Open stage + moderation facts from a Space reply (bit-sign rooms/[ticker]/space GET). */
+export const parseStageFacts = (o: Record<string, unknown>) => ({
+  openStage: o.open_stage === true,
+  stageCap: typeof o.stage_cap === 'number' && o.stage_cap > 0 ? o.stage_cap : undefined,
+  mayModerate: o.may_moderate === true,
+  mayAppoint: o.may_appoint === true,
+  moderators: Array.isArray(o.moderators) ? o.moderators.filter((h): h is string => typeof h === 'string') : undefined,
+});
+
+/** The listener's stage button: "Join the stage" on an open stage, "Request to speak" otherwise. */
+export const stageButtonLabel = (o: { openStage: boolean; raised: boolean }) =>
+  o.openStage
+    ? o.raised
+      ? 'Waiting for a seat'
+      : 'Join the stage'
+    : o.raised
+      ? '✋ Hand raised'
+      : '✋ Request to speak';
+
+export const OPEN_STAGE_FULL = "Stage full. You'll get a seat when one frees up.";
+
+/** What to tell someone after "Join the stage" (bit-sign take_stage `outcome`). */
+export const takeStageNote = (outcome: unknown, error?: unknown): string | null => {
+  if (typeof error === 'string' && error) return error;
+  if (outcome === 'speaker') return "You're on stage. Your mic is off: tap it to talk.";
+  if (outcome === 'queued') return OPEN_STAGE_FULL;
+  return null;
 };
 
 // ── Green room (bit-sign rooms/[ticker]/space/green-room) ──────────────────────────────────
