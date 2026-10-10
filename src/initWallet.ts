@@ -381,6 +381,7 @@ export const initWallet = async (
       identityWif: keys.identityWif,
       chain,
       options: recoveryOptions,
+      addresses: () => [...syncContext.addressManager.getAddresses(), keys.identityAddress],
     });
 
   // Scan past maxKeyIndex (addresses handed out on other devices) and rescan history once whenever that window
