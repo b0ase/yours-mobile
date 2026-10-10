@@ -90,6 +90,8 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
+import { LoungeCard } from '../chat/LoungeCard';
+import { isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
@@ -327,6 +329,7 @@ const Conversation = ({
   hidden,
   onMessageMenu = null,
   bell = true,
+  autoJoinSpace = false,
 }: {
   client: BchatClient;
   room: ChatRoom;
@@ -352,6 +355,8 @@ const Conversation = ({
   onMessageMenu?: ((m: ChatMessage) => void) | null;
   /** Push bell (All / Mentions / Off). Off for DMs, which always notify. */
   bell?: boolean;
+  /** Opened from the Lounge card's Join: go straight into the room's always-open Space. */
+  autoJoinSpace?: boolean;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
@@ -723,6 +728,7 @@ const Conversation = ({
           createdBy={room.created_by_handle}
           gated={!!entry}
           spaceOpen={roomSpaceOpen(room)}
+          autoOpen={autoJoinSpace}
         />
       )}
       <div
@@ -2033,7 +2039,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [query, setQuery] = useState('');
   // Chat filters (bWalletX only): All, or Spaces = token rooms with a space on (spaces/SpacesFilter.tsx).
   const [roomFilter, setRoomFilter] = useState<RoomFilter>('all');
-  const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null } | null>(null);
+  const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null; joinSpace?: boolean } | null>(null);
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(
     null,
   );
@@ -2296,13 +2302,34 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       (a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room),
     );
     // The bWallet Lounge is pinned at the top (owner, 9 Oct 2026).
-    return loungeFirst(sorted, (x) => (x.kind === 'open' ? x.room.ticker : x.item.e.room?.ticker));
+    // The bWallet Lounge is the yellow card above this list (LoungeCard), so it isn't a row here.
+    return loungeFirst(sorted, (x) => (x.kind === 'open' ? x.room.ticker : x.item.e.room?.ticker)).filter(
+      (x) => !(x.kind === 'open' && isLounge(x.room.ticker)),
+    );
   }, [myOpen, tokenMine]);
 
-  const openOpenRoom = (room: ChatRoom) => {
+  const openOpenRoom = (room: ChatRoom, joinSpace = false) => {
     setRooms((cur) => cur?.map((r) => (r.ticker === room.ticker ? { ...r, unread: 0 } : r)) ?? cur);
     setHidden(new Set());
-    setOpen({ room, entry: null });
+    setOpen({ room, entry: null, joinSpace });
+  };
+  /** The pinned Lounge card: open (or first join) the Lounge, optionally straight into its Space. */
+  const openLounge = async (joinSpace: boolean) => {
+    const mine = (rooms ?? []).find((r) => isLounge(r.ticker));
+    if (mine) return openOpenRoom(mine, joinSpace);
+    try {
+      await client.joinOpenRoom({ ticker: LOUNGE_TICKER });
+      openOpenRoom(
+        stubRoom(LOUNGE_TICKER, 'bWallet Lounge', {
+          metadata: { kind: 'open', open: { visibility: 'public', official: true } },
+        }),
+        joinSpace,
+      );
+      refresh();
+    } catch (e) {
+      if (e instanceof ChatApiError && e.status === 401) return authLost();
+      setListError(errText(e));
+    }
   };
   const stubRoom = (ticker: string, name: string, extra: Partial<ChatRoom> = {}): ChatRoom => ({
     id: ticker,
@@ -2670,6 +2697,17 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
         {handle && rooms && (!BSPACES_ENABLED || roomFilter === 'all') && (
           <>
+            <LoungeCard
+              client={client}
+              room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
+              me={handle}
+              preview={(() => {
+                const r = (rooms ?? []).find((x) => isLounge(x.ticker));
+                return r ? previewText(r, handle) : '';
+              })()}
+              onOpen={() => void openLounge(false)}
+              onJoin={() => void openLounge(true)}
+            />
             <ListLabel>Your rooms</ListLabel>
             {yours.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
@@ -2786,6 +2824,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           client={client}
           room={open.room}
           entry={open.entry}
+          autoJoinSpace={!!open.joinSpace}
           me={handle}
           online={online}
           onAuthLost={authLost}
