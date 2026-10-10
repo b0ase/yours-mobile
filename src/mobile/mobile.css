@@ -347,6 +347,65 @@ body,
   /* Secondary text and icons brighten as the card turns gold, to keep contrast. */
   --bw-wcard-muted: color-mix(in srgb, #8e8e89, #fff4d8 calc(var(--gold) * 100%));
 }
+/* bWallet (store) edition: a yellow card with black text (WalletCard YELLOW_CARD). Contrast on the darkest yellow
+   (#e0a400): text #0b0b0c 8.9:1, muted #3d3000 5.9:1, ok-green #044a23 4.7:1, flashes 4.7:1 or more. */
+.bw-wcard.is-yellow .bw-wcard-face {
+  background:
+    linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.22) 48%, transparent 64%),
+    radial-gradient(120% 90% at 0% 0%, #ffe680 0%, transparent 60%),
+    linear-gradient(160deg, #ffd84d 0%, #f5b800 55%, #e0a400 100%);
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  color: #0b0b0c;
+  --bw-wcard-muted: #3d3000;
+  --bw-wcard-ok: #044a23;
+}
+.bw-wcard.is-yellow .bw-wcard-handle,
+.bw-wcard.is-yellow .bw-wcard-addr,
+.bw-wcard.is-yellow .bw-wcard-since b {
+  color: #0b0b0c;
+}
+.bw-wcard.is-yellow .bw-wcard-getname,
+.bw-wcard.is-yellow .bw-wcard-idwarn {
+  color: #ffd24d;
+  background: #0b0b0c;
+}
+.bw-wcard.is-yellow .bw-wcard-retry {
+  color: #0b0b0c;
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.3);
+}
+.bw-wcard.is-yellow .bw-live-tick,
+.bw-wcard.is-yellow .bw-live-session {
+  background: rgba(0, 0, 0, 0.82);
+  border-color: rgba(0, 0, 0, 0.9);
+}
+.bw-wcard.is-yellow .bw-live-bar {
+  background: rgba(0, 0, 0, 0.18);
+}
+.bw-wcard.is-yellow .bw-live-bar > span {
+  background: #0b0b0c;
+}
+.bw-wcard.is-yellow .bw-wcard-usd.bw-live-flash-up {
+  animation-name: bw-live-up-dark;
+}
+.bw-wcard.is-yellow .bw-wcard-usd.bw-live-flash-down {
+  animation-name: bw-live-down-dark;
+}
+@keyframes bw-live-up-dark {
+  0%,
+  30% {
+    color: #044a23;
+  }
+}
+@keyframes bw-live-down-dark {
+  0%,
+  30% {
+    color: #740b11;
+  }
+}
 .bw-wcard-face .bw-wcard-icon svg,
 .bw-wcard-face .bw-wcard-addr svg,
 .bw-wcard-face .bw-wcard-sync svg {
