@@ -169,7 +169,7 @@ export const BsvPriceBar = ({
         <HistoryButton className={CELL} />
       </div>
       {swapOn && SwapPromo && (
-        <Suspense fallback={<div className="mb-4" />}>
+        <Suspense fallback={<div className="mb-2" />}>
           <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
         </Suspense>
       )}
