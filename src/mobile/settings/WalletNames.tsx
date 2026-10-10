@@ -3,6 +3,7 @@ import { AtSign, BadgeCheck } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { listPaymails, unlinkPaymail, type WalletName } from '../names/paymail';
 import { setPaymail } from '../names/accountName';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -82,10 +83,10 @@ export const WalletNames = () => {
         </p>
       )}
       {error && (
-        <p className="text-[11px] m-0 mt-1" style={{ color: '#FDA29B' }}>
+<div className="flex flex-col gap-1.5"><p className="text-[11px] m-0 mt-1" style={{ color: '#FDA29B' }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
     </div>
   );
 };

@@ -24,6 +24,7 @@ import { hide, keep, markSeen, type AirdropItem } from './inbox';
 import { trustIssuer } from './quarantine';
 import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
 import { useAirdrops } from './useAirdrops';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const CARD = '#17191E';
 const MUTED = '#98A2B3';
@@ -296,7 +297,9 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
         />
         Only show airdrops from issuers I&apos;ve kept before
       </label>
-      {error && <p className="text-xs text-[#F97066] m-0">{error}</p>}
+      {error && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{error}</p><ErrorActions message={String(error)} /></div>
+)}
       {!visible.length && (
         <p className="text-xs text-center py-4 m-0" style={{ color: MUTED }}>
           {loading ? 'Checking your history…' : 'No unstamped items.'}

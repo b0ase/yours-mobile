@@ -10,6 +10,7 @@ import { marketFeeSats } from '../market/fee';
 import { buyStrategy, listStrategies, ownedStrategyOutpoints, priceSats, unlockStrategy, type Listing } from './market';
 import { SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
 import { rememberStrategy, myStrategies } from './myStrategies';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -170,10 +171,10 @@ export const StrategiesMarket = () => {
         </p>
       )}
       {error && (
-        <p className="text-xs m-0" style={{ color: '#F97066' }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs m-0" style={{ color: '#F97066' }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
       {items?.length === 0 && (
         <p className="text-xs text-center py-8 m-0" style={{ color: MUTED }}>
           No strategies for sale yet. Publish yours from an agent account (Settings › Agents › Strategy › Publish &amp;

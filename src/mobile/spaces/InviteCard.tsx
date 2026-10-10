@@ -12,6 +12,7 @@ import { BuyTokenButton, OpenTokenRoomButton } from '../chat/OpenTokenRoomButton
 import { parseSpaceState } from './model';
 import { parsePage, parseSpaceInvite, type SpacePage } from './invite';
 import { DoorButton } from './DoorButton';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -135,7 +136,9 @@ export const InviteCard = ({
               </button>
             </>
           )}
-          {error && <p className="mt-2 text-sm">{error}</p>}
+          {error && (
+<div className="flex flex-col gap-1.5"><p className="mt-2 text-sm">{error}</p><ErrorActions message={String(error)} /></div>
+)}
         </div>
         <button onClick={onClose} className="p-1" aria-label="Dismiss invite">
           <X size={18} color={MUTED} />

@@ -22,6 +22,7 @@ import {
   type BackupExit,
   type BackupMethod,
 } from './backupState';
+import { ErrorActions } from '../errors/ErrorActions';
 
 type Props = {
   /** How the user may leave without backing up (backupState.backupExit). */
@@ -215,10 +216,10 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
         </button>
       </div>
       {error && (
-        <p className="text-xs mt-2 self-start" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2 self-start" style={{ color: RED }}>
           {error}
-        </p>
-      )}
+        </p><ErrorActions message={String(error)} /></div>
+)}
       <button
         type="submit"
         disabled={!password || busy}
@@ -306,10 +307,10 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
             I restored this wallet from my own phrase or backup
           </button>
           {error && (
-            <p className="text-xs mt-2 text-center" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2 text-center" style={{ color: RED }}>
               {error}
-            </p>
-          )}
+            </p><ErrorActions message={String(error)} /></div>
+)}
           {exit !== 'none' && !confirmSkip && (
             <button
               onClick={() => (exit === 'skip' ? setConfirmSkip(true) : onExit())}
@@ -394,10 +395,10 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
                 {savedOnce ? 'Save another copy' : 'Save backup file'}
               </button>
               {error && (
-                <p className="text-xs mt-2" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
                   {error}
-                </p>
-              )}
+                </p><ErrorActions message={String(error)} /></div>
+)}
               {shareFailed && file && (
                 <div className="flex flex-col gap-2 mt-3">
                   {!isNative && (
@@ -510,10 +511,10 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
             </label>
           ))}
           {error && (
-            <p className="text-xs mt-3" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs mt-3" style={{ color: RED }}>
               {error}
-            </p>
-          )}
+            </p><ErrorActions message={String(error)} /></div>
+)}
           <button
             type="submit"
             disabled={answers.some((a) => !a.trim())}

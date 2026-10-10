@@ -35,7 +35,7 @@ const SettingsHub = () => {
     setSection(id);
     // Leave any deep-linked sub-page behind: Settings opens its list, New opens Create account.
     if (id === 'settings' && query) handleSelect('settings', '');
-    if (id === 'new' && !NEW_QUERIES.includes(query)) handleSelect('settings', 'create-account');
+    if (id === 'new' && !NEW_QUERIES.includes(query)) handleSelect('settings', 'restore-account');
   };
 
   const pill = (id: Section, label: string) => (

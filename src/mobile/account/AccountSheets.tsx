@@ -141,8 +141,8 @@ export const SwitchAccountSheet = ({
       onClose={onClose}
       footer={
         <>
+          {/* Add account is one screen: New account on top, then restore / import (owner, 10 Oct 2026). */}
           <SheetAction icon={<Plus size={16} color="#fff" />} label="Add account" onClick={onAdd} />
-          <SheetAction icon={<Download size={16} color="#fff" />} label="Import account" onClick={onImport} />
         </>
       }
     >

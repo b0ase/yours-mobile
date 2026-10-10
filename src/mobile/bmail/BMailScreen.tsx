@@ -68,6 +68,7 @@ import { OPEN_BMAIL_EVENT, takeBMailComposeTo } from './store';
 import { useBMail } from './useBMail';
 import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
@@ -516,7 +517,9 @@ const Reader = ({
           )}
         </div>
       )}
-      {err && <p className="text-xs text-[#F97066] m-0">{err}</p>}
+      {err && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{err}</p><ErrorActions message={String(err)} /></div>
+)}
       {mail && (
         <button
           type="button"
@@ -678,7 +681,9 @@ const Compose = ({
             : 'No stamp: lands in their Requests unless you are a contact.'
           : `You pay ${money(q.total, rate)} postage to them, from your wallet, when you send.`}
       </div>
-      {err && <p className="text-xs text-[#F97066] m-0">{err}</p>}
+      {err && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{err}</p><ErrorActions message={String(err)} /></div>
+)}
       <button type="button" disabled={!!busy} onClick={() => void go()} className={gold} style={{ background: GOLD }}>
         {busy || (q.total ? `Send · ${money(q.total, rate)}` : 'Send')}
       </button>
@@ -740,7 +745,9 @@ const PriceSettings = ({
           ≈ {money(usdToSats(n, rate) ?? 0, rate)}
         </div>
       )}
-      {err && <p className="text-xs text-[#F97066] m-0">{err}</p>}
+      {err && (
+<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] m-0">{err}</p><ErrorActions message={String(err)} /></div>
+)}
       <button
         type="button"
         disabled={busy || n === null || n > 100}

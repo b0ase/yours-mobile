@@ -13,6 +13,7 @@ import { PROVIDER_IDS } from '../agent/providers';
 import { openDappBrowser } from '../dappBrowser';
 import { DELETE_ACCOUNT_URL, SUPPORT_EMAIL } from '../ugc/ugc';
 import { confirmMatches, deleteAccount, type DeleteStep } from './deleteAccount';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -184,10 +185,10 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
               style={{ background: PANEL, border: `1px solid ${LINE}` }}
             />
             {error && (
-              <p className="text-xs" style={{ color: RED }}>
+<div className="flex flex-col gap-1.5"><p className="text-xs" style={{ color: RED }}>
                 {error}
-              </p>
-            )}
+              </p><ErrorActions message={String(error)} /></div>
+)}
             <button
               onClick={() => void run()}
               disabled={!ok || busy}

@@ -17,6 +17,7 @@ import { DoorKeeper } from './DoorKeeper';
 import { InviteCard, type SpaceLink } from './InviteCard';
 import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
+import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = '#FFD24D';
 const MUTED = '#a3a9b3';
@@ -198,10 +199,10 @@ const SpacesPage = () => {
             space.
           </p>
           {error && (
-            <p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
+<div className="flex flex-col gap-1.5"><p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
               {error}
-            </p>
-          )}
+            </p><ErrorActions message={String(error)} /></div>
+)}
         </div>
       )}
 
