@@ -1,5 +1,6 @@
 /* global chrome */
 import { mirrorToMiner } from './mobile/minerMirror';
+import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
@@ -572,6 +573,8 @@ let denyAllPendingPrompts: () => void = () => undefined;
 // prompt.html) instead of a separate popup window (owner, 6 Oct 2026). activePopupPorts are the open
 // panels (App.tsx connects 'extension-popup'); the window remains the fallback when no panel is open.
 let promptInPanel = false;
+// The prompt the open prompt UI is showing (set when it loads its payload); see services/promptQueue.ts.
+let shownPrompt: ShownPrompt | undefined;
 // Set when the background opened the side panel itself: the prompt shows once the panel connects.
 let panelPromptOnConnect: { kind: PromptKind; requestID?: string } | undefined;
 
@@ -593,9 +596,11 @@ const postToPanels = (msg: unknown) =>
       /* panel closing */
     }
   });
+// Always tell an open panel to drop its prompt overlay: a stale one (its request gone) would otherwise sit over
+// the panel's own screens, e.g. hiding the unlock screen a waiting site needs.
 const hidePanelPrompt = () => {
-  if (!promptInPanel) return;
   promptInPanel = false;
+  shownPrompt = undefined;
   postToPanels({ action: 'HIDE_PROMPT_PANEL' });
 };
 
@@ -860,6 +865,10 @@ if (isInServiceWorker) {
   };
 
   const notifyPromptWindow = (kind: PromptKind, requestID?: string) => {
+    // One approval at a time: a prompt still being answered is never replaced; this one waits in the queue and
+    // the UI loads it next (prompt-tab advance → GET_NEXT_PROMPT).
+    const stillPending = !!shownPrompt && !!getPendingPromptPayload(shownPrompt.kind, shownPrompt.requestID);
+    if (!shouldPushPrompt(shownPrompt, stillPending, { kind, requestID })) return;
     chrome.runtime.sendMessage({ action: 'SHOW_PROMPT', kind, requestID }).catch(() => {
       // No listener (window still booting); it reads its URL params on mount
     });
@@ -994,7 +1003,11 @@ if (isInServiceWorker) {
     // The browser-action popup renders its own unlock UI; never force a
     // window over it just to unlock.
     if (activePopupPorts.size > 0) {
-      console.log('[background] showUnlockUi: extension popup is connected, skipping window creation');
+      // The panel shows its own unlock screen, but only if told (it may think it is unlocked after the
+      // inactivity lock) and only if no stale prompt overlay covers it.
+      promptInPanel = false;
+      shownPrompt = undefined;
+      panelUnlockMessages().forEach((m) => postToPanels(m));
       return;
     }
     showPromptUi('unlock');
@@ -1181,6 +1194,7 @@ if (isInServiceWorker) {
         case 'GET_PROMPT_PAYLOAD': {
           const { kind, requestID } = message as { kind: string; requestID?: string };
           const payload = getPendingPromptPayload(kind, requestID);
+          if (payload) shownPrompt = { kind, requestID };
           console.log('[background] GET_PROMPT_PAYLOAD', kind, requestID, 'found:', !!payload);
           sendResponse({ type: 'GET_PROMPT_PAYLOAD', success: !!payload, data: payload });
           return true;
@@ -1223,6 +1237,9 @@ if (isInServiceWorker) {
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: false, data: { prompt: { kind: 'unlock' } } });
             return true;
           }
+          shownPrompt = undefined;
+          // Nothing left: an open panel always drops its overlay (even if it was shown via another path).
+          if (activePopupPorts.size > 0) hidePanelPrompt();
           if (promptInPanel || inPageSheet) {
             hidePanelPrompt();
             hideInPageSheet();

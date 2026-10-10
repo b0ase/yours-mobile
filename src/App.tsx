@@ -53,8 +53,13 @@ export const App = () => {
   useEffect(() => {
     const port = chrome.runtime.connect({ name: 'extension-popup' });
     // bWalletX: approval prompts arrive here when the side panel is open (mobile/PanelPrompt.tsx).
-    port.onMessage?.addListener((msg: unknown) => window.dispatchEvent(new CustomEvent(PANEL_PROMPT_EVENT, { detail: msg })));
+    port.onMessage?.addListener((msg: unknown) => {
+      // A site is waiting on waitForAuthentication: show the unlock screen even if this panel thought it was unlocked.
+      if ((msg as { action?: string })?.action === 'SHOW_UNLOCK_PANEL') setIsLocked(true);
+      window.dispatchEvent(new CustomEvent(PANEL_PROMPT_EVENT, { detail: msg }));
+    });
     return () => port.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleUnlock = async () => {
