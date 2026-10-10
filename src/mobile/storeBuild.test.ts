@@ -298,7 +298,7 @@ describe('store build has no Market', () => {
     const cards = src('./wallet/DefaultTokenCards.tsx');
     expect(cards).toMatch(/PNEE_TOKEN_ID && MARKET_ENABLED/);
     expect(cards).toMatch(/MARKET_ENABLED\s*\?\s*\{ label: BACK_PNEE_LABEL/);
-    expect(src('./locks/LockScreen.tsx')).toMatch(/MARKET_ENABLED && backPnee && <BackPneeAmountSheet/);
+    expect(src('./locks/LockScreen.tsx')).toMatch(/MARKET_ENABLED && backPnee === 'card' && \(\s*<BackPneeSheet/);
     expect(src('./radarApps.ts')).toMatch(/const BUY_APPS[^=]*= MARKET_ENABLED\s*\?/);
   });
   test('Apps tab: no exchange / swap tiles or market / on-ramp groups in a store build', async () => {

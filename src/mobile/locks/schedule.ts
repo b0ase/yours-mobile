@@ -456,6 +456,8 @@ export type LockPlan = {
   surplusTo?: 'next' | 'extend';
   /** Gradual schedules: the unlock curve (missing = linear). */
   curve?: Curve;
+  /** Pots & Locks: the pot this lock belongs to ('pnee' = backs PNEEs, else a template id). Missing = Other locks. */
+  pot?: string;
 };
 
 export type PlanStatus = 'Locked' | 'Ready to claim' | 'Partly claimed' | 'Finished';
