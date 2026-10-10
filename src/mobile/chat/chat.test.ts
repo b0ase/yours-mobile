@@ -97,7 +97,10 @@ describe('mergeMessages', () => {
     const calls: Array<{ method: string; url: string; body?: unknown }> = [];
     const http: Http = async (req) => {
       calls.push({ method: req.method, url: req.url, body: req.body });
-      return { status: 200, data: { message: { id: 'a2', supersedes_id: 'a', root_id: 'a', body: 'x', created_at: 't' } } };
+      return {
+        status: 200,
+        data: { message: { id: 'a2', supersedes_id: 'a', root_id: 'a', body: 'x', created_at: 't' } },
+      };
     };
     const client = new BchatClient(http, { token: 'T', handle: 'me', address: 'a' }, 'https://x.test');
     const saved = await client.editMessage('$STUFF', 'a', 'x');

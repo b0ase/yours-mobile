@@ -8,7 +8,10 @@ describe('green room', () => {
       title: 'AMA',
       listening: 12,
       anonymous_listeners: 3,
-      stage: [{ handle: '$Alice', role: 'host', avatar_url: null }, { handle: 'bob', role: 'speaker' }],
+      stage: [
+        { handle: '$Alice', role: 'host', avatar_url: null },
+        { handle: 'bob', role: 'speaker' },
+      ],
       recording: { active: true },
       ticketed: true,
     });
@@ -37,7 +40,12 @@ describe('green room', () => {
   });
   test('space state carries the recording flag and may_record', () => {
     const s = parseSpaceState(
-      { space: { id: 's1', host_handle: 'a', status: 'live', transport: 'sfu' }, participants: [], recording: { active: true }, may_record: true },
+      {
+        space: { id: 's1', host_handle: 'a', status: 'live', transport: 'sfu' },
+        participants: [],
+        recording: { active: true },
+        may_record: true,
+      },
       'a',
     );
     expect(s.recording).toBe(true);

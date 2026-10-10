@@ -40,7 +40,15 @@ import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import { BchatClient, ChatApiError, defaultHttp, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
+import {
+  BchatClient,
+  ChatApiError,
+  defaultHttp,
+  loadSession,
+  needsHandle,
+  saveSession,
+  SESSION_EVENT,
+} from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import type { ReplyRef } from '../chat/api';
@@ -903,7 +911,11 @@ const Conversation = ({
                     style={{ color: it.mine ? '#5c4800' : MUTED }}
                   >
                     {it.message.edited ? (
-                      <span title={it.message.edited_at ? `Edited ${new Date(it.message.edited_at).toLocaleString()}` : 'Edited'}>
+                      <span
+                        title={
+                          it.message.edited_at ? `Edited ${new Date(it.message.edited_at).toLocaleString()}` : 'Edited'
+                        }
+                      >
                         edited ·{' '}
                       </span>
                     ) : (
@@ -1191,10 +1203,13 @@ const PayToPostSheet = ({
         </div>
       )}
       {err && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mb-2" style={{ color: '#f87171' }}>
-          {err}
-        </p><ErrorActions message={String(err)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mb-2" style={{ color: '#f87171' }}>
+            {err}
+          </p>
+          <ErrorActions message={String(err)} />
+        </div>
+      )}
       <div className="flex gap-2 pb-4">
         <button onClick={onCancel} className="flex-1 rounded-2xl py-3 text-white" style={{ background: PANEL }}>
           Cancel
@@ -1475,8 +1490,11 @@ const InviteSheet = ({
           {busy || 'Next'}
         </button>
         {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-[#F97066] mt-2">{error}</p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
         {note && (
           <button
             onClick={() => setNote('')}
@@ -1571,8 +1589,11 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
         })}
       </ul>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] mt-2">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </Sheet>
   );
 };
@@ -1759,8 +1780,11 @@ const BountiesSheet = ({
           </button>
         </div>
         {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-[#F97066] mt-2">{error}</p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
       </Sheet>
     );
   }
@@ -1808,8 +1832,11 @@ const BountiesSheet = ({
           </button>
         </div>
         {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-[#F97066] mt-2">{error}</p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
       </Sheet>
     );
   }
@@ -1873,8 +1900,11 @@ const BountiesSheet = ({
         ))}
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] mt-2">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </Sheet>
   );
 };

@@ -87,7 +87,15 @@ const Header = ({ title, back, onBack }: { title: string; back: string; onBack: 
   </>
 );
 
-const Cta = ({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) => (
+const Cta = ({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) => (
   <button
     type="button"
     disabled={disabled}
@@ -102,7 +110,10 @@ const Cta = ({ children, onClick, disabled }: { children: React.ReactNode; onCli
 const CopyRow = ({ label, value }: { label: string; value: string }) => {
   const [done, setDone] = useState(false);
   return (
-    <div className="flex items-center gap-2 p-3 rounded-xl" style={{ background: C.card, border: `1px solid ${C.line}` }}>
+    <div
+      className="flex items-center gap-2 p-3 rounded-xl"
+      style={{ background: C.card, border: `1px solid ${C.line}` }}
+    >
       <div className="flex-1 min-w-0">
         <div className="text-[11px]" style={{ color: C.muted }}>
           {label}
@@ -242,7 +253,12 @@ const CoinMenu = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-20 sm:bg-transparent" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={onClose} aria-hidden="true" />
+      <div
+        className="fixed inset-0 z-20 sm:bg-transparent"
+        style={{ background: 'rgba(0,0,0,0.55)' }}
+        onClick={onClose}
+        aria-hidden="true"
+      />
       <div
         role="dialog"
         aria-modal="true"
@@ -252,7 +268,10 @@ const CoinMenu = ({
         style={{ background: C.card, border: `1px solid ${C.line}`, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         <div className="p-3 flex items-center gap-2">
-          <label className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl" style={{ border: `1px solid ${C.chip}`, background: C.bg }}>
+          <label
+            className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl"
+            style={{ border: `1px solid ${C.chip}`, background: C.bg }}
+          >
             <Search size={16} color={C.muted} />
             <span className="sr-only">Search coins</span>
             <input
@@ -268,11 +287,22 @@ const CoinMenu = ({
               style={{ color: C.text }}
             />
           </label>
-          <button type="button" aria-label="Close coin list" onClick={onClose} className="w-11 h-11 grid place-items-center border-0 bg-transparent cursor-pointer">
+          <button
+            type="button"
+            aria-label="Close coin list"
+            onClick={onClose}
+            className="w-11 h-11 grid place-items-center border-0 bg-transparent cursor-pointer"
+          >
             <X size={18} color={C.muted} />
           </button>
         </div>
-        <ul ref={listRef} id="swap-coin-list" role="listbox" aria-label="Coins" className="m-0 p-0 pb-2 list-none overflow-y-auto flex-1">
+        <ul
+          ref={listRef}
+          id="swap-coin-list"
+          role="listbox"
+          aria-label="Coins"
+          className="m-0 p-0 pb-2 list-none overflow-y-auto flex-1"
+        >
           {items.length === 0 && (
             <li className="px-4 py-3 text-sm" style={{ color: C.muted }}>
               No coins match “{q}”
@@ -354,7 +384,12 @@ const Pick = ({
   const [coin, setCoin] = useState<SwapCoin>(POPULAR_COINS[0]);
   const [amount, setAmount] = useState('');
   const [refund, setRefund] = useState('');
-  const [est, setEst] = useState<{ toAmount: number | null; minAmount: number; belowMin?: boolean; warning?: string | null } | null>(null);
+  const [est, setEst] = useState<{
+    toAmount: number | null;
+    minAmount: number;
+    belowMin?: boolean;
+    warning?: string | null;
+  } | null>(null);
   const [estLoading, setEstLoading] = useState(false);
   const [estError, setEstError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -363,7 +398,10 @@ const Pick = ({
   const coinBtn = useRef<HTMLButtonElement>(null);
   const n = parseTyped(amount);
   // Show the server's images on the picked coin once they arrive.
-  const shown = useMemo(() => popular.concat(all).find((c) => coinKey(c) === coinKey(coin) && c.image) ?? coin, [coin, popular, all]);
+  const shown = useMemo(
+    () => popular.concat(all).find((c) => coinKey(c) === coinKey(coin) && c.image) ?? coin,
+    [coin, popular, all],
+  );
 
   // Quote: asked for the minimum as soon as a coin is picked (amount 0), then for the typed amount.
   useEffect(() => {
@@ -436,7 +474,10 @@ const Pick = ({
     <>
       <Header title="Swap into BSV" back="Wallet" onBack={onBack} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-4 rounded-2xl p-3.5 flex flex-col gap-2.5" style={{ background: C.card, border: `1px solid ${C.line}` }}>
+        <div
+          className="mx-4 rounded-2xl p-3.5 flex flex-col gap-2.5"
+          style={{ background: C.card, border: `1px solid ${C.line}` }}
+        >
           <div className="text-xs" style={{ color: C.muted }}>
             You send
           </div>
@@ -485,13 +526,20 @@ const Pick = ({
             </div>
           </div>
           <div className="text-xs" style={{ color: below ? '#ff8a7a' : C.muted }}>
-            {est ? `Minimum ${fmtAmount(est.minAmount)} ${coin.ticker.toUpperCase()}` : estError ? 'Minimum unavailable' : '…'}
+            {est
+              ? `Minimum ${fmtAmount(est.minAmount)} ${coin.ticker.toUpperCase()}`
+              : estError
+                ? 'Minimum unavailable'
+                : '…'}
           </div>
         </div>
         <div className="grid place-items-center h-9">
           <ArrowDown size={22} color={C.gold} />
         </div>
-        <div className="mx-4 rounded-2xl p-3.5 flex flex-col gap-1.5" style={{ background: C.cardHi, border: `1px solid ${C.gold}` }}>
+        <div
+          className="mx-4 rounded-2xl p-3.5 flex flex-col gap-1.5"
+          style={{ background: C.cardHi, border: `1px solid ${C.gold}` }}
+        >
           <div className="text-xs" style={{ color: C.muted }}>
             You get, in this wallet
           </div>
@@ -526,22 +574,35 @@ const Pick = ({
           />
         </label>
         {err && (
-<div className="flex flex-col gap-1.5"><div className="mx-4 mt-3 text-sm" style={{ color: '#ff8a7a' }}>
-            {err}
-          </div><ErrorActions message={String(err)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <div className="mx-4 mt-3 text-sm" style={{ color: '#ff8a7a' }}>
+              {err}
+            </div>
+            <ErrorActions message={String(err)} />
+          </div>
+        )}
       </div>
       <div className="px-4 pt-3 pb-2">
         <Cta onClick={() => void go()} disabled={!gate.ok}>
           {busy ? <Loader2 className="inline animate-spin" size={18} /> : 'Get deposit address'}
         </Cta>
         {!gate.ok && !busy && (
-          <p role="status" aria-live="polite" className="m-0 mt-2 text-[12px] text-center" style={{ color: gate.retryAddress ? '#ff8a7a' : C.muted }}>
+          <p
+            role="status"
+            aria-live="polite"
+            className="m-0 mt-2 text-[12px] text-center"
+            style={{ color: gate.retryAddress ? '#ff8a7a' : C.muted }}
+          >
             {gate.reason}
             {gate.retryAddress && (
               <>
                 {' '}
-                <button type="button" onClick={onRetryAddress} className="p-0 border-0 bg-transparent underline cursor-pointer text-[12px]" style={{ color: C.gold }}>
+                <button
+                  type="button"
+                  onClick={onRetryAddress}
+                  className="p-0 border-0 bg-transparent underline cursor-pointer text-[12px]"
+                  style={{ color: C.gold }}
+                >
                   Try again
                 </button>
               </>
@@ -554,12 +615,25 @@ const Pick = ({
   );
 };
 
-
 // ── Deposit ─────────────────────────────────────────────────────────────────────────────────
-const Deposit = ({ swap, notice, onBack, onSent }: { swap: SwapRecord; notice: SwapNotice; onBack: () => void; onSent: () => void }) => {
+const Deposit = ({
+  swap,
+  notice,
+  onBack,
+  onSent,
+}: {
+  swap: SwapRecord;
+  notice: SwapNotice;
+  onBack: () => void;
+  onSent: () => void;
+}) => {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   useEffect(() => {
-    qr.toDataURL(swap.payinAddress, { margin: 2, width: 220, color: { dark: '#000000', light: '#ffffff' } }, (e, url) => !e && setQrUrl(url));
+    qr.toDataURL(
+      swap.payinAddress,
+      { margin: 2, width: 220, color: { dark: '#000000', light: '#ffffff' } },
+      (e, url) => !e && setQrUrl(url),
+    );
   }, [swap.payinAddress]);
   const tick = swap.from.toUpperCase();
   const net = networkName({ ticker: swap.from, network: swap.network });
@@ -587,9 +661,14 @@ const Deposit = ({ swap, notice, onBack, onSent }: { swap: SwapRecord; notice: S
         <CopyRow label={`${tick} deposit address (${net})`} value={swap.payinAddress} />
         {swap.payinExtraId && <CopyRow label="Memo / tag (required)" value={swap.payinExtraId} />}
         <CopyRow label="Amount" value={String(fmtAmount(swap.amount))} />
-        <div className="rounded-xl p-3 text-[13px] leading-snug" style={{ background: '#2a1d0b', color: C.cta, border: `1px solid ${C.chip}` }}>
+        <div
+          className="rounded-xl p-3 text-[13px] leading-snug"
+          style={{ background: '#2a1d0b', color: C.cta, border: `1px solid ${C.chip}` }}
+        >
           Send only {tick} on the {net} network to this address. Other coins or networks can be lost.
-          {expires ? ` Send before ${expires.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : ' Send within the next few hours; the rate floats until it arrives.'}
+          {expires
+            ? ` Send before ${expires.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`
+            : ' Send within the next few hours; the rate floats until it arrives.'}
         </div>
       </div>
       <div className="px-4 pt-3 pb-2">
@@ -601,7 +680,15 @@ const Deposit = ({ swap, notice, onBack, onSent }: { swap: SwapRecord; notice: S
 };
 
 // ── Track ───────────────────────────────────────────────────────────────────────────────────
-const Track = ({ swap, onBack, onUpdate }: { swap: SwapRecord; onBack: () => void; onUpdate: (r: SwapRecord) => void }) => {
+const Track = ({
+  swap,
+  onBack,
+  onUpdate,
+}: {
+  swap: SwapRecord;
+  onBack: () => void;
+  onUpdate: (r: SwapRecord) => void;
+}) => {
   const navigate = useNavigate();
   const ref = useRef(swap);
   ref.current = swap;
@@ -652,9 +739,16 @@ const Track = ({ swap, onBack, onUpdate }: { swap: SwapRecord; onBack: () => voi
               <li key={label} className="flex items-center gap-3 py-3" style={{ borderBottom: `1px solid ${C.line}` }}>
                 <span
                   className="w-7 h-7 rounded-full grid place-items-center"
-                  style={{ background: done ? C.gold : 'transparent', border: `2px solid ${done || now ? C.gold : C.chip}` }}
+                  style={{
+                    background: done ? C.gold : 'transparent',
+                    border: `2px solid ${done || now ? C.gold : C.chip}`,
+                  }}
                 >
-                  {done ? <Check size={16} color={C.bg} /> : now ? <Loader2 size={14} color={C.gold} className="animate-spin" /> : null}
+                  {done ? (
+                    <Check size={16} color={C.bg} />
+                  ) : now ? (
+                    <Loader2 size={14} color={C.gold} className="animate-spin" />
+                  ) : null}
                 </span>
                 <span className="text-[15px] font-semibold" style={{ color: done || now ? C.text : C.muted }}>
                   {label}
@@ -761,7 +855,8 @@ export const SwapFlow = ({
           }}
         />
       );
-    if (step === 'deposit') return <Deposit swap={swap} notice={notice} onBack={() => setStep('pick')} onSent={() => setStep('track')} />;
+    if (step === 'deposit')
+      return <Deposit swap={swap} notice={notice} onBack={() => setStep('pick')} onSent={() => setStep('track')} />;
     return <Track swap={swap} onBack={onClose} onUpdate={setSwap} />;
   }, [step, swap, address, addressState, loadAddress, notice, popular, all, handle, onClose]);
 

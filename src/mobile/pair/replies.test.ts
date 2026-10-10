@@ -89,8 +89,9 @@ const doc = {
 const g = globalThis as Record<string, unknown>;
 const saved = { WebSocket: g.WebSocket, localStorage: g.localStorage, document: g.document };
 afterAll(() => {
-  for (const [k, v] of Object.entries(saved)) if (v === undefined) delete g[k];
-  else g[k] = v;
+  for (const [k, v] of Object.entries(saved))
+    if (v === undefined) delete g[k];
+    else g[k] = v;
 });
 Object.assign(globalThis, {
   WebSocket: FakeWS,

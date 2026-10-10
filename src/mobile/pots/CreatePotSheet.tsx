@@ -219,10 +219,13 @@ export const AddOrderSheet = ({
         Pause or cancel any time.
       </p>
       {error && (
-<div className="flex flex-col gap-1.5"><div className="text-xs" style={{ color: '#FDA29B' }}>
-          {error}
-        </div><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs" style={{ color: '#FDA29B' }}>
+            {error}
+          </div>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         type="button"
         onClick={save}

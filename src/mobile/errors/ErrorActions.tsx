@@ -7,7 +7,15 @@ import { askB, copyError } from './errorReport';
  * "Copy" and "Ask b" for any error (owner, 10 Oct 2026). Use this (or ErrorNotice) wherever an error is
  * shown, so every error can be copied and taken straight to b. Both actions redact secrets first.
  */
-export const ErrorActions = ({ message, color = '#fff', onAsk }: { message: string; color?: string; onAsk?: () => void }) => {
+export const ErrorActions = ({
+  message,
+  color = '#fff',
+  onAsk,
+}: {
+  message: string;
+  color?: string;
+  onAsk?: () => void;
+}) => {
   const [copied, setCopied] = useState(false);
   const btn =
     'shrink-0 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold border-0 cursor-pointer select-none';

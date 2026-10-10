@@ -42,7 +42,10 @@ export const shouldAskBattery = (o: { os: string; ignoring: boolean; asked: bool
   o.os === 'android' && !o.ignoring && !o.asked;
 
 /** Is the app already exempt? Anything other than Android (or an old build without the method) counts as yes. */
-export const isIgnoringBattery = async (plugin: SpaceSessionPlugin = SpaceSession, platform = os()): Promise<boolean> => {
+export const isIgnoringBattery = async (
+  plugin: SpaceSessionPlugin = SpaceSession,
+  platform = os(),
+): Promise<boolean> => {
   if (platform !== 'android') return true;
   try {
     return (await plugin.isIgnoringBatteryOptimizations()).ignoring;

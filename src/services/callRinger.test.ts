@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { callNotification, callsToAnnounce, CALL_NOTIFICATION_PREFIX } from './callRinger';
-import { canPopOutCalls, isCallsWindow, openCallsWindow, pipSupported, startRoute, togglePip } from '../mobile/calls/popout';
+import {
+  canPopOutCalls,
+  isCallsWindow,
+  openCallsWindow,
+  pipSupported,
+  startRoute,
+  togglePip,
+} from '../mobile/calls/popout';
 
 describe('background call ringing', () => {
   test('announces only new calls', () => {
@@ -29,7 +36,10 @@ describe('calls window', () => {
     expect(isCallsWindow('?route=/m/calls')).toBe(true);
   });
   test('pop-out only in the extension, and not from the window itself', () => {
-    const c = { runtime: { getURL: (p: string) => `chrome-extension://id/${p}` }, windows: { create: () => undefined } };
+    const c = {
+      runtime: { getURL: (p: string) => `chrome-extension://id/${p}` },
+      windows: { create: () => undefined },
+    };
     expect(canPopOutCalls('', true, c)).toBe(true);
     expect(canPopOutCalls('?route=/m/calls', true, c)).toBe(false);
     expect(canPopOutCalls('', false, c)).toBe(false);
@@ -37,7 +47,10 @@ describe('calls window', () => {
   });
   test('opens a small popup window on the calls route', () => {
     let got: Record<string, unknown> | null = null;
-    const ok = openCallsWindow({ runtime: { getURL: (p) => `chrome-extension://id/${p}` }, windows: { create: (o) => (got = o) } });
+    const ok = openCallsWindow({
+      runtime: { getURL: (p) => `chrome-extension://id/${p}` },
+      windows: { create: (o) => (got = o) },
+    });
     expect(ok).toBe(true);
     expect(got!.type).toBe('popup');
     expect(String(got!.url)).toBe('chrome-extension://id/index.html?route=%2Fm%2Fcalls');
@@ -55,7 +68,10 @@ describe('picture-in-picture', () => {
     const calls: string[] = [];
     const v = { requestPictureInPicture: async () => calls.push('in') } as unknown as HTMLVideoElement;
     await togglePip(v, { pictureInPictureElement: null } as never);
-    await togglePip(v, { pictureInPictureElement: v, exitPictureInPicture: async () => void calls.push('out') } as never);
+    await togglePip(v, {
+      pictureInPictureElement: v,
+      exitPictureInPicture: async () => void calls.push('out'),
+    } as never);
     expect(calls).toEqual(['in', 'out']);
   });
 });
@@ -75,12 +91,23 @@ describe('background calls poll', () => {
     let lists = 0;
     const f = async (url: string) => {
       seen.push(url.replace(RING_ORIGIN, ''));
-      if (url.endsWith('/session')) return { status: 200, json: async () => ({ token: `t${seen.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() }) };
+      if (url.endsWith('/session'))
+        return {
+          status: 200,
+          json: async () => ({ token: `t${seen.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() }),
+        };
       lists++;
-      return lists === 1 ? { status: 401, json: async () => ({}) } : { status: 200, json: async () => ({ incoming: [{ id: 'c1', peer_label: '$x' }] }) };
+      return lists === 1
+        ? { status: 401, json: async () => ({}) }
+        : { status: 200, json: async () => ({ incoming: [{ id: 'c1', peer_label: '$x' }] }) };
     };
     const out = await fetchIncoming(f, { identityKey: async () => '02AB', sign: async () => 'sig' });
     expect(out).toEqual([{ id: 'c1', peer_label: '$x' }]);
-    expect(seen).toEqual(['/api/bitsign/wallet-calls/session', '/api/bitsign/wallet-calls', '/api/bitsign/wallet-calls/session', '/api/bitsign/wallet-calls']);
+    expect(seen).toEqual([
+      '/api/bitsign/wallet-calls/session',
+      '/api/bitsign/wallet-calls',
+      '/api/bitsign/wallet-calls/session',
+      '/api/bitsign/wallet-calls',
+    ]);
   });
 });

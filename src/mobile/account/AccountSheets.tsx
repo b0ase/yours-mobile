@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Download, Plus, Search, Sparkles, Star, Terminal, X } from 'lucide-react';
+import { Bot, Plus, Search, Sparkles, Star, Terminal, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { useMenuAccounts, type MenuEntry } from './useMenuAccounts';
 import { AccountRow } from './AccountSwitcher';

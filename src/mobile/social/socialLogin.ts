@@ -178,9 +178,7 @@ const webReturnKey = (): keyof typeof WEB_RETURNS =>
   typeof location !== 'undefined' && location.origin === 'https://beta.bwalletx.com' ? 'beta' : 'web';
 const isWebReturn = (url: string) => Object.values(WEB_RETURNS).some((r) => url.startsWith(r));
 const isReturn = (url: string) =>
-  url.startsWith(RETURN) ||
-  url.startsWith('bwalletx://social') ||
-  (isWebReturn(url) && /#(.*&)?(t|error)=/.test(url));
+  url.startsWith(RETURN) || url.startsWith('bwalletx://social') || (isWebReturn(url) && /#(.*&)?(t|error)=/.test(url));
 
 /** A return URL (universal link, bwalletx://, or the extension's tab): keep the ticket, fetch the profile. */
 export async function receiveSocialUrl(url: string): Promise<void> {
@@ -220,12 +218,7 @@ export function socialProof(
 
 // Web wallet: back from the provider in this tab with #p=…&t=… (or #error=…). Take it, then clear the address
 // bar so the ticket isn't left in history or re-read on reload.
-if (
-  !Capacitor.isNativePlatform() &&
-  !IS_EXTENSION &&
-  typeof location !== 'undefined' &&
-  isWebReturn(location.href)
-) {
+if (!Capacitor.isNativePlatform() && !IS_EXTENSION && typeof location !== 'undefined' && isWebReturn(location.href)) {
   const here = location.href;
   if (isReturn(here)) {
     history.replaceState(null, '', location.pathname + location.search);

@@ -1,8 +1,24 @@
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { getAgentAccount } from '../agents/agentAccounts';
-import { buildRows, missingParents, ownOutputs, ratesByDay, withRates, type HistoryRow, type LocalInfo, type RawTx } from './txHistory';
-import { fetchAccountTxs, fetchDailyRates, fetchLocalInfo, fetchTokenSymbols, fetchTxs, type Progress } from './txHistoryFetch';
+import {
+  buildRows,
+  missingParents,
+  ownOutputs,
+  ratesByDay,
+  withRates,
+  type HistoryRow,
+  type LocalInfo,
+  type RawTx,
+} from './txHistory';
+import {
+  fetchAccountTxs,
+  fetchDailyRates,
+  fetchLocalInfo,
+  fetchTokenSymbols,
+  fetchTxs,
+  type Progress,
+} from './txHistoryFetch';
 import { classifyEvent, findListings } from './historyEvents';
 import { appsByTxid, loadConnectionLog } from './connectionLog';
 import { cacheBsvUsd } from './fiatRates';
@@ -47,9 +63,7 @@ export const loadHistoryRows = async ({
   let rows = buildRows(txs, own, local as Map<string, LocalInfo>, now, extra);
   if (kind)
     rows = rows.map((r) =>
-      r.direction === 'out' && r.label === 'send'
-        ? { ...r, label: kind === 'pot' ? 'pot payment' : 'agent spend' }
-        : r,
+      r.direction === 'out' && r.label === 'send' ? { ...r, label: kind === 'pot' ? 'pot payment' : 'agent spend' } : r,
     );
   // History v2: token / NFT / game / subscription / app events (historyEvents.ts).
   const byId = new Map<string, RawTx>(txs.map((t) => [t.txid, t]));

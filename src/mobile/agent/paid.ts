@@ -124,7 +124,10 @@ export const turnBody = (quote: Quote, txid: string, messages: AgentMessage[], s
 });
 
 const clientInfo = (): { platform: string; version?: string } => {
-  const g = globalThis as { chrome?: { runtime?: { getManifest?: () => { version?: string } } }; Capacitor?: { getPlatform?: () => string } };
+  const g = globalThis as {
+    chrome?: { runtime?: { getManifest?: () => { version?: string } } };
+    Capacitor?: { getPlatform?: () => string };
+  };
   const native = g.Capacitor?.getPlatform?.();
   if (native === 'ios') return { platform: 'iPhone' };
   if (native === 'android') return { platform: 'Android' };

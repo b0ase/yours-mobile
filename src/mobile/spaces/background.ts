@@ -49,7 +49,12 @@ export const noticeText = (o: { title: string; onStage: boolean; micOn: boolean 
  * Whose video floats: someone speaking now, else the host, else any other speaker on camera. Never
  * my own camera (I can see myself when I come back). null: nothing to float.
  */
-export const pipFocus = (o: { stage: Participant[]; videos: string[]; speaking: string[]; me: string }): string | null => {
+export const pipFocus = (o: {
+  stage: Participant[];
+  videos: string[];
+  speaking: string[];
+  me: string;
+}): string | null => {
   const cams = o.stage.filter((p) => p.handle !== o.me && o.videos.includes(p.handle));
   return (
     cams.find((p) => o.speaking.includes(p.handle))?.handle ??
@@ -76,7 +81,8 @@ type WebkitVideo = HTMLVideoElement & {
 
 /** Browser PiP (desktop/web button, and the iOS background attempt). Resolves false when refused. */
 export const pipSupported = () =>
-  typeof document !== 'undefined' && !!(document as Document & { pictureInPictureEnabled?: boolean }).pictureInPictureEnabled;
+  typeof document !== 'undefined' &&
+  !!(document as Document & { pictureInPictureEnabled?: boolean }).pictureInPictureEnabled;
 
 export const togglePip = async (el: HTMLVideoElement | null): Promise<boolean> => {
   if (!el) return false;
@@ -191,7 +197,9 @@ export class SpaceBackground {
       try {
         const { granted } = await this.plugin.requestNotifications();
         if (!granted)
-          console.warn('[spaces] notification permission denied: the Space notification is hidden and Android may stop the Space when the screen is off');
+          console.warn(
+            '[spaces] notification permission denied: the Space notification is hidden and Android may stop the Space when the screen is off',
+          );
       } catch (e) {
         console.warn('[spaces] notification permission check failed', e);
       }
@@ -199,7 +207,9 @@ export class SpaceBackground {
     }
     try {
       await this.plugin.start(o);
-      console.info(`[spaces] foreground service ${first ? 'started' : 'updated'} (${o.onStage ? 'on stage' : 'listening'})`);
+      console.info(
+        `[spaces] foreground service ${first ? 'started' : 'updated'} (${o.onStage ? 'on stage' : 'listening'})`,
+      );
     } catch (e) {
       console.warn('[spaces] background service failed', e);
     }
@@ -244,7 +254,9 @@ export class SpaceBackground {
     set('pause', () => undefined);
     set('togglemicrophone', this.s.onStage ? () => this.cb.onMute() : null);
     try {
-      (ms as MediaSession & { setMicrophoneActive?: (on: boolean) => void }).setMicrophoneActive?.(this.s.onStage && this.s.micOn);
+      (ms as MediaSession & { setMicrophoneActive?: (on: boolean) => void }).setMicrophoneActive?.(
+        this.s.onStage && this.s.micOn,
+      );
     } catch {
       /* unsupported */
     }

@@ -453,6 +453,29 @@ describe('delete (account deletion)', () => {
   });
 });
 
+describe('reserved names (owner, 9 Oct 2026)', () => {
+  test('company and product names refuse, with or without a social suffix', () => {
+    for (const a of [
+      'bcorp',
+      'bcorp.x',
+      'bcorp.gmail',
+      'bwallet',
+      'bwalletx.x',
+      'bchatx',
+      'npg.x',
+      'admin.gmail',
+      'satoshi.x',
+      'bsv',
+      'craigwright.x',
+    ])
+      expect(pm.validAlias(a)).toBe('That alias is reserved');
+  });
+  test('ordinary names, including look-alikes, still pass', () => {
+    for (const a of ['b0asex.x', 'alice', 'bcorpfan', 'theirname.gmail', 'craig.x'])
+      expect(pm.validAlias(a)).toBeNull();
+  });
+});
+
 describe('renamed handles keep receiving', () => {
   test('an old name answers as the new one via bit-sign', async () => {
     const store = memStore();

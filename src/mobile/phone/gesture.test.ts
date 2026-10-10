@@ -135,10 +135,14 @@ describe('b hold to talk', () => {
 });
 
 describe('b hold timing (owner, 10 Oct 2026)', () => {
-  const at = (events: BHoldEvent[]) => events.reduce((acc, e) => {
-    const r = bHold(acc.s, e);
-    return { s: r.state, fx: r.effect === 'none' ? acc.fx : [...acc.fx, r.effect] };
-  }, { s: B_HOLD_IDLE, fx: [] as string[] });
+  const at = (events: BHoldEvent[]) =>
+    events.reduce(
+      (acc, e) => {
+        const r = bHold(acc.s, e);
+        return { s: r.state, fx: r.effect === 'none' ? acc.fx : [...acc.fx, r.effect] };
+      },
+      { s: B_HOLD_IDLE, fx: [] as string[] },
+    );
   test('the hold is about 400ms: long enough not to steal taps, short enough to feel instant', () => {
     expect(B_HOLD_MS).toBe(400);
   });
@@ -150,8 +154,13 @@ describe('b hold timing (owner, 10 Oct 2026)', () => {
   });
   test('slide away while listening, release = cancel; slide back = send', () => {
     const d = { type: 'down', x: 0, y: 0 } as const;
-    expect(at([d, { type: 'timer' }, { type: 'move', x: 0, y: -200 }, { type: 'up' }]).fx).toEqual(['listen', 'cancel']);
-    expect(at([d, { type: 'timer' }, { type: 'move', x: 0, y: -200 }, { type: 'move', x: 0, y: -5 }, { type: 'up' }]).fx).toEqual(['listen', 'send']);
+    expect(at([d, { type: 'timer' }, { type: 'move', x: 0, y: -200 }, { type: 'up' }]).fx).toEqual([
+      'listen',
+      'cancel',
+    ]);
+    expect(
+      at([d, { type: 'timer' }, { type: 'move', x: 0, y: -200 }, { type: 'move', x: 0, y: -5 }, { type: 'up' }]).fx,
+    ).toEqual(['listen', 'send']);
   });
   test('a late timer after release does nothing', () => {
     expect(at([{ type: 'down', x: 0, y: 0 }, { type: 'up' }, { type: 'timer' }]).fx).toEqual(['home']);

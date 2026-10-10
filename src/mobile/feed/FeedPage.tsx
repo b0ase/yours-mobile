@@ -1022,10 +1022,13 @@ const Composer = ({
           ` Large video / audio is inscribed first as a 1Sat ordinal you own (${inscribed.length + 1} approvals).`}
       </p>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         onClick={() => void send()}
         disabled={!!busy || !!invalid}
@@ -1189,10 +1192,13 @@ const TipSheet = ({
         ) : null;
       })()}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         onClick={() => void pay('tip', sats)}
         disabled={busy}
@@ -1340,10 +1346,13 @@ const LockSheet = ({
         </span>
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         // One-click pay (Settings → Payments) skips the confirm for amounts within the limit.
         onClick={() => (oneClick.take(sats).ok ? void lock() : setConfirming(true))}
@@ -1420,10 +1429,13 @@ const IdentitySetupSheet = ({
         />
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <button
         onClick={() => void save()}
         disabled={busy || !name.trim()}
@@ -1803,10 +1815,13 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </div>
         )}
         {error && (
-<div className="flex flex-col gap-1.5"><div className="text-center text-xs pt-4" style={{ color: RED }}>
-            {error}
-          </div><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <div className="text-center text-xs pt-4" style={{ color: RED }}>
+              {error}
+            </div>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
 
         <PostList
           posts={sorted}
@@ -2107,10 +2122,13 @@ const ProfileView = ({
         />
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-center text-xs pt-4" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-center text-xs pt-4" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       <PostList
         posts={shown}
         a={{ ...actions, onAuthor: () => undefined }}

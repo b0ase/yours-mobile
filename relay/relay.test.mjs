@@ -102,7 +102,10 @@ test('same-phone pairing: wallet joins while the site is away (Safari suspended)
   await assert.rejects(open(`${base}/v1/c/${C}?role=site`, 'https://evil.lol'), /403/);
   const s2 = await open(`${base}/v1/c/${C}?role=site`, 'https://a.lol');
   await until(() => s2.inbox.some((m) => m.t === 'hello'));
-  assert.deepEqual(s2.inbox.find((m) => m.t === 'hello'), { t: 'hello', k: '02cd' });
+  assert.deepEqual(
+    s2.inbox.find((m) => m.t === 'hello'),
+    { t: 'hello', k: '02cd' },
+  );
   s2.ws.close();
   phone.ws.close();
   await done();

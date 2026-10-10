@@ -27,8 +27,10 @@ describe('pickGate', () => {
   });
   test('quote loading', () => expect(r({ est: null, estLoading: true }).reason).toBe('Getting a quote…'));
   test('quote error', () => expect(r({ est: null, estError: 'down' }).reason).toMatch(/Couldn’t get a quote: down/));
-  test('below min', () => expect(r({ est: { toAmount: 1, minAmount: 1, belowMin: true } }).reason).toBe('Minimum is 1 LTC'));
-  test('below min without flag', () => expect(r({ est: { toAmount: 1, minAmount: 2 } }).reason).toBe('Minimum is 2 LTC'));
+  test('below min', () =>
+    expect(r({ est: { toAmount: 1, minAmount: 1, belowMin: true } }).reason).toBe('Minimum is 1 LTC'));
+  test('below min without flag', () =>
+    expect(r({ est: { toAmount: 1, minAmount: 2 } }).reason).toBe('Minimum is 2 LTC'));
   test('null quote', () => expect(r({ est: { toAmount: null, minAmount: 0.1 } }).ok).toBe(false));
   test('busy', () => expect(r({ busy: true }).ok).toBe(false));
 });

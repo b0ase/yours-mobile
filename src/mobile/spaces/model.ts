@@ -209,7 +209,11 @@ export const roomSpaceOpen = (room: { ticker?: string | null; metadata?: unknown
   if (!room) return false;
   const m = room.metadata as { space_open?: unknown; spaceOpen?: unknown } | null | undefined;
   if (m && (m.space_open === true || m.spaceOpen === true)) return true;
-  return OPEN_STAGE_TICKERS.includes(String(room.ticker ?? '').replace(/^\$/, '').toUpperCase());
+  return OPEN_STAGE_TICKERS.includes(
+    String(room.ticker ?? '')
+      .replace(/^\$/, '')
+      .toUpperCase(),
+  );
 };
 
 // ── Always-open rooms (bit-sign PR #117: always_open, room_host, host_label, always_here) ──────
@@ -231,7 +235,10 @@ export interface RoomSpaceMeta {
 
 /** Rooms that are always open before bit-sign says so (the Lounge). */
 export const ALWAYS_OPEN_TICKERS = ['LOUNGE'];
-const tickerKey = (t: string | null | undefined) => String(t ?? '').replace(/^\$/, '').toUpperCase();
+const tickerKey = (t: string | null | undefined) =>
+  String(t ?? '')
+    .replace(/^\$/, '')
+    .toUpperCase();
 export const isAlwaysOpenTicker = (t: string | null | undefined) => ALWAYS_OPEN_TICKERS.includes(tickerKey(t));
 
 /**
@@ -248,7 +255,9 @@ export const parseRoomSpaceMeta = (data: unknown, ticker?: string | null): RoomS
     .map((v): AlwaysHere | null => {
       const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
       const handle = str(r.handle);
-      return handle ? { handle: norm(handle), kind: str(r.kind) ?? 'agent', label: str(r.label) ?? norm(handle) } : null;
+      return handle
+        ? { handle: norm(handle), kind: str(r.kind) ?? 'agent', label: str(r.label) ?? norm(handle) }
+        : null;
     })
     .filter((v): v is AlwaysHere => !!v);
   return { alwaysOpen, hostLabel: alwaysOpen ? hostLabel : null, alwaysHere: alwaysOpen ? alwaysHere : [] };
@@ -259,7 +268,8 @@ export const alwaysOpenBarText = (ticker: string, roomName: string) =>
   `Join ${tickerKey(ticker) === 'LOUNGE' ? 'the Lounge' : roomName} · Open 24/7`;
 
 /** The agent tile's caption (b on an always-open stage). */
-export const alwaysHereCaption = (a: AlwaysHere) => (a.handle === 'b' ? 'bWalletX agent · always here' : `${a.label} · always here`);
+export const alwaysHereCaption = (a: AlwaysHere) =>
+  a.handle === 'b' ? 'bWalletX agent · always here' : `${a.label} · always here`;
 
 /** Always-open rooms have no host to end it: whoever started is just on stage. */
 export const mayEndSpace = (o: { isHost: boolean; alwaysOpen: boolean }) => o.isHost && !o.alwaysOpen;

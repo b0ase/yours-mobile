@@ -8,9 +8,25 @@
 import { BCHAT_ORIGIN, defaultHttp, type Http } from '../chat/api';
 import { Capacitor } from '@capacitor/core';
 
-export type SwapCoin = { ticker: string; network: string; label: string; name?: string; image?: string | null; hasExtraId?: boolean };
+export type SwapCoin = {
+  ticker: string;
+  network: string;
+  label: string;
+  name?: string;
+  image?: string | null;
+  hasExtraId?: boolean;
+};
 export type SwapNotice = { provider: string; text: string; links: { label: string; url: string }[] };
-export type SwapStage = 'waiting' | 'deposit_seen' | 'swapping' | 'sending' | 'done' | 'failed' | 'refunded' | 'expired' | 'on_hold';
+export type SwapStage =
+  | 'waiting'
+  | 'deposit_seen'
+  | 'swapping'
+  | 'sending'
+  | 'done'
+  | 'failed'
+  | 'refunded'
+  | 'expired'
+  | 'on_hold';
 
 /** The popular chips, used before the server list arrives (same order as the server's POPULAR). */
 export const POPULAR_COINS: SwapCoin[] = [
@@ -83,7 +99,9 @@ export const saveSwap = (r: SwapRecord) => {
 
 // ── Coin icons ──
 /** Ticker label + optional network line for a coin tile ("USDT" / "Tron"); network shown only when the ticker lives on several chains. */
-export const coinTileText = (c: Pick<SwapCoin, 'ticker' | 'network' | 'label'>): { ticker: string; network: string | null } => {
+export const coinTileText = (
+  c: Pick<SwapCoin, 'ticker' | 'network' | 'label'>,
+): { ticker: string; network: string | null } => {
   const ticker = c.ticker.toUpperCase();
   const dot = c.label.indexOf(' · ');
   if (dot >= 0) return { ticker: c.label.slice(0, dot), network: c.label.slice(dot + 3) };
@@ -102,7 +120,9 @@ export const safeCoinImage = (u: string | null | undefined): string | null => {
 /** Fill the built-in popular list with the server's images (matched on ticker + network); keeps local order and labels. */
 export const withImages = (local: SwapCoin[], server: SwapCoin[]): SwapCoin[] => {
   const img = new Map(server.map((c) => [`${c.ticker}:${c.network}`, c.image]));
-  return local.map((c) => (img.get(`${c.ticker}:${c.network}`) ? { ...c, image: img.get(`${c.ticker}:${c.network}`) } : c));
+  return local.map((c) =>
+    img.get(`${c.ticker}:${c.network}`) ? { ...c, image: img.get(`${c.ticker}:${c.network}`) } : c,
+  );
 };
 
 // ── Text helpers ──
@@ -110,7 +130,15 @@ export const fmtAmount = (n: number | null | undefined, max = 8) =>
   n === null || n === undefined || !Number.isFinite(n) ? '…' : Number(n.toFixed(max)).toString();
 export const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 export const networkName = (c: Pick<SwapCoin, 'ticker' | 'network'>) => {
-  const n: Record<string, string> = { btc: 'Bitcoin', eth: 'Ethereum', trx: 'Tron', sol: 'Solana', ltc: 'Litecoin', doge: 'Dogecoin', bsc: 'BNB Smart Chain' };
+  const n: Record<string, string> = {
+    btc: 'Bitcoin',
+    eth: 'Ethereum',
+    trx: 'Tron',
+    sol: 'Solana',
+    ltc: 'Litecoin',
+    doge: 'Dogecoin',
+    bsc: 'BNB Smart Chain',
+  };
   return n[c.network] ?? c.network.toUpperCase();
 };
 
@@ -146,14 +174,20 @@ export class SwapApi {
   }
 
   currencies(q = '') {
-    return this.call<{ currencies: SwapCoin[]; notice: SwapNotice }>('GET', `currencies${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+    return this.call<{ currencies: SwapCoin[]; notice: SwapNotice }>(
+      'GET',
+      `currencies${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    );
   }
   estimate(c: SwapCoin, amount: number) {
     const qs = `from=${encodeURIComponent(c.ticker)}&network=${encodeURIComponent(c.network)}&amount=${amount}`;
-    return this.call<{ toAmount: number | null; minAmount: number; belowMin?: boolean; warning?: string | null; notice: SwapNotice }>(
-      'GET',
-      `estimate?${qs}`,
-    );
+    return this.call<{
+      toAmount: number | null;
+      minAmount: number;
+      belowMin?: boolean;
+      warning?: string | null;
+      notice: SwapNotice;
+    }>('GET', `estimate?${qs}`);
   }
   create(c: SwapCoin, amount: number, address: string, refundAddress?: string, handle?: string) {
     return this.call<{
@@ -166,10 +200,12 @@ export class SwapApi {
     }>('POST', 'create', { from: c.ticker, network: c.network, amount, address, refundAddress, handle });
   }
   status(id: string) {
-    return this.call<{ stage: SwapStage; payoutTxid: string | null; amountTo: number | null; validUntil: string | null }>(
-      'GET',
-      `status?id=${encodeURIComponent(id)}`,
-    );
+    return this.call<{
+      stage: SwapStage;
+      payoutTxid: string | null;
+      amountTo: number | null;
+      validUntil: string | null;
+    }>('GET', `status?id=${encodeURIComponent(id)}`);
   }
 }
 

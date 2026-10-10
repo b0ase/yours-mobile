@@ -78,14 +78,28 @@ describe('social sign-in is per account', () => {
 describe('back from X with an existing (locked) wallet', () => {
   it('Connect reopens once for that account, after unlock; Create Account never does', async () => {
     const { socialReturnWaiting, takeSocialReturn } = await import('./socialLogin');
-    store.set(KEY, JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), ticket: 't', profile, owner: A, returned: true }));
+    store.set(
+      KEY,
+      JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), ticket: 't', profile, owner: A, returned: true }),
+    );
     expect(socialReturnWaiting(B)).toBe(false);
     expect(socialReturnWaiting(A)).toBe(true);
     expect(takeSocialReturn(A)).toBe(true);
     // One trip: the profile stays for Connect to claim, but it won't send the user round again.
     expect(takeSocialReturn(A)).toBe(false);
     expect(socialProof(A)?.ticket).toBe('t');
-    store.set(KEY, JSON.stringify({ provider: 'x', secret: 's', at: Date.now(), ticket: 't', profile, owner: NEW_ACCOUNT, returned: true }));
+    store.set(
+      KEY,
+      JSON.stringify({
+        provider: 'x',
+        secret: 's',
+        at: Date.now(),
+        ticket: 't',
+        profile,
+        owner: NEW_ACCOUNT,
+        returned: true,
+      }),
+    );
     expect(takeSocialReturn(NEW_ACCOUNT)).toBe(false);
   });
 

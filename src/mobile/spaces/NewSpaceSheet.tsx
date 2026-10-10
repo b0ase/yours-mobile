@@ -17,6 +17,7 @@ const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
 
 /** Rooms this wallet may start a Space in, from the chat list it already has. */
+// eslint-disable-next-line react-refresh/only-export-components
 export const hostableRooms = (rooms: ChatRoom[], me: string): ChatRoom[] =>
   rooms.filter((r) => canHostRoom({ me, createdBy: r.created_by_handle, spaceOpen: roomSpaceOpen(r) }));
 

@@ -445,10 +445,13 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
               </>
             )}
             {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs" style={{ color: RED }}>
-                {error}
-              </p><ErrorActions message={String(error)} /></div>
-)}
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs" style={{ color: RED }}>
+                  {error}
+                </p>
+                <ErrorActions message={String(error)} />
+              </div>
+            )}
             <button
               onClick={() => void scan()}
               disabled={!phrase.trim()}

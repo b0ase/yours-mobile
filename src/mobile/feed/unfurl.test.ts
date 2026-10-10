@@ -47,7 +47,12 @@ describe('own-site link previews in the Feed', () => {
     const n = calls.length;
     expect(await ownLinkPreview('https://example.com/x', http)).toBeNull();
     expect(calls.length).toBe(n);
-    for (const h of ['https://bmovies.app/', 'https://web.bwalletx.com/', 'https://desktop.bwalletx.com/', 'https://bchatx.com/'])
+    for (const h of [
+      'https://bmovies.app/',
+      'https://web.bwalletx.com/',
+      'https://desktop.bwalletx.com/',
+      'https://bchatx.com/',
+    ])
       expect(isOwnHost(h)).toBe(true);
     expect(isOwnHost('http://bwalletx.com/')).toBe(false);
     expect(isOwnHost('https://bwalletx.com.evil.io/')).toBe(false);
@@ -55,7 +60,11 @@ describe('own-site link previews in the Feed', () => {
 
   test('parsePreviews drops failed rows and non-https images', () => {
     expect(parsePreviews({ previews: [{ url: 'https://bwalletx.com/', ok: false, title: 'x' }] })).toEqual([]);
-    expect(parsePreviews({ previews: [{ url: 'https://bwalletx.com/', ok: true, title: 'T', image_url: 'http://a/b.png' }] })[0].image).toBeNull();
+    expect(
+      parsePreviews({
+        previews: [{ url: 'https://bwalletx.com/', ok: true, title: 'T', image_url: 'http://a/b.png' }],
+      })[0].image,
+    ).toBeNull();
     expect(parsePreviews(null)).toEqual([]);
   });
 });

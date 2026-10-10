@@ -27,7 +27,13 @@ describe('participants reply (hand / role / mute)', () => {
   test('raising a hand updates me and keeps the space and recording flags', () => {
     const next = applyParticipantsReply(
       cur,
-      { ok: true, participants: [raw.participants[0], { handle: 'alice', role: 'listener', hand_raised_at: '2026-10-09T20:01:00Z' }] },
+      {
+        ok: true,
+        participants: [
+          raw.participants[0],
+          { handle: 'alice', role: 'listener', hand_raised_at: '2026-10-09T20:01:00Z' },
+        ],
+      },
       '$alice',
     )!;
     expect(next.me?.handRaisedAt).toBe('2026-10-09T20:01:00Z');
@@ -38,7 +44,9 @@ describe('participants reply (hand / role / mute)', () => {
   test('malformed replies change nothing (no throw)', () => {
     expect(applyParticipantsReply(cur, null, 'alice')).toBeNull();
     expect(applyParticipantsReply(cur, { ok: true }, 'alice')).toBeNull();
-    expect(applyParticipantsReply(cur, { participants: [null, 3, { role: 'host' }] }, 'alice')?.participants).toEqual([]);
+    expect(applyParticipantsReply(cur, { participants: [null, 3, { role: 'host' }] }, 'alice')?.participants).toEqual(
+      [],
+    );
     expect(applyParticipantsReply({ space: null, participants: [], me: null }, raw, 'alice')).toBeNull();
   });
 });
@@ -85,7 +93,13 @@ describe('screen awake', () => {
       wakeLock: {
         request: async () => {
           requests++;
-          const s = { released: false, release: async () => { s.released = true; released++; } };
+          const s = {
+            released: false,
+            release: async () => {
+              s.released = true;
+              released++;
+            },
+          };
           return s;
         },
       },
@@ -110,7 +124,14 @@ test('native keep-awake used first, released on leave', async () => {
   const calls: string[] = [];
   const native = { keepAwake: async () => void calls.push('on'), allowSleep: async () => void calls.push('off') };
   let webRequests = 0;
-  const nav = { wakeLock: { request: async () => { webRequests++; return { released: false, release: async () => {} }; } } };
+  const nav = {
+    wakeLock: {
+      request: async () => {
+        webRequests++;
+        return { released: false, release: async () => {} };
+      },
+    },
+  };
   const a = new ScreenAwake(nav, native);
   await a.set(true);
   expect(a.held).toBe(true);
@@ -121,9 +142,21 @@ test('native keep-awake used first, released on leave', async () => {
 });
 
 test('native failure falls back to navigator.wakeLock', async () => {
-  const native = { keepAwake: async () => { throw new Error('no plugin'); }, allowSleep: async () => {} };
+  const native = {
+    keepAwake: async () => {
+      throw new Error('no plugin');
+    },
+    allowSleep: async () => {},
+  };
   let webRequests = 0;
-  const nav = { wakeLock: { request: async () => { webRequests++; return { released: false, release: async () => {} }; } } };
+  const nav = {
+    wakeLock: {
+      request: async () => {
+        webRequests++;
+        return { released: false, release: async () => {} };
+      },
+    },
+  };
   const a = new ScreenAwake(nav, native);
   await a.set(true);
   expect(webRequests).toBe(1);

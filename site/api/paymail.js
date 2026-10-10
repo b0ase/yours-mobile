@@ -86,9 +86,7 @@ module.exports = async function handler(req, res) {
   );
   // Vercel sets x-real-ip / x-vercel-forwarded-for; x-forwarded-for's first hop is the client.
   const ip =
-    String(
-      req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '',
-    )
+    String(req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '')
       .split(',')[0]
       .trim() || 'unknown';
   if (limited(ip)) return send(res, 429, { error: 'rate-limited' });

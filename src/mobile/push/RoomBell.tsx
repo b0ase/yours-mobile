@@ -84,8 +84,11 @@ const Sheet = ({
           </button>
         ))}
         {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-red-400">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-red-400">{error}</p>
+            <ErrorActions message={String(error)} />
+          </div>
+        )}
       </div>
     </div>,
     document.body,

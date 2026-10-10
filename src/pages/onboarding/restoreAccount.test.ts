@@ -37,7 +37,11 @@ const makeStore = async (count: number) => {
   };
   const store = {
     state,
-    getCurrentAccountObject: () => ({ selectedAccount: state.selectedAccount, account: state.accounts[state.selectedAccount], salt: state.salt }),
+    getCurrentAccountObject: () => ({
+      selectedAccount: state.selectedAccount,
+      account: state.accounts[state.selectedAccount],
+      salt: state.salt,
+    }),
     getAllAccounts: () => Object.values(state.accounts),
     getUsbSecurity: () => undefined,
     verifyPassword: async (pw: string) => {
@@ -77,14 +81,18 @@ describe('Add account › restore a Twetch phrase into a wallet with several acc
     const err = await new KeysService(store as never)
       .generateSeedAndStoreEncrypted('not it at all', false, TWETCH, null, null, null, 'twetch')
       .catch((e) => e);
-    expect(restoreErrorMessage(err)).toMatch(/^Wrong password: use the password you unlock .+ with \(one for all accounts\)\.$/);
+    expect(restoreErrorMessage(err)).toMatch(
+      /^Wrong password: use the password you unlock .+ with \(one for all accounts\)\.$/,
+    );
   });
 
   test('adding the same phrase twice is refused, not silently overwritten', async () => {
     const store = await makeStore(1);
     const keys = new KeysService(store as never);
     await keys.generateSeedAndStoreEncrypted(PASSWORD, false, TWETCH, null, null, null, 'twetch');
-    const err = await keys.generateSeedAndStoreEncrypted(PASSWORD, false, TWETCH, null, null, null, 'twetch').catch((e) => e);
+    const err = await keys
+      .generateSeedAndStoreEncrypted(PASSWORD, false, TWETCH, null, null, null, 'twetch')
+      .catch((e) => e);
     expect(err).toBeInstanceOf(AccountExistsError);
     expect(restoreErrorMessage(err)).toBe('That account is already in bWalletX.');
   });

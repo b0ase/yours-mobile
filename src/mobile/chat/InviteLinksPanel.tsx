@@ -136,8 +136,11 @@ export const InviteLinksPanel = ({ create, list, revoke, title, onNote }: Invite
         </button>
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs text-[#F97066] mt-2">{error}</p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-[#F97066] mt-2">{error}</p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
 
       <div className="text-[11px] font-semibold uppercase tracking-wide mt-5 mb-2" style={{ color: MUTED }}>
         Invites

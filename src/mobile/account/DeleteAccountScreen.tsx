@@ -185,10 +185,13 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
               style={{ background: PANEL, border: `1px solid ${LINE}` }}
             />
             {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs" style={{ color: RED }}>
-                {error}
-              </p><ErrorActions message={String(error)} /></div>
-)}
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs" style={{ color: RED }}>
+                  {error}
+                </p>
+                <ErrorActions message={String(error)} />
+              </div>
+            )}
             <button
               onClick={() => void run()}
               disabled={!ok || busy}

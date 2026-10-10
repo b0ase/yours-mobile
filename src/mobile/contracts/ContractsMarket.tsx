@@ -128,10 +128,13 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
         </p>
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs m-0" style={{ color: '#F97066' }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs m-0" style={{ color: '#F97066' }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {items !== null && shown.length === 0 && (
         <p className="text-xs text-center py-8 m-0" style={{ color: MUTED }}>
           {filter === 'bond'

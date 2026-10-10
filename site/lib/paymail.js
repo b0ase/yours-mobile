@@ -59,18 +59,89 @@ const hashIp = (ip, env = process.env) =>
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const RESERVED = new Set([
+  // Impersonation and technical names.
   'admin',
+  'administrator',
   'root',
   'support',
   'help',
-  'bwallet',
-  'bcorp',
+  'helpdesk',
+  'security',
+  'system',
+  'staff',
+  'team',
+  'official',
+  'billing',
+  'payments',
+  'legal',
+  'abuse',
+  'moderator',
+  'mod',
+  'postmaster',
+  'webmaster',
+  'noreply',
+  'no-reply',
+  'notifications',
   'paymail',
   'api',
   'www',
   'info',
-  'security',
+  // Our companies and products (owner, 9 Oct 2026). Kept in step with bit-sign's reserved handles.
+  'bwallet',
+  'bwalletx',
+  'bcorp',
+  'bitcoincorp',
+  'bitcoin-corp',
+  'thebitcoincorp',
+  'bitsign',
+  'bit-sign',
+  'bchat',
+  'bchatx',
+  'bspaces',
+  'bmail',
+  'bmovies',
+  'bvault',
+  'btrust',
+  'bapps',
+  'bitcoinos',
+  'npg',
+  'ninjapunkgirls',
+  'kintsugi',
+  'moneybutton',
+  'divvy',
+  'path401',
+  'path402',
+  'path403',
+  // Bitcoin itself, its people and companies: full names only, so a real Craig keeps `craig`.
+  'bitcoin',
+  'bsv',
+  'btc',
+  'bitcoinsv',
+  'bitcoin-sv',
+  'satoshi',
+  'satoshinakamoto',
+  'nakamoto',
+  'craigwright',
+  'drcraigwright',
+  'csw',
+  'nchain',
+  'bsvassociation',
+  'bsva',
+  'metanet',
+  'teranode',
+  'handcash',
+  'relayx',
+  'twetch',
+  'centbee',
+  // Held for the owner (10 Oct 2026); assign it to his wallet by hand when he wants it.
+  'richard',
 ]);
+/**
+ * ⚠ A SOCIAL ALIAS IS RESERVED BY ITS BASE NAME. `bcorp.x` is proven by whoever holds X @bcorp,
+ * which need not be us, so the suffix must not let a reserved name back in: `bcorp.x`,
+ * `bcorp.gmail` and `bcorp` all refuse. Existing records are untouched (this runs at register).
+ */
+const reservedBase = (alias) => RESERVED.has(String(alias).replace(/\.(x|gmail)$/, ''));
 
 const cleanDomain = (d) =>
   String(d || '')
@@ -126,9 +197,10 @@ function parseHandle(handle, env = process.env) {
   return p ? p.alias : null;
 }
 
+const RESERVED_MSG = 'That alias is reserved';
 function validAlias(alias) {
   if (!aliasOk(alias)) return 'Alias must be 1-32 chars: a-z, 0-9, - or _ (not at the ends)';
-  if (RESERVED.has(alias)) return 'That alias is reserved';
+  if (reservedBase(alias)) return RESERVED_MSG;
   return null;
 }
 
@@ -391,13 +463,16 @@ function makeHandlers({
       const f = body.fields || {};
       const alias = String(f.alias || '').toLowerCase();
       const bad = validAlias(alias);
-      if (bad) return [400, { error: bad }];
+      // Reserved names refuse NEW claims only: whoever already holds one (us) can still update it.
+      if (bad && bad !== RESERVED_MSG) return [400, { error: bad }];
       if (f.ordAddress && !/^1[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(String(f.ordAddress)))
         return [400, { error: 'Invalid ordAddress' }];
       const sigErr = await verifySigned(body, 'register', now());
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
       const taken = await store.getAlias(alias);
+      if (bad === RESERVED_MSG && !(taken && String(taken.identity_key).toLowerCase() === identityKey))
+        return [400, { error: bad }];
       // A verified name needs proof only to claim it; its owner can update the profile without signing in again.
       const ownsIt = taken && String(taken.identity_key).toLowerCase() === identityKey;
       if (SOCIAL_RE.test(alias) && !ownsIt) {

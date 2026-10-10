@@ -113,7 +113,11 @@ export const GreenRoomSheet = ({
       onClick={onStart}
       disabled={busy}
       className="mt-6 h-12 w-full rounded-full text-sm font-bold disabled:opacity-60"
-      style={speakerFirst && onStartSpeaker ? { border: `1px solid ${GOLD}`, color: GOLD } : { background: GOLD, color: '#010101' }}
+      style={
+        speakerFirst && onStartSpeaker
+          ? { border: `1px solid ${GOLD}`, color: GOLD }
+          : { background: GOLD, color: '#010101' }
+      }
     >
       {busy ? 'Joining…' : greenRoomPrimary({ anonymous, needsTicket: false })}
     </button>

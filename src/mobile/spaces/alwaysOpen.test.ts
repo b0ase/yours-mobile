@@ -4,10 +4,20 @@ import { alwaysHereCaption, alwaysOpenBarText, isAlwaysOpenTicker, mayEndSpace, 
 describe('always-open rooms', () => {
   test('full #117 reply, space null', () => {
     const m = parseRoomSpaceMeta(
-      { space: null, always_open: true, room_host: 'bwalletx', host_label: 'bWalletX', always_here: [{ handle: 'b', kind: 'agent', label: 'b' }] },
+      {
+        space: null,
+        always_open: true,
+        room_host: 'bwalletx',
+        host_label: 'bWalletX',
+        always_here: [{ handle: 'b', kind: 'agent', label: 'b' }],
+      },
       'LOUNGE',
     );
-    expect(m).toEqual({ alwaysOpen: true, hostLabel: 'bWalletX', alwaysHere: [{ handle: 'b', kind: 'agent', label: 'b' }] });
+    expect(m).toEqual({
+      alwaysOpen: true,
+      hostLabel: 'bWalletX',
+      alwaysHere: [{ handle: 'b', kind: 'agent', label: 'b' }],
+    });
   });
   test('pre-#117: always_open without host_label falls back to bWalletX for the Lounge', () => {
     expect(parseRoomSpaceMeta({ space: null, always_open: true }, '$lounge').hostLabel).toBe('bWalletX');

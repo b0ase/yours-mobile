@@ -28,7 +28,8 @@ export const phraseProblem = (raw: string): string | null => {
   if (!phrase) return 'Enter your recovery words.';
   const n = phrase.split(' ').length;
   if (!WORD_COUNTS.includes(n)) return `Recovery phrases have 12 or 24 words. This one has ${n}.`;
-  if (!bip39.validateMnemonic(phrase)) return "Those words aren't a valid recovery phrase. Check the spelling and order.";
+  if (!bip39.validateMnemonic(phrase))
+    return "Those words aren't a valid recovery phrase. Check the spelling and order.";
   return null;
 };
 
@@ -39,7 +40,8 @@ export const restoreErrorMessage = (err: unknown): string => {
   const msg = err instanceof Error ? err.message : String(err ?? '');
   if (err instanceof AccountExistsError || /already added/i.test(msg)) return 'That account is already in bWalletX.';
   // Same words the phone/extension builds already showed (mobile/onboardingError.ts): accurate, so kept.
-  if (/unauthori[sz]ed/i.test(msg)) return `Wrong password: use the password you unlock ${APP_NAME} with (one for all accounts).`;
+  if (/unauthori[sz]ed/i.test(msg))
+    return `Wrong password: use the password you unlock ${APP_NAME} with (one for all accounts).`;
   if (/invalid mnemonic/i.test(msg)) return "Those words aren't a valid recovery phrase. Check the spelling and order.";
   if (/usb/i.test(msg)) return 'Plug in your USB security key, then try again.';
   return msg ? `Couldn't restore the account: ${msg}` : "Couldn't restore the account.";

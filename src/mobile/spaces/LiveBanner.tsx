@@ -116,11 +116,16 @@ export const LiveBanner = ({
           className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
           style={{ background: 'linear-gradient(90deg, #2a1d05, #1a1408)', border: `1px solid ${GOLD}55` }}
         >
-          <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: space ? '#D92D20' : '#2a2b30' }}>
+          <span
+            className="flex h-8 w-8 items-center justify-center rounded-full"
+            style={{ background: space ? '#D92D20' : '#2a2b30' }}
+          >
             <Radio size={16} color="#fff" />
           </span>
           <span className="flex-1 min-w-0">
-            <span className="block text-[13px] font-semibold text-white truncate">{alwaysOpenBarText(ticker, roomName)}</span>
+            <span className="block text-[13px] font-semibold text-white truncate">
+              {alwaysOpenBarText(ticker, roomName)}
+            </span>
             <span className="block text-[11px] truncate" style={{ color: MUTED }}>
               {meta.hostLabel ? `Hosted by ${meta.hostLabel}` : 'Open 24/7'}
               {space ? ` · ${audienceLine(audienceCount(state!))}` : ''}
@@ -249,7 +254,11 @@ export const NameSpaceSheet = ({
           className="mt-3 w-full rounded-xl px-3 py-3 text-sm text-white outline-none"
           style={{ background: '#1a1b1f' }}
         />
-        <button type="submit" className="mt-3 w-full rounded-full py-3 font-semibold" style={{ background: GOLD, color: '#010101' }}>
+        <button
+          type="submit"
+          className="mt-3 w-full rounded-full py-3 font-semibold"
+          style={{ background: GOLD, color: '#010101' }}
+        >
           Go live
         </button>
       </form>

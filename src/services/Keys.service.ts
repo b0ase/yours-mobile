@@ -118,7 +118,10 @@ export class KeysService {
 
     const keys = getKeys(mnemonic, walletDerivation, ordDerivation, identityDerivation);
     // Adding to an existing wallet must not silently overwrite an account it already has.
-    if (!isNewWallet && this.chromeStorageService.getAllAccounts().some((a) => a?.addresses?.identityAddress === keys.identityAddress)) {
+    if (
+      !isNewWallet &&
+      this.chromeStorageService.getAllAccounts().some((a) => a?.addresses?.identityAddress === keys.identityAddress)
+    ) {
       throw new AccountExistsError();
     }
     if (mnemonic) {

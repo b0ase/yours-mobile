@@ -212,10 +212,13 @@ export const NewRoomSheet = ({
         </div>
       )}
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
     </OSheet>
   );
 };
@@ -457,10 +460,13 @@ export const OpenRoomSheet = ({
         )}
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {reporting && (
         <ReportSheet
           title={`Report ${card.name}`}
@@ -561,10 +567,13 @@ export const MessageMenu = ({
         </>
       </div>
       {error && (
-<div className="flex flex-col gap-1.5"><p className="text-xs mt-2" style={{ color: RED }}>
-          {error}
-        </p><ErrorActions message={String(error)} /></div>
-)}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs mt-2" style={{ color: RED }}>
+            {error}
+          </p>
+          <ErrorActions message={String(error)} />
+        </div>
+      )}
       {reporting && (
         <ReportSheet
           title="Report message"
