@@ -87,6 +87,7 @@ export type CreateLockInput = {
   customDays?: number;
   surplusTo?: LockPlan['surplusTo'];
   curve?: LockPlan['curve'];
+  pot?: string;
 };
 
 /** Lock outputs (and the receipt) in one transaction. Returns the txid. */
@@ -194,6 +195,7 @@ export async function createLock(
     customDays: input.customDays,
     surplusTo: input.surplusTo,
     ...(input.curve && input.curve.kind !== 'linear' ? { curve: input.curve } : {}),
+    ...(input.pot ? { pot: input.pot } : {}),
   };
   savePlans(account, [plan, ...loadPlans(account, cs)], cs);
   return plan;

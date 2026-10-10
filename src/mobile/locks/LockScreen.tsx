@@ -10,7 +10,16 @@ import {
   valuesEntered,
 } from './builderForm';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Check, Plus, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Lock as LockIcon,
+  Plus,
+  ShieldCheck,
+} from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -52,6 +61,8 @@ import {
   walletLockOutpoints,
 } from './lockApi';
 import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
+import { BackPneeSheet } from '../notes/BackPneeSheet';
+import { groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
 import { MARKET_ENABLED } from '../storeBuild';
 import { verifyLockTx, type VerifyResult } from './verify';
@@ -133,8 +144,14 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [rate, setRate] = useState(cachedExchangeRate());
   const [plans, setPlans] = useState<LockPlan[]>(() => loadPlans(account, chromeStorageService));
   const [busy, setBusy] = useState(false);
-  // Wallet › PNEEs lock icon opens /m/lock?back=pnee: the amount sheet first, then the Back PNEEs flow.
-  const [backPnee, setBackPnee] = useState(() => isBackPneeMode(window.location.search));
+  // Wallet › PNEEs lock icon opens /m/lock?back=pnee: the Back PNEEs card first, then how much BSV, then the
+  // builder filled in for the PNEEs pot (owner, 10 Oct 2026).
+  const [backPnee, setBackPnee] = useState<'card' | 'amount' | null>(() =>
+    isBackPneeMode(window.location.search) ? 'card' : null,
+  );
+  /** The pot the lock being built goes into (LockPlan.pot); undefined = Other locks. */
+  const [pot, setPot] = useState<string | undefined>(undefined);
+  const [openPot, setOpenPot] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -219,6 +236,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setLabel(v.label);
     setTemplateUsed(t.id);
     setTemplateChecked(false);
+    setPot(t.id);
   };
   const [typed, setTyped] = useState('');
   /** Soft check above 0.01 BSV: shown after Review, until answered. */
@@ -312,6 +330,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             : undefined,
           surplusTo: mode === 'usd-target' ? surplusTo : undefined,
           curve: curved ? curve : undefined,
+          pot,
           receipt: receipt
             ? {
                 identity: {
@@ -481,18 +500,97 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const est = (sats: number) => (rate > 0 && sats > 0 ? ` · ≈ ${fmtUsd(satsToUsd(sats, rate))}` : '');
 
   let body: React.ReactNode;
+  const pots = groupPots(plans, height);
+  const startLock = (potId?: string) => {
+    setTemplateUsed(null);
+    setPot(potId);
+    setView({ kind: 'new' });
+  };
+  const startPot = (t: LockTemplate) => {
+    applyTemplate(t);
+    setView({ kind: 'new' });
+  };
+  const lockForPnee = (bsv: number) => {
+    setKind('once');
+    setAmountBsv(String(bsv));
+    setUnlockOn(dayInput(new Date(Date.now() + 365 * 86_400_000)));
+    setLabel('PNEEs backing');
+    setTemplateUsed(null);
+    setPot(PNEE_POT);
+    setBackPnee(null);
+    setView({ kind: 'new' });
+  };
+  const renderPlan = (p: LockPlan) => {
+    const s = planStatus(p, height);
+    const total = p.pieces.reduce((a, x) => a + x.sats, 0);
+    const pieceTxt = p.pieces.length === 1 ? 'one date' : `${p.pieces.length} payouts`;
+    return (
+      <div key={p.id} className={card} style={cardStyle}>
+        <div className="flex justify-between gap-2">
+          <span className="text-sm font-bold text-white truncate">{p.label}</span>
+          <span className="text-xs font-bold" style={{ color: s.status === 'Ready to claim' ? GOLD : MUTED }}>
+            {s.status}
+          </span>
+        </div>
+        <div className="text-xs" style={{ color: MUTED }}>
+          {modeLabel(p)} · {pieceTxt} · {fmtBsv(total)} locked at start
+        </div>
+        <div className="text-xs text-white">
+          Still locked {fmtBsv(s.locked)}
+          {s.next ? ` · next ≈ block ${s.next} (${fmtDate(new Date(Date.now() + (s.next - height) * 600_000))})` : ''}
+        </div>
+        {p.pieces.some((x) => x.paidUsd != null) && (
+          <div className="text-xs" style={{ color: MUTED }}>
+            {p.pieces
+              .filter((x) => x.paidUsd != null)
+              .slice(-3)
+              .map((x) => `paid ${fmtUsd(x.paidUsd!)} of ${fmtUsd(x.usdTarget ?? 0)}`)
+              .join(' · ')}
+          </div>
+        )}
+        <button
+          className="text-xs text-left"
+          style={{ color: GOLD }}
+          onClick={() => {
+            setTxInput(p.txids[0]);
+            setView({ kind: 'verify', tx: p.txids[0] });
+            void runVerify(p.txids[0]);
+          }}
+        >
+          Verify on chain
+        </button>
+      </div>
+    );
+  };
+
   if (view.kind === 'list') {
     body = (
       <>
-        {header('Lock BSV', () => navigate(-1))}
+        {header('Pots & Locks', () => navigate(-1))}
         <div className="px-4 flex flex-col gap-3">
+          <div className="flex gap-2">
+            <button
+              onClick={() => startLock()}
+              className={`${btn} flex-1 flex items-center justify-center gap-2`}
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              <LockIcon size={16} /> Lock BSV
+            </button>
+            <button
+              onClick={() => setOpenPot('__start')}
+              className={`${btn} flex-1 flex items-center justify-center gap-2 text-white`}
+              style={{ border: `1px solid ${LINE}` }}
+            >
+              <Plus size={16} /> Pot
+            </button>
+          </div>
           <div className={card} style={cardStyle}>
             <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-              Total locked
+              In pots
             </div>
             <div className="text-3xl font-extrabold text-white">{fmtBsv(totals.locked)}</div>
             <div className="text-xs" style={{ color: MUTED }}>
-              {totals.count} lock{totals.count === 1 ? '' : 's'}
+              {pots.length} pot{pots.length === 1 ? '' : 's'} · {totals.count} lock{totals.count === 1 ? '' : 's'}
               {totals.next ? ` · next unlock ≈ block ${totals.next}` : ''}
               {est(totals.locked)}
             </div>
@@ -567,62 +665,81 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               ))}
             </div>
           )}
-          <button
-            onClick={() => setView({ kind: 'new' })}
-            className={`${btn} flex items-center justify-center gap-2`}
-            style={{ background: GOLD, color: '#1a1300' }}
-          >
-            <Plus size={16} /> New lock
-          </button>
-          {plans.length === 0 && (
-            <p className="text-sm" style={{ color: MUTED }}>
-              Lock BSV until a date, or as payouts over time. Nobody can unlock it early, not even you.
-            </p>
-          )}
-          {plans.map((p) => {
-            const s = planStatus(p, height);
-            const total = p.pieces.reduce((a, x) => a + x.sats, 0);
-            const pieceTxt = p.pieces.length === 1 ? 'one date' : `${p.pieces.length} payouts`;
+          {pots.map((pt) => {
+            const open = openPot === pt.id;
             return (
-              <div key={p.id} className={card} style={cardStyle}>
-                <div className="flex justify-between gap-2">
-                  <span className="text-sm font-bold text-white truncate">{p.label}</span>
-                  <span className="text-xs font-bold" style={{ color: s.status === 'Ready to claim' ? GOLD : MUTED }}>
-                    {s.status}
-                  </span>
-                </div>
-                <div className="text-xs" style={{ color: MUTED }}>
-                  {modeLabel(p)} · {pieceTxt} · {fmtBsv(total)} locked at start
-                </div>
-                <div className="text-xs text-white">
-                  Still locked {fmtBsv(s.locked)}
-                  {s.next
-                    ? ` · next ≈ block ${s.next} (${fmtDate(new Date(Date.now() + (s.next - height) * 600_000))})`
-                    : ''}
-                </div>
-                {p.pieces.some((x) => x.paidUsd != null) && (
-                  <div className="text-xs" style={{ color: MUTED }}>
-                    {p.pieces
-                      .filter((x) => x.paidUsd != null)
-                      .slice(-3)
-                      .map((x) => `paid ${fmtUsd(x.paidUsd!)} of ${fmtUsd(x.usdTarget ?? 0)}`)
-                      .join(' · ')}
-                  </div>
-                )}
+              <div key={pt.id} className="flex flex-col gap-2">
                 <button
-                  className="text-xs text-left"
-                  style={{ color: GOLD }}
-                  onClick={() => {
-                    setTxInput(p.txids[0]);
-                    setView({ kind: 'verify', tx: p.txids[0] });
-                    void runVerify(p.txids[0]);
-                  }}
+                  onClick={() => setOpenPot(open ? null : pt.id)}
+                  aria-expanded={open}
+                  className={`${card} text-left`}
+                  style={cardStyle}
                 >
-                  Verify on chain
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-sm font-bold text-white truncate">{pt.name}</span>
+                    <span className="flex items-center gap-1 text-sm font-bold text-white">
+                      {fmtBsv(pt.locked)}
+                      {open ? <ChevronUp size={16} color={MUTED} /> : <ChevronDown size={16} color={MUTED} />}
+                    </span>
+                  </div>
+                  <div className="text-xs" style={{ color: MUTED }}>
+                    {pt.id === PNEE_POT ? 'Locked to back PNEEs · ' : ''}
+                    {pt.plans.length} lock{pt.plans.length === 1 ? '' : 's'}
+                    {pt.ready > 0
+                      ? ` · ${fmtBsv(pt.ready)} ready to claim`
+                      : pt.next
+                        ? ` · locked until ≈ ${fmtDate(new Date(Date.now() + (pt.next - height) * 600_000))}`
+                        : ''}
+                    {est(pt.locked)}
+                  </div>
                 </button>
+                {open && (
+                  <>
+                    {pt.plans.map(renderPlan)}
+                    <button
+                      onClick={() =>
+                        pt.id === PNEE_POT ? setBackPnee('amount') : startLock(pt.id === 'other' ? undefined : pt.id)
+                      }
+                      className="text-xs py-1 flex items-center gap-1 justify-center"
+                      style={{ color: GOLD }}
+                    >
+                      <Plus size={14} /> Add to {potName(pt.id)}
+                    </button>
+                  </>
+                )}
               </div>
             );
           })}
+          {(plans.length === 0 || openPot === '__start') && (
+            <div className={card} style={cardStyle}>
+              <div className="text-sm font-bold text-white">Start a pot</div>
+              <p className="text-xs m-0" style={{ color: MUTED }}>
+                A pot is BSV you lock for something: until a date, or as payouts over time. Nobody can unlock it early,
+                not even you. Pick one to fill in example values, then check them.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => startPot(t)}
+                    className="rounded-full px-3 py-2 text-xs font-bold"
+                    style={{ border: `1px solid ${LINE}`, color: '#fff', background: PANEL }}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+                {MARKET_ENABLED && (
+                  <button
+                    onClick={() => setBackPnee('card')}
+                    className="rounded-full px-3 py-2 text-xs font-bold"
+                    style={{ border: `1px solid ${GOLD}`, color: GOLD, background: PANEL }}
+                  >
+                    Back PNEEs
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <button
             className="text-xs py-2 flex items-center gap-1 justify-center"
             style={{ color: MUTED }}
@@ -637,7 +754,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     const pr = schedule as PercentResult | null;
     body = (
       <>
-        {header('New lock', () => setView({ kind: 'list' }))}
+        {header(pot ? `New lock · ${potName(pot)}` : 'New lock', () => setView({ kind: 'list' }))}
         <div className="px-4 flex flex-col gap-3">
           <div
             className="rounded-2xl p-3 text-xs font-semibold flex gap-2"
@@ -1085,7 +1202,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
-      {MARKET_ENABLED && backPnee && <BackPneeAmountSheet rate={rate} onClose={() => setBackPnee(false)} />}
+      {MARKET_ENABLED && backPnee === 'card' && (
+        <BackPneeSheet onClose={() => setBackPnee(null)} onLock={() => setBackPnee('amount')} />
+      )}
+      {MARKET_ENABLED && backPnee === 'amount' && (
+        <BackPneeAmountSheet rate={rate} onClose={() => setBackPnee(null)} onContinue={lockForPnee} />
+      )}
     </div>
   );
 };

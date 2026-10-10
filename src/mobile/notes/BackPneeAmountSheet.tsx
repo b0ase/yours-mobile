@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { Lock, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { fmtUsd } from '../locks/schedule';
-import { BackPneeSheet } from './BackPneeSheet';
 import {
   BACK_PNEE_EXPLAINER,
   BACK_PNEE_PRESETS,
@@ -17,18 +16,22 @@ const MUTED = '#98A2B3';
 const CARD = '#17191E';
 
 /**
- * Lock screen › Back PNEEs mode, first sheet (owner, 10 Oct 2026): how much BSV to lock, then on into the existing
- * Back PNEEs flow (BackPneeSheet). Backing itself is unchanged.
+ * Lock screen › Back PNEEs, second sheet (owner, 10 Oct 2026): after the Back PNEEs card, how much BSV to lock.
+ * Continue opens the lock builder filled in for the PNEEs pot (the usual review and type-LOCK confirm follow).
  */
-export const BackPneeAmountSheet = ({ rate, onClose }: { rate: number; onClose: () => void }) => {
+export const BackPneeAmountSheet = ({
+  rate,
+  onClose,
+  onContinue,
+}: {
+  rate: number;
+  onClose: () => void;
+  onContinue: (bsv: number) => void;
+}) => {
   const [raw, setRaw] = useState('');
-  const [next, setNext] = useState(false);
-  useBackClose(!next, onClose);
+  useBackClose(true, onClose);
   const bsv = parseBsvAmount(raw);
   const sum = bsv ? backPneeSummary(bsv, rate) : null;
-
-  if (next && bsv)
-    return <BackPneeSheet onClose={() => setNext(false)} amountBsv={bsv} amountUsd={sum?.usd ?? 0} />;
 
   return createPortal(
     <div className="fixed inset-0 z-[300] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
@@ -84,7 +87,7 @@ export const BackPneeAmountSheet = ({ rate, onClose }: { rate: number; onClose: 
         <button
           type="button"
           disabled={!bsv}
-          onClick={() => setNext(true)}
+          onClick={() => bsv && onContinue(bsv)}
           className="rounded-xl py-3 text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
           style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
         >
