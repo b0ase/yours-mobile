@@ -15,6 +15,11 @@ import {
 } from 'react';
 import { AlertTriangle, Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
 import { myPayUri } from '../scan/payUri';
+import { isBWalletX } from '../storeBuild';
+
+// Edition colour (owner, 10 Oct 2026): bWallet's card is yellow with black text, like its app icon; bWalletX keeps
+// the black card that turns gold with the balance. One card, two palettes (.bw-wcard.is-yellow in mobile.css).
+const YELLOW_CARD = !isBWalletX();
 
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -292,8 +297,8 @@ const WalletCardInner = ({
   return (
     <div className="bw-wcard-wrap">
       <div
-        className={`bw-wcard${turning ? ' is-turning' : ''}`}
-        style={{ ['--gold' as string]: gold.toFixed(3) }}
+        className={`bw-wcard${YELLOW_CARD ? ' is-yellow' : ''}${turning ? ' is-turning' : ''}`}
+        style={{ ['--gold' as string]: YELLOW_CARD ? '0' : gold.toFixed(3) }}
         role="button"
         tabIndex={0}
         aria-label={flipped ? 'Show card front' : 'Show receive QR and identity'}
@@ -315,7 +320,11 @@ const WalletCardInner = ({
                   <>
                     <span className="bw-wcard-handle">{t.tag}</span>
                     {verified && (
-                      <span aria-label="Verified identity" title="Verified identity" style={{ color: '#2ecc71' }}>
+                      <span
+                        aria-label="Verified identity"
+                        title="Verified identity"
+                        style={{ color: 'var(--bw-wcard-ok, #2ecc71)' }}
+                      >
                         <Check size={13} strokeWidth={3} />
                       </span>
                     )}
@@ -325,7 +334,7 @@ const WalletCardInner = ({
                       aria-label={`Copy ${t.copy}`}
                       className="bw-wcard-icon"
                     >
-                      <Copy size={15} color="#98A2B3" />
+                      <Copy size={15} color="var(--bw-wcard-muted, #98A2B3)" />
                     </button>
                   </>
                 ) : (
@@ -389,9 +398,13 @@ const WalletCardInner = ({
           </div>
           <div className="bw-wcard-centre">
             {view === 'spinner' ? (
-              <Loader2 size={28} className="animate-spin" color="#8e8e89" />
+              <Loader2 size={28} className="animate-spin" color="var(--bw-wcard-muted, #8e8e89)" />
             ) : view === 'unknown' ? (
-              <span className="bw-wcard-usd" title="Balance unavailable" style={{ color: '#8e8e89' }}>
+              <span
+                className="bw-wcard-usd"
+                title="Balance unavailable"
+                style={{ color: 'var(--bw-wcard-muted, #8e8e89)' }}
+              >
                 —
               </span>
             ) : (
@@ -409,7 +422,9 @@ const WalletCardInner = ({
                   })()}
                 >
                   {unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
-                  {syncing && <Loader2 size={16} className="animate-spin bw-wcard-sync" color="#8e8e89" />}
+                  {syncing && (
+                    <Loader2 size={16} className="animate-spin bw-wcard-sync" color="var(--bw-wcard-muted, #8e8e89)" />
+                  )}
                   {onRefresh && !syncing && (
                     <button
                       type="button"
@@ -421,7 +436,7 @@ const WalletCardInner = ({
                         onRefresh(true);
                       }}
                       className="bw-wcard-sync bg-transparent border-0 p-1 cursor-pointer"
-                      style={{ color: '#8e8e89', lineHeight: 0 }}
+                      style={{ color: 'var(--bw-wcard-muted, #8e8e89)', lineHeight: 0 }}
                     >
                       <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
                     </button>
@@ -471,7 +486,7 @@ const WalletCardInner = ({
                         aria-label="Copy BSV address"
                         className="bw-wcard-icon"
                       >
-                        <Copy size={14} color="#98A2B3" />
+                        <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" />
                       </button>
                     </div>
                   )}
@@ -517,7 +532,7 @@ const WalletCardInner = ({
                 aria-label="Copy receive address"
               >
                 <span>{shortAddr(receiveAddress)}</span>
-                <Copy size={13} color="#98A2B3" />
+                <Copy size={13} color="var(--bw-wcard-muted, #98A2B3)" />
               </button>
               <span className="bw-wcard-sig-cap">AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}</span>
               <div
