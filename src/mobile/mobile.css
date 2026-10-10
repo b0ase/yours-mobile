@@ -203,10 +203,16 @@ select {
    staggered entry (opacity + translateY layers on each section) Chromium can
    leave a stale raster tile of the Receive/Send/Mint row painted inside it,
    below the asset rows. Giving the scroller its own layer makes it repaint
-   its contents itself. Nothing inside uses position:fixed (MintSheet portals
-   to body), so the new containing block is harmless. */
+   its contents itself.
+   No transform / filter / perspective / will-change:transform / contain here:
+   any of them makes the scroller the containing block for position:fixed, and
+   the wallet's video background (VideoBackground position='fixed') then rides
+   inside the scrolled content instead of staying pinned to the screen, which
+   made the Wallet page scroll on past its last row (owner, 10 Oct 2026).
+   backface-visibility gives the same own layer without that side effect. */
 .pt-14.pb-16.overflow-y-auto {
-  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   isolation: isolate;
 }
 

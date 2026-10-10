@@ -38,4 +38,12 @@ describe('wallet layout', () => {
       expect(placed?.length ?? 0).toBeGreaterThan(0);
     }
   });
+
+  test('the Wallet scroller is not a containing block for its fixed video background (endless scroll)', () => {
+    const css = read('src/mobile/mobile.css');
+    const rule = css.match(/\.pt-14\.pb-16\.overflow-y-auto \{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toContain('isolation: isolate');
+    expect(rule).not.toMatch(/transform|filter|perspective|will-change|contain/);
+    expect(read('vite.config.mobile.ts')).toContain("position='fixed'");
+  });
 });

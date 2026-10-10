@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useReducedMotion } from 'framer-motion';
+import { PAGE_REFRESH } from '../tabs/tabRetap';
 import { DECIDE, THRESHOLD, gestureIntent, pushBand, pushIntent, rubberBand, shouldRefresh } from './pullMath';
 
 /**
@@ -124,6 +125,9 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
         moveContent(0, true);
         return setPull(0);
       }
+      runRefresh();
+    };
+    const runRefresh = () => {
       busy.current = true;
       setRefreshing(true);
       moveContent(THRESHOLD, true);
@@ -140,6 +144,20 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
           setPull(0);
         });
     };
+    // Re-tapping the current tab at the top of the page refreshes it (tabs/tabRetap.ts).
+    const onRetap = (e: Event) => {
+      const target = (e as CustomEvent<Element | null>).detail;
+      if (busy.current || off.current || !target) return;
+      if (!(target === el || target.contains(el) || el.contains(target))) return;
+      if (el.closest('.bw-page-off') || !el.getClientRects().length || el.scrollTop > 1) return;
+      moving = [...el.children].filter(
+        (k): k is HTMLElement =>
+          k instanceof HTMLElement && k !== anchor.current && getComputedStyle(k).position !== 'fixed',
+      );
+      setTop(Math.max(0, el.getBoundingClientRect().top));
+      runRefresh();
+    };
+    window.addEventListener(PAGE_REFRESH, onRetap);
     el.addEventListener('touchstart', onStart, { passive: true });
     el.addEventListener('touchmove', onMove, { passive: false });
     el.addEventListener('touchend', onEnd);
@@ -147,6 +165,7 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
     return () => {
       el.style.overscrollBehaviorY = prevOverscroll;
       moveContent(0, false);
+      window.removeEventListener(PAGE_REFRESH, onRetap);
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
