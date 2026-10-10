@@ -6,6 +6,7 @@ import {
   MicOff,
   Phone,
   PhoneOff,
+  PictureInPicture2,
   SwitchCamera,
   UserPlus,
   Video,
@@ -16,6 +17,8 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import { PAID_CALLS_ENABLED } from '../storeBuild';
+import { IS_EXTENSION } from '../extension';
+import { isCallsWindow, openCallsWindow, pipSupported, togglePip } from './popout';
 import {
   accept,
   bindVideo,
@@ -216,6 +219,16 @@ export const CallScreen = () => {
           {peer.verified && <BadgeCheck size={18} color="#2ecc71" aria-label="Name verified" />}
         </div>
         <div className="text-sm text-[#98A2B3]">{status(call)}</div>
+        {IS_EXTENSION && !isCallsWindow() && call.phase !== 'incoming' && (
+          <div className="text-xs text-[#98A2B3]">
+            Closing this panel ends the call.{' '}
+            {call.phase !== 'active' && (
+              <button type="button" className="underline text-[#F5C542]" onClick={() => openCallsWindow()}>
+                Open Calls in a window
+              </button>
+            )}
+          </div>
+        )}
         {(note || (cam && error && /camera/i.test(error) ? error : '')) && (
           <div className="text-xs text-[#F5B800]">{note || error}</div>
         )}
@@ -292,6 +305,11 @@ export const CallScreen = () => {
             {call.phase === 'active' && (
               <Round label="Speaker" on={call.speaker} onClick={() => void toggleSpeaker()}>
                 <Volume2 size={24} color={call.speaker ? '#111' : '#fff'} />
+              </Round>
+            )}
+            {call.phase === 'active' && layout.remote === 'full' && pipSupported(remoteRef.current) && (
+              <Round label="Float video" onClick={() => void togglePip(remoteRef.current).catch(() => setNote('Picture-in-picture is not available here'))}>
+                <PictureInPicture2 size={24} color="#fff" />
               </Round>
             )}
           </div>
