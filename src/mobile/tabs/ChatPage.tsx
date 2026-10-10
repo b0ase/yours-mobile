@@ -368,6 +368,8 @@ const Conversation = ({
   // Facebook / WhatsApp parity (chat/social.ts): reply quote, reaction bar, typing, mentions.
   const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
   const [acting, setActing] = useState<ChatMessage | null>(null);
+  /** Inline edit of one of your own messages: the bubble becomes a text box (Save / Cancel). */
+  const [editing, setEditing] = useState<{ id: string; text: string; busy?: boolean } | null>(null);
   const [typing, setTyping] = useState<string[]>([]);
   const lastTypingPing = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
@@ -437,7 +439,7 @@ const Conversation = ({
       .then((fresh) => {
         const shown = visibleMessages(fresh, viewerIsAdmin);
         if (!shown.length) return;
-        setMessages((cur) => mergeMessages(cur, shown));
+        setMessages((cur) => mergeMessages(cur, shown, { dropOrphanEdits: true }));
         void client.markRead(room.ticker).catch(() => {});
       })
       .catch(() => {});
@@ -449,6 +451,30 @@ const Conversation = ({
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
     lastTypingPing.current = Date.now();
     void client.typing(room.ticker).catch(() => {});
+  };
+  // The server appends a new version and returns it; merging replaces the old bubble in place
+  // (its supersedes_id), marked "edited". Same text → nothing to do.
+  const saveEdit = () => {
+    if (!editing || editing.busy) return;
+    const text = editing.text.trim();
+    const original = messages.find((x) => x.id === editing.id);
+    if (!text || !original || text === (original.body || '').trim()) {
+      setEditing(null);
+      return;
+    }
+    setEditing({ ...editing, busy: true });
+    client
+      .editMessage(room.ticker, editing.id, text)
+      .then((saved) => {
+        // Dated as the original (it is placed there anyway): the edit's own created_at is
+        // "now" and would move the `since` cursor past messages the poll has not fetched yet.
+        setMessages((cur) => mergeMessages(cur, [{ ...saved, created_at: original.created_at }]));
+        setEditing(null);
+      })
+      .catch((e) => {
+        setEditing((cur) => (cur ? { ...cur, busy: false } : cur));
+        fail(e);
+      });
   };
   const react = (m: ChatMessage, emoji: string) => {
     const mineNow = (reactions.get(m.id) ?? []).some((r) => r.emoji === emoji && r.handles.includes(normHandle(me)));
@@ -826,7 +852,7 @@ const Conversation = ({
                     <div className="shrink-0" style={{ width: 28 }} />
                   ))}
                 <div
-                  {...(!it.message.pending && !isEphemeral(it.message)
+                  {...(!it.message.pending && !isEphemeral(it.message) && editing?.id !== it.message.id
                     ? bubbleGestures(
                         () => setActing(it.message),
                         isPrivateB(it.message) ? null : () => setReplyTo(replyRefFor(it.message)),
@@ -857,7 +883,50 @@ const Conversation = ({
                       Shared by ${(it.message.event_payload as { shared_by?: string }).shared_by}
                     </div>
                   )}
-                  <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                  {editing?.id === it.message.id ? (
+                    <div className="flex flex-col gap-2 min-w-[220px]">
+                      <textarea
+                        autoFocus
+                        value={editing.text}
+                        onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            saveEdit();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditing(null);
+                          }
+                        }}
+                        maxLength={4000}
+                        rows={Math.min(6, Math.max(2, editing.text.split('\n').length))}
+                        aria-label="Edit message"
+                        className="w-full resize-none rounded-xl px-3 py-2 text-[15px] outline-none"
+                        style={{ background: 'rgba(0,0,0,0.18)', color: 'inherit' }}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(null)}
+                          className="rounded-full px-3 py-1 text-[13px] font-semibold"
+                          style={{ background: 'rgba(0,0,0,0.15)' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveEdit}
+                          disabled={!editing.text.trim() || editing.busy}
+                          className="rounded-full px-3 py-1 text-[13px] font-semibold disabled:opacity-50"
+                          style={{ background: '#1a1300', color: GOLD }}
+                        >
+                          {editing.busy ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                  )}
                   {isPrivateB(it.message) && (
                     <div
                       className="text-[11px] mt-1 flex items-center gap-2"
@@ -883,7 +952,13 @@ const Conversation = ({
                     className="text-[10px] ml-2 float-right mt-[6px]"
                     style={{ color: it.mine ? '#5c4800' : MUTED }}
                   >
-                    {it.message.edited ? 'edited · ' : ''}
+                    {it.message.edited ? (
+                      <span title={it.message.edited_at ? `Edited ${new Date(it.message.edited_at).toLocaleString()}` : 'Edited'}>
+                        edited ·{' '}
+                      </span>
+                    ) : (
+                      ''
+                    )}
                     {it.message.failed ? (
                       <button
                         className="underline text-[#b42318]"
@@ -1052,6 +1127,19 @@ const Conversation = ({
             !isShared(acting)
               ? () => {
                   shareB(acting);
+                  setActing(null);
+                }
+              : null
+          }
+          onEdit={
+            normHandle(acting.author_handle ?? '') === normHandle(me) &&
+            acting.kind === 'text' &&
+            !acting.pending &&
+            !acting.failed &&
+            !isPrivateB(acting) &&
+            !isEphemeral(acting)
+              ? () => {
+                  setEditing({ id: acting.id, text: acting.body || '' });
                   setActing(null);
                 }
               : null

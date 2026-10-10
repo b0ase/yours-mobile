@@ -862,6 +862,17 @@ export class BchatClient {
     return this.call('GET', `/api/bitsign/rooms/open/${encodeURIComponent(ticker.replace(/^\$/, ''))}`);
   }
 
+  /**
+   * Edit your own text message. The server APPENDS a version (nothing is overwritten) and
+   * returns it: a new row whose `supersedes_id` is the one edited — merge it and it replaces
+   * the old bubble in place (messages.ts mergeMessages). Author / text-only / latest-version
+   * rules are the server's.
+   */
+  async editMessage(ticker: string, id: string, body: string): Promise<ChatMessage> {
+    const r = await this.call<{ message: ChatMessage }>('PATCH', `${BchatClient.path(ticker)}/messages`, { id, body });
+    return { ...r.message, edited: true };
+  }
+
   async openRoomAction(
     ticker: string,
     action: 'leave' | 'remove' | 'add' | 'delete_message' | 'close' | 'mod' | 'unmod' | 'rotate_code',

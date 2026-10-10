@@ -16,6 +16,8 @@ export interface ChatMessage {
   root_id?: string | null;
   supersedes_id?: string | null;
   edited?: boolean;
+  /** When the latest version was written (an edited message keeps created_at = when said). */
+  edited_at?: string | null;
   /** Client-only: optimistic message not yet acknowledged by the server. */
   pending?: boolean;
   /** Client-only: send failed. */
@@ -82,7 +84,11 @@ export const isEphemeral = (m: Pick<ChatMessage, 'id'> | null | undefined): bool
 export const settleEphemeral = (current: ChatMessage[], localId: string, reply: ChatMessage): ChatMessage[] =>
   current.filter((m) => m.localId !== localId && m.id !== reply.id).concat({ ...reply, pending: false, failed: false });
 
-export const mergeMessages = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
+export const mergeMessages = (
+  current: ChatMessage[],
+  incoming: ChatMessage[],
+  opts: { dropOrphanEdits?: boolean } = {},
+): ChatMessage[] => {
   // Edits keep the original's position: order by the chain root's time, which
   // must be read before the superseded original is dropped.
   const rootTime = new Map<string, number>();
@@ -94,8 +100,19 @@ export const mergeMessages = (current: ChatMessage[], incoming: ChatMessage[]): 
   const byId = new Map<string, ChatMessage>();
   for (const m of current) byId.set(m.localId && m.pending ? `local:${m.localId}` : m.id, m);
 
-  for (const m of incoming) {
-    if (m.supersedes_id) byId.delete(m.supersedes_id);
+  // The `since` poll (dropOrphanEdits): an edit of a message we never loaded (an older page)
+  // is skipped rather than drawn at the bottom as if it were new. The server places the latest
+  // version on the page that holds the original, so it arrives when that page loads. Pages are
+  // already resolved by the server (heads without their originals), so they never drop.
+  const roots = new Set<string>();
+  for (const m of current) roots.add(m.root_id || m.id);
+
+  for (let m of incoming) {
+    if (opts.dropOrphanEdits && m.supersedes_id && !roots.has(m.root_id || m.supersedes_id)) continue;
+    if (m.supersedes_id) {
+      byId.delete(m.supersedes_id);
+      m = { ...m, edited: true };
+    }
     // Resolve a matching optimistic message (oldest pending first) — only the
     // first time this server row is seen, so a re-polled row can't eat a newer
     // identical pending message.
