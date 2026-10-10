@@ -92,6 +92,16 @@ export const MARKET_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
 /**
+ * Swap into BSV (ChangeNOW via bit-sign, src/mobile/swap/): bWalletX only. Swapping coins is exchange
+ * functionality (Apple 3.1.5(iii), the same rejection as the Market), so the store edition has no Swap card and
+ * keeps the plain price card. Literal env check so Vite inlines it and Rollup drops the lazy SwapFlow chunk.
+ */
+export const SWAP_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+/**
  * Apps tiles left out of a store build: exchanges / swaps (bApps by name, BSVRadar groups by id). The data
  * itself is gated by MARKET_ENABLED in bapps.ts / radarApps.ts, so the name folds to [] in a store build.
  */

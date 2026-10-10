@@ -256,6 +256,20 @@ describe('store build has no Market', () => {
     const s = src('./storeBuild.ts');
     expect(cond(s, 'MARKET_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
+  test('Swap: SWAP_ENABLED mirrors MARKET_ENABLED; store edition has no Swap card and keeps the price card', async () => {
+    const { SWAP_ENABLED } = await import('./storeBuild');
+    expect(SWAP_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'SWAP_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+    expect(storeEval('s.SWAP_ENABLED')).toBe(false);
+    expect(storeEval('s.SWAP_ENABLED', { VITE_CHANNEL: 'android-play' })).toBe(false);
+    expect(storeEval('s.SWAP_ENABLED', {})).toBe(true);
+    const bar = src('./wallet/BuyBsv.tsx');
+    expect(bar).toMatch(/const SwapFlow = SWAP_ENABLED \? lazy\(/);
+    expect(bar).toMatch(/swapOn \? <SwapCell[^:]*: <PriceCell/);
+    const w = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
+    expect(w).toMatch(/\{!BUY_CRYPTO_ENABLED && <BsvHistoryBar/);
+  });
   test('store tabs: no Market tab, and market ids land on Wallet', () => {
     const t = storeEval(
       '{ order: t.TAB_ORDER, tab: t.tabFor("market"), route: t.routeFor("market"), m: s.MARKET_ENABLED }',

@@ -1,5 +1,11 @@
-import { APP_NAME } from '../storeBuild';
-import { useEffect, useState } from 'react';
+import { APP_NAME, SWAP_ENABLED } from '../storeBuild';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { useSnackbar } from '../../hooks/useSnackbar';
+import { useSwapWatcher } from '../swap/useSwapWatcher';
+import type { SwapRecord } from '../swap/swapApi';
+
+// Swap into BSV (bWalletX only): the chunk is dropped from a store build (SWAP_ENABLED).
+const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -93,16 +99,60 @@ const PriceCell = ({ rate, onOpen }: { rate: number; onOpen: () => void }) => (
 );
 
 /**
- * Wallet top row (owner, rounds 6–7): price · Buy BSV · History, three equal columns. The price opens the BSV view
- * (`onPrice`, the BSV card's own handler).
+ * Swap cell (owner-approved design, 10 Oct 2026): the wallet's top-left card is "Swap" with today's BSV price in
+ * small type. Opens the swap screens (Pick → Deposit → Track). bWalletX only; the store edition keeps PriceCell.
  */
-export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onPrice: () => void }) => {
+const SwapCell = ({ rate, onOpen, active }: { rate: number; onOpen: () => void; active: number }) => (
+  <button
+    type="button"
+    onClick={onOpen}
+    aria-label={active ? `Swap, ${active} in progress` : 'Swap into BSV'}
+    className={`${CELL} flex-col leading-tight relative`}
+    style={{ background: '#17191E', borderColor: active ? '#f5b80099' : '#2b2f36', color: '#fff' }}
+  >
+    <span className="text-[15px] font-extrabold">Swap</span>
+    <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
+      BSV {rate > 0 ? formatUSD(rate) : '…'}
+    </span>
+    {active > 0 && (
+      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: GOLD }} aria-hidden="true" />
+    )}
+  </button>
+);
+
+/**
+ * Wallet top row (owner, rounds 6–7): Swap (or price) · Buy BSV · History, three equal columns. Without swaps the
+ * price opens the BSV view (`onPrice`, the BSV card's own handler). `getAddress` gives Swap the wallet's own BSV
+ * receive address.
+ */
+export const BsvPriceBar = ({
+  onReceive,
+  onPrice,
+  getAddress,
+}: {
+  onReceive: () => void;
+  onPrice: () => void;
+  getAddress?: () => Promise<string>;
+}) => {
   const rate = useLivePrice();
   const [open, setOpen] = useState(false);
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [resume, setResume] = useState<SwapRecord | null>(null);
+  const { addSnackbar } = useSnackbar();
+  const { swaps, active } = useSwapWatcher((s) => {
+    if (s.stage === 'done') addSnackbar(`Swap finished: ${s.toAmount ?? ''} BSV is in your wallet`, 'success');
+    else if (s.stage === 'refunded') addSnackbar('Your swap was refunded', 'info');
+    else if (s.stage === 'failed') addSnackbar('A swap needs attention. Open Swap to see it.', 'error');
+  });
+  const swapOn = SWAP_ENABLED && !!SwapFlow && !!getAddress;
+  const openSwap = () => {
+    setResume(active[0] ?? (swaps[0] && !swaps[0].notified ? swaps[0] : null));
+    setSwapOpen(true);
+  };
   return (
     <>
-      <div className="w-[92%] mb-4 flex items-stretch gap-2">
-        <PriceCell rate={rate} onOpen={onPrice} />
+      <div className="w-[92%] mb-2 flex items-stretch gap-2">
+        {swapOn ? <SwapCell rate={rate} onOpen={openSwap} active={active.length} /> : <PriceCell rate={rate} onOpen={onPrice} />}
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -117,6 +167,28 @@ export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onP
         </button>
         <HistoryButton className={CELL} />
       </div>
+      {swapOn && (
+        <button
+          type="button"
+          onClick={() => {
+            setResume(null);
+            setSwapOpen(true);
+          }}
+          className="w-[92%] mb-4 p-0 border-0 bg-transparent text-left text-xs cursor-pointer"
+          style={{ color: MUTED }}
+        >
+          {active.length > 0 ? (
+            <>
+              <span style={{ color: GOLD, fontWeight: 700 }}>Swap in progress</span> · tap Swap to track it
+            </>
+          ) : (
+            <>
+              Have BTC, ETH or USDT? <span style={{ color: GOLD, fontWeight: 700 }}>Swap it into BSV here</span>
+            </>
+          )}
+        </button>
+      )}
+      {!swapOn && <div className="mb-2" />}
       {open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
@@ -125,6 +197,11 @@ export const BsvPriceBar = ({ onReceive, onPrice }: { onReceive: () => void; onP
             onReceive();
           }}
         />
+      )}
+      {swapOn && swapOpen && SwapFlow && getAddress && (
+        <Suspense fallback={null}>
+          <SwapFlow getAddress={getAddress} resume={resume} onClose={() => setSwapOpen(false)} />
+        </Suspense>
       )}
     </>
   );
