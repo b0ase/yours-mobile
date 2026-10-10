@@ -147,7 +147,15 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
     });
   }
 
+  let closed = false;
   server?.on('upgrade', (req, socket, head) => {
+    // After close() the socket server refuses upgrades; answer it ourselves rather than hand ws a
+    // late connection (Bun's ws shim crashes in abortHandshake on that path).
+    if (closed) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     const a = admit(req);
     if (!a.ok) {
       socket.write(`HTTP/1.1 ${a.code} ${a.reason}\r\nConnection: close\r\n\r\n`);
@@ -160,6 +168,7 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
   return {
     stats: () => ({ channels: channels.size, sockets: wss.clients.size }),
     close: () => {
+      closed = true;
       clearInterval(timer);
       for (const id of [...channels.keys()]) drop(id);
       wss.close();
