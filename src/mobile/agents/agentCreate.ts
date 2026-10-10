@@ -1,5 +1,7 @@
 import { markAgentAccount } from './agentAccounts';
 import { makePot } from '../pots/pots';
+import { consumeFundIntent } from '../pots/fund';
+import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 
 /** Settings › Agents › New agent account sets this; Add account's toggle reads and writes it. */
 const FLAG = 'bwallet.createAgent';
@@ -25,6 +27,8 @@ export const consumeAgentCreate = (identityAddress: string) => {
   if (pot) {
     writeFlag(false);
     makePot(identityAddress, pot.name, pot.emoji);
+    // Back bWalletX: the fund pot gets its monthly subscription straight away (pots/fund.ts).
+    if (SUBSCRIPTIONS_ENABLED) consumeFundIntent(identityAddress);
     return;
   }
   if (!readFlag()) return;
