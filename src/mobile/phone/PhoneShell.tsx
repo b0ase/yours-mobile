@@ -7,6 +7,7 @@ import { getBappFrameState, openBapp } from '../bappFrame/bappFrame';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled } from '../storeBuild';
 import { TAB_TAP } from '../tabs/tabs';
+import { onTabRetap } from '../tabs/tabRetap';
 import { setWalletKind } from '../wallet/walletKind';
 import { AddToDockSheet } from './AddToDockSheet';
 import { Dock } from './Dock';
@@ -125,6 +126,8 @@ const Shell = () => {
       // Already here: reset the screen's inner pages, like re-tapping a tab did.
       if (legacy) window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: legacy }));
       if (pathname !== s.route) navigate(s.route, { replace: true });
+      // …and back to the top, or a refresh when already there (tabs/tabRetap.ts).
+      else onTabRetap();
       return;
     }
     navigate(s.route, { replace: true });

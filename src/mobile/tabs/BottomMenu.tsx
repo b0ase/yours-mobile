@@ -6,6 +6,7 @@ import { indexingEnabled, marketLabel } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
 import { usePhoneLayout } from '../phone/flag';
 import { WIDE_ON } from '../wide/flag';
+import { onTabRetap } from './tabRetap';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:
@@ -51,9 +52,12 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
             theme={theme}
             icon={t.icon}
             onClick={() => {
+              const again = active === t.id;
               handleSelect(asMenuItem(t.id));
               // Re-tapping the lit tab (e.g. from Media or the b agent) must still navigate back to it.
               window.dispatchEvent(new CustomEvent(TAB_TAP, { detail: t.id }));
+              // Already on this tab: back to the top, or refresh when at the top (tabRetap.ts).
+              if (again) onTabRetap();
             }}
             isSelected={active === t.id}
             badge={t.id === 'bsv' && pending && indexingEnabled() ? String(pending) : undefined}
