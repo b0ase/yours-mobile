@@ -449,7 +449,7 @@ describe('BSPACES_ENABLED: full bSpaces (token rooms, paid entry) is bWalletX on
       /\(BSPACES_ENABLED \|\| roomSpacesAllowed\(room\)\) && \(\s*<LiveBanner/,
     );
     // Paid entry stays bWalletX only.
-    expect(src('./spaces/LiveBanner.tsx')).toContain('BSPACES_ENABLED && open && <DoorKeeper');
+    expect(src('./spaces/LiveBanner.tsx')).toContain("BSPACES_ENABLED ? lazy(() => import('./DoorKeeper')");
     // The Chat tab's Spaces filter: chips and list both behind the flag.
     expect(src('./tabs/ChatPage.tsx').match(/BSPACES_ENABLED && ROOMS && handle && rooms/g)?.length).toBe(2);
   });

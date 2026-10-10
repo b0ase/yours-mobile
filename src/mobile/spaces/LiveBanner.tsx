@@ -3,7 +3,7 @@
  * and for the token's issuer or the room's admin (creator) a slim "Start a Space" bar pinned under the
  * room header when it has none (docs/BSPACES-PLAN.md). Everyone else sees nothing until it is live.
  */
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Mic, Radio } from 'lucide-react';
 import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from '../chat/api';
@@ -21,8 +21,10 @@ import {
   type SpaceState,
 } from './model';
 import { SpaceScreen } from './SpaceScreen';
-import { DoorKeeper } from './DoorKeeper';
 import { BSPACES_ENABLED } from '../storeBuild';
+
+// Paid entry is bWalletX only: a lazy chunk behind the inlined flag, so a store build never contains it.
+const DoorKeeper = BSPACES_ENABLED ? lazy(() => import('./DoorKeeper').then((m) => ({ default: m.DoorKeeper }))) : null;
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -196,7 +198,11 @@ export const LiveBanner = ({
       )}
 
       {/* Paid entry is bWalletX only (BSPACES_ENABLED inlines false in a store build, dropping DoorKeeper). */}
-      {BSPACES_ENABLED && open && <DoorKeeper client={client} ticker={ticker} me={me} />}
+      {DoorKeeper && open && (
+        <Suspense fallback={null}>
+          <DoorKeeper client={client} ticker={ticker} me={me} />
+        </Suspense>
+      )}
       {open && (
         <SpaceScreen
           client={client}

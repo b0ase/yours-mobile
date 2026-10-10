@@ -4,7 +4,7 @@ import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
 import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
 import { logInWalletApp } from '../wallet/connectionLog';
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
@@ -90,12 +90,16 @@ import {
   tokenRoomsEnabled,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
-import { NewSpaceSheet } from '../spaces/NewSpaceSheet';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
+// New Space picks any of your rooms and can open paid entry: bWalletX only, a lazy chunk behind the inlined
+// flag so a store build never contains it (the store starts a free Space from an open room's banner).
+const NewSpaceSheet = BSPACES_ENABLED
+  ? lazy(() => import('../spaces/NewSpaceSheet').then((m) => ({ default: m.NewSpaceSheet })))
+  : null;
 import {
   amountLabel,
   buildTokenRoomList,
@@ -2810,17 +2814,19 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           }}
         />
       )}
-      {newSpace && handle && (
-        <NewSpaceSheet
-          client={client}
-          me={handle}
-          rooms={rooms ?? []}
-          onClose={() => setNewSpace(false)}
-          onNewRoom={() => {
-            setNewSpace(false);
-            setNewRoom(true);
-          }}
-        />
+      {NewSpaceSheet && newSpace && handle && (
+        <Suspense fallback={null}>
+          <NewSpaceSheet
+            client={client}
+            me={handle}
+            rooms={rooms ?? []}
+            onClose={() => setNewSpace(false)}
+            onNewRoom={() => {
+              setNewSpace(false);
+              setNewRoom(true);
+            }}
+          />
+        </Suspense>
       )}
       {newRoom && handle && (
         <NewRoomSheet
