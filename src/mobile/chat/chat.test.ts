@@ -63,6 +63,51 @@ describe('mergeMessages', () => {
     expect(out.map((m) => m.id)).toEqual(['a2', 'b']);
   });
 
+  test('an edit is marked edited and keeps the original position', () => {
+    const a = msg('a', '2026-10-01T10:00:00Z', { body: 'bit native' });
+    const b = msg('b', '2026-10-01T10:01:00Z');
+    const a2 = msg('a2', '2026-10-01T11:00:00Z', { supersedes_id: 'a', root_id: 'a', body: 'bot native' });
+    const out = mergeMessages([a, b], [a2], { dropOrphanEdits: true });
+    expect(out.map((m) => m.id)).toEqual(['a2', 'b']);
+    expect(out[0].edited).toBe(true);
+    expect(out[0].body).toBe('bot native');
+  });
+
+  test('a second edit replaces the first', () => {
+    const a = msg('a', '2026-10-01T10:00:00Z');
+    const a2 = msg('a2', '2026-10-01T11:00:00Z', { supersedes_id: 'a', root_id: 'a' });
+    const a3 = msg('a3', '2026-10-01T12:00:00Z', { supersedes_id: 'a2', root_id: 'a', body: 'v3' });
+    const out = mergeMessages(mergeMessages([a], [a2]), [a3]);
+    expect(out.map((m) => m.id)).toEqual(['a3']);
+  });
+
+  test('poll: an edit of a message not loaded is skipped, not drawn at the bottom', () => {
+    const c = msg('c', '2026-10-01T10:02:00Z');
+    const old2 = msg('old2', '2026-10-01T11:00:00Z', { supersedes_id: 'old', root_id: 'old' });
+    expect(mergeMessages([c], [old2], { dropOrphanEdits: true }).map((m) => m.id)).toEqual(['c']);
+  });
+
+  test('page: a server-resolved head (original not included) is kept', () => {
+    const head = msg('a2', '2026-09-30T10:00:00Z', { supersedes_id: 'a', root_id: 'a', edited: true });
+    const c = msg('c', '2026-10-01T10:02:00Z');
+    expect(mergeMessages([c], [head]).map((m) => m.id)).toEqual(['a2', 'c']);
+  });
+
+  test('editMessage PATCHes the room messages and returns the new version', async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const http: Http = async (req) => {
+      calls.push({ method: req.method, url: req.url, body: req.body });
+      return { status: 200, data: { message: { id: 'a2', supersedes_id: 'a', root_id: 'a', body: 'x', created_at: 't' } } };
+    };
+    const client = new BchatClient(http, { token: 'T', handle: 'me', address: 'a' }, 'https://x.test');
+    const saved = await client.editMessage('$STUFF', 'a', 'x');
+    expect(calls[0].method).toBe('PATCH');
+    expect(calls[0].url).toContain('/api/bitsign/rooms/STUFF/messages');
+    expect(calls[0].body).toEqual({ id: 'a', body: 'x' });
+    expect(saved.id).toBe('a2');
+    expect(saved.edited).toBe(true);
+  });
+
   test('prepending an older page works', () => {
     const newer = [msg('c', '2026-10-01T10:02:00Z')];
     const older = [msg('a', '2026-09-30T10:00:00Z'), msg('b', '2026-09-30T10:01:00Z')];
