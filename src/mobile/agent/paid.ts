@@ -119,7 +119,23 @@ export const turnBody = (quote: Quote, txid: string, messages: AgentMessage[], s
   // The signed payment itself: the server checks it pays this quote and broadcasts it, so a
   // fresh tx is never "not on the network yet". Older servers ignore it (txid-only fallback).
   ...(beef && /^[0-9a-f]+$/i.test(beef) ? { beef } : {}),
+  // So b can log a bug report with the platform without asking (bit-sign lib/b-feedback.ts).
+  client: clientInfo(),
 });
+
+const clientInfo = (): { platform: string; version?: string } => {
+  const g = globalThis as { chrome?: { runtime?: { getManifest?: () => { version?: string } } }; Capacitor?: { getPlatform?: () => string } };
+  const native = g.Capacitor?.getPlatform?.();
+  if (native === 'ios') return { platform: 'iPhone' };
+  if (native === 'android') return { platform: 'Android' };
+  try {
+    const v = g.chrome?.runtime?.getManifest?.().version;
+    if (v) return { platform: 'Chrome extension', version: v };
+  } catch {
+    /* not the extension */
+  }
+  return { platform: 'web' };
+};
 
 /** Waits before re-asking when the server has not seen the payment yet (it also polls ~12 s itself). */
 export const NOT_YET_RETRY_MS = [3000, 6000] as const;
