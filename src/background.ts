@@ -1,4 +1,5 @@
 /* global chrome */
+import { balanceWithDeposits } from './services/depositBalance';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
@@ -2331,8 +2332,8 @@ if (isInServiceWorker) {
       });
       return;
     }
-    accountContext.baseWallet
-      .balance()
+    // Received-but-not-yet-swept deposits count too (services/depositBalance.ts).
+    balanceWithDeposits(accountContext.baseWallet)
       .then((satoshis) => {
         sendResponse({
           type: YoursEventName.GET_BALANCE,
