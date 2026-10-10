@@ -218,7 +218,13 @@ export function socialProof(
 
 // Web wallet: back from the provider in this tab with #p=…&t=… (or #error=…). Take it, then clear the address
 // bar so the ticket isn't left in history or re-read on reload.
-if (!Capacitor.isNativePlatform() && !IS_EXTENSION && typeof location !== 'undefined' && isWebReturn(location.href)) {
+if (
+  !Capacitor.isNativePlatform() &&
+  !IS_EXTENSION &&
+  typeof location !== 'undefined' &&
+  typeof location.href === 'string' &&
+  isWebReturn(location.href)
+) {
   const here = location.href;
   if (isReturn(here)) {
     history.replaceState(null, '', location.pathname + location.search);

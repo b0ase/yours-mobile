@@ -3,12 +3,24 @@
  * + bWallet's phone side (src/mobile/pair/sessions.ts), with the wallet call stubbed.
  * Run from the bwallet repo: bun test relay/e2e
  */
-import { expect, mock, test } from 'bun:test';
+import { afterAll, expect, mock, test } from 'bun:test';
 import http from 'node:http';
 import { createRelay } from '../relay.mjs';
 
 const SITE_ORIGIN = 'http://localhost:3000';
 const calls: unknown[] = [];
+
+// This test installs browser-ish globals; put the originals back so later test files see a clean runtime.
+const g = globalThis as Record<string, unknown>;
+const savedGlobals = Object.fromEntries(
+  ['location', 'sessionStorage', 'localStorage', 'document', 'WebSocket'].map((k) => [k, g[k]]),
+);
+afterAll(() => {
+  for (const [k, v] of Object.entries(savedGlobals)) {
+    if (v === undefined) delete g[k];
+    else g[k] = v;
+  }
+});
 
 test('QR → scan → same code → connect → request reaches the wallet and the answer comes back', async () => {
   const server = http.createServer();
@@ -27,7 +39,11 @@ test('QR → scan → same code → connect → request reaches the wallet and t
     };
   };
   Object.assign(globalThis, { location: { origin: SITE_ORIGIN }, sessionStorage: mem(), localStorage: mem() });
-  (globalThis as { document?: unknown }).document = { visibilityState: 'visible', addEventListener() {} };
+  (globalThis as { document?: unknown }).document = {
+    visibilityState: 'visible',
+    addEventListener() {},
+    removeEventListener() {},
+  };
   const Native = globalThis.WebSocket;
   (globalThis as { WebSocket: unknown }).WebSocket = class extends Native {
     constructor(url: string) {
@@ -41,9 +57,10 @@ test('QR → scan → same code → connect → request reaches the wallet and t
       return { success: true, data: { publicKey: '02' + 'ab'.repeat(32) } };
     },
   }));
-  mock.module(new URL('../../src/mobile/storeBuild.ts', import.meta.url).pathname, () => ({
-    appNameFor: () => 'bWalletX',
-  }));
+  // Keep every real export (other modules import more than appNameFor) and pin only the app name.
+  const storeBuildPath = new URL('../../src/mobile/storeBuild.ts', import.meta.url).pathname;
+  const realStoreBuild = await import(storeBuildPath);
+  mock.module(storeBuildPath, () => ({ ...realStoreBuild, appNameFor: () => 'bWalletX' }));
 
   const site = await import('../../../tokenblaster.lol/src/lib/pair/site.ts');
   const phone = await import('../../src/mobile/pair/sessions.ts');
@@ -82,6 +99,9 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   stop2();
 
   stop();
+  // Close the phone's live sessions before the relay goes, so no reconnect timer outlives the test.
+  for (const s of phone.pairedSites() as { c: string }[]) phone.forget(s.c, false);
   relay.close();
+  server.closeAllConnections?.();
   server.close();
 }, 20000);
