@@ -538,6 +538,7 @@ export const AgentConversation = ({
         {messages.length === 0 && !busy && (
           <ObsidianHero
             compact={compact}
+            extra={MARKET_ENABLED ? QUICK_STARTS : []}
             onPick={(prompt) => {
               setInput(prompt);
               document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();
@@ -603,7 +604,7 @@ export const AgentConversation = ({
           void send();
         }}
       >
-        {MARKET_ENABLED && !input && !busy && (
+        {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {QUICK_STARTS.map((q) => (
               <button
@@ -631,8 +632,8 @@ export const AgentConversation = ({
             }}
             rows={1}
             autoFocus={autoFocus}
-            placeholder="Message b"
-            aria-label="Message b"
+            placeholder="Ask b"
+            aria-label="Ask b"
             className="flex-1 resize-none rounded-2xl px-3 py-2 text-[14px] text-white outline-none max-h-32"
             style={{ background: PANEL, border: `1px solid ${LINE}` }}
           />

@@ -10,26 +10,30 @@ import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
  * Reduced motion, or no WebGL: one still frame / a plain gradient.
  */
 
-const GOLD = '#F5B800';
-const MUTED = '#98A2B3';
 
 type Option = { label: string; prompt: string };
 
 const OPTIONS: Option[] = [
-  { label: 'Send BSV', prompt: 'Help me send BSV to someone. Ask me who to and how much.' },
+  { label: 'Send money to a friend', prompt: 'Help me send BSV to someone. Ask me who to and how much.' },
   ...(MARKET_ENABLED
     ? [{ label: 'Buy a token', prompt: 'Help me buy a token. Ask me which one and how much I want to spend.' }]
     : []),
-  { label: 'Lock BSV', prompt: 'Help me lock some BSV in a pot. Ask me how much, until when, and what it is for.' },
+  {
+    label: 'Lock some BSV away',
+    prompt: 'Help me lock some BSV in a pot. Ask me how much, until when, and what it is for.',
+  },
   ...(BSPACES_ENABLED
     ? [
         {
-          label: 'Start a Space',
+          label: 'Go live in a Space',
           prompt: 'Help me start a live Space in one of my rooms. Ask me which room and the topic.',
         },
       ]
     : []),
-  { label: 'Fix a problem', prompt: "Something isn't working in my wallet. Help me find out what and fix it." },
+  {
+    label: 'Fix something that isn’t working',
+    prompt: "Something isn't working in my wallet. Help me find out what and fix it.",
+  },
 ];
 
 const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
@@ -122,7 +126,23 @@ const usePool = (canvas: React.RefObject<HTMLCanvasElement | null>, still: boole
   return failed;
 };
 
-export const ObsidianHero = ({ onPick, compact = false }: { onPick: (prompt: string) => void; compact?: boolean }) => {
+/** How long each suggestion floats in the pool, and its fade. */
+const LINE_MS = 3600;
+const FADE_MS = 900;
+
+/**
+ * Ask b (owner, 11 Oct 2026: "pure simplicity"): the obsidian pool, a big gold b in the middle, and one suggestion at
+ * a time drifting in and out of the pool. Tapping the line fills the message box; nothing is sent until Send.
+ */
+export const ObsidianHero = ({
+  onPick,
+  compact = false,
+  extra = [],
+}: {
+  onPick: (prompt: string) => void;
+  compact?: boolean;
+  extra?: Option[];
+}) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [still] = useState(() => {
     try {
@@ -132,63 +152,54 @@ export const ObsidianHero = ({ onPick, compact = false }: { onPick: (prompt: str
     }
   });
   const failed = usePool(canvas, still);
-  // The b alone first, then the options rise in beneath it.
-  const [open, setOpen] = useState(still);
+  const lines = [...OPTIONS, ...extra];
+  const [i, setI] = useState(0);
+  const [shown, setShown] = useState(false);
   useEffect(() => {
-    if (open) return;
-    const t = setTimeout(() => setOpen(true), 1400);
+    // Wait a beat with the b alone, then cycle: fade in, hold, fade out, next.
+    const t = setTimeout(
+      () => {
+        if (shown) {
+          setShown(false);
+          setTimeout(() => setI((n) => (n + 1) % lines.length), FADE_MS);
+        } else setShown(true);
+      },
+      shown ? LINE_MS : i === 0 ? 1400 : 200,
+    );
     return () => clearTimeout(t);
-  }, [open]);
-  const mark = compact ? 52 : 84;
+  }, [shown, i, lines.length]);
+  const line = lines[i % lines.length];
+  const mark = compact ? 120 : 176;
   return (
     <div
       className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden"
-      style={{ background: 'radial-gradient(circle at 50% 45%, #15130c 0%, #050506 45%, #010101 80%)' }}
+      style={{ background: 'radial-gradient(circle at 50% 50%, #15130c 0%, #050506 45%, #010101 80%)' }}
     >
       {!failed && <canvas ref={canvas} aria-hidden className="absolute inset-0 h-full w-full" />}
       <img
         src={bGlyph}
-        alt=""
+        alt="Ask b"
         width={mark}
         height={mark}
         className="relative"
-        style={{
-          filter: 'drop-shadow(0 0 24px rgba(245,184,0,.45)) drop-shadow(0 6px 18px rgba(0,0,0,.8))',
-          transform: open ? 'translateY(-12px) scale(.92)' : 'none',
-          transition: 'transform 900ms cubic-bezier(.2,.7,.2,1)',
-        }}
+        style={{ filter: 'drop-shadow(0 0 36px rgba(245,184,0,.5)) drop-shadow(0 8px 24px rgba(0,0,0,.85))' }}
       />
-      <div
-        className="relative mt-6 flex max-w-md flex-col items-center gap-3 px-6"
+      <button
+        type="button"
+        onClick={() => onPick(line.prompt)}
+        aria-live="polite"
+        className="relative mt-8 border-0 bg-transparent px-6 text-lg font-light tracking-wide cursor-pointer"
         style={{
-          opacity: open ? 1 : 0,
-          transform: open ? 'none' : 'translateY(10px)',
-          transition: 'opacity 900ms ease, transform 900ms cubic-bezier(.2,.7,.2,1)',
-          pointerEvents: open ? 'auto' : 'none',
+          color: '#EDE6D0',
+          textShadow: '0 2px 18px rgba(0,0,0,.9)',
+          opacity: shown || still ? 1 : 0,
+          filter: shown || still ? 'blur(0)' : 'blur(6px)',
+          transition: `opacity ${FADE_MS}ms ease, filter ${FADE_MS}ms ease`,
+          minHeight: '1.6em',
         }}
       >
-        <p className="m-0 text-sm" style={{ color: MUTED }}>
-          What would you like to do?
-        </p>
-        <div className="flex flex-wrap justify-center gap-2">
-          {OPTIONS.map((o) => (
-            <button
-              key={o.label}
-              type="button"
-              onClick={() => onPick(o.prompt)}
-              className="rounded-full px-4 py-2 text-sm font-semibold"
-              style={{
-                color: '#F2F2F0',
-                background: 'rgba(10,10,12,.55)',
-                border: `1px solid ${GOLD}55`,
-                backdropFilter: 'blur(6px)',
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </div>
+        {line.label}
+      </button>
     </div>
   );
 };
