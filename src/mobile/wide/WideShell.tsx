@@ -325,7 +325,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     {
       title: 'Discover',
       items: [
-        { id: 'feed', label: 'Feed', icon: I.feed, to: '/m/feed' },
+        { id: 'feed', label: 'bFeed', icon: I.feed, to: '/m/feed' },
         { id: 'media', label: 'Media', icon: I.media, to: '/m/media' },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/browser?view=bapps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
