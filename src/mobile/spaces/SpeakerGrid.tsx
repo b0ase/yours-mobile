@@ -15,7 +15,7 @@ import { pipSupported, togglePip } from './background';
 import { LevelBars } from './LevelBars';
 import type { SpaceMedia } from './media';
 import { audienceLine, hostLabel, type Participant, stageButtonLabel } from './model';
-import { faceArtUrl, fallBackToLocal } from './faceArt';
+import { bannerUrl, faceArtUrl, fallBackToLocal } from './faceArt';
 import { gridShape, pagesOf, recentlyActive, spareCells, tvWidth, wantsLiveVideo } from './speakerLayout';
 
 /** Desktop/web only: a PiP button on video tiles. Phones float the video on their own (background.ts). */
@@ -71,6 +71,9 @@ const Tile = ({
   // 11 Oct 2026); the room banner is only the fallback behind it.
   const art = faceArtUrl(p.handle);
   const bg = banner ? `center / cover no-repeat url("${banner}")` : '#0b0b0d';
+  // Their own uploaded bChatX banner first (an artist's own look, owner 11 Oct 2026); bAvatar art when they have none.
+  const [ownBanner, setOwnBanner] = useState(true);
+  const face2 = size === 'big' ? 34 : 26;
   return (
     <div
       role="button"
@@ -87,15 +90,26 @@ const Tile = ({
     >
       {!video && (
         <>
-          <img
-            src={art}
-            alt=""
-            aria-hidden="true"
-            onError={fallBackToLocal(p.handle)}
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ transform: 'scale(1.35)' }}
-            draggable={false}
-          />
+          {ownBanner ? (
+            <img
+              src={bannerUrl(p.handle)}
+              alt=""
+              aria-hidden="true"
+              onError={() => setOwnBanner(false)}
+              className="absolute inset-0 h-full w-full object-cover"
+              draggable={false}
+            />
+          ) : (
+            <img
+              src={art}
+              alt=""
+              aria-hidden="true"
+              onError={fallBackToLocal(p.handle)}
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ transform: 'scale(1.35)' }}
+              draggable={false}
+            />
+          )}
           <div
             className="absolute inset-0"
             style={{
@@ -113,12 +127,24 @@ const Tile = ({
             e.stopPropagation();
             void togglePip(ref.current);
           }}
-          className="absolute left-1.5 top-1.5 z-10 rounded-full bg-black/60 p-1"
+          className={`absolute ${onMenu ? 'right-9' : 'right-1.5'} top-1.5 z-10 rounded-full bg-black/60 p-1`}
           aria-label="Picture in picture"
           title="Picture in picture"
         >
           <PictureInPicture2 size={16} color="#fff" />
         </button>
+      )}
+      {video && size !== 'small' && (
+        // Camera on: who it is, top-left (owner, 11 Oct 2026): their uploaded picture, else their gold bAvatar.
+        <img
+          src={avatar || art}
+          alt=""
+          aria-hidden="true"
+          onError={avatar ? undefined : fallBackToLocal(p.handle)}
+          className="absolute left-2 top-2 z-10 rounded-full object-cover"
+          style={{ width: face2, height: face2, boxShadow: '0 0 0 2px rgba(255,210,77,.6), 0 2px 8px rgba(0,0,0,.6)' }}
+          draggable={false}
+        />
       )}
       {video ? (
         <video
