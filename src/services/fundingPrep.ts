@@ -45,8 +45,16 @@ export interface FundingSources {
   arriving: () => number;
   /** Retry crediting those outputs now (the receive guard). Optional: older contexts lack it. */
   creditArriving?: () => Promise<void>;
+  /** Restore failed-but-mined actions (services/recoverFailed.ts). Run only when nothing is spendable. */
+  recoverFailed?: () => Promise<{ restored: string[] }>;
   log?: (line: string) => void;
 }
+
+let lastRecoverAt = 0;
+/** Tests only. */
+export const resetRecoverThrottle = () => {
+  lastRecoverAt = 0;
+};
 
 export interface DepositBreakdown {
   /** Deposit outputs the sweep will move. */
@@ -115,6 +123,21 @@ export async function prepareFunding(src: FundingSources): Promise<FundingSnapsh
   const log = src.log ?? ((l: string) => console.log(l));
   let snap = await fundingSnapshot(src);
   log(`[funding] before: ${fmt(snap)}`);
+
+  // Nothing spendable: storage may hold a mined transaction as failed, hiding its change ($vexvoid, 11 Oct 2026).
+  if (snap.spendable === 0 && src.recoverFailed && Date.now() - lastRecoverAt > 120_000) {
+    lastRecoverAt = Date.now();
+    try {
+      const r = await src.recoverFailed();
+      if (r.restored.length) {
+        log(`[funding] restored ${r.restored.length} mined transaction(s) storage had marked failed`);
+        snap = await fundingSnapshot(src);
+        log(`[funding] after restore: ${fmt(snap)}`);
+      }
+    } catch (err) {
+      log(`[funding] restoring failed transactions failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   if (snap.sweepable > 0) {
     try {

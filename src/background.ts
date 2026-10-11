@@ -351,8 +351,13 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
     });
     // Release a site's inscription chain that broke part-way and still holds change (services/streamHeal.ts).
-    void healStrandedStreamActions(accountContext.baseWallet).then((r) => {
+    // Never release one the network already knows (services/recoverFailed.ts knownOnChain).
+    void healStrandedStreamActions(accountContext.baseWallet, { isKnown: accountContext.knownOnChain }).then((r) => {
       if (r.aborted.length || r.errors.length) console.log('[background] stranded stream actions released:', r);
+    });
+    // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
+    void accountContext.recoverFailed().then((r) => {
+      if (r.failed || r.error) console.log('[background] failed-action review:', r);
     });
     void preferLocalStorage(accountContext);
   }
@@ -3291,6 +3296,7 @@ if (isInServiceWorker) {
           sweep: ctx.sweepDeposits,
           arriving: arrivingSats,
           creditArriving: ctx.creditArriving,
+          recoverFailed: ctx.recoverFailed,
         });
       } else {
         console.warn('[createAction] no account context: skipping funding preparation');
@@ -3394,6 +3400,13 @@ if (isInServiceWorker) {
     try {
       const w = await ensureWallet();
 
+      // Never abort an action whose transaction the network already has: that strands money that really moved.
+      const ref = String(message.params?.reference ?? '');
+      if (accountContext && (await accountContext.knownOnChain(ref))) {
+        console.warn('[abortAction] transaction is already on chain; not aborting:', ref);
+        sendResponse({ type: CWIEventName.ABORT_ACTION, success: true, data: { aborted: false } });
+        return true;
+      }
       const result = await w.abortAction(message.params, message.originator);
       sendResponse({
         type: CWIEventName.ABORT_ACTION,

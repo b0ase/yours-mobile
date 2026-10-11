@@ -1,3 +1,9 @@
+import {
+  knownOnChain,
+  recoverMinedFailedActions,
+  type FailedAction,
+  type RecoverReport,
+} from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
 import {
   createWebWallet,
@@ -118,6 +124,10 @@ export interface AccountContext {
   sweepDeposits: () => Promise<{ swept?: number }>;
   /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
   creditArriving: () => Promise<void>;
+  /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
+  recoverFailed: () => Promise<RecoverReport>;
+  /** True when the network already knows this txid (never abort such an action). */
+  knownOnChain: (txid: string) => Promise<boolean>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -266,6 +276,8 @@ export const initWallet = async (
     remoteStorage,
     setActiveStorage,
     addRemote,
+    monitor: walletMonitor,
+    services: toolboxServices,
   } = await createWebWallet(walletConfig).catch(async (err: unknown) => {
     // A backup that won't connect (e.g. 1Sat answering HTTP 400 to the iPhone WebView's auth
     // handshake) must not take the whole wallet down: the device's own copy is authoritative when
@@ -752,6 +764,15 @@ export const initWallet = async (
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
+    recoverFailed: () =>
+      recoverMinedFailedActions({
+        listFailed: async (unfail) =>
+          (await baseWallet.listFailedActions({ labels: [], includeOutputs: true, limit: 200 }, unfail))
+            .actions as unknown as FailedAction[],
+        isMined: async (txid) => !!(await toolboxServices.getMerklePath(txid))?.merklePath,
+        runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
+      }),
+    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
     close,
   };
 };
