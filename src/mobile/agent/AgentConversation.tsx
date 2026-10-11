@@ -11,7 +11,6 @@ import { fetchExchangeRate } from '../../utils/wallet';
 import { ChatApiError, saveSession, type BchatClient } from '../chat/api';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import { oneClick } from '../settings/oneClick';
-import bGlyph from '../brand/bwallet-glyph.svg';
 import { MAX_INPUT, SECRET_WARNING, looksLikeSecret, transcript, type AgentMessage } from './agent';
 import { BWALLET_GUIDE } from './guide';
 import { PROVIDERS, callProvider } from './providers';
@@ -31,6 +30,7 @@ import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
+import { ObsidianHero } from './ObsidianHero';
 import { FINAL_CODES, clearPending, errorCode, finalText, loadPending, savePending, type PendingPaid } from './pending';
 import { ReportSheet } from '../ugc/UgcSheets';
 
@@ -534,14 +534,15 @@ export const AgentConversation = ({
         />
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-        {messages.length === 0 && (
-          <div className="m-auto text-center">
-            <img src={bGlyph} alt="" width={compact ? 40 : 56} height={compact ? 40 : 56} className="mx-auto mb-3" />
-            <p className="text-sm" style={{ color: MUTED }}>
-              Talk to b
-            </p>
-          </div>
+      <div className="relative flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+        {messages.length === 0 && !busy && (
+          <ObsidianHero
+            compact={compact}
+            onPick={(prompt) => {
+              setInput(prompt);
+              document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();
+            }}
+          />
         )}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
