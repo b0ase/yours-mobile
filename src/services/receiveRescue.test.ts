@@ -127,4 +127,25 @@ describe('rescue money stuck at our own receive address', () => {
     }
     expect(calls.internalize).toBe(0);
   });
+
+  test('an output the network says is already spent is reported, not retried as a failure', async () => {
+    const src = fundingTx(25_432_350);
+    const spent: string[] = [];
+    const { d } = deps(src, {
+      broadcast: async () => {
+        throw new Error('network refused the sweep (DOUBLE_SPEND_ATTEMPTED)');
+      },
+      alreadySpent: (o) => spent.push(o),
+    });
+    const out = await rescueStuckOutputs([{ outpoint: `${src.id('hex')}_0`, satoshis: 25_432_350 }], d);
+    expect(out).toHaveLength(0);
+    expect(spent).toEqual([`${src.id('hex')}.0`]);
+  });
+
+  test('a successful rescue names the outpoint it spent', async () => {
+    const src = fundingTx(25_432_350);
+    const { d } = deps(src);
+    const out = await rescueStuckOutputs([{ outpoint: `${src.id('hex')}.0`, satoshis: 25_432_350 }], d);
+    expect(out[0].from).toBe(`${src.id('hex')}.0`);
+  });
 });

@@ -62,3 +62,18 @@ describe('receive guard: the address the Receive screen shows always counts', ()
     expect(await balanceWithDeposits(wallet)).toBe(0);
   });
 });
+
+describe('outputs the wallet already moved (5.2.1 double count, 11 Oct 2026)', () => {
+  test('a moved outpoint is not counted as arriving, and is forgotten after the TTL', async () => {
+    const { findUncredited, markMoved, isMoved, MOVED_TTL_MS, restoreMoved, movedEntries } =
+      await import('./receiveGuard');
+    const op = 'f'.repeat(64) + '.0';
+    const chain = [{ outpoint: op.replace('.', '_'), satoshis: 25_432_350, address: '' }];
+    expect(findUncredited(chain, []).satoshis).toBe(25_432_350);
+    markMoved([op]);
+    expect(isMoved(op)).toBe(true);
+    restoreMoved(movedEntries());
+    expect(findUncredited(chain, []).satoshis).toBe(0);
+    expect(isMoved(op, Date.now() + MOVED_TTL_MS + 1)).toBe(false);
+  });
+});

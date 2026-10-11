@@ -64,6 +64,8 @@ import {
 import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
+import { healStrandedStreamActions } from './services/streamHeal';
+import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
 import { WalletBackupService } from './backup/WalletBackupService';
 import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/usbRekeyBackground';
@@ -347,6 +349,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // Abort token-indexing payments that were built but never sent (bounded, never throws).
     void healIndexFundActions(accountContext.baseWallet).then((r) => {
       if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
+    });
+    // Release a site's inscription chain that broke part-way and still holds change (services/streamHeal.ts).
+    void healStrandedStreamActions(accountContext.baseWallet).then((r) => {
+      if (r.aborted.length || r.errors.length) console.log('[background] stranded stream actions released:', r);
     });
     void preferLocalStorage(accountContext);
   }
@@ -3273,7 +3279,12 @@ if (isInServiceWorker) {
 
       // createAction funds from managed change in the 'default' basket only; money the balance shows in the
       // deposit basket or still arriving would be invisible to it (services/fundingPrep.ts, vexvoid.com 11 Oct 2026).
-      if (accountContext) {
+      // Never between the steps of a site's multi-step action: the preparation's own wallet actions break the
+      // chain (services/dappChain.ts, vexvoid.com streamed mint 11 Oct 2026).
+      const continuing = !isAdmin && continuesChain(message.params);
+      if (continuing) {
+        console.log('[createAction] continues a site chain: funding preparation skipped');
+      } else if (accountContext) {
         const ctx = accountContext;
         fundingSnap = await prepareFunding({
           wallet: ctx.baseWallet as unknown as Parameters<typeof prepareFunding>[0]['wallet'],
@@ -3287,6 +3298,7 @@ if (isInServiceWorker) {
 
       const result = await signer.createAction(message.params, message.originator);
       console.log('[createAction] Success');
+      if (!isAdmin && (continuing || startsChain(message.params))) markChainStep();
       // Live balance: tell any open wallet page at once, so the card ticks down before the next fetch (owner, 8 Oct
       // 2026). Display only; the page reconciles on its next balance load (src/mobile/wallet/live/liveBus.ts).
       if (result.txid || result.tx) {
@@ -3346,8 +3358,12 @@ if (isInServiceWorker) {
       const w = await ensureWallet();
       await ensureUsbSeen('sign a transaction', message.originator);
 
+      markChainStep();
       const result = await w.signAction(message.params, message.originator);
       console.log('[signAction] Success', result?.txid ? `txid=${result.txid}` : '');
+      // The step that broadcasts the batch ends the chain; otherwise it stays active for the next step.
+      if (result?.sendWithResults?.length) endChain();
+      else markChainStep();
       sendResponse({
         type: CWIEventName.SIGN_ACTION,
         success: true,
@@ -3385,6 +3401,14 @@ if (isInServiceWorker) {
         data: result,
       });
     } catch (error) {
+      // An abort of an action that is already signed or shared has nothing to do. Answer it as done, so the site
+      // reports the step that actually failed instead of this refusal (services/dappChain.ts; @1sat/actions
+      // completeSignedAction aborts after a failed local check and surfaces only the abort's error).
+      if (isAlreadyProcessedAbort(error)) {
+        console.warn('[abortAction] already signed or shared; nothing to abort:', message.params?.reference);
+        sendResponse({ type: CWIEventName.ABORT_ACTION, success: true, data: { aborted: true } });
+        return true;
+      }
       sendResponse({
         type: CWIEventName.ABORT_ACTION,
         success: false,
