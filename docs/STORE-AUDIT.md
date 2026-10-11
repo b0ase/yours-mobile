@@ -340,3 +340,5 @@ The owner approved free Spaces in bWallet. `FREE_SPACES_ENABLED` and `roomSpaces
 - **Android background audio:** `SpaceSessionService` (FOREGROUND_SERVICE_MEDIA_PLAYBACK + FOREGROUND_SERVICE_MICROPHONE) starts when a user joins a Space and stops when they leave, with an ongoing notification and a Leave button. This is what the Play foreground-service declaration describes.
 
 **Open question, Google Play (not decided):** Play's policies are looser than Apple 3.1.1 on blockchain tokens, and holding a token you already own to enter a room may be allowed there. Token-gated rooms stay off in the Play build too until someone checks the current Play policy wording (Blockchain-based content / tokenized digital assets) and the owner decides.
+
+- **Paid listening (11 Oct 2026, bWalletX only, `PAID_LISTENING_ENABLED`):** per-minute paid listening in Spaces (BSV or BSV-21, paid to speakers / issuer / burned). `PaidListening.tsx` is a lazy chunk behind the inlined flag, so the store bundle has none of it. The store grep also checks `Paid listening|space-listen`.
