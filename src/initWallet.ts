@@ -34,7 +34,15 @@ import { shouldResumeReconcile } from './services/storageReconcile';
 import { showOneSatPrompt } from './services/oneSatPrompt';
 import { runTokenRecovery } from './services/tokenRecoveryWallet';
 import { planAddressScan, resetSyncCursor } from './services/addressScan';
-import { checkReceiveAddresses, normOutpoint, setArriving } from './services/receiveGuard';
+import {
+  checkReceiveAddresses,
+  markMoved,
+  movedEntries,
+  normOutpoint,
+  restoreMoved,
+  setArriving,
+} from './services/receiveGuard';
+import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
@@ -475,6 +483,20 @@ export const initWallet = async (
   // Deposit derivation for one of our addresses: the address manager's window first, then a wider scan (an
   // address handed out past this device's maxKeyIndex), which is added to the manager so sync and the guard see it.
   const stuckSince = new Map<string, number>();
+  // Outputs the wallet already moved, kept across service-worker restarts (services/receiveGuard.ts markMoved).
+  const MOVED_KEY = 'bwxMovedOutpoints';
+  const rememberMoved = (outpoints: string[]) => {
+    markMoved(outpoints);
+    chrome.storage?.local
+      ?.set({ [MOVED_KEY]: movedEntries() })
+      .catch((err: unknown) => console.error('[receiveGuard] saving moved outputs failed:', err));
+  };
+  try {
+    const stored = await chrome.storage?.local?.get(MOVED_KEY);
+    restoreMoved(stored?.[MOVED_KEY]);
+  } catch {
+    /* nothing remembered yet */
+  }
   const DERIVATION_SEARCH_LIMIT = 200;
   let derivationSearchedThrough = -1;
   const depositDerivationFor = async (address: string): Promise<DepositDerivation | null> => {
@@ -498,6 +520,11 @@ export const initWallet = async (
   // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
   // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
   const runReceiveGuard = async () => {
+    // Never between the steps of a connected site's multi-step action (services/dappChain.ts).
+    if (chainActive()) {
+      console.log('[receiveGuard] a site action is in progress; check deferred');
+      return;
+    }
     const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
     const addresses = [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
     const walletOutpoints = async () => {
@@ -618,6 +645,7 @@ export const initWallet = async (
         },
         protocolID: ONESAT_PROTOCOL as WalletProtocol,
         feeRate: chromeStorageService.getCustomFeeRate(),
+        alreadySpent: (outpoint) => rememberMoved([outpoint]),
         firstSeen: (outpoint) => {
           const k = normOutpoint(outpoint);
           if (!stuckSince.has(k)) stuckSince.set(k, Date.now());
@@ -625,6 +653,7 @@ export const initWallet = async (
         },
       });
       if (rescued.length) {
+        rememberMoved(rescued.map((r) => r.from));
         await sweepDeposit
           .execute(actionCtx, {})
           .catch((err: unknown) => console.error('[receiveGuard] sweep after rescue failed:', err));

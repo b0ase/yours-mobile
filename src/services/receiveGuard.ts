@@ -26,10 +26,40 @@ export interface UncreditedResult {
 /** Normalise "txid.vout" / "txid_vout" to "txid.vout". */
 export const normOutpoint = (o: string) => o.replace('_', '.');
 
+/**
+ * Outputs the wallet has already moved itself (receiveRescue.ts), so they are spent even while the indexer still
+ * lists them as unspent: the spend sits in the mempool until the next block, and the owner sync only reports a
+ * spendTxid once it is mined. Owner, 11 Oct 2026 (5.2.1): right after the rescue the card showed $9.84 for $4.92,
+ * the new output plus the old one still counted as "arriving", and every site createAction re-ran the guard.
+ */
+const moved = new Map<string, number>();
+/** How long a moved outpoint is remembered: long past the spend's first confirmation. */
+export const MOVED_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+export function markMoved(outpoints: string[], at = Date.now()) {
+  for (const o of outpoints) moved.set(normOutpoint(o), at);
+}
+export function isMoved(outpoint: string, now = Date.now()): boolean {
+  const at = moved.get(normOutpoint(outpoint));
+  if (at === undefined) return false;
+  if (now - at > MOVED_TTL_MS) {
+    moved.delete(normOutpoint(outpoint));
+    return false;
+  }
+  return true;
+}
+/** Persistable form, for restoring after a service-worker restart. */
+export const movedEntries = (): [string, number][] => [...moved.entries()];
+export function restoreMoved(entries: unknown, now = Date.now()) {
+  if (!Array.isArray(entries)) return;
+  for (const e of entries)
+    if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number' && now - e[1] <= MOVED_TTL_MS)
+      moved.set(normOutpoint(e[0]), e[1]);
+}
+
 /** On-chain unspent outputs at our receive addresses that wallet storage does not hold. */
 export function findUncredited(chain: ChainOutput[], walletOutpoints: Iterable<string>): UncreditedResult {
   const known = new Set(Array.from(walletOutpoints, normOutpoint));
-  const outputs = chain.filter((o) => o.satoshis > 0 && !known.has(normOutpoint(o.outpoint)));
+  const outputs = chain.filter((o) => o.satoshis > 0 && !known.has(normOutpoint(o.outpoint)) && !isMoved(o.outpoint));
   return {
     satoshis: outputs.reduce((t, o) => t + o.satoshis, 0),
     outputs,

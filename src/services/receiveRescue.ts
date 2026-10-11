@@ -51,6 +51,11 @@ export interface RescueDeps {
   internalize: (beef: number[], derivations: Map<string, DepositDerivation>) => Promise<number>;
   protocolID: WalletProtocol;
   feeRate: number; // sats per kB
+  /**
+   * The network says the stuck output is already spent (typically by an earlier rescue still in the mempool, which
+   * the indexer reports as unspent until it is mined). Called so the guard stops counting and re-rescuing it.
+   */
+  alreadySpent?: (outpoint: string) => void;
   /** When the guard first saw each outpoint missing (ms since epoch). */
   firstSeen: (outpoint: string) => number;
   now?: () => number;
@@ -58,10 +63,18 @@ export interface RescueDeps {
 }
 
 export interface RescueResult {
+  /** The stuck outpoint this rescue spent ("txid.vout"). */
+  from: string;
   txid: string;
   address: string;
   satoshis: number;
 }
+
+/** A broadcast refusal meaning the input is already spent (double spend / missing or spent input). */
+export const isAlreadySpentError = (err: unknown) =>
+  /DOUBLE_SPEND|double.?spend|already spent|missing.?inputs|txn-mempool-conflict/i.test(
+    err instanceof Error ? err.message : String(err),
+  );
 
 /** P2PKH address of an output, or null for any other script. */
 export function p2pkhAddress(tx: Transaction, vout: number): string | null {
@@ -126,8 +139,13 @@ export async function rescueStuckOutputs(stuck: StuckOutput[], deps: RescueDeps)
       const credited = await deps.internalize(beef.toBinary(), new Map([[address, d]]));
       const kept = tx.outputs[0].satoshis ?? 0;
       log(`[receiveGuard] swept stuck output at ${address} ${kept} sats ${newTxid} (credited ${credited})`);
-      done.push({ txid: newTxid, address, satoshis: kept });
+      done.push({ from: `${txid}.${vout}`, txid: newTxid, address, satoshis: kept });
     } catch (err) {
+      if (isAlreadySpentError(err)) {
+        log(`[receiveGuard] ${o.outpoint} is already spent (an earlier move is waiting to confirm); no longer counted`);
+        deps.alreadySpent?.(`${txid}.${vout}`);
+        continue;
+      }
       console.error(`[receiveGuard] rescue of ${o.outpoint} failed:`, err);
     }
   }
