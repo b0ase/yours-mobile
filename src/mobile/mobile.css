@@ -1599,106 +1599,172 @@ button.bw-mail-card:active {
   color: #ffd24d;
   cursor: pointer;
 }
-.bw-wcard-adjust {
-  position: absolute;
-  right: 12px;
-  top: calc(50% - 44px);
-  transform: translateY(-50%);
-  z-index: 3;
+/* Card designer entry (owner, 11 Oct 2026): a quiet sliders icon at the right end of the magnetic strip on the
+   card back, top right, in the same right-hand column as the pen below. 44px target. */
+.bw-wcard-design {
+  flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+  margin-right: 4px;
   padding: 0;
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: var(--bw-wcard-muted);
+  color: #8e8e89;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.bw-wcard.is-adjusting {
-  touch-action: none;
-  cursor: grab;
+.bw-wcard-design:hover {
+  color: #d6d3c8;
 }
-.bw-wcard.is-adjusting .bw-wcard-art {
-  transition: filter 0.25s ease;
+.bw-wcard-design:focus-visible {
+  outline: 2px solid #ffd24d;
+  outline-offset: -6px;
 }
-.bw-wcard-adjust.is-on {
-  color: #ffd24d;
-  background: rgb(0 0 0 / 0.35);
+/* Full-screen card designer (CardDesigner.tsx). */
+.bw-cdes,
+.bw-cdes * {
+  box-sizing: border-box;
 }
-.bw-wcard-adjust:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
-}
-/* Card art adjust panel (CardArtAdjust.tsx): pinned to the bottom so the card above stays visible. */
-.bw-artadj {
+.bw-cdes {
   position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  z-index: 60;
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 16px 18px 14px;
-  border-radius: 20px;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  background: rgb(14 13 11 / 0.92);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  color: #f2f2f0;
-  box-shadow: 0 18px 50px rgb(0 0 0 / 0.5);
-}
-.bw-artadj-head {
+  inset: 0;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
+  align-items: center;
+  gap: 14px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: #070605;
+  color: #f2f2f0;
 }
-.bw-artadj-head b {
-  font-size: 15px;
+.bw-cdes > * {
+  width: 100%;
+  max-width: 520px;
 }
-.bw-artadj-head span {
+.bw-cdes-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+}
+.bw-cdes-top b {
+  font-size: 17px;
+}
+.bw-cdes-x {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-right: -10px;
+  padding: 0;
+  border: 0;
+  border-radius: 22px;
+  background: transparent;
+  color: #cfc8b6;
+  cursor: pointer;
+}
+.bw-cdes-card {
+  position: relative;
+  isolation: isolate;
+  aspect-ratio: 1.7 / 1;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #0b0b0c;
+  box-shadow:
+    0 20px 60px rgb(0 0 0 / 0.6),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bw-cdes-card:active {
+  cursor: grabbing;
+}
+.bw-cdes-handle {
+  position: absolute;
+  left: 18px;
+  top: 16px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffd24d;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 0.6);
+}
+.bw-cdes-bal {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+}
+.bw-cdes-bal b {
+  font-family: 'Space Grotesk', Inter, system-ui, sans-serif;
+  font-size: clamp(28px, 9vw, 42px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.bw-cdes-bal small {
+  margin-top: 3px;
   font-size: 12px;
-  color: #a39a85;
+  color: #b9b4a6;
 }
-.bw-artadj-row {
+.bw-cdes-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  color: #8e8e89;
+}
+.bw-cdes-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.bw-cdes-row {
   display: grid;
   grid-template-columns: 96px 1fr;
   align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  font-size: 13px;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 14px;
   color: #cfc8b6;
 }
-.bw-artadj-row input {
+.bw-cdes-row input {
   width: 100%;
   accent-color: #f5c542;
 }
-.bw-artadj-actions {
+.bw-cdes-actions {
   display: flex;
   justify-content: space-between;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 12px;
 }
-.bw-artadj-actions button {
-  min-height: 44px;
-  padding: 0 18px;
-  border-radius: 12px;
+.bw-cdes-actions button {
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 14px;
   border: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }
-.bw-artadj-reset {
+.bw-cdes-reset {
   background: transparent;
   color: #cfc8b6;
 }
-.bw-artadj-reset:disabled {
+.bw-cdes-reset:disabled {
   opacity: 0.4;
   cursor: default;
 }
-.bw-artadj-done {
+.bw-cdes-done {
+  flex: 1;
+  max-width: 220px;
   background: linear-gradient(180deg, #ffd24d, #f5b800);
   color: #0b0a08;
 }
