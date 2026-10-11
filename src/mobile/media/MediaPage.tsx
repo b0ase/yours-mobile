@@ -4,7 +4,8 @@ import { ArrowLeft, Music, Pause, Play, Video } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
-import { getState, pauseAudio, subscribe, toggle } from './player';
+import { getState, pauseAudio, playQueue, subscribe, toggle } from './player';
+import { FEATURED_TRACKS, featuredQueue, type FeaturedTrack } from './featured/featured';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { TopNav } from '../../components/TopNav';
 import { PullToRefresh } from '../ui/PullToRefresh';
@@ -119,6 +120,37 @@ const MediaPage = () => {
     </button>
   ) : null;
 
+  // Free to play (FEATURED_TRACKS): a card of its own, outside the wallet's library.
+  const featuredCard = (t: FeaturedTrack) => {
+    const active = nowPlaying?.id === t.id;
+    return (
+      <button
+        key={t.id}
+        onClick={() => (active ? toggle() : playQueue(featuredQueue(t), 0))}
+        className="w-full flex items-center gap-3 rounded-2xl p-3 text-left"
+        style={{ background: PANEL, border: `1px solid ${active ? GOLD : LINE}` }}
+      >
+        <img src={t.artwork} alt="" className="w-16 h-16 rounded-xl object-cover shrink-0" loading="lazy" />
+        <span className="flex-1 min-w-0">
+          <span className="block text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+            Free to play · {t.label}
+          </span>
+          <span className={`block text-base font-bold text-white ${ELLIPSIS}`}>{t.title}</span>
+          <span className="block text-xs" style={{ color: MUTED }}>
+            {t.artist}
+          </span>
+        </span>
+        <span className="w-11 h-11 rounded-full flex items-center justify-center shrink-0" style={{ background: GOLD }}>
+          {active && player.playing ? (
+            <Pause size={18} color="#1a1300" />
+          ) : (
+            <Play size={18} color="#1a1300" fill="#1a1300" />
+          )}
+        </span>
+      </button>
+    );
+  };
+
   const track = (item: MediaItem, n: number) => {
     const active = nowPlaying?.id === item.output.outpoint;
     return (
@@ -172,8 +204,10 @@ const MediaPage = () => {
     <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
       <PullToRefresh onRefresh={reload} />
       <TopNav />
+      {/* Room for the top bar as its own block: Desktop hides the header below, and its margin went with it. */}
+      <div className="h-14 shrink-0" aria-hidden />
       <div
-        className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1 mt-14"
+        className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
         style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
       >
         <button aria-label="Back" onClick={close} className="p-2">
@@ -183,6 +217,9 @@ const MediaPage = () => {
       </div>
       <div className="px-4 pt-4 flex flex-col gap-5">
         {hero}
+        {filter !== 'video' && FEATURED_TRACKS.length > 0 && (
+          <div className="flex flex-col gap-2">{FEATURED_TRACKS.map(featuredCard)}</div>
+        )}
         <div className="flex gap-1.5">
           {FILTERS.map((f) => (
             <button
@@ -207,7 +244,7 @@ const MediaPage = () => {
         )}
         {!loading && playable.length === 0 && (
           <p className="text-sm text-center py-10" style={{ color: MUTED }}>
-            No music or video in this wallet yet. Mint some from the Wallet tab.
+            No music or video of your own yet. Mint some from the Wallet tab.
           </p>
         )}
         {filter !== 'video' &&
