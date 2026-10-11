@@ -65,7 +65,8 @@ import {
   replyRefFor,
   typingLabel,
 } from '../chat/social';
-import { bubbleGestures } from '../chat/gestures';
+import { messageGestures } from '../chat/messageGestures';
+import { haptic } from '../swipe/haptics';
 import {
   MentionPicker,
   MessageText,
@@ -375,6 +376,12 @@ const Conversation = ({
   // Facebook / WhatsApp parity (chat/social.ts): reply quote, reaction bar, typing, mentions.
   const [replyTo, setReplyTo] = useState<ReplyRef | null>(null);
   const [acting, setActing] = useState<ChatMessage | null>(null);
+  /** Hold (or swipe right) on a message: quote it and open the keyboard, no extra Reply tap. */
+  const startReply = (m: ChatMessage) => {
+    setReplyTo(replyRefFor(m));
+    setActing(null);
+    requestAnimationFrame(() => composer.current?.focus());
+  };
   /** Inline edit of one of your own messages: the bubble becomes a text box (Save / Cancel). */
   const [editing, setEditing] = useState<{ id: string; text: string; busy?: boolean } | null>(null);
   const [typing, setTyping] = useState<string[]>([]);
@@ -822,10 +829,13 @@ const Conversation = ({
                   ))}
                 <div
                   {...(!it.message.pending && !isEphemeral(it.message) && editing?.id !== it.message.id
-                    ? bubbleGestures(
-                        () => setActing(it.message),
-                        isPrivateB(it.message) ? null : () => setReplyTo(replyRefFor(it.message)),
-                      )
+                    ? messageGestures({
+                        onTap: () => setActing(it.message),
+                        onHold: isPrivateB(it.message) ? null : () => startReply(it.message),
+                        onSwipeLeft: onMessageMenu && !isPrivateB(it.message) ? () => onMessageMenu(it.message) : null,
+                        onSwipeRight: isPrivateB(it.message) ? null : () => startReply(it.message),
+                        label: `Message from ${it.mine ? 'you' : `$${it.message.author_handle || 'someone'}`}. Tap for reactions, hold to reply, swipe left to report or block`,
+                      })
                     : {})}
                   className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none"
                   style={{
@@ -1084,14 +1094,15 @@ const Conversation = ({
                   setActing(null);
                 }
           }
-          onReply={
-            isPrivateB(acting)
-              ? null
-              : () => {
-                  setReplyTo(replyRefFor(acting));
+          onReply={isPrivateB(acting) ? null : () => startReply(acting)}
+          onCopy={
+            acting.body
+              ? () => {
+                  const text = acting.body || '';
                   setActing(null);
-                  requestAnimationFrame(() => composer.current?.focus());
+                  void copyLink(text).then((r) => r === 'copied' && haptic('light'));
                 }
+              : null
           }
           onShare={
             isPrivateB(acting) &&

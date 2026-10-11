@@ -1,19 +1,22 @@
 import { Capacitor } from '@capacitor/core';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 type Style = 'light' | 'medium' | 'heavy';
-type HapticsPlugin = { impact: (o: { style: 'LIGHT' | 'MEDIUM' | 'HEAVY' }) => Promise<void> };
+
+const IMPACT: Record<Style, ImpactStyle> = {
+  light: ImpactStyle.Light,
+  medium: ImpactStyle.Medium,
+  heavy: ImpactStyle.Heavy,
+};
 
 /**
- * A short haptic tick. Uses the Capacitor Haptics plugin when the native app has it (not installed in this repo yet:
- * `@capacitor/haptics` would light this up), else navigator.vibrate (Android web), else nothing.
+ * A short haptic tick. The phone apps use the Capacitor Haptics plugin (iOS Taptic Engine, Android vibrator);
+ * browsers fall back to navigator.vibrate (Android web); desktops do nothing.
  */
 export const haptic = (style: Style = 'medium') => {
   try {
-    const p = (Capacitor as unknown as { Plugins?: Record<string, unknown> }).Plugins?.Haptics as
-      | HapticsPlugin
-      | undefined;
-    if (Capacitor.isNativePlatform() && p?.impact) {
-      void p.impact({ style: style.toUpperCase() as 'LIGHT' }).catch(() => undefined);
+    if (Capacitor.isNativePlatform()) {
+      void Haptics.impact({ style: IMPACT[style] }).catch(() => undefined);
       return;
     }
     navigator.vibrate?.(style === 'heavy' ? 18 : style === 'medium' ? 10 : 5);
