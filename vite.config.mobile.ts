@@ -645,7 +645,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // PhonePage wraps the routed page so the phone layout can drag it sideways (phone/pager.tsx).
     // ErrorNavBridge: errors outside the router (the snackbar) can open b with the error typed in (errors/).
     // Wide web layout (src/mobile/wide): sidebar + top bar around the same routes; a no-op when off.
-    ['<Routes>', '<ErrorNavBridge /><Suspense fallback={null}><PhoneShell /></Suspense>\n<WideFrame><PhonePage><Routes>'],
+    [
+      '<Routes>',
+      '<ErrorNavBridge /><Suspense fallback={null}><PhoneShell /></Suspense>\n<WideFrame><PhonePage><Routes>',
+    ],
     ['</Routes>', '</Routes></PhonePage></WideFrame>'],
     // Wide layout: unlock in the same composition as the welcome screen (wide/WideAuth.tsx; a no-op otherwise).
     ['<UnlockWallet onUnlock={handleUnlock} />', '<WideAuth><UnlockWallet onUnlock={handleUnlock} /></WideAuth>'],
