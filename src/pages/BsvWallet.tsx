@@ -471,20 +471,37 @@ export const BsvWallet = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch receive address from service worker
+  // Fetch receive address from service worker. Retries while it comes back empty (the wallet may still be
+  // unlocking or switching account), and again whenever the app returns to the foreground, so the card's
+  // address line never stays blank.
   useEffect(() => {
-    (async () => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async (attempt: number) => {
       try {
         const response = await sendMessageAsync<{ success: boolean; data?: string }>({
           action: YoursEventName.GET_RECEIVE_ADDRESS,
         });
+        if (stop) return;
         if (response?.success && response.data) {
           setReceiveAddress(response.data);
+          return;
         }
       } catch (error) {
         console.error('Failed to get receive address:', error);
       }
-    })();
+      if (!stop && attempt < 6) timer = setTimeout(() => void load(attempt + 1), 1000 * 2 ** attempt);
+    };
+    void load(0);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !receiveAddressRef.current) void load(0);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   useEffect(() => {
