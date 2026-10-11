@@ -51,6 +51,8 @@ import {
 } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
+import { defaultPictures } from '../chat/roomArt';
+import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
 import {
   applyMention,
@@ -158,7 +160,6 @@ import {
   normHandle,
   oldestCursor,
   previewText,
-  roomInitial,
   roomTitle,
   threadItems,
   timeLabel,
@@ -258,45 +259,35 @@ const Avatar = ({
   size = 48,
   roomKey,
   src,
+  issuer,
 }: {
   title: string;
   size?: number;
   roomKey?: string | null;
   /** A picture to use as is: a room's metadata.icon, a person's avatar. */
   src?: string | null;
+  /** A token room's issuer handle, when known: its default picture is theirs. */
+  issuer?: string | null;
 }) => {
-  const hue = avatarHue(title);
-  // Token / collection rooms show the token's icon; letter tile when there is none or it fails.
+  // Token / collection rooms show the token's icon; with none, the issuer's photo or gold bAvatar (chat/roomArt.ts).
   const tokenIcon = useRoomIcon(src ? null : roomKey);
-  const icon = src || tokenIcon;
-  const [broken, setBroken] = useState<string | null>(null);
-  if (icon && broken !== icon)
-    return (
-      <img
-        src={icon}
-        alt=""
-        onError={() => setBroken(icon)}
-        loading="lazy"
-        decoding="async"
-        referrerPolicy="no-referrer"
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size, background: '#16181c' }}
-      />
-    );
+  const candidates = useMemo(
+    () => [...[src || tokenIcon].filter((u): u is string => !!u), ...defaultPictures(title, issuer)],
+    [src, tokenIcon, title, issuer],
+  );
+  const [failed, setFailed] = useState<Set<string>>(() => new Set());
+  const icon = candidates.find((u) => !failed.has(u)) ?? candidates[candidates.length - 1];
   return (
-    <div
-      className="rounded-full flex items-center justify-center shrink-0 font-bold"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.42,
-        color: `hsl(${hue} 70% 82%)`,
-        background: `linear-gradient(145deg, hsl(${hue} 35% 26%), hsl(${hue} 30% 14%))`,
-        border: `1px solid hsl(${hue} 30% 30% / 0.6)`,
-      }}
-    >
-      {roomInitial(title)}
-    </div>
+    <img
+      src={icon}
+      alt=""
+      onError={() => setFailed((cur) => (cur.has(icon) ? cur : new Set(cur).add(icon)))}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className="rounded-full object-cover shrink-0"
+      style={{ width: size, height: size, background: '#16181c' }}
+    />
   );
 };
 
@@ -701,7 +692,8 @@ const Conversation = ({
         )}
         {onBans && (
           <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Room settings">
-            <Settings size={18} color={MUTED} />
+            {/* Gold for the room's issuer (known once set-up was offered), so they can find their controls. */}
+            <Settings size={18} color={['done', 'later'].includes(roomSetupState(room.ticker) ?? '') ? GOLD : MUTED} />
           </button>
         )}
         {onBounties && (
@@ -2370,6 +2362,25 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   };
   const blockUser = (target: string) => void setBlocked(client, target, true);
 
+  // "Set up your room": offered once when the issuer opens their own token room (chat/roomSetupPrompt.ts).
+  const [roomSetupOffer, setRoomSetupOffer] = useState(false);
+  const openRoomKey = open?.entry && !openTicker ? open.room.ticker : null;
+  useEffect(() => {
+    setRoomSetupOffer(!!openRoomKey && ROOMS && shouldOfferRoomSetup(openRoomKey, true));
+  }, [openRoomKey]);
+  const closeRoomSettings = useCallback(() => {
+    setRoomSettings(false);
+    setRoomSetupOffer(false);
+  }, []);
+  // List tickets for sale: the token's market page and its own Sell flow (no money code here).
+  const sellTickets = (key: string) => {
+    const ref = parseTokenKey(key);
+    if (!ref) return;
+    closeRoomSettings();
+    requestMarketToken(ref);
+    handleSelect(asMenuItem('market'));
+  };
+
   const buy = (key: string) => {
     const ref = parseTokenKey(key);
     setLocked(null);
@@ -2916,18 +2927,21 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           onClose={() => setMsgMenu(null)}
         />
       )}
-      {roomSettings && open?.entry && (
+      {(roomSettings || roomSetupOffer) && open?.entry && (
         <RoomSettingsSheet
           client={client}
           ctx={apiContext}
           me={handle ?? ''}
           ticker={open.room.ticker}
           entry={open.entry}
+          setup={!roomSettings && roomSetupOffer}
+          onSell={MARKET_ENABLED ? () => sellTickets(open.entry!.key) : null}
           onBans={() => {
             setRoomSettings(false);
+            setRoomSetupOffer(false);
             setBanning(true);
           }}
-          onClose={() => setRoomSettings(false)}
+          onClose={closeRoomSettings}
         />
       )}
       {banning && open && <BansSheet client={client} ticker={open.room.ticker} onClose={() => setBanning(false)} />}

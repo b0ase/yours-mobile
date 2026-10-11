@@ -19,6 +19,7 @@ import { claimIssuerAdmin } from './autoClaim';
 import { claimDepsFor } from './claimDeps';
 import { spendFloorError } from './roomSpend';
 import { HistoryToggle } from './HistoryToggle';
+import { rememberRoomSetup } from './roomSetupPrompt';
 import {
   amountLabel,
   formatRaw,
@@ -103,6 +104,8 @@ export const RoomSettingsSheet = ({
   entry,
   onBans,
   onClose,
+  setup = false,
+  onSell,
 }: {
   client: BchatClient;
   ctx: OneSatContext;
@@ -111,6 +114,10 @@ export const RoomSettingsSheet = ({
   entry: TokenRoomEntry;
   onBans: () => void;
   onClose: () => void;
+  /** First open of the issuer's own room: "Set up your room", with "Set up later" (chat/roomSetupPrompt.ts). */
+  setup?: boolean;
+  /** Open this token's page to list tickets for sale (the market's own Sell flow and approval card). */
+  onSell?: (() => void) | null;
 }) => {
   const [look, setLook] = useState<TokenRoomLookup | null>(null);
   const [challenge, setChallenge] = useState<IssuerChallenge | null>(null);
@@ -164,8 +171,10 @@ export const RoomSettingsSheet = ({
       await fn();
       setSaved(done);
       await load();
+      return true;
     } catch (e) {
       setError(errText(e));
+      return false;
     } finally {
       setBusy('');
     }
@@ -210,7 +219,9 @@ export const RoomSettingsSheet = ({
         });
       },
       'Saved.',
-    );
+    ).then((ok) => {
+      if (ok && setup) rememberRoomSetup(ticker, 'done');
+    });
 
   const pickCover = async (file: File | undefined) => {
     if (!file) return;
@@ -218,6 +229,17 @@ export const RoomSettingsSheet = ({
   };
 
   const isIssuer = !!challenge?.youAreIssuer;
+  // Set-up mode is only for the issuer: anyone else never sees it, and isn't asked again for this room.
+  const notIssuerInSetup = setup && !!challenge && !isIssuer;
+  useEffect(() => {
+    if (!notIssuerInSetup) return;
+    rememberRoomSetup(ticker, 'not-issuer');
+    onClose();
+  }, [notIssuerInSetup, ticker, onClose]);
+  const later = () => {
+    rememberRoomSetup(ticker, 'later');
+    onClose();
+  };
   const gate = look?.gate ?? entry.gate;
   const issuerLine = challenge?.claimedBy
     ? `$${challenge.claimedBy}`
@@ -225,8 +247,18 @@ export const RoomSettingsSheet = ({
       ? `$${look.personal.by}`
       : 'Not claimed yet';
 
+  if (setup && (!look || !challenge || !isIssuer) && !error) return null;
+
   return (
-    <SSheet title={isIssuer ? 'Room settings' : 'Room rules'} onClose={onClose}>
+    <SSheet
+      title={setup ? 'Set up your room' : isIssuer ? 'Room settings' : 'Room rules'}
+      onClose={setup ? later : onClose}
+    >
+      {setup && (
+        <p className="text-sm mb-3" style={{ color: MUTED }}>
+          {`Your $${symbol} room is open. Choose who can come in, what chatting costs, and put tickets on sale. You can change all of this later from ⚙.`}
+        </p>
+      )}
       {!look && !error && (
         <p className="text-xs" style={{ color: MUTED }}>
           Loading…
@@ -328,6 +360,15 @@ export const RoomSettingsSheet = ({
           >
             {busy === 'save' ? 'Saving…' : 'Save'}
           </button>
+          {onSell && (
+            <button
+              onClick={onSell}
+              className="w-full rounded-2xl py-3 font-semibold text-white"
+              style={{ background: PANEL, border: `1px solid ${GOLD}` }}
+            >
+              {`List $${symbol} tickets for sale`}
+            </button>
+          )}
           <div className="flex gap-2">
             <label
               className="flex-1 text-center rounded-2xl py-2 text-sm text-white"
@@ -352,6 +393,15 @@ export const RoomSettingsSheet = ({
         </div>
       )}
 
+      {setup && isIssuer && (
+        <button
+          onClick={later}
+          className="w-full mt-3 rounded-2xl py-3 text-sm bg-transparent"
+          style={{ color: MUTED, border: `1px solid ${LINE}` }}
+        >
+          Set up later
+        </button>
+      )}
       {saved && (
         <p className="text-xs mt-2" style={{ color: GOLD }}>
           {saved}

@@ -84,7 +84,7 @@ export const HandleFlow = ({
   const { theme } = useTheme();
   const [link, setLink] = useState(() => getPersonalLink(identityAddress));
   // Store build: free paymail only, no personal token + holder room (storeBuild.ts).
-  const [withToken, setWithToken] = useState(PAID_FEATURES_ENABLED);
+  const withToken = PAID_FEATURES_ENABLED;
   const [supply, setSupply] = useState(DEFAULT_SUPPLY);
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
@@ -354,7 +354,8 @@ export const HandleFlow = ({
                 {blocked}
               </p>
             )}
-            {!owned && !blocked && (
+            {/* With a paymail already, offer "Change to" only once a different name is typed (owner, 11 Oct 2026). */}
+            {!owned && !blocked && (!paymail || (!!alias && `${alias}@${BWALLET_PAYMAIL_DOMAIN}` !== paymail)) && (
               <button
                 type="button"
                 disabled={busy || state !== 'free'}
@@ -396,7 +397,12 @@ export const HandleFlow = ({
             {link ? (
               <p className="text-xs text-white">
                 <b style={{ color: GOLD }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
-                {link.roomTicker ? 'room open' : 'room not set up yet'}.
+                {link.roomTicker
+                  ? 'room open'
+                  : getFundRecord(link.tokenId)
+                    ? 'room paid for, waiting for confirmation (usually 10–20 min)'
+                    : 'room not set up yet'}
+                .
               </p>
             ) : null}
             {link && !busy && !getFundRecord(link.tokenId) ? (
@@ -407,13 +413,9 @@ export const HandleFlow = ({
                 <p className="text-[11px]" style={{ color: GRAY }}>
                   A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat
                   room only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not
-                  trading. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. Your room can be set up later (it
-                  lists the token in other wallets and opens its chat). You confirm it before anything is sent.
+                  trading. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. You confirm it before anything is
+                  sent.
                 </p>
-                <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
-                  <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
-                  Create my token and room with my handle
-                </label>
                 {withToken && (
                   <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
                     Supply
