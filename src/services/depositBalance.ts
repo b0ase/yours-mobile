@@ -31,11 +31,48 @@ export async function depositBasketSats(wallet: DepositLister): Promise<number> 
   return total;
 }
 
+interface ActionLister {
+  listActions(args: { labels: string[]; includeOutputs?: boolean; limit?: number; offset?: number }): Promise<{
+    totalActions: number;
+    actions: { status: string; outputs?: { satoshis: number; spendable?: boolean; basket?: string }[] }[];
+  }>;
+}
+
+const RECENT_ACTIONS = 50;
+
+/**
+ * Change from payments still going out.
+ *
+ * Owner, 11 Oct 2026 ($bMusicX): paying ~$2.50 from $3 showed $0.00 until he left the screen. The toolbox's
+ * balance counts spendable 'default' outputs only once their transaction is sending, unproven or completed.
+ * A payment the wallet accepted for delayed broadcast stays 'unprocessed' until the Monitor sends it: its
+ * inputs already left the balance, its change had not arrived. With $1,000 in the wallet that reads as a
+ * drained wallet. This adds back the change of those payments, so the balance only ever drops by what was
+ * paid. Unsent work (nosend, unsigned) is not counted: it may never go out.
+ */
+export async function inFlightChangeSats(wallet: ActionLister): Promise<number> {
+  const head = await wallet.listActions({ labels: [], limit: 1 });
+  const offset = Math.max(0, head.totalActions - RECENT_ACTIONS);
+  const { actions } = await wallet.listActions({ labels: [], includeOutputs: true, limit: RECENT_ACTIONS, offset });
+  let total = 0;
+  for (const a of actions) {
+    if (a.status !== 'unprocessed') continue;
+    for (const o of a.outputs ?? []) if (o.basket === 'default' && o.spendable) total += o.satoshis || 0;
+  }
+  return total;
+}
+
 /** Funding balance plus anything still waiting in the deposit basket. A failed deposit read never hides the rest. */
-export async function balanceWithDeposits(wallet: DepositLister & { balance(): Promise<number> }): Promise<number> {
-  const [funded, waiting] = await Promise.all([wallet.balance(), depositBasketSats(wallet).catch(() => 0)]);
+export async function balanceWithDeposits(
+  wallet: DepositLister & { balance(): Promise<number> } & Partial<ActionLister>,
+): Promise<number> {
+  const [funded, waiting, changeOnTheWay] = await Promise.all([
+    wallet.balance(),
+    depositBasketSats(wallet).catch(() => 0),
+    wallet.listActions ? inFlightChangeSats(wallet as ActionLister).catch(() => 0) : 0,
+  ]);
   // Plus anything on chain at our receive addresses that storage still lacks (services/receiveGuard.ts).
-  return funded + waiting + arrivingSats();
+  return funded + waiting + changeOnTheWay + arrivingSats();
 }
 
 /**
