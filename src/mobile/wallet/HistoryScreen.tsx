@@ -313,7 +313,18 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
               className="text-xs mt-2 rounded-lg p-2"
               style={{ color: GOLD, border: `1px solid ${GOLD}` }}
             >
-              History may be incomplete. Pull to refresh or run Repair Sync (Settings &gt; Troubleshooting).
+              <div>History may be incomplete. Refresh it, or run Repair Sync (Settings &gt; Troubleshooting).</div>
+              {/* A visible button: pull-to-refresh doesn't exist in the Chrome extension (owner, 11 Oct 2026). */}
+              <button
+                type="button"
+                disabled={!!progress}
+                onClick={() => void load()}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 border-0 cursor-pointer font-semibold"
+                style={{ background: GOLD, color: '#000' }}
+              >
+                <RefreshCw size={14} className={progress ? 'animate-spin' : ''} />
+                {progress ? 'Refreshing…' : 'Refresh history'}
+              </button>
             </div>
           )}
           {bal && (
