@@ -88,7 +88,16 @@ export async function deployPersonalToken(
   if (isFundsError(res.error) && input.payAddress) {
     // bCorp covers a new user's mint fee: a small gift to their own address, then mint as usual.
     const client = await chatClient(ctx);
-    await client.sponsorMint(input.payAddress);
+    // A wallet that was sponsored once (or has money still arriving) gets "Already sponsored": that is not the
+    // reason the mint failed, so say what is (owner, 11 Oct 2026, $vexvoid: money at the address not yet spendable).
+    try {
+      await client.sponsorMint(input.payAddress);
+    } catch {
+      throw new Error(
+        `Couldn't create $${ticker}: the wallet has no spendable money for the network fee yet. ` +
+          `If you just received some, wait a minute for it to be added, tap refresh, then try again.`,
+      );
+    }
     for (let i = 0; i < SPONSOR_TRIES && isFundsError(res.error); i++) {
       await new Promise((ok) => setTimeout(ok, SPONSOR_WAIT_MS));
       await syncAddresses.execute(ctx, { count: 5 }).catch(() => undefined);

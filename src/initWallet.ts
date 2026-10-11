@@ -14,11 +14,14 @@ import {
   syncMessages,
   sweepDeposit,
   internalizeBeef,
+  signP2PKHInput,
+  deriveDepositAddresses,
   createContext as createActionContext,
 } from '@1sat/actions';
 import { BSV21_BASKET, DEPOSIT_BASKET, FUNDING_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
 import { createAssetPermissionModules } from '@1sat/permission-module';
-import { Transaction, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
+import { Beef, Transaction, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
+import { rescueStuckOutputs, type DepositDerivation } from './services/receiveRescue';
 import { ChromeStorageService } from './services/ChromeStorage.service';
 import { MESSAGEBOX_URL } from './utils/constants';
 import type { Account, StorageConfig } from './services/types/chromeStorage.types';
@@ -469,6 +472,29 @@ export const initWallet = async (
       sendSyncStatus({ status: 'sweep-failed', error: err instanceof Error ? err.message : String(err) });
     });
 
+  // Deposit derivation for one of our addresses: the address manager's window first, then a wider scan (an
+  // address handed out past this device's maxKeyIndex), which is added to the manager so sync and the guard see it.
+  const stuckSince = new Map<string, number>();
+  const DERIVATION_SEARCH_LIMIT = 200;
+  let derivationSearchedThrough = -1;
+  const depositDerivationFor = async (address: string): Promise<DepositDerivation | null> => {
+    const am = syncContext.addressManager;
+    const known = am.getDerivation(address);
+    if (known) return { address, derivationPrefix: known.derivationPrefix, derivationSuffix: known.derivationSuffix };
+    const start = Math.max(am.getMaxKeyIndex() + 1, derivationSearchedThrough + 1);
+    if (start > DERIVATION_SEARCH_LIMIT) return null;
+    const { derivations } = await deriveDepositAddresses.execute(
+      { wallet: adminWallet, services: syncContext.services, chain, isBaseWallet: true },
+      { startIndex: start, count: DERIVATION_SEARCH_LIMIT - start + 1 },
+    );
+    derivationSearchedThrough = DERIVATION_SEARCH_LIMIT;
+    const hit = derivations.find((d) => d.address === address);
+    if (!hit) return null;
+    am.addAddress(hit);
+    console.log(`[receiveGuard] ${address} is deposit index ${hit.index}; added to the address manager`);
+    return { address, derivationPrefix: hit.derivationPrefix, derivationSuffix: hit.derivationSuffix };
+  };
+
   // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
   // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
   const runReceiveGuard = async () => {
@@ -521,14 +547,16 @@ export const initWallet = async (
     for (const txid of first.txids) {
       try {
         const beef = await syncContext.services.beef.getBeef(txid);
-        await internalizeBeef({
+        const r = await internalizeBeef({
           beef,
           addressDerivations: derivations as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
           wallet: adminWallet,
           services: syncContext.services,
           chain,
         });
-        console.log(`[receiveGuard] internalized ${txid}`);
+        // internalizeBeef resolves with internalized: 0 when no output matched a derivation: not a success.
+        if (r.internalized) console.log(`[receiveGuard] internalized ${txid} (${r.internalized} output(s))`);
+        else console.warn(`[receiveGuard] ${txid}: no output matched our derivations`);
       } catch (err) {
         console.error(`[receiveGuard] internalize ${txid} failed:`, err);
         sendSyncStatus({ status: 'receive-failed', txid, error: err instanceof Error ? err.message : String(err) });
@@ -542,9 +570,74 @@ export const initWallet = async (
       outputSats,
       walletOutpoints,
     });
+    // Still missing after a direct internalize: storage won't take this txid (services/receiveRescue.ts). Spend
+    // each stuck output back to the same address in a fresh transaction and credit that one instead.
+    let final = after;
+    if (after.satoshis) {
+      const rescued = await rescueStuckOutputs(after.outputs, {
+        getRawTx: async (txid) => Array.from(await syncContext.services.beef.getRawTx(txid)),
+        getBeef: async (txid) => Array.from(await syncContext.services.beef.getBeef(txid)),
+        isConfirmed: async (txid) => {
+          try {
+            const b = Beef.fromBinary(Array.from(await syncContext.services.beef.getBeef(txid)));
+            return b.findTxid(txid)?.bumpIndex !== undefined;
+          } catch {
+            return false;
+          }
+        },
+        derivationFor: (address) => depositDerivationFor(address),
+        signInput: async (tx, i, protocolID, keyID) => {
+          const r = await signP2PKHInput(actionCtx, tx, i, protocolID, keyID, 'self');
+          if (typeof r !== 'string') throw new Error(r.error);
+          return r;
+        },
+        broadcast: async (tx) => {
+          const r = await syncContext.services.submitToStack(tx.toBinary());
+          if (['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFORMED'].includes(r.txStatus))
+            throw new Error(`network refused the sweep (${r.txStatus}${r.extraInfo ? `: ${r.extraInfo}` : ''})`);
+        },
+        internalize: async (beef, ds) => {
+          const map = new Map<string, unknown>();
+          for (const [address, d] of ds)
+            map.set(address, {
+              outputIndex: 0,
+              derivationPrefix: d.derivationPrefix,
+              derivationSuffix: d.derivationSuffix,
+              senderIdentityKey,
+              protocolID: ONESAT_PROTOCOL as WalletProtocol,
+              counterparty: 'self',
+            });
+          const r = await internalizeBeef({
+            beef: Uint8Array.from(beef),
+            addressDerivations: map as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
+            wallet: adminWallet,
+            services: syncContext.services,
+            chain,
+          });
+          return r.internalized;
+        },
+        protocolID: ONESAT_PROTOCOL as WalletProtocol,
+        feeRate: chromeStorageService.getCustomFeeRate(),
+        firstSeen: (outpoint) => {
+          const k = normOutpoint(outpoint);
+          if (!stuckSince.has(k)) stuckSince.set(k, Date.now());
+          return stuckSince.get(k) ?? Date.now();
+        },
+      });
+      if (rescued.length) {
+        await sweepDeposit
+          .execute(actionCtx, {})
+          .catch((err: unknown) => console.error('[receiveGuard] sweep after rescue failed:', err));
+        final = await checkReceiveAddresses(addresses, {
+          ownerSync: (a) => syncContext.services.owner.sync(a),
+          outputSats,
+          walletOutpoints,
+        });
+      }
+    }
     // Whatever is still missing counts as arriving, so the balance never shows $0 for it.
-    setArriving(after.satoshis);
-    if (after.satoshis) sendSyncStatus({ status: 'arriving', satoshis: after.satoshis });
+    setArriving(final.satoshis);
+    if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
   };
   const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
 

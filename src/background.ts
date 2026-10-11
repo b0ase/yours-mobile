@@ -2516,7 +2516,11 @@ if (isInServiceWorker) {
       }
       // Prefer the user's selected primaryAddress from storage; fall back to index 0.
       const { account } = chromeStorageService.getCurrentAccountObject();
-      const address = account?.primaryAddress ?? accountContext.syncContext.addressManager.getPrimaryAddress();
+      // Only hand out an address whose payments the wallet can credit (one the address manager derives); a stored
+      // primaryAddress it can't derive would collect money the wallet never adds (owner, 11 Oct 2026, $vexvoid).
+      const am = accountContext.syncContext.addressManager;
+      const stored = account?.primaryAddress;
+      const address = stored && am.getDerivation(stored) ? stored : am.getPrimaryAddress();
       sendResponse({
         type: YoursEventName.GET_RECEIVE_ADDRESS,
         success: true,
