@@ -13,7 +13,8 @@
  */
 import { parseHistorySetting, type HistorySetting, type HistoryVisibility } from './history';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { getChatAccount, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
+import { getChatAccount, getChatReceiveAddress, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
+import { REPORTED_STORAGE_PREFIX, reportedKey } from './walletAddress';
 import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
@@ -101,6 +102,11 @@ export interface ChatSigner {
    * paymail name the owner chose; the server looks the name up itself from the key.
    */
   identityProof?: (nonce: string) => Promise<{ identity_key: string; identity_signature: string } | null>;
+  /**
+   * Hex signature by the identity key over `walletAddressMessage(address, handle)` (walletAddress.ts), so
+   * bChatX can show the owner's real balance on their profile. Best-effort; never blocks sign-in.
+   */
+  proveAddress?: (address: string, handle: string) => Promise<string>;
 }
 
 export interface SignInItem {
@@ -176,8 +182,32 @@ export class BchatClient {
     private readonly origin = BCHAT_ORIGIN,
   ) {}
 
+  /** The signer of the last sign-in, kept to prove the receive address afterwards. */
+  private signer: ChatSigner | null = null;
+
   get handle() {
     return this.session?.handle ?? null;
+  }
+
+  /**
+   * Tell bChatX this account's BSV receive address, proven by the identity key, so the owner's bChatX
+   * profile shows their real balance (bit-sign POST /api/bitsign/me/wallet-address). Best-effort: only
+   * when the handle or address changed since the last report; every failure is ignored.
+   */
+  private async reportWalletAddress(): Promise<void> {
+    try {
+      const handle = this.session?.handle;
+      const address = getChatReceiveAddress();
+      if (!handle || !address || !this.signer?.proveAddress) return;
+      const storageKey = `${REPORTED_STORAGE_PREFIX}${getChatAccount() ?? 'default'}`;
+      const key = reportedKey(handle, address);
+      if (localStorage.getItem(storageKey) === key) return;
+      const signature = await this.signer.proveAddress(address, handle);
+      await this.call('POST', '/api/bitsign/me/wallet-address', { address, signature });
+      localStorage.setItem(storageKey, key);
+    } catch {
+      /* best-effort: the profile shows "Open bWalletX" until a later sign-in reports it */
+    }
   }
 
   get current() {
@@ -212,6 +242,7 @@ export class BchatClient {
 
   /** Challenge → wallet BSM signature → verify. Returns (and keeps) the session. */
   async signIn(signer: ChatSigner): Promise<ChatSession> {
+    this.signer = signer;
     let address = await signer.address();
     for (let attempt = 0; attempt < 2; attempt++) {
       const ch = await this.call<{ nonce: string; message: string }>(
@@ -266,6 +297,7 @@ export class BchatClient {
       if (!v.token || !v.handle) throw new ChatApiError('bChat sign-in failed', 401);
       const account = getChatAccount();
       this.session = { token: v.token, handle: v.handle, address, ...(account ? { account } : {}) };
+      void this.reportWalletAddress();
       return this.session;
     }
     throw new ChatApiError('The wallet signed with an unexpected key', 401);
@@ -285,6 +317,7 @@ export class BchatClient {
     if (!r.token || !r.handle) throw new ChatApiError('bChat sign-in failed', 401);
     const account = getChatAccount();
     this.session = { token: r.token, handle: r.handle, address, ...(account ? { account } : {}) };
+    void this.reportWalletAddress();
     return this.session;
   }
 
@@ -306,6 +339,7 @@ export class BchatClient {
     );
     if (!this.session || !r.handle) throw new ChatApiError('bChat handle update failed', 500);
     this.session = { ...this.session, handle: r.handle, token: r.token || this.session.token };
+    void this.reportWalletAddress();
     return this.session;
   }
 

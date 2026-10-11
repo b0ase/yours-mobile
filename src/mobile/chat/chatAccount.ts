@@ -21,6 +21,13 @@ export const setChatAccount = (account: string | null | undefined) => {
 
 export const getChatAccount = () => chatAccount;
 
+/** The active account's BSV receive address, reported to bChatX for the profile balance (walletAddress.ts). */
+let chatReceiveAddress: string | null = null;
+export const setChatReceiveAddress = (address: string | null | undefined) => {
+  chatReceiveAddress = address || null;
+};
+export const getChatReceiveAddress = () => chatReceiveAddress;
+
 /**
  * One-time reset of every stored bChat / bit-sign session (8 Oct 2026). A bad server credential mapped the
  * richardwboase.gmail wallet to b0asex; it is deleted server-side, but a b0asex token saved under the gmail

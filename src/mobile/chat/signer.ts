@@ -3,6 +3,7 @@ import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
 import { PublicKey, Utils } from '@bsv/sdk';
 import type { ChatSigner } from './api';
 import { lookupPaymail, PAYMAIL_ALIAS_RE } from '../names/paymail';
+import { WALLET_ADDRESS_KEY_ID, WALLET_ADDRESS_PROTOCOL, walletAddressMessage } from './walletAddress';
 
 /**
  * The in-app wallet as a bChat signer: the same BRC-100 identity key and BSM
@@ -41,5 +42,15 @@ export const walletSigner = (ctx: OneSatContext): ChatSigner => ({
       counterparty: 'anyone',
     });
     return { identity_key: publicKey, identity_signature: Utils.toHex(signature) };
+  },
+  // Must match bit-sign src/lib/bwallet-address.ts: lets bChatX show this wallet's real balance.
+  proveAddress: async (address, handle) => {
+    const { signature } = await ctx.wallet.createSignature({
+      data: Utils.toArray(walletAddressMessage(address, handle), 'utf8'),
+      protocolID: WALLET_ADDRESS_PROTOCOL,
+      keyID: WALLET_ADDRESS_KEY_ID,
+      counterparty: 'anyone',
+    });
+    return Utils.toHex(signature);
   },
 });
