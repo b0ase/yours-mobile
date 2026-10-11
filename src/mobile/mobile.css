@@ -366,6 +366,10 @@ body,
   object-fit: cover;
   object-position: center;
   user-select: none;
+  /* cardFrontArt.ts artStyle(): zoomed, its bright core moved off the text, dimmed to a calm level. */
+  transition:
+    transform-origin 0.25s ease,
+    filter 0.25s ease;
 }
 .bw-wcard-art-shade {
   /* Owner, 11 Oct 2026: the lighter shade, so the gold art glows through. Darkest bottom-left, where the
@@ -1594,6 +1598,109 @@ button.bw-mail-card:active {
   background: transparent;
   color: #ffd24d;
   cursor: pointer;
+}
+.bw-wcard-adjust {
+  position: absolute;
+  right: 12px;
+  top: calc(50% - 44px);
+  transform: translateY(-50%);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--bw-wcard-muted);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.bw-wcard.is-adjusting {
+  touch-action: none;
+  cursor: grab;
+}
+.bw-wcard.is-adjusting .bw-wcard-art {
+  transition: filter 0.25s ease;
+}
+.bw-wcard-adjust.is-on {
+  color: #ffd24d;
+  background: rgb(0 0 0 / 0.35);
+}
+.bw-wcard-adjust:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+/* Card art adjust panel (CardArtAdjust.tsx): pinned to the bottom so the card above stays visible. */
+.bw-artadj {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 60;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px 18px 14px;
+  border-radius: 20px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(14 13 11 / 0.92);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: #f2f2f0;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.5);
+}
+.bw-artadj-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.bw-artadj-head b {
+  font-size: 15px;
+}
+.bw-artadj-head span {
+  font-size: 12px;
+  color: #a39a85;
+}
+.bw-artadj-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  font-size: 13px;
+  color: #cfc8b6;
+}
+.bw-artadj-row input {
+  width: 100%;
+  accent-color: #f5c542;
+}
+.bw-artadj-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.bw-artadj-actions button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bw-artadj-reset {
+  background: transparent;
+  color: #cfc8b6;
+}
+.bw-artadj-reset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.bw-artadj-done {
+  background: linear-gradient(180deg, #ffd24d, #f5b800);
+  color: #0b0a08;
 }
 .bw-wcard.is-yellow .bw-wcard-penflip {
   color: #0b0b0c;

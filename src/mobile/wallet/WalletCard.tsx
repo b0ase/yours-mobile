@@ -14,10 +14,21 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
+import { Check, Copy, Loader2, PenLine, RefreshCw, ScanLine, SlidersHorizontal } from 'lucide-react';
 import { myPayUri } from '../scan/payUri';
 import { isBWalletX } from '../storeBuild';
-import { cardFrontArtUri } from './cardFrontArt';
+import {
+  artStyle,
+  autoBrightness,
+  cardFrontArtUri,
+  clampLook,
+  defaultPlacement,
+  loadCardArtLook,
+  measureArtLuma,
+  saveCardArtLook,
+  type CardArtLook,
+} from './cardFrontArt';
+import { CardArtAdjust } from './CardArtAdjust';
 
 // Edition colour (owner, 10 Oct 2026): bWallet's card is yellow with black text, like its app icon; bWalletX keeps
 // the black card that turns gold with the balance. One card, two palettes (.bw-wcard.is-yellow in mobile.css).
@@ -206,6 +217,32 @@ const WalletCardInner = ({
     () => cardFrontArtUri(account?.pubKeys?.identityPubKey, YELLOW_CARD),
     [account?.pubKeys?.identityPubKey],
   );
+  // How the art sits: the account's own adjustment, else bright art dimmed and its core moved top-right.
+  const artKey = account?.pubKeys?.identityPubKey ?? '';
+  const [luma, setLuma] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    setLuma(null);
+    if (frontArt) void measureArtLuma(frontArt).then((l) => live && setLuma(l));
+    return () => {
+      live = false;
+    };
+  }, [frontArt]);
+  const [savedLook, setSavedLook] = useState<CardArtLook | null>(() => loadCardArtLook(artKey));
+  useEffect(() => setSavedLook(loadCardArtLook(artKey)), [artKey]);
+  const defaultLook = useMemo<CardArtLook>(
+    () => ({ brightness: autoBrightness(luma), ...defaultPlacement(artKey) }),
+    [luma, artKey],
+  );
+  const look = savedLook ?? defaultLook;
+  const [adjusting, setAdjusting] = useState(false);
+  const setLook = (l: CardArtLook | null) => {
+    const v = l && clampLook(l);
+    setSavedLook(v);
+    saveCardArtLook(artKey, v);
+  };
+  // While adjusting, dragging on the card moves the art (and tapping does not flip it).
+  const drag = useRef<{ x: number; y: number; lx: number; ly: number; w: number; h: number } | null>(null);
 
   // The back's QR: the account's bAvatar art QR (its paymail), else the plain receive QR below.
   const artQr = useMemo(
@@ -300,19 +337,48 @@ const WalletCardInner = ({
   return (
     <div className="bw-wcard-wrap">
       <div
-        className={`bw-wcard${YELLOW_CARD ? ' is-yellow' : ''}${turning ? ' is-turning' : ''}`}
+        className={`bw-wcard${YELLOW_CARD ? ' is-yellow' : ''}${turning ? ' is-turning' : ''}${adjusting ? ' is-adjusting' : ''}`}
         style={{ ['--gold' as string]: YELLOW_CARD ? '0' : gold.toFixed(3) }}
         role="button"
         tabIndex={0}
         aria-label={flipped ? 'Show card front' : 'Show receive QR and identity'}
-        onClick={flip}
-        onKeyDown={onKey}
+        onClick={adjusting ? undefined : flip}
+        onKeyDown={adjusting ? undefined : onKey}
+        onPointerDown={(e) => {
+          if (!adjusting) return;
+          const r = e.currentTarget.getBoundingClientRect();
+          drag.current = { x: e.clientX, y: e.clientY, lx: look.x, ly: look.y, w: r.width, h: r.height };
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!adjusting || !d) return;
+          setSavedLook(
+            clampLook({
+              ...look,
+              x: d.lx + ((e.clientX - d.x) / d.w) * 100,
+              y: d.ly + ((e.clientY - d.y) / d.h) * 100,
+            }),
+          );
+        }}
+        onPointerUp={() => {
+          if (!adjusting || !drag.current) return;
+          drag.current = null;
+          setLook(look);
+        }}
       >
         {/* ── Front ── */}
         <div className={`bw-wcard-face bw-wcard-front${frontArt ? ' has-art' : ''}`} aria-hidden={flipped}>
           {frontArt && (
             <>
-              <img className="bw-wcard-art" src={frontArt} alt="" decoding="async" draggable={false} />
+              <img
+                className="bw-wcard-art"
+                src={frontArt}
+                alt=""
+                decoding="async"
+                draggable={false}
+                style={artStyle(look)}
+              />
               <span className="bw-wcard-art-shade" aria-hidden="true" />
             </>
           )}
@@ -509,6 +575,22 @@ const WalletCardInner = ({
               )}
             </div>
           </div>
+          {frontArt && (
+            <button
+              type="button"
+              className={`bw-wcard-adjust${adjusting ? ' is-on' : ''}`}
+              aria-label="Adjust card art"
+              title="Adjust card art"
+              aria-pressed={adjusting}
+              tabIndex={flipped ? -1 : 0}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAdjusting((v) => !v);
+              }}
+            >
+              <SlidersHorizontal size={17} aria-hidden="true" />
+            </button>
+          )}
           {/* A plain pen, right-centre (owner, 10 Oct 2026): flips to the back, where the signature lives. */}
           <button
             type="button"
@@ -619,6 +701,15 @@ const WalletCardInner = ({
       </div>
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
+      {adjusting && frontArt && (
+        <CardArtAdjust
+          look={look}
+          isDefault={!savedLook}
+          onChange={setLook}
+          onReset={() => setLook(null)}
+          onClose={() => setAdjusting(false)}
+        />
+      )}
       {sig.ui}
       {scanOpen && (
         <Suspense fallback={null}>
