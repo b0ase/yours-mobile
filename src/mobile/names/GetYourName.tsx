@@ -25,7 +25,7 @@ import {
   toAlias,
 } from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
-import { estimateMintFee, fetchMineNode } from './opnsMint';
+import { alsoGetText, estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
 import { moneyNow } from '../money/money';
@@ -525,7 +525,7 @@ export const GetYourName = ({
                       charsToMine === 1 ? '' : 's'
                     }, one transaction each, roughly ${formatEta(
                       (charsToMine * EXPECTED_HASHES) / PHONE_HASHRATE,
-                    )} of mining on a phone.`
+                    )} of mining on a phone.${alsoGetText(mineFromDomain, result.name)}`
                   : " Couldn't find where to mine it from; try again shortly."}
               </p>
               {mineFromDomain !== null && charsToMine > 0 && (
@@ -598,12 +598,40 @@ export const GetYourName = ({
               )}
               {!link && withToken && !myName && tokenOptions()}
               {owned.map((n) => (
-                <div key={n.id} className="flex items-center justify-between">
-                  <span className="text-sm" style={{ color: fg }}>
-                    {n.name}
-                    {n.published && (
-                      <span className="text-[10px] ml-2" style={{ color: gray }}>
-                        bound
+                <div key={n.id} className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 flex flex-col">
+                    <span className="text-sm flex items-center gap-2" style={{ color: fg }}>
+                      {n.name}
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full"
+                        style={
+                          n.published
+                            ? { background: '#123d24', color: '#2ecc71' }
+                            : { background: '#3a2f0c', color: gold }
+                        }
+                      >
+                        {n.published ? 'Bound to you' : 'Not bound'}
+                      </span>
+                    </span>
+                    {/^[0-9a-f]{64}[._]\d+$/i.test(n.id) && (
+                      <span className="text-[10px] flex items-center gap-2" style={{ color: gray }}>
+                        <button
+                          type="button"
+                          onClick={() => void navigator.clipboard?.writeText(n.id).catch(() => undefined)}
+                          className="bg-transparent border-0 p-0 cursor-pointer"
+                          style={{ color: gray }}
+                          title="Copy origin"
+                        >
+                          {n.id.slice(0, 8)}…{n.id.slice(-4)}
+                        </button>
+                        <a
+                          href={`https://whatsonchain.com/tx/${n.id.slice(0, 64)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: gold }}
+                        >
+                          View on chain
+                        </a>
                       </span>
                     )}
                   </span>

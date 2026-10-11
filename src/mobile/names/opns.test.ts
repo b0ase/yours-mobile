@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { OpNS } from '@1sat/templates';
 import { Hash, Script, Transaction } from '@bsv/sdk';
 import { lastWordMask, meetsDifficulty, mineRange, opnsHash, OPNS_DIFFICULTY } from './opnsPow';
-import { buildMintOutputs, estimateUnlockLength } from './opnsMint';
+import { buildMintOutputs, estimateUnlockLength, miningPath } from './opnsMint';
 import { mineName, NameTakenError, MiningCancelled, type MineChar } from './opnsRegister';
-import type { Fetch } from './names';
+import { opnsBinding, type Fetch } from './names';
 
 // Golden vector from @1sat/templates (b-open-io/1sat-sdk packages/templates/src/opns/testdata):
 // parent output 1 is node "s"; the mint spends it, mining 'h' to create "sh".
@@ -226,5 +226,27 @@ describe('mineName orchestration', () => {
     await expect(
       mineName({ ctx: fakeCtx, fetch: routes({}) }, 'bad_name', new AbortController().signal, () => undefined),
     ).rejects.toThrow('a-z, 0-9');
+  });
+});
+
+describe('miningPath', () => {
+  test('bmusic from bm: 4 steps, also bmu, bmus, bmusi', () => {
+    expect(miningPath('bm', 'bmusic')).toEqual({ steps: 4, alsoGet: ['bmu', 'bmus', 'bmusi'] });
+  });
+  test('one step gives nothing extra; root counts from the first character', () => {
+    expect(miningPath('bmusi', 'bmusic')).toEqual({ steps: 1, alsoGet: [] });
+    expect(miningPath('', 'ab')).toEqual({ steps: 2, alsoGet: ['a'] });
+  });
+  test('a name that does not continue the domain', () => {
+    expect(miningPath('zz', 'bmusic')).toBeNull();
+    expect(miningPath('bmusic', 'bmusic')).toBeNull();
+  });
+});
+
+describe('opnsBinding', () => {
+  test('bound only with an identity key; other routes are not OpNS', () => {
+    expect(opnsBinding({ via: 'opns-owner', pubkey: '02ab' })).toBe('bound');
+    expect(opnsBinding({ via: 'opns-owner' })).toBe('unbound');
+    expect(opnsBinding({ via: 'p2p-paymail', pubkey: '02ab' })).toBeNull();
   });
 });

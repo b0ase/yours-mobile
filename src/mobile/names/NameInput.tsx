@@ -4,7 +4,7 @@ import { Input } from '../../components/Input';
 import type { Theme } from '../../theme.types';
 import { loadPoisonData, poisonWarning } from '../airdrops/poison';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { destinationFor, parseRecipient, resolveRecipient, VIA_LABEL, type Resolved } from './names';
+import { destinationFor, opnsBinding, parseRecipient, resolveRecipient, VIA_LABEL, type Resolved } from './names';
 
 /**
  * Recipient box for the Send screens (build-time swap for upstream's address <Input>, see
@@ -161,6 +161,11 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                   <div className="text-[10px]" style={{ color: gray }}>
                     {asset === 'token' && d.ok && r.via !== 'opns-owner' ? 'Paymail ordinal address' : VIA_LABEL[r.via]}
                   </div>
+                  {opnsBinding(r) === 'bound' && (
+                    <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
+                      <Check size={11} /> Verified on chain · bound to {short(r.pubkey ?? '')}
+                    </div>
+                  )}
                 </div>
               </div>
               {!d.ok ? (
