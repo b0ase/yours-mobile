@@ -71,6 +71,7 @@ import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/
 import { finishInterruptedReconcile, reconcileStorage } from './services/storageReconcileBackground';
 import { reconcileOutcome } from './services/storageReconcile';
 import { USB_HANDLE_DB_NAME } from './services/UsbKey.service';
+import { QUEUED_MESSAGE, RepeatGuard, queuedSend, repeatRefusal, requestFingerprint } from './services/repeatGuard';
 import { CALL_NOTIFICATION_PREFIX, CALL_RING_ALARM, callNotification, callsToAnnounce, fetchIncoming } from './services/callRinger';
 import { openCallsWindow } from './mobile/calls/popout';
 import {
@@ -3254,6 +3255,24 @@ if (isInServiceWorker) {
     return true;
   };
 
+  // Never pay twice for the same thing while the first is still going out (services/repeatGuard.ts, vexvoid.com
+  // 11 Oct 2026). Kept in session storage: the service worker sleeps between a failed-looking attempt and the retry.
+  const repeatGuard = new RepeatGuard();
+  let repeatGuardLoaded = false;
+  const withRepeatGuard = async <T>(fn: (g: RepeatGuard) => T): Promise<T> => {
+    if (!repeatGuardLoaded) {
+      repeatGuardLoaded = true;
+      try {
+        repeatGuard.load((await chrome.storage.session.get('bwxRepeatGuard')).bwxRepeatGuard);
+      } catch {
+        /* session storage unavailable: memory only */
+      }
+    }
+    const r = fn(repeatGuard);
+    chrome.storage.session.set({ bwxRepeatGuard: repeatGuard.toJSON() }).catch(() => undefined);
+    return r;
+  };
+
   const processCWICreateAction = async (
     message: { params: CreateActionArgs; originator?: string },
     sendResponse: CallbackResponse,
@@ -3285,6 +3304,13 @@ if (isInServiceWorker) {
       // Never between the steps of a site's multi-step action: the preparation's own wallet actions break the
       // chain (services/dappChain.ts, vexvoid.com streamed mint 11 Oct 2026).
       const continuing = !isAdmin && continuesChain(message.params);
+      const fingerprint = isAdmin || continuing ? null : await requestFingerprint(message.params).catch(() => null);
+      const earlier = await withRepeatGuard((g) => g.check(fingerprint));
+      if (earlier) {
+        console.warn('[createAction] identical request still going out; refusing a second payment', earlier);
+        sendResponse({ type: CWIEventName.CREATE_ACTION, success: false, error: repeatRefusal(earlier) });
+        return true;
+      }
       if (continuing) {
         console.log('[createAction] continues a site chain: funding preparation skipped');
       } else if (accountContext) {
@@ -3300,8 +3326,25 @@ if (isInServiceWorker) {
         console.warn('[createAction] no account context: skipping funding preparation');
       }
 
-      const result = await signer.createAction(message.params, message.originator);
+      let result: Awaited<ReturnType<typeof signer.createAction>>;
+      try {
+        result = await signer.createAction(message.params, message.originator);
+      } catch (err) {
+        // Queued to retry is not a failure: the wallet will send it. Say so, and guard against paying again.
+        if (queuedSend(err)) {
+          await withRepeatGuard((g) => g.record(fingerprint, { origin: message.originator }));
+          throw new Error(QUEUED_MESSAGE);
+        }
+        throw err;
+      }
       console.log('[createAction] Success');
+      await withRepeatGuard((g) =>
+        g.record(fingerprint, {
+          origin: message.originator,
+          reference: result.signableTransaction?.reference,
+          txid: result.txid,
+        }),
+      );
       if (!isAdmin && (continuing || startsChain(message.params))) markChainStep();
       // Live balance: tell any open wallet page at once, so the card ticks down before the next fetch (owner, 8 Oct
       // 2026). Display only; the page reconciles on its next balance load (src/mobile/wallet/live/liveBus.ts).
@@ -3365,6 +3408,7 @@ if (isInServiceWorker) {
       markChainStep();
       const result = await w.signAction(message.params, message.originator);
       console.log('[signAction] Success', result?.txid ? `txid=${result.txid}` : '');
+      await withRepeatGuard((g) => g.signed(message.params.reference, result?.txid));
       // The step that broadcasts the batch ends the chain; otherwise it stays active for the next step.
       if (result?.sendWithResults?.length) endChain();
       else markChainStep();
@@ -3385,7 +3429,8 @@ if (isInServiceWorker) {
       sendResponse({
         type: CWIEventName.SIGN_ACTION,
         success: false,
-        error: error instanceof Error ? error.message : JSON.stringify(error),
+        // Queued to retry is not a failure (services/repeatGuard.ts): the wallet will send it on its own.
+        error: queuedSend(error) ? QUEUED_MESSAGE : error instanceof Error ? error.message : JSON.stringify(error),
       });
     }
     return true;
@@ -3406,6 +3451,7 @@ if (isInServiceWorker) {
         return true;
       }
       const result = await w.abortAction(message.params, message.originator);
+      if (result?.aborted) await withRepeatGuard((g) => g.aborted(String(message.params?.reference ?? '')));
       sendResponse({
         type: CWIEventName.ABORT_ACTION,
         success: true,
