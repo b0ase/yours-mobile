@@ -46,6 +46,36 @@ const fmtSats = (sats: number) => `${sats.toLocaleString()} sats`;
 type Loaded = { rows: HistoryRow[]; at: number };
 
 /** Activity / History for the current account: full on-chain history, summary, CSV and printable statement. */
+/**
+ * Last loaded history per account (owner, 11 Oct 2026: Desktop reloaded it from scratch every time the wallet page
+ * opened). Shown at once on the next open while a quiet refresh runs; also kept for this tab's session.
+ */
+const HISTORY_CACHE = new Map<string, Loaded>();
+const cacheKey = (addresses: string[]) => `bwx-history:${addresses.join(',')}`;
+const readCache = (key: string): Loaded | null => {
+  const hit = HISTORY_CACHE.get(key);
+  if (hit) return hit;
+  try {
+    const raw = sessionStorage.getItem(key);
+    const v = raw ? (JSON.parse(raw) as Loaded) : null;
+    if (v && Array.isArray(v.rows) && typeof v.at === 'number') {
+      HISTORY_CACHE.set(key, v);
+      return v;
+    }
+  } catch {
+    /* no storage or bad JSON: load fresh */
+  }
+  return null;
+};
+const writeCache = (key: string, v: Loaded) => {
+  HISTORY_CACHE.set(key, v);
+  try {
+    sessionStorage.setItem(key, JSON.stringify(v));
+  } catch {
+    /* over quota or blocked: the in-memory copy still serves this tab */
+  }
+};
+
 export const HistoryScreen = ({
   onClose,
   inline = false,
@@ -62,7 +92,8 @@ export const HistoryScreen = ({
     [addrs?.bsvAddress, addrs?.ordAddress, addrs?.identityAddress],
   );
   const accountName = account?.name || addrs?.bsvAddress || 'Account';
-  const [data, setData] = useState<Loaded | null>(null);
+  const key = cacheKey(addresses);
+  const [data, setData] = useState<Loaded | null>(() => readCache(key));
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState('');
   const [preset, setPreset] = useState<RangePreset>('30d');
@@ -73,23 +104,27 @@ export const HistoryScreen = ({
 
   const load = useCallback(async () => {
     setError('');
-    setProgress({ phase: 'Starting', done: 0, total: 1 });
+    // With a cached copy on screen, refresh quietly: no progress bar over rows the user is already reading.
+    const quiet = !!readCache(key);
+    if (!quiet) setProgress({ phase: 'Starting', done: 0, total: 1 });
     try {
       const now = Date.now();
       const rows = await loadHistoryRows({
         addresses,
         identityAddress: addrs?.identityAddress,
         apiContext,
-        onProgress: setProgress,
+        onProgress: quiet ? () => undefined : setProgress,
         now,
       });
-      setData({ rows, at: now });
+      const loaded = { rows, at: now };
+      writeCache(key, loaded);
+      setData(loaded);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setProgress(null);
     }
-  }, [addresses, addrs?.identityAddress, apiContext]);
+  }, [addresses, addrs?.identityAddress, apiContext, key]);
 
   useEffect(() => {
     void load();

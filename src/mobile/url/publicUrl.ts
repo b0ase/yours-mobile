@@ -4,7 +4,8 @@
  *   /m/spaces              ↔ /spaces
  *   /m/spaces?space=<slug> ↔ /spaces/<slug>   (a permanent Space, e.g. /spaces/bwallet-lounge)
  *   /m/<page>              ↔ /<page>
- * Top-level app routes (/bsv-wallet, /settings, …) keep their own path.
+ *   /bsv-wallet            ↔ /wallet
+ * Other top-level app routes (/settings, …) keep their own path.
  */
 const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/browser']);
 /**
@@ -22,7 +23,8 @@ export const toPublic = (pathname: string, search: string): string => {
   if (path === '/m/spaces' && SLUG.test(q.get('space') ?? '')) {
     path = `/spaces/${q.get('space')}`;
     q.delete('space');
-  } else if (path.startsWith('/m/')) path = path.slice(2);
+  } else if (path === '/bsv-wallet') path = '/wallet';
+  else if (path.startsWith('/m/')) path = path.slice(2);
   const rest = q.toString();
   return rest ? `${path}?${rest}` : path;
 };
@@ -38,6 +40,7 @@ export const toRouter = (pathname: string, search: string): string | null => {
   };
   const space = /^\/spaces\/([^/]+)$/.exec(path);
   if (space) return SLUG.test(space[1]) ? withQ('/m/spaces', `space=${encodeURIComponent(space[1])}`) : '/m/spaces';
+  if (path === '/wallet') return withQ('/bsv-wallet');
   if (TOP.has(path)) return withQ(path);
   return withQ(`/m${path}`);
 };
