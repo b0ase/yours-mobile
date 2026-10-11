@@ -7,8 +7,8 @@ import { tokenKey } from '../chat/tokenRooms';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 
 /**
- * Account drawer: the current account's handle (full paymail / OpNS name) and a link to its
- * personal $NAME room, or a "Get your $name" button. Rendered by the mobile TopNav.
+ * Account drawer: a link to the current account's personal $NAME room, or a "Get your $name" button. The handle is
+ * shown once, above; it is never repeated here as a paymail line (owner, 11 Oct 2026). Rendered by the mobile TopNav.
  */
 export const DrawerHandle = ({
   identityAddress,
@@ -43,7 +43,7 @@ export const DrawerHandle = ({
       >
         <AtSign size={15} color="#FFD24D" />
         <span className="text-sm font-semibold" style={{ color: '#FFD24D' }}>
-          {name ? `${name} · Create your room` : 'Get your $name'}
+          {name ? 'Create your room' : 'Get your $name'}
         </span>
       </button>
     );

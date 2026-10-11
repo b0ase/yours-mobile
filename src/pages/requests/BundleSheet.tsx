@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronDown, ChevronRight, Loader2, Shield } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { useAccountNames } from '../../mobile/names/accountNames';
+import { identityRowText } from '../../mobile/names/identityText';
+import { keyFingerprint } from '../../mobile/wallet/identityLine';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -41,6 +44,17 @@ export const BundleSheet = (props: {
   const { handleSelect, hideMenu } = useBottomMenu();
   const { addSnackbar } = useSnackbar();
   const { chromeStorageService } = useServiceContext();
+  // Which account is signing (owner, 11 Oct 2026): "$handle · 033622…3ed4", the same fingerprint the card shows,
+  // so a user can match it with what the site displays.
+  const signer = chromeStorageService.getCurrentAccountObject().account;
+  const signerNames = useAccountNames(
+    signer?.addresses?.identityAddress,
+    signer?.name ?? '',
+    signer?.settings?.socialProfile?.displayName ?? '',
+    false,
+  );
+  const signerTag = identityRowText(signerNames.displayName, signerNames.paymail, signerNames.handle).tag;
+  const signerFingerprint = keyFingerprint(signer?.pubKeys?.identityPubKey);
   const model = useMemo(() => buildSheetModel(request), [request]);
 
   // Ticks keyed by requestID so lines that join mid-sheet get their default without resetting the rest.
@@ -157,6 +171,20 @@ export const BundleSheet = (props: {
           {title}
         </p>
       </div>
+      {(signerTag || signerFingerprint) && (
+        <p className="text-xs mb-3 m-0" style={{ color: gray }} data-testid="signing-as">
+          Signing in as{' '}
+          <span className="font-semibold" style={{ color: contrast }}>
+            {signerTag || 'this account'}
+          </span>
+          {signerFingerprint && (
+            <span className="font-mono select-none" style={{ userSelect: 'none' }}>
+              {' '}
+              · {signerFingerprint}
+            </span>
+          )}
+        </p>
+      )}
 
       {added > 0 && (
         <p className="text-xs mb-2 m-0" style={{ color: GREEN }}>
