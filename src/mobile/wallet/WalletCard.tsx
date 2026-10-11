@@ -50,7 +50,7 @@ import { LiveTicker } from './live/LiveTicker';
 import { noteBalance, useLive } from './live/liveBus';
 import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
-import { cardSats, memberSince, shortAddr, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
+import { cardSats, memberSince, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
   /** Total in US dollars (BSV at the current rate, plus MNEE when enabled). */
@@ -240,7 +240,6 @@ const WalletCardInner = ({
       flip();
     }
   };
-  const stop = (e: MouseEvent) => e.stopPropagation();
   const sig = useCardSignature(id);
   // `$handle · 02cbe7…6ed8` under the name: which chat identity this account is using (identityLine.ts).
   const chat = useChatIdentity(id);
@@ -451,17 +450,18 @@ const WalletCardInner = ({
                   )}
                   {receiveAddress && backedUp && (
                     <div className="bw-wcard-addrrow">
-                      <span className="bw-wcard-addr" aria-label="Your BSV address">
-                        {receiveAddress}
-                      </span>
+                      {/* Copy sits LEFT of the address (owner, 11 Oct 2026), well away from the $/BSV switch. */}
                       <button
                         type="button"
                         onClick={copy(receiveAddress)}
                         aria-label="Copy BSV address"
-                        className="bw-wcard-icon"
+                        className="bw-wcard-icon bw-wcard-copyicon"
                       >
-                        <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" />
+                        <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" aria-hidden="true" />
                       </button>
+                      <span className="bw-wcard-addr" aria-label="Your BSV address">
+                        {receiveAddress}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -509,7 +509,7 @@ const WalletCardInner = ({
           {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon. */}
           <div className="bw-wcard-stripe">
             {chat.identityKey && (
-              <div className="bw-wcard-stripe-key" onClick={stop}>
+              <div className="bw-wcard-stripe-key">
                 <span className="bw-wcard-stripe-text">
                   <span className="bw-wcard-stripe-label">IDENTITY KEY</span>
                   <span className="bw-wcard-stripe-hex">{chat.identityKey}</span>
@@ -528,20 +528,10 @@ const WalletCardInner = ({
             )}
           </div>
           <div className="bw-wcard-backbody">
-            <div className="bw-wcard-qr" onClick={stop}>
+            <div className="bw-wcard-qr">
               {qrUrl ? <img src={qrUrl} alt="Receive QR code" /> : <div className="bw-wcard-qr-empty" />}
             </div>
             <div className="bw-wcard-backinfo">
-              <span className="bw-wcard-label">Receive BSV</span>
-              <button
-                type="button"
-                className="bw-wcard-addr"
-                onClick={copy(receiveAddress)}
-                aria-label="Copy receive address"
-              >
-                <span>{shortAddr(receiveAddress)}</span>
-                <Copy size={13} color="var(--bw-wcard-muted, #98A2B3)" />
-              </button>
               <span className="bw-wcard-sig-cap">AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}</span>
               <div
                 className={`bw-wcard-sig${sig.svgPath ? ' has-drawn' : ''}`}
@@ -583,6 +573,21 @@ const WalletCardInner = ({
               </div>
             </div>
           </div>
+          {/* Same plain pen, same spot as the front (owner, 11 Oct 2026): flips back to the front. On Android the
+              back's copy targets used to swallow every tap, so this is the reliable way home. */}
+          <button
+            type="button"
+            className="bw-wcard-penflip bw-wcard-penflip-back"
+            aria-label="Show the front of the card"
+            title="Show the front of the card"
+            tabIndex={flipped ? 0 : -1}
+            onClick={(e) => {
+              e.stopPropagation();
+              flip();
+            }}
+          >
+            <PenLine size={20} aria-hidden="true" />
+          </button>
         </div>
       </div>
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}

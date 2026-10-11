@@ -1570,3 +1570,54 @@ button.bw-mail-card:active {
   outline-offset: 2px;
   border-radius: 8px;
 }
+
+/* Card back (owner, 11 Oct 2026): a pen in the same right-centre spot flips back to the front; the body keeps a
+   right gutter so the pen never sits on the signature panel or QR. Only the small icons copy, each with a 44px
+   touch target that overhangs its glyph without covering the text beside it. */
+.bw-wcard-back .bw-wcard-backbody {
+  padding-right: 52px;
+}
+.bw-wcard-penflip-back {
+  right: 8px;
+}
+.bw-wcard-addrrow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.bw-wcard-addr-text {
+  min-width: 0;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.bw-wcard-copyicon,
+.bw-wcard-stripe-copy {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -14px -12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
+}
+.bw-wcard-copyicon:focus-visible {
+  outline: 2px solid #ffd24d;
+  outline-offset: -8px;
+  border-radius: 10px;
+}
+
+/* Front address row: copy icon on the left, and clear space before the $/BSV switch so a tap meant for one
+   never hits the other (owner, 11 Oct 2026). */
+.bw-wcard-front .bw-wcard-addrslot {
+  margin-right: 20px;
+}
+.bw-wcard-front .bw-wcard-addrrow .bw-wcard-copyicon {
+  margin: -14px -8px -14px -14px;
+}
