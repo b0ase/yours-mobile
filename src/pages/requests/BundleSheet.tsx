@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronDown, ChevronRight, Loader2, Shield } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useAccountNames } from '../../mobile/names/accountNames';
 import { identityRowText } from '../../mobile/names/identityText';
 import { keyFingerprint } from '../../mobile/wallet/identityLine';
 import { useSnackbar } from '../../hooks/useSnackbar';
-import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { confirmUsbForApproval } from '../../services/usbPresence';
@@ -17,6 +15,10 @@ import {
   sheetCanTrust,
   type BundleRequest,
 } from '../../services/permissionBundle';
+import { approvalKindForSheet, siteName } from '../../services/approvalKind';
+import { ApprovalCard, Check, Chip, Cross, SiteTile } from '../../components/approval/ApprovalCard';
+import { CARD } from '../../components/approval/cardTheme';
+import { CarefulHero, ConnectHero, PayHero, SignInHero } from '../../components/approval/ApprovalHeroes';
 
 /**
  * One sheet per action (docs/ONE-SHEET-PERMISSIONS.md §3c): everything a site asks for in one action,
@@ -26,9 +28,6 @@ import {
 export type BundlePayload = { bundleID: string; originator: string; items: BundleRequest[] };
 
 type Allowance = { usdPerBsv?: number; existingSats?: number; defaultUsd: number };
-
-const RED = '#F04438';
-const GREEN = '#A1FF8B';
 
 const fmtUsd = (usd: number) => (usd < 1 ? `${Math.round(usd * 100)}¢` : `$${usd.toFixed(2)}`);
 const fmtSats = (sats: number) => (sats >= 1e8 ? `${(sats / 1e8).toFixed(8)} BSV` : `${sats.toLocaleString()} sats`);
@@ -40,7 +39,6 @@ export const BundleSheet = (props: {
   armed?: boolean;
 }) => {
   const { request, onResponse, armed = true } = props;
-  const { theme } = useTheme();
   const { handleSelect, hideMenu } = useBottomMenu();
   const { addSnackbar } = useSnackbar();
   const { chromeStorageService } = useServiceContext();
@@ -70,7 +68,7 @@ export const BundleSheet = (props: {
   // "Don't ask again": later sign-in, signing and basket requests from this site need no sheet.
   const canTrust = useMemo(() => sheetCanTrust(request), [request]);
   const [trustSite, setTrustSite] = useState(true);
-  const [details, setDetails] = useState(false);
+  const [details_, setDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [usbError, setUsbError] = useState('');
 
@@ -127,15 +125,22 @@ export const BundleSheet = (props: {
     }
   };
 
-  const title = model.mode === 'pay' ? 'asks you to pay' : 'wants to connect';
+  const kind = approvalKindForSheet(model, { existingAllowanceSats: allowance?.existingSats });
+  const name = siteName(request.originator);
   const many = model.lines.length + (model.payment ? 1 : 0) > 1;
+  const payLabel = payUsd !== undefined ? fmtUsd(payUsd) : model.payment ? fmtSats(model.payment.satoshis) : '';
+  const allowanceSetsUsd = showAllowance && allowanceOn && allowanceUsd > 0 ? allowanceUsd : 0;
+  const existingUsd =
+    allowance?.existingSats !== undefined && allowance.usdPerBsv
+      ? (allowance.existingSats / 1e8) * allowance.usdPerBsv
+      : undefined;
   const primary =
-    model.mode === 'pay'
-      ? 'Pay'
-      : model.mode === 'connectAndPay'
-        ? many
-          ? 'Allow all & pay'
-          : 'Connect & pay'
+    kind === 'signin'
+      ? 'Sign in'
+      : kind === 'pay'
+        ? model.mode === 'connectAndPay'
+          ? `Connect & pay ${payLabel}`
+          : `Pay ${payLabel}`
         : many
           ? 'Allow all'
           : 'Connect';
@@ -146,198 +151,340 @@ export const BundleSheet = (props: {
     setAllowanceOn(next > 0);
   };
   const disabled = busy || !armed;
-  const contrast = theme.color.global.contrast;
-  const gray = theme.color.global.gray;
+  const careful = kind === 'careful';
+  const riskyLines = model.lines.filter((l) => l.risky);
 
-  return (
-    <motion.div
-      className="flex flex-col w-full px-4 pt-5 pb-4 overflow-y-auto"
-      style={{ maxHeight: '100vh' }}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: 'spring', damping: 24, stiffness: 260 }}
+  const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
+  const lineRow = (l: (typeof model.lines)[number], big = false) => (
+    <label
+      key={l.requestID}
+      className="flex items-center gap-3 cursor-pointer"
+      style={{
+        minHeight: 44,
+        padding: big ? '10px 14px' : '6px 0',
+        borderRadius: big ? 14 : 0,
+        background: big ? CARD.redChip : undefined,
+        fontSize: big ? 14 : 13,
+      }}
     >
-      <div className="flex items-center gap-3 mb-3">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: 'rgba(161,255,139,0.12)' }}
-        >
-          <Shield size={18} style={{ color: GREEN }} />
-        </div>
-        <p className="text-sm leading-snug m-0" style={{ color: gray }}>
-          <span className="font-bold" style={{ color: contrast }}>
-            {request.originator}
-          </span>{' '}
-          {title}
-        </p>
-      </div>
+      <input
+        type="checkbox"
+        checked={isChecked(l.requestID, l.checked)}
+        onChange={() => toggle(l.requestID, l.checked)}
+        style={{ width: 18, height: 18, accentColor: l.risky ? CARD.red : CARD.gold, flexShrink: 0 }}
+      />
+      <span style={{ color: l.risky ? '#FF6B6B' : undefined }}>{l.text}</span>
+    </label>
+  );
+
+  const signingAs = (signerTag || signerFingerprint) && (
+    <span>
+      <span style={{ color: CARD.gold }}>{signerTag || 'this account'}</span>
+      {signerFingerprint && (
+        <span className="font-mono" style={{ userSelect: 'none', fontSize: 12, color: CARD.muted }}>
+          {' '}
+          · {signerFingerprint}
+        </span>
+      )}
+    </span>
+  );
+
+  // Everything the old sheet showed, behind "Details": per-line ticks, allowance, remember, trust, raw detail.
+  const details = (
+    <div className="flex flex-col" style={{ gap: 4 }}>
       {(signerTag || signerFingerprint) && (
-        <p className="text-xs mb-3 m-0" style={{ color: gray }} data-testid="signing-as">
-          Signing in as{' '}
-          <span className="font-semibold" style={{ color: contrast }}>
-            {signerTag || 'this account'}
-          </span>
-          {signerFingerprint && (
-            <span className="font-mono select-none" style={{ userSelect: 'none' }}>
-              {' '}
-              · {signerFingerprint}
-            </span>
-          )}
+        <p className="m-0" data-testid="signing-as" style={{ fontSize: 12 }}>
+          Signing in as {signingAs}
         </p>
       )}
-
       {added > 0 && (
-        <p className="text-xs mb-2 m-0" style={{ color: GREEN }}>
+        <p className="m-0" style={{ fontSize: 12, color: CARD.green }}>
           +{added} more added while this was open
         </p>
       )}
-
-      <div
-        className="w-full rounded-2xl px-3 py-1 mb-3"
-        style={{ background: theme.color.global.row, border: '1px solid rgba(255,255,255,0.06)' }}
-      >
-        {model.lines.map((l) => (
-          <label key={l.requestID} className="flex items-start gap-3 py-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isChecked(l.requestID, l.checked)}
-              onChange={() => setChecked((c) => ({ ...c, [l.requestID]: !isChecked(l.requestID, l.checked) }))}
-              className="mt-0.5 accent-green-400"
-            />
-            <span className="text-xs" style={{ color: l.risky ? RED : contrast }}>
-              {l.text}
-            </span>
-          </label>
-        ))}
-        {showAllowance && (
-          <div className="flex items-start gap-3 py-2">
-            <input
-              type="checkbox"
-              checked={allowanceOn && allowanceUsd > 0}
-              onChange={() => {
-                if (allowanceUsd === 0) setAllowanceUsd(DEFAULT_ALLOWANCE_USD);
-                setAllowanceOn(!(allowanceOn && allowanceUsd > 0));
-              }}
-              className="mt-0.5 accent-green-400"
-              aria-label="Monthly allowance"
-            />
-            <span className="text-xs flex-1" style={{ color: contrast }}>
-              {allowanceUsd > 0
-                ? `Spend up to ${fmtUsd(allowanceUsd)} a month without asking`
-                : 'Ask me before every payment'}
-            </span>
-            <button
-              type="button"
-              className="text-xs border-0 bg-transparent p-0 underline"
-              style={{ color: gray }}
-              onClick={nextAllowance}
-            >
-              change
-            </button>
-          </div>
-        )}
-      </div>
-
+      {model.lines.map((l) => lineRow(l))}
       {model.payment && (
-        <div
-          className="w-full rounded-2xl px-3 py-2 mb-3"
-          style={{ background: 'rgba(161,255,139,0.06)', border: '1px solid rgba(161,255,139,0.2)' }}
-        >
-          <p className="text-xs font-bold uppercase tracking-wider m-0 pb-1" style={{ color: gray }}>
-            Pay now
-          </p>
-          <p className="text-sm font-semibold m-0" style={{ color: GREEN }}>
-            {payUsd !== undefined ? fmtUsd(payUsd) : fmtSats(model.payment.satoshis)}{' '}
-            <span className="font-normal" style={{ color: contrast }}>
-              to {request.originator}
-            </span>
-          </p>
-          {model.payment.description && (
-            <p className="text-xs m-0 mt-0.5" style={{ color: gray }}>
-              &ldquo;{model.payment.description}&rdquo;
-            </p>
-          )}
+        <p className="m-0" style={{ padding: '6px 0' }}>
+          Pay now: <span style={{ color: CARD.gold, fontWeight: 600 }}>{payLabel}</span> to {request.originator}
+          {model.payment.description && <> &ldquo;{model.payment.description}&rdquo;</>}
+        </p>
+      )}
+      {showAllowance && (
+        <div className="flex items-center gap-3" style={{ minHeight: 44 }}>
+          <input
+            type="checkbox"
+            checked={allowanceOn && allowanceUsd > 0}
+            onChange={() => {
+              if (allowanceUsd === 0) setAllowanceUsd(DEFAULT_ALLOWANCE_USD);
+              setAllowanceOn(!(allowanceOn && allowanceUsd > 0));
+            }}
+            style={{ width: 18, height: 18, accentColor: CARD.gold, flexShrink: 0 }}
+            aria-label="Monthly allowance"
+          />
+          <span className="flex-1">
+            {allowanceUsd > 0
+              ? `Spend up to ${fmtUsd(allowanceUsd)} a month without asking`
+              : 'Ask me before every payment'}
+          </span>
+          <button
+            type="button"
+            className="border-0 bg-transparent underline"
+            style={{ color: CARD.gold, minHeight: 44, padding: '0 4px', fontSize: 13 }}
+            onClick={nextAllowance}
+          >
+            change
+          </button>
         </div>
       )}
-
-      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+      <label className="flex items-center gap-3 cursor-pointer" style={{ minHeight: 44 }}>
         <input
           type="checkbox"
           checked={remember}
           onChange={() => setRemember(!remember)}
-          className="accent-green-400"
+          style={{ width: 18, height: 18, accentColor: CARD.gold, flexShrink: 0 }}
         />
-        <span className="text-xs" style={{ color: gray }}>
-          Remember this site
-        </span>
+        <span>Remember this site</span>
       </label>
       {canTrust && remember && (
-        <label className="flex items-start gap-2 mb-3 cursor-pointer">
+        <label className="flex items-start gap-3 cursor-pointer" style={{ padding: '6px 0' }}>
           <input
             type="checkbox"
             checked={trustSite}
             onChange={() => setTrustSite(!trustSite)}
-            className="mt-0.5 accent-green-400"
+            style={{ width: 18, height: 18, accentColor: CARD.gold, flexShrink: 0, marginTop: 1 }}
           />
-          <span className="text-xs" style={{ color: gray }}>
+          <span>
             Don&apos;t ask again on {request.originator} for sign-in and signing. Payments stay within the allowance;
             your personal details always ask.
           </span>
         </label>
       )}
+      <ul className="m-0 mt-1 pl-4 break-all" style={{ fontSize: 11, color: CARD.muted }}>
+        {model.payment && <li>pay: {model.payment.detail}</li>}
+        {model.lines.map((l) => (
+          <li key={l.requestID}>{l.detail}</li>
+        ))}
+        {allowanceSetsUsd > 0 && <li>allowance: monthly spending cap for {request.originator}</li>}
+      </ul>
+    </div>
+  );
 
-      {usbError && (
-        <p className="text-xs text-center m-0 mb-2" style={{ color: RED }}>
-          {usbError}
-        </p>
-      )}
+  const deny = { label: careful ? 'No, block it' : 'Not now', onClick: () => void send(false), disabled };
+  const allow = { label: careful ? 'I trust it, allow' : primary, onClick: () => void send(true), disabled, busy };
 
-      <div className="flex gap-3">
-        <button
-          type="button"
-          className="flex-1 py-3 rounded-xl font-semibold text-sm"
-          style={{ background: 'transparent', color: gray, border: '1px solid rgba(255,255,255,0.1)' }}
-          disabled={disabled}
-          onClick={() => void send(false)}
+  let hero: ReactNode;
+  let title: ReactNode;
+  let body: ReactNode = null;
+  let siteSub: string | undefined;
+  const gold = (t: string) => <span style={{ color: CARD.gold }}>{t}</span>;
+
+  if (kind === 'careful') {
+    hero = <CarefulHero />;
+    siteSub = 'Check this carefully';
+    const privileged = request.items.some((r) => r.privileged);
+    const privateCert = riskyLines.some(
+      (l) => request.items.find((r) => r.requestID === l.requestID)?.type === 'certificate',
+    );
+    const red = (t: string) => <span style={{ color: '#FF6B6B' }}>{t}</span>;
+    title = privileged ? (
+      <>Wants {red('full control')} of your keys</>
+    ) : privateCert ? (
+      <>Wants your {red('private details')}</>
+    ) : model.payment && riskyLines.length === 0 ? (
+      <>{red(payLabel)} is over your allowance</>
+    ) : (
+      <>Wants {red('more than usual')}</>
+    );
+    body = (
+      <div className="flex flex-col" style={{ gap: 8 }}>
+        {privileged && (
+          <div
+            className="flex items-center gap-2.5"
+            style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
+          >
+            <Cross />
+            Could move your money
+          </div>
+        )}
+        {riskyLines.length === 0 && model.payment && (
+          <div
+            className="flex items-center gap-2.5"
+            style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
+          >
+            <Cross />
+            {existingUsd !== undefined
+              ? `Your allowance here is ${fmtUsd(existingUsd)} a month`
+              : 'More than this site may spend'}
+          </div>
+        )}
+        {riskyLines.map((l) => lineRow(l, true))}
+        <div
+          className="flex items-center gap-2.5"
+          style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
         >
-          Deny
-        </button>
-        <button
-          type="button"
-          className="flex-[2] py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2"
-          style={{
-            background: 'linear-gradient(135deg, #A1FF8B 0%, #34D399 100%)',
-            color: '#010101',
-            opacity: disabled ? 0.6 : 1,
-          }}
-          disabled={disabled}
-          onClick={() => void send(true)}
-        >
-          {busy && <Loader2 size={14} className="animate-spin" />}
-          {primary}
-        </button>
+          <Cross />
+          Only allow apps you trust
+        </div>
       </div>
-
-      <button
-        type="button"
-        className="flex items-center gap-1 mt-3 text-xs border-0 bg-transparent p-0"
-        style={{ color: gray }}
-        onClick={() => setDetails(!details)}
-      >
-        {details ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        Details
-      </button>
-      {details && (
-        <ul className="text-[11px] mt-1 pl-4 break-all" style={{ color: gray }}>
-          {model.payment && <li>pay: {model.payment.detail}</li>}
-          {model.lines.map((l) => (
-            <li key={l.requestID}>{l.detail}</li>
+    );
+  } else if (kind === 'pay') {
+    hero = (
+      <PayHero
+        amount={payLabel}
+        sub={payUsd !== undefined && model.payment ? `${model.payment.satoshis.toLocaleString()} sats` : undefined}
+      />
+    );
+    siteSub = model.payment?.description || 'Asks you to pay';
+    title = <>Pay {gold(name)}</>;
+    body = (
+      <>
+        <div className="flex items-center gap-3" style={{ padding: 14, borderRadius: 16, background: CARD.chip }}>
+          <SiteTile site={request.originator} size={44} />
+          <div className="flex flex-col min-w-0" style={{ gap: 2, lineHeight: 1.25 }}>
+            <span className="truncate" style={{ fontSize: 15, fontWeight: 600 }}>
+              To {request.originator}
+            </span>
+            <span className="truncate" style={{ fontSize: 13, color: CARD.muted }}>
+              {model.payment?.description ? `“${model.payment.description}”` : 'Straight from your wallet'}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2" style={{ fontSize: 14, color: CARD.soft }}>
+          <Check size={18} />
+          {allowanceSetsUsd > 0
+            ? `Then up to ${fmtUsd(allowanceSetsUsd)} a month without asking`
+            : 'Every payment asks you first'}
+        </div>
+      </>
+    );
+  } else if (kind === 'signin') {
+    hero = <SignInHero />;
+    siteSub = 'Sign-in request';
+    title = <>Sign in to {gold(name)}</>;
+    body = (
+      <>
+        {signingAs && (
+          <div className="flex items-center gap-2.5">
+            <div
+              aria-hidden="true"
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                background: 'conic-gradient(#F5C542, #B8860B, #FFE08A, #F5C542)',
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontSize: 18, fontWeight: 600 }}>as {signingAs}</span>
+          </div>
+        )}
+        <div className="flex flex-wrap" style={{ gap: 8, marginTop: 4 }}>
+          <Chip>
+            <Check />
+            No password
+          </Chip>
+          <Chip>
+            <Check />
+            No money moves
+          </Chip>
+        </div>
+      </>
+    );
+  } else {
+    hero = <ConnectHero site={request.originator} />;
+    siteSub = 'Wants to connect';
+    title = (
+      <>
+        Use {gold('bWalletX')} on {name}
+      </>
+    );
+    const types = new Set(request.items.map((r) => r.type));
+    const tiles: { label: string; icon: ReactNode }[] = [
+      { label: types.has('certificate') ? 'Your details' : 'Your name', icon: <PersonIcon /> },
+    ];
+    if (types.has('protocol')) tiles.push({ label: 'Sign posts', icon: <PenIcon /> });
+    if (types.has('basket')) tiles.push({ label: 'Keep items', icon: <BagIcon /> });
+    body = (
+      <>
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`, gap: 8 }}>
+          {tiles.map((t) => (
+            <div
+              key={t.label}
+              className="flex flex-col items-center"
+              style={{ gap: 8, padding: '14px 6px', borderRadius: 16, background: CARD.chip }}
+            >
+              {t.icon}
+              <span style={{ fontSize: 13, fontWeight: 600, textAlign: 'center' }}>{t.label}</span>
+            </div>
           ))}
-          {showAllowance && allowanceOn && allowanceUsd > 0 && (
-            <li>allowance: monthly spending cap for {request.originator}</li>
-          )}
-        </ul>
-      )}
+        </div>
+        <div className="flex items-center gap-2" style={{ fontSize: 14, color: CARD.soft }}>
+          <Check size={18} />
+          {allowanceSetsUsd > 0
+            ? `Payments over ${fmtUsd(allowanceSetsUsd)} a month ask you first`
+            : 'Payments still ask you first'}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <motion.div
+      className="flex flex-col w-full h-full"
+      style={{ maxHeight: '100vh' }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', damping: 24, stiffness: 260 }}
+      data-approval-kind={kind}
+    >
+      <ApprovalCard
+        tone={careful ? 'red' : 'gold'}
+        site={request.originator}
+        siteSub={siteSub}
+        onClose={() => void send(false)}
+        closeLabel="Deny and close"
+        closeDisabled={disabled}
+        hero={hero}
+        title={title}
+        primary={careful ? deny : allow}
+        secondary={careful ? allow : deny}
+        details={details}
+        detailsOpen={details_}
+        onToggleDetails={() => setDetails(!details_)}
+        error={usbError}
+      >
+        {body}
+      </ApprovalCard>
     </motion.div>
   );
 };
+
+const iconProps = {
+  'aria-hidden': true,
+  width: 28,
+  height: 28,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: CARD.gold,
+  strokeWidth: 1.8,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+} as const;
+const PersonIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" />
+  </svg>
+);
+const PenIcon = () => (
+  <svg {...iconProps}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+const BagIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="7" width="18" height="13" rx="2" />
+    <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
+);
