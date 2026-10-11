@@ -9,6 +9,7 @@ import {
   needsSizeCheck,
   valuesEntered,
 } from './builderForm';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -601,7 +602,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               <LockIcon size={16} /> Lock BSV
             </button>
             <button
-              onClick={() => setOpenPot('__start')}
+              onClick={() => {
+                setOpenPot('__start');
+                requestAnimationFrame(() =>
+                  document.getElementById('start-pot')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+                );
+              }}
               className={`${btn} flex-1 flex items-center justify-center gap-2 text-white`}
               style={{ border: `1px solid ${LINE}` }}
             >
@@ -766,7 +772,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             </button>
           )}
           {(plans.length === 0 || openPot === '__start') && (
-            <div className={card} style={cardStyle}>
+            <div id="start-pot" className={card} style={cardStyle}>
               <div className="text-sm font-bold text-white">Start a pot</div>
               <p className="text-xs m-0" style={{ color: MUTED }}>
                 A pot is BSV you lock for something: until a date, or as payouts over time. Nobody can unlock it early,
@@ -1257,17 +1263,20 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
-      {showSubs && (
-        <Suspense fallback={null}>
-          <PotsScreen
-            openFund={openFund}
-            onClose={() => {
-              setShowSubs(false);
-              setOpenFund(false);
-            }}
-          />
-        </Suspense>
-      )}
+      {/* Portal: on desktop the wallet sits in a transformed column, which would trap a fixed full-screen view. */}
+      {showSubs &&
+        createPortal(
+          <Suspense fallback={null}>
+            <PotsScreen
+              openFund={openFund}
+              onClose={() => {
+                setShowSubs(false);
+                setOpenFund(false);
+              }}
+            />
+          </Suspense>,
+          document.body,
+        )}
       {MARKET_ENABLED && backPnee === 'card' && (
         <BackPneeSheet onClose={leavePneeFlow} onLock={() => setBackPnee('amount')} />
       )}
