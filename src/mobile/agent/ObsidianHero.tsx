@@ -10,7 +10,6 @@ import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
  * Reduced motion, or no WebGL: one still frame / a plain gradient.
  */
 
-
 type Option = { label: string; prompt: string };
 
 const OPTIONS: Option[] = [
