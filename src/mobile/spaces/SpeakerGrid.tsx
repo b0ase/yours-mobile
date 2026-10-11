@@ -14,7 +14,7 @@ import { Capacitor } from '@capacitor/core';
 import { pipSupported, togglePip } from './background';
 import { LevelBars } from './LevelBars';
 import type { SpaceMedia } from './media';
-import { audienceLine, hostLabel, type Participant } from './model';
+import { audienceLine, hostLabel, type Participant, stageButtonLabel } from './model';
 import { gridShape, pagesOf, recentlyActive, spareCells, tvWidth, wantsLiveVideo } from './speakerLayout';
 
 /** Desktop/web only: a PiP button on video tiles. Phones float the video on their own (background.ts). */
@@ -174,7 +174,17 @@ const Tile = ({
   );
 };
 
-const RequestButton = ({ raised, onRaise, small }: { raised: boolean; onRaise: () => void; small?: boolean }) => (
+const RequestButton = ({
+  raised,
+  onRaise,
+  small,
+  openStage = false,
+}: {
+  raised: boolean;
+  onRaise: () => void;
+  small?: boolean;
+  openStage?: boolean;
+}) => (
   <button
     onClick={onRaise}
     className={`rounded-full font-semibold ${small ? 'px-2 py-1 text-[10px]' : 'px-4 py-2 text-sm'}`}
@@ -184,7 +194,7 @@ const RequestButton = ({ raised, onRaise, small }: { raised: boolean; onRaise: (
         : { background: GOLD, color: '#010101' }
     }
   >
-    {raised ? '✋ Hand raised' : '✋ Request to speak'}
+    {stageButtonLabel({ openStage, raised })}
   </button>
 );
 
@@ -208,6 +218,8 @@ export interface SpeakerGridProps {
   raised: boolean;
   /** The existing raise-hand action. */
   onRaiseHand: () => void;
+  /** Open stage: the button reads "Join the stage" and takes a seat. */
+  openStage?: boolean;
   /** Moderator menu for a tile, or null when I may not moderate them. */
   menuFor: (p: Participant) => (() => void) | null;
   /** Profile pictures by handle, when known. */
@@ -229,6 +241,7 @@ export const SpeakerGrid = ({
   canHand,
   raised,
   onRaiseHand,
+  openStage = false,
   menuFor,
   avatars,
   banner,
@@ -274,7 +287,11 @@ export const SpeakerGrid = ({
   if (!n)
     return (
       <p className="pt-10 text-center text-sm" style={{ color: MUTED }}>
-        {noHost ? 'Nobody on stage yet. Request to speak to go up.' : 'Waiting for the host to come back on stage…'}
+        {noHost
+          ? openStage
+            ? 'Nobody on stage yet. Join the stage to talk.'
+            : 'Nobody on stage yet. Request to speak to go up.'
+          : 'Waiting for the host to come back on stage…'}
       </p>
     );
 
@@ -307,7 +324,7 @@ export const SpeakerGrid = ({
   const under =
     canHand && spare === 0 ? (
       <div className="mt-3 flex items-center justify-center">
-        <RequestButton raised={raised} onRaise={onRaiseHand} />
+        <RequestButton raised={raised} onRaise={onRaiseHand} openStage={openStage} />
       </div>
     ) : null;
 
@@ -373,7 +390,9 @@ export const SpeakerGrid = ({
             {i === 0 && (
               <>
                 {listenerLine}
-                {canHand && <RequestButton raised={raised} onRaise={onRaiseHand} small={shape.small} />}
+                {canHand && (
+                  <RequestButton raised={raised} onRaise={onRaiseHand} small={shape.small} openStage={openStage} />
+                )}
               </>
             )}
           </div>
