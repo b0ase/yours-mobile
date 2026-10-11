@@ -38,6 +38,7 @@ import { BODY_MAX, SUBJECT_MAX } from './envelope';
 import {
   agoLabel,
   amountOf,
+  EXAMPLE_SWIPE,
   EXAMPLES,
   EXAMPLES_BELOW,
   examplesHidden,
@@ -1483,27 +1484,39 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 {(tab === 'inbox' ? exInbox : exRequests)
                   .filter((e) => !goneExamples.includes(e.id))
                   .map((e) => {
-                    // Examples swipe like real mail so the gesture can be tried before any real mail arrives.
-                    const dismiss = {
-                      id: 'dismiss',
-                      label: 'Archive',
-                      icon: <Archive size={14} />,
-                      color: '#12B76A',
-                      removes: true,
-                      onPress: () => {
-                        setGoneExamples((g) => [...g, e.id]);
-                        undoable('Example archived', () => setGoneExamples((g) => g.filter((x) => x !== e.id)));
-                      },
+                    // Examples swipe like real mail (same trays as mailActions) so the gesture can be tried before
+                    // any real mail arrives. Archive / Delete / Quarantine hide the example; the rest open it.
+                    const hide = (verb: string) => {
+                      setGoneExamples((g) => [...g, e.id]);
+                      undoable(`Example ${verb}`, () => setGoneExamples((g) => g.filter((x) => x !== e.id)));
                     };
+                    const look: Record<string, { icon: ReactNode; color: string }> = {
+                      reply: { icon: <Reply size={18} />, color: '#475467' },
+                      archive: { icon: <Archive size={18} />, color: '#12B76A' },
+                      delete: { icon: <Trash2 size={18} />, color: '#D92D20' },
+                      read: { icon: <MailOpen size={18} />, color: '#2E90FA' },
+                      pin: { icon: <Pin size={18} />, color: '#B54708' },
+                      quarantine: { icon: <ShieldAlert size={18} />, color: '#7A2E0E' },
+                    };
+                    const toAction = (a: (typeof EXAMPLE_SWIPE.left)[number]): SwipeAction => ({
+                      id: a.id,
+                      label: a.label,
+                      ...look[a.id],
+                      removes: a.removes,
+                      onPress: () =>
+                        a.removes
+                          ? hide(a.id === 'delete' ? 'deleted' : a.id === 'quarantine' ? 'quarantined' : 'archived')
+                          : setExample(e),
+                    });
                     return (
                       <SwipeRow
                         key={e.id}
                         rowId={e.id}
                         label={`example mail from ${e.name}`}
-                        leftActions={[dismiss]}
-                        rightActions={[{ ...dismiss, id: 'dismiss-r' }]}
-                        fullSwipeLeft="dismiss"
-                        fullSwipeRight="dismiss-r"
+                        leftActions={EXAMPLE_SWIPE.left.map(toAction)}
+                        rightActions={EXAMPLE_SWIPE.right.map(toAction)}
+                        fullSwipeLeft={EXAMPLE_SWIPE.fullLeft}
+                        fullSwipeRight={EXAMPLE_SWIPE.fullRight}
                       >
                         <ExampleRow e={e} onOpen={() => setExample(e)} />
                       </SwipeRow>

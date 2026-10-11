@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { bytesToSealed, decodeEnvelope, encodeEnvelope, newMessageId, sealedToBytes, type Envelope } from './envelope';
 import { quote, rank, route, split, type MailMeta } from './route';
 import { parseProfile } from '../calls/rateCard';
+import { EXAMPLE_SWIPE } from './examples';
 
 const K = (c: string) => `02${c.repeat(64)}`;
 const env = (o: Partial<Envelope> = {}): Envelope => ({
@@ -182,5 +183,16 @@ describe('swipe flags', () => {
     const del = setFlags(s0, ['b'], { deleted: true }).next;
     expect(isArchived(del.received[1])).toBe(false);
     expect(pinnedFirst([{ id: 1 }, { id: 2, pinned: true }]).map((x) => x.id)).toEqual([2, 1]);
+  });
+});
+
+describe('example swipe trays', () => {
+  test('match real mail: Reply/Archive/Delete left, Read/Pin/Quarantine right, distinct ids', () => {
+    expect(EXAMPLE_SWIPE.left.map((a) => a.label)).toEqual(['Reply', 'Archive', 'Delete']);
+    expect(EXAMPLE_SWIPE.right.map((a) => a.label)).toEqual(['Read', 'Pin', 'Quarantine']);
+    const ids = [...EXAMPLE_SWIPE.left, ...EXAMPLE_SWIPE.right].map((a) => a.id);
+    expect(new Set(ids).size).toBe(6);
+    expect(EXAMPLE_SWIPE.left.some((a) => a.id === EXAMPLE_SWIPE.fullLeft)).toBe(true);
+    expect(EXAMPLE_SWIPE.right.some((a) => a.id === EXAMPLE_SWIPE.fullRight)).toBe(true);
   });
 });
