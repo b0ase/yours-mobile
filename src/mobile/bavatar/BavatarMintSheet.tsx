@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
+import { ApprovalCard, Chip } from '../../components/approval/ApprovalCard';
+import { CARD } from '../../components/approval/cardTheme';
+import { MintHero } from '../../components/approval/ApprovalHeroes';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { BavatarMine } from '../chat/api';
 import { svgDataUri } from '../wallet/cardBackQr';
-import { bavatarClient, bavatarLabel, bavatarMintSvg, FOUNDING, mintBavatar, mintOffer } from './mintBavatar';
-
-const GOLD = '#F5B800';
-const MUTED = '#98A2B3';
-const PANEL = '#17191E';
+import {
+  bavatarClient,
+  bavatarLabel,
+  bavatarNumber,
+  bavatarMintSvg,
+  FOUNDING,
+  mintBavatar,
+  mintOffer,
+} from './mintBavatar';
 
 type State =
   | { k: 'loading' }
@@ -29,6 +36,7 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
   const identityKey = account?.pubKeys?.identityPubKey ?? '';
   const payAddress = account?.addresses?.bsvAddress ?? '';
   const [state, setState] = useState<State>({ k: 'loading' });
+  const [details, setDetails] = useState(false);
 
   useBackClose(true, onClose);
 
@@ -67,90 +75,110 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const num = mine ? bavatarNumber(mine.number) : undefined;
+  const founding = !!mine?.founding && !!mine && mine.number <= FOUNDING;
+  const busy = state.k === 'minting';
+
   return createPortal(
-    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: '#010101' }}>
-      <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
-        <button
-          onClick={onClose}
-          aria-label="Back"
-          className="w-11 h-11 flex items-center justify-center bg-transparent border-0"
-        >
-          <ArrowLeft size={20} color="white" />
-        </button>
-        <span className="text-white font-bold text-[17px]">Mint my bAvatar</span>
-      </div>
-      <div className="flex-1 overflow-y-auto px-4 pb-8 flex flex-col items-center gap-4">
-        {state.k === 'loading' && <p style={{ color: MUTED }}>Looking up your number…</p>}
-        {state.k === 'error' && (
-          <p className="text-sm text-center" style={{ color: '#ff8a8a' }}>
-            {state.msg}
+    <div
+      className="fixed inset-0 z-[420] flex flex-col"
+      style={{
+        background: CARD.bg,
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
+      <ApprovalCard
+        ours
+        site="bWalletX"
+        siteSub={founding ? 'Founding 1,000' : 'Your bAvatar'}
+        onClose={onClose}
+        closeLabel="Close"
+        hero={
+          <MintHero
+            image={preview || undefined}
+            alt={mine ? bavatarLabel(mine.handle, mine.number) : 'Your bAvatar'}
+            number={num}
+          />
+        }
+        title={
+          <>
+            {state.k === 'done' ? 'Minted your ' : 'Mint your '}
+            <span style={{ color: CARD.gold }}>bAvatar</span>
+          </>
+        }
+        primary={
+          state.k === 'ready' || state.k === 'minting'
+            ? {
+                label: busy ? 'Minting…' : `Mint ${num ?? ''}`.trim(),
+                onClick: () => void mint(),
+                disabled: busy || !preview,
+                busy,
+              }
+            : undefined
+        }
+        secondary={state.k === 'done' ? undefined : { label: 'Not now', onClick: onClose, disabled: busy }}
+        details={
+          mine ? (
+            <span>
+              Your bAvatar art, your name and your number, inscribed as a 1-sat ordinal in this wallet. The QR opens
+              your paymail. Send it on and the art and number go with it; your account stays yours.
+            </span>
+          ) : undefined
+        }
+        detailsOpen={details}
+        onToggleDetails={() => setDetails(!details)}
+        error={state.k === 'error' ? state.msg : undefined}
+      >
+        {state.k === 'loading' && (
+          <p className="m-0" style={{ color: CARD.muted }}>
+            Looking up your number…
           </p>
         )}
         {mine && (
           <>
-            {preview ? (
-              <img
-                src={preview}
-                alt={bavatarLabel(mine.handle, mine.number)}
-                className="w-full rounded-2xl"
-                style={{ maxWidth: 320, boxShadow: '0 0 0 1px #f5b80055, 0 18px 50px #000' }}
-              />
-            ) : (
-              <p className="text-sm" style={{ color: MUTED }}>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>{bavatarLabel(mine.handle, mine.number)}</div>
+            {!preview && (
+              <p className="m-0" style={{ fontSize: 14, color: CARD.muted }}>
                 Claim a $name first: your bAvatar carries it.
               </p>
             )}
-            <div className="text-center">
-              <div className="text-white font-bold text-[17px]">{bavatarLabel(mine.handle, mine.number)}</div>
-              {mine.founding && mine.number <= FOUNDING && (
-                <div className="text-xs font-bold tracking-[0.18em] mt-1" style={{ color: GOLD }}>
-                  FOUNDING 1,000
-                </div>
-              )}
+            <div className="flex flex-wrap" style={{ gap: 8 }}>
+              {offer?.kind === 'free' && <Chip solid>FREE</Chip>}
+              {offer?.kind === 'paid' && <Chip>Network fee ~4,000 sats</Chip>}
+              <Chip>
+                <svg
+                  aria-hidden="true"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={CARD.gold}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                  <path d="M9 9h2v2H9zM13 13h2v2h-2z" />
+                </svg>
+                Scans to your paymail
+              </Chip>
+              <Chip>Yours forever</Chip>
             </div>
-            <div
-              className="w-full rounded-2xl p-4 text-sm"
-              style={{ background: PANEL, color: '#D0D5DD', maxWidth: 420 }}
-            >
-              Your bAvatar art, your name and your number, inscribed as a 1-sat ordinal in this wallet. The QR opens
-              your paymail. Send it on and the art and number go with it; your account stays yours.
-              <div className="mt-3 font-semibold text-white">
-                {offer?.kind === 'free'
-                  ? 'Free: bWalletX pays the network fee.'
-                  : offer?.kind === 'paid'
-                    ? 'Network fee: about 4,000 sats.'
-                    : ''}
-              </div>
-            </div>
-            {state.k === 'done' ? (
+            {state.k === 'done' && (
               <a
                 href={`https://whatsonchain.com/tx/${state.txid}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 font-bold"
-                style={{ color: GOLD }}
+                style={{ color: CARD.gold, minHeight: 44 }}
               >
-                Minted <ExternalLink size={14} />
+                Minted: view on chain <ExternalLink size={14} />
               </a>
-            ) : (
-              <button
-                type="button"
-                disabled={state.k === 'minting' || !preview}
-                onClick={mint}
-                className="w-full rounded-full py-3 font-bold border-0"
-                style={{
-                  maxWidth: 420,
-                  background: GOLD,
-                  color: '#010101',
-                  opacity: state.k === 'minting' || !preview ? 0.6 : 1,
-                }}
-              >
-                {state.k === 'minting' ? 'Minting…' : 'Mint'}
-              </button>
             )}
           </>
         )}
-      </div>
+      </ApprovalCard>
     </div>,
     document.body,
   );
