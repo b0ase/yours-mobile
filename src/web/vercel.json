@@ -26,6 +26,14 @@
     {
       "source": "/agents",
       "destination": "/agents.html"
+    },
+    {
+      "source": "/desktop",
+      "destination": "/desktop.html"
+    },
+    {
+      "source": "/((?!assets/|icons/|api/)[^.]*)",
+      "destination": "/index.html"
     }
   ]
 }

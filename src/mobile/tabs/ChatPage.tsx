@@ -1,4 +1,6 @@
 import { claimIssuerAdmin } from '../chat/autoClaim';
+import { WIDE_ON } from '../wide/flag';
+import { RoomDetails } from '../wide/RoomDetails';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
@@ -650,11 +652,14 @@ const Conversation = ({
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
-      className="fixed left-0 right-0 z-[110] flex flex-col"
+      className="fixed z-[110] flex flex-col"
       style={{
         display: offScreen ? 'none' : undefined,
-        top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
-        bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem))',
+        // Wide web layout (wide/wide.css) sets these so the room opens beside the room list.
+        left: 'var(--ww-conv-left, 0px)',
+        right: 'var(--ww-conv-right, 0px)',
+        top: 'calc(var(--wallet-inset-top, 0px) + var(--ww-conv-top, 3.5rem))',
+        bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem) + var(--ww-conv-bottom, 0px))',
         background: BG,
       }}
     >
@@ -717,7 +722,8 @@ const Conversation = ({
       </div>
 
       {/* Spaces: Live now / Join, or Start for the issuer or admin. bWalletX: any room; store: open rooms (free Spaces). */}
-      {(BSPACES_ENABLED || roomSpacesAllowed(room)) && (
+      {/* In the wide layout the Space banner sits in the room details column instead. */}
+      {!WIDE_ON && (BSPACES_ENABLED || roomSpacesAllowed(room)) && (
         <LiveBanner
           client={client}
           ctx={apiContext}
@@ -728,6 +734,54 @@ const Conversation = ({
           gated={!!entry}
           spaceOpen={roomSpaceOpen(room)}
           autoOpen={autoJoinSpace}
+        />
+      )}
+      {WIDE_ON && (
+        <RoomDetails
+          title={title}
+          kind={
+            peer
+              ? 'Direct message'
+              : entry
+                ? 'Token room'
+                : openRoom
+                  ? `${openRoom.visibility === 'public' ? 'Public' : 'Invite-only'} room${openRoom.closed ? ' · closed' : ''}`
+                  : `Room · $${room.ticker}`
+          }
+          members={members}
+          voices={[
+            ...new Set(
+              messages
+                .map((m) => m.author_handle)
+                .filter((h): h is string => !!h)
+                .reverse(),
+            ),
+          ].slice(0, 24)}
+          gate={
+            entry
+              ? {
+                  symbol: entry.gate.key.startsWith('coll:') ? entry.gate.symbol : `$${entry.gate.symbol}`,
+                  min: amountLabel(entry.gate.minRaw, entry.gate),
+                  hold: amountLabel(entry.holding.amountRaw, entry.gate),
+                }
+              : null
+          }
+          space={
+            BSPACES_ENABLED || roomSpacesAllowed(room) ? (
+              <LiveBanner
+                client={client}
+                ctx={apiContext}
+                ticker={room.ticker}
+                roomName={title}
+                me={me}
+                createdBy={room.created_by_handle}
+                gated={!!entry}
+                spaceOpen={roomSpaceOpen(room)}
+                autoOpen={autoJoinSpace}
+              />
+            ) : null
+          }
+          actions={null}
         />
       )}
       <div

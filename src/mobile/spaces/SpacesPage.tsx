@@ -7,10 +7,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
+import { ArrowLeft, MessageCircle, Radio, RefreshCw } from 'lucide-react';
+import { requestRoomByTicker } from '../chat/segmentNav';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
-import { roomTitle, type ChatRoom } from '../chat/messages';
+import { isDirectRoom, roomTitle, type ChatRoom } from '../chat/messages';
 import {
   audienceCount,
   audienceLine,
@@ -23,6 +24,7 @@ import {
 } from './model';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
+import { SpaceAvatar } from './SpaceAvatar';
 import { InviteCard, type SpaceLink } from './InviteCard';
 import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
@@ -101,8 +103,12 @@ const SpacesPage = () => {
   }, [load]);
 
   const live = (rows ?? []).filter((r) => r.state.space);
+  // One-to-one chats are private: never offered as a place to go live (owner, 11 Oct 2026).
   const hostable = (rows ?? []).filter(
-    (r) => !r.state.space && canHostRoom({ me, createdBy: r.room.created_by_handle, spaceOpen: roomSpaceOpen(r.room) }),
+    (r) =>
+      !r.state.space &&
+      !isDirectRoom(r.room) &&
+      canHostRoom({ me, createdBy: r.room.created_by_handle, spaceOpen: roomSpaceOpen(r.room) }),
   );
 
   return (
@@ -165,12 +171,7 @@ const SpacesPage = () => {
               className="w-full flex items-center gap-3 px-4 py-3 text-left"
               style={{ borderBottom: `1px solid ${LINE}` }}
             >
-              <span
-                className="h-11 w-11 rounded-full flex items-center justify-center"
-                style={{ background: '#D92D20' }}
-              >
-                <Radio size={20} color="#fff" />
-              </span>
+              <SpaceAvatar room={room} title={roomTitle(room, me)} live />
               <span className="flex-1 min-w-0">
                 <span className="block font-semibold truncate">{state.space?.title || roomTitle(room, me)}</span>
                 <span className="block text-xs truncate" style={{ color: MUTED }}>
@@ -195,7 +196,20 @@ const SpacesPage = () => {
               className="flex items-center gap-3 px-4 py-3"
               style={{ borderBottom: `1px solid ${LINE}` }}
             >
+              <SpaceAvatar room={room} title={roomTitle(room, me)} />
               <span className="flex-1 truncate">{roomTitle(room, me)}</span>
+              {/* The room's group chat, next to its Go live (owner, 11 Oct 2026). */}
+              <button
+                onClick={() => {
+                  requestRoomByTicker(room.ticker, false);
+                  navigate('/m/chat');
+                }}
+                aria-label={`Chat in ${roomTitle(room, me)}`}
+                className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white"
+                style={{ border: `1px solid ${LINE}` }}
+              >
+                <MessageCircle size={12} /> Chat
+              </button>
               <button
                 onClick={() => openRoom(room, roomTitle(room, me))}
                 className="rounded-full px-3 py-1 text-xs font-semibold"

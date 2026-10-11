@@ -29,6 +29,8 @@ import { SentHost } from './components/sent/SentScreen';
 import { SweepMigration } from './pages/SweepMigration';
 import { PANEL_PROMPT_EVENT, PanelPrompt } from './mobile/PanelPrompt';
 import { IS_EXTENSION } from './mobile/extension';
+import { isWebApp } from './mobile/webApp';
+import { UrlSync } from './mobile/url/UrlSync';
 
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
@@ -112,6 +114,7 @@ export const App = () => {
                       whenFalseContent={<PageLoader message="Switching account..." theme={theme} />}
                     >
                       <Router>
+                        {isWebApp() && <UrlSync />}
                         <Routes>
                           <Route path="/" element={<Start />} />
                           <Route

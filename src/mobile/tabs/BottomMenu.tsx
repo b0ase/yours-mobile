@@ -5,6 +5,7 @@ import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled, marketLabel } from '../storeBuild';
 import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
 import { usePhoneLayout } from '../phone/flag';
+import { WIDE_ON } from '../wide/flag';
 import { onTabRetap } from './tabRetap';
 
 /**
@@ -33,7 +34,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
     chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
   ).length;
   // Phone layout test switch on: the dock (phone/PhoneShell.tsx) replaces this bar.
-  if (phone) return null;
+  if (phone || WIDE_ON) return null;
   return (
     <>
       <div

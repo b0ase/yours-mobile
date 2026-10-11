@@ -347,3 +347,30 @@ export const sortExamples = (list: ExampleMail[], mode: SortMode): ExampleMail[]
     if (mode === 'spreading') return (b.token?.forwards ?? 0) - (a.token?.forwards ?? 0) || a.ago - b.ago;
     return totalCents(b) - totalCents(a) || a.ago - b.ago;
   });
+
+/**
+ * Swipe trays for example rows: the same actions, order and full-swipe ends as a real letter (BMailScreen
+ * mailActions), so trying the gesture shows what it will do. Archive, Delete and Quarantine hide the example;
+ * the others only explain. (Until 5.2.7 both trays held one "Archive" under two ids, so every tray, hover icon
+ * and menu entry read Archive.)
+ */
+export type ExampleSwipeId = 'reply' | 'archive' | 'delete' | 'read' | 'pin' | 'quarantine';
+export const EXAMPLE_SWIPE: {
+  left: { id: ExampleSwipeId; label: string; removes: boolean }[];
+  right: { id: ExampleSwipeId; label: string; removes: boolean }[];
+  fullLeft: ExampleSwipeId;
+  fullRight: ExampleSwipeId;
+} = {
+  left: [
+    { id: 'reply', label: 'Reply', removes: false },
+    { id: 'archive', label: 'Archive', removes: true },
+    { id: 'delete', label: 'Delete', removes: true },
+  ],
+  right: [
+    { id: 'read', label: 'Read', removes: false },
+    { id: 'pin', label: 'Pin', removes: false },
+    { id: 'quarantine', label: 'Quarantine', removes: true },
+  ],
+  fullLeft: 'archive',
+  fullRight: 'read',
+};

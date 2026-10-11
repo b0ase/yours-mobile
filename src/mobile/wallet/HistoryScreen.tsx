@@ -46,7 +46,14 @@ const fmtSats = (sats: number) => `${sats.toLocaleString()} sats`;
 type Loaded = { rows: HistoryRow[]; at: number };
 
 /** Activity / History for the current account: full on-chain history, summary, CSV and printable statement. */
-export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
+export const HistoryScreen = ({
+  onClose,
+  inline = false,
+}: {
+  onClose: () => void;
+  /** Wide web layout: render in place as a panel, not a full-screen dialog. */
+  inline?: boolean;
+}) => {
   const { chromeStorageService, apiContext } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const addrs = account?.addresses;
@@ -130,12 +137,17 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
 
   const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
 
-  return createPortal(
+  const page = (
     <div
-      role="dialog"
+      role={inline ? 'region' : 'dialog'}
       aria-label="Transaction history"
-      className="fixed inset-0 flex flex-col"
-      style={{ background: BG, color: '#fff', zIndex: 2000, paddingTop: 'env(safe-area-inset-top)' }}
+      className={inline ? 'flex h-full min-h-0 flex-col' : 'fixed inset-0 flex flex-col'}
+      style={{
+        background: BG,
+        color: '#fff',
+        zIndex: inline ? undefined : 2000,
+        paddingTop: inline ? 0 : 'env(safe-area-inset-top)',
+      }}
     >
       <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${LINE}` }}>
         <div className="flex-1 min-w-0">
@@ -154,15 +166,17 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
         >
           <RefreshCw size={18} className={progress ? 'animate-spin' : ''} />
         </button>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={onClose}
-          className="p-2 bg-transparent border-0 cursor-pointer"
-          style={{ color: '#fff' }}
-        >
-          <X size={20} />
-        </button>
+        {!inline && (
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="p-2 bg-transparent border-0 cursor-pointer"
+            style={{ color: '#fff' }}
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
       <div className="flex gap-2 px-4 pt-3" role="tablist" aria-label="History view">
@@ -378,9 +392,9 @@ export const HistoryScreen = ({ onClose }: { onClose: () => void }) => {
           </div>
         </div>
       )}
-    </div>,
-    document.body,
+    </div>
   );
+  return inline ? page : createPortal(page, document.body);
 };
 
 const Row = ({ r }: { r: HistoryRow }) => {

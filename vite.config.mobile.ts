@@ -156,6 +156,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { CreditsRow } from '../mobile/credits/CreditsRow';",
       "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
     ],
+    // Wide web layout: the token table and totals beside the wallet read this page's balances (wide/walletFeed.ts).
+    [
+      '  if (showWelcome) {',
+      '  useWideWalletFeed({ bsvBalance, mneeBalance, exchangeRate, bsv21s });\n  if (showWelcome) {',
+    ],
+    [
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
+      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { useWideWalletFeed } from '../mobile/wide/walletFeed';",
+    ],
     // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
     [
       '</SectionBoundary>\n        </motion.div>',
@@ -635,8 +644,14 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // agent, mounted once inside the router. Renders nothing while the switch is off.
     // PhonePage wraps the routed page so the phone layout can drag it sideways (phone/pager.tsx).
     // ErrorNavBridge: errors outside the router (the snackbar) can open b with the error typed in (errors/).
-    ['<Routes>', '<ErrorNavBridge /><Suspense fallback={null}><PhoneShell /></Suspense>\n<PhonePage><Routes>'],
-    ['</Routes>', '</Routes></PhonePage>'],
+    // Wide web layout (src/mobile/wide): sidebar + top bar around the same routes; a no-op when off.
+    [
+      '<Routes>',
+      '<ErrorNavBridge /><Suspense fallback={null}><PhoneShell /></Suspense>\n<WideFrame><PhonePage><Routes>',
+    ],
+    ['</Routes>', '</Routes></PhonePage></WideFrame>'],
+    // Wide layout: unlock in the same composition as the welcome screen (wide/WideAuth.tsx; a no-op otherwise).
+    ['<UnlockWallet onUnlock={handleUnlock} />', '<WideAuth><UnlockWallet onUnlock={handleUnlock} /></WideAuth>'],
     // After a forgot-password wipe, open straight on the restore-from-phrase screen.
     [
       "import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';",
@@ -647,7 +662,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['</Router>', '</Router></AndroidMotion>'],
     [
       "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));",
-      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';\nimport { ErrorNavBridge } from './mobile/errors/ErrorNavBridge';",
+      "const BrowserPage = lazy(() => import('./mobile/BrowserPage'));\nconst MobileRoutes = lazy(() => import('./mobile/tabs/MobileRoutes'));\nconst MiniPlayer = lazy(() => import('./mobile/media/MiniPlayer'));\nconst CallScreen = lazy(() => import('./mobile/calls/CallScreen'));\nconst NotifyEngine = lazy(() => import('./mobile/notify/NotifyEngine'));\nconst PushEngine = lazy(() => import('./mobile/push/PushEngine'));\nconst BappFrameHost = lazy(() => import('./mobile/bappFrame/BappFrameHost').then((m) => ({ default: m.BappFrameHost })));\nconst ExtensionEdge = lazy(() => import('./mobile/ExtensionEdge'));\nconst PhoneShell = lazy(() => import('./mobile/phone/PhoneShell'));\nimport { PhonePage } from './mobile/phone/pager';\nimport { WideFrame } from './mobile/wide/WideFrame';\nimport { WideAuth } from './mobile/wide/WideAuth';\nimport { ErrorNavBridge } from './mobile/errors/ErrorNavBridge';",
     ],
     [
       '<Route path="/settings" element={<Settings />} />',

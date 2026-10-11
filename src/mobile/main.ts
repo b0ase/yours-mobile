@@ -141,4 +141,10 @@ if (Capacitor.isNativePlatform()) {
 // Before the UI: a push tap that launched the app is held until PushEngine (after unlock) takes it.
 initPushTaps();
 initTesterCheckins();
+// PROTOTYPE (demo/desktop-shell): wide web layout (wide/flag.ts) wraps the same app; otherwise nothing changes.
+if ((await import('./wide/flag')).WIDE_ON) {
+  document.querySelector('.bwallet-web-banner')?.remove();
+  // Desktop opens with the Just b advert before any screen (welcome, unlock or wallet): its own root, on top.
+  void import('./wide/mountIntro').then((m) => m.mountJustBIntro());
+}
 await import('../index');
