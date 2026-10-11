@@ -64,6 +64,7 @@ const FOREIGN_FRAME =
 const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement | null>) => {
   const [tokenOk, setTokenOk] = useState<boolean | undefined>(enabled ? undefined : true);
   const [visible, setVisible] = useState(!enabled);
+  const [stuck, setStuck] = useState(false);
   useEffect(() => {
     if (!enabled) return;
     sendMessageAsync<{ success: boolean }>({ action: 'INPAGE_SHEET_CHECK', token: INPAGE_TOKEN })
@@ -73,14 +74,18 @@ const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement
   useEffect(() => {
     if (!enabled || !target.current) return;
     let timer: number | undefined;
+    // `target` is a small marker at the top of the sheet, not the whole sheet: a full-height box
+    // sized with calc(100vh - 41px) can round to 99.9% visible and never reach a 1.0 threshold,
+    // which left the buttons dead (owner, 11 Oct 2026, bChatX /welcome). The clickjacking guard
+    // stays: Chrome's isVisible (IntersectionObserver v2) must still say nothing covers the frame.
     const io = new IntersectionObserver(
       (entries) => {
         const e = entries[entries.length - 1] as IntersectionObserverEntry & { isVisible?: boolean };
         window.clearTimeout(timer);
-        if (e.isVisible) timer = window.setTimeout(() => setVisible(true), 500);
+        if (e.isVisible && e.intersectionRatio >= 0.99) timer = window.setTimeout(() => setVisible(true), 500);
         else setVisible(false);
       },
-      { threshold: [1.0], trackVisibility: true, delay: 100 } as IntersectionObserverInit,
+      { threshold: [0, 0.99, 1.0], trackVisibility: true, delay: 100 } as IntersectionObserverInit,
     );
     io.observe(target.current);
     return () => {
@@ -88,7 +93,16 @@ const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement
       io.disconnect();
     };
   }, [enabled, target]);
-  return { tokenOk, armed: tokenOk === true && visible };
+  // Still not armed after 1.5s: offer the wallet's own popup window (see MOVE_PROMPT_TO_WINDOW).
+  useEffect(() => {
+    if (!enabled || visible) {
+      setStuck(false);
+      return;
+    }
+    const t = window.setTimeout(() => setStuck(true), 1500);
+    return () => window.clearTimeout(t);
+  }, [enabled, visible]);
+  return { tokenOk, armed: tokenOk === true && visible, stuck: tokenOk === true && !visible && stuck };
 };
 
 const PromptApp = () => {
@@ -237,7 +251,8 @@ const PromptApp = () => {
 
   const walletBg = theme.color.global.walletBackground;
   const sheetRef = useRef<HTMLDivElement>(null);
-  const inPage = useInPageArmed(!!INPAGE_TOKEN, sheetRef);
+  const armMarkerRef = useRef<HTMLDivElement>(null);
+  const inPage = useInPageArmed(!!INPAGE_TOKEN, armMarkerRef);
 
   if (FOREIGN_FRAME || inPage.tokenOk === false) {
     return (
@@ -257,6 +272,16 @@ const PromptApp = () => {
           <span className="text-sm font-bold" style={{ color: theme.color.global.contrast }}>
             bWalletX
           </span>
+          {inPage.stuck && (
+            <button
+              type="button"
+              className="text-xs font-bold border-0 rounded-full px-3 py-1"
+              style={{ background: '#F5C542', color: '#0b0a08' }}
+              onClick={() => chrome.runtime.sendMessage({ action: 'MOVE_PROMPT_TO_WINDOW' }).catch(() => undefined)}
+            >
+              Open in bWalletX
+            </button>
+          )}
           <button
             type="button"
             aria-label="Deny and close"
@@ -278,6 +303,7 @@ const PromptApp = () => {
           pointerEvents: inPage.armed ? undefined : 'none',
         }}
       >
+        {INPAGE_TOKEN && <div ref={armMarkerRef} aria-hidden style={{ position: 'absolute', top: 0, left: 0, width: 24, height: 24, pointerEvents: 'none' }} />}
         {(!isReady || screen.kind === 'loading') && <PageLoader message="Loading..." theme={theme} />}
         {screen.kind === 'waiting' && <PageLoader message="Waiting for request..." theme={theme} />}
         {screen.kind === 'expired' && (

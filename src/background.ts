@@ -1339,6 +1339,14 @@ if (isInServiceWorker) {
             );
           return true;
         }
+        case 'MOVE_PROMPT_TO_WINDOW': {
+          // The in-page sheet couldn't arm its buttons (visibility check never passed): answer the
+          // same pending request in the wallet's own popup window instead. Nothing is denied.
+          hideInPageSheet();
+          createNewPopup();
+          sendResponse({ type: 'MOVE_PROMPT_TO_WINDOW', success: true });
+          return true;
+        }
         case 'DISMISS_PROMPT_PANEL': {
           promptInPanel = false;
           postToPanels({ action: 'HIDE_PROMPT_PANEL' });
