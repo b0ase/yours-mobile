@@ -7,7 +7,18 @@
  * check is the gate) and the media half is LiveKit via /space/token, which bit-sign mints only for a
  * member who has joined, with publish rights read from their participant row.
  */
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import {
   Camera,
@@ -85,6 +96,10 @@ import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { shareText } from '../chat/shareLink';
 import { ErrorActions } from '../errors/ErrorActions';
 import { UserSafetyButton } from '../ugc/UserSafety';
+import { PAID_LISTENING_ENABLED } from './paidListen';
+
+/** Paid listening: bWalletX only. A literal-false constant in store builds, so Vite drops the chunk. */
+const PaidListening = PAID_LISTENING_ENABLED ? lazy(() => import('./PaidListening')) : null;
 import { isBlocked, TERMS_URL } from '../ugc/ugc';
 
 const GOLD = '#FFD24D';
@@ -1271,7 +1286,14 @@ const SpaceScreenInner = ({
       </header>
 
       <div className={`flex-1 min-h-0 relative ${landscape ? 'flex' : 'flex flex-col'}`}>
-        <div className="flex-1 min-h-0 flex flex-col">{body}</div>
+        <div className="flex-1 min-h-0 flex flex-col">
+          {PaidListening && phase === 'live' && !anon && (
+            <Suspense fallback={null}>
+              <PaidListening client={client} ticker={ticker} role={myRole} />
+            </Suspense>
+          )}
+          {body}
+        </div>
         {landscape ? (
           <>
             {controls}

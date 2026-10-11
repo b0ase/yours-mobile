@@ -460,6 +460,16 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
   }
 
+  /** Paid listening (bit-sign rooms/[ticker]/space/paid): config, my paid time and the next minute's signed plan. */
+  async spacePaid(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/paid`);
+  }
+
+  /** config | payout | pay (bit-sign rooms/[ticker]/space/paid). */
+  async spacePaidAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/space/paid`, body);
+  }
+
   /** LiveKit join token. The server mints it from your participant row, never from the request. */
   async spaceToken(ticker: string): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
