@@ -17,6 +17,7 @@ import {
 import { Check, Copy, Loader2, PenLine, RefreshCw, ScanLine } from 'lucide-react';
 import { myPayUri } from '../scan/payUri';
 import { isBWalletX } from '../storeBuild';
+import { cardFrontArtUri } from './cardFrontArt';
 
 // Edition colour (owner, 10 Oct 2026): bWallet's card is yellow with black text, like its app icon; bWalletX keeps
 // the black card that turns gold with the balance. One card, two palettes (.bw-wcard.is-yellow in mobile.css).
@@ -200,6 +201,12 @@ const WalletCardInner = ({
   // No account creation time is stored today; memberSince() returns '' and the line is omitted.
   const since = memberSince((account as { createdAt?: number } | undefined)?.createdAt);
 
+  // The front's art: the account's bAvatar (bWalletX only; bWallet keeps its yellow card). Cached per key.
+  const frontArt = useMemo(
+    () => cardFrontArtUri(account?.pubKeys?.identityPubKey, YELLOW_CARD),
+    [account?.pubKeys?.identityPubKey],
+  );
+
   // The back's QR: the account's bAvatar art QR (its paymail), else the plain receive QR below.
   const artQr = useMemo(
     () => (flipped ? svgDataUri(cardArtQrSvg(account?.pubKeys?.identityPubKey, names.paymail, 512)) : ''),
@@ -302,7 +309,13 @@ const WalletCardInner = ({
         onKeyDown={onKey}
       >
         {/* ── Front ── */}
-        <div className="bw-wcard-face bw-wcard-front" aria-hidden={flipped}>
+        <div className={`bw-wcard-face bw-wcard-front${frontArt ? ' has-art' : ''}`} aria-hidden={flipped}>
+          {frontArt && (
+            <>
+              <img className="bw-wcard-art" src={frontArt} alt="" decoding="async" draggable={false} />
+              <span className="bw-wcard-art-shade" aria-hidden="true" />
+            </>
+          )}
           {ghost && (
             <span className="bw-wcard-ghost">
               <PixelGhost color={ghost} size={34} title="Agent account" />
