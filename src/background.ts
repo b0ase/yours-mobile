@@ -1,5 +1,5 @@
 /* global chrome */
-import { balanceWithDeposits } from './services/depositBalance';
+import { balanceWithDeposits, sweepWaitingDeposits } from './services/depositBalance';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
@@ -3207,6 +3207,14 @@ if (isInServiceWorker) {
       const isAdmin = message.originator === ADMIN_ORIGINATOR;
       const usesSendAllSentinel = message.params.outputs?.some((o) => o.satoshis === 2099999999999999) === true;
       const signer = isAdmin && usesSendAllSentinel && accountContext?.baseWallet ? accountContext.baseWallet : w;
+
+      // createAction funds from the 'default' basket only; money still in the deposit basket (counted in the
+      // balance) would be invisible to it (services/depositBalance.ts, vexvoid.com 11 Oct 2026).
+      if (accountContext) {
+        const ctx = accountContext;
+        const swept = await sweepWaitingDeposits(ctx.baseWallet, ctx.sweepDeposits);
+        if (swept) console.log(`[createAction] Swept ${swept} waiting deposit(s) before funding`);
+      }
 
       const result = await signer.createAction(message.params, message.originator);
       console.log('[createAction] Success');

@@ -96,6 +96,8 @@ export interface AccountContext {
   addRemote: (url: string) => Promise<void>;
   /** Find and import token outputs the wallet owns on chain but has no record of (tokenRecovery.ts). */
   recoverTokens: (options?: TokenRecoveryOptions) => Promise<TokenRecoveryResult>;
+  /** Move anything waiting in the deposit basket into the funding basket (sweepDeposit). */
+  sweepDeposits: () => Promise<{ swept?: number }>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -599,6 +601,7 @@ export const initWallet = async (
     setActiveStorage,
     addRemote,
     recoverTokens,
+    sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     close,
   };
 };
