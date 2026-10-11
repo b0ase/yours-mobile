@@ -2,6 +2,7 @@ import { BAPPS as WALLET_BAPPS } from '../bapps';
 import bmusicIcon from '../brand/bmusic-icon.png';
 import bvideoIcon from '../brand/bvideo-icon.png';
 import tokenblasterIcon from '../brand/apps/tokenblaster.png';
+import { TOKENBLASTER_ENABLED } from '../storeBuild';
 
 /** Real tile icons from the wallet's own bApps list. */
 const ico = (name: string) => WALLET_BAPPS.find((a) => a.name === name)?.icon as string | undefined;
@@ -55,14 +56,19 @@ export const BAPPS: Bapp[] = [
   },
   { id: 'bvideo', name: 'Bitcoin Video', icon: bvideoIcon, mono: 'bV', soon: true },
   { id: 'bchatx', name: 'bChatX', url: 'https://bchatx.com', icon: ico('bChat'), mono: 'bC', newTab: true },
-  {
-    id: 'tokenblaster',
-    name: 'TokenBlaster',
-    url: 'https://www.tokenblaster.lol/',
-    icon: tokenblasterIcon,
-    mono: 'TB',
-    newTab: true,
-  },
+  // Never in a store build (storeBuild.ts TOKENBLASTER_ENABLED folds the entry and its icon out).
+  ...(TOKENBLASTER_ENABLED
+    ? [
+        {
+          id: 'tokenblaster',
+          name: 'TokenBlaster',
+          url: 'https://www.tokenblaster.lol/',
+          icon: tokenblasterIcon,
+          mono: 'TB',
+          newTab: true,
+        },
+      ]
+    : []),
 ];
 
 export const BappIcon = ({ app, size }: { app: Bapp; size: number }) =>
