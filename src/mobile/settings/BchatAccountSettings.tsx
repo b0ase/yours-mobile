@@ -94,25 +94,32 @@ export const BchatAccountSettings = () => {
     }
   };
 
-  const option = (mode: BchatPref['mode'], title: string, note: string) => (
-    <label className="flex items-start gap-2 py-1.5 cursor-pointer">
-      <input
-        type="radio"
-        name="bchatx-pref"
-        id={`bchatx-pref-${mode}`}
-        checked={pref.mode === mode}
-        disabled={busy}
-        onChange={() => void choose({ mode })}
-        style={{ accentColor: GOLD, marginTop: 3 }}
-      />
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold text-white">{title}</span>
-        <span className="block text-xs" style={{ color: MUTED }}>
-          {note}
-        </span>
-      </span>
-    </label>
-  );
+  // One compact row of three choices (owner, 11 Oct 2026: the long radio list looked out of place).
+  const option = (mode: BchatPref['mode'], title: string, note: string) => {
+    const on = pref.mode === mode;
+    return (
+      <label
+        title={note}
+        className="flex flex-1 items-center justify-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-semibold cursor-pointer"
+        style={{
+          background: on ? `${GOLD}22` : 'transparent',
+          border: `1px solid ${on ? GOLD : '#ffffff22'}`,
+          color: on ? GOLD : '#fff',
+        }}
+      >
+        <input
+          type="radio"
+          name="bchatx-pref"
+          id={`bchatx-pref-${mode}`}
+          checked={on}
+          disabled={busy}
+          onChange={() => void choose({ mode })}
+          className="sr-only"
+        />
+        <span className="truncate">{title}</span>
+      </label>
+    );
+  };
 
   const failed = status && !status.ok && pref.mode !== 'off';
   return (
@@ -124,10 +131,13 @@ export const BchatAccountSettings = () => {
           {pref.mode === 'off' ? 'Not connected' : session ? `Signed in as @${session.handle}` : 'Not signed in yet'}
         </span>
       </div>
-      {option('account', alias ? `Use this account's name (@${alias})` : "Use this account's name", 'Default')}
-      {option('custom', 'Use a different name on bChatX', 'This account, under a name you choose')}
+      <div className="mt-2 flex gap-2" role="radiogroup" aria-label="bChatX for this account">
+        {option('account', alias ? `@${alias}` : 'This name', "Use this account's name on bChatX (default)")}
+        {option('custom', 'Other name', 'This account, under a name you choose')}
+        {option('off', 'Off', 'Never sign in to bChatX with this account')}
+      </div>
       {pref.mode === 'custom' && session && (
-        <div className="flex gap-2 pl-6 pb-1">
+        <div className="mt-2 flex gap-2">
           <input
             id="bchatx-other-name"
             value={wanted}
@@ -147,7 +157,6 @@ export const BchatAccountSettings = () => {
           </button>
         </div>
       )}
-      {option('off', "Don't connect this account to bChatX", 'Never sign in to bChatX with this account')}
       {failed && (
         <div className="mt-1 flex items-center gap-2 text-xs" style={{ color: RED }}>
           <span className="min-w-0 flex-1 select-text">Couldn't sign in to bChatX: {status.error}</span>
