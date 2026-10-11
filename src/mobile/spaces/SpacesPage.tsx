@@ -7,7 +7,8 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
+import { ArrowLeft, MessageCircle, Radio, RefreshCw } from 'lucide-react';
+import { requestRoomByTicker } from '../chat/segmentNav';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { roomTitle, type ChatRoom } from '../chat/messages';
@@ -196,6 +197,18 @@ const SpacesPage = () => {
               style={{ borderBottom: `1px solid ${LINE}` }}
             >
               <span className="flex-1 truncate">{roomTitle(room, me)}</span>
+              {/* The room's group chat, next to its Go live (owner, 11 Oct 2026). */}
+              <button
+                onClick={() => {
+                  requestRoomByTicker(room.ticker, false);
+                  navigate('/m/chat');
+                }}
+                aria-label={`Chat in ${roomTitle(room, me)}`}
+                className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white"
+                style={{ border: `1px solid ${LINE}` }}
+              >
+                <MessageCircle size={12} /> Chat
+              </button>
               <button
                 onClick={() => openRoom(room, roomTitle(room, me))}
                 className="rounded-full px-3 py-1 text-xs font-semibold"
