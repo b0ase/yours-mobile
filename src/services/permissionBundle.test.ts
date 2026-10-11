@@ -216,7 +216,10 @@ describe('sheet model', () => {
     ];
     const m = buildSheetModel({ originator: 'x', items });
     const byId = Object.fromEntries(m.lines.map((l) => [l.requestID, l]));
-    expect(byId.anyone.checked).toBe(false);
+    // A signature anyone can check (Sign in with bWalletX) is pre-ticked and not red.
+    expect(byId.anyone.checked).toBe(true);
+    expect(byId.anyone.risky).toBe(false);
+    expect(byId.anyone.text).toBe("Prove it's you (a signature anyone can check)");
     expect(byId.priv.checked).toBe(false);
     expect(byId.cert.checked).toBe(false);
     expect(byId.cert.risky).toBe(true);
