@@ -41,7 +41,8 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const current = getPaymail(identityAddress) || names?.find((n) => n.main)?.paymail || names?.[0]?.paymail || '';
   const state = handleState(getPaymail(identityAddress), names);
 
-  if (choosing) return <HandleFlow onClose={onClose} title={state === 'has' ? 'Change handle' : 'Choose your handle'} />;
+  if (choosing)
+    return <HandleFlow onClose={onClose} title={state === 'has' ? 'Change handle' : 'Choose your handle'} />;
 
   return createPortal(
     <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
