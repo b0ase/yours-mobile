@@ -235,7 +235,10 @@ const protoLevel = (r: BundleRequest) => Number(r.protocolID?.[0] ?? 0);
 /** True when a request should never be pre-ticked (plan §3c). */
 export const isRiskyRequest = (r: BundleRequest): boolean => {
   if (r.privileged) return true;
-  if (r.type === 'protocol' && r.counterparty === 'anyone') return true;
+  // NOT counterparty 'anyone' (owner, 11 Oct 2026): it is how a site gets a signature it can check
+  // with only your public identity key, e.g. "Sign in with bWalletX" on bChatX. It proves you hold
+  // your key and moves nothing; anything "encrypted for anyone" is readable from your public key
+  // anyway. Flagging it red and unticked made sign-in fail with "permission denied".
   if (r.type === 'certificate' && (r.certificate?.fields ?? []).some((f) => PRIVATE_CERT_FIELDS.test(f))) return true;
   return false;
 };
@@ -243,7 +246,7 @@ export const isRiskyRequest = (r: BundleRequest): boolean => {
 const lineText = (r: BundleRequest): string => {
   switch (r.type) {
     case 'protocol': {
-      if (r.counterparty === 'anyone') return 'Sign and decrypt for anyone, not just this app';
+      if (r.counterparty === 'anyone') return "Prove it's you (a signature anyone can check)";
       if (protoLevel(r) === 2 && r.counterparty && r.counterparty !== 'self')
         return 'Sign and share keys with one named person or service';
       return 'Sign in and sign its messages';
@@ -337,6 +340,8 @@ export const TRUST_SITE_BASKET = 'bwalletx.trust-site';
  */
 export const isAutoGrantable = (r: BundleRequest): boolean => {
   if (isRiskyRequest(r)) return false;
+  // Signatures anyone can check are pre-ticked but still always shown, even on a trusted site.
+  if (r.type === 'protocol' && r.counterparty === 'anyone') return false;
   if (r.type === 'basket') return !!r.basket && r.basket !== TRUST_SITE_BASKET;
   if (r.type !== 'protocol') return false;
   const level = protoLevel(r);
