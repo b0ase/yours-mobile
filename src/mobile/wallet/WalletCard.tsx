@@ -1,4 +1,5 @@
 import * as qr from 'qrcode';
+import { cardArtQrSvg, cardPaymail, svgDataUri } from './cardBackQr';
 import {
   Component,
   lazy,
@@ -7,6 +8,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -198,8 +200,14 @@ const WalletCardInner = ({
   // No account creation time is stored today; memberSince() returns '' and the line is omitted.
   const since = memberSince((account as { createdAt?: number } | undefined)?.createdAt);
 
+  // The back's QR: the account's bAvatar art QR (its paymail), else the plain receive QR below.
+  const artQr = useMemo(
+    () => (flipped ? svgDataUri(cardArtQrSvg(account?.pubKeys?.identityPubKey, names.paymail, 512)) : ''),
+    [flipped, account?.pubKeys?.identityPubKey, names.paymail],
+  );
+
   useEffect(() => {
-    if (!flipped || !receiveAddress) return;
+    if (!flipped || !receiveAddress || artQr) return;
     // BIP21 so other wallets (and another bWallet's Scan) read it as a payment code.
     qr.toDataURL(
       myPayUri(receiveAddress),
@@ -208,7 +216,7 @@ const WalletCardInner = ({
         if (!err) setQrUrl(url);
       },
     );
-  }, [flipped, receiveAddress]);
+  }, [flipped, receiveAddress, artQr]);
 
   const copy = (text: string) => (e: MouseEvent) => {
     e.stopPropagation();
@@ -528,8 +536,14 @@ const WalletCardInner = ({
             )}
           </div>
           <div className="bw-wcard-backbody">
-            <div className="bw-wcard-qr">
-              {qrUrl ? <img src={qrUrl} alt="Receive QR code" /> : <div className="bw-wcard-qr-empty" />}
+            <div className={`bw-wcard-qr${artQr ? ' is-art' : ''}`}>
+              {artQr ? (
+                <img src={artQr} alt={`QR code for ${cardPaymail(names.paymail)}`} />
+              ) : qrUrl ? (
+                <img src={qrUrl} alt="Receive QR code" />
+              ) : (
+                <div className="bw-wcard-qr-empty" />
+              )}
             </div>
             <div className="bw-wcard-backinfo">
               <span className="bw-wcard-sig-cap">AUTHORISED SIGNATURE{sig.svgPath ? '' : ' · tap to sign'}</span>

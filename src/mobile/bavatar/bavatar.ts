@@ -529,7 +529,9 @@ export function bavatarArtQrSvg(
   identityKeyOrName: string,
   paymail: string,
   qr: QrMatrix,
-  opts: { size?: number } = {},
+  /** `dot` (share of a cell) and `lift` (pale wash over the art) default to the bit-sign values; the
+   *  wallet card raises both so every common decoder reads it, not only phone cameras. */
+  opts: { size?: number; dot?: number; lift?: number; pip?: boolean } = {},
 ): string {
   const S = opts.size ?? 512,
     seed = bavatarSeed(identityKeyOrName);
@@ -551,11 +553,11 @@ export function bavatarArtQrSvg(
   ctx.closePath();
   ctx.clip();
   paintBlend(ctx, n * cell, seed, off, off);
-  ctx.fillStyle = 'rgba(255,243,207,' + ART_LIFT + ')';
+  ctx.fillStyle = 'rgba(255,243,207,' + (opts.lift ?? ART_LIFT) + ')';
   ctx.fillRect(off, off, n * cell, n * cell);
   ctx.restore();
   const finder = (x: number, y: number) => (x < 8 && y < 8) || (x >= n - 8 && y < 8) || (x < 8 && y >= n - 8);
-  const dot = cell * DOT,
+  const dot = cell * (opts.dot ?? DOT),
     inset = (cell - dot) / 2;
   for (let y = 0; y < n; y++)
     for (let x = 0; x < n; x++) {
@@ -583,9 +585,12 @@ export function bavatarArtQrSvg(
     ctx.fillStyle = '#0b0a08';
     roundRect(ctx, x + cell * 2, y + cell * 2, cell * 3, cell * 3, cell * 0.8);
     ctx.fill();
-    ctx.fillStyle = '#d9a21a';
-    roundRect(ctx, x + cell * 3.1, y + cell * 3.1, cell * 0.8, cell * 0.8, cell * 0.4);
-    ctx.fill();
+    // The gold pip stops ZXing (Android's usual decoder) finding the square; the card turns it off.
+    if (opts.pip !== false) {
+      ctx.fillStyle = '#d9a21a';
+      roundRect(ctx, x + cell * 3.1, y + cell * 3.1, cell * 0.8, cell * 0.8, cell * 0.4);
+      ctx.fill();
+    }
   }
   return ctx.toSvg(S, paymail);
 }
