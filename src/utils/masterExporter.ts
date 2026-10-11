@@ -1,4 +1,18 @@
 import { ChromeStorageService } from '../services/ChromeStorage.service';
+import { accountNamesFor } from '../mobile/names/accountNames';
+
+/**
+ * `vexvoid_bwalletx_backup_2026-10-11.zip`: the current account's $handle (else its name), so the owner
+ * never has to rename the file to know whose backup it is (owner, 11 Oct 2026).
+ */
+export const masterBackupFileName = (name: string, now = new Date()): string => {
+  const slug = name
+    .replace(/^\$/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `${slug ? `${slug}_` : ''}bwalletx_backup_${now.toISOString().split('T')[0]}.zip`;
+};
 
 export type MasterBackupProgressEvent = {
   message: string;
@@ -21,7 +35,7 @@ type MasterBackupProgress = (event: MasterBackupProgressEvent) => void;
  * progress back to the caller in real time.
  */
 export const streamDataToZip = async (
-  _chromeStorageService: ChromeStorageService,
+  chromeStorageService: ChromeStorageService,
   progress: MasterBackupProgress,
   /** Password-only key (PBKDF2 of the password). With USB unlock on, export needs it to re-encrypt. */
   passwordKey?: string,
@@ -67,7 +81,9 @@ export const streamDataToZip = async (
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `yours_wallet_backup_${new Date().toISOString().split('T')[0]}.zip`;
+    const { account } = chromeStorageService.getCurrentAccountObject();
+    const names = accountNamesFor(account?.addresses?.identityAddress, account?.name ?? '');
+    a.download = masterBackupFileName(names.payable || names.displayName);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
