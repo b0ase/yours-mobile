@@ -50,7 +50,6 @@ import './wide.css';
 
 const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
 const BsvPriceChart = lazy(() => import('../wallet/PriceChart').then((m) => ({ default: m.BsvPriceChart })));
-const BappsPage = lazy(() => import('./BappsPage'));
 
 /**
  * PROTOTYPE (demo/desktop-shell): the wide web layout. Runs inside the real app (same providers, router and
@@ -255,9 +254,8 @@ const WalletSide = () => {
 
 const WideShell = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
   const canInstall = useCanInstall();
-  const bapps = new URLSearchParams(search).get('view') === 'bapps';
   const bmoviesBadge = useBappBadge('bmovies');
   const { chromeStorageService, lockWallet } = useServiceContext();
   const { handleSelect } = useBottomMenu();
@@ -288,6 +286,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const onWallet = pathname === '/bsv-wallet';
   const hiddenKind = (k: string) => STORE_BUILD && STORE_HIDDEN_WALLET_KINDS.includes(k);
   const groups: { title: string; items: Item[] }[] = [
+    // Agent b first, above everything (owner, 11 Oct 2026).
+    { title: '', items: [{ id: 'agent', label: 'Agent b', icon: I.agent, to: '/m/agent' }] },
     {
       title: 'Money',
       items: [
@@ -327,9 +327,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       items: [
         { id: 'feed', label: 'bFeed', icon: I.feed, to: '/m/feed' },
         { id: 'media', label: 'Media', icon: I.media, to: '/m/media' },
-        { id: 'apps', label: 'bApps', icon: I.apps, to: '/browser?view=bapps' },
+        { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
-        { id: 'agent', label: 'Agent b', icon: I.agent, to: '/m/agent' },
       ],
     },
     // bApps pinned in the wide layout (BappHost.tsx, shell protocol v2).
@@ -363,7 +362,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     deepLinked.current = true;
     const v = new URLSearchParams(location.search).get('view');
     const to: Record<string, string> = {
-      bapps: '/browser?view=bapps',
+      bapps: '/m/apps',
       bmail: '/m/bmail',
       mail: '/m/bmail',
       chat: '/m/chat',
@@ -414,9 +413,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           : 'page';
   // Page header: the sidebar item this route belongs to; sub-routes get their last segment and a Back button.
   const allItems = [...groups.flatMap((g) => g.items), ...bottom];
-  const current = bapps
-    ? allItems.find((i) => i.id === 'apps')
-    : pathname === '/m/settings'
+  // bApps is the phone's own scrolling app screen (/m/apps), not a separate Desktop grid (owner, 11 Oct 2026).
+  const current =
+    pathname === '/m/settings'
       ? allItems.find((i) => i.id === section)
       : (allItems.find((i) => i.to && !i.kind && pathname === i.to.split('?')[0]) ??
         (onWallet ? allItems.find((i) => i.kind === kind) : undefined));
@@ -466,7 +465,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             .filter((g) => g.items.some((i) => !i.hidden))
             .map((g) => (
               <nav key={g.title} className="ww-nav">
-                <div className="ww-navtitle">{g.title}</div>
+                {g.title && <div className="ww-navtitle">{g.title}</div>}
                 {g.items.map(navBtn)}
               </nav>
             ))}
@@ -516,17 +515,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         </header>
         <WidePage title={page.title} onBack={page.root ? undefined : () => navigate(-1)} bleed={view === 'bapp'}>
           <div className={`ww-content view-${view}${fullWallet ? ' is-full' : ''}`}>
-            {bapps ? (
-              <Suspense fallback={null}>
-                <BappsPage />
-              </Suspense>
-            ) : (
-              <div className="ww-colwrap">
-                <div className="ww-col">
-                  {bapp ? <BappHost key={bapp.id} app={bapp} onClose={() => navigate('/m/feed')} /> : children}
-                </div>
+            <div className="ww-colwrap">
+              <div className="ww-col">
+                {bapp ? <BappHost key={bapp.id} app={bapp} onClose={() => navigate('/m/feed')} /> : children}
               </div>
-            )}
+            </div>
             {view === 'wallet' && !fullWallet && <WalletSide />}
             {view === 'chat' && (
               <div className="ww-panel ww-chat-empty">
