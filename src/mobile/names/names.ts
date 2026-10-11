@@ -87,6 +87,13 @@ export type Resolved = {
 
 export class ResolveError extends Error {}
 
+/**
+ * Whether an OpNS name is bound to a wallet (signed identity key, opns.idKey) or only held at an address.
+ * Display only: Send still pays the holder's address either way (pay-to-name is a later stage).
+ */
+export const opnsBinding = (r: Pick<Resolved, 'via' | 'pubkey'>): 'bound' | 'unbound' | null =>
+  r.via !== 'opns-owner' ? null : r.pubkey ? 'bound' : 'unbound';
+
 export const SERVICES = {
   doh: 'https://dns.google.com/resolve',
   opnsApi: 'https://ordinals.gorillapool.io/api/opns',

@@ -25,6 +25,18 @@ const OPNS_CONTENT_TYPE = 'application/op-ns';
 
 export type MineNode = { outpoint: string; domain: string };
 
+/**
+ * One mint transaction per missing character, from the nearest claimed prefix (`domain`) to `name`.
+ * Every intermediate name is minted to the miner too: mining `bmusic` from `bm` also gives `bmu`, `bmus`
+ * and `bmusi` (opns.md, mine tree). Null when `name` doesn't continue `domain`.
+ */
+export const miningPath = (domain: string, name: string): { steps: number; alsoGet: string[] } | null => {
+  if (!name.startsWith(domain) || name.length <= domain.length) return null;
+  const alsoGet: string[] = [];
+  for (let n = domain.length + 1; n < name.length; n++) if (n > 0) alsoGet.push(name.slice(0, n));
+  return { steps: name.length - domain.length, alsoGet };
+};
+
 /** GET /1sat/opns/mine/:name → nearest mined prefix (null when the name is taken or no prefix is found). */
 export const fetchMineNode = async (f: Fetch, name: string): Promise<MineNode | null> => {
   const res = await f(`${SERVICES.opnsMine}/${encodeURIComponent(name)}`);
@@ -197,3 +209,11 @@ export const mintStep = async (
 export const randomPrefix = () => Array.from(crypto.getRandomValues(new Uint8Array(27)));
 
 export const toHex = (b: number[]) => Utils.toHex(b);
+
+/** " You also get bmu, bmus and bmusi." for the intermediate names a mint gives you, else ''. */
+export const alsoGetText = (domain: string | null, name: string) => {
+  const p = domain === null ? null : miningPath(domain, name);
+  if (!p?.alsoGet.length) return '';
+  const list = p.alsoGet.length === 1 ? p.alsoGet[0] : `${p.alsoGet.slice(0, -1).join(', ')} and ${p.alsoGet.at(-1)}`;
+  return ` You also get ${list}.`;
+};
