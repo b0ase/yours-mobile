@@ -24,8 +24,10 @@ import {
   clampLook,
   defaultPlacement,
   loadCardArtLook,
+  loadCardImage,
   measureArtLuma,
   saveCardArtLook,
+  saveCardImage,
   type CardArtLook,
 } from './cardFrontArt';
 import { CardDesigner } from './CardDesigner';
@@ -213,12 +215,21 @@ const WalletCardInner = ({
   const since = memberSince((account as { createdAt?: number } | undefined)?.createdAt);
 
   // The front's art: the account's bAvatar (bWalletX only; bWallet keeps its yellow card). Cached per key.
-  const frontArt = useMemo(
+  const bavatarArt = useMemo(
     () => cardFrontArtUri(account?.pubKeys?.identityPubKey, YELLOW_CARD),
     [account?.pubKeys?.identityPubKey],
   );
   // How the art sits: the account's own adjustment, else bright art dimmed and its core moved top-right.
   const artKey = account?.pubKeys?.identityPubKey ?? '';
+  // The account's own picture, when it chose one in the card designer (owner, 12 Oct 2026); bWalletX only.
+  const [cardImage, setCardImage] = useState<string | null>(() => (bavatarArt ? loadCardImage(artKey) : null));
+  useEffect(() => setCardImage(bavatarArt ? loadCardImage(artKey) : null), [artKey, bavatarArt]);
+  const frontArt = (bavatarArt && cardImage) || bavatarArt;
+  const setImage = (uri: string | null) => {
+    if (!saveCardImage(artKey, uri)) return false;
+    setCardImage(uri);
+    return true;
+  };
   const [luma, setLuma] = useState<number | null>(null);
   useEffect(() => {
     let live = true;
@@ -297,6 +308,9 @@ const WalletCardInner = ({
   // mismatches are fixed quietly here and choice/privacy live in Settings › bChatX (bchatFollow.ts).
   useBchatFollow(id, chat, names.paymail);
   const fingerprint = keyFingerprint(chat.identityKey);
+  // The back always carries this account's identity key, signed in to bChatX or not (owner, 12 Oct 2026: it was
+  // missing whenever there was no bChatX session yet).
+  const backKey = chat.identityKey || account?.pubKeys?.identityPubKey || '';
   // Long-press the identity line: Settings › Identity map. Tap still copies the key.
   const selectTab = useContext(BottomMenuContext)?.handleSelect;
   const pressTimer = useRef<number | null>(null);
@@ -571,16 +585,16 @@ const WalletCardInner = ({
         <div className="bw-wcard-face bw-wcard-back" aria-hidden={!flipped}>
           {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon. */}
           <div className="bw-wcard-stripe">
-            {chat.identityKey && (
+            {backKey && (
               <div className="bw-wcard-stripe-key">
                 <span className="bw-wcard-stripe-text">
                   <span className="bw-wcard-stripe-label">IDENTITY KEY</span>
-                  <span className="bw-wcard-stripe-hex">{chat.identityKey}</span>
+                  <span className="bw-wcard-stripe-hex">{backKey}</span>
                 </span>
                 <button
                   type="button"
                   className="bw-wcard-stripe-copy"
-                  onClick={copy(chat.identityKey)}
+                  onClick={copy(backKey)}
                   aria-label="Copy identity key"
                   title="Copy identity key"
                   tabIndex={flipped ? 0 : -1}
@@ -687,6 +701,8 @@ const WalletCardInner = ({
           onChange={setLook}
           onReset={() => setLook(null)}
           onClose={() => setAdjusting(false)}
+          customImage={!!cardImage}
+          onImage={setImage}
         />
       )}
       {sig.ui}
