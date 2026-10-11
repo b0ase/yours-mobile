@@ -15,6 +15,7 @@ import { pipSupported, togglePip } from './background';
 import { LevelBars } from './LevelBars';
 import type { SpaceMedia } from './media';
 import { audienceLine, hostLabel, type Participant, stageButtonLabel } from './model';
+import { faceArtUrl, fallBackToLocal } from './faceArt';
 import { gridShape, pagesOf, recentlyActive, spareCells, tvWidth, wantsLiveVideo } from './speakerLayout';
 
 /** Desktop/web only: a PiP button on video tiles. Phones float the video on their own (background.ts). */
@@ -29,12 +30,6 @@ const webPip = (() => {
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
-
-const hueOf = (s: string) => {
-  let h = 0;
-  for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-};
 
 const Tile = ({
   p,
@@ -71,11 +66,11 @@ const Tile = ({
     media.bindVideo(p.handle, ref.current);
     return () => media.bindVideo(p.handle, null);
   }, [video, media, p.handle]);
-  const hue = hueOf(p.handle);
   const face = size === 'big' ? 96 : size === 'mid' ? 64 : 40;
-  const bg = banner
-    ? `center / cover no-repeat url("${banner}")`
-    : `radial-gradient(120% 100% at 50% 0%, hsl(${hue} 35% 18%) 0%, #0b0b0d 70%)`;
+  // Camera off: the speaker's own gold bAvatar fills the tile under a dark shade (gold by default, owner
+  // 11 Oct 2026); the room banner is only the fallback behind it.
+  const art = faceArtUrl(p.handle);
+  const bg = banner ? `center / cover no-repeat url("${banner}")` : '#0b0b0d';
   return (
     <div
       role="button"
@@ -90,7 +85,25 @@ const Tile = ({
       }}
       aria-label={`$${p.handle}`}
     >
-      {banner && !video && <div className="absolute inset-0 bg-black/45" />}
+      {!video && (
+        <>
+          <img
+            src={art}
+            alt=""
+            aria-hidden="true"
+            onError={fallBackToLocal(p.handle)}
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ transform: 'scale(1.35)' }}
+            draggable={false}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background: 'linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,.5) 55%, rgba(0,0,0,.8) 100%)',
+            }}
+          />
+        </>
+      )}
       {video && p.handle !== me && size !== 'small' && webPip && (
         <button
           type="button"
@@ -115,30 +128,18 @@ const Tile = ({
           className="absolute inset-0 h-full w-full object-cover"
           style={p.handle === me ? { transform: 'scaleX(-1)' } : undefined}
         />
-      ) : avatar ? (
+      ) : (
         <img
-          src={avatar}
+          src={avatar || art}
           alt=""
+          onError={avatar ? undefined : fallBackToLocal(p.handle)}
           className="relative rounded-full object-cover"
           style={{
             width: face,
             height: face,
-            boxShadow: speaking ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}` : undefined,
+            boxShadow: speaking ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}` : '0 0 0 2px rgba(255,210,77,.35)',
           }}
         />
-      ) : (
-        <div
-          className="relative rounded-full flex items-center justify-center font-bold text-white"
-          style={{
-            width: face,
-            height: face,
-            fontSize: face * 0.4,
-            background: `hsl(${hue} 55% 42%)`,
-            boxShadow: speaking ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}` : undefined,
-          }}
-        >
-          {p.handle[0]?.toUpperCase() ?? '?'}
-        </div>
       )}
       <div
         className={`absolute left-2 bottom-1.5 right-2 flex items-center gap-1 text-white ${size === 'small' ? 'text-[10px]' : 'text-[12px]'}`}
