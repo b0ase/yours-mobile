@@ -6,17 +6,12 @@
  * Anonymous = a hidden, listen-only LiveKit token and no participant row (bit-sign
  * /space/anon-token). It is still member-gated, so a ticketed room's ticket still applies.
  */
+import { faceArtUrl, fallBackToLocal } from './faceArt';
 import { ANON_EXPLAINER, RECORDING_NOTICE, audienceLine, greenRoomPrimary, type GreenRoom } from './model';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
-
-const hueOf = (s: string) => {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
-  return h;
-};
 
 export const GreenRoomSheet = ({
   data,
@@ -65,16 +60,12 @@ export const GreenRoomSheet = ({
       <ul className="mt-5 grid grid-cols-3 gap-4">
         {data.stage.map((p) => (
           <li key={p.handle} className="flex flex-col items-center min-w-0 text-center">
-            {p.avatar ? (
-              <img src={p.avatar} alt="" className="h-16 w-16 rounded-full object-cover" />
-            ) : (
-              <span
-                className="flex h-16 w-16 items-center justify-center rounded-full text-xl font-bold uppercase text-white"
-                style={{ background: `hsl(${hueOf(p.handle)} 45% 30%)` }}
-              >
-                {p.handle.slice(0, 1)}
-              </span>
-            )}
+            <img
+              src={p.avatar || faceArtUrl(p.handle)}
+              alt=""
+              onError={p.avatar ? undefined : fallBackToLocal(p.handle)}
+              className="h-16 w-16 rounded-full object-cover"
+            />
             <span className="mt-1 w-full text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
               ${p.handle}
             </span>
