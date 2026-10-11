@@ -3,7 +3,7 @@
  * and for the token's issuer or the room's admin (creator) a slim "Start a Space" bar pinned under the
  * room header when it has none (docs/BSPACES-PLAN.md). Everyone else sees nothing until it is live.
  */
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, useRef, Suspense, useEffect, useState } from 'react';
 import { Mic, Radio } from 'lucide-react';
 import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from '../chat/api';
@@ -39,6 +39,7 @@ export const LiveBanner = ({
   createdBy,
   gated = true,
   spaceOpen = false,
+  autoOpen = false,
 }: {
   client: BchatClient;
   /** The wallet, for the inline "Claim admin" fallback when starting is refused. */
@@ -51,12 +52,20 @@ export const LiveBanner = ({
   gated?: boolean;
   /** Open-stage room: any member may start the Space (model.ts roomSpaceOpen). */
   spaceOpen?: boolean;
+  /** Open the always-open Space as soon as it's known (the Lounge card's Join). Once per mount. */
+  autoOpen?: boolean;
 }) => {
   const [state, setState] = useState<SpaceState | null>(null);
   const [issuer, setIssuer] = useState(false);
   const [open, setOpen] = useState<{ start?: string; always?: boolean } | null>(null);
   const [meta, setMeta] = useState<RoomSpaceMeta | null>(null);
   const [naming, setNaming] = useState(false);
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current || !meta?.alwaysOpen) return;
+    autoOpened.current = true;
+    setOpen({ always: true });
+  }, [autoOpen, meta]);
 
   useEffect(() => {
     if (open) return;
