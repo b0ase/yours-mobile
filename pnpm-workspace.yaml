@@ -509,3 +509,7 @@ overrides:
   'yocto-queue@~0.1': '0.1.0'
   'zod@^3': '3.25.76'
 # <<< pinned from upstream bun.lock
+
+# pnpm 11+ reads settings here, not from .npmrc. Keep the flat layout .npmrc asks for: vite.config.base.ts
+# sets preserveSymlinks, which cannot follow the symlinked store (react-router-dom -> react-router).
+nodeLinker: hoisted
