@@ -401,6 +401,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   if (ONBOARDING.includes(pathname)) return <WideAuth>{children}</WideAuth>;
 
   const bapp = bappFromPath(pathname);
+  // NFTs and Friends take the whole area right of the menu (owner, 11 Oct 2026); the holdings pane is for Wallet.
+  const fullWallet = onWallet && (kind === 'nfts' || kind === 'friends');
   const view = bapp
     ? 'bapp'
     : pathname.startsWith('/m/bmail')
@@ -513,7 +515,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </div>
         </header>
         <WidePage title={page.title} onBack={page.root ? undefined : () => navigate(-1)} bleed={view === 'bapp'}>
-          <div className={`ww-content view-${view}`}>
+          <div className={`ww-content view-${view}${fullWallet ? ' is-full' : ''}`}>
             {bapps ? (
               <Suspense fallback={null}>
                 <BappsPage />
@@ -525,7 +527,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
                 </div>
               </div>
             )}
-            {view === 'wallet' && <WalletSide />}
+            {view === 'wallet' && !fullWallet && <WalletSide />}
             {view === 'chat' && (
               <div className="ww-panel ww-chat-empty">
                 <WideEmpty

@@ -939,6 +939,9 @@ kbd {
   flex: 0 0 460px;
   margin: 0;
 }
+.ww-content.view-wallet.is-full .ww-colwrap {
+  flex: 1 1 auto;
+}
 .ww-content.view-chat .ww-colwrap {
   flex: 0 0 420px;
   margin: 0;

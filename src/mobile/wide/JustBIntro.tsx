@@ -4,6 +4,8 @@ import mark from '../brand/bwalletx-glyph.svg';
 
 const SEEN = 'bwx-just-b-intro';
 const SHOW_MS = 4200;
+/** Longest wait for the desert to start playing before the clock starts anyway. */
+const LOAD_MS = 2500;
 const FADE_MS = 900;
 
 /**
@@ -20,6 +22,12 @@ export const JustBIntro = () => {
     }
     return 'show';
   });
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (phase !== 'show' || playing) return;
+    const t = setTimeout(() => setPlaying(true), LOAD_MS);
+    return () => clearTimeout(t);
+  }, [phase, playing]);
   useEffect(() => {
     if (phase === 'gone') return;
     try {
@@ -31,14 +39,15 @@ export const JustBIntro = () => {
       const t = setTimeout(() => setPhase('gone'), FADE_MS);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setPhase('fade'), SHOW_MS);
     const skip = () => setPhase('fade');
     addEventListener('keydown', skip);
+    if (!playing) return () => removeEventListener('keydown', skip);
+    const t = setTimeout(() => setPhase('fade'), SHOW_MS);
     return () => {
       clearTimeout(t);
       removeEventListener('keydown', skip);
     };
-  }, [phase]);
+  }, [phase, playing]);
   if (phase === 'gone') return null;
   return (
     <div
@@ -60,6 +69,8 @@ export const JustBIntro = () => {
         muted
         loop
         playsInline
+        preload="auto"
+        onPlaying={() => setPlaying(true)}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
       />
       <h1
