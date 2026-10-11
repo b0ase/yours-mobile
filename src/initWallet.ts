@@ -105,6 +105,8 @@ export interface AccountContext {
   addressSyncBusy: () => boolean;
   /** Move anything waiting in the deposit basket into the funding basket (sweepDeposit). */
   sweepDeposits: () => Promise<{ swept?: number }>;
+  /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
+  creditArriving: () => Promise<void>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -627,6 +629,7 @@ export const initWallet = async (
     lastAddressSyncAt: addressSync.lastFinishedAt,
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
+    creditArriving: () => runReceiveGuard(),
     close,
   };
 };
