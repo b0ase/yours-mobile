@@ -2,7 +2,10 @@ import { signBsm, type OneSatContext } from '@1sat/actions';
 import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
 import { PublicKey, Utils } from '@bsv/sdk';
 import type { ChatSigner } from './api';
-import { lookupPaymail, PAYMAIL_ALIAS_RE } from '../names/paymail';
+import { listPaymails } from '../names/paymail';
+import { getPaymail } from '../names/accountName';
+import { pickHandleAlias } from '../names/handlePrompt';
+import { getChatAccount } from './chatAccount';
 import { WALLET_ADDRESS_KEY_ID, WALLET_ADDRESS_PROTOCOL, walletAddressMessage } from './walletAddress';
 
 /**
@@ -27,10 +30,12 @@ export const walletSigner = (ctx: OneSatContext): ChatSigner => ({
   },
   // A new bChat account takes the plain paymail name this wallet's owner chose; a verified .x / .gmail
   // name is not a handle (and a .gmail one would publish the address), so those wait for "Choose your handle".
+  // Every name the wallet owns counts, not just the main one (a main b0asex.x still has a plain b0asex), and a
+  // failed lookup falls back to the account's cached paymail, so an owned handle is never asked for again.
   handle: async () => {
     const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
-    const alias = (await lookupPaymail((u, i) => fetch(u, i), publicKey).catch(() => null))?.split('@')[0] ?? '';
-    return PAYMAIL_ALIAS_RE.test(alias) ? alias : null;
+    const names = await listPaymails((u, i) => fetch(u, i), publicKey).catch(() => []);
+    return pickHandleAlias(names, getPaymail(getChatAccount() ?? undefined));
   },
   // Must match bit-sign src/lib/adopt-wallet-name.ts (adoptMessage, ADOPT_PROTOCOL, ADOPT_KEY_ID).
   identityProof: async (nonce) => {

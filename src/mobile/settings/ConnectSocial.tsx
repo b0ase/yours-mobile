@@ -5,6 +5,8 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { HandleFlow } from '../names/HandleFlow';
 import { getPaymail } from '../names/accountName';
+import { handleState } from '../names/handlePrompt';
+import { listPaymails, type WalletName } from '../names/paymail';
 import { SocialSignIn } from '../social/SocialSignIn';
 import { onSocialChange, socialProof } from '../social/socialLogin';
 
@@ -16,15 +18,30 @@ import { onSocialChange, socialProof } from '../social/socialLogin';
  */
 export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   useBackClose(true, onClose);
-  const { chromeStorageService } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const [proof, setProof] = useState(() => socialProof(identityAddress));
   const [choosing, setChoosing] = useState(false);
   useEffect(() => onSocialChange(() => setProof(socialProof(identityAddress))), [identityAddress]);
-  const current = getPaymail(identityAddress);
+  // The paymail server decides whether this account already has a handle; the cache only paints until it
+  // answers. Until then the screen never offers "Choose your handle" (owner, 11 Oct 2026).
+  const [names, setNames] = useState<WalletName[] | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    apiContext?.wallet
+      .getPublicKey({ identityKey: true })
+      .then(({ publicKey }) => listPaymails((u, i) => fetch(u, i), publicKey))
+      .then((n) => live && setNames(n))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [apiContext, identityAddress]);
+  const current = getPaymail(identityAddress) || names?.find((n) => n.main)?.paymail || names?.[0]?.paymail || '';
+  const state = handleState(getPaymail(identityAddress), names);
 
-  if (choosing) return <HandleFlow onClose={onClose} title={current ? 'Change handle' : 'Choose your handle'} />;
+  if (choosing) return <HandleFlow onClose={onClose} title={state === 'has' ? 'Change handle' : 'Choose your handle'} />;
 
   return createPortal(
     <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
@@ -46,14 +63,14 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
           .
         </p>
         <SocialSignIn owner={identityAddress} onProfile={() => setProof(socialProof(identityAddress))} />
-        {(proof || current) && (
+        {state !== 'loading' && (proof || current) && (
           <button
             onClick={() => setChoosing(true)}
             className="mt-2 w-[92%] flex items-center justify-center gap-2 rounded-xl py-3 font-bold border-0"
             style={{ background: '#F5B800', color: '#000' }}
           >
             <AtSign size={16} />
-            {current ? 'Change handle' : 'Choose your handle'}
+            {state === 'has' ? 'Change handle' : 'Choose your handle'}
           </button>
         )}
       </div>

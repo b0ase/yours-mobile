@@ -3,7 +3,7 @@
  * "Get your $name" card on the Wallet tab. Pure decisions + localStorage flags; nothing here
  * signs, claims or broadcasts (claims go through paymail.ts / GetYourName).
  */
-import { toAlias } from './paymail';
+import { PAYMAIL_ALIAS_RE, toAlias } from './paymail';
 import { markBackupPrompt, markCreatedHere, markImported } from '../backup/backupState';
 
 export type PromptReason = 'create' | 'restore';
@@ -108,3 +108,36 @@ export const suggestHandle = (profileName = '', accountName = ''): string => {
 
 /** "$alice" for the card title, else "$name". */
 export const handleTitle = (alias: string) => `$${alias || 'name'}`;
+
+/**
+ * Does this account already have its handle? The paymail server's lookup (by identity key) is the
+ * authoritative answer; the local cache only paints until it answers. `lookup` is undefined while the
+ * lookup has not answered (still loading, or it failed): never 'none' then, so a wallet that owns a name
+ * is not asked to register one again (owner, 11 Oct 2026: $b0asex was offered for registration).
+ */
+export type HandleState = 'loading' | 'has' | 'none';
+export const handleState = (cached: string, lookup: readonly { paymail: string }[] | undefined): HandleState => {
+  if (cached) return 'has';
+  if (lookup === undefined) return 'loading';
+  return lookup.length ? 'has' : 'none';
+};
+
+/**
+ * The plain handle to sign in to bChatX with: the main plain paymail, else any plain one, else the cached
+ * paymail's name. A verified .x / .gmail name is never a handle (a .gmail one would publish the address).
+ */
+export const pickHandleAlias = (
+  names: readonly { paymail: string; kind?: string; main?: boolean }[],
+  cached = '',
+): string | null => {
+  const alias = (p: string) => p.split('@')[0] ?? '';
+  const ok = (a: string) => PAYMAIL_ALIAS_RE.test(a);
+  const plain = names.filter((n) => (n.kind ?? 'plain') === 'plain' && ok(alias(n.paymail)));
+  const pick = plain.find((n) => n.main) ?? plain[0];
+  if (pick) return alias(pick.paymail);
+  return ok(alias(cached)) ? alias(cached) : null;
+};
+
+/** Where closing Connect X / Google goes: back to Settings when opened from there, else the Wallet home. */
+export const socialCloseTarget = (openedByReturn: boolean): 'settings' | 'wallet' =>
+  openedByReturn ? 'wallet' : 'settings';

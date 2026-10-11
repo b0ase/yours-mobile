@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -34,6 +34,9 @@ import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { HandleFlow } from '../names/HandleFlow';
 import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
+import { asMenuItem } from '../tabs/tabs';
+import { socialCloseTarget } from '../names/handlePrompt';
 import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
 import { isNative } from '../native';
 import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
@@ -510,10 +513,24 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   }, [acct]);
   // Back from X / Google for this account: reopen Connect so the profile attaches on this trip (socialLogin.ts).
   const { chromeStorageService: socialStore } = useServiceContext();
+  // Opened by the app (back from X / Google after unlock), not by a tap here: closing it goes to the Wallet,
+  // not the Settings page the return passed through (owner, 11 Oct 2026).
+  const [socialFromReturn, setSocialFromReturn] = useState(false);
+  const selectTab = useContext(BottomMenuContext)?.handleSelect;
+  const closeSocial = () => {
+    const target = socialCloseTarget(socialFromReturn);
+    setSocialFromReturn(false);
+    setScreen(null);
+    if (target === 'wallet') selectTab?.(asMenuItem('bsv'));
+  };
   const socialOwner = socialStore.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   useEffect(() => {
     if (!acct || !socialOwner) return;
-    const open = () => takeSocialReturn(socialOwner) && setScreen('social');
+    const open = () => {
+      if (!takeSocialReturn(socialOwner)) return;
+      setSocialFromReturn(true);
+      setScreen('social');
+    };
     open();
     return onSocialChange(open);
   }, [acct, socialOwner]);
@@ -1031,7 +1048,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
-      {screen === 'social' && <ConnectSocial onClose={() => setScreen(null)} />}
+      {screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
