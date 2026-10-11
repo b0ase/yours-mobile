@@ -155,6 +155,12 @@ async function unlock(b, res) {
 }
 
 module.exports = async function handler(req, res) {
+  // The web and Desktop wallets call this from their own origins: without these the browser blocks the reply
+  // ("Failed to fetch"). Public catalogue; writes are checked by signature, never by cookie.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return send(res, 204, {});
   try {
     if (req.method === 'GET') return await list(req, res);
     if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
