@@ -303,7 +303,13 @@ const PromptApp = () => {
           pointerEvents: inPage.armed ? undefined : 'none',
         }}
       >
-        {INPAGE_TOKEN && <div ref={armMarkerRef} aria-hidden style={{ position: 'absolute', top: 0, left: 0, width: 24, height: 24, pointerEvents: 'none' }} />}
+        {INPAGE_TOKEN && (
+          <div
+            ref={armMarkerRef}
+            aria-hidden
+            style={{ position: 'absolute', top: 0, left: 0, width: 24, height: 24, pointerEvents: 'none' }}
+          />
+        )}
         {(!isReady || screen.kind === 'loading') && <PageLoader message="Loading..." theme={theme} />}
         {screen.kind === 'waiting' && <PageLoader message="Waiting for request..." theme={theme} />}
         {screen.kind === 'expired' && (

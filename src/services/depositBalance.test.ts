@@ -51,7 +51,11 @@ describe('sweep waiting deposits before createAction', () => {
     expect(calls).toBe(0);
   });
   test('a failed sweep or read never throws', async () => {
-    expect(await sweepWaitingDeposits(wallet(0, [1]), async () => { throw new Error('broadcast'); })).toBe(0);
+    expect(
+      await sweepWaitingDeposits(wallet(0, [1]), async () => {
+        throw new Error('broadcast');
+      }),
+    ).toBe(0);
     expect(await sweepWaitingDeposits(wallet(0, [], { failList: true }), async () => ({ swept: 1 }))).toBe(0);
   });
 });

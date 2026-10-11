@@ -50,7 +50,10 @@ export function compactArtQrSvg(identityKey: string, paymail: string, S = 512): 
   const art = bavatarSvg(identityKey, { size: 512 })
     .replace(/^<\?xml[^>]*>\s*/, '')
     .replace(/^<svg\b[^>]*?>/, (tag) => tag.replace(/\s(width|height)="[^"]*"/g, ''))
-    .replace(/^<svg\b/, `<svg x="${(off).toFixed(2)}" y="${(off).toFixed(2)}" width="${(n * cell).toFixed(2)}" height="${(n * cell).toFixed(2)}"`);
+    .replace(
+      /^<svg\b/,
+      `<svg x="${off.toFixed(2)}" y="${off.toFixed(2)}" width="${(n * cell).toFixed(2)}" height="${(n * cell).toFixed(2)}"`,
+    );
   const finder = (x: number, y: number) => (x < 8 && y < 8) || (x >= n - 8 && y < 8) || (x < 8 && y >= n - 8);
   const d = CARD_QR.dot,
     i = (1 - d) / 2;

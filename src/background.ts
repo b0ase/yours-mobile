@@ -1,6 +1,5 @@
 /* global chrome */
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
-import { balanceWithDeposits } from './services/depositBalance';
 import { balanceWithDeposits, sweepWaitingDeposits } from './services/depositBalance';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';

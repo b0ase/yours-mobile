@@ -1,10 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import type { BavatarMine } from '../chat/api';
-import { MAX_BAVATAR_BYTES, bavatarLabel, bavatarMintSvg, bavatarNumber, mintOffer, shouldSponsor } from './mintBavatar';
+import {
+  MAX_BAVATAR_BYTES,
+  bavatarLabel,
+  bavatarMintSvg,
+  bavatarNumber,
+  mintOffer,
+  shouldSponsor,
+} from './mintBavatar';
 
 const KEY = '02' + 'ab'.repeat(32);
 const mine = (o: Partial<BavatarMine> = {}): BavatarMine => ({
-  handle: 'alice', number: 7, founding: true, edition: 1000, minted: null, sponsored: false, ...o,
+  handle: 'alice',
+  number: 7,
+  founding: true,
+  edition: 1000,
+  minted: null,
+  sponsored: false,
+  ...o,
 });
 
 describe('bAvatar mint', () => {
@@ -32,7 +45,10 @@ describe('bAvatar mint', () => {
   });
 
   test('offer: minted, free for founders, paid after', () => {
-    expect(mintOffer(mine({ minted: { txid: 'a'.repeat(64), outpoint: 'x_0' } }))).toEqual({ kind: 'minted', txid: 'a'.repeat(64) });
+    expect(mintOffer(mine({ minted: { txid: 'a'.repeat(64), outpoint: 'x_0' } }))).toEqual({
+      kind: 'minted',
+      txid: 'a'.repeat(64),
+    });
     expect(mintOffer(mine())).toEqual({ kind: 'free' });
     expect(mintOffer(mine({ number: 1001, founding: false }))).toEqual({ kind: 'paid' });
   });
@@ -52,11 +68,18 @@ import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from 
 import { compactArtQrSvg } from './mintBavatar';
 
 async function decode(svg: string, px: number): Promise<string | null> {
-  const { data, info } = await sharp(Buffer.from(svg)).resize(px, px).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = await sharp(Buffer.from(svg))
+    .resize(px, px)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
   const lum = new Uint8ClampedArray(info.width * info.height);
-  for (let i = 0; i < lum.length; i++) lum[i] = (data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114) | 0;
+  for (let i = 0; i < lum.length; i++)
+    lum[i] = (data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114) | 0;
   try {
-    return new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(lum, info.width, info.height)))).getText();
+    return new QRCodeReader()
+      .decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(lum, info.width, info.height))))
+      .getText();
   } catch {
     return null;
   }
@@ -65,7 +88,8 @@ async function decode(svg: string, px: number): Promise<string | null> {
 describe('compact art QR scans', () => {
   test('ZXing reads every name at 512, 320 and 220 px; under the size cap', async () => {
     const names = ['b0asex', 'vexvoid', 'a-longer_name.x', 'nova', 'sam', 'mira'];
-    let ok = 0, total = 0;
+    let ok = 0,
+      total = 0;
     for (const name of names) {
       const key = '02' + createHash('sha256').update(name).digest('hex');
       const pm = `${name}@bwalletx.com`;

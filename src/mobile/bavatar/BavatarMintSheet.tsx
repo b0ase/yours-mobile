@@ -108,7 +108,10 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </div>
-            <div className="w-full rounded-2xl p-4 text-sm" style={{ background: PANEL, color: '#D0D5DD', maxWidth: 420 }}>
+            <div
+              className="w-full rounded-2xl p-4 text-sm"
+              style={{ background: PANEL, color: '#D0D5DD', maxWidth: 420 }}
+            >
               Your bAvatar art, your name and your number, inscribed as a 1-sat ordinal in this wallet. The QR opens
               your paymail. Send it on and the art and number go with it; your account stays yours.
               <div className="mt-3 font-semibold text-white">
@@ -135,7 +138,12 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
                 disabled={state.k === 'minting' || !preview}
                 onClick={mint}
                 className="w-full rounded-full py-3 font-bold border-0"
-                style={{ maxWidth: 420, background: GOLD, color: '#010101', opacity: state.k === 'minting' || !preview ? 0.6 : 1 }}
+                style={{
+                  maxWidth: 420,
+                  background: GOLD,
+                  color: '#010101',
+                  opacity: state.k === 'minting' || !preview ? 0.6 : 1,
+                }}
               >
                 {state.k === 'minting' ? 'Minting…' : 'Mint'}
               </button>
