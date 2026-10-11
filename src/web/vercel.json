@@ -26,6 +26,10 @@
     {
       "source": "/agents",
       "destination": "/agents.html"
+    },
+    {
+      "source": "/desktop",
+      "destination": "/desktop.html"
     }
   ]
 }

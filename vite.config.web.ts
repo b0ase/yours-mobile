@@ -13,7 +13,33 @@ import mobileConfig from './vite.config.mobile';
  */
 
 const BANNER = 'Web wallet beta — your keys stay in this browser. Connecting other websites is coming soon.';
+/**
+ * A tab keeps the build it first loaded (an SPA never refetches index.html), so tabs opened before a deploy showed an
+ * older layout next to newer ones (owner, 9 Oct 2026: "sometimes full width, sometimes half"). When the tab comes
+ * back into view, compare this page's main-*.js with the live index.html and reload if a newer build is out. The
+ * wallet's keys stay encrypted in localStorage and the unlock session in sessionStorage, both survive a reload.
+ */
+const STALE_BUILD = `(function(){var m=document.querySelector('script[type=module][src*="main-"]');if(!m)return;var mine=m.getAttribute('src').split('/').pop(),busy=0;function check(){if(busy||document.visibilityState!=='visible')return;busy=1;fetch('./',{cache:'no-store'}).then(function(r){return r.ok?r.text():''}).then(function(h){var x=/assets\\/(main-[^"']+\\.js)/.exec(h);if(x&&x[1]!==mine)location.reload()}).catch(function(){}).then(function(){busy=0})}document.addEventListener('visibilitychange',check);addEventListener('focus',check)})();`;
+
 const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
+/** The wide build is bWalletX Desktop (owner, 9 Oct 2026: "web" is the classic wallet, the beta becomes "desktop"). */
+const DESKTOP = process.env.VITE_WIDE_WEB === '1';
+const APP_TITLE = DESKTOP ? 'bWalletX Desktop' : 'bWalletX';
+
+// desktop.bwalletx.com share card (owner, 9 Oct 2026). Source: bwalletx-site media-src/og/og-desktop-v1.html.
+const DESKTOP_OG = 'https://desktop.bwalletx.com/og-desktop-v1.png';
+const DESKTOP_SHARE = [
+  '    <meta property="og:type" content="website" />',
+  '    <meta property="og:url" content="https://desktop.bwalletx.com/" />',
+  '    <meta property="og:title" content="bWalletX Desktop" />',
+  '    <meta property="og:description" content="Your whole wallet on one big screen: money, bMail, chat and apps side by side." />',
+  `    <meta property="og:image" content="${DESKTOP_OG}" />`,
+  '    <meta property="og:image:width" content="1200" />',
+  '    <meta property="og:image:height" content="630" />',
+  '    <meta property="og:image:alt" content="bWalletX Desktop: your whole wallet on one big screen" />',
+  '    <meta name="twitter:card" content="summary_large_image" />',
+  `    <meta name="twitter:image" content="${DESKTOP_OG}" />`,
+];
 
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
@@ -23,19 +49,22 @@ const webShell = (): Plugin => ({
       // Overlay pages (prompt, sweep, USB) load inside the wallet; only the shell is the site.
       if (!ctx.filename.endsWith('mobile.html')) return html;
       return html
+        .replace(/<title>[^<]*<\/title>/, `<title>${APP_TITLE}</title>`)
         .replace(
           '</head>',
           [
             '    <meta name="description" content="bWalletX: the BSV wallet for tokens, media and apps." />',
+            ...(DESKTOP ? DESKTOP_SHARE : []),
             '    <link rel="manifest" href="./manifest.webmanifest" />',
             '    <link rel="icon" href="./favicon.ico" sizes="any" />',
             '    <link rel="apple-touch-icon" href="./icons/icon192.png" />',
             '    <meta name="apple-mobile-web-app-capable" content="yes" />',
-            '    <meta name="apple-mobile-web-app-title" content="bWalletX" />',
+            `    <meta name="apple-mobile-web-app-title" content="${APP_TITLE}" />`,
             '  </head>',
           ].join('\n'),
         )
-        .replace('<body>', `<body>\n    <div class="bwallet-web-banner" role="status">${BANNER}</div>`);
+        .replace('<body>', `<body>\n    <div class="bwallet-web-banner" role="status">${BANNER}</div>`)
+        .replace('</body>', `    <script>${STALE_BUILD}</script>\n  </body>`);
     },
   },
   generateBundle() {
@@ -49,6 +78,25 @@ const webShell = (): Plugin => ({
       fileName: 'agents.html',
       source: readFileSync(resolve(__dirname, 'src/web/agents.html')),
     });
+    // desktop.bwalletx.com/desktop: what Desktop is and how to install it, and its share image.
+    if (DESKTOP) {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'desktop.html',
+        source: readFileSync(resolve(__dirname, 'src/web/desktop.html')),
+      });
+      this.emitFile({
+        type: 'asset',
+        fileName: 'og-desktop-page-v1.png',
+        source: readFileSync(resolve(__dirname, 'src/web/og-desktop-page-v1.png')),
+      });
+    }
+    if (DESKTOP)
+      this.emitFile({
+        type: 'asset',
+        fileName: 'og-desktop-v1.png',
+        source: readFileSync(resolve(__dirname, 'src/web/og-desktop-v1.png')),
+      });
     this.emitFile({
       type: 'asset',
       fileName: 'og-agents.png',
@@ -66,13 +114,20 @@ const webShell = (): Plugin => ({
       fileName: 'vercel.json',
       source: readFileSync(resolve(__dirname, 'src/web/vercel.json')),
     });
+    // Install UI (Chrome's richer install sheet on desktop): one wide screenshot of the welcome screen.
+    this.emitFile({
+      type: 'asset',
+      fileName: 'install-wide.png',
+      source: readFileSync(resolve(__dirname, 'src/web/install-wide.png')),
+    });
     this.emitFile({
       type: 'asset',
       fileName: 'manifest.webmanifest',
       source: JSON.stringify(
         {
-          name: 'bWalletX',
-          short_name: 'bWalletX',
+          id: '/',
+          name: APP_TITLE,
+          short_name: APP_TITLE,
           description: 'The BSV wallet for tokens, media and apps.',
           start_url: './',
           scope: './',
@@ -83,6 +138,15 @@ const webShell = (): Plugin => ({
             { src: 'icons/icon192.png', sizes: '192x192', type: 'image/png' },
             { src: 'icons/icon512.png', sizes: '512x512', type: 'image/png' },
             { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          ],
+          screenshots: [
+            {
+              src: 'install-wide.png',
+              sizes: '1440x900',
+              type: 'image/png',
+              form_factor: 'wide',
+              label: 'bWalletX on the desktop',
+            },
           ],
         },
         null,

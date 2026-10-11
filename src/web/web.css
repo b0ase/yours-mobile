@@ -102,7 +102,7 @@ html body #root {
 /* Wide screens: one centred column, like the phone layout but wider (owner, 9 Oct 2026): the card centred at
    the top, everything else below it. The phone layout's 88/90/92% widths keep their proportions. */
 @media (min-width: 900px) {
-  .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
+  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-wcard-wrap) > .bw-wcard-wrap {
     margin-left: auto;
     margin-right: auto;
   }

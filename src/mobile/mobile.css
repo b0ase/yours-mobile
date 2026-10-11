@@ -146,6 +146,37 @@ select {
   gap: 12px;
 }
 
+/* Wide layout: the confirm sheet (forgot password, biometrics) is a centred modal, not a full-window strip. */
+html.ww-on .yours-sheet-backdrop {
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+html.ww-on .yours-sheet {
+  max-width: 480px;
+  border-radius: 20px;
+  padding-bottom: 20px;
+}
+/* Welcome / unlock (html.ww-onb): the sheet sits inside the wallet panel on the right, a bottom sheet as on the
+   phone, not over the story. Same box as `html.ww-on.ww-onb body #root` below. */
+html.ww-on.ww-onb .yours-sheet-backdrop {
+  inset: auto;
+  top: 50%;
+  right: max(32px, calc((50vw - 440px) / 2));
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  height: min(760px, calc(100vh - 96px));
+  transform: translateY(-50%);
+  border-radius: 24px;
+  overflow: hidden;
+  align-items: flex-end;
+  padding: 0;
+}
+html.ww-on.ww-onb .yours-sheet {
+  max-width: none;
+  border-radius: 20px 20px 0 0;
+}
+
 .yours-sheet h2 {
   margin: 0;
   font-size: 18px;
@@ -1340,6 +1371,184 @@ select optgroup {
   display: none !important;
 }
 
+/* Wide web layout (src/mobile/wide, demo/desktop-shell): html.ww-on only. The shell itself is position: fixed;
+   lock / unlock render in a centred phone-width column. */
+html.ww-on:root {
+  --web-banner-height: 0px;
+  --wallet-unlock-width: 420px;
+  --wallet-width: 100%;
+  --wallet-height: 100vh;
+  --dock-h: 0px;
+  --account-strip-height: 0px;
+  /* Shell geometry (wide/wide.css): sidebar width and top bar height. */
+  --ww-side-w: 240px;
+  --ww-top-h: 69px;
+  /* Chat: an open room sits beside the room list (tabs/ChatPage.tsx Conversation). */
+  --ww-conv-left: calc(240px + 32px + 420px + 16px);
+  --ww-conv-top: calc(69px + 76px);
+  /* …and the room details column (wide/RoomDetails.tsx) on its right. */
+  --ww-conv-right: calc(32px + 300px + 16px);
+  --ww-conv-bottom: 32px;
+}
+html.ww-on,
+html.ww-on body {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #050505 !important;
+  overflow: hidden;
+}
+html.ww-on body > .bwallet-web-banner {
+  display: none;
+}
+html.ww-on body #root {
+  width: 100%;
+  max-width: none;
+  margin: 0 !important;
+}
+
+/* Wide layout welcome / onboarding / unlock (wide/WideAuth.tsx toggles html.ww-onb): full-viewport background, the
+   story on the left (.ww-auth), the real phone flow on the right as a ~420px action panel, vertically centred, no
+   frame and no fixed tall height. */
+html.ww-on.ww-onb:root {
+  --wallet-width: 420px;
+  --wallet-height: 0px;
+  --wallet-unlock-width: 420px;
+}
+html.ww-on.ww-onb body {
+  display: flex;
+  align-items: center;
+  min-height: 100vh;
+  background: #050505 !important;
+}
+html.ww-on.ww-onb body #root {
+  position: fixed;
+  z-index: 1;
+  top: 50%;
+  right: max(32px, calc((50vw - 440px) / 2));
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  /* ONE fixed, generous height for every step (owner, 9 Oct 2026: the panel loaded at half height and
+     jumped between steps). Content is centred inside; a taller step scrolls within the panel. */
+  height: min(760px, calc(100vh - 96px)) !important;
+  min-height: 0 !important;
+  overflow: hidden auto;
+  margin: 0 !important;
+  padding: 0;
+  transform: translateY(-50%);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #050505 !important;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  scrollbar-width: none;
+}
+/* Pure black, the phone flow's own background, so its logo tiles and headers don't show as boxes. */
+html.ww-on.ww-onb body #root {
+  background: #000 !important;
+}
+/* The flow's wrappers fill the panel (min-height, so a tall step grows and scrolls instead of spilling above
+   the top) and centre their content. They carry no background or frame of their own: one box, not two. */
+html.ww-on.ww-onb body #root > div,
+html.ww-on.ww-onb body #root > div > div,
+html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
+  height: auto !important;
+  min-height: 100% !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+html.ww-on.ww-onb body #root > div,
+html.ww-on.ww-onb body #root > div > div {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch !important;
+}
+html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
+  justify-content: center !important;
+  padding: 28px 24px !important;
+}
+/* Errors and notices (components/Snackbar: absolute, bottom of a zero-height box, so they showed as a red sliver at
+   the panel's top): pin them to the panel's bottom edge, full text, readable size. #root is transformed, so fixed
+   is relative to the panel. */
+html.ww-on.ww-onb body #root .absolute.bottom-0.z-\[9999\] {
+  position: fixed !important;
+  top: auto !important;
+  bottom: 16px !important;
+  left: 16px !important;
+  right: 16px !important;
+  width: auto !important;
+  margin: 0 !important;
+  font-size: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.ww-auth {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  font-family: Inter, system-ui, sans-serif;
+  color: #f2f2f0;
+  background:
+    radial-gradient(900px 700px at 25% 40%, rgba(232, 184, 0, 0.14), transparent 65%),
+    linear-gradient(90deg, rgba(5, 5, 5, 0.2) 0%, rgba(5, 5, 5, 0.75) 50%, rgba(5, 5, 5, 0.92) 100%);
+}
+.ww-auth-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.16;
+  z-index: -1;
+}
+.ww-auth-hero {
+  position: absolute;
+  top: 50%;
+  left: max(48px, calc((50vw - 520px) / 2));
+  width: min(520px, calc(50vw - 64px));
+  transform: translateY(-50%);
+}
+.ww-auth-hero h1 {
+  margin: 0 0 36px;
+  line-height: 1.08;
+  font-size: clamp(36px, 3.6vw, 56px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.ww-auth-pitch {
+  margin: 0 0 32px;
+  font-size: clamp(17px, 1.4vw, 21px);
+  line-height: 1.4;
+  color: #c9c9c4;
+}
+.ww-auth-hero ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.ww-auth-hero li {
+  display: grid;
+  gap: 2px;
+  padding-left: 16px;
+  border-left: 2px solid rgba(255, 210, 77, 0.6);
+}
+.ww-auth-hero li b {
+  font-size: 15px;
+  color: #ffd24d;
+}
+.ww-auth-hero li span {
+  font-size: 14px;
+  color: #a5a5a0;
+}
+
+/* Wide auth panel: nothing until the flow mounts (an empty 30px frame showed for the first ~200ms). */
+html.ww-on.ww-onb body #root:empty {
+  visibility: hidden;
+}
+
 /* bMail and bPhone Calls (src/mobile/bmail, src/mobile/calls): the Wallet card's black-and-gold finish on translucent cards over the wallet clip. */
 .bw-mail-bar {
   background: linear-gradient(180deg, rgba(5, 5, 6, 0.86) 0%, rgba(5, 5, 6, 0.62) 100%);
@@ -1826,4 +2035,111 @@ button.bw-mail-card:active {
 }
 .bw-wcard-front .bw-wcard-addrrow .bw-wcard-copyicon {
   margin: -14px -8px -14px -14px;
+}
+
+/* Desktop (wide layout, mouse/trackpad): a click-drag on a row swipes it instead of selecting text or dragging links. */
+@media (hover: hover) and (pointer: fine) {
+  .bw-swipe-face {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .bw-swipe-face a,
+  .bw-swipe-face img {
+    -webkit-user-drag: none;
+  }
+}
+
+/* Identity key fingerprint (card front): display only, never selected or copied. */
+.bw-wcard-fingerprint {
+  /* 13 characters always fit: never shrink to "0…" (owner, 10 Oct 2026). */
+  flex: none;
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--bw-wcard-muted, #98a2b3);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+/* Full identity key (card back): selectable, wraps, with Copy. */
+/* Identity key inside the magnetic strip (card back): label, full key, small copy icon at the right end. */
+.bw-wcard-stripe {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.bw-wcard-stripe-key {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px 0 14px;
+  color: #d6d3c8;
+}
+.bw-wcard-stripe-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.bw-wcard-stripe-label {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #8e8e89;
+}
+.bw-wcard-stripe-hex {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.bw-wcard-stripe-copy {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d6d3c8;
+  cursor: pointer;
+}
+.bw-wcard-stripe-copy:focus-visible {
+  outline: 2px solid #ffd24d;
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+
+/* Front: a plain pen, right side, vertically centred; flips to the back (same as tapping the card). */
+.bw-wcard-penflip {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ffd24d;
+  cursor: pointer;
+}
+.bw-wcard.is-yellow .bw-wcard-penflip {
+  color: #0b0b0c;
+}
+.bw-wcard-penflip:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 8px;
 }
