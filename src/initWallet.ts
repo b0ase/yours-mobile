@@ -1,3 +1,4 @@
+import { singleFlight } from './services/addressResync';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -96,6 +97,12 @@ export interface AccountContext {
   addRemote: (url: string) => Promise<void>;
   /** Find and import token outputs the wallet owns on chain but has no record of (tokenRecovery.ts). */
   recoverTokens: (options?: TokenRecoveryOptions) => Promise<TokenRecoveryResult>;
+  /** Run the address sync now, or join the run already in flight (services/addressResync.ts). Quiet = no spinner. */
+  resyncAddresses: (options?: { quiet?: boolean }) => Promise<void>;
+  /** When the last address sync finished (ms since epoch), 0 before the first. */
+  lastAddressSyncAt: () => number;
+  /** True while an address sync is running. */
+  addressSyncBusy: () => boolean;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -537,40 +544,55 @@ export const initWallet = async (
   };
   const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
 
-  console.log('[initWallet] Starting address sync...');
-  sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
-
-  syncAddresses
-    .execute(actionCtx, {
-      count: scanPlan.count,
-      onProgress: (progress) => {
-        sendSyncStatus({ status: 'progress', ...progress });
-      },
-    })
-    .then(async (result) => {
-      sendSyncStatus({ status: 'complete', ...result });
-      // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.
-      if (result.failed === 0) persistScanThrough();
-      console.log('[initWallet] Address sync complete:', result);
-      // Token outputs no address scan can see (change of a send this storage
-      // never recorded). Cheap when there is nothing to find; cached per tx.
-      recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
-      void guard();
-      if (options?.afterSync) {
-        try {
-          await options.afterSync({ storage });
-        } catch (err) {
-          console.error('[initWallet] afterSync failed:', err);
+  // One address sync at a time, shared by the startup run, the background alarm and the refresh button
+  // (services/addressResync.ts). A quiet run (the alarm) shows no spinner; its 'complete' still refreshes the balance.
+  let quietRun = false;
+  let afterSyncDone = false;
+  const addressSync = singleFlight(async () => {
+    const quiet = quietRun;
+    if (!quiet) {
+      console.log('[initWallet] Starting address sync...');
+      sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
+    }
+    await syncAddresses
+      .execute(actionCtx, {
+        count: scanPlan.count,
+        onProgress: (progress) => {
+          if (!quiet) sendSyncStatus({ status: 'progress', ...progress });
+        },
+      })
+      .then(async (result) => {
+        sendSyncStatus({ status: 'complete', ...result });
+        // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.
+        if (result.failed === 0) persistScanThrough();
+        console.log('[initWallet] Address sync complete:', result);
+        // Token outputs no address scan can see (change of a send this storage
+        // never recorded). Cheap when there is nothing to find; cached per tx.
+        recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
+        void guard();
+        // afterSync is a once-per-open hook, not for every background resync.
+        if (options?.afterSync && !afterSyncDone) {
+          afterSyncDone = true;
+          try {
+            await options.afterSync({ storage });
+          } catch (err) {
+            console.error('[initWallet] afterSync failed:', err);
+          }
         }
-      }
-    })
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      sendSyncStatus({ status: 'error', message });
-      console.error('[initWallet] Address sync failed:', error);
-      void guard();
-      recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
-    });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        sendSyncStatus({ status: 'error', message });
+        console.error('[initWallet] Address sync failed:', error);
+        void guard();
+        recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
+      });
+  });
+  const resyncAddresses = (options?: { quiet?: boolean }) => {
+    if (!addressSync.busy()) quietRun = options?.quiet ?? false;
+    return addressSync.run();
+  };
+  void resyncAddresses();
 
   // Sync incoming paymail payments from the message box (fire-and-forget)
   syncMessages
@@ -599,6 +621,9 @@ export const initWallet = async (
     setActiveStorage,
     addRemote,
     recoverTokens,
+    resyncAddresses,
+    lastAddressSyncAt: addressSync.lastFinishedAt,
+    addressSyncBusy: addressSync.busy,
     close,
   };
 };
