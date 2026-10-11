@@ -1,3 +1,4 @@
+import { BGamesHero } from './games/BGamesHero';
 import {
   BSPACES_ENABLED,
   MARKET_ENABLED,
@@ -931,6 +932,8 @@ const BrowserPage = ({
     <>
       {appScreens.screens.map((x, i) => (
         <div key={i} data-apps-section={i} className="flex flex-col gap-3">
+          {/* The Games section opens with the bGames hero (owner, 11 Oct 2026). */}
+          {/^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}
           <button
             type="button"
             onClick={() => {
@@ -1093,7 +1096,10 @@ const BrowserPage = ({
               {only === 'home' ? (
                 pageBody(0)
               ) : only === 'games' ? (
-                pageBody(3)
+                <>
+                  <BGamesHero />
+                  {pageBody(3)}
+                </>
               ) : (
                 <>
                   {pageBody(1)}
