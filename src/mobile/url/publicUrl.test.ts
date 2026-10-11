@@ -9,7 +9,8 @@ describe('toPublic', () => {
   test('other tab pages lose the /m prefix, top routes stay', () => {
     expect(toPublic('/m/chat', '')).toBe('/chat');
     expect(toPublic('/m/lock/verify', '?tx=ab')).toBe('/lock/verify?tx=ab');
-    expect(toPublic('/bsv-wallet', '')).toBe('/bsv-wallet');
+    expect(toPublic('/bsv-wallet', '')).toBe('/wallet');
+    expect(toPublic('/settings', '')).toBe('/settings');
   });
   test('a bad slug is not put in the path', () => {
     expect(toPublic('/m/spaces', '?space=../x')).toBe('/spaces?space=..%2Fx');
@@ -22,6 +23,8 @@ describe('toRouter', () => {
     expect(toRouter('/spaces/bwallet-lounge', '')).toBe('/m/spaces?space=bwallet-lounge');
     expect(toRouter('/chat/', '')).toBe('/m/chat');
     expect(toRouter('/settings', '')).toBe('/settings');
+    expect(toRouter('/wallet', '')).toBe('/bsv-wallet');
+    expect(toRouter('/bsv-wallet', '')).toBe('/bsv-wallet');
   });
   test('root and files keep the app start', () => {
     expect(toRouter('/', '')).toBeNull();

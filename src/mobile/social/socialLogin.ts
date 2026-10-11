@@ -173,9 +173,17 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
 
 const RETURN = 'https://www.bwallet.space/social';
 // Web wallet origins the sign-in server returns to (exact list; the server maps the key, never a caller URL).
-const WEB_RETURNS = { web: 'https://web.bwalletx.com/', beta: 'https://beta.bwalletx.com/' } as const;
-const webReturnKey = (): keyof typeof WEB_RETURNS =>
-  typeof location !== 'undefined' && location.origin === 'https://beta.bwalletx.com' ? 'beta' : 'web';
+// desktop.bwalletx.com returned to web.bwalletx.com (owner, 11 Oct 2026): it is the same Vercel project as beta,
+// so it asks for 'desktop' (site/lib/social.js RETURNS has it since 9 Oct); an older server ignores an unknown key.
+const WEB_RETURNS = {
+  web: 'https://web.bwalletx.com/',
+  beta: 'https://beta.bwalletx.com/',
+  desktop: 'https://desktop.bwalletx.com/',
+} as const;
+export const webReturnKey = (
+  origin = typeof location === 'undefined' ? '' : location.origin,
+): keyof typeof WEB_RETURNS =>
+  origin === 'https://desktop.bwalletx.com' ? 'desktop' : origin === 'https://beta.bwalletx.com' ? 'beta' : 'web';
 const isWebReturn = (url: string) => Object.values(WEB_RETURNS).some((r) => url.startsWith(r));
 const isReturn = (url: string) =>
   url.startsWith(RETURN) || url.startsWith('bwalletx://social') || (isWebReturn(url) && /#(.*&)?(t|error)=/.test(url));

@@ -13,7 +13,8 @@ const store = new Map<string, string>();
   },
 } as Storage;
 
-const { NEW_ACCOUNT, bindSocial, clearSocial, socialProfile, socialProof } = await import('./socialLogin');
+const { NEW_ACCOUNT, bindSocial, clearSocial, socialProfile, socialProof, webReturnKey } =
+  await import('./socialLogin');
 
 const KEY = 'bwallet.social';
 const A = '1AccountAaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -120,5 +121,14 @@ describe('back from X with an existing (locked) wallet', () => {
     expect(p.ticket).toBe('ticket1');
     expect(p.returned).toBe(true);
     expect(p.owner).toBe(A);
+  });
+});
+
+describe('webReturnKey', () => {
+  it('Desktop comes back to Desktop, not the web wallet', () => {
+    expect(webReturnKey('https://desktop.bwalletx.com')).toBe('desktop');
+    expect(webReturnKey('https://beta.bwalletx.com')).toBe('beta');
+    expect(webReturnKey('https://web.bwalletx.com')).toBe('web');
+    expect(webReturnKey('http://localhost:4310')).toBe('web');
   });
 });
