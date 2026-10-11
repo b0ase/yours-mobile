@@ -14,6 +14,7 @@ import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  BadgeCheck,
   Bot,
   ChevronRight,
   Lock,
@@ -48,6 +49,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { CALLS_ROUTE } from '../calls/route';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
+
+const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 import { useLocation, useNavigate } from 'react-router-dom';
 
 /**
@@ -101,6 +104,7 @@ const TopNavBar = () => {
   // bPhone Calls opens in the content area (/m/calls, owner 9 Oct 2026, as bMail); tapping the button again leaves.
   const onCalls = pathname.startsWith(CALLS_ROUTE);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [mintOpen, setMintOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
   // Phone: ☰ "Scan to connect a website" opens the one Scan sheet (pay codes, people, pairing).
   // Extension keeps the paste-first pairing screen (a desktop can't scan its own screen).
@@ -362,6 +366,11 @@ const TopNavBar = () => {
               <div className="shrink-0 border-t border-white/5 px-2 pt-2 pb-2">
                 {/* Owner, 9 Oct 2026: Add account, Add agent account, Connect CLI & MCP, then Settings. */}
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('restore-account'))}
+                {/* bAvatar mint (owner, 11 Oct 2026): this account's art, $name and signup number as a 1-sat ordinal. */}
+                {action(<BadgeCheck size={16} color="#fff" />, 'Mint my bAvatar', () => {
+                  setDrawer(false);
+                  setMintOpen(true);
+                })}
                 {X_MARK &&
                   action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
                     startAgentCreate();
@@ -524,6 +533,11 @@ const TopNavBar = () => {
               : undefined
           }
         />
+      )}
+      {mintOpen && (
+        <Suspense fallback={null}>
+          <BavatarMintSheet onClose={() => setMintOpen(false)} />
+        </Suspense>
       )}
       {toolsOpen && (
         <AgentToolsSheet

@@ -841,6 +841,21 @@ export class BchatClient {
     return this.call('POST', '/api/bitsign/sponsor/mint', { address });
   }
 
+  /** This account's bAvatar edition: number (signup order), Founding 1,000 or not, and whether it is minted. */
+  async bavatarMine(): Promise<BavatarMine> {
+    return this.call('GET', '/api/bitsign/bavatar/mine');
+  }
+
+  /** bCorp pays a Founding 1,000 account's bAvatar mint fee: sats to its own address, once per account. */
+  async sponsorBavatar(address: string): Promise<{ ok?: boolean; txid?: string; sats?: number }> {
+    return this.call('POST', '/api/bitsign/bavatar/sponsor', { address });
+  }
+
+  /** Record the bAvatar inscription so the number shows as minted (once per account). */
+  async recordBavatarMint(txid: string): Promise<{ ok?: boolean }> {
+    return this.call('POST', '/api/bitsign/bavatar/minted', { txid });
+  }
+
   /** Delete this bChat account (identity-key signed; see src/mobile/account/deleteAccount.ts). */
   async deleteAccount(body: {
     identity_key: string;
@@ -952,4 +967,13 @@ export const saveSession = (s: ChatSession | null) => {
   } catch {
     /* no window (tests) */
   }
+};
+
+export type BavatarMine = {
+  handle: string;
+  number: number;
+  founding: boolean;
+  edition: number;
+  minted: { txid: string; outpoint: string } | null;
+  sponsored: boolean;
 };
