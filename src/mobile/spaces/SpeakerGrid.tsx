@@ -99,7 +99,9 @@ const Tile = ({
           <div
             className="absolute inset-0"
             style={{
-              background: 'linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,.5) 55%, rgba(0,0,0,.8) 100%)',
+              // Calm like the wallet card (owner, 11 Oct 2026): ~0.6 overall, darkest bottom-left behind the name and mic.
+              background:
+                'linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.6) 50%, rgba(0,0,0,.85) 100%), linear-gradient(45deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,0) 55%)',
             }}
           />
         </>
