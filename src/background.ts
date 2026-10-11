@@ -64,7 +64,6 @@ import {
 import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
-import { healStrandedStreamActions } from './services/streamHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
 import { WalletBackupService } from './backup/WalletBackupService';
@@ -351,10 +350,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
     });
     // Release a site's inscription chain that broke part-way and still holds change (services/streamHeal.ts).
-    // Never release one the network already knows (services/recoverFailed.ts knownOnChain).
-    void healStrandedStreamActions(accountContext.baseWallet, { isKnown: accountContext.knownOnChain }).then((r) => {
-      if (r.aborted.length || r.errors.length) console.log('[background] stranded stream actions released:', r);
-    });
+    // The stranded-stream auto-abort (services/streamHeal.ts) is off (audit, 11 Oct 2026): it ran on every
+    // service-worker restart and could abort an action whose transaction had gone out. The toolbox's own
+    // no-send expiry releases genuinely abandoned steps.
     // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
     void accountContext.recoverFailed().then((r) => {
       if (r.failed || r.error) console.log('[background] failed-action review:', r);
@@ -3419,7 +3417,7 @@ if (isInServiceWorker) {
       // completeSignedAction aborts after a failed local check and surfaces only the abort's error).
       if (isAlreadyProcessedAbort(error)) {
         console.warn('[abortAction] already signed or shared; nothing to abort:', message.params?.reference);
-        sendResponse({ type: CWIEventName.ABORT_ACTION, success: true, data: { aborted: true } });
+        sendResponse({ type: CWIEventName.ABORT_ACTION, success: true, data: { aborted: false } });
         return true;
       }
       sendResponse({

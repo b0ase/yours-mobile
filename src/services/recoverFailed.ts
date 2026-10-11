@@ -6,13 +6,10 @@
  * that action as failed (a racing duplicate broadcast during the 5.2.1 per-step funding preparation is the likely
  * cause), so its outputs were not spendable.
  *
- * The toolbox has a supported repair for exactly this: listFailedActions(unfail=true) queues failed actions
- * as 'unfail', and the Monitor's UnFail task fetches a merkle proof for each, authenticates it against the
- * chain, and restores the transaction and its outputs (restoreTransactionForProof). Actions without a proof
- * go back to 'invalid' untouched. So this never invents outputs: only proven transactions are restored, with
- * the outputs storage already recorded for them.
- *
- * We only queue the repair when at least one failed action is actually mined, then run UnFail once.
+ * The toolbox's repair: the Monitor's UnFail task takes proven-tx requests in status 'unfail', fetches a merkle
+ * proof, authenticates it against the chain, and restores the transaction and the outputs storage recorded for
+ * it (restoreTransactionForProof). We queue ONLY failed actions we have checked are mined (not every failed
+ * action), so nothing is invented and nothing unproven is touched.
  */
 export type FailedAction = {
   txid: string;
@@ -22,8 +19,10 @@ export type FailedAction = {
 };
 
 export type RecoverDeps = {
-  /** Failed actions (and, with unfail=true, queue all of them for proof-based recovery). */
-  listFailed: (unfail: boolean) => Promise<FailedAction[]>;
+  /** Failed actions (read only). */
+  listFailed: () => Promise<FailedAction[]>;
+  /** Queue exactly these txids for the proof-checked UnFail repair (their proven-tx requests -> 'unfail'). */
+  queueUnfail: (txids: string[]) => Promise<number>;
   /** True when the network has a merkle proof for txid (mined). */
   isMined: (txid: string) => Promise<boolean>;
   /** Run the Monitor's UnFail task now. */
@@ -39,7 +38,7 @@ export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<Reco
   const log = deps.log ?? ((m: string) => console.log(m));
   const report: RecoverReport = { failed: 0, mined: [], restored: [] };
   try {
-    const failed = (await deps.listFailed(false)).filter((a) => /^[0-9a-f]{64}$/i.test(a.txid ?? ''));
+    const failed = (await deps.listFailed()).filter((a) => /^[0-9a-f]{64}$/i.test(a.txid ?? ''));
     report.failed = failed.length;
     if (!failed.length) return report;
     for (const a of failed) {
@@ -51,9 +50,13 @@ export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<Reco
     }
     if (!report.mined.length) return report;
     log(`[recover] ${report.mined.length} failed action(s) are mined; restoring: ${report.mined.join(', ')}`);
-    await deps.listFailed(true);
+    const queued = await deps.queueUnfail(report.mined);
+    if (!queued) {
+      log('[recover] no proven-tx request found for the mined txid(s); nothing queued');
+      return report;
+    }
     log(`[recover] UnFail: ${(await deps.runUnFail()).trim() || 'done'}`);
-    const still = new Set((await deps.listFailed(false)).map((a) => a.txid));
+    const still = new Set((await deps.listFailed()).map((a) => a.txid));
     for (const a of failed) {
       if (!report.mined.includes(a.txid) || still.has(a.txid)) continue;
       report.restored.push(a.txid);
@@ -66,15 +69,26 @@ export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<Reco
   return report;
 }
 
-/** Abort/release guard: an action whose transaction the network already knows must never be aborted. */
+/**
+ * Abort/release guard: an action whose transaction the network may already have must never be aborted.
+ * Fails CLOSED: any error or unclear answer counts as known (do not abort). Only a clean "not found" is unknown.
+ * A reference that isn't a txid can't be checked on chain and is left to the toolbox (false).
+ */
 export async function knownOnChain(txid: string, getRawTx: (txid: string) => Promise<unknown>): Promise<boolean> {
   if (!/^[0-9a-f]{64}$/i.test(txid)) return false;
   try {
-    const r = (await getRawTx(txid)) as { rawTx?: unknown } | string | number[] | Uint8Array | undefined;
-    if (!r) return false;
+    const r = (await getRawTx(txid)) as
+      | { rawTx?: unknown; error?: unknown }
+      | string
+      | number[]
+      | Uint8Array
+      | undefined
+      | null;
+    if (r === undefined || r === null) return false;
     if (typeof r === 'string' || Array.isArray(r) || r instanceof Uint8Array) return r.length > 0;
+    if ((r as { error?: unknown }).error) return true; // a service error is not a clean "not found"
     return !!(r as { rawTx?: unknown }).rawTx;
   } catch {
-    return false;
+    return true;
   }
 }

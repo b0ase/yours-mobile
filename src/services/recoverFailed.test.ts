@@ -8,13 +8,15 @@ const T2 = 'a'.repeat(64);
 
 function fakeStore(failed: FailedAction[], mined: string[]) {
   let list = [...failed];
-  const calls = { unfail: 0, runs: 0 };
+  const calls = { unfail: 0, runs: 0, queued: [] as string[] };
   return {
     calls,
     deps: {
-      listFailed: async (unfail: boolean) => {
-        if (unfail) calls.unfail++;
-        return list;
+      listFailed: async () => list,
+      queueUnfail: async (txids: string[]) => {
+        calls.unfail++;
+        calls.queued.push(...txids);
+        return txids.length;
       },
       isMined: async (txid: string) => mined.includes(txid),
       runUnFail: async () => {
@@ -34,6 +36,7 @@ describe('restore failed actions that are mined', () => {
     expect(r.mined).toEqual([T1]);
     expect(r.restored).toEqual([T1]);
     expect(s.calls.unfail).toBe(1);
+    expect(s.calls.queued).toEqual([T1]); // only the mined one, never every failed action
     expect(s.calls.runs).toBe(1);
   });
 
@@ -58,6 +61,7 @@ describe('restore failed actions that are mined', () => {
       listFailed: async () => {
         throw new Error('db');
       },
+      queueUnfail: async () => 0,
       isMined: async () => true,
       runUnFail: async () => '',
       log: () => undefined,
@@ -73,11 +77,13 @@ describe('never abort what the network already has', () => {
     expect(await knownOnChain(T1, async () => ({ rawTx: undefined }))).toBe(false);
     expect(await knownOnChain(T1, async () => undefined)).toBe(false);
     expect(await knownOnChain('not-a-txid', async () => ({ rawTx: [1] }))).toBe(false);
+    // fails closed: errors count as known, so nothing is aborted
+    expect(await knownOnChain(T1, async () => ({ error: 'service down' }))).toBe(true);
     expect(
       await knownOnChain(T1, async () => {
         throw new Error('offline');
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test('stream heal skips a step already on chain', async () => {
