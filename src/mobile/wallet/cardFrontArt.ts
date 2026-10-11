@@ -35,7 +35,18 @@ export function cardFrontArtUri(identityPubKey: string | null | undefined, yello
 
 /** How the art sits on the card: brightness is the CSS filter value (<= 1, so the shade's contrast always holds);
  *  x/y are where the art's centre lands on the card, in % of its width/height. */
-export type CardArtLook = { brightness: number; x: number; y: number };
+export type CardArtLook = {
+  brightness: number;
+  x: number;
+  y: number;
+  /** Colour (owner, 12 Oct 2026): hue turn in degrees (-180..180) and saturation (0 = grey .. 2 = vivid; 1 = as drawn). */
+  hue?: number;
+  saturation?: number;
+};
+export const HUE_MIN = -180;
+export const HUE_MAX = 180;
+export const SAT_MIN = 0;
+export const SAT_MAX = 2;
 
 /** The art is drawn at this zoom; its centre can move within PLACE_MIN..PLACE_MAX % without showing an edge
  *  (scaled about origin o, the art spans v - 50Z .. v + 50Z, which must cover 0..100). */
@@ -71,17 +82,32 @@ export function artStyle(look: CardArtLook): Record<string, string> {
   return {
     transform: `scale(${ART_ZOOM})`,
     transformOrigin: `${o(look.x)} ${o(look.y)}`,
-    filter: `brightness(${clamp(look.brightness, MIN_BRIGHTNESS, 1).toFixed(3)})`,
+    filter: artFilter(look),
   };
 }
 
-/** A look kept within range: brightness MIN_BRIGHTNESS..1, placement PLACE_MIN..PLACE_MAX. */
+/** CSS filter for the art: shade (brightness), then saturation, then hue. Same filter for bAvatar art and an
+ *  uploaded picture. Unset colour = the art as drawn. */
+export function artFilter(look: CardArtLook): string {
+  const parts = [`brightness(${clamp(look.brightness, MIN_BRIGHTNESS, 1).toFixed(3)})`];
+  const sat = clamp(look.saturation ?? 1, SAT_MIN, SAT_MAX);
+  const hue = Math.round(clamp(look.hue ?? 0, HUE_MIN, HUE_MAX));
+  if (sat !== 1) parts.push(`saturate(${sat.toFixed(2)})`);
+  if (hue !== 0) parts.push(`hue-rotate(${hue}deg)`);
+  return parts.join(' ');
+}
+
+/** A look kept within range: brightness MIN_BRIGHTNESS..1, placement PLACE_MIN..PLACE_MAX, hue/saturation in range. */
 export function clampLook(look: CardArtLook): CardArtLook {
-  return {
+  const out: CardArtLook = {
     brightness: clamp(look.brightness, MIN_BRIGHTNESS, 1),
     x: clamp(look.x, PLACE_MIN, PLACE_MAX),
     y: clamp(look.y, PLACE_MIN, PLACE_MAX),
   };
+  if (typeof look.hue === 'number' && Number.isFinite(look.hue)) out.hue = clamp(look.hue, HUE_MIN, HUE_MAX);
+  if (typeof look.saturation === 'number' && Number.isFinite(look.saturation))
+    out.saturation = clamp(look.saturation, SAT_MIN, SAT_MAX);
+  return out;
 }
 
 const LOOK_KEY = (key: string) => 'bw-card-art:' + key.toLowerCase();
@@ -93,8 +119,10 @@ export function loadCardArtLook(identityPubKey: string | null | undefined): Card
     const v = JSON.parse(localStorage.getItem(LOOK_KEY(identityPubKey)) ?? 'null');
     if (!v || typeof v !== 'object') return null;
     const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : NaN);
-    const look = { brightness: n(v.brightness), x: n(v.x), y: n(v.y) };
+    const look: CardArtLook = { brightness: n(v.brightness), x: n(v.x), y: n(v.y) };
     if ([look.brightness, look.x, look.y].some(Number.isNaN)) return null;
+    if (!Number.isNaN(n(v.hue))) look.hue = n(v.hue);
+    if (!Number.isNaN(n(v.saturation))) look.saturation = n(v.saturation);
     return clampLook(look);
   } catch {
     return null;
@@ -108,6 +136,71 @@ export function saveCardArtLook(identityPubKey: string | null | undefined, look:
     else localStorage.removeItem(LOOK_KEY(identityPubKey));
   } catch {
     /* private mode: the adjustment lasts this session only */
+  }
+}
+
+/* ── Own picture (owner, 12 Oct 2026) ─────────────────────────────────────────────────────────────────────────
+   An account may put its own picture on the card front instead of its bAvatar art. It is resized and compressed on
+   this device and kept in this device's storage per account; it is never uploaded anywhere. */
+
+const IMG_KEY = (key: string) => 'bw-card-img:' + key.toLowerCase();
+/** Longest side of a stored card picture, in pixels; JPEG quality. ~100-200 KB per picture. */
+export const CARD_IMG_MAX = 900;
+const CARD_IMG_QUALITY = 0.84;
+
+export function loadCardImage(identityPubKey: string | null | undefined): string | null {
+  if (!identityPubKey) return null;
+  try {
+    const v = localStorage.getItem(IMG_KEY(identityPubKey));
+    return v && v.startsWith('data:image/') ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Saves (or with null, removes) the account's card picture. False when the device has no room for it. */
+export function saveCardImage(identityPubKey: string | null | undefined, uri: string | null): boolean {
+  if (!identityPubKey) return false;
+  try {
+    if (uri) localStorage.setItem(IMG_KEY(identityPubKey), uri);
+    else localStorage.removeItem(IMG_KEY(identityPubKey));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Width/height that fit within `max` on the longest side, keeping the aspect ratio (never enlarges). */
+export function fitWithin(w: number, h: number, max = CARD_IMG_MAX): { w: number; h: number } {
+  if (!(w > 0) || !(h > 0)) return { w: 0, h: 0 };
+  const k = Math.min(1, max / Math.max(w, h));
+  return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+}
+
+/** Reads a picture the user picked and returns a resized JPEG data URI, or throws a plain-English error. */
+export async function prepareCardImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('That file isn’t a picture.');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('That picture couldn’t be opened.'));
+      i.src = url;
+    });
+    const { w, h } = fitWithin(img.naturalWidth, img.naturalHeight);
+    if (!w) throw new Error('That picture couldn’t be opened.');
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new Error('This device can’t resize pictures.');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', CARD_IMG_QUALITY);
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }
 

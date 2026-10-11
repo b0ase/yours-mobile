@@ -4,10 +4,14 @@ import {
   cardFrontArtUri,
   PLACE_MAX,
   PLACE_MIN,
+  artFilter,
   artStyle,
   autoBrightness,
   clampLook,
   defaultPlacement,
+  fitWithin,
+  loadCardImage,
+  saveCardImage,
   loadCardArtLook,
   saveCardArtLook,
 } from './cardFrontArt';
@@ -78,5 +82,44 @@ describe('card art look', () => {
     expect(loadCardArtLook(B)).toBeNull();
     saveCardArtLook(A, null);
     expect(loadCardArtLook(A)).toBeNull();
+  });
+});
+
+describe('card colour and own picture (owner, 12 Oct 2026)', () => {
+  test('filter: shade only by default, then saturation and hue when set', () => {
+    expect(artFilter({ brightness: 0.8, x: 60, y: 40 })).toBe('brightness(0.800)');
+    expect(artFilter({ brightness: 0.8, x: 60, y: 40, hue: 90, saturation: 1.5 })).toBe(
+      'brightness(0.800) saturate(1.50) hue-rotate(90deg)',
+    );
+    expect(artFilter({ brightness: 0.8, x: 60, y: 40, hue: 0, saturation: 1 })).toBe('brightness(0.800)');
+  });
+  test('clampLook keeps hue and saturation in range and leaves them out when unset', () => {
+    const l = clampLook({ brightness: 0.5, x: 50, y: 50, hue: 999, saturation: -3 });
+    expect(l.hue).toBe(180);
+    expect(l.saturation).toBe(0);
+    expect('hue' in clampLook({ brightness: 0.5, x: 50, y: 50 })).toBe(false);
+  });
+  test('fitWithin shrinks the longest side to the limit and never enlarges', () => {
+    expect(fitWithin(1800, 900, 900)).toEqual({ w: 900, h: 450 });
+    expect(fitWithin(400, 300, 900)).toEqual({ w: 400, h: 300 });
+    expect(fitWithin(0, 300)).toEqual({ w: 0, h: 0 });
+  });
+  test('colour and own picture are saved per account, and both can be removed', () => {
+    const mem = new Map<string, string>();
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+      removeItem: (k: string) => void mem.delete(k),
+    };
+    saveCardArtLook(A, { brightness: 0.6, x: 60, y: 40, hue: -45, saturation: 0.4 });
+    expect(loadCardArtLook(A)).toEqual({ brightness: 0.6, x: 60, y: 40, hue: -45, saturation: 0.4 });
+    expect(loadCardImage(A)).toBeNull();
+    expect(saveCardImage(A, 'data:image/jpeg;base64,AAAA')).toBe(true);
+    expect(loadCardImage(A)).toBe('data:image/jpeg;base64,AAAA');
+    expect(loadCardImage(B)).toBeNull();
+    mem.set('bw-card-img:' + A, 'javascript:alert(1)');
+    expect(loadCardImage(A)).toBeNull();
+    saveCardImage(A, null);
+    expect(mem.has('bw-card-img:' + A)).toBe(false);
   });
 });
