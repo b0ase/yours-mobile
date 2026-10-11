@@ -44,47 +44,22 @@ describe('deposit breakdown', () => {
 });
 
 describe('prepare funding before a site createAction', () => {
-  test('sweeps waiting deposits so the funder can see them', async () => {
-    const state = { funded: 0, deposits: [{ satoshis: 25_000_000, spendable: true, customInstructions: KEYED }] };
-    const lines: string[] = [];
+  test('detection only: never sweeps or credits, even with deposits and arriving money', async () => {
+    let calls = 0;
     const snap = await prepareFunding({
-      wallet: makeWallet(state),
-      sweep: async () => {
-        state.funded = 24_999_900;
-        state.deposits = [];
-        return { swept: 1 };
-      },
-      arriving: () => 0,
-      log: (l) => lines.push(l),
-    });
-    expect(snap.spendable).toBe(24_999_900);
-    expect(snap.sweepable).toBe(0);
-    expect(lines.some((l) => l.includes('swept 1 waiting deposit'))).toBe(true);
-  });
-
-  test('credits money still arriving, then sweeps it (the 5.1.99 vexvoid case)', async () => {
-    const state = { funded: 0, deposits: [] as DepositOutput[] };
-    let arriving = 25_432_350;
-    const order: string[] = [];
-    const snap = await prepareFunding({
-      wallet: makeWallet(state),
-      sweep: async () => {
-        order.push('sweep');
-        if (!state.deposits.length) return { swept: 0 };
-        state.funded = state.deposits.reduce((t, d) => t + d.satoshis, 0) - 100;
-        state.deposits = [];
-        return { swept: 1 };
-      },
-      arriving: () => arriving,
+      wallet: makeWallet({
+        funded: 0,
+        deposits: [{ satoshis: 25_000_000, spendable: true, customInstructions: KEYED }],
+      }),
+      sweep: async () => (calls++, { swept: 1 }),
+      arriving: () => 25_432_350,
       creditArriving: async () => {
-        order.push('credit');
-        state.deposits = [{ satoshis: arriving, spendable: true, customInstructions: KEYED }];
-        arriving = 0;
+        calls++;
       },
       log: () => {},
     });
-    expect(order).toEqual(['credit', 'sweep']);
-    expect(snap).toMatchObject({ spendable: 25_432_250, arriving: 0, sweepable: 0 });
+    expect(calls).toBe(0);
+    expect(snap).toMatchObject({ spendable: 0, arriving: 25_432_350 });
   });
 
   test('nothing waiting: no sweep, no credit', async () => {

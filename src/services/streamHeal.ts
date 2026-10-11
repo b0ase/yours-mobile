@@ -22,7 +22,7 @@ export type StreamHealReport = { aborted: string[]; errors: string[] };
 
 export async function healStrandedStreamActions(
   wallet: Pick<WalletInterface, 'listActions' | 'abortAction'>,
-  { timeoutMs = 20_000 }: { timeoutMs?: number } = {},
+  { timeoutMs = 20_000, isKnown }: { timeoutMs?: number; isKnown?: (txid: string) => Promise<boolean> } = {},
 ): Promise<StreamHealReport> {
   const report: StreamHealReport = { aborted: [], errors: [] };
   let actions: StreamAction[] = [];
@@ -36,6 +36,7 @@ export async function healStrandedStreamActions(
   for (const a of actions) {
     if (!isStrandedStream(a) || !a.txid) continue;
     try {
+      if (isKnown && (await isKnown(a.txid))) continue; // already on chain: not stranded, never abort
       const r = await withTimeout(wallet.abortAction({ reference: a.txid }), timeoutMs, 'abortAction');
       if (r.aborted) report.aborted.push(a.txid);
     } catch (e) {

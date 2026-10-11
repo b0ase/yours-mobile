@@ -45,8 +45,16 @@ export interface FundingSources {
   arriving: () => number;
   /** Retry crediting those outputs now (the receive guard). Optional: older contexts lack it. */
   creditArriving?: () => Promise<void>;
+  /** Restore failed-but-mined actions (services/recoverFailed.ts). Run only when nothing is spendable. */
+  recoverFailed?: () => Promise<{ restored: string[] }>;
   log?: (line: string) => void;
 }
+
+let lastRecoverAt = 0;
+/** Tests only. */
+export const resetRecoverThrottle = () => {
+  lastRecoverAt = 0;
+};
 
 export interface DepositBreakdown {
   /** Deposit outputs the sweep will move. */
@@ -116,35 +124,24 @@ export async function prepareFunding(src: FundingSources): Promise<FundingSnapsh
   let snap = await fundingSnapshot(src);
   log(`[funding] before: ${fmt(snap)}`);
 
-  if (snap.sweepable > 0) {
+  // Nothing spendable: storage may hold a mined transaction as failed, hiding its change ($vexvoid, 11 Oct 2026).
+  if (snap.spendable === 0 && src.recoverFailed && Date.now() - lastRecoverAt > 120_000) {
+    lastRecoverAt = Date.now();
     try {
-      const r = await src.sweep();
-      log(`[funding] swept ${r.swept ?? 0} waiting deposit(s)`);
+      const r = await src.recoverFailed();
+      if (r.restored.length) {
+        log(`[funding] restored ${r.restored.length} mined transaction(s) storage had marked failed`);
+        snap = await fundingSnapshot(src);
+        log(`[funding] after restore: ${fmt(snap)}`);
+      }
     } catch (err) {
-      log(`[funding] deposit sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+      log(`[funding] restoring failed transactions failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  if (snap.arriving > 0 && src.creditArriving) {
-    try {
-      await src.creditArriving();
-      log('[funding] credited arriving payments (receive guard)');
-    } catch (err) {
-      log(`[funding] crediting arriving payments failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    // The receive guard parks what it credits in the deposit basket; move it into spendable funds too.
-    try {
-      const r = await src.sweep();
-      if (r.swept) log(`[funding] swept ${r.swept} newly credited deposit(s)`);
-    } catch (err) {
-      log(`[funding] sweep after crediting failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  if (snap.sweepable > 0 || snap.arriving > 0) {
-    snap = await fundingSnapshot(src);
-    log(`[funding] after: ${fmt(snap)}`);
-  }
+  // Detection only (audit, 11 Oct 2026): no sweep, internalize or rescue here. Those created their own
+  // transactions between a site's steps and between each other, which is how money ended up in storage as
+  // failed. The only repair left is recoverFailed, which restores proven, already-mined transactions.
   return snap;
 }
 

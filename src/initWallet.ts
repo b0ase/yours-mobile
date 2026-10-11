@@ -1,3 +1,9 @@
+import {
+  knownOnChain,
+  recoverMinedFailedActions,
+  type FailedAction,
+  type RecoverReport,
+} from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
 import {
   createWebWallet,
@@ -96,6 +102,9 @@ const decryptKeys = async (chromeStorageService: ChromeStorageService): Promise<
  * Account context containing wallet and necessary sync components.
  * All components share the same lifecycle (account-specific).
  */
+/** The receive guard's stuck-output rescue broadcast (receiveRescue.ts). Off: see runReceiveGuard. */
+const RESCUE_AUTO_BROADCAST = false as boolean;
+
 export interface AccountContext {
   wallet: LocalWalletPermissionsManager;
   baseWallet: Wallet;
@@ -118,6 +127,10 @@ export interface AccountContext {
   sweepDeposits: () => Promise<{ swept?: number }>;
   /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
   creditArriving: () => Promise<void>;
+  /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
+  recoverFailed: () => Promise<RecoverReport>;
+  /** True when the network already knows this txid (never abort such an action). */
+  knownOnChain: (txid: string) => Promise<boolean>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -266,6 +279,8 @@ export const initWallet = async (
     remoteStorage,
     setActiveStorage,
     addRemote,
+    monitor: walletMonitor,
+    services: toolboxServices,
   } = await createWebWallet(walletConfig).catch(async (err: unknown) => {
     // A backup that won't connect (e.g. 1Sat answering HTTP 400 to the iPhone WebView's auth
     // handshake) must not take the whole wallet down: the device's own copy is authoritative when
@@ -519,7 +534,7 @@ export const initWallet = async (
 
   // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
   // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
-  const runReceiveGuard = async () => {
+  const receiveGuardOnce = async () => {
     // Never between the steps of a connected site's multi-step action (services/dappChain.ts).
     if (chainActive()) {
       console.log('[receiveGuard] a site action is in progress; check deferred');
@@ -600,7 +615,9 @@ export const initWallet = async (
     // Still missing after a direct internalize: storage won't take this txid (services/receiveRescue.ts). Spend
     // each stuck output back to the same address in a fresh transaction and credit that one instead.
     let final = after;
-    if (after.satoshis) {
+    // Off (audit, 11 Oct 2026): the rescue broadcast outside storage and could double-spend an in-flight spend,
+    // because walletOutpoints only lists spendable outputs. Stuck money now just counts as arriving.
+    if (RESCUE_AUTO_BROADCAST && after.satoshis) {
       const rescued = await rescueStuckOutputs(after.outputs, {
         getRawTx: async (txid) => Array.from(await syncContext.services.beef.getRawTx(txid)),
         getBeef: async (txid) => Array.from(await syncContext.services.beef.getBeef(txid)),
@@ -668,6 +685,9 @@ export const initWallet = async (
     setArriving(final.satoshis);
     if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
   };
+  // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
+  const receiveGuardFlight = singleFlight(receiveGuardOnce);
+  const runReceiveGuard = () => receiveGuardFlight.run();
   const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
 
   // One address sync at a time, shared by the startup run, the background alarm and the refresh button
@@ -752,6 +772,25 @@ export const initWallet = async (
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
+    recoverFailed: () =>
+      recoverMinedFailedActions({
+        listFailed: async () =>
+          (await baseWallet.listFailedActions({ labels: [], includeOutputs: true, limit: 200 }, false))
+            .actions as unknown as FailedAction[],
+        queueUnfail: (txids) =>
+          storage.runAsStorageProvider(async (sp) => {
+            let n = 0;
+            for (const txid of txids)
+              for (const req of await sp.findProvenTxReqs({ partial: { txid } })) {
+                await sp.updateProvenTxReq(req.provenTxReqId, { status: 'unfail' });
+                n++;
+              }
+            return n;
+          }),
+        isMined: async (txid) => !!(await toolboxServices.getMerklePath(txid))?.merklePath,
+        runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
+      }),
+    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
     close,
   };
 };
