@@ -2,7 +2,7 @@ import { LockingScript, OP, P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction,
 import { OneSatServices } from '@1sat/wallet-browser';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { decrypt } from '../../utils/crypto';
-import { parseRecipient, resolveRecipient } from '../names/names';
+import { UNBOUND_NAME, opnsBinding, parseRecipient, resolveRecipient } from '../names/names';
 import type { Payee } from './pots';
 
 /**
@@ -51,6 +51,7 @@ export const payeeAddress = async (p: Payee): Promise<string> => {
   if (p.address) return p.address;
   if (!p.paymail) throw new Error('No payee address');
   const r = await resolveRecipient((u, i) => fetch(u, i), parseRecipient(p.paymail));
+  if (opnsBinding(r) === 'unbound') throw new Error(UNBOUND_NAME);
   if (r.targetKind === 'address') return r.target;
   throw new Error(`${p.paymail} only takes P2P payments, which subscriptions can’t send yet`);
 };

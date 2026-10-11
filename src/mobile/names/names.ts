@@ -309,10 +309,19 @@ export const resolveRecipient = async (
 export const TOKENS_UNSUPPORTED = "This name can't receive tokens";
 
 /** Pick the destination for a send. Tokens only go to a name with an ordinal-receive address. */
+/**
+ * "No binding, no payment" (OpNS docs; BWALLETX-MEDIA-SPEC §6.4): an OpNS name pays only once its holder has
+ * published a binding to their identity key. Never fall back to whoever holds the name ordinal right now: a
+ * sold, listed or never-published name would silently take the money.
+ */
+export const UNBOUND_NAME =
+  "This name can't receive payments yet. Ask its owner to publish it, or pay their address instead.";
+
 export const destinationFor = (
   r: Resolved,
   asset: 'bsv' | 'token',
 ): { ok: true; to: string } | { ok: false; error: string } => {
+  if (opnsBinding(r) === 'unbound') return { ok: false, error: UNBOUND_NAME };
   if (asset === 'bsv') return { ok: true, to: r.target };
   return r.ordAddress ? { ok: true, to: r.ordAddress } : { ok: false, error: TOKENS_UNSUPPORTED };
 };

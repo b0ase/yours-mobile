@@ -7,6 +7,7 @@ import {
   resolveRecipient,
   scriptToAddress,
   TOKENS_UNSUPPORTED,
+  UNBOUND_NAME,
   type Fetch,
 } from './names';
 
@@ -132,6 +133,22 @@ describe('opns resolution', () => {
     const r = await resolveRecipient(f, parseRecipient('zed'));
     expect(r.target).toBe(ADDR);
     expect(calls.at(-1)).toContain('aa_2/latest');
+  });
+
+  test('no binding, no payment: an unbound name is never paid', async () => {
+    const { f } = mock({ 'https://ordinals.gorillapool.io/api/opns/loose': { owner: ADDR } });
+    const r = await resolveRecipient(f, parseRecipient('loose'));
+    expect(r.pubkey).toBeFalsy();
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: UNBOUND_NAME });
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: UNBOUND_NAME });
+  });
+
+  test('a bound name still pays as before', async () => {
+    const { f } = mock({
+      'https://ordinals.gorillapool.io/api/opns/tied': { owner: ADDR, map: { 'opns.idKey': '03ff' } },
+    });
+    const r = await resolveRecipient(f, parseRecipient('tied'));
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: ADDR });
   });
 
   test('unregistered name errors', async () => {

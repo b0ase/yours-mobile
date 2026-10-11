@@ -166,11 +166,6 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       <Check size={11} /> Verified on chain · bound to {short(r.pubkey ?? '')}
                     </div>
                   )}
-                  {opnsBinding(r) === 'unbound' && (
-                    <div className="text-[11px]" style={{ color: '#FEC84B' }}>
-                      Not bound to a wallet yet: this pays whoever holds the name right now.
-                    </div>
-                  )}
                 </div>
               </div>
               {!d.ok ? (
