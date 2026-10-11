@@ -103,6 +103,8 @@ export interface AccountContext {
   lastAddressSyncAt: () => number;
   /** True while an address sync is running. */
   addressSyncBusy: () => boolean;
+  /** Move anything waiting in the deposit basket into the funding basket (sweepDeposit). */
+  sweepDeposits: () => Promise<{ swept?: number }>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -624,6 +626,7 @@ export const initWallet = async (
     resyncAddresses,
     lastAddressSyncAt: addressSync.lastFinishedAt,
     addressSyncBusy: addressSync.busy,
+    sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     close,
   };
 };

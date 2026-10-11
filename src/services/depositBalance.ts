@@ -37,3 +37,26 @@ export async function balanceWithDeposits(wallet: DepositLister & { balance(): P
   // Plus anything on chain at our receive addresses that storage still lacks (services/receiveGuard.ts).
   return funded + waiting + arrivingSats();
 }
+
+/**
+ * Before a createAction the wallet funds itself, move waiting deposits into the funding basket.
+ *
+ * vexvoid.com, 11 Oct 2026: a connected site's inscribe createAction failed with "Insufficient funds ... 670198
+ * more satoshis are needed, for a total of 670198" (zero inputs) while the wallet showed ~$5. createAction funds
+ * from FUNDING_BASKET ('default') only, and the money sat in the deposit basket, which the balance counts but
+ * the funder never reads. So: if anything is waiting there, sweep it first. A failed sweep never blocks the
+ * action; the action then fails on its own funding as before. Returns how many deposits were swept.
+ */
+export async function sweepWaitingDeposits(
+  wallet: DepositLister,
+  sweep: () => Promise<{ swept?: number }>,
+): Promise<number> {
+  try {
+    if ((await depositBasketSats(wallet)) <= 0) return 0;
+    const r = await sweep();
+    return r.swept ?? 0;
+  } catch (err) {
+    console.error('[sweepWaitingDeposits] sweep before createAction failed:', err);
+    return 0;
+  }
+}
