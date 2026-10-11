@@ -8,6 +8,8 @@ describe('release a broken streamed inscription', () => {
     expect(isStrandedStream({ txid: 'a', status: 'sending', description: 'Stream chunk 3/12' })).toBe(false);
     expect(isStrandedStream({ txid: 'a', status: 'nosend', description: 'Tip @aigf' })).toBe(false);
     expect(isStrandedStream({ status: 'nosend', description: 'Stream origin inscription' })).toBe(false);
+    expect(isStrandedStream({ txid: 'a', status: 'nosend', description: 'Sigma anchor output' })).toBe(true);
+    expect(isStrandedStream({ txid: 'a', status: 'completed', description: 'Sigma anchor output' })).toBe(false);
   });
 
   test('aborts the stranded ones and reports errors without throwing', async () => {
