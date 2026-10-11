@@ -62,6 +62,7 @@ import { CreateAccount } from './onboarding/CreateAccount';
 import { RestoreAccount } from './onboarding/RestoreAccount';
 import { ImportAccount } from './onboarding/ImportAccount';
 import { MasterBackupProgressEvent, streamDataToZip } from '../utils/masterExporter';
+import { accountNamesFor } from '../mobile/names/accountNames';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { PermissionsManager } from './PermissionsManager';
 import { StorageStatus } from './StorageStatus';
@@ -832,7 +833,13 @@ export const Settings = () => {
     const passwordKey = password && salt ? derivePasswordKey(password, salt) : undefined;
     // Populate overlay with all accounts
     const allAccounts = chromeStorageService.getAllAccounts();
-    setBackupAccounts(allAccounts.map((a) => ({ name: a.name, icon: a.icon || '', status: 'pending' })));
+    setBackupAccounts(
+      allAccounts.map((a) => {
+        // The account's $handle, not its placeholder name ("Account 1") (owner, 11 Oct 2026).
+        const n = accountNamesFor(a.addresses?.identityAddress, a.name);
+        return { name: n.payable ? `$${n.payable}` : n.displayName, icon: a.icon || '', status: 'pending' };
+      }),
+    );
     setBackupInProgress(true);
     setBackupDone(false);
     setBackupError('');
@@ -2009,7 +2016,7 @@ export const Settings = () => {
                   <img
                     src={acct.icon || activeCircle}
                     className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-                    alt={acct.name}
+                    alt=""
                   />
                   <span className="text-sm flex-1 truncate" style={{ color: '#FFFFFF' }}>
                     {acct.name}
