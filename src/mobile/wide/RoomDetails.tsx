@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
+import { PersonPic } from './PersonPic';
 
 /**
  * Wide layout, Chat: the third column beside the open room (wide.css .ww-room-details). Members, the token gate
@@ -60,7 +61,7 @@ export const RoomDetails = ({
             <ul className="ww-rd-people">
               {voices.map((h) => (
                 <li key={h}>
-                  <span className="ww-rd-av">{h.slice(0, 1).toUpperCase()}</span>${h}
+                  <PersonPic className="ww-rd-av" handle={h} />${h}
                 </li>
               ))}
             </ul>

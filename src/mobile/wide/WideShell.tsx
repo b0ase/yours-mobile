@@ -36,10 +36,17 @@ import { HomeButton } from '../phone/Dock';
 import { useWalletFeed } from './walletFeed';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
+import { PersonPic } from './PersonPic';
+import { JustBIntro } from './JustBIntro';
 import { WidePage, WideEmpty } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
+import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
+import { isUri } from '../../utils/uri';
+import { GENERIC_TOKEN_ICON } from '../../utils/constants';
+import { useTokenIcon } from '../tokens/tokenIcon';
+import bsvCoin from '../../assets/bsv-coin.svg';
 import './wide.css';
 
 const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
@@ -119,6 +126,29 @@ const useCurrency = () => useSyncExternalStore(onDisplayCurrencyChange, getDispl
 type Row = { id: string; sym: string; icon?: string; amt: number; price: number | null; usd: number | null };
 type SortKey = 'sym' | 'amt' | 'price' | 'usd';
 
+/** A holding's picture, as on the phone (Bsv21TokensList): BSV's coin, an on-chain icon resolved to a URL, a
+ *  personal token's creator photo, else the generic token art. Never a raw outpoint (it broke as an image). */
+const TokIcon = ({ row }: { row: Row }) => {
+  const onchain = row.icon
+    ? isUri(row.icon)
+      ? row.icon
+      : `${ONESAT_MAINNET_CONTENT_URL}/${row.icon}`
+    : GENERIC_TOKEN_ICON;
+  const icon = useTokenIcon(row.id === 'bsv' || row.id === 'mnee' ? undefined : row.id, row.sym, onchain);
+  const [broken, setBroken] = useState(false);
+  if (row.id === 'bsv') return <img className="ww-tok" src={bsvCoin} alt="" />;
+  if (row.id === 'mnee' && !row.icon) return <span className="ww-tok">{row.sym.slice(0, 2)}</span>;
+  return (
+    <img
+      className="ww-tok"
+      src={broken ? GENERIC_TOKEN_ICON : icon.url}
+      alt=""
+      referrerPolicy="no-referrer"
+      onError={() => setBroken(true)}
+    />
+  );
+};
+
 const WalletSide = () => {
   const feed = useWalletFeed();
   useCurrency();
@@ -189,11 +219,7 @@ const WalletSide = () => {
             {sorted.map((t) => (
               <tr key={t.id}>
                 <td>
-                  {t.icon ? (
-                    <img className="ww-tok" src={t.icon} alt="" />
-                  ) : (
-                    <span className="ww-tok">{t.sym.slice(0, 2)}</span>
-                  )}
+                  <TokIcon row={t} />
                   <b>{t.sym}</b>
                 </td>
                 <td className="r mono">{t.amt.toLocaleString('en-GB', { maximumFractionDigits: 8 })}</td>
@@ -291,7 +317,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       title: 'Talk',
       items: [
         { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
-        { id: 'chat', label: 'Chat', icon: I.chat, to: '/m/chat' },
+        { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat' },
         { id: 'calls', label: 'Calls', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
         { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
@@ -303,7 +329,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'feed', label: 'Feed', icon: I.feed, to: '/m/feed' },
         { id: 'media', label: 'Media', icon: I.media, to: '/m/media' },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/browser?view=bapps' },
-        { id: 'games', label: 'Games', icon: I.games, to: '/m/games' },
+        { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
         { id: 'agent', label: 'Agent b', icon: I.agent, to: '/m/agent' },
       ],
     },
@@ -413,6 +439,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   return createPortal(
     <div className="ww-root">
       <video className="ww-bg" src={bgVideo} poster={bgPoster} autoPlay muted loop playsInline />
+      <JustBIntro />
       <div className="ww-scrim" />
       <aside className="ww-sidebar">
         <div className="ww-brand">
@@ -422,7 +449,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </span>
         </div>
         <button className="ww-account" onClick={() => wwOpen('drawer')} title="Accounts">
-          <span className="ww-av">{(names.displayName || 'A').slice(0, 1).toUpperCase()}</span>
+          <PersonPic className="ww-av" handle={names.handle || account?.name || 'b'} />
           <div className="ww-grow">
             <div className="ww-clip">{names.displayName || account?.name || 'Account'}</div>
             <div className="ww-muted ww-small ww-clip">
