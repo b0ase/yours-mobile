@@ -3,7 +3,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getPersonalLink } from '../names/personalToken';
 import { identityRowText } from '../names/identityText';
-import { setChatAccount } from '../chat/chatAccount';
+import { setChatAccount, setChatReceiveAddress } from '../chat/chatAccount';
 import { markAccountUsed } from './accountMenu';
 
 /**
@@ -26,6 +26,7 @@ export const useAccountSwitch = (onSame?: () => void) => {
       await chromeStorageService.switchAccount(identityAddress);
       // Act as the new account at once (before the reload): no request may reuse the old session.
       setChatAccount(identityAddress);
+      setChatReceiveAddress(null); // the new account's address arrives with its storage refresh
       // Recent accounts sort first in the switcher (accountMenu.ts).
       markAccountUsed(identityAddress);
     } catch (err) {
