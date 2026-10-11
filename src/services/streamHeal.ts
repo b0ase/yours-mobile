@@ -13,7 +13,8 @@ import { withTimeout } from '../mobile/withTimeout';
  */
 export type StreamAction = { txid?: string; status?: string; description?: string };
 
-const STREAM_DESC = /^Stream (origin inscription|chunk \d+\/\d+)$/;
+// @1sat/actions 0.0.230 inscribe (sigma) starts with a noSend "Sigma anchor output" (vexvoid.com, 11 Oct 2026).
+const STREAM_DESC = /^(Stream (origin inscription|chunk \d+\/\d+)|Sigma anchor output)$/;
 
 export const isStrandedStream = (a: StreamAction) =>
   !!a.txid && STREAM_DESC.test(a.description ?? '') && (a.status === 'nosend' || a.status === 'unsigned');
