@@ -11,7 +11,7 @@ import { ArrowLeft, MessageCircle, Radio, RefreshCw } from 'lucide-react';
 import { requestRoomByTicker } from '../chat/segmentNav';
 import { isNative } from '../native';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
-import { roomTitle, type ChatRoom } from '../chat/messages';
+import { isDirectRoom, roomTitle, type ChatRoom } from '../chat/messages';
 import {
   audienceCount,
   audienceLine,
@@ -102,8 +102,12 @@ const SpacesPage = () => {
   }, [load]);
 
   const live = (rows ?? []).filter((r) => r.state.space);
+  // One-to-one chats are private: never offered as a place to go live (owner, 11 Oct 2026).
   const hostable = (rows ?? []).filter(
-    (r) => !r.state.space && canHostRoom({ me, createdBy: r.room.created_by_handle, spaceOpen: roomSpaceOpen(r.room) }),
+    (r) =>
+      !r.state.space &&
+      !isDirectRoom(r.room) &&
+      canHostRoom({ me, createdBy: r.room.created_by_handle, spaceOpen: roomSpaceOpen(r.room) }),
   );
 
   return (
