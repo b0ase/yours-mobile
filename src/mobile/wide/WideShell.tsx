@@ -37,7 +37,6 @@ import { useWalletFeed } from './walletFeed';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
-import { JustBIntro } from './JustBIntro';
 import { WidePage, WideEmpty } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
@@ -439,7 +438,6 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   return createPortal(
     <div className="ww-root">
       <video className="ww-bg" src={bgVideo} poster={bgPoster} autoPlay muted loop playsInline />
-      <JustBIntro />
       <div className="ww-scrim" />
       <aside className="ww-sidebar">
         <div className="ww-brand">
