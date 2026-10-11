@@ -1,6 +1,8 @@
 /* global chrome */
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
-import { balanceWithDeposits, sweepWaitingDeposits } from './services/depositBalance';
+import { balanceWithDeposits } from './services/depositBalance';
+import { arrivingSats } from './services/receiveGuard';
+import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
@@ -3243,6 +3245,7 @@ if (isInServiceWorker) {
     message: { params: CreateActionArgs; originator?: string },
     sendResponse: CallbackResponse,
   ) => {
+    let fundingSnap: FundingSnapshot | undefined;
     try {
       const w = await ensureWallet();
       await ensureUsbSeen('build and sign a transaction', message.originator);
@@ -3264,12 +3267,18 @@ if (isInServiceWorker) {
       const usesSendAllSentinel = message.params.outputs?.some((o) => o.satoshis === 2099999999999999) === true;
       const signer = isAdmin && usesSendAllSentinel && accountContext?.baseWallet ? accountContext.baseWallet : w;
 
-      // createAction funds from the 'default' basket only; money still in the deposit basket (counted in the
-      // balance) would be invisible to it (services/depositBalance.ts, vexvoid.com 11 Oct 2026).
+      // createAction funds from managed change in the 'default' basket only; money the balance shows in the
+      // deposit basket or still arriving would be invisible to it (services/fundingPrep.ts, vexvoid.com 11 Oct 2026).
       if (accountContext) {
         const ctx = accountContext;
-        const swept = await sweepWaitingDeposits(ctx.baseWallet, ctx.sweepDeposits);
-        if (swept) console.log(`[createAction] Swept ${swept} waiting deposit(s) before funding`);
+        fundingSnap = await prepareFunding({
+          wallet: ctx.baseWallet as unknown as Parameters<typeof prepareFunding>[0]['wallet'],
+          sweep: ctx.sweepDeposits,
+          arriving: arrivingSats,
+          creditArriving: ctx.creditArriving,
+        });
+      } else {
+        console.warn('[createAction] no account context: skipping funding preparation');
       }
 
       const result = await signer.createAction(message.params, message.originator);
@@ -3314,10 +3323,12 @@ if (isInServiceWorker) {
       const errorStack = error instanceof Error ? error.stack : undefined;
       console.error('[createAction] Error:', errorName, errorMessage);
       if (errorStack) console.error('[createAction] Stack:', errorStack);
+      const friendly = fundingSnap && isInsufficientFunds(error) ? insufficientFundsMessage(error, fundingSnap) : null;
+      if (friendly) console.error('[createAction] Funding:', friendly);
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
         success: false,
-        error: errorMessage,
+        error: friendly ?? errorMessage,
       });
     }
     return true;
