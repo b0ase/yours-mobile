@@ -347,6 +347,36 @@ body,
   /* Secondary text and icons brighten as the card turns gold, to keep contrast. */
   --bw-wcard-muted: color-mix(in srgb, #8e8e89, #fff4d8 calc(var(--gold) * 100%));
 }
+/* bWalletX card front: the account's bAvatar art (cardFrontArt.ts) under a dark shade, so the white/gold text
+   and buttons keep WCAG AA (the shade alone takes the brightest art, pale gold #f6dc8a, to about 1:0.25 of its colour (sRGB):
+   white text >= 4.5:1). isolation keeps the art's negative z-index inside the face, above its background. */
+.bw-wcard-front.has-art {
+  isolation: isolate;
+}
+.bw-wcard-art,
+.bw-wcard-art-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+}
+.bw-wcard-art {
+  object-fit: cover;
+  object-position: center;
+  user-select: none;
+}
+.bw-wcard-art-shade {
+  background:
+    linear-gradient(90deg, rgb(0 0 0 / 0.72) 0%, rgb(0 0 0 / 0.65) 55%, rgb(0 0 0 / 0.62) 100%),
+    linear-gradient(180deg, rgb(0 0 0 / 0.3) 0%, rgb(0 0 0 / 0.55) 100%),
+    linear-gradient(
+      160deg,
+      rgb(140 101 26 / calc(var(--gold) * 0.45)) 0%,
+      rgb(92 64 12 / calc(var(--gold) * 0.45)) 100%
+    );
+}
 /* bWallet (store) edition: a yellow card with black text (WalletCard YELLOW_CARD). Contrast on the darkest yellow
    (#e0a400): text #0b0b0c 8.9:1, muted #3d3000 5.9:1, ok-green #044a23 4.7:1, flashes 4.7:1 or more. */
 .bw-wcard.is-yellow .bw-wcard-face {
