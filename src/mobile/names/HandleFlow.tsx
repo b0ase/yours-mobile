@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
 import { payNameFee } from './nameFee';
 import { askNotifyPermissionOnce } from '../notify/engine';
@@ -261,7 +262,10 @@ export const HandleFlow = ({
     error: "Couldn't check. Check your connection.",
   };
 
-  return (
+  // Portalled to <body>: opened from inside the wallet page (WalletCard, TopNav), a transformed ancestor such as
+  // the pull-to-refresh container became the containing block of this fixed sheet, so it drew inside the page
+  // between the card and the token list and its Close/Done were hard or impossible to reach (owner, 11 Oct 2026).
+  return createPortal(
     <div
       className="fixed inset-0 z-[400] flex flex-col overflow-y-auto"
       style={{
@@ -486,6 +490,7 @@ export const HandleFlow = ({
           onCancel={() => setConfirming(false)}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
