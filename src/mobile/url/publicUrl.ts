@@ -6,22 +6,17 @@
  *   /m/<page>              ↔ /<page>
  * Top-level app routes (/bsv-wallet, /settings, …) keep their own path.
  */
-const TOP = new Set([
-  '/bsv-wallet',
-  '/ord-wallet',
-  '/tools',
-  '/settings',
-  '/browser',
-  '/sweep',
-  '/master-restore',
-  '/create-wallet',
-  '/restore-wallet',
-  '/import-wallet',
-]);
+const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/browser']);
+/**
+ * Set-up and restore screens are never put in the address bar or reopened from it: restoring reloads the page, and
+ * reopening /restore-wallet after that reload sent people round in a loop (owner, 11 Oct 2026).
+ */
+const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore', '/sweep']);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 
 /** Router location → address-bar path (with any remaining query). */
 export const toPublic = (pathname: string, search: string): string => {
+  if (ONBOARDING.has(pathname)) return '/';
   const q = new URLSearchParams(search);
   let path = pathname;
   if (path === '/m/spaces' && SLUG.test(q.get('space') ?? '')) {
@@ -35,7 +30,7 @@ export const toPublic = (pathname: string, search: string): string => {
 /** Address-bar path on first load → router path to open, or null to keep the app's own start. */
 export const toRouter = (pathname: string, search: string): string | null => {
   const path = pathname.replace(/\/+$/, '') || '/';
-  if (path === '/' || /\.[a-z0-9]+$/i.test(path)) return null;
+  if (path === '/' || ONBOARDING.has(path) || /\.[a-z0-9]+$/i.test(path)) return null;
   const q = search.replace(/^\?/, '');
   const withQ = (p: string, extra?: string) => {
     const all = [extra, q].filter(Boolean).join('&');

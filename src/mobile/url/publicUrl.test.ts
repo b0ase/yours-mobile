@@ -27,4 +27,9 @@ describe('toRouter', () => {
     expect(toRouter('/', '')).toBeNull();
     expect(toRouter('/desktop.html', '')).toBeNull();
   });
+  test('restore and set-up screens never reopen from the URL (reload loop)', () => {
+    expect(toRouter('/restore-wallet', '')).toBeNull();
+    expect(toRouter('/master-restore', '')).toBeNull();
+    expect(toPublic('/restore-wallet', '')).toBe('/');
+  });
 });
