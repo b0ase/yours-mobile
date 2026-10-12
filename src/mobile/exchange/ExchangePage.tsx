@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Search, Star } from 'lucide-react';
+import { Search, Star, Users } from 'lucide-react';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { YoursEventName } from '../../inject';
@@ -20,6 +20,7 @@ import { SWAP_ENABLED } from '../storeBuild';
 import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
+import { PeopleMarket } from './PeopleMarket';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
 import { useRegistry } from './registry/useRegistry';
 import { categoryLabel, filterSearch, matches, parseFilter, type Filter } from './registry/catalog';
@@ -142,6 +143,14 @@ const Markets = ({
   const [extra, setExtra] = useState<Record<string, RowStats>>({});
   const [q, setQ] = useState('');
   const [onlyFavs, setOnlyFavs] = useState(false);
+  const people = new URLSearchParams(search).get('people') === '1';
+  const setPeople = (on: boolean) => {
+    const sp = new URLSearchParams(search);
+    if (on) sp.set('people', '1');
+    else sp.delete('people');
+    const s = sp.toString();
+    navigate(`${pathname}${s ? `?${s}` : ''}`, { replace: true });
+  };
   const [shown, setShown] = useState(40);
 
   const all = useMemo(() => board ?? [], [board]);
@@ -220,107 +229,126 @@ const Markets = ({
         >
           <Star size={14} color={GOLD} fill={onlyFavs ? GOLD : 'none'} /> Favourites
         </button>
+        <button
+          type="button"
+          onClick={() => setPeople(!people)}
+          aria-pressed={people}
+          className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold border cursor-pointer"
+          style={{
+            background: people ? '#2a2100' : '#17191E',
+            borderColor: people ? GOLD : '#2b2f36',
+            color: GOLD,
+          }}
+        >
+          <Users size={14} color={GOLD} /> Friends
+        </button>
       </div>
 
-      {registry && labels.length > 0 && (
-        <FilterBar labels={labels} filter={filter} registry={registry} onChange={setFilter} />
-      )}
-
-      {loading ? (
-        <Loading text="Loading markets…" />
-      ) : !list.length ? (
-        <p className="text-sm text-center py-8" style={{ color: MUTED }}>
-          {onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
-        </p>
+      {people ? (
+        <PeopleMarket rate={rate} q={q} />
       ) : (
-        <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs" style={{ color: MUTED }}>
-                <th className="w-8" />
-                <th className="text-left font-semibold py-2">Token</th>
-                <th className="text-right font-semibold">Price / token</th>
-                <th className="text-right font-semibold">24h</th>
-                <th className="text-right font-semibold hidden md:table-cell">24h volume</th>
-                <th className="text-right font-semibold hidden md:table-cell pr-3">For sale</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((r) => {
-                const x = extra[r.ref.id];
-                const price = x?.stats?.last ?? x?.floor ?? null;
-                const ch = x?.stats?.change ?? null;
-                const fav = favs.includes(r.ref.id);
-                return (
-                  <tr
-                    key={r.ref.id}
-                    onClick={() => navigate(tradeRoute(r.ref.id))}
-                    className="border-t border-[#2b2f36] cursor-pointer hover:bg-[#1e2127]"
-                  >
-                    <td className="pl-2">
-                      <button
-                        type="button"
-                        aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onFav(r.ref.id);
-                        }}
-                        className="w-7 h-7 grid place-items-center bg-transparent border-0 cursor-pointer"
-                      >
-                        <Star size={15} color={GOLD} fill={fav ? GOLD : 'none'} />
-                      </button>
-                    </td>
-                    <td className="py-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <TokenIcon icon={r.icon} sym={r.title} size={28} />
-                        <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
-                        {registry && (
-                          <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
-                            {categoryLabel(registry.labels(r.ref.id).category)}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-right text-white whitespace-nowrap">
-                      {x ? (price === null ? '—' : unitPriceLabel(price)) : '…'}
-                      {price !== null && fiatLabel(price, rate) && (
-                        <div className="text-[11px]" style={{ color: MUTED }}>
-                          {fiatLabel(price, rate)}
-                        </div>
-                      )}
-                    </td>
-                    <td
-                      className="text-right font-semibold whitespace-nowrap"
-                      style={{ color: ch === null ? MUTED : ch >= 0 ? GREEN : RED }}
-                    >
-                      {x ? changeLabel(ch) : '…'}
-                    </td>
-                    <td className="text-right text-white whitespace-nowrap hidden md:table-cell">
-                      {x?.stats ? (x.stats.volume ? bsvLabel(x.stats.volume) : '—') : '…'}
-                    </td>
-                    <td className="text-right whitespace-nowrap hidden md:table-cell pr-3" style={{ color: MUTED }}>
-                      {x ? x.live : '…'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {list.length > shown && (
-            <button
-              type="button"
-              onClick={() => setShown((n) => n + 40)}
-              className="w-full py-3 text-xs font-bold border-0 bg-transparent cursor-pointer"
-              style={{ color: GOLD }}
-            >
-              Show more ({list.length - shown})
-            </button>
+        <>
+          {registry && labels.length > 0 && (
+            <FilterBar labels={labels} filter={filter} registry={registry} onChange={setFilter} />
           )}
-        </div>
+
+          {loading ? (
+            <Loading text="Loading markets…" />
+          ) : !list.length ? (
+            <p className="text-sm text-center py-8" style={{ color: MUTED }}>
+              {onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
+            </p>
+          ) : (
+            <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs" style={{ color: MUTED }}>
+                    <th className="w-8" />
+                    <th className="text-left font-semibold py-2">Token</th>
+                    <th className="text-right font-semibold">Price / token</th>
+                    <th className="text-right font-semibold">24h</th>
+                    <th className="text-right font-semibold hidden md:table-cell">24h volume</th>
+                    <th className="text-right font-semibold hidden md:table-cell pr-3">For sale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((r) => {
+                    const x = extra[r.ref.id];
+                    const price = x?.stats?.last ?? x?.floor ?? null;
+                    const ch = x?.stats?.change ?? null;
+                    const fav = favs.includes(r.ref.id);
+                    return (
+                      <tr
+                        key={r.ref.id}
+                        onClick={() => navigate(tradeRoute(r.ref.id))}
+                        className="border-t border-[#2b2f36] cursor-pointer hover:bg-[#1e2127]"
+                      >
+                        <td className="pl-2">
+                          <button
+                            type="button"
+                            aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onFav(r.ref.id);
+                            }}
+                            className="w-7 h-7 grid place-items-center bg-transparent border-0 cursor-pointer"
+                          >
+                            <Star size={15} color={GOLD} fill={fav ? GOLD : 'none'} />
+                          </button>
+                        </td>
+                        <td className="py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <TokenIcon icon={r.icon} sym={r.title} size={28} />
+                            <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                            {registry && (
+                              <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
+                                {categoryLabel(registry.labels(r.ref.id).category)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="text-right text-white whitespace-nowrap">
+                          {x ? (price === null ? '—' : unitPriceLabel(price)) : '…'}
+                          {price !== null && fiatLabel(price, rate) && (
+                            <div className="text-[11px]" style={{ color: MUTED }}>
+                              {fiatLabel(price, rate)}
+                            </div>
+                          )}
+                        </td>
+                        <td
+                          className="text-right font-semibold whitespace-nowrap"
+                          style={{ color: ch === null ? MUTED : ch >= 0 ? GREEN : RED }}
+                        >
+                          {x ? changeLabel(ch) : '…'}
+                        </td>
+                        <td className="text-right text-white whitespace-nowrap hidden md:table-cell">
+                          {x?.stats ? (x.stats.volume ? bsvLabel(x.stats.volume) : '—') : '…'}
+                        </td>
+                        <td className="text-right whitespace-nowrap hidden md:table-cell pr-3" style={{ color: MUTED }}>
+                          {x ? x.live : '…'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {list.length > shown && (
+                <button
+                  type="button"
+                  onClick={() => setShown((n) => n + 40)}
+                  className="w-full py-3 text-xs font-bold border-0 bg-transparent cursor-pointer"
+                  style={{ color: GOLD }}
+                >
+                  Show more ({list.length - shown})
+                </button>
+              )}
+            </div>
+          )}
+          <p className="text-[11px]" style={{ color: MUTED }}>
+            Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks.
+          </p>
+        </>
       )}
-      <p className="text-[11px]" style={{ color: MUTED }}>
-        Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks.
-      </p>
     </div>
   );
 };

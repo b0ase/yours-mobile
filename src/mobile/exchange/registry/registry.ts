@@ -103,10 +103,12 @@ export const loadRegistry = (): Promise<Registry> =>
       tokens: t.default.tokens,
       overrides: o.default as BuiltIn['overrides'],
     };
-    const [feed, manifests] = await Promise.all([
+    const [blast, people, manifests] = await Promise.all([
       blastPadFeed(),
+      import('../people').then((m) => m.peopleFeed()).catch(() => new Map<string, Labels>()),
       Promise.all(b.overrides.remotePlatforms.map((r) => loadManifest(r.domain, r.identityKey))),
     ]);
+    const feed = new Map([...blast, ...people]);
     return buildRegistry(
       b,
       feed,
