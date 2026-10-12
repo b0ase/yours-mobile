@@ -18,7 +18,8 @@ Where they show today: phone Wallet › NFTs (`MediaSection`), Media/bMusic (`Me
 ## Actions that work today (and only these are offered)
 
 - **Send**: `sendOrdinals` through the existing `NftDetail` sheet (name box → "Send to <name>"), which goes through the wallet's one-sheet approval.
-- **Cancel listing**: `cancelOrdinalListing` (as Market and OrdWallet do).
+- **OrdLock v2 only** (1Sat withdrew v1 on 12 Oct 2026): an item counts as listed only with the `ordlock2` tag. Items still in a v1 lock are never shown as for sale; the panel says so and Send is off.
+- **Cancel listing** (v2): `cancelOrdinalListing` (as Market and OrdWallet do).
 - **List / change price: not offered.** OrdLock listing creation for ordinals is disabled (`ORDLOCK_LISTING_DISABLED`, `utils/cancelOrdLockListings.ts`); bWallet's Sell covers BSV-21 only. Existing listings show their price and can be cancelled.
 - **Download** (fetch from ORDFS → file), **Open on chain** (WhatsOnChain tx), **History** (mint tx on WoC + 1satordinals.com), **Copy link** (`/wallet/nfts/<outpoint>`).
 - Burn and Set-as-avatar stay in the phone sheet (Burn is reachable from the Send sheet, unchanged).

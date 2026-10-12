@@ -335,7 +335,13 @@ const DetailPanel = ({
           <Row label="Outpoint">{it.outpoint}</Row>
           <Row label="Origin">{it.origin}</Row>
           <Row label="Minted">{facts.mintDate ?? (it.pending ? 'Not yet' : '…')}</Row>
-          <Row label="Held in">{it.listed ? 'This wallet, in a sale listing' : 'This wallet'}</Row>
+          <Row label="Held in">
+            {it.listed
+              ? 'This wallet, in a sale listing (OrdLock v2)'
+              : it.legacyListing
+                ? 'This wallet, in a withdrawn OrdLock v1 listing'
+                : 'This wallet'}
+          </Row>
           <Row label="File">
             {it.contentType ?? 'Unknown type'}
             {facts.size ? ` · ${facts.size}` : ''}
@@ -354,7 +360,7 @@ const DetailPanel = ({
 
         <div className="grid grid-cols-2 gap-2">
           <button
-            disabled={off || it.listed}
+            disabled={off || it.listed || it.legacyListing}
             title={it.listed ? 'Cancel the listing first' : undefined}
             onClick={() => setSending(true)}
             className={`${btn} text-[#010101]`}
@@ -384,6 +390,12 @@ const DetailPanel = ({
             <Copy size={15} /> Copy link
           </button>
         </div>
+        {it.legacyListing && (
+          <p className="text-[11px] text-[#F5B800]">
+            This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it isn’t for sale and can’t be
+            sent from here.
+          </p>
+        )}
         {it.pending && <p className="text-[11px] text-[#98A2B3]">Actions are off until it’s on chain.</p>}
         {msg && <p className="text-xs text-[#98A2B3] break-all">{msg}</p>}
       </div>
