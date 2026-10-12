@@ -81,6 +81,14 @@ import {
   requestFingerprint,
 } from './services/repeatGuard';
 import { releasedMessage } from './services/stuckSends';
+import {
+  createActionBytes,
+  kickSendWaiting,
+  pendingShape,
+  shouldDelay,
+  signActionBytes,
+  withDelayedBroadcast,
+} from './services/bigDelayed';
 import { CALL_NOTIFICATION_PREFIX, CALL_RING_ALARM, callNotification, callsToAnnounce, fetchIncoming } from './services/callRinger';
 import { openCallsWindow } from './mobile/calls/popout';
 import {
@@ -3407,9 +3415,16 @@ if (isInServiceWorker) {
         console.warn('[createAction] no account context: skipping funding preparation');
       }
 
+      // A big transaction goes to the background sender, so the site gets {txid, pending} at once instead of
+      // waiting on a long upload (services/bigDelayed.ts, owner 12 Oct 2026). Small ones are never changed.
+      const bytes = createActionBytes(message.params);
+      const delayed = shouldDelay(bytes, message.params.options);
+      const args = delayed ? withDelayedBroadcast(message.params) : message.params;
+      if (delayed) console.log(`[createAction] ${bytes} bytes: sending in the background`);
+
       let result: Awaited<ReturnType<typeof signer.createAction>>;
       try {
-        result = await signer.createAction(message.params, message.originator);
+        result = await signer.createAction(args, message.originator);
       } catch (err) {
         // Queued to retry is not a failure: the wallet will send it. Say so, and guard against paying again.
         if (queuedSend(err)) {
@@ -3423,6 +3438,13 @@ if (isInServiceWorker) {
         throw err;
       }
       console.log('[createAction] Success');
+      const ref = result.signableTransaction?.reference;
+      if (bigRefBytes.size > 200) bigRefBytes.clear();
+      if (ref && bytes > 0) bigRefBytes.set(ref, bytes + (result.signableTransaction?.tx?.length ?? 0));
+      if (delayed && result.txid) {
+        result = pendingShape(result);
+        if (accountContext) kickSendWaiting(accountContext.sendWaitingNow);
+      }
       await withRepeatGuard((g) =>
         g.record(fingerprint, {
           origin: message.originator,
@@ -3491,6 +3513,15 @@ if (isInServiceWorker) {
     });
   };
 
+  /** Bytes known for a signable action's reference (set at createAction; storage when the worker restarted). */
+  const bigRefBytes = new Map<string, number>();
+  const signableBytes = async (reference: string | undefined): Promise<number> => {
+    if (!reference) return 0;
+    const known = bigRefBytes.get(reference);
+    if (known !== undefined) return known;
+    return accountContext ? await accountContext.referenceBytes(reference).catch(() => 0) : 0;
+  };
+
   const processCWISignAction = async (
     message: { params: SignActionArgs; originator?: string },
     sendResponse: CallbackResponse,
@@ -3500,7 +3531,16 @@ if (isInServiceWorker) {
       await ensureUsbSeen('sign a transaction', message.originator);
 
       markChainStep();
-      const result = await w.signAction(message.params, message.originator);
+      // Big: the background sender uploads it (services/bigDelayed.ts).
+      const bytes = (await signableBytes(message.params.reference)) + signActionBytes(message.params);
+      const delayed = shouldDelay(bytes, message.params.options);
+      if (delayed) console.log(`[signAction] ${bytes} bytes: sending in the background`);
+      bigRefBytes.delete(message.params.reference);
+      let result = await w.signAction(delayed ? withDelayedBroadcast(message.params) : message.params, message.originator);
+      if (delayed && result?.txid) {
+        result = pendingShape(result);
+        if (accountContext) kickSendWaiting(accountContext.sendWaitingNow);
+      }
       console.log('[signAction] Success', result?.txid ? `txid=${result.txid}` : '');
       await withRepeatGuard((g) => g.signed(message.params.reference, result?.txid));
       // The step that broadcasts the batch ends the chain; otherwise it stays active for the next step.

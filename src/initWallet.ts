@@ -145,6 +145,10 @@ export interface AccountContext {
   recoverFailed: () => Promise<RecoverReport>;
   /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
   releaseStuckSends: () => Promise<ReleaseReport>;
+  /** Run the Monitor's SendWaiting task now (a big send was queued: services/bigDelayed.ts). */
+  sendWaitingNow: () => Promise<string>;
+  /** Bytes storage holds for an action reference (unsigned tx + input BEEF), 0 when unknown. */
+  referenceBytes: (reference: string) => Promise<number>;
   /** True when the network already knows this txid (never abort such an action). */
   knownOnChain: (txid: string) => Promise<boolean>;
   /** Call to stop sync and destroy wallet */
@@ -845,6 +849,12 @@ export const initWallet = async (
         runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
       }),
     knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    sendWaitingNow: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
+    referenceBytes: (reference) =>
+      storage.runAsStorageProvider(async (sp) => {
+        const [t] = await sp.findTransactions({ partial: { reference } });
+        return (t?.rawTx?.length ?? 0) + (t?.inputBEEF?.length ?? 0);
+      }),
     releaseStuckSends: () =>
       releaseStuckSends({
         listQueued: () =>
