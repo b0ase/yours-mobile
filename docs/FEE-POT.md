@@ -67,7 +67,7 @@ Vercel. Rotate by setting a new key and sweeping the old address.
 ## What the owner does
 
 1. Say the server is clean.
-2. Approve and run `supabase/migrations/20261014_feepot.sql` (bitcoin-music).
+2. Approve and run `supabase/migrations/20261014b_feepot.sql` (bitcoin-music).
 3. Generate a key, set `FEE_POT_WIF` and `FEE_POT_MONTHLY_SATS` on the bitcoin-music Vercel project, fund the address
    (≈ $10/month).
 4. Set `FEE_POT_ENABLED=1` on the server, then build the wallet with `VITE_FEE_POT=1`.
