@@ -28,6 +28,7 @@ import { lockCandidates } from '../feed/locks';
 import { parseBmapFeed, parseTwetchFeed, TWETCH_API, type FeedPost } from '../feed/post';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { isRoomMuted } from '../chat/listPrefs';
+import { liveHub } from '../chat/live';
 import { subscribe as subscribeCalls } from '../calls/store';
 import { App } from '@capacitor/app';
 import { ONESAT, search, type SearchRow } from '../market/indexer';
@@ -71,6 +72,7 @@ let me: Me | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let unsubCalls: (() => void) | null = null;
+let unsubLive: (() => void) | null = null;
 let resumeSub: { remove: () => Promise<void> } | null = null;
 let tapSub: { remove: () => Promise<void> } | null = null;
 
@@ -614,6 +616,20 @@ export function startNotify(next: Me) {
         .then((h) => (tapSub = h))
         .catch(() => undefined);
     schedule(5_000);
+    // Live chat (chat/live.ts): a new message in an unmuted room polls now instead of in 90 s.
+    const lh = liveHub();
+    if (lh) {
+      const release = lh.acquire();
+      const off = lh.on('message.new', undefined, (ev) => {
+        const handle = loadSession()?.handle;
+        if (!me || !ev.room || (handle && isRoomMuted(handle, ev.room))) return;
+        schedule(1_500);
+      });
+      unsubLive = () => {
+        off();
+        release();
+      };
+    }
   }
 }
 
@@ -623,6 +639,8 @@ export function stopNotify() {
   timer = null;
   unsubCalls?.();
   unsubCalls = null;
+  unsubLive?.();
+  unsubLive = null;
   void resumeSub?.remove();
   resumeSub = null;
   void tapSub?.remove();

@@ -23,12 +23,12 @@ export type BillingConfig = {
 };
 export type RemoteConfig = {
   billing: BillingConfig;
-  features: { subscriptions: boolean; presigned: boolean; pnee: boolean };
+  features: { subscriptions: boolean; presigned: boolean; pnee: boolean; liveChat: boolean };
 };
 
 export const DEFAULT_CONFIG: RemoteConfig = {
   billing: { enabled: false, usdPerDay: 0.01, graceDays: 30, freeBefore: null, grandfatherCreatedBefore: null },
-  features: { subscriptions: true, presigned: false, pnee: false },
+  features: { subscriptions: true, presigned: false, pnee: false, liveChat: true },
 };
 
 const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
@@ -71,6 +71,8 @@ export const parseConfig = (raw: unknown, pubkey = CONFIG_PUBKEY, billingBuild =
         subscriptions: bool(f.subscriptions, d.features.subscriptions),
         presigned: bool(f.presigned, d.features.presigned),
         pnee: bool(f.pnee, d.features.pnee),
+        // Live chat stream (chat/live.ts): on unless the config says `liveChat: false`.
+        liveChat: bool(f.liveChat, d.features.liveChat),
       },
     };
   } catch {
