@@ -146,6 +146,8 @@ export function saveCardArtLook(identityPubKey: string | null | undefined, look:
 const IMG_KEY = (key: string) => 'bw-card-img:' + key.toLowerCase();
 /** Longest side of a stored card picture, in pixels; JPEG quality. ~100-200 KB per picture. */
 export const CARD_IMG_MAX = 900;
+/** Fired when a card picture is saved from elsewhere (e.g. bPics › Use on my card) so the card re-reads it. */
+export const CARD_IMG_EVENT = 'bw-card-img-changed';
 const CARD_IMG_QUALITY = 0.84;
 
 export function loadCardImage(identityPubKey: string | null | undefined): string | null {
@@ -164,6 +166,7 @@ export function saveCardImage(identityPubKey: string | null | undefined, uri: st
   try {
     if (uri) localStorage.setItem(IMG_KEY(identityPubKey), uri);
     else localStorage.removeItem(IMG_KEY(identityPubKey));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(CARD_IMG_EVENT));
     return true;
   } catch {
     return false;
@@ -178,7 +181,7 @@ export function fitWithin(w: number, h: number, max = CARD_IMG_MAX): { w: number
 }
 
 /** Reads a picture the user picked and returns a resized JPEG data URI, or throws a plain-English error. */
-export async function prepareCardImage(file: Blob): Promise<string> {
+export async function prepareCardImage(file: Blob, max = CARD_IMG_MAX, quality = CARD_IMG_QUALITY): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('That file isn’t a picture.');
   const url = URL.createObjectURL(file);
   try {
@@ -188,7 +191,7 @@ export async function prepareCardImage(file: Blob): Promise<string> {
       i.onerror = () => reject(new Error('That picture couldn’t be opened.'));
       i.src = url;
     });
-    const { w, h } = fitWithin(img.naturalWidth, img.naturalHeight);
+    const { w, h } = fitWithin(img.naturalWidth, img.naturalHeight, max);
     if (!w) throw new Error('That picture couldn’t be opened.');
     const c = document.createElement('canvas');
     c.width = w;
@@ -198,7 +201,7 @@ export async function prepareCardImage(file: Blob): Promise<string> {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(img, 0, 0, w, h);
-    return c.toDataURL('image/jpeg', CARD_IMG_QUALITY);
+    return c.toDataURL('image/jpeg', quality);
   } finally {
     URL.revokeObjectURL(url);
   }

@@ -36,6 +36,7 @@ import { PHONE_APPS_TOP, PHONE_GO } from './phone/events';
 import { useInPeek } from './phone/pageEl';
 import bGlyph from './brand/bwallet-glyph.svg';
 import bspacesGlyph from './brand/bspaces-glyph.svg';
+import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
@@ -219,7 +220,9 @@ const AGENT_TILE: Tile = { key: AGENT_KEY, name: 'Agent b', url: '/m/agent', ico
 /** bSpaces (docs/BSPACES-PLAN.md): live audio/video spaces in your token rooms. bWalletX only (no token rooms in a store build). */
 const BSPACES_KEY = 'sys:bspaces';
 const BSPACES_TILE: Tile = { key: BSPACES_KEY, name: 'bSpaces', url: '/m/spaces', icon: bspacesGlyph };
-const SYS_TILES: Tile[] = BSPACES_ENABLED ? [AGENT_TILE, BSPACES_TILE] : [AGENT_TILE];
+/** bPics (owner, 12 Oct 2026; src/mobile/bpics): mint your photos as ordinals, browse shared ones. Both editions. */
+const BPICS_TILE: Tile = { key: 'sys:bpics', name: 'bPics', url: '/m/bpics', icon: bpicsGlyph };
+const SYS_TILES: Tile[] = BSPACES_ENABLED ? [AGENT_TILE, BPICS_TILE, BSPACES_TILE] : [AGENT_TILE, BPICS_TILE];
 /** Wallet screens rather than web apps: they open by route. */
 const isSys = (t: Tile) => t.key.startsWith('sys:');
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));

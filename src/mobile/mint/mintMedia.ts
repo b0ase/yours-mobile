@@ -19,6 +19,8 @@ export type MintMediaInput = {
   collection: Collection;
   /** The 1% mint fee in sats (estimateCost().feeSats); 0 = no fee output. */
   feeSats: number;
+  /** MAP to inscribe instead of buildMap's (no collection only), e.g. bPics' share tag (bpics/bpics.ts). */
+  map?: Record<string, string>;
 };
 export type MintMediaResult = {
   txid: string;
@@ -79,7 +81,7 @@ export async function mintMedia(apiContext: OneSatContext, m: MintMediaInput): P
     res = await inscribe.execute(signed(withFeeOutput(base, feeSats)), {
       base64Content,
       contentType,
-      map: buildMap({ title: name, description, collection }),
+      map: m.map ?? buildMap({ title: name, description, collection }),
     });
   } else {
     collectionId = collection.kind === 'existing' ? collection.id : '';
