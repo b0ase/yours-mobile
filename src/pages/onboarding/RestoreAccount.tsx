@@ -13,6 +13,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { PageLoader } from '../../components/PageLoader';
 import { Show } from '../../components/Show';
+import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { ToggleSwitch } from '../../components/ToggleSwitch';
 import { WalletRow } from '../../components/WalletRow';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -627,7 +628,8 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false, onNewAccount
   return (
     <Show when={!loading} whenFalseContent={<PageLoader theme={theme} message="Restoring..." />}>
       {/* my-auto: centred when short, top-aligned (not clipped) when taller than the wallet box. */}
-      <div className="flex flex-col items-center w-full px-2 pt-4 pb-4 my-auto">
+      <div className="flex flex-col items-center w-full px-2 pt-4 pb-4 my-auto" style={{ isolation: 'isolate' }}>
+        <ObsidianBackdrop />
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div

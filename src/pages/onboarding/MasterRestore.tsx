@@ -5,6 +5,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { PageLoader } from '../../components/PageLoader';
 import { Show } from '../../components/Show';
+import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -113,7 +114,8 @@ export const MasterRestore = () => {
       when={!loading}
       whenFalseContent={<PageLoader theme={theme} message={loaderMessage} showProgressBar barProgress={progress} />}
     >
-      <div className="flex flex-col items-center w-full px-2 pt-4 pb-20">
+      <div className="flex flex-col items-center w-full px-2 pt-4 pb-20" style={{ isolation: 'isolate' }}>
+        <ObsidianBackdrop />
         <div className="flex w-full items-center gap-3 px-2 pb-4">
           <motion.button
             whileTap={{ scale: 0.9 }}

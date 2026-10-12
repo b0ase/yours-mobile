@@ -7,6 +7,7 @@ import { Input } from './Input';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { YoursIcon } from './YoursIcon';
 import { QuickUnlock } from './QuickUnlock';
+import { ObsidianBackdrop } from '../mobile/ui/ObsidianBackdrop';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import {
   type StickProbe,
@@ -326,8 +327,11 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
         backgroundColor: bg,
         color: contrast,
         zIndex: 100,
+        position: 'relative',
+        isolation: 'isolate',
       }}
     >
+      <ObsidianBackdrop />
       {/* Logo */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
