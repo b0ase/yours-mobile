@@ -5,21 +5,10 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { useBackClose } from '../backStack';
 import { dockKey, moveInDock, removeFromDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
-import { hapticTick, startVoice, voiceSupported, type VoiceStart } from '../agent/voice';
-import { usableTranscript, voiceNote } from '../agent/voiceText';
-import { levelToBars } from '../spaces/levelMeter';
-import {
-  bHold,
-  B_HOLD_IDLE,
-  B_HOLD_MS,
-  DOCK_LONG_PRESS_MS,
-  edgeFade,
-  fadeMask,
-  longPressCancelled,
-  type BHoldEvent,
-  type BHoldPhase,
-  type BHoldState,
-} from './gesture';
+import { voiceNote } from '../agent/voiceText';
+import { useHoldToTalk } from '../agent/useHoldToTalk';
+import { HoldRing, TalkSheetView } from '../agent/TalkVisuals';
+import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
 
 /**
@@ -184,172 +173,42 @@ export const HomeButton = ({
   onAgent: () => void;
   disabled: boolean;
 }) => {
-  const timer = useRef<number | null>(null);
-  const hold = useRef<BHoldState>(B_HOLD_IDLE);
-  const lastTouch = useRef(0);
-  const supported = useRef<boolean | null>(null);
-  /** Hold without voice: b opened at the hold (today's behaviour); release focuses the composer. */
-  const legacy = useRef(false);
-  const voice = useRef<Promise<VoiceStart> | null>(null);
-  const [phase, setPhase] = useState<BHoldPhase>('idle');
-  const [sheet, setSheet] = useState<null | { text: string; level: number; note?: string; sending?: boolean }>(null);
-  useEffect(() => {
-    void voiceSupported().then((v) => (supported.current = v));
-  }, []);
-
-  const clearTimer = () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = null;
-  };
   const focusComposer = () => document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();
-  const cancelVoice = () => {
-    const v = voice.current;
-    voice.current = null;
-    setSheet(null);
-    void v?.then((r) => r.ok && r.session.cancel());
-  };
-  const sendVoice = async () => {
-    const v = voice.current;
-    voice.current = null;
-    if (!v) return setSheet(null);
-    setSheet((s) => (s ? { ...s, sending: true } : s));
-    const r = await v;
-    const text = r.ok ? usableTranscript(await r.session.stop()) : '';
-    setSheet(null);
-    if (text) setAgentVoice(text);
-    else setAgentNote(r.ok ? voiceNote('empty', 'web') : r.note);
-    // b's page is already open (since the hold): the handoff event delivers the message to it.
-    if (!text) window.setTimeout(focusComposer, 50);
-  };
-
-  const dispatch = (e: BHoldEvent) => {
-    const r = bHold(hold.current, e);
-    hold.current = r.state;
-    setPhase(r.state.phase);
-    if (r.state.phase === 'idle') clearTimer();
-    switch (r.effect) {
-      case 'home':
-        return onHome();
-      case 'listen':
-        hapticTick();
-        // Owner, 10 Oct 2026: the hold opens b's chat at once; keep holding to talk, the reply lands there.
-        onAgent();
-        legacy.current = supported.current === false;
-        if (legacy.current) return setAgentNote(voiceNote('unavailable', 'web'));
-        setSheet({ text: '', level: 0 });
-        voice.current = startVoice({
-          onText: (text) => setSheet((s) => (s ? { ...s, text } : s)),
-          onLevel: (level) => setSheet((s) => (s ? { ...s, level } : s)),
-        });
-        void voice.current.then((v) => !v.ok && setSheet((s) => (s ? { ...s, note: v.note } : s)));
-        return;
-      case 'send':
-        // Still inside the user's gesture: iOS lets the composer take focus (and show the keyboard) here.
-        if (legacy.current) return void focusComposer();
-        return void sendVoice();
-      case 'cancel':
-        if (!legacy.current) cancelVoice();
-        return;
-    }
-  };
-  useEffect(() => {
-    const onHide = () => document.hidden && dispatch({ type: 'abort' });
-    document.addEventListener('visibilitychange', onHide);
-    return () => {
-      document.removeEventListener('visibilitychange', onHide);
-      clearTimer();
-      cancelVoice();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const begin = (x: number, y: number) => {
-    if (disabled || hold.current.phase !== 'idle') return;
-    dispatch({ type: 'down', x, y });
-    clearTimer();
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      dispatch({ type: 'timer' });
-    }, B_HOLD_MS);
-  };
-  const move = (x: number, y: number) => dispatch({ type: 'move', x, y });
-  const end = () => dispatch({ type: 'up' });
-  const abort = () => dispatch({ type: 'abort' });
-  const listening = phase === 'listening' || phase === 'cancelling';
-  const bars = levelToBars(sheet?.level ?? 0, 5);
+  const { phase, sheet, handlers, listening } = useHoldToTalk({
+    disabled,
+    onTap: onHome,
+    onListen: (ok) => {
+      // Owner, 10 Oct 2026: the hold opens b's chat at once; keep holding to talk, the reply lands there.
+      onAgent();
+      if (!ok) setAgentNote(voiceNote('unavailable', 'web'));
+    },
+    // Still inside the user's gesture: iOS lets the composer take focus (and show the keyboard) here.
+    onUnsupportedRelease: focusComposer,
+    onResult: (r) => {
+      // b's page is already open (since the hold): the handoff event delivers the message to it.
+      if ('text' in r) return setAgentVoice(r.text);
+      setAgentNote(r.note);
+      window.setTimeout(focusComposer, 50);
+    },
+  });
   return (
     <>
       {sheet && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="bw-talk-sheet absolute left-0 right-0 z-[102] px-3 pb-2 pointer-events-none"
-          style={{ bottom: '100%' }}
-        >
-          <div
-            className="rounded-2xl px-4 py-3 flex flex-col items-center gap-2 backdrop-blur-md"
-            style={{
-              background: 'rgba(23,25,30,0.95)',
-              border: `1px solid ${phase === 'cancelling' ? '#F04438' : '#2b2f36'}`,
-            }}
-          >
-            <div className="flex items-end gap-1 h-8" aria-hidden>
-              {bars.map((h, i) => (
-                <span
-                  key={i}
-                  className="w-1.5 rounded-full transition-[height] duration-100"
-                  style={{ height: `${Math.round(h * 32)}px`, background: phase === 'cancelling' ? MUTED : GOLD }}
-                />
-              ))}
-            </div>
-            <p className="m-0 text-center text-[15px] leading-snug text-white min-h-[1.4em] max-h-24 overflow-hidden">
-              {sheet.note ?? (sheet.text || (sheet.sending ? '' : 'Listening… release to send'))}
-            </p>
-            <p className="m-0 text-[11px]" style={{ color: phase === 'cancelling' ? '#F04438' : MUTED }}>
-              {sheet.sending
-                ? 'Sending to b…'
-                : sheet.note
-                  ? 'Let go to type to b instead'
-                  : phase === 'cancelling'
-                    ? 'Let go to cancel'
-                    : 'Let go to send to b · slide away to cancel'}
-            </p>
-          </div>
-        </div>
+        <TalkSheetView
+          sheet={sheet}
+          phase={phase}
+          idleText="Listening… release to send"
+          hint="Let go to send to b · slide away to cancel"
+          sendingHint="Sending to b…"
+          noteHint="Let go to type to b instead"
+        />
       )}
       <button
         type="button"
         disabled={disabled}
         aria-label="Home. Press and hold to talk to b"
         data-testid="dock-b"
-        onTouchStart={(e) => {
-          lastTouch.current = Date.now();
-          const t = e.touches[0];
-          if (e.touches.length === 1 && t) begin(t.clientX, t.clientY);
-        }}
-        onTouchMove={(e) => {
-          const t = e.touches[0];
-          if (t) move(t.clientX, t.clientY);
-        }}
-        onTouchEnd={(e) => {
-          e.preventDefault(); // no synthetic mouse/click after a touch
-          lastTouch.current = Date.now();
-          end();
-        }}
-        onTouchCancel={abort}
-        // Pointer events for mouse and pen only: on touch, WKWebView may cancel them mid-hold.
-        onPointerDown={(e) => {
-          if (e.pointerType === 'touch' || Date.now() - lastTouch.current <= 800) return;
-          e.currentTarget.setPointerCapture?.(e.pointerId); // sliding away still reports moves
-          begin(e.clientX, e.clientY);
-        }}
-        onPointerMove={(e) => e.pointerType !== 'touch' && move(e.clientX, e.clientY)}
-        onPointerUp={(e) => e.pointerType !== 'touch' && Date.now() - lastTouch.current > 800 && end()}
-        onPointerCancel={(e) => e.pointerType !== 'touch' && abort()}
-        onContextMenu={(e) => e.preventDefault()}
-        onClick={(e) => {
-          // Keyboard activation only (Enter/Space have detail 0); touch and mouse are handled above.
-          if (e.detail === 0) onHome();
-        }}
+        {...handlers}
         // Snug in the bar, centred, ring fully inside (owner, 8 Oct 2026; bChatX copies it).
         className="relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
@@ -362,24 +221,7 @@ export const HomeButton = ({
           touchAction: 'none',
         }}
       >
-        {phase !== 'idle' && (
-          <svg className="absolute -inset-[5px] pointer-events-none" viewBox="0 0 62 62" aria-hidden>
-            <circle
-              cx="31"
-              cy="31"
-              r="29"
-              fill="none"
-              stroke={phase === 'cancelling' ? MUTED : GOLD}
-              strokeWidth="3"
-              strokeLinecap="round"
-              pathLength={100}
-              strokeDasharray="100"
-              transform="rotate(-90 31 31)"
-              className={phase === 'pressing' ? 'bw-hold-ring' : phase === 'listening' ? 'bw-listen-ring' : undefined}
-              style={phase === 'pressing' ? { animationDuration: `${B_HOLD_MS}ms` } : undefined}
-            />
-          </svg>
-        )}
+        <HoldRing phase={phase} />
         <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
       </button>
     </>
