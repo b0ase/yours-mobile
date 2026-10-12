@@ -9,6 +9,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { YoursIcon } from '../../components/YoursIcon';
 import { ThemeBadge } from '../../components/ThemeBadge';
 import { getPlatform } from '../../platform';
+import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -55,8 +56,9 @@ export const Start = () => {
     <Show when={showStart}>
       <div
         className="flex flex-col items-center justify-between w-full h-full min-h-[var(--wallet-height)] px-6 py-8"
-        style={{ backgroundColor: bg }}
+        style={{ backgroundColor: bg, isolation: 'isolate' }}
       >
+        <ObsidianBackdrop />
         {/* Top section — logo + branding */}
         <div className="flex flex-col items-center gap-3 mt-6">
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={0}>

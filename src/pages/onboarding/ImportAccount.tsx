@@ -6,6 +6,7 @@ import { Input } from '../../components/Input';
 import { PageLoader } from '../../components/PageLoader';
 import wifWallet from '../../assets/wif-wallet.svg';
 import { Show } from '../../components/Show';
+import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useTheme } from '../../hooks/useTheme';
@@ -317,7 +318,8 @@ export const ImportAccount = ({ onNavigateBack, newWallet = false }: ImportAccou
   return (
     <>
       <Show when={!loading} whenFalseContent={<PageLoader theme={theme} message="Importing..." />}>
-        <div className="flex flex-col items-center w-full px-2 pt-4 pb-4">
+        <div className="flex flex-col items-center w-full px-2 pt-4 pb-4" style={{ isolation: 'isolate' }}>
+          <ObsidianBackdrop />
           {/* Back button + title — above logo, consistent position */}
           <div
             className="flex w-full items-center gap-3 px-4 pb-4 pt-4 sticky top-0 z-10"

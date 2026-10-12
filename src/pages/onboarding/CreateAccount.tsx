@@ -5,6 +5,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { PageLoader } from '../../components/PageLoader';
 import { Show } from '../../components/Show';
+import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useTheme } from '../../hooks/useTheme';
@@ -318,7 +319,8 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
 
   return (
     <Show when={!loading} whenFalseContent={<PageLoader theme={theme} message="Generating keys..." />}>
-      <div className="flex flex-col items-center w-full px-2 pt-4 pb-4">
+      <div className="flex flex-col items-center w-full px-2 pt-4 pb-4" style={{ isolation: 'isolate' }}>
+        <ObsidianBackdrop />
         {/* Back button + title — hidden on final "Wallet Ready" step */}
         {step < TOTAL_STEPS && (
           <div
