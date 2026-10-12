@@ -13,15 +13,15 @@ const STATUS: Record<MyListing['status'], { label: string; color: string }> = {
 };
 
 /** My BSV-21 listings (tickets, $NAME tokens) made in bWallet, with Cancel (tokens come back). */
-export const MyTokenListings = ({ emptyText }: { emptyText?: string }) => {
+export const MyTokenListings = ({ emptyText, tokenId }: { emptyText?: string; tokenId?: string }) => {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [rows, setRows] = useState<MyListing[] | null>(null);
   const [busy, setBusy] = useState('');
 
   const load = useCallback(() => {
-    void myListings().then(setRows);
-  }, []);
+    void myListings().then((r) => setRows(tokenId ? r.filter((l) => l.tokenId === tokenId) : r));
+  }, [tokenId]);
   useEffect(() => {
     load();
     return onListingsChanged(load);

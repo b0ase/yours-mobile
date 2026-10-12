@@ -83,7 +83,7 @@ export const DefaultTokenCards = () => {
         // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
         action={
           PNEE_TOKEN_ID && MARKET_ENABLED
-            ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/market') }
+            ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
             : undefined
         }
         // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen

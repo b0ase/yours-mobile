@@ -21,7 +21,15 @@ export const SCREENS: readonly Screen[] = [
   { id: 'wallet', label: 'Wallet', route: '/bsv-wallet', aliases: ['/ord-wallet'], legacyIds: ['bsv', 'ords'] },
   // Store builds have no Market at all: written inline so Rollup drops it from the store bundle.
   ...(MARKET_ENABLED
-    ? [{ id: 'exchange', label: 'Exchange', route: '/m/market', legacyIds: ['market'] } satisfies Screen]
+    ? [
+        {
+          id: 'exchange',
+          label: 'Exchange',
+          route: '/m/exchange',
+          aliases: ['/m/market'],
+          legacyIds: ['market'],
+        } satisfies Screen,
+      ]
     : []),
   { id: 'home', label: 'Home', route: '/m/home', legacyIds: [] },
   { id: 'apps', label: 'bApps', route: '/browser', aliases: ['/m/apps'], legacyIds: ['browser'] },

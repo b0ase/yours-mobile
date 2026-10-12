@@ -38,6 +38,16 @@
   ],
   "redirects": [
     {
+      "source": "/market",
+      "destination": "/exchange",
+      "permanent": true
+    },
+    {
+      "source": "/market/:path*",
+      "destination": "/exchange/:path*",
+      "permanent": true
+    },
+    {
       "source": "/media",
       "destination": "/bmusic",
       "permanent": true

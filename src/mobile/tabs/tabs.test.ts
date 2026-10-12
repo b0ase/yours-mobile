@@ -25,7 +25,7 @@ describe('mobile tabs', () => {
   });
 
   test('other tabs unchanged', () => {
-    expect(routeFor('market')).toBe('/m/market');
+    expect(routeFor('market')).toBe('/m/exchange');
     expect(routeFor('chat')).toBe('/m/chat');
     expect(routeFor('browser')).toBe('/browser');
     expect(tabFor('tools')).toBe('settings');

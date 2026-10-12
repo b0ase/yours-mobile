@@ -795,11 +795,14 @@ export const SwapFlow = ({
   onClose,
   resume,
   handle,
+  inline = false,
 }: {
   getAddress: () => Promise<string>;
   onClose: () => void;
   resume?: SwapRecord | null;
   handle?: string;
+  /** Render in the page (Exchange › Swap) instead of as a full-screen layer. */
+  inline?: boolean;
 }) => {
   const [address, setAddress] = useState('');
   const [addressState, setAddressState] = useState<AddressState>('loading');
@@ -808,7 +811,7 @@ export const SwapFlow = ({
   const [popular, setPopular] = useState<SwapCoin[]>(POPULAR_COINS);
   const [swap, setSwap] = useState<SwapRecord | null>(resume ?? null);
   const [step, setStep] = useState<'pick' | 'deposit' | 'track'>(resume ? 'track' : 'pick');
-  useBackClose(true, onClose);
+  useBackClose(!inline, onClose);
 
   /** The wallet's BSV address for the payout; a failure is shown under the button with "Try again". */
   const loadAddress = useCallback(() => {
@@ -860,6 +863,14 @@ export const SwapFlow = ({
     return <Track swap={swap} onBack={onClose} onUpdate={setSwap} />;
   }, [step, swap, address, addressState, loadAddress, notice, popular, all, handle, onClose]);
 
+  if (inline)
+    return (
+      <div className="w-full flex justify-center" style={{ background: C.bg }}>
+        <div className="relative w-full max-w-[480px] flex flex-col" style={{ color: C.text }}>
+          {body}
+        </div>
+      </div>
+    );
   return createPortal(
     <div
       className="fixed inset-0 z-[300] flex justify-center"

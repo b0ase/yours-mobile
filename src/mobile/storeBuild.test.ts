@@ -294,12 +294,13 @@ describe('store build has no Market', () => {
   test('bWalletX keeps the Exchange tab', () => {
     const t = storeEval('{ order: t.TAB_ORDER, route: t.routeFor("market") }', {});
     expect(t.order).toContain('market');
-    expect(t.route).toBe('/m/market');
+    expect(t.route).toBe('/m/exchange');
   });
   test('the Market route and its chunk are behind MARKET_ENABLED', () => {
     const r = src('./tabs/MobileRoutes.tsx');
-    expect(r).toMatch(/const MarketPage = MARKET_ENABLED \? lazy\(/);
-    expect(r).toMatch(/\{MarketPage && <Route path="market"/);
+    expect(r).toMatch(/const ExchangePage = MARKET_ENABLED \? lazy\(/);
+    expect(r).toMatch(/\{ExchangePage && <Route path="exchange\/\*"/);
+    expect(r).toMatch(/\{ExchangePage && <Route path="market\/\*"/);
   });
   test('Buy / Get PNEEs / Back PNEEs entry points are behind MARKET_ENABLED', () => {
     expect(src('./chat/OpenTokenRoomButton.tsx')).toMatch(/if \(!id \|\| !MARKET_ENABLED\) return null/);

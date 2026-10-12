@@ -50,7 +50,7 @@ export const routeFor = (selected: string | null): string | null => {
     case 'media':
       return '/m/media';
     case 'market':
-      return MARKET_ENABLED ? '/m/market' : '/bsv-wallet';
+      return MARKET_ENABLED ? '/m/exchange' : '/bsv-wallet';
     case 'browser':
       return '/browser';
     case 'feed':

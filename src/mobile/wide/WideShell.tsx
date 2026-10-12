@@ -309,7 +309,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           to: '/m/credits',
           hidden: hiddenKind('credits'),
         },
-        { id: 'market', label: marketLabel(), icon: I.exchange, to: '/m/market', hidden: !MARKET_ENABLED },
+        { id: 'market', label: marketLabel(), icon: I.exchange, to: '/m/exchange', hidden: !MARKET_ENABLED },
         { id: 'lock', label: 'Lock BSV', icon: I.lockbsv, to: '/m/lock' },
       ],
     },
@@ -370,7 +370,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       feed: '/m/feed',
       calls: CALLS_ROUTE,
       settings: '/m/settings',
-      exchange: '/m/market',
+      exchange: '/m/exchange',
     };
     if (v && to[v]) navigate(to[v]);
   }, [pathname, navigate]);
