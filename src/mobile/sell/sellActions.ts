@@ -234,3 +234,78 @@ const ERRORS: Record<string, string> = {
   'overlay-validation-failed': 'Could not reach the token indexer. Try again.',
 };
 const friendly = (e: string | undefined) => (e ? (ERRORS[e] ?? e) : undefined);
+
+export type CreateTrancheInput = {
+  tokenId: string;
+  symbol: string;
+  dec: number;
+  pack: bigint;
+  count: number;
+  priceSats: number;
+};
+
+/**
+ * Personal-token curve sales: lock `count` listings of `pack` tokens each, at `priceSats` per listing,
+ * in ONE transaction from the person's own supply (sendBsv21 with one recipient per listing). Returns the
+ * listing outpoints ("txid_vout") to register with bit-sign. The cancel key is the wallet's own.
+ */
+export async function createTranche(ctx: OneSatContext, input: CreateTrancheInput): Promise<string[]> {
+  const tokenId = normId(input.tokenId);
+  const count = Math.max(1, Math.min(50, Math.floor(input.count)));
+  const keyID = cancelKeyID(tokenId);
+  const [cancel, pay] = await Promise.all([cancelAddress(ctx, keyID), defaultPayAddress(ctx)]);
+  const script = buildListingScript(tokenId, input.pack, cancel, pay, input.priceSats).toHex();
+  const res = await sendBsv21.execute(ctx, {
+    tokenId,
+    recipients: Array.from({ length: count }, () => ({
+      amount: input.pack.toString(),
+      destination: { lockingScript: script },
+    })),
+  } as Parameters<typeof sendBsv21.execute>[1]);
+  if (!res.txid || res.error) throw new Error(friendly(res.error) ?? 'Listings were not broadcast');
+  const vouts = listingVouts(res.tx, tokenId);
+  const outs = (vouts.length ? vouts : Array.from({ length: count }, (_, i) => i)).map((v) => `${res.txid}_${v}`);
+  for (const o of outs) {
+    addRecord({
+      outpoint: dotted(o),
+      tokenId,
+      symbol: input.symbol,
+      dec: input.dec,
+      amount: input.pack.toString(),
+      priceSats: input.priceSats,
+      keyID,
+      createdAt: Date.now(),
+    });
+  }
+  return outs;
+}
+
+function listingVouts(tx: number[] | undefined, tokenId: string): number[] {
+  if (!tx?.length) return [];
+  let parsed: Transaction | null = null;
+  try {
+    parsed = Transaction.fromAtomicBEEF(tx);
+  } catch {
+    try {
+      parsed = Transaction.fromBinary(tx);
+    } catch {
+      return [];
+    }
+  }
+  return parsed.outputs.flatMap((o, i) => (decodeListing(o.lockingScript)?.tokenId === normId(tokenId) ? [i] : []));
+}
+
+/** Cancel the person's curve listings by outpoint (the ones this wallet created). Returns those cancelled. */
+export async function cancelOutpoints(ctx: OneSatContext, outpoints: readonly string[]): Promise<string[]> {
+  const want = new Set(outpoints.map((o) => o.replace('.', '_')));
+  const done: string[] = [];
+  for (const r of loadRecords().filter((x) => want.has(x.outpoint.replace('.', '_')))) {
+    try {
+      await cancelListing(ctx, r);
+      done.push(r.outpoint.replace('.', '_'));
+    } catch {
+      /* already bought or not ours: leave it */
+    }
+  }
+  return done;
+}

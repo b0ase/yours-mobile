@@ -34,6 +34,8 @@ export type PersonToken = {
   pricing: PeoplePricing;
   /** Their own price for one token, in US cents (null: they ask people to request to join). */
   priceUsdCents: number | null;
+  /** Their wallet keeps listings from their own supply live (bit-sign curve sales). */
+  salesOpen: boolean;
 };
 
 const TOKEN_ID = /^[0-9a-f]{64}_\d{1,6}$/i;
@@ -61,6 +63,7 @@ export const parsePeople = (body: unknown): PersonToken[] => {
       members: typeof r.members === 'number' ? r.members : 0,
       pricing: p && (p.mode === 'curve' || p.mode === 'flat' || p.mode === 'off') ? p : { mode: 'off' },
       priceUsdCents: typeof r.price_usd_cents === 'number' ? r.price_usd_cents : null,
+      salesOpen: r.sales_open === true,
     });
   }
   return out;

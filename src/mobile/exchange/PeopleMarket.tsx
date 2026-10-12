@@ -20,7 +20,17 @@ import { bavatarSvg } from '../bavatar/bavatar';
 import { purchaseError } from './purchase';
 import { addHistory, bsvLabel, fiatLabel, unitPriceLabel } from './exchangeData';
 import { usePeopleTokens } from './usePeopleTokens';
-import { joinLabel, peopleSections, type PersonToken } from './people';
+import { joinLabel, peopleSections, tokenFor, type PersonToken } from './people';
+import {
+  fetchQuote,
+  joinSheetTitle,
+  pickCurveListing,
+  quoteAction,
+  recordPurchase,
+  supporterBadge,
+} from './curveSales';
+import { SellMyToken } from './SellMyToken';
+import { SELL_ENABLED } from '../sell/sell';
 
 const GOLD = '#F5B800';
 const GREEN = '#A1FF8B';
@@ -44,8 +54,11 @@ const useOpenRoom = () => {
 };
 
 /**
- * "Buy & chat": buy the cheapest live listing of their token (OrdLock v2 only, one sheet), then open
- * their room. No listings → "No one is selling yet" (+ "Open their room" when it is open to anyone).
+ * "Buy & chat". When the person has opened sales, ask bit-sign for a quote first (refuses your own token;
+ * "already joined" just opens the room), buy one of THEIR curve listings (from their own supply) in one
+ * sheet — "Join $kim's room — 1¢ (Supporter #3)" — report the txid so bit-sign records the Supporter
+ * number, then open the room. Otherwise: the cheapest resale listing (OrdLock v2 only). No listings →
+ * "No one is selling yet" (+ "Open their room" when it is open to anyone).
  */
 export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -53,12 +66,38 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
   const openRoom = useOpenRoom();
   const [state, setState] = useState<'idle' | 'loading' | 'none' | 'sheet' | 'buying'>('idle');
   const [best, setBest] = useState<Listing | null>(null);
+  const [curve, setCurve] = useState<{ cents: number; supporter: number | null } | null>(null);
   useBackClose(state === 'sheet', () => setState('idle'));
   if (!TRADING || !tokenRoomsEnabled()) return null;
 
   const start = async () => {
     setState('loading');
     const ref = { kind: 'bsv21' as const, id: token.tokenId, key: `bsv21:${token.tokenId}` };
+    setCurve(null);
+    if (token.salesOpen && token.pricing.mode !== 'off') {
+      const q = await fetchQuote(token.tokenId).catch(() => null);
+      const act = q ? quoteAction(q) : 'resale';
+      if (act === 'hide') {
+        addSnackbar('This is your own token', 'info');
+        setState('idle');
+        return;
+      }
+      if (act === 'open-room') {
+        setState('idle');
+        openRoom(token);
+        return;
+      }
+      if (q?.ok) {
+        const m = await roomMarket(ref, 50).catch(() => null);
+        const l = pickCurveListing(q.listings, m?.listings ?? []);
+        if (l) {
+          setCurve({ cents: q.price_usd_cents * q.pack, supporter: q.supporter });
+          setBest(l);
+          setState('sheet');
+          return;
+        }
+      }
+    }
     const m = await roomMarket(ref, 20).catch(() => null);
     const l = [...(m?.listings ?? [])].filter((x) => x.buyable).sort((a, b) => perToken(a) - perToken(b))[0];
     setBest(l ?? null);
@@ -92,7 +131,9 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
         at: Date.now(),
       });
       clearMarketCache();
-      addSnackbar(`You're in $${token.handle}'s room`, 'success');
+      const rec = curve ? await recordPurchase(token.tokenId, res.txid) : null;
+      const badge = supporterBadge(rec?.supporter);
+      addSnackbar(`You're in $${token.handle}'s room${badge ? ` · ${badge}` : ''}`, 'success');
       setState('idle');
       openRoom(token);
     } catch (e) {
@@ -142,9 +183,12 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
             <div className="flex items-center gap-3">
               <img src={avatarSrc(token)} alt="" className="w-12 h-12 rounded-full object-cover" />
               <div>
-                <div className="text-base font-bold text-white">Join ${token.handle}'s room</div>
+                <div className="text-base font-bold text-white">
+                  {curve ? joinSheetTitle(token.handle, curve.cents, curve.supporter) : `Join $${token.handle}'s room`}
+                </div>
                 <div className="text-xs" style={{ color: MUTED }}>
-                  Buy {best.label}. Holding their token opens their room.
+                  {curve ? `${best.label} from $${token.handle}. ` : `Buy ${best.label}. `}Holding their token opens
+                  their room.
                 </div>
               </div>
             </div>
@@ -233,7 +277,8 @@ export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
         Loading people…
       </p>
     );
-  if (!sections.friends.length && !sections.people.length)
+  const mine = tokenFor(tokens, me);
+  if (!mine && !sections.friends.length && !sections.people.length)
     return (
       <p className="text-sm text-center py-8" style={{ color: MUTED }}>
         No personal tokens yet.
@@ -241,6 +286,7 @@ export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
     );
   return (
     <div className="flex flex-col gap-3">
+      {mine && SELL_ENABLED && <SellMyToken token={mine} rate={rate} />}
       <Section title="Friends" list={sections.friends} rate={rate} />
       <Section title="People" list={sections.people} rate={rate} />
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
