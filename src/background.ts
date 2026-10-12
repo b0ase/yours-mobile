@@ -1,4 +1,5 @@
 /* global chrome */
+import { isSessionExpired } from './utils/lockTimeout';
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
@@ -435,7 +436,7 @@ const startupInitPromise = chromeStorageService
     const { account, lastActiveTime } = chromeStorageService.getCurrentAccountObject();
     const passKey = await chromeStorageService.getPassKey();
     const isUnlocked =
-      passKey && account?.encryptedKeys && lastActiveTime && Date.now() - Number(lastActiveTime) < getInactivityLimit();
+      passKey && account?.encryptedKeys && !isSessionExpired(lastActiveTime, getInactivityLimit());
 
     if (isUnlocked) {
       try {
@@ -715,7 +716,7 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
     : undefined;
 };
 
-/** Read the user's configured lock timeout (defaults to 10 minutes). */
+/** Read the user's configured lock timeout in ms (Infinity = Never, the default). */
 const getInactivityLimit = () => chromeStorageService.getLockTimeout();
 
 // Periodic inactivity check — destroys decrypted keys when session expires.
@@ -725,7 +726,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== 'inactivity-lock' || !accountContext) return;
   await chromeStorageService.getAndSetStorage();
   const { lastActiveTime } = chromeStorageService.getCurrentAccountObject();
-  if (!lastActiveTime || Date.now() - Number(lastActiveTime) >= getInactivityLimit()) {
+  // Never (the default): only a deliberate lock, which writes lastActiveTime 0, gets here.
+  if (isSessionExpired(lastActiveTime, getInactivityLimit())) {
     console.log('[background] Inactivity detected — wallet gone, clearing passKey');
     dropWalletContext('inactivity');
     await chromeStorageService.clearPassKey();
@@ -2873,7 +2875,7 @@ if (isInServiceWorker) {
     const currentTime = Date.now();
     const lastActiveTime = result.lastActiveTime;
 
-    return !result.isLocked && currentTime - Number(lastActiveTime) < getInactivityLimit();
+    return !result.isLocked && !isSessionExpired(lastActiveTime, getInactivityLimit(), currentTime);
   };
 
   const processCWIIsAuthenticated = (sendResponse: CallbackResponse) => {

@@ -618,16 +618,16 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '      <Section title="Preferences">\n        <SettingRow\n          icon={<Gauge size={16} />}\n          label="Custom Fee Rate"\n          isFirst\n          description="All accounts \u00b7 default 100 sat/kb"',
     ],
     [
-      '          description="Lock wallet after inactivity"',
-      '          description="Lock every account after inactivity"',
+      '          description="Lock anytime with ⌘L or the menu."',
+      '          description="Every account. Lock anytime with ⌘L or the menu."',
     ],
     [
       "    const update: Partial<ChromeStorageObject['accounts']> = {\n      [selectedAccount]: {\n        ...account,\n        settings: { ...account.settings, customFeeRate: rate },\n      },\n    };",
       "    const update: Partial<ChromeStorageObject['accounts']> = Object.fromEntries(\n      chromeStorageService.getAllAccounts().map(({ address: _a, ...a }) => [a.addresses.identityAddress, { ...a, settings: { ...a.settings, customFeeRate: rate } }]),\n    );\n    void account;",
     ],
     [
-      "    const update: Partial<ChromeStorageObject['accounts']> = {\n      [selectedAccount]: {\n        ...account,\n        settings: { ...account.settings, lockTimeout: minutes },\n      },\n    };",
-      "    const update: Partial<ChromeStorageObject['accounts']> = Object.fromEntries(\n      chromeStorageService.getAllAccounts().map(({ address: _a, ...a }) => [a.addresses.identityAddress, { ...a, settings: { ...a.settings, lockTimeout: minutes } }]),\n    );\n    void account;",
+      "      const update: Partial<ChromeStorageObject['accounts']> = {\n        [selectedAccount]: {\n          ...account,\n          settings: { ...account.settings, lockTimeout: minutes, lockTimeoutChosen: true },\n        },\n      };",
+      "      const update: Partial<ChromeStorageObject['accounts']> = Object.fromEntries(\n        chromeStorageService.getAllAccounts().map(({ address: _a, ...a }) => [a.addresses.identityAddress, { ...a, settings: { ...a.settings, lockTimeout: minutes, lockTimeoutChosen: true } }]),\n      );\n      void account;",
     ],
     // Deep links to Settings → Identity ("Get verified" / "Qualify as an investor" from Market → Shares).
     [

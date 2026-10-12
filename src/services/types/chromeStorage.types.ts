@@ -16,8 +16,10 @@ export type Settings = {
   socialProfile: SocialProfile;
   favoriteTokens: string[];
   customFeeRate: number;
-  /** Auto-lock timeout in minutes. Defaults to 10. */
-  lockTimeout?: number;
+  /** Auto-lock timeout in minutes; 0/unset = Never (the default). See utils/lockTimeout.ts. */
+  lockTimeout?: number | null;
+  /** True once the user picked a value in Settings (keeps a deliberate 10 from reading as the old default). */
+  lockTimeoutChosen?: boolean;
   /** Set to true once the user dismisses the backup storage promo for this account */
   dismissedBackupPromo?: boolean;
   /** Set to true once the user downloads their keys from the walkthrough */
