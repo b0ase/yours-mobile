@@ -3,6 +3,7 @@ import type { BchatClient } from './api';
 import type { ChatRoom } from './messages';
 import { audienceCount, parseSpaceState } from '../spaces/model';
 import { loungeCardInfo, LOUNGE_TICKER } from './loungeInfo';
+import { useLive } from './live';
 
 /**
  * The bWallet Lounge as a yellow card pinned above every other chat (owner, 10 Oct 2026: "I still
@@ -31,6 +32,13 @@ export const LoungeCard = ({
   onJoin: () => void;
 }) => {
   const [listening, setListening] = useState<number | null>(null);
+  const [bump, setBump] = useState(0);
+  // Live (chat/live.ts): a Lounge room/member change re-reads the Space; 5 min poll while live.
+  const pollMs = useLive(() => setBump((n) => n + 1), POLL_MS, {
+    liveMs: 300_000,
+    types: ['room.update', 'member.join', 'member.leave', 'member.update'],
+    room: LOUNGE_TICKER,
+  });
 
   useEffect(() => {
     let live = true;
@@ -45,12 +53,12 @@ export const LoungeCard = ({
         })
         .catch(() => undefined);
     void load();
-    const id = setInterval(load, POLL_MS);
+    const id = setInterval(load, pollMs);
     return () => {
       live = false;
       clearInterval(id);
     };
-  }, [client, me]);
+  }, [client, me, pollMs, bump]);
 
   const info = loungeCardInfo({ unread: room?.unread ?? 0, listening, preview, member: !!room });
 

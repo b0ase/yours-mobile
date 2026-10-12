@@ -213,6 +213,7 @@ import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
+import { LIST_TYPES, THREAD_TYPES, useLive, useLiveHealth, useLiveTyping } from '../chat/live';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -231,6 +232,9 @@ const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 const LIST_POLL_MS = 30_000;
 const THREAD_POLL_MS = 4_000;
+/** While the live stream is healthy (chat/live.ts) the polls are only a safety net. */
+const THREAD_LIVE_MS = 60_000;
+const LIST_LIVE_MS = 300_000;
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 const useOnline = () => {
@@ -385,7 +389,11 @@ const Conversation = ({
   };
   /** Inline edit of one of your own messages: the bubble becomes a text box (Save / Cancel). */
   const [editing, setEditing] = useState<{ id: string; text: string; busy?: boolean } | null>(null);
-  const [typing, setTyping] = useState<string[]>([]);
+  const [polledTyping, setTyping] = useState<string[]>([]);
+  // Live (chat/live.ts): typing arrives over the stream and the typing GET poll stops.
+  const liveOn = useLiveHealth() === 'live';
+  const liveTyping = useLiveTyping(room.ticker, me, liveOn);
+  const typing = liveOn ? liveTyping : polledTyping;
   const lastTypingPing = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -490,11 +498,18 @@ const Conversation = ({
         void client.markRead(room.ticker).catch(() => {});
       })
       .catch(() => {});
-    void client.whoIsTyping(room.ticker).then(setTyping);
-  }, [client, room.ticker, messages, online, viewerIsAdmin, me]);
+    if (!liveOn) void client.whoIsTyping(room.ticker).then(setTyping);
+  }, [client, room.ticker, messages, online, viewerIsAdmin, me, liveOn]);
   // Hidden (phone pager peek / display:none): no polling; the list catches up when shown.
   const offScreen = useInPeek();
-  usePoll(poll, THREAD_POLL_MS, !loading && !offScreen);
+  // A message event for this room re-reads it through `since`; the poll drops to 60 s while live.
+  const threadMs = useLive(poll, THREAD_POLL_MS, {
+    liveMs: THREAD_LIVE_MS,
+    types: THREAD_TYPES,
+    room: room.ticker,
+    enabled: !loading && !offScreen,
+  });
+  usePoll(poll, threadMs, !loading && !offScreen);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
@@ -2355,7 +2370,20 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
   useEffect(refresh, [refresh]);
   const listHidden = useInPeek();
-  usePoll(refresh, LIST_POLL_MS, !!handle && !open && !listHidden);
+  // Any room change re-reads the list (fetchRooms is shared and coalesced); 5 min poll while live.
+  // Only the rooms list on a live event (not holdings / open rooms, which the poll still covers).
+  const listMs = useLive(
+    () => {
+      if (handle && online) void fetchRooms(client, identityAddress, 0).catch(() => undefined);
+    },
+    LIST_POLL_MS,
+    {
+      liveMs: LIST_LIVE_MS,
+      types: LIST_TYPES,
+      enabled: !!handle && !open && !listHidden,
+    },
+  );
+  usePoll(refresh, listMs, !!handle && !open && !listHidden);
 
   // Rooms you hold the token for but are not in yet: ask bChat whether they exist.
   useEffect(() => {

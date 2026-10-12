@@ -24,6 +24,7 @@ import { ArchivedGroup, ChatSwipeRow, MutedMark, RowBadge, type RowCommands } fr
 import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from './listPrefs';
 import { Avatar, ContactRow, SourceBadges } from './ContactViews';
 import { SOURCES_NOTE } from './contactSources';
+import { LIST_TYPES, useLive } from './live';
 import {
   canMessage,
   contactLine,
@@ -187,11 +188,19 @@ export const DmsPage = ({
   );
 
   useEffect(refresh, [refresh]);
+  // Live (chat/live.ts): a room change re-reads the rooms list; the poll drops to 5 min while live.
+  const listMs = useLive(
+    () => {
+      if (handle && online) void fetchRooms(client, identityAddress, 0).catch(() => undefined);
+    },
+    LIST_POLL_MS,
+    { liveMs: 300_000, types: LIST_TYPES, enabled: !!handle && !open && !hidden },
+  );
   useEffect(() => {
     if (!handle || open || hidden) return;
-    const id = window.setInterval(() => document.visibilityState === 'visible' && refresh(), LIST_POLL_MS);
+    const id = window.setInterval(() => document.visibilityState === 'visible' && refresh(), listMs);
     return () => window.clearInterval(id);
-  }, [handle, open, hidden, refresh]);
+  }, [handle, open, hidden, refresh, listMs]);
   useEffect(() => {
     const off = onFriends(setFriends);
     void refreshFriends().catch(() => undefined);
