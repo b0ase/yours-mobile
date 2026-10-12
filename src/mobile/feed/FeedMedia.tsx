@@ -4,6 +4,8 @@ import { openDappBrowser } from '../dappBrowser';
 import type { FeedMedia, LinkEmbed } from './media';
 import { isOwnHost, ownLinkPreview, type OgPreview } from './unfurl';
 import { usePrefs } from '../settings/usePrefs';
+import { VideoEmbed } from './VideoEmbed';
+import { parseVideoLink } from './video-embed';
 
 /**
  * Feed media views: swipeable image gallery, tap-to-play video, audio row, link / YouTube /
@@ -243,44 +245,16 @@ const open = (url: string) => (e: MouseEvent) => {
   void openDappBrowser(url);
 };
 
-/** YouTube lite thumbnail (opens in the in-app browser), Vimeo / plain link cards. No page fetches, except OG previews of our own sites (unfurl.ts). */
+/** YouTube / Vimeo: click-to-play (VideoEmbed). Plain link cards otherwise. No page fetches, except OG previews of our own sites (unfurl.ts). */
 export const LinkCard = ({ l, blur }: { l: LinkEmbed; blur: boolean }) => {
-  const [shown, setShown] = useState(!blur);
+  const video = l.kind === 'link' ? null : parseVideoLink(l.url);
+  if (video) return <VideoEmbed video={video} blur={blur} />;
   if (l.kind === 'youtube')
     return (
-      <div
-        className="relative mt-2 overflow-hidden rounded-2xl"
-        style={{ border: `1px solid ${LINE}`, aspectRatio: '16 / 9', background: '#000' }}
-      >
-        <button
-          className="absolute inset-0 w-full h-full"
-          aria-label={shown ? 'Open YouTube video' : 'Show YouTube preview'}
-          onClick={(e) => {
-            if (!shown) {
-              stop(e);
-              return setShown(true);
-            }
-            open(l.url)(e);
-          }}
-        >
-          <img
-            src={l.thumb}
-            alt=""
-            loading="lazy"
-            className="w-full h-full object-cover"
-            style={shown ? undefined : { filter: 'blur(24px)' }}
-          />
-          {shown ? (
-            <span className="absolute inset-0 flex items-center justify-center">
-              <span className="rounded-xl px-4 py-2" style={{ background: 'rgba(220,0,0,0.9)' }}>
-                <Play size={22} color="white" fill="white" />
-              </span>
-            </span>
-          ) : (
-            <Veil label="Tap to show YouTube preview" />
-          )}
-        </button>
-      </div>
+      <VideoEmbed
+        video={{ provider: 'youtube', url: l.url, id: l.id, start: 0, portrait: false, live: false }}
+        blur={blur}
+      />
     );
   if (l.kind === 'link' && isOwnHost(l.url)) return <OwnLinkCard l={l} />;
   const host = l.kind === 'vimeo' ? 'vimeo.com' : l.host;

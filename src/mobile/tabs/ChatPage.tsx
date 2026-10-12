@@ -87,6 +87,8 @@ import {
   ReplyQuote,
   TypingRow,
 } from '../chat/BubbleExtras';
+import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
+import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
@@ -1006,8 +1008,18 @@ const Conversation = ({
                         </button>
                       </div>
                     </div>
+                  ) : mediaPayload(it.message) ? (
+                    <>
+                      <RoomMediaBubble client={client} ticker={room.ticker} message={it.message} />
+                      {it.message.body && mediaPayload(it.message)?.filename !== it.message.body && (
+                        <MessageText body={it.message.body} mine={it.mine} me={me} />
+                      )}
+                    </>
                   ) : (
-                    <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                    <>
+                      <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
+                      <MessageVideo body={it.message.body} />
+                    </>
                   )}
                   {isPrivateB(it.message) && (
                     <div
@@ -1145,7 +1157,10 @@ const Conversation = ({
               borderTop: `1px solid ${LINE}`,
             }}
           >
-            {/* v2 hook: attachment / voice note / video note buttons go here (rooms/[ticker]/media). */}
+            {/* Photos and videos (free; hidden in rooms that charge per message). */}
+            {!mustPay(charge) && (
+              <AttachButton client={client} ticker={room.ticker} onUploaded={poll} disabled={!online} />
+            )}
             <button
               type="button"
               onClick={askB}
