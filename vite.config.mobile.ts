@@ -453,7 +453,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
     ],
   ],
-  // UnlockWallet: bigger b mark above "Welcome back" (YoursIcon shows the b+x in bWalletX builds).
+  // UnlockWallet's mark is src/mobile/ui/UnlockMark (bare gold b, no tile).
   // Unlock: let the phone / browser fill the saved wallet password (PasswordFields saves it).
   'src/components/UnlockWallet.tsx#autofill': [
     [
@@ -461,7 +461,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '            placeholder="Password"\n            type="password"\n            name="password"\n            autoComplete="current-password"\n            value={password}',
     ],
   ],
-  'src/components/UnlockWallet.tsx#logo': [['<YoursIcon width="4rem" />', '<YoursIcon width="7rem" />']],
   // Welcome, unlock and every other YoursIcon: the b+x tile in bWalletX builds (storeBuild.isBWalletX).
   'src/components/YoursIcon.tsx': [
     [

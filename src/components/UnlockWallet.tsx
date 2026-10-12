@@ -5,7 +5,7 @@ import { useTheme } from '../hooks/useTheme';
 import { sleep } from '../utils/sleep';
 import { Input } from './Input';
 import { useServiceContext } from '../hooks/useServiceContext';
-import { YoursIcon } from './YoursIcon';
+import { UnlockMark } from '../mobile/ui/UnlockMark';
 import { QuickUnlock } from './QuickUnlock';
 import { ObsidianBackdrop } from '../mobile/ui/ObsidianBackdrop';
 import { sendMessageAsync } from '../utils/chromeHelpers';
@@ -339,7 +339,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         className="mb-8"
       >
-        <YoursIcon width="4rem" />
+        <UnlockMark />
       </motion.div>
 
       {/* Title */}
