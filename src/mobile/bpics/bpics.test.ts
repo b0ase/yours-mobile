@@ -107,3 +107,12 @@ describe('data URI', () => {
     expect(b.base64Bytes('QQ==')).toBe(1);
   });
 });
+
+describe('bPics is free (owner, 12 Oct 2026)', () => {
+  test('no bWallet mint fee with an empty fee address', async () => {
+    const { estimateCost } = await import('../mint/mint');
+    const c = estimateCost(200_000, 100, 50, { feeAddress: '' });
+    expect(c.feeSats).toBe(0);
+    expect(c.totalSats).toBe(c.networkSats);
+  });
+});

@@ -396,7 +396,7 @@ const MintPicSheet = ({ onClose }: { onClose: () => void }) => {
     if (!rate) void fetchExchangeRate('main').then(setRate, () => undefined);
   }, [rate]);
 
-  const cost = pic ? estimateCost(pic.bytes, chromeStorageService.getCustomFeeRate(), rate) : null;
+  const cost = pic ? estimateCost(pic.bytes, chromeStorageService.getCustomFeeRate(), rate, { feeAddress: '' }) : null;
 
   const pick = async (file: File | undefined) => {
     setError('');
