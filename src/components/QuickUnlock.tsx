@@ -6,39 +6,61 @@ import { Theme } from '../theme.types';
 export const QuickUnlock = ({ theme, onUnlock }: { theme: Theme; onUnlock: () => void }) => {
   const quick = getPlatform().quickUnlock;
   const [available, setAvailable] = useState(false);
+  const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const prompted = useRef(false);
 
+  const refresh = async () => {
+    if (!quick) return false;
+    const ok = await quick.isAvailable().catch(() => false);
+    setAvailable(ok);
+    setNotice(ok ? undefined : await quick.notice?.().catch(() => undefined));
+    return ok;
+  };
+
   const run = async () => {
-    if (!quick || busy) return;
+    if (!quick || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       if (await quick.unlock()) onUnlock();
+      else await refresh();
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   useEffect(() => {
     let cancelled = false;
-    quick
-      ?.isAvailable()
-      .then((ok) => {
-        if (cancelled) return;
-        setAvailable(ok);
-        if (ok && quick.autoPrompt && !prompted.current) {
-          prompted.current = true;
-          void run();
-        }
-      })
-      .catch(() => setAvailable(false));
+    const autoPrompt = async () => {
+      // Android cancels a prompt raised while the app is in the background; wait until it is in front.
+      if (cancelled || prompted.current || document.visibilityState !== 'visible') return;
+      const ok = await refresh();
+      if (cancelled || !ok || !quick?.autoPrompt || prompted.current) return;
+      prompted.current = true;
+      void run();
+    };
+    void autoPrompt();
+    const onVisible = () => void autoPrompt();
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quick]);
 
-  if (!quick || !available) return null;
+  if (!quick) return null;
+  if (!available) {
+    if (!notice) return null;
+    return (
+      <p className="w-[87%] text-xs text-center mt-3" style={{ color: theme.color.global.gray }} role="status">
+        {notice}
+      </p>
+    );
+  }
   const left = theme.color.component.primaryButtonLeftGradient || '#A1FF8B';
   const right = theme.color.component.primaryButtonRightGradient || '#34D399';
   return (

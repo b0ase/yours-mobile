@@ -348,7 +348,9 @@ public class YoursNativePlugin extends Plugin {
                 call.resolve(ret);
             });
         } catch (KeyPermanentlyInvalidatedException e) {
-            // Biometrics changed since enrolment: the sealed passKey is unrecoverable by design.
+            // Biometrics changed since enrolment: the sealed passKey is unrecoverable by design. The JS side
+            // (biometricUnlock.ts) tells the user and re-enrols after the next password unlock.
+            android.util.Log.w("YoursNative", "biometric key invalidated (new fingerprint enrolled?); needs re-enrolment");
             deleteBiometricKey();
             JSObject ret = new JSObject();
             ret.put("value", JSObject.NULL);
