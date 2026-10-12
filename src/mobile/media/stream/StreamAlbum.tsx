@@ -14,7 +14,10 @@ import { paymentsPerSecond, SessionPayer, type PayerSnapshot } from './payer';
 import { ACTIVE_SESSIONS, forgetSession, openSession, openSponsoredSession, sweepFirst } from './session';
 import { SponsorEnded, SponsoredPayer, type SponsorSnapshot } from './sponsor';
 import { PotGauge, SponsorBadge } from './SponsorBadge';
-import { sponsorName, useManifest, useSponsor } from './useAlbum';
+import { SPONSOR_ALBUM_ID, sponsorName, useManifest, useSponsor } from './useAlbum';
+import { boardChoice, claimSession, setBoardChoice } from './board';
+import ListenerBoard from './ListenerBoard';
+import { useAccountNames } from '../../names/accountNames';
 import { estimateTotal, SEGMENT_FEE } from './tx';
 
 /** The album's free headline track, played from the wallet's own copy (featured.ts) by the page. */
@@ -38,8 +41,28 @@ type Session = { id: string; key: PrivateKey; engine: StreamEngine; payer?: Sess
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 export default function StreamAlbum({ headline, autoplay }: { headline: Headline; autoplay?: number }) {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const wallet = apiContext?.wallet;
+  const accountObj = chromeStorageService.getCurrentAccountObject();
+  const names = useAccountNames(
+    accountObj.account?.addresses.identityAddress,
+    accountObj.account?.name ?? '',
+    '',
+    false,
+  );
+  const [identityKey, setIdentityKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wallet) return;
+    wallet
+      .getPublicKey({ identityKey: true })
+      .then((r) => setIdentityKey(r.publicKey))
+      .catch(() => setIdentityKey(null));
+  }, [wallet]);
+  /** Listener board opt-in: asked once per session, after its first paid or sponsored second. */
+  const [ask, setAsk] = useState<string | null>(null);
+  const [boardTick, setBoardTick] = useState(0);
+  const [claimNote, setClaimNote] = useState<string | null>(null);
+  const asked = useRef<Set<string>>(new Set());
   const { m, error: loadError, view } = useManifest();
   const [sheet, setSheet] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
   const [busy, setBusy] = useState(false);
@@ -205,6 +228,35 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
   const cover = view?.cover ?? HEADLINE_ALBUM.cover;
   const st = snap?.stats;
   const sst = sSnap?.stats;
+  const artistName = view?.artist ?? HEADLINE_ALBUM.artist;
+  const sessionId = session.current?.id;
+  const firstSecond = (st?.payments ?? 0) + (sst?.payments ?? 0) > 0;
+  const claim = async (pub: string) => {
+    if (!wallet) return;
+    const handle = names.handle?.startsWith('$') ? names.handle : undefined;
+    try {
+      await claimSession(wallet, pub, handle);
+      setClaimNote(null);
+      setBoardTick((x) => x + 1);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      setClaimNote(
+        status === 409
+          ? 'This session is already on the board under another identity.'
+          : `Couldn't add you to the board: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  };
+  useEffect(() => {
+    const cur = session.current;
+    if (!firstSecond || !cur || asked.current.has(cur.id)) return;
+    asked.current.add(cur.id);
+    const choice = boardChoice(artistName);
+    const pub = cur.key.toPublicKey().toString();
+    if (choice === 'yes') void claim(pub);
+    else if (choice === null) setAsk(pub);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstSecond, sessionId]);
   const s = session.current;
   const playHeadline = () => {
     void end();
@@ -310,6 +362,41 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
             >
               Not now
             </button>
+          </div>
+        )}
+        {ask && (
+          <div
+            className="flex flex-wrap items-center gap-3 p-3 text-sm"
+            style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 4 }}
+          >
+            <span className="text-white">Show me on {artistName}'s listener board?</span>
+            <button
+              onClick={() => {
+                setBoardChoice(artistName, 'yes');
+                const pub = ask;
+                setAsk(null);
+                void claim(pub);
+              }}
+              className="px-3 py-1.5 text-xs font-bold"
+              style={{ background: GOLD, color: '#1a1300', borderRadius: 4 }}
+            >
+              Yes, show me
+            </button>
+            <button
+              onClick={() => {
+                setBoardChoice(artistName, 'no');
+                setAsk(null);
+              }}
+              className="text-xs"
+              style={{ color: MUTED }}
+            >
+              No thanks
+            </button>
+          </div>
+        )}
+        {claimNote && (
+          <div className="text-xs" style={{ color: MUTED }}>
+            {claimNote}
           </div>
         )}
         {st && (
@@ -424,6 +511,15 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
               </button>
             ))}
         </div>
+      </div>
+      <div className="px-4 md:px-6 pb-4 md:pb-6">
+        <ListenerBoard
+          albumId={SPONSOR_ALBUM_ID}
+          artist={artistName}
+          identityKey={identityKey}
+          wallet={wallet}
+          refresh={boardTick}
+        />
       </div>
       {sheet && m && (
         <BudgetSheet

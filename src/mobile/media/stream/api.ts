@@ -104,6 +104,8 @@ export type SponsorStatus = {
   sponsor: string;
   capSats: number;
   spentSats: number;
+  /** Sats the pot holds now (sponsored is true only while it holds funds). */
+  potSats?: number;
   fundAddress?: string;
 };
 /** A sponsored segment: the pot paid (or had already paid) for it; same key fields as a paid one. */

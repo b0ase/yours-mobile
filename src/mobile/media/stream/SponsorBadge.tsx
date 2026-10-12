@@ -21,6 +21,7 @@ export const PotGauge = ({ s, wide }: { s: SponsorStatus; wide?: boolean }) => {
         <span className="block h-full" style={{ width: `${pct}%`, background: GOLD }} />
       </span>
       {pct.toFixed(pct < 10 ? 1 : 0)}% of the pot used
+      {typeof s.potSats === 'number' ? ` · ${s.potSats.toLocaleString()} sats left` : ''}
     </span>
   );
 };
