@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_RT_URL?: string;
   /** '0' = build without the live chat stream. */
   readonly VITE_LIVE_CHAT?: string;
+  /** bMusic server base URL (src/mobile/media/stream/api.ts). */
+  readonly VITE_BMUSIC_URL?: string;
 }
 
 interface ImportMeta {

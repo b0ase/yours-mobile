@@ -318,3 +318,14 @@ export const RELEASES_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Media › pay-per-second streaming (the bMusic FIRST 12 demo, media/stream/): bWalletX only, absent from a store
+ * build even as code (paying for digital content in-app: Apple 3.1.1, Play Payments). Literal env check so Vite
+ * inlines it and Rollup drops the lazy StreamAlbum chunk and the session sweeper.
+ */
+export const PAY_STREAM_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

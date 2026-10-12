@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -9,7 +9,7 @@ import { FEATURED_TRACKS, featuredQueue, type FeaturedTrack } from './featured/f
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { useReleases } from './releases/useReleases';
 import type { Release } from './releases/releases';
-import { RELEASES_ENABLED } from '../storeBuild';
+import { PAY_STREAM_ENABLED, RELEASES_ENABLED } from '../storeBuild';
 import { TopNav } from '../../components/TopNav';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -22,6 +22,9 @@ import { ErrorActions } from '../errors/ErrorActions';
  * Free / Listen / Play (owned) — no prices. Square covers everywhere; items without a cover get
  * generated gold square art, never a grey box.
  */
+// bWalletX only: absent from a store build (PAY_STREAM_ENABLED).
+const StreamAlbum = PAY_STREAM_ENABLED ? lazy(() => import('./stream/StreamAlbum')) : null;
+
 const GOLD = '#FFD24D';
 const PANEL = '#111216';
 const LINE = '#2b2f36';
@@ -474,6 +477,11 @@ const MediaPage = () => {
                   </div>
                 )}
               </section>
+            )}
+            {showMusic && StreamAlbum && (
+              <Suspense fallback={null}>
+                <StreamAlbum />
+              </Suspense>
             )}
             {showMusic && shelf('Free this week', free)}
             {shelf(
