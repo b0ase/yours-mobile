@@ -48,6 +48,26 @@
       "permanent": true
     },
     {
+      "source": "/tickets",
+      "destination": "/wallet/tickets",
+      "permanent": true
+    },
+    {
+      "source": "/tickets/:path*",
+      "destination": "/wallet/tickets/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/credits",
+      "destination": "/wallet/credits",
+      "permanent": true
+    },
+    {
+      "source": "/credits/:path*",
+      "destination": "/wallet/credits/:path*",
+      "permanent": true
+    },
+    {
       "source": "/feed",
       "destination": "/bchatx-feed",
       "permanent": true

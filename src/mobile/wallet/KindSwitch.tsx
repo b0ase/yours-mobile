@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
 import { walletKindsFor } from '../storeBuild';
+import { WalletTabs } from '../nfts/WalletTabs';
 
 const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
 
@@ -69,6 +70,8 @@ export const WalletKindSwitch = () => {
       box.removeEventListener('touchstart', stop);
     };
   }, [kind]);
+  // Desktop (wide/flag.ts sets html.ww-on): the Wallet tab bar with NFTs, Tickets and Credits as their own pages.
+  if (document.documentElement.classList.contains('ww-on')) return <WalletTabs active={kind} />;
   return (
     <div
       ref={ref}

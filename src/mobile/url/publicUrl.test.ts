@@ -65,3 +65,27 @@ describe('shareable album and artist paths', () => {
     expect(toRouter('/bmusic/artist/vexvoid/album/nope', '')).toBe('/m/media');
   });
 });
+
+describe('wallet pages under /wallet', () => {
+  const op = `${'a'.repeat(64)}_0`;
+  test('NFT library and deep link round trip', () => {
+    expect(toPublic('/m/nfts', '')).toBe('/wallet/nfts');
+    expect(toRouter('/wallet/nfts', '')).toBe('/m/nfts');
+    expect(toPublic(`/m/nfts/${op}`, '')).toBe(`/wallet/nfts/${op}`);
+    expect(toRouter(`/wallet/nfts/${op}`, '')).toBe(`/m/nfts/${op}`);
+  });
+  test('tickets round trip; old /tickets still opens', () => {
+    expect(toPublic('/m/tickets', '')).toBe('/wallet/tickets');
+    expect(toRouter('/wallet/tickets', '')).toBe('/m/tickets');
+    expect(toRouter('/tickets', '')).toBe('/m/tickets');
+  });
+  test('credits round trip; old /credits still opens', () => {
+    expect(toPublic('/m/credits', '')).toBe('/wallet/credits');
+    expect(toRouter('/wallet/credits', '')).toBe('/m/credits');
+    expect(toRouter('/credits', '')).toBe('/m/credits');
+  });
+  test('the wallet itself is unchanged', () => {
+    expect(toPublic('/bsv-wallet', '')).toBe('/wallet');
+    expect(toRouter('/wallet', '')).toBe('/bsv-wallet');
+  });
+});

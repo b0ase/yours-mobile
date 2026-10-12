@@ -33,6 +33,8 @@ const LockScreen = lazy(() => import('../locks/LockScreen'));
 // Desktop sidebar › Tickets / Credits (wide/WalletKindPages.tsx).
 const TicketsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.TicketsPage })));
 const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.CreditsPage })));
+// Wallet › NFTs library (Desktop /wallet/nfts[/<outpoint>], docs/NFT-LIBRARY.md).
+const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
 // No app-wide error boundary upstream: one throw blanked the whole page (owner, 6 Oct 2026).
@@ -64,6 +66,8 @@ const MobileRoutes = () => (
         <Route path="calls" element={<CallsPage />} />
         <Route path="lock" element={<LockScreen />} />
         <Route path="lock/verify" element={<LockVerify />} />
+        <Route path="nfts" element={<NftLibraryPage />} />
+        <Route path="nfts/:outpoint" element={<NftLibraryPage />} />
         <Route path="tickets" element={<TicketsPage />} />
         <Route path="credits" element={<CreditsPage />} />
         <Route path="home" element={<HomeScreen />} />

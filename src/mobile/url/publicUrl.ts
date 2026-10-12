@@ -10,6 +10,8 @@
  *   /m/feed                ↔ /bchatx-feed   (old /feed links 308 there, src/web/vercel.json)
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
+ *   /m/nfts[/<outpoint>]  ↔ /wallet/nfts[/<outpoint>]   (NFT library, nfts/NftLibraryPage.tsx)
+ *   /m/tickets, /m/credits ↔ /wallet/tickets, /wallet/credits   (old /tickets, /credits 308 there, vercel.json)
  * Other top-level app routes (/settings, …) keep their own path.
  */
 import { SHARE_ALBUMS, albumPublicPath } from '../media/shareAlbums';
@@ -22,6 +24,8 @@ const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/brow
 const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore', '/sweep']);
 /** In-app artist screens (media/artists/ArtistsPage.tsx). */
 const ARTISTS_ROUTE = '/m/media/artists';
+/** Wallet pages with their own route: /m/<page>[/…] ↔ /wallet/<page>[/…]. */
+const WALLET_PAGES = /^\/(nfts|tickets|credits)(?=\/|$)/;
 const albumById = (id: string) => SHARE_ALBUMS.find((a) => a.id === id);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 
@@ -38,6 +42,7 @@ export const toPublic = (pathname: string, search: string): string => {
   } else if (path === '/m/feed') path = '/bchatx-feed';
   else if (path === '/m/media' || path.startsWith('/m/media/')) path = `/bmusic${path.slice(8)}`;
   else if (path === '/bsv-wallet') path = '/wallet';
+  else if (path.startsWith('/m/') && WALLET_PAGES.test(path.slice(2))) path = `/wallet${path.slice(2)}`;
   else if (path.startsWith('/m/')) path = path.slice(2);
   const rest = q.toString();
   return rest ? `${path}?${rest}` : path;
@@ -69,6 +74,7 @@ export const toRouter = (pathname: string, search: string): string | null => {
   if (path === '/bchatx-feed' || path === '/feed') return withQ('/m/feed');
   if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
   if (path === '/wallet') return withQ('/bsv-wallet');
+  if (path.startsWith('/wallet/') && WALLET_PAGES.test(path.slice(7))) return withQ(`/m${path.slice(7)}`);
   if (TOP.has(path)) return withQ(path);
   return withQ(`/m${path}`);
 };
