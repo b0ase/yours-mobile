@@ -70,7 +70,7 @@ import { HOSTED_YOURS_IMAGE } from './utils/constants';
 import { WalletBackupService } from './backup/WalletBackupService';
 import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/usbRekeyBackground';
 import { finishInterruptedReconcile, reconcileStorage } from './services/storageReconcileBackground';
-import { reconcileOutcome } from './services/storageReconcile';
+import { RECONCILE_RECORD_KEY, reconcileOutcome, type ReconcileRecord } from './services/storageReconcile';
 import { USB_HANDLE_DB_NAME } from './services/UsbKey.service';
 import { QUEUED_MESSAGE, RepeatGuard, queuedSend, repeatRefusal, requestFingerprint } from './services/repeatGuard';
 import { CALL_NOTIFICATION_PREFIX, CALL_RING_ALARM, callNotification, callsToAnnounce, fetchIncoming } from './services/callRinger';
@@ -1212,6 +1212,7 @@ if (isInServiceWorker) {
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
       'STORAGE_REPAIR_SYNC',
+      'BSV21_FIX_STALE',
       'STORAGE_SET_ACTIVE_STORAGE',
       'STORAGE_ADD_REMOTE',
       'STORAGE_REMOVE_REMOTE',
@@ -1524,6 +1525,9 @@ if (isInServiceWorker) {
           return true;
         case 'STORAGE_REPAIR_SYNC':
           processStorageRepairSync(sendResponse, Array.isArray(message.tokenIds) ? message.tokenIds : undefined);
+          return true;
+        case 'BSV21_FIX_STALE':
+          processBsv21FixStale(typeof message.tokenId === 'string' ? message.tokenId : '', sendResponse);
           return true;
         case 'STORAGE_SET_ACTIVE_STORAGE':
           processStorageSetActiveStorage(message.target, sendResponse);
@@ -1927,23 +1931,53 @@ if (isInServiceWorker) {
       const config: StorageConfig = account?.storageConfig ?? { remotes: [] };
       const remoteUrl = config.activeRemote || config.remotes?.[0];
       // After the reconcile (or alone, with no remote): token outputs on chain
-      // that no store recorded, searched over the wider window too.
-      const recoverTokens = async () => {
+      // that no store recorded, searched over the wider window too. Then a final
+      // pass relinquishes token outputs the overlay or chain reports spent: the
+      // merge is a union and can bring a spent one back (TERANODE, 12 Oct 2026).
+      const tokenPass = async (): Promise<NonNullable<ReconcileRecord['tokens']>> => {
+        const errors: string[] = [];
+        let recovered = 0;
         try {
           const r = await accountContext!.recoverTokens({ thorough: true, tokenIds });
-          return r.imported.length;
+          recovered = r.imported.length;
         } catch (err) {
           console.error('[STORAGE_REPAIR_SYNC] token recovery failed:', err);
-          return 0;
+          errors.push(`recover: ${err instanceof Error ? err.message : String(err)}`);
         }
+        let staleDropped: NonNullable<ReconcileRecord['tokens']>['staleDropped'] = [];
+        try {
+          const pass = await accountContext!.dropSpentTokens();
+          staleDropped = pass.dropped;
+          errors.push(...pass.errors);
+        } catch (err) {
+          console.error('[STORAGE_REPAIR_SYNC] token spend pass failed:', err);
+          errors.push(`spend pass: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return { recovered, staleDropped, ...(errors.length ? { errors } : {}) };
+      };
+      // The Repair Log shows the token pass too; without a remote it is the whole record.
+      const saveTokenRecord = async (tokens: NonNullable<ReconcileRecord['tokens']>, base?: ReconcileRecord) => {
+        const now = new Date().toISOString();
+        const record: ReconcileRecord = base
+          ? { ...base, tokens }
+          : {
+              startedAt: now,
+              finishedAt: now,
+              trigger: 'manual',
+              appVersion: chrome.runtime.getManifest().version,
+              remoteUrl: '',
+              verify: { onlyLocal: 0, onlyRemote: 0, mismatched: [] },
+              tokens,
+            };
+        await chrome.storage.local.set({ [RECONCILE_RECORD_KEY]: record });
       };
       if (!remoteUrl) {
-        const tokensRecovered = await recoverTokens();
+        const tokens = await tokenPass();
+        await saveTokenRecord(tokens).catch(() => undefined);
         sendResponse({
           type: 'STORAGE_REPAIR_SYNC',
-          success: tokensRecovered > 0,
-          data: { tokensRecovered },
-          error: tokensRecovered > 0 ? undefined : 'No remote configured to repair',
+          success: true,
+          data: { tokensRecovered: tokens.recovered, staleDropped: tokens.staleDropped.length, noRemote: true },
         });
         return;
       }
@@ -1954,17 +1988,43 @@ if (isInServiceWorker) {
         remoteUrl,
         'manual',
       );
-      const tokensRecovered = await recoverTokens();
+      const tokens = await tokenPass();
+      await saveTokenRecord(tokens, record).catch(() => undefined);
 
       sendResponse({
         type: 'STORAGE_REPAIR_SYNC',
         success: true,
-        data: { outcome: reconcileOutcome(record), tokensRecovered },
+        data: {
+          outcome: reconcileOutcome(record),
+          tokensRecovered: tokens.recovered,
+          staleDropped: tokens.staleDropped.length,
+        },
       });
     } catch (error) {
       console.error('[STORAGE_REPAIR_SYNC] reconcile failed:', error);
       sendResponse({
         type: 'STORAGE_REPAIR_SYNC',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /** "Fix and send" (SendBsv21View stale prompt): one token's local records made to match the overlay. */
+  const processBsv21FixStale = async (tokenId: string, sendResponse: CallbackResponse) => {
+    if (!/^[0-9a-f]{64}[._]\d+$/i.test(tokenId)) {
+      sendResponse({ type: 'BSV21_FIX_STALE', success: false, error: 'Invalid token ID' });
+      return;
+    }
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const data = await accountContext.fixStaleToken(tokenId);
+      sendResponse({ type: 'BSV21_FIX_STALE', success: true, data });
+    } catch (error) {
+      console.error('[BSV21_FIX_STALE] failed:', error);
+      sendResponse({
+        type: 'BSV21_FIX_STALE',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });

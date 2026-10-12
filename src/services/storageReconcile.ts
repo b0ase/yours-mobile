@@ -333,6 +333,15 @@ export interface ReconcileRecord {
   /** Outputs both stores listed unspent that the indexer reports spent, marked spent in both. */
   rescan?: { checked: number; stale: StaleSpend[] };
   verify?: { onlyLocal: number; onlyRemote: number; mismatched: string[] };
+  /**
+   * Token pass after the merge (Repair Sync): outputs found on chain and imported, and token outputs relinquished
+   * because the overlay or chain reports them spent (the merge is a union and can bring them back).
+   */
+  tokens?: {
+    recovered: number;
+    staleDropped: Array<{ outpoint: string; tokenId: string; amt: string }>;
+    errors?: string[];
+  };
   error?: string;
   errorStack?: string;
   /** Set once the user has dismissed the result of a migration run. */

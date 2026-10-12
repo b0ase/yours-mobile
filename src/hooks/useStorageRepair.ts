@@ -23,7 +23,8 @@ export type RepairResponse = {
   success: boolean;
   error?: string;
   /** tokensRecovered: token outputs found on chain that no store had recorded (tokenRecovery.ts). */
-  data?: { outcome?: ReconcileOutcome; tokensRecovered?: number };
+  /** staleDropped: token outputs relinquished because the overlay or chain reports them spent. */
+  data?: { outcome?: ReconcileOutcome; tokensRecovered?: number; staleDropped?: number; noRemote?: boolean };
 };
 
 /**

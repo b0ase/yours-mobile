@@ -3,7 +3,7 @@
  * See tokenRecovery.ts for what it does and why.
  */
 import { BSV21_BASKET, P1SAT_PROTOCOL } from '@1sat/types';
-import { internalizeBeef } from '@1sat/actions';
+import { bsv21FieldsFromOutput, internalizeBeef } from '@1sat/actions';
 import type { OneSatServices } from '@1sat/wallet-browser';
 import { KeyDeriver, PrivateKey, PublicKey, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import { buildKeySearchSetup, invoicePrefixFor, searchMsKeyIDs } from './tokenKeySearch';
@@ -15,6 +15,19 @@ import {
   type TokenRecoveryResult,
   type TxTokenOutput,
 } from './tokenRecovery';
+import {
+  TOKEN_SEND_JOURNAL_KEY,
+  dropSpentTokenOutputs,
+  fixStaleToken,
+  healTokenSends,
+  openJournalTokens,
+  type HealAction,
+  type LocalTokenOutput,
+  type SpendPassReport,
+  type StaleFixResult,
+  type TokenSendHealReport,
+  type TokenSendJournalEntry,
+} from './tokenSendHeal';
 
 /** Pull the BSV-21 transfer/mint data and the P2PKH owner out of one output script. */
 export const parseTokenOutput = (lockingScriptHex: string, txid: string, vout: number): TxTokenOutput | null => {
@@ -196,6 +209,43 @@ const ownerTokenOutputs = async (services: OneSatServices, address: string) => {
   return out;
 };
 
+/** Import one token output the wallet holds the key for (keyID, P1SAT protocol, self). Skips one already listed. */
+const importTokenOutput = async (
+  env: { wallet: WalletInterface; services: OneSatServices; chain: 'main' | 'test'; identityKey: string },
+  { txid, vout, keyID }: { txid: string; vout: number; keyID: string },
+) => {
+  const { wallet, services, chain, identityKey } = env;
+  // Never twice: skip if the wallet lists it by now.
+  const have = await wallet.listOutputs({ basket: BSV21_BASKET, limit: 10000 });
+  if (have.outputs.some((o) => normOutpoint(o.outpoint) === `${txid}.${vout}`)) return;
+  const { publicKey } = await wallet.getPublicKey({
+    protocolID: P1SAT_PROTOCOL,
+    keyID,
+    counterparty: 'self',
+    forSelf: true,
+  });
+  const address = PublicKey.fromString(publicKey).toAddress();
+  const beef = await services.beef.getBeef(txid);
+  await internalizeBeef({
+    beef: beef instanceof Uint8Array ? beef : new Uint8Array(beef),
+    wallet,
+    services,
+    chain,
+    addressDerivations: new Map([
+      [
+        address,
+        {
+          outputIndex: vout,
+          keyID,
+          protocolID: P1SAT_PROTOCOL,
+          counterparty: 'self',
+          senderIdentityKey: identityKey,
+        },
+      ],
+    ]),
+  });
+};
+
 const doRun = async ({ wallet, services, identityWif, chain, options, addresses }: RunTokenRecoveryArgs) => {
   const deriver = new KeyDeriver(PrivateKey.fromWif(identityWif));
   const invoicePrefix = invoicePrefixFor(P1SAT_PROTOCOL);
@@ -265,37 +315,8 @@ const doRun = async ({ wallet, services, identityWif, chain, options, addresses 
       },
       searchKeys: (prefix, targets, fromMs, toMs) =>
         searchMsKeyIDs({ setup, keyIDPrefix: prefix, targets, fromMs, toMs }),
-      async importOutput({ txid, vout, keyID }) {
-        // Never twice: skip if the wallet lists it by now.
-        const have = await wallet.listOutputs({ basket: BSV21_BASKET, limit: 10000 });
-        if (have.outputs.some((o) => normOutpoint(o.outpoint) === `${txid}.${vout}`)) return;
-        const { publicKey } = await wallet.getPublicKey({
-          protocolID: P1SAT_PROTOCOL,
-          keyID,
-          counterparty: 'self',
-          forSelf: true,
-        });
-        const address = PublicKey.fromString(publicKey).toAddress();
-        const beef = await services.beef.getBeef(txid);
-        await internalizeBeef({
-          beef: beef instanceof Uint8Array ? beef : new Uint8Array(beef),
-          wallet,
-          services,
-          chain,
-          addressDerivations: new Map([
-            [
-              address,
-              {
-                outputIndex: vout,
-                keyID,
-                protocolID: P1SAT_PROTOCOL,
-                counterparty: 'self',
-                senderIdentityKey: identityKey,
-              },
-            ],
-          ]),
-        });
-      },
+      importOutput: ({ txid, vout, keyID }) =>
+        importTokenOutput({ wallet, services, chain, identityKey }, { txid, vout, keyID }),
       async dropStale(outpoint) {
         await wallet.relinquishOutput({ basket: BSV21_BASKET, output: outpoint });
       },
@@ -310,4 +331,186 @@ const doRun = async ({ wallet, services, identityWif, chain, options, addresses 
     console.log('[tokenRecovery] done:', JSON.stringify(result));
   }
   return result;
+};
+
+// --- Unfinished token sends, stale records, the post-merge spend pass (tokenSendHeal.ts) -----------------------
+
+const chainSpends = async (services: OneSatServices, outpoints: string[]) => {
+  const map = new Map<string, string | null>();
+  for (let i = 0; i < outpoints.length; i += 100) {
+    const batch = outpoints.slice(i, i + 100);
+    const res = await services.txo.getSpends(batch.map((o) => o.replace('.', '_')));
+    batch.forEach((o, j) => map.set(o, res[j] ?? null));
+  }
+  return map;
+};
+
+const overlayStates = async (services: OneSatServices, tokenId: string, outpoints: string[]) => {
+  const res = await services.bsv21.getOutputStatus(tokenId, outpoints);
+  return new Map(res.map((r) => [normOutpoint(r.outpoint), r.state as string | undefined]));
+};
+
+/** Spendable bsv21-basket outputs with their token and amount. */
+const localTokenOutputs = async (wallet: WalletInterface): Promise<LocalTokenOutput[]> => {
+  const list = await wallet.listOutputs({
+    basket: BSV21_BASKET,
+    includeTags: true,
+    includeCustomInstructions: true,
+    limit: 10000,
+  });
+  return list.outputs.flatMap((o) => {
+    const f = bsv21FieldsFromOutput({ tags: o.tags, customInstructions: o.customInstructions, outpoint: o.outpoint });
+    return f.tokenId && f.amt ? [{ outpoint: normOutpoint(o.outpoint), tokenId: f.tokenId, amt: String(f.amt) }] : [];
+  });
+};
+
+const p2pkhAddress = (hash160: string, chain: 'main' | 'test') =>
+  Utils.toBase58Check(Utils.toArray(hash160, 'hex'), chain === 'main' ? [0x00] : [0x6f]);
+
+export interface TokenHealArgs {
+  wallet: WalletInterface;
+  /** For failed actions (listFailedActions); optional. */
+  listFailedActions?: () => Promise<HealAction[]>;
+  services: OneSatServices;
+  identityWif: string;
+  chain: 'main' | 'test';
+}
+
+/** Startup and "Fix and send": import the change of token sends storage never finished. */
+export const runTokenSendHeal = async (
+  args: TokenHealArgs,
+  opts: { tokenId?: string } = {},
+): Promise<TokenSendHealReport> => {
+  const { wallet, services, chain } = args;
+  const identityKey = new KeyDeriver(PrivateKey.fromWif(args.identityWif)).identityKey;
+  const rawCache = new Map<string, Transaction>();
+  const getTx = async (txid: string) => {
+    let tx = rawCache.get(txid);
+    if (!tx) {
+      tx = Transaction.fromBinary(Array.from(await services.beef.getRawTx(txid)));
+      rawCache.set(txid, tx);
+    }
+    return tx;
+  };
+  return healTokenSends(
+    {
+      async listActions() {
+        const page = await wallet.listActions({
+          labels: [],
+          includeOutputs: true,
+          includeOutputLockingScripts: true,
+          limit: 300,
+        });
+        const failed = args.listFailedActions ? await args.listFailedActions().catch(() => []) : [];
+        return [...(page.actions as unknown as HealAction[]), ...failed];
+      },
+      parse: (lockingScript) => parseTokenOutput(lockingScript, '0'.repeat(64), 0),
+      async findValidUnspent(tokenId, hash160) {
+        const want = tokenId.replace('.', '_');
+        const held = (await ownerTokenOutputs(services, p2pkhAddress(hash160, chain)))
+          .filter((o) => tokenIdsFromEvents(o.events).includes(want))
+          .map((o) => normOutpoint(o.outpoint));
+        if (held.length === 0) return [];
+        const spends = await chainSpends(services, held);
+        const unspent = held.filter((o) => !spends.get(o));
+        if (unspent.length === 0) return [];
+        const states = await overlayStates(services, tokenId, unspent);
+        const out: { outpoint: string; amt: string }[] = [];
+        for (const o of unspent) {
+          const st = states.get(o);
+          if (st !== 'valid' && st !== 'queued') continue;
+          const [txid, vout] = o.split('.');
+          const tx = await getTx(txid);
+          const t = parseTokenOutput(tx.outputs[Number(vout)].lockingScript.toHex(), txid, Number(vout));
+          if (t && t.hash160 === hash160) out.push({ outpoint: o, amt: t.amt });
+        }
+        return out;
+      },
+      async haveOutput(outpoint) {
+        const have = await wallet.listOutputs({ basket: BSV21_BASKET, limit: 10000 });
+        return have.outputs.some((o) => normOutpoint(o.outpoint) === outpoint);
+      },
+      importOutput: ({ txid, vout, keyID }) =>
+        importTokenOutput({ wallet, services, chain, identityKey }, { txid, vout, keyID }),
+      journal: {
+        async read() {
+          try {
+            const r = await chrome.storage.local.get(TOKEN_SEND_JOURNAL_KEY);
+            return (r?.[TOKEN_SEND_JOURNAL_KEY] as TokenSendJournalEntry[] | undefined) ?? [];
+          } catch {
+            return [];
+          }
+        },
+        async write(entries) {
+          await chrome.storage.local.set({ [TOKEN_SEND_JOURNAL_KEY]: entries });
+        },
+      },
+      now: () => Date.now(),
+      log: (m) => console.log(`[tokenSendHeal] ${m}`),
+    },
+    opts,
+  );
+};
+
+/** Relinquish token outputs the overlay or the chain reports spent (all tokens, or one). */
+export const runSpendPass = (
+  args: { wallet: WalletInterface; services: OneSatServices },
+  opts: { tokenId?: string } = {},
+): Promise<SpendPassReport> =>
+  dropSpentTokenOutputs(
+    {
+      localOutputs: () => localTokenOutputs(args.wallet),
+      overlayStatus: (tokenId, outpoints) => overlayStates(args.services, tokenId, outpoints),
+      chainSpends: (outpoints) => chainSpends(args.services, outpoints),
+      async relinquish(outpoint) {
+        await args.wallet.relinquishOutput({ basket: BSV21_BASKET, output: outpoint });
+      },
+      log: (m) => console.log(`[tokenSpendPass] ${m}`),
+    },
+    opts,
+  );
+
+/** "Fix and send" for one token: drop spent records, import its valid change, report what changed. */
+export const runStaleFix = (
+  args: TokenHealArgs & { addresses?: () => string[] },
+  tokenId: string,
+): Promise<StaleFixResult> =>
+  fixStaleToken(
+    {
+      spendPass: (id) => runSpendPass(args, { tokenId: id }),
+      healSends: (id) => runTokenSendHeal(args, { tokenId: id }),
+      recover: async (id) =>
+        (
+          await runTokenRecovery({
+            wallet: args.wallet,
+            services: args.services,
+            identityWif: args.identityWif,
+            chain: args.chain,
+            addresses: args.addresses,
+            options: { thorough: true, wide: true, tokenIds: [id] },
+          })
+        ).imported,
+    },
+    tokenId,
+  );
+
+/** Startup: heal unfinished sends, walk tokens the send view journalled, then close those journal entries. */
+export const runStartupTokenHeal = async (args: TokenHealArgs & { addresses?: () => string[] }) => {
+  const healed = await runTokenSendHeal(args);
+  let journalled: string[] = [];
+  try {
+    const r = await chrome.storage.local.get(TOKEN_SEND_JOURNAL_KEY);
+    const entries = (r?.[TOKEN_SEND_JOURNAL_KEY] as TokenSendJournalEntry[] | undefined) ?? [];
+    journalled = openJournalTokens(entries, Date.now());
+    if (journalled.length) {
+      await runSpendPass(args).catch(() => undefined);
+      await runTokenRecovery({ ...args, options: { thorough: true, tokenIds: journalled } }).catch(() => undefined);
+      await chrome.storage.local.set({
+        [TOKEN_SEND_JOURNAL_KEY]: entries.map((e) => (journalled.includes(e.tokenId) ? { ...e, done: true } : e)),
+      });
+    }
+  } catch (err) {
+    healed.errors.push(`journal: ${String(err)}`);
+  }
+  return { ...healed, journalled };
 };

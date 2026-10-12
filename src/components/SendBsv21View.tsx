@@ -23,6 +23,16 @@ import {
   type Bsv21Balance,
 } from '@1sat/actions';
 import { classifyBsv21Shortfall } from '../utils/bsv21OverlayShortfall';
+import { OVERLAY_ISSUES, bsv21ErrorMessage } from '../utils/bsv21SendErrors';
+import { fundOverlayExact, fundingTotal, formatBsvAmount, transfersCovered } from '../services/bsv21FundGuard';
+import {
+  chromeJournalStore,
+  describeStaleFix,
+  journalSendEnd,
+  journalSendStart,
+  type StaleFixResult,
+} from '../services/tokenSendHeal';
+import { sendMessageAsync } from '../utils/chromeHelpers';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag } from 'lucide-react';
 import { SellSheet } from '../mobile/sell/SellSheet';
@@ -65,18 +75,11 @@ type Bsv21Recipient = {
   amountInput: string;
 };
 
-/** sendBsv21 errors that mean the overlay could not validate the transfer. */
-const OVERLAY_ISSUES: Record<string, Bsv21OverlayIssue> = {
-  'token-not-active': 'not-active',
-  'tokens-queued': 'queued',
-  'insufficient-valid-tokens': 'not-valid',
-  'token-not-found': 'not-found',
-};
-
 const WARN = '#F79009';
 
 /** Overlay status of the token, for the pill beside the token ID. */
 type OverlayStatus = 'active' | 'inactive' | 'unknown';
+const OK = '#12B76A';
 
 const newRecipient = (): Bsv21Recipient => ({
   id: crypto.randomUUID(),
@@ -101,11 +104,15 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   } | null>(null);
   const [successTxId, setSuccessTxId] = useState('');
   const [overlayStatus, setOverlayStatus] = useState<OverlayStatus | null>(null);
+  /** Indexing balance and fee from the token details (status.balance / fee_per_output, sats). */
+  const [overlayFunds, setOverlayFunds] = useState<{ balance: number; feePerOutput: number } | null>(null);
   const [overlayPrompt, setOverlayPrompt] = useState<{
     issue: Bsv21OverlayIssue;
     recipients: { address: string; amount: bigint }[];
     total: bigint;
     fundingSats?: number;
+    fundingCovers?: number;
+    fundingError?: string;
   } | null>(null);
   const [overlayProcessing, setOverlayProcessing] = useState<string | undefined>();
   const [confirmUnverified, setConfirmUnverified] = useState(false);
@@ -136,10 +143,13 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     try {
       const details = await bsv21.getTokenDetails(token.info.id, { fresh: true });
       setOverlayStatus(details.status?.is_active ? 'active' : 'inactive');
+      setOverlayFunds({ balance: details.status?.balance ?? 0, feePerOutput: details.status?.fee_per_output ?? 0 });
+      return details;
     } catch (error) {
       console.error('[SendBsv21View] overlay status lookup failed:', error);
       setOverlayStatus('unknown');
     }
+    return undefined;
   };
 
   useEffect(() => {
@@ -267,6 +277,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     validateOverlay: boolean,
   ) => {
     let sendRes: Awaited<ReturnType<typeof sendBsv21.execute>>;
+    let journalId: string | undefined;
     // Quarantine: never spend a token from a sender you have not accepted together with your own coins.
     if (activeQuarantine().has(normId(token.info.id ?? ''))) {
       addSnackbar('This token is in Quarantine. Keep it in bMail › Quarantine first.', 'error');
@@ -283,6 +294,9 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
       const ctx = text
         ? { ...apiContext, wallet: withExtraOutput(apiContext.wallet, noteOutput(text, token.info.id!)) }
         : apiContext;
+      // Journal: open before the send, closed as soon as a txid (or a clean refusal) comes back. A page suspended
+      // in between leaves it open, and the next start heals this token (tokenSendHeal.ts).
+      journalId = await journalSendStart(chromeJournalStore, token.info.id!).catch(() => undefined);
       sendRes = await sendBsv21.execute(ctx, {
         tokenId: token.info.id!,
         recipients: sendRecipients.map((r) => ({
@@ -292,11 +306,13 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         validateOverlay,
       });
     } catch (error) {
+      // Left open on purpose: a throw can come after the broadcast.
       console.error('[SendBsv21View] sendBsv21.execute threw:', error);
       setIsProcessing(false);
       addSnackbar(getErrorMessage(error), 'error');
       return;
     }
+    if (journalId) void journalSendEnd(chromeJournalStore, journalId, sendRes.txid).catch(() => undefined);
 
     if (!sendRes.txid || sendRes.error) {
       console.error('[SendBsv21View] sendBsv21 error:', sendRes.error);
@@ -307,7 +323,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         await openOverlayPrompt(issue, sendRecipients, total);
         return;
       }
-      addSnackbar(getErrorMessage(sendRes.error), 'error');
+      addSnackbar(bsv21ErrorMessage(sendRes.error, getTokenName(token.info)) ?? getErrorMessage(sendRes.error), 'error');
       return;
     }
 
@@ -358,42 +374,107 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     }
   };
 
+  /** The indexer's exact price, or why there is none (then nothing can be paid). */
+  const loadFunding = async (): Promise<{ fundingSats?: number; fundingCovers?: number; fundingError?: string }> => {
+    try {
+      const [template, details] = await Promise.all([
+        apiContext.services!.bsv21.getFundingTemplate(token.info.id!),
+        refreshOverlayStatus(),
+      ]);
+      const sats = fundingTotal(template);
+      if (sats <= 0) return { fundingError: 'The indexer is not asking for funding right now. Try sending again.' };
+      return {
+        fundingSats: sats,
+        fundingCovers: transfersCovered(sats, details?.status?.fee_per_output, details?.status?.balance),
+      };
+    } catch (error) {
+      console.error('[SendBsv21View] funding template lookup failed:', error);
+      return { fundingError: "Couldn't get the indexer's price, so nothing can be paid." };
+    }
+  };
+
   const openOverlayPrompt = async (
     issue: Bsv21OverlayIssue,
     sendRecipients: { address: string; amount: bigint }[],
     total: bigint,
   ) => {
-    let fundingSats: number | undefined;
-    if (issue === 'not-active') {
-      try {
-        const template = await apiContext.services!.bsv21.getFundingTemplate(token.info.id!);
-        fundingSats = template.outputs.reduce((sum, o) => sum + o.satoshis, 0) || undefined;
-      } catch (error) {
-        console.error('[SendBsv21View] funding template lookup failed:', error);
-      }
-    }
-    setOverlayPrompt({ issue, recipients: sendRecipients, total, fundingSats });
+    const funding = issue === 'not-active' ? await loadFunding() : {};
+    setOverlayPrompt({ issue, recipients: sendRecipients, total, ...funding });
   };
 
-  const handleFundOverlay = async () => {
-    setOverlayProcessing('Funding overlay...');
+  const handleRetryFunding = async () => {
+    if (!overlayPrompt) return;
+    setOverlayProcessing('Getting the price...');
     try {
-      const res = await fundBsv21Overlay.execute(apiContext, { tokenId: token.info.id! });
+      const funding = await loadFunding();
+      setOverlayPrompt((p) => (p ? { ...p, fundingSats: undefined, fundingCovers: undefined, fundingError: undefined, ...funding } : p));
+    } finally {
+      setOverlayProcessing(undefined);
+    }
+  };
+
+  /** Pays exactly the confirmed sats; a changed price is refused and shown for a new confirm. */
+  const handleFundOverlay = async (confirmedSats: number) => {
+    setOverlayProcessing('Funding indexer...');
+    try {
+      const res = await fundOverlayExact(apiContext, token.info.id!, confirmedSats, fundBsv21Overlay);
+      if (res.error === 'funding-amount-changed') {
+        addSnackbar(bsv21ErrorMessage(res.error, tokenName)!, 'error');
+        const funding = await loadFunding();
+        setOverlayPrompt((p) => (p ? { ...p, fundingSats: undefined, fundingError: undefined, ...funding } : p));
+        return;
+      }
       if (res.error === 'funding-not-needed') {
-        addSnackbar(`The ${tokenName} overlay is already funded. Try sending again.`, 'info');
+        addSnackbar(`The ${tokenName} indexer is already funded. Nothing was paid. Try sending again.`, 'info');
       } else if (res.error === 'funding-submit-failed') {
-        addSnackbar('Funding sent. The overlay will pick it up within about 20 minutes.', 'info');
+        addSnackbar(`Paid ${formatBsvAmount(confirmedSats)}. The indexer will pick it up within about 20 minutes.`, 'info');
       } else if (res.error) {
-        addSnackbar(getErrorMessage(res.error), 'error');
+        addSnackbar(bsv21ErrorMessage(res.error, tokenName) ?? getErrorMessage(res.error), 'error');
         return;
       } else {
-        addSnackbar(`${tokenName} overlay funded. Your tokens will be validated shortly.`, 'success');
+        addSnackbar(`Paid ${formatBsvAmount(confirmedSats)} to the ${tokenName} indexer. Your tokens will be checked shortly.`, 'success');
       }
       setOverlayPrompt(null);
       await refreshOverlayStatus();
     } catch (error) {
       console.error('[SendBsv21View] fundBsv21Overlay threw:', error);
       addSnackbar(getErrorMessage(error), 'error');
+    } finally {
+      setOverlayProcessing(undefined);
+    }
+  };
+
+  /** Stale prompt: make this wallet match the indexer for this token, say what changed, send again. */
+  const handleFixAndSend = async () => {
+    if (!overlayPrompt) return;
+    const { recipients: rs, total } = overlayPrompt;
+    setOverlayProcessing('Updating this wallet from the indexer...');
+    try {
+      const res = await sendMessageAsync<{ success: boolean; error?: string; data?: StaleFixResult }>({
+        action: 'BSV21_FIX_STALE',
+        tokenId: token.info.id,
+      });
+      if (!res?.success || !res.data) {
+        addSnackbar(res?.error ?? "Couldn't update this wallet. Try Settings › Troubleshooting › Repair Sync.", 'error');
+        return;
+      }
+      const summary = describeStaleFix(res.data, (a) => showAmount(a, token.info.dec), tokenName);
+      addSnackbar(summary, res.data.dropped.length || res.data.imported.length ? 'success' : 'info');
+      setOverlayProcessing('Sending...');
+      await runSend(rs, total, true);
+    } catch (error) {
+      addSnackbar(getErrorMessage(error), 'error');
+    } finally {
+      setOverlayProcessing(undefined);
+    }
+  };
+
+  const handleRetrySend = async () => {
+    if (!overlayPrompt) return;
+    const { recipients: rs, total } = overlayPrompt;
+    setOverlayProcessing('Sending...');
+    try {
+      await runSend(rs, total, true);
     } finally {
       setOverlayProcessing(undefined);
     }
@@ -497,24 +578,38 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 </motion.button>
               </Show>
 
-              <Show when={overlayStatus === 'inactive' || overlayStatus === 'unknown'}>
-                <div
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-full"
-                  style={{ background: overlayStatus === 'inactive' ? `${WARN}1A` : `${gray}12` }}
-                  title={
-                    overlayStatus === 'inactive'
-                      ? 'The overlay is not funded for this token, so it cannot validate your tokens before you send them'
-                      : 'The overlay could not be reached'
-                  }
-                >
-                  <AlertTriangle size={10} style={{ color: overlayStatus === 'inactive' ? WARN : gray }} />
-                  <span
-                    className="text-[10px] font-semibold"
-                    style={{ color: overlayStatus === 'inactive' ? WARN : gray }}
-                  >
-                    {overlayStatus === 'inactive' ? 'Not validated' : 'Overlay offline'}
-                  </span>
-                </div>
+              <Show when={overlayStatus !== null}>
+                {(() => {
+                  const color = overlayStatus === 'active' ? OK : overlayStatus === 'inactive' ? WARN : gray;
+                  const label =
+                    overlayStatus === 'active'
+                      ? `Indexed${overlayFunds ? ` · ${formatBsvAmount(overlayFunds.balance)}` : ''}`
+                      : overlayStatus === 'inactive'
+                        ? 'Indexer not funded'
+                        : 'Indexer offline';
+                  const title =
+                    overlayStatus === 'active'
+                      ? `The ${tokenName} indexer is funded and active. Its balance pays for checking future transfers.`
+                      : overlayStatus === 'inactive'
+                        ? `The ${tokenName} indexer is not funded, so it cannot check your tokens before you send them`
+                        : "Couldn't reach the token indexer";
+                  return (
+                    <div
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-full"
+                      style={{ background: `${color}1A` }}
+                      title={title}
+                    >
+                      {overlayStatus === 'active' ? (
+                        <Check size={10} style={{ color }} />
+                      ) : (
+                        <AlertTriangle size={10} style={{ color }} />
+                      )}
+                      <span className="text-[10px] font-semibold" style={{ color }}>
+                        {label}
+                      </span>
+                    </div>
+                  );
+                })()}
               </Show>
             </div>
             <Show when={!!token.info.id}>
@@ -730,8 +825,13 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         issue={overlayPrompt?.issue ?? 'not-active'}
         tokenName={tokenName}
         fundingSats={overlayPrompt?.fundingSats}
+        fundingCovers={overlayPrompt?.fundingCovers}
+        fundingError={overlayPrompt?.fundingError}
         processingMessage={overlayProcessing}
-        onFund={() => void handleFundOverlay()}
+        onFund={(sats) => void handleFundOverlay(sats)}
+        onRetryFunding={() => void handleRetryFunding()}
+        onFixAndSend={() => void handleFixAndSend()}
+        onRetry={() => void handleRetrySend()}
         onSendUnverified={() => setConfirmUnverified(true)}
         onCancel={() => setOverlayPrompt(null)}
       />
