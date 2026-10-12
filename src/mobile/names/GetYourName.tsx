@@ -25,7 +25,7 @@ import {
   PAYMAIL_ALIAS_RE,
   toAlias,
 } from './paymail';
-import { BWALLET_PAYMAIL_DOMAIN } from './config';
+import { BWALLET_PAYMAIL_DOMAIN, OPNS_PROFILE_DOMAIN } from './config';
 import { alsoGetText, estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
@@ -173,7 +173,7 @@ export const GetYourName = ({
     if (!n.tokenOnly) {
       const res = await registerOpns.execute(apiContext, {
         id: n.id,
-        profile: { domain: '1sat.name', ...(profileName ? { name: profileName } : {}) },
+        profile: { domain: OPNS_PROFILE_DOMAIN, ...(profileName ? { name: profileName } : {}) },
       });
       if (res.error) throw new Error(res.error);
       setMyName(identityAddress, n.name);

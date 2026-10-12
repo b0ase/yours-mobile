@@ -33,6 +33,7 @@ const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
  * name or Gmail address = one wallet.
  */
 const { openTicket, socialAliasFor } = require('./social');
+const { makeOpnsResolver } = require('./opnsResolve');
 async function ticketSocialCheck(alias, proof, env = process.env) {
   if (!proof || !proof.ticket || !proof.secret) return 'Continue with X or Google first';
   const p = openTicket(proof.ticket, proof.secret, env);
@@ -338,6 +339,8 @@ function makeHandlers({
   renamed = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => null
     : (alias) => bitsignRenamed(alias, env),
+  // OpNS names (lib/opnsResolve.js) for pki / profile / verify only. Off under tests unless injected.
+  opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : makeOpnsResolver(),
   // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
   feeChain = nameFee.chain,
 }) {
@@ -372,6 +375,20 @@ function makeHandlers({
     if (!row) return [404, { error: 'not-found' }];
     return [200, { ...row, _domain: p.domain }];
   };
+  // A claimed alias (or its forward / rename) always wins; only then is the handle tried as an OpNS
+  // name bound on chain to an identity key. Read-only answers: no payments, inbox or ord address.
+  const publicIdentity = async (handle) => {
+    const [s, row] = await publicAlias(handle);
+    if (s === 200) return [s, row];
+    const p = parseHandleParts(handle, env);
+    if (!p) return [s, row];
+    const o = await opns(p.alias, domains(env)).catch(() => null);
+    if (!o) return [s, row];
+    return [
+      200,
+      { alias: p.alias, identity_key: o.identityKey, display_name: o.displayName, _domain: p.domain, _opns: true },
+    ];
+  };
 
   return {
     caps: async () => [200, capabilities(env)],
@@ -389,13 +406,13 @@ function makeHandlers({
     },
 
     pki: async ({ handle }) => {
-      const [s, row] = await publicAlias(handle);
+      const [s, row] = await publicIdentity(handle);
       if (s !== 200) return [s, row];
       return [200, { bsvalias: '1.0', handle: handleOf(row.alias, row._domain), pubkey: row.identity_key }];
     },
 
     profile: async ({ handle }) => {
-      const [s, row] = await publicAlias(handle);
+      const [s, row] = await publicIdentity(handle);
       if (s !== 200) return [s, row];
       // No picture of their own: their generated bAvatar, drawn from the identity key (bChatX
       // /api/bavatar, the same picture the wallet draws), so other BSV apps show one too.
@@ -408,7 +425,7 @@ function makeHandlers({
     },
 
     verify: async ({ handle, pubkey }) => {
-      const [s, row] = await publicAlias(handle);
+      const [s, row] = await publicIdentity(handle);
       if (s !== 200) return [s, row];
       const pk = String(pubkey || '').toLowerCase();
       return [
