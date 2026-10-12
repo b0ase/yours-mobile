@@ -43,6 +43,16 @@ import { readListCache, writeListCache } from '../ui/listCache';
 import { afterPaint } from '../ui/afterPaint';
 import { stableOrder } from '../chat/listOrder';
 import { SkeletonRows } from '../chat/SkeletonRows';
+import {
+  ArchivedGroup,
+  ChatSwipeRow,
+  MutedMark,
+  RowBadge,
+  type ChatRowInfo,
+  type RowCommands,
+} from '../chat/ChatRowActions';
+import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from '../chat/listPrefs';
+import { UndoToastHost } from '../swipe/undo';
 import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sharedRooms';
 import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -160,6 +170,7 @@ import {
   normHandle,
   oldestCursor,
   previewText,
+  roomActivity,
   roomTitle,
   threadItems,
   timeLabel,
@@ -190,7 +201,6 @@ import { blockedHandles, onUgcChange } from '../ugc/ugc';
 import {
   browseList,
   byActivity,
-  loungeFirst,
   isOpenRoom,
   isStaff,
   openInfo,
@@ -2028,40 +2038,61 @@ const ListLabel = ({ children }: { children: React.ReactNode }) => (
 );
 
 /** A joined open room (no token) in "Your rooms". */
-const OpenRoomRow = ({ room, me, onOpen }: { room: ChatRoom; me: string; onOpen: () => void }) => {
+const OpenRoomRow = ({
+  room,
+  me,
+  onOpen,
+  commands,
+}: {
+  room: ChatRoom;
+  me: string;
+  onOpen: () => void;
+  commands: RowCommands;
+}) => {
   const info = openInfo(room);
   const unread = room.unread ?? 0;
   const title = room.name || `$${room.ticker}`;
+  const key = roomKeyOf(room.ticker);
+  const muted = isMuted(commands.prefs, key);
   return (
     <li>
-      <button onClick={onOpen} className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]">
-        <Avatar title={title} src={roomIcon(room)} />
-        <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
-          <div className="flex items-baseline gap-2">
-            <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
-              <span className={ELLIPSIS}>{title}</span>
-              {info?.official && <ShieldCheck size={14} color={GOLD} className="shrink-0" />}
-              {info?.visibility === 'invite' && <Lock size={12} color={MUTED} className="shrink-0" />}
-            </span>
-            <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-              {listTimeLabel(room.last_message?.created_at ?? room.updated_at)}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 mt-[2px]">
-            <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-              {info?.closed ? 'Closed' : previewText(room, me)}
-            </span>
-            {unread > 0 && (
-              <span
-                className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
-                style={{ background: GOLD, color: '#1a1300' }}
-              >
-                {unread > 99 ? '99+' : unread}
+      <ChatSwipeRow
+        row={{ key, ticker: room.ticker, title, at: roomActivity(room), unread }}
+        commands={commands}
+        canLeave={!info?.official && !isLounge(room.ticker)}
+      >
+        <button
+          onClick={onOpen}
+          className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+          style={{ background: BG }}
+        >
+          <Avatar title={title} src={roomIcon(room)} />
+          <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+            <div className="flex items-baseline gap-2">
+              <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                <span className={ELLIPSIS}>{title}</span>
+                {info?.official && <ShieldCheck size={14} color={GOLD} className="shrink-0" />}
+                {info?.visibility === 'invite' && <Lock size={12} color={MUTED} className="shrink-0" />}
+                <MutedMark muted={muted} />
               </span>
-            )}
+              <span className="text-[11px] shrink-0" style={{ color: unread && !muted ? GOLD : MUTED }}>
+                {listTimeLabel(room.last_message?.created_at ?? room.updated_at)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-[2px] min-h-5">
+              <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                {info?.closed ? 'Closed' : previewText(room, me)}
+              </span>
+              <RowBadge
+                unread={unread}
+                marked={isMarked(commands.prefs, key)}
+                muted={muted}
+                pinned={isPinned(commands.prefs, key)}
+              />
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+      </ChatSwipeRow>
     </li>
   );
 };
@@ -2402,21 +2433,72 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   );
   const tokenMine = shown.filter(({ e }) => e.status === 'member');
   const tokenOther = shown.filter(({ e }) => e.status !== 'member');
-  const yours = useMemo(() => {
-    const at = (r: ChatRoom | null) => Date.parse(r?.last_message?.created_at ?? r?.updated_at ?? '') || 0;
+  // Telegram-style list (chat/listPrefs.ts): pinned first, then newest activity; archived in one group.
+  const [prefs, updatePrefs] = useListPrefs(handle);
+  const arranged = useMemo(() => {
+    const roomOf = (x: { kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] }) =>
+      x.kind === 'open' ? x.room : x.item.e.room;
     const list: ({ kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] })[] = [
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    const sorted = list.sort(
-      (a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room),
+    // The bWallet Lounge is the yellow card above this list (LoungeCard, pinned as before), so it isn't a row here.
+    return arrange(
+      list.filter((x) => !(x.kind === 'open' && isLounge(x.room.ticker))),
+      prefs,
+      (x) => roomKeyOf(roomOf(x)?.ticker ?? (x.kind === 'token' ? x.item.e.key : '')),
+      (x) => {
+        const r = roomOf(x);
+        return r ? roomActivity(r) : 0;
+      },
     );
-    // The bWallet Lounge is pinned at the top (owner, 9 Oct 2026).
-    // The bWallet Lounge is the yellow card above this list (LoungeCard), so it isn't a row here.
-    return loungeFirst(sorted, (x) => (x.kind === 'open' ? x.room.ticker : x.item.e.room?.ticker)).filter(
-      (x) => !(x.kind === 'open' && isLounge(x.room.ticker)),
+  }, [myOpen, tokenMine, prefs]);
+  const yours = arranged.main;
+  // A new message brings an archived (not muted) or deleted chat back: record that.
+  useEffect(() => {
+    if (arranged.unarchive.length || arranged.unhide.length) updatePrefs((p) => settle(p, arranged));
+  }, [arranged, updatePrefs]);
+  // Opening a chat clears a hand-set "unread" mark.
+  const openTickerKey = open ? roomKeyOf(open.room.ticker) : null;
+  useEffect(() => {
+    if (openTickerKey) updatePrefs((p) => (isMarked(p, openTickerKey) ? setMarked(p, openTickerKey, false) : p));
+  }, [openTickerKey, updatePrefs]);
+  const rowCommands: RowCommands = {
+    prefs,
+    update: updatePrefs,
+    markRead: (key) => {
+      const r = (rooms ?? []).find((x) => roomKeyOf(x.ticker) === key);
+      if (!r) return;
+      setRooms((cur) => cur?.map((x) => (x.ticker === r.ticker ? { ...x, unread: 0 } : x)) ?? cur);
+      void client.markRead(r.ticker).catch(() => {});
+    },
+    leave: async (key) => {
+      const r = (rooms ?? []).find((x) => roomKeyOf(x.ticker) === key);
+      if (!r) return;
+      await client.openRoomAction(r.ticker, 'leave');
+      refresh(true);
+    },
+  };
+  const wrapRow = (row: ChatRowInfo | null, face: React.ReactNode) =>
+    row ? (
+      <ChatSwipeRow row={row} commands={rowCommands}>
+        {face}
+      </ChatSwipeRow>
+    ) : (
+      face
     );
-  }, [myOpen, tokenMine]);
+  const renderYour = (y: (typeof yours)[number]) =>
+    y.kind === 'open' ? (
+      <OpenRoomRow
+        key={y.room.ticker}
+        room={y.room}
+        me={handle ?? ''}
+        onOpen={() => openOpenRoom(y.room)}
+        commands={rowCommands}
+      />
+    ) : (
+      renderTokenRow(y.item)
+    );
 
   // Keep the order stable while the list is being scrolled; apply the fresh order once it stops.
   const [scrolling, setScrolling] = useState(false);
@@ -2640,6 +2722,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       );
     }
     const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
+    const rowKey = e.status === 'member' && e.room ? roomKeyOf(e.room.ticker) : null;
+    const muted = !!rowKey && isMuted(prefs, rowKey);
     const sub = !ROOMS
       ? STORE_ROOM_NOTE
       : e.status === 'start'
@@ -2651,44 +2735,49 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             : '';
     return (
       <li key={e.key}>
-        <button
-          onClick={() => void openEntry(e)}
-          disabled={!!opening || !ROOMS}
-          className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
-        >
-          <Avatar title={e.gate.symbol} roomKey={e.key} />
-          <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
-            <div className="flex items-baseline gap-2">
-              <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
-              <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-                {opening === e.key
-                  ? 'opening…'
-                  : e.room
-                    ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
-                    : ''}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mt-[2px]">
-              <span
-                className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
-                style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
-              >
-                <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
-              </span>
-              <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-                {sub}
-              </span>
-              {unread > 0 && (
-                <span
-                  className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
-                  style={{ background: GOLD, color: '#1a1300' }}
-                >
-                  {unread > 99 ? '99+' : unread}
+        {wrapRow(
+          rowKey && e.room ? { key: rowKey, ticker: e.room.ticker, title, at: roomActivity(e.room), unread } : null,
+          <button
+            onClick={() => void openEntry(e)}
+            disabled={!!opening || !ROOMS}
+            className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+            style={{ background: BG }}
+          >
+            <Avatar title={e.gate.symbol} roomKey={e.key} />
+            <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+              <div className="flex items-baseline gap-2">
+                <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                  <span className={ELLIPSIS}>{title}</span>
+                  <MutedMark muted={muted} />
                 </span>
-              )}
+                <span className="text-[11px] shrink-0" style={{ color: unread && !muted ? GOLD : MUTED }}>
+                  {opening === e.key
+                    ? 'opening…'
+                    : e.room
+                      ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
+                      : ''}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-[2px]">
+                <span
+                  className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
+                  style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
+                >
+                  <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
+                </span>
+                <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                  {sub}
+                </span>
+                <RowBadge
+                  unread={unread}
+                  marked={!!rowKey && isMarked(prefs, rowKey)}
+                  muted={muted}
+                  pinned={!!rowKey && isPinned(prefs, rowKey)}
+                />
+              </div>
             </div>
-          </div>
-        </button>
+          </button>,
+        )}
       </li>
     );
   };
@@ -2848,7 +2937,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               onJoin={() => void openLounge(true)}
             />
             <ListLabel>Your rooms</ListLabel>
-            {yours.length === 0 && (
+            {yours.length === 0 && arranged.archived.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
                 You haven’t joined any rooms yet. Pick a public room below or start your own.
               </p>
@@ -2870,13 +2959,17 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     }}
                   />
                 ))}
-              {yoursShown.map((y) =>
-                y.kind === 'open' ? (
-                  <OpenRoomRow key={y.room.ticker} room={y.room} me={handle} onOpen={() => openOpenRoom(y.room)} />
-                ) : (
-                  renderTokenRow(y.item)
-                ),
-              )}
+              <ArchivedGroup
+                identity={handle}
+                count={arranged.archived.length}
+                unread={arranged.archived.reduce(
+                  (n, y) => n + ((y.kind === 'open' ? y.room.unread : y.item.e.room?.unread) ?? 0),
+                  0,
+                )}
+              >
+                {arranged.archived.map(renderYour)}
+              </ArchivedGroup>
+              {yoursShown.map(renderYour)}
             </ul>
 
             <ListLabel>Public rooms</ListLabel>
@@ -3095,10 +3188,13 @@ const DmConversation = (p: DmConversationProps) => (
 );
 
 const ChatPage = () => (
-  <ChatTabs
-    rooms={(header) => <RoomsPage header={header} />}
-    dms={(header) => <DmsPage header={header} Conversation={DmConversation} />}
-  />
+  <>
+    <ChatTabs
+      rooms={(header) => <RoomsPage header={header} />}
+      dms={(header) => <DmsPage header={header} Conversation={DmConversation} />}
+    />
+    <UndoToastHost />
+  </>
 );
 
 export default ChatPage;

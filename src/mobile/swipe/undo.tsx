@@ -22,15 +22,28 @@ export const dismissUndo = () => {
   emit();
 };
 
+// Several screens mount a host (bMail, Chat) and both can stay mounted: only the first one draws.
+const hosts: number[] = [];
+let hostSeq = 0;
+
 export const UndoToastHost = () => {
   const [t, setT] = useState<Toast | null>(current);
+  const [me] = useState(() => ++hostSeq);
+  const [first, setFirst] = useState(false);
   useEffect(() => {
-    const f = () => setT(current);
+    const f = () => {
+      setT(current);
+      setFirst(hosts[0] === me);
+    };
+    hosts.push(me);
     subs.add(f);
+    emit();
     return () => {
       subs.delete(f);
+      hosts.splice(hosts.indexOf(me), 1);
+      emit();
     };
-  }, []);
+  }, [me]);
   useEffect(() => {
     if (!t) return;
     const id = t.id;
@@ -39,7 +52,7 @@ export const UndoToastHost = () => {
     }, UNDO_MS);
     return () => clearTimeout(h);
   }, [t]);
-  if (!t) return null;
+  if (!t || !first) return null;
   return createPortal(
     <div
       role="status"

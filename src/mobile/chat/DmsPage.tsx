@@ -19,7 +19,9 @@ import { useInPeek } from '../phone/pageEl';
 import { SkeletonRows } from './SkeletonRows';
 import { HandleFlow } from '../names/HandleFlow';
 import { walletSigner } from './signer';
-import { listTimeLabel, previewText, roomTitle, type ChatRoom } from './messages';
+import { listTimeLabel, previewText, roomActivity, roomTitle, type ChatRoom } from './messages';
+import { ArchivedGroup, ChatSwipeRow, MutedMark, RowBadge, type RowCommands } from './ChatRowActions';
+import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from './listPrefs';
 import { Avatar, ContactRow, SourceBadges } from './ContactViews';
 import { SOURCES_NOTE } from './contactSources';
 import {
@@ -202,10 +204,34 @@ export const DmsPage = ({
   useEffect(() => {
     if (handle) return afterPaint(() => void syncBlocks(client));
   }, [client, handle]);
-  const dms = useMemo(
+  const allDms = useMemo(
     () => (rooms ? dmRooms(rooms).filter((r) => !isBlocked(roomTitle(r, handle || ''))) : null),
     [rooms, handle, blockTick], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Telegram-style list (listPrefs.ts): pinned first, newest activity, archived in one group.
+  const [prefs, updatePrefs] = useListPrefs(handle);
+  const arranged = useMemo(
+    () => (allDms ? arrange(allDms, prefs, (r) => roomKeyOf(r.ticker), roomActivity) : null),
+    [allDms, prefs],
+  );
+  const dms = arranged?.main ?? null;
+  useEffect(() => {
+    if (arranged && (arranged.unarchive.length || arranged.unhide.length)) updatePrefs((p) => settle(p, arranged));
+  }, [arranged, updatePrefs]);
+  const openKey = open ? roomKeyOf(open.ticker) : null;
+  useEffect(() => {
+    if (openKey) updatePrefs((p) => (isMarked(p, openKey) ? setMarked(p, openKey, false) : p));
+  }, [openKey, updatePrefs]);
+  const rowCommands: RowCommands = {
+    prefs,
+    update: updatePrefs,
+    markRead: (key) => {
+      const r = (rooms ?? []).find((x) => roomKeyOf(x.ticker) === key);
+      if (!r) return;
+      setRooms((cur) => cur?.map((x) => (x.ticker === r.ticker ? { ...x, unread: 0 } : x)) ?? cur);
+      void client.markRead(r.ticker).catch(() => {});
+    },
+  };
   const contacts = useMemo(
     () => mergeContacts(bchatContacts, friends, sheet ? loadFollows() : [], handle),
     [bchatContacts, friends, sheet, handle],
@@ -289,6 +315,43 @@ export const DmsPage = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
+  const renderDm = (r: ChatRoom) => {
+    const title = roomTitle(r, handle || '');
+    const unread = r.unread ?? 0;
+    const key = roomKeyOf(r.ticker);
+    const muted = isMuted(prefs, key);
+    return (
+      <li key={r.id}>
+        <ChatSwipeRow row={{ key, ticker: r.ticker, title, at: roomActivity(r), unread }} commands={rowCommands}>
+          <button
+            onClick={() => setOpen(r)}
+            className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+            style={{ background: BG }}
+          >
+            <Avatar title={title} />
+            <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+              <div className="flex items-baseline gap-2">
+                <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                  <span className={ELLIPSIS}>{title}</span>
+                  <MutedMark muted={muted} />
+                </span>
+                <span className="text-[11px] shrink-0" style={{ color: unread && !muted ? GOLD : MUTED }}>
+                  {listTimeLabel(r.last_message?.created_at ?? r.updated_at)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-[2px] min-h-5">
+                <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                  {previewText(r, handle || '')}
+                </span>
+                <RowBadge unread={unread} marked={isMarked(prefs, key)} muted={muted} pinned={isPinned(prefs, key)} />
+              </div>
+            </div>
+          </button>
+        </ChatSwipeRow>
+      </li>
+    );
+  };
+
   const shownContacts = filterContacts(contacts, sheet === 'new' ? input : query);
 
   return (
@@ -353,7 +416,7 @@ export const DmsPage = ({
             </div>
           </div>
         )}
-        {handle && dms && dms.length === 0 && (
+        {handle && dms && dms.length === 0 && !arranged?.archived.length && (
           <div className="px-8 pt-14 text-center">
             <p className="text-sm text-white font-semibold">No messages yet</p>
             <p className="text-xs mt-1" style={{ color: MUTED }}>
@@ -370,41 +433,16 @@ export const DmsPage = ({
         )}
 
         <ul className="w-full">
-          {(dms ?? []).map((r) => {
-            const title = roomTitle(r, handle || '');
-            const unread = r.unread ?? 0;
-            return (
-              <li key={r.id}>
-                <button
-                  onClick={() => setOpen(r)}
-                  className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
-                >
-                  <Avatar title={title} />
-                  <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
-                    <div className="flex items-baseline gap-2">
-                      <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
-                      <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-                        {listTimeLabel(r.last_message?.created_at ?? r.updated_at)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-[2px]">
-                      <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-                        {previewText(r, handle || '')}
-                      </span>
-                      {unread > 0 && (
-                        <span
-                          className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
-                          style={{ background: GOLD, color: '#1a1300' }}
-                        >
-                          {unread > 99 ? '99+' : unread}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              </li>
-            );
-          })}
+          {arranged && (
+            <ArchivedGroup
+              identity={handle || ''}
+              count={arranged.archived.length}
+              unread={arranged.archived.reduce((n, r) => n + (r.unread ?? 0), 0)}
+            >
+              {arranged.archived.map(renderDm)}
+            </ArchivedGroup>
+          )}
+          {(dms ?? []).map(renderDm)}
         </ul>
       </div>
 

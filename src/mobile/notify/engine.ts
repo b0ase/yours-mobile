@@ -27,6 +27,7 @@ import {
 import { lockCandidates } from '../feed/locks';
 import { parseBmapFeed, parseTwetchFeed, TWETCH_API, type FeedPost } from '../feed/post';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
+import { isRoomMuted } from '../chat/listPrefs';
 import { subscribe as subscribeCalls } from '../calls/store';
 import { App } from '@capacitor/app';
 import { ONESAT, search, type SearchRow } from '../market/indexer';
@@ -326,6 +327,8 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
     for (const r of rooms) {
       const n = up[r.ticker];
       if (!n) continue;
+      // Muted in the chat list (chat/listPrefs.ts): no notification, as in Telegram.
+      if (isRoomMuted(session.handle, r.ticker)) continue;
       const last = r.last_message;
       const mention = !!last?.body && mentionsMe(last.body, names);
       out.push(
