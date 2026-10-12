@@ -45,8 +45,11 @@ export const NftDetail = ({
   all = [],
   onClose,
   onSent,
+  initialTo = '',
 }: {
   item: MediaItem;
+  /** Recipient to fill in (Friends › Send NFT): the name box still resolves it and Send to … still confirms. */
+  initialTo?: string;
   /** Everything the wallet holds, for the copies / last-copy check before a burn. */
   all?: MediaItem[];
   onClose: () => void;
@@ -61,6 +64,10 @@ export const NftDetail = ({
   const [msg, setMsg] = useState('');
   const [sending, setSending] = useState(false);
   const [to, setTo] = useState('');
+  // Set after mount so the name box treats it as typed and resolves it (NameInput's outside-value path).
+  useEffect(() => {
+    if (initialTo) setTo(initialTo);
+  }, [initialTo]);
   const [busy, setBusy] = useState(false);
   // Step 1 (who): what the name box resolved. Step 2: one "Send to <name>" button (nftSend.ts).
   const [status, setStatus] = useState<'empty' | 'typing' | 'loading' | 'error' | 'ready'>('empty');

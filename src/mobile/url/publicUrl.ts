@@ -5,6 +5,7 @@
  *   /m/spaces?space=<slug> ↔ /spaces/<slug>   (a permanent Space, e.g. /spaces/bwallet-lounge)
  *   /m/<page>              ↔ /<page>
  *   /bsv-wallet            ↔ /wallet
+ *   /m/friends[/<slug>]    ↔ /wallet/friends[/<slug>]   (Desktop Friends, friends/FriendsPage.tsx)
  *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
  *   /m/media/artists[/<artist>] ↔ /bmusic/artists[/<artist>]   (in-app artist screens, media/artists/)
  *   /m/feed                ↔ /bchatx-feed   (old /feed links 308 there, src/web/vercel.json)
@@ -25,7 +26,7 @@ const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet
 /** In-app artist screens (media/artists/ArtistsPage.tsx). */
 const ARTISTS_ROUTE = '/m/media/artists';
 /** Wallet pages with their own route: /m/<page>[/…] ↔ /wallet/<page>[/…]. */
-const WALLET_PAGES = /^\/(nfts|tickets|credits)(?=\/|$)/;
+const WALLET_PAGES = /^\/(nfts|friends|tickets|credits)(?=\/|$)/;
 const albumById = (id: string) => SHARE_ALBUMS.find((a) => a.id === id);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 

@@ -22,6 +22,7 @@ import { loadLastBalance } from './balanceLoad';
 import { ConnectionsView } from './ConnectionsView';
 import { GainsView } from './GainsView';
 import { loadHistoryRows } from './historyLoad';
+import { historyCacheKey, readHistoryCache, writeHistoryCache, type LoadedHistory } from './historyCache';
 import { statementHtml } from './txStatement';
 
 const BG = '#0d0e11';
@@ -43,39 +44,12 @@ const PRESETS: { id: RangePreset; label: string }[] = [
 const fmtBsv = (sats: number) => `${bsvString(sats).replace(/\.?0+$/, '') || '0'} BSV`;
 const fmtSats = (sats: number) => `${sats.toLocaleString()} sats`;
 
-type Loaded = { rows: HistoryRow[]; at: number };
+type Loaded = LoadedHistory;
+const cacheKey = historyCacheKey;
+const readCache = readHistoryCache;
+const writeCache = writeHistoryCache;
 
 /** Activity / History for the current account: full on-chain history, summary, CSV and printable statement. */
-/**
- * Last loaded history per account (owner, 11 Oct 2026: Desktop reloaded it from scratch every time the wallet page
- * opened). Shown at once on the next open while a quiet refresh runs; also kept for this tab's session.
- */
-const HISTORY_CACHE = new Map<string, Loaded>();
-const cacheKey = (addresses: string[]) => `bwx-history:${addresses.join(',')}`;
-const readCache = (key: string): Loaded | null => {
-  const hit = HISTORY_CACHE.get(key);
-  if (hit) return hit;
-  try {
-    const raw = sessionStorage.getItem(key);
-    const v = raw ? (JSON.parse(raw) as Loaded) : null;
-    if (v && Array.isArray(v.rows) && typeof v.at === 'number') {
-      HISTORY_CACHE.set(key, v);
-      return v;
-    }
-  } catch {
-    /* no storage or bad JSON: load fresh */
-  }
-  return null;
-};
-const writeCache = (key: string, v: Loaded) => {
-  HISTORY_CACHE.set(key, v);
-  try {
-    sessionStorage.setItem(key, JSON.stringify(v));
-  } catch {
-    /* over quota or blocked: the in-memory copy still serves this tab */
-  }
-};
-
 export const HistoryScreen = ({
   onClose,
   inline = false,
