@@ -18,6 +18,17 @@ describe('toPublic', () => {
 });
 
 describe('toRouter', () => {
+  test('the Exchange: /exchange, /exchange/swap, /exchange/<token>; old /market links open it', () => {
+    const tok = `${'a'.repeat(64)}_0`;
+    expect(toPublic('/m/exchange', '')).toBe('/exchange');
+    expect(toPublic('/m/exchange/swap', '')).toBe('/exchange/swap');
+    expect(toPublic(`/m/exchange/${tok}`, '')).toBe(`/exchange/${tok}`);
+    expect(toRouter('/exchange', '')).toBe('/m/exchange');
+    expect(toRouter('/exchange/swap', '')).toBe('/m/exchange/swap');
+    expect(toRouter(`/exchange/${tok}`, '')).toBe(`/m/exchange/${tok}`);
+    expect(toRouter('/market', '')).toBe('/m/exchange');
+    expect(toRouter('/market/swap', '?x=1')).toBe('/m/exchange/swap?x=1');
+  });
   test('round trips', () => {
     expect(toRouter('/spaces', '')).toBe('/m/spaces');
     expect(toRouter('/spaces/bwallet-lounge', '')).toBe('/m/spaces?space=bwallet-lounge');

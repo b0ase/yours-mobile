@@ -9,7 +9,7 @@ const SettingsHub = lazy(() => import('./SettingsHub'));
 // bSpaces (Apps › bSpaces): bWalletX only, not even built into a store edition.
 const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
-const MarketPage = MARKET_ENABLED ? lazy(() => import('../market/MarketPage')) : null;
+const ExchangePage = MARKET_ENABLED ? lazy(() => import('../exchange/ExchangePage')) : null;
 // bPics (Apps › bPics): picture ordinals; mint, shared library, mine.
 const BPicsPage = lazy(() => import('../bpics/BPicsPage'));
 const FeedTab = lazy(() => import('../feed/FeedTab'));
@@ -76,7 +76,9 @@ const MobileRoutes = () => (
         <Route path="screen/:n" element={<BrowserPage only="apps" />} />
         <Route path="games" element={<BrowserPage only="games" />} />
         <Route path="people" element={<PeopleScreen />} />
-        {MarketPage && <Route path="market" element={<MarketPage />} />}
+        {/* The Exchange (was Market, 12 Oct 2026): /m/exchange, /m/exchange/swap, /m/exchange/<token>… */}
+        {ExchangePage && <Route path="exchange/*" element={<ExchangePage />} />}
+        {ExchangePage && <Route path="market/*" element={<Navigate to="/m/exchange" replace />} />}
         {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}
         {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
         <Route

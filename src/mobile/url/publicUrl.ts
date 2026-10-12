@@ -7,6 +7,7 @@
  *   /bsv-wallet            ↔ /wallet
  *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
  *   /m/media/artists[/<artist>] ↔ /bmusic/artists[/<artist>]   (in-app artist screens, media/artists/)
+ *   /m/exchange[/…]        ↔ /exchange[/…]   (old /market[/…] links open the Exchange; vercel.json 308s them too)
  *   /m/feed                ↔ /bchatx-feed   (old /feed links 308 there, src/web/vercel.json)
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
@@ -72,6 +73,7 @@ export const toRouter = (pathname: string, search: string): string | null => {
   }
   if (path === '/bmusic/artists') return withQ(ARTISTS_ROUTE);
   if (path === '/bchatx-feed' || path === '/feed') return withQ('/m/feed');
+  if (path === '/market' || path.startsWith('/market/')) return withQ(`/m/exchange${path.slice(7)}`);
   if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
   if (path === '/wallet') return withQ('/bsv-wallet');
   if (path.startsWith('/wallet/') && WALLET_PAGES.test(path.slice(7))) return withQ(`/m${path.slice(7)}`);
