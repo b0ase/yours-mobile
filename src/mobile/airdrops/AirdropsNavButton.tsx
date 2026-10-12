@@ -1,7 +1,7 @@
 /**
  * Top-bar bMail button (replaces the centred b): mailbox icon + badge. Opens bMail in the content area (/m/bmail,
  * owner 9 Oct 2026: between the top bar and the tab bar, not over them); tapping it again goes back. Airdrops live
- * in Requests.
+ * in Quarantine (with a pointer from Inbox and Requests).
  */
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';

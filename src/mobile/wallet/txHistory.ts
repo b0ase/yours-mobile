@@ -19,7 +19,8 @@ export type RawTx = {
   time?: number;
   blockHeight?: number;
   confirmations?: number;
-  vin: { txid?: string; vout?: number; coinbase?: string }[];
+  /** `pubkey`: the public key a P2PKH input revealed when it was spent (airdrops: who sent it, airdrops/sender.ts). */
+  vin: { txid?: string; vout?: number; coinbase?: string; pubkey?: string }[];
   vout: { n: number; sats: number; addresses: string[]; script?: string }[];
 };
 

@@ -20,6 +20,10 @@ export type AirdropItem = {
   from: string;
   /** The issuer's note, read from an OP_RETURN in the same tx (note.ts). Plain text, ≤280 chars. */
   note?: string;
+  /** NFT: where it sits now, at our address (`txid_vout`). asset.id is the outpoint it came from. */
+  outpoint?: string;
+  /** The public key the sender revealed when spending (sender.ts): reverse-looked-up to a $name. */
+  senderKey?: string;
 };
 
 export type InboxState = {
@@ -68,6 +72,41 @@ export const visibleItems = (items: AirdropItem[], s: InboxState): AirdropItem[]
       !trusted.has(i.issuer) &&
       (!s.onlyKnown || knownIssuers.has(i.issuer)),
   );
+};
+
+/**
+ * Kept NFTs (kept, or from a trusted sender): out of Quarantine, so Wallet › NFTs must show them (AirdropsInbox
+ * and MediaSection list the ones the wallet's own NFT list does not have yet, with the reason).
+ */
+export const keptNfts = (items: AirdropItem[], s: Pick<InboxState, 'kept' | 'trustedIssuers'>): AirdropItem[] => {
+  const kept = new Set(s.kept);
+  const trusted = new Set(s.trustedIssuers ?? []);
+  return items.filter((i) => i.asset.kind === 'nft' && (kept.has(i.key) || trusted.has(i.issuer)));
+};
+
+/** True when the wallet's NFT list (its ordinals basket) already holds this airdrop: same outpoint, or same tx. */
+export const inWalletList = (item: Pick<AirdropItem, 'txid' | 'outpoint'>, walletOutpoints: Iterable<string>) => {
+  for (const o of walletOutpoints) {
+    const op = o.toLowerCase().replace('.', '_');
+    if ((item.outpoint && op === item.outpoint.toLowerCase()) || op.split('_')[0] === item.txid.toLowerCase())
+      return true;
+  }
+  return false;
+};
+
+/**
+ * One line for bMail Inbox / Requests pointing at Quarantine, where airdrops live (owner, 12 Oct 2026: found them
+ * "as bMails in my inbox" but they were in Quarantine). null when there are none.
+ */
+export const airdropPointer = (visible: Pick<AirdropItem, 'asset'>[]): string | null => {
+  if (!visible.length) return null;
+  const nfts = visible.filter((i) => i.asset.kind === 'nft').length;
+  const toks = visible.length - nfts;
+  const parts = [
+    nfts ? `${nfts} NFT${nfts === 1 ? '' : 's'}` : '',
+    toks ? `${toks} token airdrop${toks === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return `${parts.join(' and ')} sent to you without asking ${visible.length === 1 ? 'waits' : 'wait'} in Quarantine.`;
 };
 
 /** Badge: visible items that arrived after the inbox was last opened. */

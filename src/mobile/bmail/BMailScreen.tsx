@@ -1,6 +1,7 @@
 /**
  * bMail (owner, 9 Oct 2026): the top-bar mailbox. Pay to send (postage), Penny post by default, friends free and on
- * top, everything unstamped (airdrops included) in Requests. Postage is utility: a stamp to reach someone.
+ * top, unstamped mail in Requests; tokens and NFTs sent without asking (airdrops) in Quarantine, with a pointer to
+ * them from Inbox and Requests and counted on the Quarantine tab, so the badge and the boxes agree. Postage is utility: a stamp to reach someone.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -29,6 +30,8 @@ import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
 import { isFriend as isCallFriend } from '../calls/friends';
 import { AirdropsList } from '../airdrops/AirdropsInbox';
+import { airdropPointer } from '../airdrops/inbox';
+import { useAirdrops } from '../airdrops/useAirdrops';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { shortKey } from '../calls/machine';
 import { getFriends } from '../calls/friends';
@@ -823,6 +826,9 @@ const Empty = ({ title, text }: { title: string; text: string }) => (
 
 export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => void; initialTab?: Tab }) => {
   const m = useBMail();
+  const drops = useAirdrops();
+  const dropsLine = airdropPointer(drops.visible);
+  const quarantineCount = m.boxes.quarantine.length + drops.visible.length;
   const [tab, setTab] = useState<Tab>(initialTab);
   const [reading, setReading] = useState<Received | null>(null);
   const [example, setExample] = useState<ExampleMail | null>(null);
@@ -1306,7 +1312,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
                     ['sent', 'Sent'],
                     ['archive', 'Archive'],
-                    ['quarantine', `Quarantine${m.boxes.quarantine.length ? ` (${m.boxes.quarantine.length})` : ''}`],
+                    ['quarantine', `Quarantine${quarantineCount ? ` (${quarantineCount})` : ''}`],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -1372,6 +1378,18 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             {m.error && <p className="text-xs text-[#F97066] m-0">{m.error}</p>}
             {tab === 'inbox' && (
               <>
+                {dropsLine && (
+                  <button
+                    type="button"
+                    onClick={() => setTab('quarantine')}
+                    className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs"
+                    style={{ background: '#2a1408', color: '#FEC84B' }}
+                  >
+                    <ShieldAlert size={14} className="shrink-0" />
+                    <span className="flex-1">{dropsLine}</span>
+                    <span className="font-semibold shrink-0">Open</span>
+                  </button>
+                )}
                 {view('inbox').map((r, i, all) => (
                   <div key={r.id} className="flex flex-col gap-1">
                     {(i === 0 ? group(r) < 2 : group(all[i - 1]) !== group(r)) && (
@@ -1404,6 +1422,18 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             )}
             {tab === 'requests' && (
               <>
+                {dropsLine && (
+                  <button
+                    type="button"
+                    onClick={() => setTab('quarantine')}
+                    className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs"
+                    style={{ background: '#2a1408', color: '#FEC84B' }}
+                  >
+                    <ShieldAlert size={14} className="shrink-0" />
+                    <span className="flex-1">{dropsLine}</span>
+                    <span className="font-semibold shrink-0">Open</span>
+                  </button>
+                )}
                 {view('requests').map((r) => (
                   <div key={r.id} className="flex flex-col gap-1">
                     {swipeMail(
@@ -1426,7 +1456,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 {!view('requests').length && !exRequests.length && (
                   <Empty
                     title="Requests"
-                    text="Unstamped mail and promotions wait here. Token airdrops from senders you haven't accepted wait in Quarantine."
+                    text="Unstamped mail and promotions wait here. Tokens and NFTs from senders you haven't accepted wait in Quarantine."
                   />
                 )}
               </>
@@ -1527,14 +1557,14 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             {tab === 'quarantine' && (
               <>
                 <p className="m-0 px-1 text-[11px] leading-relaxed" style={{ color: MUTED }}>
-                  Mail you marked as spam or from senders you blocked, and tokens from senders you have not accepted.
-                  Mail stays sealed until you open it. Quarantined tokens are not in your balance and are never spent
-                  with your own coins. Nothing here is burned or moved.
+                  Mail you marked as spam or from senders you blocked, and tokens and NFTs from senders you have not
+                  accepted. Mail stays sealed until you open it. Quarantined tokens are not in your balance and are
+                  never spent with your own coins. Nothing here is burned or moved.
                 </p>
                 {!m.boxes.quarantine.length && (
                   <Empty
                     title="Quarantine is empty"
-                    text="Swipe a letter right and tap Quarantine (or use … › Spam or Block): that letter and their future mail land here, sealed. Token airdrops from senders you haven't accepted wait here too, out of your balance."
+                    text="Swipe a letter right and tap Quarantine (or use … › Spam or Block): that letter and their future mail land here, sealed. Tokens and NFTs from senders you haven't accepted wait here too, out of your balance."
                   />
                 )}
                 {m.boxes.quarantine.map((r) => (
