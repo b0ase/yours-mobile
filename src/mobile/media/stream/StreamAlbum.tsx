@@ -19,6 +19,10 @@ import { boardChoice, claimSession, setBoardChoice } from './board';
 import ListenerBoard from './ListenerBoard';
 import { useAccountNames } from '../../names/accountNames';
 import { estimateTotal, SEGMENT_FEE } from './tx';
+import { getWalletBalance } from '../../../utils/wallet';
+import { logStep, takePending } from '../../onboarding/funnel/funnel';
+import { BMUSIC_FUNNEL } from '../../onboarding/funnel/products';
+import { AddFundsSheet } from '../../onboarding/funnel/FunnelSheets';
 
 /** The album's free headline track, played from the wallet's own copy (featured.ts) by the page. */
 export type Headline = { playing: boolean; duration?: number; onPlay: () => void };
@@ -64,7 +68,20 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
   const [claimNote, setClaimNote] = useState<string | null>(null);
   const asked = useRef<Set<string>>(new Set());
   const { m, error: loadError, view } = useManifest();
-  const [sheet, setSheet] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
+  const [sheet, setSheetRaw] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
+  /** The funnel's add-funds step: shown instead of the budget sheet while the wallet can't pay for a minute. */
+  const [funds, setFunds] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
+  const satsPerSec = m?.satsPerSegment ?? 1;
+  const setSheet = useCallback(
+    (x: null | { track: number; from?: number; topUp?: boolean }) => {
+      if (!x) return setSheetRaw(null);
+      const minute = estimateTotal(60, satsPerSec) + SEGMENT_FEE;
+      void getWalletBalance()
+        .then((b) => (b < minute ? setFunds(x) : setSheetRaw(x)))
+        .catch(() => setSheetRaw(x));
+    },
+    [satsPerSec],
+  );
   /** Sponsored tracks play free; the budget sheet only appears when a pay-to-play track starts or the pot runs out. */
   const sponsorRef = useRef<SponsorStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -159,6 +176,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
         },
       });
       session.current = { id, key, engine, sponsor: sp };
+      logStep(BMUSIC_FUNNEL.id, 'more');
       setSnap(null);
       setSSnap(sp.snapshot());
       pauseAudio();
@@ -196,6 +214,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
         },
       });
       session.current = { id, key, payer, engine };
+      logStep(BMUSIC_FUNNEL.id, 'buy');
       setSSnap(null);
       setSnap(payer.snapshot());
       setSheet(null);
@@ -228,6 +247,14 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
   };
 
   const auto = useRef(autoplay);
+  // Back from the funnel's "Get bWalletX" (guest album page): carry on with the first track after the free one.
+  const [resume] = useState(() => (autoplay === undefined ? takePending(BMUSIC_FUNNEL.id) : null));
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!resume || resumed.current || !view?.paid.length) return;
+    resumed.current = true;
+    auto.current = view.paid[0].index;
+  }, [resume, view]);
   useEffect(() => {
     // Opened from a banner / list row: play that track once the manifest and the pot are known.
     if (auto.current === undefined || !m || !wallet || !sponsorKnown) return;
@@ -235,7 +262,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
     auto.current = undefined;
     playAt(i);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [m, wallet, sponsorKnown]);
+  }, [m, wallet, sponsorKnown, view]);
 
   const title = view?.title ?? HEADLINE_ALBUM.title;
   const artist = view?.artist ?? HEADLINE_ALBUM.artist;
@@ -536,6 +563,22 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           refresh={boardTick}
         />
       </div>
+      {funds && m && (
+        <AddFundsSheet
+          product={BMUSIC_FUNNEL}
+          neededSats={estimateTotal(Math.max(albumSeconds, 60), m.satsPerSegment) + SEGMENT_FEE}
+          enoughSats={estimateTotal(60, m.satsPerSegment) + SEGMENT_FEE}
+          onFunded={() => {
+            const f = funds;
+            setFunds(null);
+            setSheetRaw(f);
+          }}
+          onClose={() => {
+            if (funds.topUp) void end();
+            setFunds(null);
+          }}
+        />
+      )}
       {sheet && m && (
         <BudgetSheet
           albumSeconds={albumSeconds}

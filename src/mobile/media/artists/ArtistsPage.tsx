@@ -1,7 +1,12 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { GuestCtx } from './guestCtx';
+import { HEADLINE_ALBUM } from '../featured/featured';
+import { resumeAt } from '../../url/resume';
+import { logStep, setPending } from '../../onboarding/funnel/funnel';
+import { BMUSIC_FUNNEL } from '../../onboarding/funnel/products';
+import { GetWalletSheet } from '../../onboarding/funnel/FunnelSheets';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Home, Play } from 'lucide-react';
+import { ChevronLeft, Home, Pause, Play } from 'lucide-react';
 import { TopNav } from '../../../components/TopNav';
 import { BMUSIC_HOST, SHARE_ALBUMS, type ShareAlbum } from '../../../web/shareAlbums';
 
@@ -47,7 +52,7 @@ type Listener = { handle?: string; name?: string; paymail?: string; identityKey?
 type Board = { listeners?: Listener[]; anonCount?: number };
 type Pot = { potSats?: number; capSats?: number; sponsored?: boolean };
 
-const Price = ({ id, site }: { id: string; site?: string }) => {
+const Price = ({ id, site, onGuest }: { id: string; site?: string; onGuest?: () => void }) => {
   const guest = useContext(GuestCtx);
   const [r, setR] = useState<Release | null>(null);
   useEffect(() => {
@@ -63,7 +68,7 @@ const Price = ({ id, site }: { id: string; site?: string }) => {
   if (!r.forSale || !r.mintPriceSats || !site) return null;
   if (guest)
     return (
-      <button onClick={guest} className="block text-[12px]" style={{ color: GOLD }}>
+      <button onClick={onGuest ?? guest} className="block text-[12px]" style={{ color: GOLD }}>
         Buy the original · {bsv(r.mintPriceSats)}
       </button>
     );
@@ -286,7 +291,44 @@ export const GuestAlbum = () => {
   const navigate = useNavigate();
   const { albumId } = useParams();
   const al = SHARE_ALBUMS.find((x) => x.id === albumId);
+  const guest = useContext(GuestCtx);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [ask, setAsk] = useState(false);
+  useEffect(() => () => audio.current?.pause(), []);
   if (!al) return <Index />;
+  // The funnel (onboarding/funnel): track 1 is the album's free headline, a local asset, so it plays with no wallet
+  // and no server. Anything after it asks for a wallet (sponsored tracks 2–6 need its key).
+  const taste = al.tracks[0]?.title === HEADLINE_ALBUM.headline.title;
+  const toggleTaste = () => {
+    const a = (audio.current ??= new Audio(HEADLINE_ALBUM.headline.url));
+    a.onended = () => {
+      setPlaying(false);
+      setAsk(true);
+    };
+    if (a.paused) {
+      logStep(BMUSIC_FUNNEL.id, 'taste');
+      void a.play().then(
+        () => setPlaying(true),
+        () => setPlaying(false),
+      );
+    } else {
+      a.pause();
+      setPlaying(false);
+    }
+  };
+  const more = () => {
+    audio.current?.pause();
+    setPlaying(false);
+    setAsk(true);
+  };
+  const create = () => {
+    audio.current?.pause();
+    setPending(BMUSIC_FUNNEL.id, 'more');
+    // Back to the in-app album page, where the sponsored tracks pick up at track 2.
+    resumeAt(`${HOME_ROUTE}/album/${encodeURIComponent(HEADLINE_ALBUM.id)}`);
+    guest?.();
+  };
   return (
     <div className="px-4 py-6 max-w-5xl mx-auto w-full flex flex-wrap gap-10">
       <img
@@ -306,11 +348,29 @@ export const GuestAlbum = () => {
         <div className="mt-3 font-semibold" style={{ color: GOLD }}>
           {al.pricing}
         </div>
-        <p className="text-[13px] mt-2 mb-3" style={{ color: MUTED }}>
-          Listening, even to the free sponsored tracks, runs through your own bWalletX: it holds the key each second of
-          music is unlocked with. Make one free in a minute, or unlock yours, and you come straight back here.
-        </p>
-        <GuestPrompt />
+        {taste ? (
+          <>
+            <p className="text-[13px] mt-2 mb-3" style={{ color: MUTED }}>
+              Track 1 is free to hear right here.
+            </p>
+            <button
+              onClick={toggleTaste}
+              className="px-5 py-2.5 rounded-full font-bold text-black inline-flex items-center gap-2"
+              style={{ background: GOLD }}
+            >
+              {playing ? <Pause size={16} /> : <Play size={16} fill="#000" />}
+              {playing ? 'Pause' : 'Play track 1 free'}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-[13px] mt-2 mb-3" style={{ color: MUTED }}>
+              Listening, even to the free sponsored tracks, runs through your own bWalletX: it holds the key each second
+              of music is unlocked with. Make one free in a minute, or unlock yours, and you come straight back here.
+            </p>
+            <GuestPrompt />
+          </>
+        )}
         <ol className="mt-6 border-t" style={{ borderColor: '#222' }}>
           {al.tracks.map((t, i) => (
             <li
@@ -318,10 +378,15 @@ export const GuestAlbum = () => {
               className="flex items-center gap-3 py-2 px-0.5 border-b text-sm"
               style={{ borderColor: '#222' }}
             >
-              <GuestPlay n={i + 1} />
+              <GuestPlay
+                n={i + 1}
+                free={taste && i === 0}
+                playing={taste && i === 0 && playing}
+                onClick={taste ? (i === 0 ? toggleTaste : more) : undefined}
+              />
               <span className="flex-1">
                 {t.title}
-                <Price id={trackId(al, i)} site={al.artistSite} />
+                <Price id={trackId(al, i)} site={al.artistSite} onGuest={taste ? more : undefined} />
               </span>
               <span style={{ color: '#777' }}>{mmss(t.seconds)}</span>
               <span
@@ -334,20 +399,31 @@ export const GuestAlbum = () => {
           ))}
         </ol>
       </div>
+      {ask && <GetWalletSheet product={BMUSIC_FUNNEL} onCreate={create} onClose={() => setAsk(false)} />}
     </div>
   );
 };
 
-const GuestPlay = ({ n }: { n: number }) => {
+const GuestPlay = ({
+  n,
+  free,
+  playing,
+  onClick,
+}: {
+  n: number;
+  free?: boolean;
+  playing?: boolean;
+  onClick?: () => void;
+}) => {
   const guest = useContext(GuestCtx);
   return (
     <button
-      aria-label={`Play track ${n}: unlock to listen`}
-      title="Unlock to listen"
-      onClick={guest ?? undefined}
+      aria-label={free ? `Play track ${n} free` : `Play track ${n}: unlock to listen`}
+      title={free ? 'Free' : 'Unlock to listen'}
+      onClick={onClick ?? guest ?? undefined}
       className="w-6 flex justify-end"
     >
-      <Play size={14} color={GOLD} />
+      {playing ? <Pause size={14} color={GOLD} /> : <Play size={14} color={GOLD} />}
     </button>
   );
 };
