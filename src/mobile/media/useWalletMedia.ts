@@ -4,7 +4,7 @@ import { listOrdinals, syncAddresses } from '@1sat/actions';
 import { onMinted } from '../mint/mint';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getOutputName, getTagValue } from '../../utils/format';
-import { isMediaOutput, kindOf, type MediaKind } from './media';
+import { dedupeByOrigin, isMediaOutput, kindOf, type MediaKind } from './media';
 import { playQueue } from './player';
 import { safety } from '../market/safety';
 import { cachedMeta, resolveMeta } from './resolveMeta';
@@ -97,7 +97,7 @@ export const useWalletMedia = () => {
       const media = outputs.filter(isMediaOutput);
       const keep = media.filter((o) => !offChain.current.has(txidOf(o.outpoint)));
       setHiddenUnbroadcast((n) => (reset ? 0 : n) + media.length - keep.length);
-      return keep.map(toItem);
+      return dedupeByOrigin(keep.map(toItem));
     },
     [toItem],
   );
@@ -111,7 +111,7 @@ export const useWalletMedia = () => {
     if (!missing.length) return;
     let live = true;
     void resolveMeta(missing).then((n) => {
-      if (live && n) setItems((prev) => prev.map((i) => toItem(i.output)));
+      if (live && n) setItems((prev) => dedupeByOrigin(prev.map((i) => toItem(i.output))));
     });
     return () => {
       live = false;
@@ -126,7 +126,7 @@ export const useWalletMedia = () => {
       const { outputs } = await listWithRetry(apiContext, PAGE, offset);
       setError('');
       const next = visible(outputs, offset === 0);
-      setItems((prev) => [...prev, ...next]);
+      setItems((prev) => dedupeByOrigin([...prev, ...next]));
       setOffset((n) => n + outputs.length);
       setHasMore(outputs.length === PAGE);
     } catch (e) {

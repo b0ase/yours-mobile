@@ -8,6 +8,7 @@ import { getState, pauseAudio, playQueue, subscribe, toggle, type Track } from '
 import { FEATURED_TRACKS, featuredQueue, HEADLINE_ALBUM, type FeaturedTrack } from './featured/featured';
 import { VEXVOID_STILLS } from './featured/stills';
 import { StillsBanner } from './featured/StillsBanner';
+import { albumBlocks } from './albumLayout';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { useReleases } from './releases/useReleases';
 import type { Release } from './releases/releases';
@@ -440,7 +441,12 @@ const MediaPage = () => {
   const isAlbum = (e: Entry) => e.id === HEADLINE_ALBUM.id;
   const albums = free.filter(isAlbum);
   /** While there is one album, its tracks list replaces the one-tile Albums shelf (List and Hybrid). */
-  const albumTracks = FeaturedTracks && view !== 'cards' && albums.length === 1 ? albums[0] : null;
+  const blocks = albumBlocks({
+    view,
+    heroIsAlbum: filter !== 'video' && !!hero && isAlbum(hero),
+    oneAlbum: albums.length === 1,
+  });
+  const albumTracks = FeaturedTracks && blocks.fullList ? albums[0] : null;
   const openAlbumAt = (e: Entry, index: number) => navigate(albumPath(e.id), { state: { autoplay: index } });
   const songs = [
     ...free.filter((e) => !isAlbum(e)),
@@ -676,7 +682,7 @@ const MediaPage = () => {
                     </div>
                   </div>
                 </div>
-                {view === 'hybrid' && isAlbum(hero) && FeaturedTracks && (
+                {blocks.inHero && FeaturedTracks && (
                   <div
                     className="relative w-full lg:w-[44%] shrink-0 p-3"
                     style={{ background: 'rgba(0,0,0,0.55)', borderRadius: 4 }}
