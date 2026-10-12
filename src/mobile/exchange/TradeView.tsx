@@ -24,6 +24,7 @@ import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
 import { TokenIcon } from './TokenIcon';
+import { TokenLabelsRow } from './Categories';
 import {
   addHistory,
   bsvLabel,
@@ -209,6 +210,9 @@ export const TradeView = ({
           <div className="text-lg font-extrabold text-white">{meta === null ? 'Unknown token' : `$${sym}`}</div>
           <div className="text-xs truncate" style={{ color: MUTED }}>
             {id}
+          </div>
+          <div className="mt-1">
+            <TokenLabelsRow id={id} />
           </div>
         </div>
         <button

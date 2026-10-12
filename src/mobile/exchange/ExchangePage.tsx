@@ -20,6 +20,10 @@ import { SWAP_ENABLED } from '../storeBuild';
 import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
+import { FilterBar, PlatformPage, PlatformsView } from './Categories';
+import { useRegistry } from './registry/useRegistry';
+import { categoryLabel, filterSearch, matches, parseFilter, type Filter } from './registry/catalog';
+import type { Registry } from './registry/registry';
 import {
   EXCHANGE_ROUTE,
   bsvLabel,
@@ -29,6 +33,7 @@ import {
   exchangeView,
   fiatLabel,
   loadFavs,
+  platformRoute,
   loadHistory,
   toggleFav,
   tokenTrades,
@@ -89,17 +94,14 @@ const swapAddress = async (): Promise<string> => {
 const tokenSafe = (r: HotRoom) =>
   !safety().check({ ids: [r.ref.id], collectionId: null, texts: [r.title, r.subtitle] }).blocked;
 
-/** Markets: every active BSV-21 token with price, 24h change and volume; search and favourites. */
-const Markets = ({ rate, favs, onFav }: { rate: number; favs: string[]; onFav: (id: string) => void }) => {
-  const navigate = useNavigate();
+/** The 1Sat token board (trending, then the overlay's active tokens), safe tokens only; null while loading. */
+const useBoard = (registry: Registry | null, wanted: boolean): HotRoom[] | null => {
   const [rooms, setRooms] = useState<HotRoom[] | null>(null);
   const [directory, setDirectory] = useState<DirectoryToken[] | null>(null);
-  const [extra, setExtra] = useState<Record<string, RowStats>>({});
-  const [q, setQ] = useState('');
-  const [onlyFavs, setOnlyFavs] = useState(false);
-  const [shown, setShown] = useState(40);
-
+  const [started, setStarted] = useState(false);
+  if (wanted && !started) setStarted(true);
   useEffect(() => {
+    if (!started) return;
     void refreshSafety();
     void tokenDirectory()
       .then(setDirectory)
@@ -107,22 +109,62 @@ const Markets = ({ rate, favs, onFav }: { rate: number; favs: string[]; onFav: (
     hotBoard((p) => setRooms(p))
       .then(setRooms)
       .catch(() => setRooms([]));
-  }, []);
-
-  const all = useMemo(
-    () => mergeTokenBoard(rooms ?? [], directory ?? []).filter((r) => r.ref.kind === 'bsv21' && tokenSafe(r)),
-    [rooms, directory],
+  }, [started]);
+  return useMemo(
+    () =>
+      rooms === null && directory === null
+        ? null
+        : mergeTokenBoard(rooms ?? [], directory ?? []).filter(
+            (r) => r.ref.kind === 'bsv21' && tokenSafe(r) && !registry?.hidden.has(r.ref.id),
+          ),
+    [rooms, directory, registry],
   );
+};
+
+/** Markets: every active BSV-21 token with price, 24h change and volume; categories, platforms, tags, search, favourites. */
+const Markets = ({
+  rate,
+  favs,
+  onFav,
+  board,
+  registry,
+}: {
+  rate: number;
+  favs: string[];
+  onFav: (id: string) => void;
+  board: HotRoom[] | null;
+  registry: Registry | null;
+}) => {
+  const navigate = useNavigate();
+  const { pathname, search } = useLocation();
+  const filter = useMemo(() => parseFilter(search), [search]);
+  const setFilter = (f: Filter) => navigate(`${pathname}${filterSearch(f, search)}`, { replace: true });
+  const [extra, setExtra] = useState<Record<string, RowStats>>({});
+  const [q, setQ] = useState('');
+  const [onlyFavs, setOnlyFavs] = useState(false);
+  const [shown, setShown] = useState(40);
+
+  const all = useMemo(() => board ?? [], [board]);
+  const labels = useMemo(() => (registry ? all.map((r) => registry.labels(r.ref.id)) : []), [all, registry]);
   const list = useMemo(() => {
-    const needle = q.trim().toLowerCase().replace(/^\$/, '');
-    const hits = all.filter(
-      (r) =>
+    const raw = q.trim().toLowerCase();
+    // "#tag" or "tag:x" searches tags; anything else matches the symbol/id or a tag.
+    const tagQ = /^(#|tag:)/.test(raw) ? raw.replace(/^(#|tag:)/, '') : '';
+    const needle = tagQ ? '' : raw.replace(/^\$/, '');
+    const hits = all.filter((r, i) => {
+      const l = labels[i];
+      if (l && !matches(l, { ...filter, tag: tagQ || filter.tag })) return false;
+      return (
         (!onlyFavs || favs.includes(r.ref.id)) &&
-        (!needle || r.title.toLowerCase().replace(/^\$/, '').includes(needle) || r.ref.id.startsWith(needle)),
-    );
+        (!needle ||
+          r.title.toLowerCase().replace(/^\$/, '').includes(needle) ||
+          r.ref.id.startsWith(needle) ||
+          !!l?.tags.some((t) => t.startsWith(needle)))
+      );
+    });
     // Favourites first, then the board's own order (trending, then most used).
     return [...hits.filter((r) => favs.includes(r.ref.id)), ...hits.filter((r) => !favs.includes(r.ref.id))];
-  }, [all, q, onlyFavs, favs]);
+  }, [all, labels, filter, q, onlyFavs, favs]);
   const visible = list.slice(0, shown);
 
   // Price, listings and 24h stats for the rows on screen, a few at a time (cached by the indexer).
@@ -152,7 +194,7 @@ const Markets = ({ rate, favs, onFav }: { rate: number; favs: string[]; onFav: (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleKey]);
 
-  const loading = rooms === null && directory === null;
+  const loading = board === null;
   return (
     <div className="flex flex-col gap-3 w-full">
       <div className="flex gap-2 items-center">
@@ -161,7 +203,7 @@ const Markets = ({ rate, favs, onFav }: { rate: number; favs: string[]; onFav: (
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search tokens ($SYMBOL or id)"
+            placeholder="Search tokens ($SYMBOL, id or #tag)"
             className="flex-1 bg-transparent border-0 outline-none text-sm text-white"
           />
         </label>
@@ -179,6 +221,10 @@ const Markets = ({ rate, favs, onFav }: { rate: number; favs: string[]; onFav: (
           <Star size={14} color={GOLD} fill={onlyFavs ? GOLD : 'none'} /> Favourites
         </button>
       </div>
+
+      {registry && labels.length > 0 && (
+        <FilterBar labels={labels} filter={filter} registry={registry} onChange={setFilter} />
+      )}
 
       {loading ? (
         <Loading text="Loading markets…" />
@@ -228,6 +274,11 @@ const Markets = ({ rate, favs, onFav }: { rate: number; favs: string[]; onFav: (
                       <div className="flex items-center gap-2 min-w-0">
                         <TokenIcon icon={r.icon} sym={r.title} size={28} />
                         <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                        {registry && (
+                          <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
+                            {categoryLabel(registry.labels(r.ref.id).category)}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="text-right text-white whitespace-nowrap">
@@ -349,6 +400,8 @@ const ExchangePage = () => {
   const [favs, setFavs] = useState<string[]>(loadFavs);
   const onFav = useCallback((id: string) => setFavs((f) => toggleFav(f, id)), []);
   useTabHome('market', () => navigate(EXCHANGE_ROUTE));
+  const registry = useRegistry();
+  const board = useBoard(registry, view.tab === 'markets' || view.tab === 'platforms' || view.tab === 'platform');
 
   // "Buy in Market" from a token room in Chat: tokens open their trade screen, collections the Collectibles tab.
   useEffect(() => {
@@ -364,10 +417,11 @@ const ExchangePage = () => {
   const tabs: { id: string; label: string; to: string }[] = [
     { id: 'markets', label: 'Markets', to: EXCHANGE_ROUTE },
     ...(SwapFlow ? [{ id: 'swap', label: 'Swap', to: `${EXCHANGE_ROUTE}/swap` }] : []),
+    { id: 'platforms', label: 'Platforms', to: platformRoute() },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
   ];
-  const active = view.tab === 'trade' ? 'markets' : view.tab;
+  const active = view.tab === 'trade' ? 'markets' : view.tab === 'platform' ? 'platforms' : view.tab;
 
   return (
     <div
@@ -399,7 +453,15 @@ const ExchangePage = () => {
           ))}
         </nav>
 
-        {view.tab === 'markets' && <Markets rate={rate} favs={favs} onFav={onFav} />}
+        {view.tab === 'markets' && <Markets rate={rate} favs={favs} onFav={onFav} board={board} registry={registry} />}
+        {(view.tab === 'platforms' || view.tab === 'platform') &&
+          (!registry || !board ? (
+            <Loading text="Loading platforms…" />
+          ) : view.tab === 'platform' ? (
+            <PlatformPage slug={view.slug} registry={registry} board={board} />
+          ) : (
+            <PlatformsView registry={registry} board={board} />
+          ))}
         {view.tab === 'trade' && (
           <TradeView
             id={view.id}
