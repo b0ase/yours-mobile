@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { assertOrdLockV2 } from './ordlockVersion';
 import { purchaseError } from '../exchange/purchase';
 import { useTabHome } from '../tabs/useTabHome';
 import { xAccountRows } from './xAccounts';
@@ -338,6 +339,7 @@ const MarketPage = () => {
       const fee = ticketPage ? ticketResaleFeeOptions() : marketFeeOptions();
       const outpoint = walletOutpoint(listing.outpoint);
       const ctx = purchaseContext(apiContext, outpoint);
+      await assertOrdLockV2(outpoint);
       const res =
         r.ref.kind === 'bsv21'
           ? await buyBsv21.execute(ctx, {

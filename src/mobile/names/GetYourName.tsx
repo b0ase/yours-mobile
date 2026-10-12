@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { buyOrdinal, listOpns, registerOpns } from '@1sat/actions';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
@@ -170,7 +171,10 @@ export const GetYourName = ({
 
   const bind = async (n: { name: string; id: string; tokenOnly?: boolean }) => {
     if (!n.tokenOnly) {
-      const res = await registerOpns.execute(apiContext, { id: n.id, profileName: profileName || undefined });
+      const res = await registerOpns.execute(apiContext, {
+        id: n.id,
+        profile: { domain: '1sat.name', ...(profileName ? { name: profileName } : {}) },
+      });
       if (res.error) throw new Error(res.error);
       setMyName(identityAddress, n.name);
       setMsg(`${n.name} is now your name`);
@@ -220,6 +224,7 @@ export const GetYourName = ({
         // buyOpns is buyOrdinal with OpNS defaults, but it drops usePermissionModule,
         // which the module-wrapped wallet needs (see MODULE_FINISHES); call buyOrdinal directly.
         const outpoint = walletOutpoint(p.outpoint);
+        await assertOrdLockV2(outpoint);
         const res = await buyOrdinal.execute(purchaseContext(apiContext, outpoint), {
           outpoint,
           name: p.name.slice(0, 64),

@@ -1,4 +1,5 @@
 import { hasRate, moneyNow } from '../money/money';
+import { listingVersion } from './ordlockVersion';
 import { cachedExchangeRate } from '../../utils/wallet';
 /**
  * Market data from the 1Sat indexers (1sat-stack at api.1sat.app). Ported from
@@ -526,6 +527,11 @@ async function loadMarket(room: RoomRef, limit: number): Promise<RoomMarket> {
         }),
       )
       .sort((a, b) => a.priceSats - b.priceSats);
+    await mapLimit(
+      listings.slice(0, limit),
+      8,
+      async (l) => void ((await listingVersion(l.outpoint)) !== 2 && (l.buyable = false)),
+    );
     return {
       listings: listings.slice(0, limit),
       floorLabel: listings[0] ? formatSats(listings[0].priceSats) : null,
@@ -582,6 +588,12 @@ async function loadMarket(room: RoomRef, limit: number): Promise<RoomMarket> {
   const floor = listings.length ? Math.min(...listings.map(perToken)) : null;
   const picked = listings.slice(0, limit);
   for (const l of listings.filter((x) => x.buyable).slice(0, 3)) if (!picked.includes(l)) picked.push(l);
+  // OrdLock v1 is retired (ordlockVersion.ts): only v2 listings are offered as buyable.
+  await mapLimit(
+    picked.filter((l) => l.buyable),
+    8,
+    async (l) => void ((await listingVersion(l.outpoint)) !== 2 && (l.buyable = false)),
+  );
   return {
     listings: picked,
     floorLabel: floor === null ? null : `${formatPerToken(floor)} / token`,
