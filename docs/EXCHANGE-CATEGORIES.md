@@ -96,6 +96,18 @@ Tags merge in the same order, at most 8 per token, lowercase, `a-z 0-9 -`, 32 ch
 `overrides.json → hidden` hides spam and scam tokens everywhere in the Exchange (TokenBlaster's `$TBTEST`
 today). The existing safety list (`market/safety.ts`) still applies too.
 
+## People (personal tokens)
+
+Platform `bwalletx-people` ("bWalletX people"), category Social, tag `people`, fed by bit-sign's public
+`GET https://www.bit-sign.online/api/public/people-tokens` (`src/mobile/exchange/people.ts`). Markets → **Friends**
+chip (`?people=1`): your Friends' tokens first, then everyone else's ("People"); `.gmail` names masked. Each row has
+**Buy & chat**: buy the cheapest OrdLock v2 listing in one sheet, then open their room. No listings → "No one is
+selling yet" (+ "Open their room" when the room is open to non-holders). The Friends page shows a friend's token
+the same way (lazy chunk, MARKET_ENABLED only). Pricing rule per token (bit-sign `lib/people-tokens.ts`): gentle
+curve by default (1¢ × 2^(distinct holders / 1000), one curve buy per identity key, owner can't buy, Supporter
+#1–100), flat opt-in, or off ("Ask to join"). The curve sale itself (auto-listing from the owner's supply) is not
+built yet.
+
 ## Exchange UI
 
 - Markets: category chips with counts, a Platform row (multi-select, counts), and tag search (`#tag` or

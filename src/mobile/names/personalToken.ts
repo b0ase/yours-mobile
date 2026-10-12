@@ -14,7 +14,8 @@ import type { OneSatContext } from '@1sat/actions';
  * Pure helpers + localStorage. Nothing here signs or broadcasts.
  */
 
-export const DEFAULT_SUPPLY = '1000000';
+/** New personal tokens mint 1B by default (owner, 12 Oct 2026); existing tokens keep their supply. */
+export const DEFAULT_SUPPLY = '1000000000';
 export const MAX_SUPPLY = 10n ** 15n;
 export const PERSONAL_DECIMALS = 0;
 export const PERSONAL_MIN = '1';

@@ -27,8 +27,8 @@ describe('personal token naming', () => {
     expect(personalTicker('')).toBeNull();
     expect(personalKey('$BOASE')).toBe('boase');
   });
-  test('supply defaults to 1,000,000 and is validated', () => {
-    expect(DEFAULT_SUPPLY).toBe('1000000');
+  test('supply defaults to 1,000,000,000 and is validated', () => {
+    expect(DEFAULT_SUPPLY).toBe('1000000000');
     expect(validateSupply('1,000,000')).toBeNull();
     expect(cleanSupply('1,000,000')).toBe('1000000');
     expect(validateSupply('0')).not.toBeNull();

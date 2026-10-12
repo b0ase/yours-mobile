@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowDownLeft,
@@ -37,7 +37,7 @@ import { useAccountNames } from '../names/accountNames';
 import { bavatarDataUri } from '../names/avatar';
 import { bavatarSvg } from '../bavatar/bavatar';
 import { getPersonalLink } from '../names/personalToken';
-import { BSPACES_ENABLED } from '../storeBuild';
+import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
 import { Scanner } from '../scan/Scanner';
 import { NftDetail } from '../media/NftDetail';
 import { useWalletMedia, type MediaItem } from '../media/useWalletMedia';
@@ -73,6 +73,9 @@ import {
   type Warning,
 } from './model';
 import './friends.css';
+
+// A friend's personal token + "Buy & chat": Exchange builds only (the chunk is dropped from store builds).
+const FriendToken = MARKET_ENABLED ? lazy(() => import('../exchange/FriendToken')) : null;
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 const shortKey = (k: string) => `${k.slice(0, 6)}…${k.slice(-6)}`;
@@ -585,6 +588,12 @@ const FriendDetail = ({ fr, data }: { fr: Friend; data: Data }) => {
           )}
         </div>
       </div>
+
+      {FriendToken && c.handle && (
+        <Suspense fallback={null}>
+          <FriendToken handle={c.handle} />
+        </Suspense>
+      )}
 
       <div className="fr-actions">
         <Action

@@ -7,6 +7,12 @@
       "about": "Tokens made in bWalletX: PNEE notes and personal tokens."
     },
     {
+      "slug": "bwalletx-people",
+      "name": "bWalletX people",
+      "url": "https://bwalletx.com",
+      "about": "People's own tokens. Hold one to join their room."
+    },
+    {
       "slug": "tokenblaster",
       "name": "TokenBlaster",
       "url": "https://www.tokenblaster.lol",
