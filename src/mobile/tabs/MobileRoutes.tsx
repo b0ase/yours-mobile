@@ -2,7 +2,13 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
-import { BSPACES_ENABLED, MARKET_ENABLED, PAY_STREAM_ENABLED, RELEASES_ENABLED } from '../storeBuild';
+import {
+  ARTIST_PROGRAMME_ENABLED,
+  BSPACES_ENABLED,
+  MARKET_ENABLED,
+  PAY_STREAM_ENABLED,
+  RELEASES_ENABLED,
+} from '../storeBuild';
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
 const SettingsHub = lazy(() => import('./SettingsHub'));
@@ -17,6 +23,10 @@ const ChatPage = lazy(() => import('./ChatPage'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
 // bMusic artist screens (/bmusic/artists[/<slug>]): bWalletX only, with prices, so not in a store build.
 const ArtistsPage = PAY_STREAM_ENABLED ? lazy(() => import('../media/artists/ArtistsPage')) : null;
+// Join as an artist (docs/ARTIST-PROGRAMME.md): off by default until the bMusic server's programme routes are on.
+const JoinArtistPage = ARTIST_PROGRAMME_ENABLED
+  ? lazy(() => import('../media/artists/programme/JoinArtistPage'))
+  : null;
 // bWalletX only: absent from a store build (RELEASES_ENABLED).
 const AddReleasePage = RELEASES_ENABLED ? lazy(() => import('../media/releases/AddReleasePage')) : null;
 const AgentPage = lazy(() => import('../agent/AgentPage'));
@@ -50,6 +60,7 @@ const MobileRoutes = () => (
         <Route path="media/album/:albumId" element={<MediaPage />} />
         <Route path="media/browse" element={<MediaPage />} />
         <Route path="media/artists" element={ArtistsPage ? <ArtistsPage /> : <MediaPage />} />
+        {JoinArtistPage && <Route path="media/artists/join" element={<JoinArtistPage />} />}
         <Route path="media/artists/:slug" element={ArtistsPage ? <ArtistsPage /> : <MediaPage />} />
         {AddReleasePage && <Route path="media/new" element={<AddReleasePage />} />}
         <Route

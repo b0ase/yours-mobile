@@ -1,6 +1,8 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { GuestCtx } from './guestCtx';
 import { LOAD_FAILED, playErrorMessage } from './playError';
+import { ARTIST_PROGRAMME_ENABLED } from '../../storeBuild';
+import { ProgrammeBlock } from './programme/ProgrammeBlock';
 import { HEADLINE_ALBUM } from '../featured/featured';
 import { resumeAt } from '../../url/resume';
 import { logStep, setPending } from '../../onboarding/funnel/funnel';
@@ -111,12 +113,22 @@ const Bar = ({ title, slug }: { title?: string; slug?: boolean }) => {
 
 const Index = () => {
   const navigate = useNavigate();
+  const guest = useContext(GuestCtx);
   return (
     <div className="px-4 py-6 max-w-5xl mx-auto w-full">
       <div className="text-[12px] font-bold tracking-[.18em] uppercase" style={{ color: GOLD }}>
         bMusic
       </div>
       <h2 className="text-3xl font-bold text-white mt-1 mb-6">Artists</h2>
+      {ARTIST_PROGRAMME_ENABLED && !guest && (
+        <button
+          onClick={() => navigate(`${ROOT}/join`)}
+          className="mb-6 px-5 py-2.5 rounded-full font-bold text-black"
+          style={{ background: GOLD }}
+        >
+          Join as an artist
+        </button>
+      )}
       <div className="flex flex-wrap gap-6">
         {ARTISTS.map((albums) => {
           const a = albums[0];
@@ -237,6 +249,7 @@ const Artist = ({ albums }: { albums: ShareAlbum[] }) => {
             </div>
           </>
         )}
+        {ARTIST_PROGRAMME_ENABLED && <ProgrammeBlock slug={a.artistSlug} />}
         <h3 className="mt-7 text-xl font-bold">Top listeners</h3>
         <ol className="mt-2 border-t" style={{ borderColor: '#222' }}>
           {board &&
