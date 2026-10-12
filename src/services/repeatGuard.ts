@@ -118,24 +118,45 @@ export type QueuedResult = {
   tx?: number[];
 };
 
-export function queuedResult(error: unknown): QueuedResult | null {
+const TXID = /^[0-9a-f]{64}$/i;
+const isTxid = (t: unknown): t is string => typeof t === 'string' && TXID.test(t);
+
+/** The txid of an atomic BEEF (BRC-95): 4-byte prefix 0x01010101, then the subject txid, little-endian. */
+function atomicBeefTxid(tx: unknown): string | null {
+  if (!Array.isArray(tx) && !(tx instanceof Uint8Array)) return null;
+  const b = tx as ArrayLike<number>;
+  if (b.length < 36 || b[0] !== 1 || b[1] !== 1 || b[2] !== 1 || b[3] !== 1) return null;
+  let hex = '';
+  for (let i = 35; i >= 4; i--) hex += (b[i] & 0xff).toString(16).padStart(2, '0');
+  return hex;
+}
+
+/**
+ * The txid of a queued send, from wherever the error carries it: its txid, its sendWithResults, its
+ * reviewActionResults, or the atomic BEEF in its tx. `fallbackTxid` (e.g. looked up in storage by the action's
+ * reference) is used when the error has none.
+ */
+export function queuedResult(error: unknown, fallbackTxid?: string | null): QueuedResult | null {
   if (!queuedSend(error)) return null;
-  const e = error as { txid?: unknown; tx?: unknown; sendWithResults: { txid?: unknown }[] };
+  const e = error as {
+    txid?: unknown;
+    tx?: unknown;
+    sendWithResults: { txid?: unknown }[];
+    reviewActionResults?: { txid?: unknown }[];
+  };
   const txid =
-    typeof e.txid === 'string' && /^[0-9a-f]{64}$/i.test(e.txid)
-      ? e.txid
-      : e.sendWithResults
-          .map((r) => r?.txid)
-          .find((t): t is string => typeof t === 'string' && /^[0-9a-f]{64}$/i.test(t));
+    (isTxid(e.txid) ? e.txid : null) ??
+    e.sendWithResults.map((r) => r?.txid).find(isTxid) ??
+    (Array.isArray(e.reviewActionResults) ? e.reviewActionResults.map((r) => r?.txid).find(isTxid) : undefined) ??
+    atomicBeefTxid(e.tx) ??
+    (isTxid(fallbackTxid) ? fallbackTxid : null);
   if (!txid) return null;
+  const sent = e.sendWithResults.map((r) => r?.txid).filter(isTxid);
   return {
     txid,
     pending: true,
     message: QUEUED_MESSAGE,
-    sendWithResults: e.sendWithResults
-      .map((r) => r?.txid)
-      .filter((t): t is string => typeof t === 'string')
-      .map((t) => ({ txid: t, status: 'sending' as const })),
+    sendWithResults: (sent.length ? sent : [txid]).map((t) => ({ txid: t, status: 'sending' as const })),
     ...(Array.isArray(e.tx) ? { tx: e.tx as number[] } : {}),
   };
 }

@@ -3482,6 +3482,15 @@ if (isInServiceWorker) {
     return true;
   };
 
+  /** The txid storage holds for an action reference (the signed transaction), or null. */
+  const txidForReference = async (reference: string | undefined): Promise<string | null> => {
+    if (!reference || !accountContext?.storage) return null;
+    return accountContext.storage.runAsStorageProvider(async (sp) => {
+      const [t] = await sp.findTransactions({ partial: { reference }, noRawTx: true });
+      return t?.txid ?? null;
+    });
+  };
+
   const processCWISignAction = async (
     message: { params: SignActionArgs; originator?: string },
     sendResponse: CallbackResponse,
@@ -3503,8 +3512,12 @@ if (isInServiceWorker) {
         data: result,
       });
     } catch (error) {
-      // Queued to retry is not a failure (services/repeatGuard.ts): answer with the txid, marked pending.
-      const queued = queuedResult(error);
+      // Queued to retry is not a failure (services/repeatGuard.ts): answer with the txid, marked pending. When the
+      // error itself carries no txid, the signed transaction is in storage under the action's reference.
+      const queued = queuedResult(
+        error,
+        queuedSend(error) ? await txidForReference(message.params.reference).catch(() => null) : null,
+      );
       if (queued) {
         console.warn('[signAction] queued for retry, answering pending:', queued.txid);
         await withRepeatGuard((g) => g.signed(message.params.reference, queued.txid));

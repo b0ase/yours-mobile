@@ -86,4 +86,22 @@ describe('queuedResult', () => {
     expect(queuedResult(new Error('x'))).toBeNull();
     expect(queuedResult({ sendWithResults: [{ status: 'sending' }] })).toBeNull();
   });
+  test('reads the txid from reviewActionResults or the atomic BEEF', () => {
+    expect(queuedResult({ reviewActionResults: [{ txid }], sendWithResults: [{ status: 'sending' }] })?.txid).toBe(
+      txid,
+    );
+    const want = '0123456789abcdef'.repeat(4);
+    const le = want
+      .match(/../g)!
+      .reverse()
+      .map((h) => parseInt(h, 16));
+    const r = queuedResult({ tx: [1, 1, 1, 1, ...le, 1, 0], sendWithResults: [{ status: 'sending' }] });
+    expect(r?.txid).toBe(want);
+    expect(r?.sendWithResults).toEqual([{ txid: want, status: 'sending' }]);
+  });
+  test('uses the fallback txid (storage, by reference) when the error has none', () => {
+    expect(queuedResult({ sendWithResults: [{ status: 'sending' }] }, txid)?.txid).toBe(txid);
+    expect(queuedResult({ sendWithResults: [{ status: 'failed' }] }, txid)).toBeNull();
+    expect(queuedResult({ sendWithResults: [{ status: 'sending' }] }, 'nope')).toBeNull();
+  });
 });
