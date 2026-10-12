@@ -932,6 +932,7 @@ const SpaceScreenInner = ({
   };
   const stageView = (
     <SpeakerGrid
+      space={ticker}
       speakers={stage}
       me={myHandle}
       media={media}

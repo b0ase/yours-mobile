@@ -23,6 +23,8 @@ import { getWalletBalance } from '../../../utils/wallet';
 import { logStep, takePending } from '../../onboarding/funnel/funnel';
 import { BMUSIC_FUNNEL } from '../../onboarding/funnel/products';
 import { AddFundsSheet } from '../../onboarding/funnel/FunnelSheets';
+import { TipButton } from '../../tip/TipButton';
+import { SHARE_ALBUMS } from '../shareAlbums';
 
 /** The album's free headline track, played from the wallet's own copy (featured.ts) by the page. */
 export type Headline = { playing: boolean; duration?: number; onPlay: () => void };
@@ -325,9 +327,20 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
               Album
             </div>
             <h2 className="text-3xl md:text-5xl font-black text-white leading-tight">{title}</h2>
-            <div className="text-sm text-white/80">
-              {artist}
-              {m ? ` · ${view!.paid.length + 1} tracks` : ''}
+            <div className="text-sm text-white/80 flex items-center gap-2 flex-wrap">
+              <span>
+                {artist}
+                {m ? ` · ${view!.paid.length + 1} tracks` : ''}
+              </span>
+              {(() => {
+                const al = SHARE_ALBUMS.find((x) => x.artist === artistName && x.tipTo);
+                return al?.tipTo ? (
+                  <TipButton
+                    to={{ name: al.artist, paymail: al.tipTo }}
+                    context={{ kind: 'artist', artist: al.artistSlug, album: al.id }}
+                  />
+                ) : null;
+              })()}
             </div>
             <div className="text-sm mt-1" style={{ color: '#e6e8ec' }}>
               Headline track: {HEADLINE_ALBUM.headline.title} · <span style={{ color: GOLD }}>free</span>

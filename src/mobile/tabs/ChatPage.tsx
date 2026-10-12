@@ -1,3 +1,4 @@
+import { TipButton } from '../tip/TipButton';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
 import { RoomDetails } from '../wide/RoomDetails';
@@ -773,6 +774,13 @@ const Conversation = ({
             )}
           </button>
         )}
+        {room.created_by_handle && room.created_by_handle !== me && (
+          <TipButton
+            compact
+            to={{ name: `$${room.created_by_handle}`, paymail: `$${room.created_by_handle}` }}
+            context={{ kind: 'room', room: room.ticker }}
+          />
+        )}
         {onInvite && (
           <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
             <UserPlus size={20} color={GOLD} />
@@ -955,10 +963,17 @@ const Conversation = ({
                 >
                   {!it.mine && !direct && it.firstOfGroup && it.message.author_handle && (
                     <div
-                      className="text-[12px] font-semibold mb-[2px]"
+                      className="text-[12px] font-semibold mb-[2px] flex items-center gap-1.5"
                       style={{ color: `hsl(${avatarHue(it.message.author_handle)} 70% 72%)` }}
                     >
                       ${it.message.author_handle}
+                      {normHandle(it.message.author_handle) !== 'b' && (
+                        <TipButton
+                          compact
+                          to={{ name: `$${it.message.author_handle}`, paymail: `$${it.message.author_handle}` }}
+                          context={{ kind: 'room', room: room.ticker, message: it.message.id }}
+                        />
+                      )}
                     </div>
                   )}
                   {replyOf(it.message) && <ReplyQuote reply={replyOf(it.message)!} mine={it.mine} />}

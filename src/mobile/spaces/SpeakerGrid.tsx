@@ -13,6 +13,7 @@ import { MoreHorizontal, PictureInPicture2, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { pipSupported, togglePip } from './background';
 import { LevelBars } from './LevelBars';
+import { TipButton } from '../tip/TipButton';
 import type { SpaceMedia } from './media';
 import { audienceLine, hostLabel, type Participant, stageButtonLabel } from './model';
 import { faceArtUrl, fallBackToLocal } from './faceArt';
@@ -45,6 +46,7 @@ const Tile = ({
   onTap,
   onMenu,
   noHost = false,
+  space = '',
 }: {
   p: Participant;
   video: boolean;
@@ -59,6 +61,8 @@ const Tile = ({
   onTap: () => void;
   onMenu: (() => void) | null;
   noHost?: boolean;
+  /** The Space's room ticker, for the tip record. */
+  space?: string;
 }) => {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -161,6 +165,15 @@ const Tile = ({
           </span>
         )}
       </div>
+      {p.handle !== me && size !== 'small' && (
+        <div className="absolute left-1.5 top-1.5 rounded-full bg-black/60">
+          <TipButton
+            compact
+            to={{ name: `$${p.handle}`, paymail: `$${p.handle}` }}
+            context={{ kind: 'space', space }}
+          />
+        </div>
+      )}
       {onMenu && (
         <button
           onClick={(e) => {
@@ -229,6 +242,8 @@ export interface SpeakerGridProps {
   avatars?: Record<string, string | null | undefined>;
   /** The Space or host profile banner, behind camera-off speakers. */
   banner?: string | null;
+  /** The Space's room ticker (tip records). */
+  space?: string;
 }
 
 export const SpeakerGrid = ({
@@ -248,6 +263,7 @@ export const SpeakerGrid = ({
   menuFor,
   avatars,
   banner,
+  space,
 }: SpeakerGridProps) => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(0);
@@ -314,6 +330,7 @@ export const SpeakerGrid = ({
       onTap={() => setExpanded((x) => (x === p.handle ? null : p.handle))}
       onMenu={menuFor(p)}
       noHost={noHost}
+      space={space}
     />
   );
 

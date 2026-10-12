@@ -11,6 +11,7 @@ import { GetWalletSheet } from '../../onboarding/funnel/FunnelSheets';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, Home, Loader2, Pause, Play } from 'lucide-react';
 import { TopNav } from '../../../components/TopNav';
+import { TipButton } from '../../tip/TipButton';
 import { BMUSIC_HOST, SHARE_ALBUMS, type ShareAlbum } from '../../../web/shareAlbums';
 
 /**
@@ -163,6 +164,7 @@ const Index = () => {
 
 const Artist = ({ albums }: { albums: ShareAlbum[] }) => {
   const navigate = useNavigate();
+  const guest = useContext(GuestCtx);
   const a = albums[0];
   const [board, setBoard] = useState<Board | null>(null);
   const [pot, setPot] = useState<Pot | null>(null);
@@ -208,6 +210,9 @@ const Artist = ({ albums }: { albums: ShareAlbum[] }) => {
           >
             Listen
           </button>
+          {a.tipTo && !guest && (
+            <TipButton to={{ name: a.artist, paymail: a.tipTo }} context={{ kind: 'artist', artist: a.artistSlug }} />
+          )}
           {a.artistSite && (
             <a href={a.artistSite} target="_blank" rel="noopener noreferrer" style={{ color: GOLD }}>
               {a.artistSite.replace(/^https:\/\//, '')}
@@ -229,6 +234,13 @@ const Artist = ({ albums }: { albums: ShareAlbum[] }) => {
                     {t.title}
                     <Price id={trackId(al, i)} site={al.artistSite} />
                   </span>
+                  {al.tipTo && !guest && (
+                    <TipButton
+                      compact
+                      to={{ name: al.artist, paymail: al.tipTo }}
+                      context={{ kind: 'artist', artist: al.artistSlug, album: al.id, track: trackId(al, i) }}
+                    />
+                  )}
                   <span style={{ color: '#777' }}>{mmss(t.seconds)}</span>
                   <span
                     className="w-24 text-right text-[11px] font-bold uppercase"

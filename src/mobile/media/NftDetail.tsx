@@ -15,6 +15,8 @@ import { NameInput } from '../names/NameInput';
 import { setLocalAvatar } from '../names/avatar';
 import { nftAvatarUri, normalizeOutpoint, ordinalsUrl } from './nftActions';
 import type { MediaItem } from './useWalletMedia';
+import { TipButton } from '../tip/TipButton';
+import { nftCreator } from '../tip/tip';
 import { celebrateSend } from '../../components/sent/sent';
 import { nftSendButton, shortAddr } from './nftSend';
 import { txidOf, walletTxStates } from './unbroadcast';
@@ -217,6 +219,13 @@ export const NftDetail = ({
           origin={origin}
           chainLink={link || undefined}
         />
+        {nftCreator(item.output.tags) && (
+          <TipButton
+            to={nftCreator(item.output.tags)!}
+            context={{ kind: 'nft', outpoint: origin }}
+            className="self-start"
+          />
+        )}
         {item.kind === 'images' && (
           <button onClick={() => void setAvatar()} className={`${btn} bg-[#A1FF8B] text-[#010101]`}>
             <UserCircle size={16} /> Set as my avatar
