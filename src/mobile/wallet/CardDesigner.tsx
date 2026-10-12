@@ -1,9 +1,8 @@
+import { hueTurnFor, shownHueFor } from './cardHue';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, X } from 'lucide-react';
 import {
-  HUE_MAX,
-  HUE_MIN,
   MIN_BRIGHTNESS,
   PLACE_MAX,
   PLACE_MIN,
@@ -61,6 +60,7 @@ export function CardDesigner({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const shownHue = Math.round(shownHueFor(look.hue ?? 0));
   const row = (
     label: string,
     value: number,
@@ -134,12 +134,12 @@ export function CardDesigner({
       <div className="bw-cdes-controls">
         {row(
           'Hue',
-          look.hue ?? 0,
-          HUE_MIN,
-          HUE_MAX,
+          shownHue,
+          0,
+          360,
           1,
-          (hue) => onChange(clampLook({ ...look, hue })),
-          'linear-gradient(90deg,#00c8ff,#4060ff,#c040ff,#ff3080,#ff6020,#ffc400,#ff6020,#ff3080,#c040ff,#4060ff,#00c8ff)',
+          (h) => onChange(clampLook({ ...look, hue: hueTurnFor(h) })),
+          'linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)',
         )}
         {row(
           'Saturation',
@@ -148,7 +148,7 @@ export function CardDesigner({
           SAT_MAX,
           0.01,
           (saturation) => onChange(clampLook({ ...look, saturation })),
-          'linear-gradient(90deg,#777,#c9a227,#ffc400)',
+          `linear-gradient(90deg,hsl(${shownHue},0%,50%),hsl(${shownHue},100%,50%))`,
         )}
         {row(
           'Shade',
@@ -157,7 +157,7 @@ export function CardDesigner({
           1,
           0.01,
           (brightness) => onChange({ ...look, brightness }),
-          'linear-gradient(90deg,#0b0b0c,#8a6d14,#ffd24d)',
+          `linear-gradient(90deg,#000,hsl(${shownHue},100%,50%))`,
         )}
         {row('Left / right', look.x, PLACE_MIN, PLACE_MAX, 1, (x) => onChange({ ...look, x }))}
         {row('Up / down', look.y, PLACE_MIN, PLACE_MAX, 1, (y) => onChange({ ...look, y }))}
