@@ -18,6 +18,10 @@ import {
   INTERRUPTED_RECONCILE_ERROR,
   MAX_RECONCILE_RESUMES,
   shouldResumeReconcile,
+  mapPool,
+  withRetry,
+  isFullPass,
+  needsVerifyReread,
 } from './storageReconcile';
 
 const A = 'a'.repeat(64);
@@ -258,5 +262,101 @@ describe('shouldResumeReconcile', () => {
     expect(shouldResumeReconcile(base)).toBe(false);
     expect(shouldResumeReconcile({ ...base, finishedAt: undefined, error: INTERRUPTED_RECONCILE_ERROR })).toBe(false);
     expect(shouldResumeReconcile(undefined)).toBe(false);
+  });
+});
+
+describe('release a never-broadcast local send', () => {
+  const remote = index({ transactions: [tx(5, A)], outputs: [out(50, 5, A, 0)] });
+  const held = (status: sdk.TransactionStatus) =>
+    index({ transactions: [tx(1, A), tx(2, B, status)], outputs: [out(10, 1, A, 0, 2)] });
+
+  test('nosend/unsigned, only on this device, unknown on chain → release', () => {
+    for (const status of ['nosend', 'unsigned'] as const) {
+      const local = held(status);
+      const c = diffIndexes(local, remote).spendConflicts[0];
+      expect(decideSpend(c, local, remote, chain({}, { [A]: 'mined', [B]: 'unknown' }))).toEqual({
+        kind: 'release',
+        txid: B,
+      });
+    }
+  });
+
+  test('never released if the network may have it', () => {
+    for (const status of ['sending', 'unprocessed', 'unproven', 'completed'] as const) {
+      const local = held(status);
+      const c = diffIndexes(local, remote).spendConflicts[0];
+      expect(decideSpend(c, local, remote, chain({}, { [A]: 'mined', [B]: 'unknown' })).kind).not.toBe('release');
+    }
+    const local = held('nosend');
+    const c = diffIndexes(local, remote).spendConflicts[0];
+    expect(decideSpend(c, local, remote, chain({}, { [A]: 'mined', [B]: 'known' })).kind).not.toBe('release');
+    expect(decideSpend(c, local, remote, chain({ [`${A}.0`]: C }, {})).kind).toBe('spent');
+  });
+
+  test('never released when the remote copy also has that transaction', () => {
+    const local = held('nosend');
+    const both = index({ transactions: [tx(5, A), tx(6, B, 'nosend')], outputs: [out(50, 5, A, 0)] });
+    const c = diffIndexes(local, both).spendConflicts[0];
+    expect(decideSpend(c, local, both, chain({}, { [A]: 'mined', [B]: 'unknown' })).kind).not.toBe('release');
+  });
+
+  test('a released output matches once it is spendable again', () => {
+    const after = index({ transactions: [tx(1, A)], outputs: [out(10, 1, A, 0)] });
+    expect(matchesVerdict(after, `${A}.0`, { kind: 'release', txid: B })).toBe(true);
+    expect(matchesVerdict(held('nosend'), `${A}.0`, { kind: 'release', txid: B })).toBe(false);
+  });
+});
+
+describe('mapPool / withRetry', () => {
+  test('keeps order and never exceeds the limit', async () => {
+    let live = 0;
+    let peak = 0;
+    const r = await mapPool([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
+      live++;
+      peak = Math.max(peak, live);
+      await new Promise((res) => setTimeout(res, 5));
+      live--;
+      return n * 2;
+    });
+    expect(r).toEqual([2, 4, 6, 8, 10, 12, 14]);
+    expect(peak).toBe(3);
+  });
+
+  test('retries 429s with backoff, not other errors', async () => {
+    let calls = 0;
+    const slept: number[] = [];
+    const sleep = async (ms: number) => void slept.push(ms);
+    const v = await withRetry(
+      async () => {
+        if (++calls < 3) throw new Error('HTTP 429 Too Many Requests');
+        return 'ok';
+      },
+      { sleep, baseMs: 100 },
+    );
+    expect(v).toBe('ok');
+    expect(slept).toEqual([100, 200]);
+    await expect(
+      withRetry(
+        async () => {
+          throw new Error('boom');
+        },
+        { sleep },
+      ),
+    ).rejects.toThrow('boom');
+  });
+});
+
+describe('incremental repair', () => {
+  test('manual runs push only changes; migration or an explicit full run resend all', () => {
+    expect(isFullPass('manual')).toBe(false);
+    expect(isFullPass('manual', { full: true })).toBe(true);
+    expect(isFullPass('migration')).toBe(true);
+  });
+  test('verify re-reads only when something moved', () => {
+    const none = { inserts: 0, updates: 0 };
+    expect(needsVerifyReread({ pushed: [none, none], corrected: 0, oneSided: 0 })).toBe(false);
+    expect(needsVerifyReread({ pushed: [{ inserts: 1, updates: 0 }, none], corrected: 0, oneSided: 0 })).toBe(true);
+    expect(needsVerifyReread({ pushed: [none, none], corrected: 2, oneSided: 0 })).toBe(true);
+    expect(needsVerifyReread({ pushed: [none, none], corrected: 0, oneSided: 3 })).toBe(true);
   });
 });

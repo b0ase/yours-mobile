@@ -72,7 +72,16 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
     setBusy(true);
     try {
       const res = await sendOrdinals.execute(apiContext, { transfers: [{ id: assetId, address: to }] });
-      if (!res.txid || res.error) throw new Error(getErrorMessage(res.error));
+      if (!res.txid || res.error) {
+        // Known codes keep their wording; anything else shows the real message, never a bare "unknown error, try
+        // again" (vexvoid, 12 Oct 2026: that hid why sends failed and invited repeats).
+        const known = getErrorMessage(res.error);
+        throw new Error(
+          known.startsWith('An unknown error')
+            ? `Not sent: ${String(res.error || 'the wallet returned no transaction')}. Check History before sending again.`
+            : known,
+        );
+      }
       setMsg(`Sent. ${short(res.txid)}`);
       celebrateSend(res, { amount: { kind: 'nft', count: 1, name: item.name }, recipients: [to] });
       setSending(false);

@@ -175,7 +175,15 @@ export const diffIndexes = (local: StoreIndex, remote: StoreIndex): StoreDiff =>
 export type SpendVerdict =
   | { kind: 'spent'; txid: string }
   | { kind: 'unspent' }
+  /**
+   * The only spender is a send this device built but never handed to the network (status nosend/unsigned, local
+   * only, unknown on chain): abort it so its inputs come back (vexvoid, 12 Oct 2026: an NFT hidden by a failed send).
+   */
+  | { kind: 'release'; txid: string }
   | { kind: 'unresolved'; reason: string };
+
+/** Statuses of a transaction the network has never been given. */
+const NEVER_BROADCAST: TransactionStatus[] = ['nosend', 'unsigned'];
 
 export type ChainTxStatus = 'mined' | 'known' | 'unknown';
 
@@ -210,6 +218,14 @@ export const decideSpend = (
   if (indexed) return { kind: 'spent', txid: indexed };
 
   const spenders = [c.local, c.remote].filter((s): s is string => s !== null);
+  // A never-broadcast local send that only this device knows about: release it, never anything the network saw.
+  if (c.remote === null && c.local && !c.local.startsWith('id:')) {
+    const s = c.local;
+    const status = local.txStatusByKey.get(s);
+    const onlyHere = !remote.txStatusByKey.has(s);
+    const unseen = s.startsWith('ref:') || chain.statuses.get(s) === 'unknown';
+    if (status && NEVER_BROADCAST.includes(status) && onlyHere && unseen) return { kind: 'release', txid: s };
+  }
   for (const s of spenders) {
     const status = local.txStatusByKey.get(s) ?? remote.txStatusByKey.get(s);
     if (s.includes(':') || (status && PENDING_STATUSES.includes(status))) {
@@ -231,6 +247,7 @@ export const decideSpend = (
 export const matchesVerdict = (index: StoreIndex, outpoint: string, verdict: SpendVerdict): boolean => {
   const o = index.outputs.get(outpoint);
   if (!o || verdict.kind === 'unresolved') return false;
+  if (verdict.kind === 'release') return o.spendable && spenderKey(index, o) === null;
   const spender = spenderKey(index, o);
   if (verdict.kind === 'unspent') return o.spendable && spender === null;
   if (index.txStatusByKey.has(verdict.txid)) return !o.spendable && spender === verdict.txid;
@@ -308,6 +325,10 @@ export interface ReconcileRecord {
   pushedToLocal?: { inserts: number; updates: number };
   pushedCorrections?: { inserts: number; updates: number };
   spendConflicts?: Array<SpendConflict & { verdict: SpendVerdict }>;
+  /** Never-broadcast local sends this run aborted, so their inputs came back. */
+  released?: string[];
+  /** Whether pushes resent everything (migration / full) or only changes since the last repair. */
+  full?: boolean;
   corrected?: string[];
   /** Outputs both stores listed unspent that the indexer reports spent, marked spent in both. */
   rescan?: { checked: number; stale: StaleSpend[] };
@@ -347,3 +368,53 @@ export const reconcileOutcome = (r: ReconcileRecord): ReconcileOutcome => {
     ? 'clean'
     : 'differences';
 };
+
+/** Run fn over items with at most `limit` in flight; results keep input order. */
+export const mapPool = async <T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, i: number) => Promise<R>,
+): Promise<R[]> => {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+};
+
+const isRateLimited = (e: unknown): boolean =>
+  /\b429\b|too many requests|rate.?limit/i.test(e instanceof Error ? e.message : String(e));
+
+/** Retry fn when an indexer rate-limits us (429), with exponential backoff. Other errors throw at once. */
+export const withRetry = async <T>(
+  fn: () => Promise<T>,
+  { tries = 4, baseMs = 800, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)) } = {},
+): Promise<T> => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= tries || !isRateLimited(e)) throw e;
+      await sleep(baseMs * 2 ** (attempt - 1));
+    }
+  }
+};
+
+/**
+ * Whether a repair resends everything. Normal runs push only what changed since this pair's last repair (its own
+ * sync state); the migration and an explicit full run resend all (owner, 12 Oct 2026: a manual repair took 21 min).
+ */
+export const isFullPass = (trigger: ReconcileTrigger, opts: { full?: boolean } = {}): boolean =>
+  trigger === 'migration' || !!opts.full;
+
+/** Re-read both stores to verify only when something moved; otherwise the first read already is the answer. */
+export const needsVerifyReread = (r: {
+  pushed: Array<{ inserts: number; updates: number }>;
+  corrected: number;
+  oneSided: number;
+}): boolean => r.corrected > 0 || r.oneSided > 0 || r.pushed.some((p) => p.inserts + p.updates > 0);
