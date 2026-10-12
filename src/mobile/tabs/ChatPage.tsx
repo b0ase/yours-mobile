@@ -40,17 +40,24 @@ import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
+import { afterPaint } from '../ui/afterPaint';
+import { stableOrder } from '../chat/listOrder';
+import { SkeletonRows } from '../chat/SkeletonRows';
+import {
+  ArchivedGroup,
+  ChatSwipeRow,
+  MutedMark,
+  RowBadge,
+  type ChatRowInfo,
+  type RowCommands,
+} from '../chat/ChatRowActions';
+import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from '../chat/listPrefs';
+import { UndoToastHost } from '../swipe/undo';
+import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sharedRooms';
+import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import {
-  BchatClient,
-  ChatApiError,
-  defaultHttp,
-  loadSession,
-  needsHandle,
-  saveSession,
-  SESSION_EVENT,
-} from '../chat/api';
+import { BchatClient, ChatApiError, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import { defaultPictures } from '../chat/roomArt';
@@ -110,6 +117,7 @@ const NewSpaceSheet = BSPACES_ENABLED
 import {
   amountLabel,
   buildTokenRoomList,
+  holdingsFromRooms,
   holdLine,
   parseGateRefusal,
   parseInvitee,
@@ -162,6 +170,7 @@ import {
   normHandle,
   oldestCursor,
   previewText,
+  roomActivity,
   roomTitle,
   threadItems,
   timeLabel,
@@ -192,7 +201,6 @@ import { blockedHandles, onUgcChange } from '../ugc/ugc';
 import {
   browseList,
   byActivity,
-  loungeFirst,
   isOpenRoom,
   isStaff,
   openInfo,
@@ -418,25 +426,56 @@ const Conversation = ({
     [onAuthLost, onLocked],
   );
 
+  // Instant open (chat/threadCache.ts): show the cached tail at once, then fetch only what is newer.
+  // latestPage only when nothing is cached for this room and identity.
   useEffect(() => {
     let live = true;
-    setLoading(true);
-    client
-      .latestPage(room.ticker)
-      .then((p) => {
+    const show = (cached: ChatMessage[]) => {
+      setMessages(mergeMessages([], visibleMessages(cached, viewerIsAdmin)));
+      setHasMore(true);
+      setLoading(false);
+      const cursor = latestCursor(cached);
+      if (!cursor) return;
+      client
+        .since(room.ticker, cursor)
+        .then((fresh) => {
+          if (!live) return;
+          writeThread(me, room.ticker, fresh);
+          const shown = visibleMessages(fresh, viewerIsAdmin);
+          if (shown.length) setMessages((cur) => mergeMessages(cur, shown, { dropOrphanEdits: true }));
+          setError('');
+          void client.markRead(room.ticker).catch(() => {});
+        })
+        .catch((e) => live && fail(e));
+    };
+    const fetchLatest = () => {
+      setLoading(true);
+      client
+        .latestPage(room.ticker)
+        .then((p) => {
+          if (!live) return;
+          writeThread(me, room.ticker, p.messages);
+          setMessages(mergeMessages([], visibleMessages(p.messages, viewerIsAdmin)));
+          setHasMore(p.hasMore);
+          setHiddenBefore(p.hiddenBefore ?? null);
+          setError('');
+          void client.markRead(room.ticker).catch(() => {});
+        })
+        .catch((e) => live && fail(e))
+        .finally(() => live && setLoading(false));
+    };
+    const peek = peekThread(me, room.ticker);
+    if (peek) show(peek);
+    else
+      void readThread(me, room.ticker).then((cached) => {
         if (!live) return;
-        setMessages(mergeMessages([], visibleMessages(p.messages, viewerIsAdmin)));
-        setHasMore(p.hasMore);
-        setHiddenBefore(p.hiddenBefore ?? null);
-        setError('');
-        void client.markRead(room.ticker).catch(() => {});
-      })
-      .catch((e) => live && fail(e))
-      .finally(() => live && setLoading(false));
+        if (cached) show(cached);
+        else fetchLatest();
+      });
     return () => {
       live = false;
     };
-  }, [client, room.ticker, fail, viewerIsAdmin]);
+  }, [client, room.ticker, fail, viewerIsAdmin, me]);
 
   const poll = useCallback(() => {
     const cursor = latestCursor(messages);
@@ -444,6 +483,7 @@ const Conversation = ({
     client
       .since(room.ticker, cursor)
       .then((fresh) => {
+        if (fresh.length) writeThread(me, room.ticker, fresh);
         const shown = visibleMessages(fresh, viewerIsAdmin);
         if (!shown.length) return;
         setMessages((cur) => mergeMessages(cur, shown, { dropOrphanEdits: true }));
@@ -451,8 +491,10 @@ const Conversation = ({
       })
       .catch(() => {});
     void client.whoIsTyping(room.ticker).then(setTyping);
-  }, [client, room.ticker, messages, online, viewerIsAdmin]);
-  usePoll(poll, THREAD_POLL_MS, !loading);
+  }, [client, room.ticker, messages, online, viewerIsAdmin, me]);
+  // Hidden (phone pager peek / display:none): no polling; the list catches up when shown.
+  const offScreen = useInPeek();
+  usePoll(poll, THREAD_POLL_MS, !loading && !offScreen);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
@@ -594,6 +636,7 @@ const Conversation = ({
     go()
       .then((saved) => {
         paidFor.current.delete(localId);
+        if (saved) writeThread(me, room.ticker, [saved]);
         // A private bot reply (lounge-bot) settles in place of the never-stored command.
         // Any other unstored reply (/b help, Lounge commands) never matches the optimistic copy: drop it.
         setMessages((cur) => {
@@ -647,8 +690,7 @@ const Conversation = ({
     requestAnimationFrame(() => composer.current?.focus());
   };
 
-  // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it.
-  const offScreen = useInPeek();
+  // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it (offScreen).
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
@@ -1996,40 +2038,61 @@ const ListLabel = ({ children }: { children: React.ReactNode }) => (
 );
 
 /** A joined open room (no token) in "Your rooms". */
-const OpenRoomRow = ({ room, me, onOpen }: { room: ChatRoom; me: string; onOpen: () => void }) => {
+const OpenRoomRow = ({
+  room,
+  me,
+  onOpen,
+  commands,
+}: {
+  room: ChatRoom;
+  me: string;
+  onOpen: () => void;
+  commands: RowCommands;
+}) => {
   const info = openInfo(room);
   const unread = room.unread ?? 0;
   const title = room.name || `$${room.ticker}`;
+  const key = roomKeyOf(room.ticker);
+  const muted = isMuted(commands.prefs, key);
   return (
     <li>
-      <button onClick={onOpen} className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]">
-        <Avatar title={title} src={roomIcon(room)} />
-        <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
-          <div className="flex items-baseline gap-2">
-            <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
-              <span className={ELLIPSIS}>{title}</span>
-              {info?.official && <ShieldCheck size={14} color={GOLD} className="shrink-0" />}
-              {info?.visibility === 'invite' && <Lock size={12} color={MUTED} className="shrink-0" />}
-            </span>
-            <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-              {listTimeLabel(room.last_message?.created_at ?? room.updated_at)}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 mt-[2px]">
-            <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-              {info?.closed ? 'Closed' : previewText(room, me)}
-            </span>
-            {unread > 0 && (
-              <span
-                className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
-                style={{ background: GOLD, color: '#1a1300' }}
-              >
-                {unread > 99 ? '99+' : unread}
+      <ChatSwipeRow
+        row={{ key, ticker: room.ticker, title, at: roomActivity(room), unread }}
+        commands={commands}
+        canLeave={!info?.official && !isLounge(room.ticker)}
+      >
+        <button
+          onClick={onOpen}
+          className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+          style={{ background: BG }}
+        >
+          <Avatar title={title} src={roomIcon(room)} />
+          <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+            <div className="flex items-baseline gap-2">
+              <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                <span className={ELLIPSIS}>{title}</span>
+                {info?.official && <ShieldCheck size={14} color={GOLD} className="shrink-0" />}
+                {info?.visibility === 'invite' && <Lock size={12} color={MUTED} className="shrink-0" />}
+                <MutedMark muted={muted} />
               </span>
-            )}
+              <span className="text-[11px] shrink-0" style={{ color: unread && !muted ? GOLD : MUTED }}>
+                {listTimeLabel(room.last_message?.created_at ?? room.updated_at)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-[2px] min-h-5">
+              <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                {info?.closed ? 'Closed' : previewText(room, me)}
+              </span>
+              <RowBadge
+                unread={unread}
+                marked={isMarked(commands.prefs, key)}
+                muted={muted}
+                pinned={isPinned(commands.prefs, key)}
+              />
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+      </ChatSwipeRow>
     </li>
   );
 };
@@ -2085,7 +2148,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const online = useOnline();
-  const client = useMemo(() => new BchatClient(defaultHttp(isNative), loadSession()), []);
+  const client = useMemo(() => sharedChatClient(), []);
   const [handle, setHandle] = useState<string | null>(client.handle);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState('');
@@ -2122,7 +2185,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   // Cache first (owner round 6): the last room list shows at once; the live list replaces it quietly.
-  const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(`chat:rooms:${identityAddress}`));
+  const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(roomsCacheKey(identityAddress)));
+  // Either segment's rooms() fetch updates this list too (chat/sharedRooms.ts).
+  useEffect(() => onRooms(setRooms), []);
   // My X / Google picture (names/socialAvatar.ts) goes to bit-sign once, so other people's bubbles show it
   // instead of my initial; bit-sign keeps a photo chosen there. Remembered per handle + picture.
   const socialAvatar = chromeStorageService.getCurrentAccountObject().account?.settings?.socialProfile?.avatar ?? '';
@@ -2135,17 +2200,21 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     } catch {
       /* no storage */
     }
-    client
-      .publishAvatar(socialAvatar)
-      .then(() => {
-        try {
-          localStorage.setItem(key, socialAvatar);
-        } catch {
-          /* no storage */
-        }
-      })
-      .catch(() => undefined);
+    // Not needed for the first paint (chat snappy): after it.
+    return afterPaint(() =>
+      client
+        .publishAvatar(socialAvatar)
+        .then(() => {
+          try {
+            localStorage.setItem(key, socialAvatar);
+          } catch {
+            /* no storage */
+          }
+        })
+        .catch(() => undefined),
+    );
   }, [client, handle, socialAvatar]);
+  useEffect(warmThreadCache, []);
   const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
@@ -2252,36 +2321,41 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   useEffect(() => {
     if (!handle) return;
     setIgnored(loadInviteList(handle, 'ignored'));
-    void syncBlocks(client);
     setAccepted(loadInviteList(handle, 'accepted'));
-    if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+    return afterPaint(() => {
+      void syncBlocks(client);
+      if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle, identityAddress]);
 
-  const refresh = useCallback(() => {
-    if (!handle || !online) return;
-    void walletHoldings(apiContext)
-      .then(setHoldings)
-      .catch(() => setHoldings([]));
-    client
-      .openRooms()
-      .then((d) => setPublicRooms(parsePublicRooms(d)))
-      .catch(() => {});
-    client
-      .rooms()
-      .then((r) => {
-        setRooms(r);
-        writeListCache(`chat:rooms:${identityAddress}`, r, 100);
-        setListError('');
-      })
-      .catch((e) => {
-        if (e instanceof ChatApiError && e.status === 401) return authLost();
-        setListError(errText(e));
-      });
-  }, [client, apiContext, handle, online, authLost, identityAddress]);
+  /** `force` skips the shared rooms() reuse window (leaving a room, Try again). */
+  const refresh = useCallback(
+    (force?: unknown) => {
+      if (!handle || !online) return;
+      void walletHoldings(apiContext)
+        .then((h) => {
+          setHoldings(h);
+          writeListCache(`chat:holdings:${identityAddress}`, h, 200);
+        })
+        .catch(() => setHoldings([]));
+      client
+        .openRooms()
+        .then((d) => setPublicRooms(parsePublicRooms(d)))
+        .catch(() => {});
+      fetchRooms(client, identityAddress, force === true ? 0 : undefined)
+        .then(() => setListError(''))
+        .catch((e) => {
+          if (e instanceof ChatApiError && e.status === 401) return authLost();
+          setListError(errText(e));
+        });
+    },
+    [client, apiContext, handle, online, authLost, identityAddress],
+  );
 
   useEffect(refresh, [refresh]);
-  usePoll(refresh, LIST_POLL_MS, !!handle && !open);
+  const listHidden = useInPeek();
+  usePoll(refresh, LIST_POLL_MS, !!handle && !open && !listHidden);
 
   // Rooms you hold the token for but are not in yet: ask bChat whether they exist.
   useEffect(() => {
@@ -2296,27 +2370,37 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       .map((h) => `${h.kind}:${h.id}`)
       .filter((k) => !mine.has(k) && now - (lookedAt.current.get(k) ?? 0) > LOOKUP_TTL_MS)
       .slice(0, 20);
-    todo.forEach((k) => lookedAt.current.set(k, now));
-    void Promise.all(
-      todo.map((k) =>
-        client
-          .tokenRoom(k)
-          .then((d) => parseLookup(d))
-          .catch(() => null),
-      ),
-    ).then((found) => {
-      const ok = found.filter((l): l is TokenRoomLookup => !!l);
-      ok.forEach(
-        (l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }),
-      );
-      const add = Object.fromEntries(ok.map((l) => [l.key, l]));
-      if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
+    if (!todo.length) return;
+    return afterPaint(() => {
+      todo.forEach((k) => lookedAt.current.set(k, now));
+      void Promise.all(
+        todo.map((k) =>
+          client
+            .tokenRoom(k)
+            .then((d) => parseLookup(d))
+            .catch(() => null),
+        ),
+      ).then((found) => {
+        const ok = found.filter((l): l is TokenRoomLookup => !!l);
+        ok.forEach(
+          (l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }),
+        );
+        const add = Object.fromEntries(ok.map((l) => [l.key, l]));
+        if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
+      });
     });
   }, [client, handle, holdings, rooms]);
 
+  // Cold open: token rows render from the cached holdings, or from the cached rooms themselves,
+  // before the wallet's holdings arrive (no rows popping in later).
+  const cachedHoldings = useMemo(() => readListCache<Holding>(`chat:holdings:${identityAddress}`), [identityAddress]);
+  const listHoldings = useMemo(
+    () => holdings ?? cachedHoldings ?? (rooms ? holdingsFromRooms(rooms) : null),
+    [holdings, cachedHoldings, rooms],
+  );
   const entries = useMemo(
-    () => (holdings && rooms ? buildTokenRoomList(holdings, rooms, lookups) : null),
-    [holdings, rooms, lookups],
+    () => (listHoldings && rooms ? buildTokenRoomList(listHoldings, rooms, lookups) : null),
+    [listHoldings, rooms, lookups],
   );
   const personalOf = useCallback(
     (e: TokenRoomEntry) => (e.room ? personalOfRoom(e.room) : null) ?? lookups[e.key]?.personal ?? null,
@@ -2349,21 +2433,85 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   );
   const tokenMine = shown.filter(({ e }) => e.status === 'member');
   const tokenOther = shown.filter(({ e }) => e.status !== 'member');
-  const yours = useMemo(() => {
-    const at = (r: ChatRoom | null) => Date.parse(r?.last_message?.created_at ?? r?.updated_at ?? '') || 0;
+  // Telegram-style list (chat/listPrefs.ts): pinned first, then newest activity; archived in one group.
+  const [prefs, updatePrefs] = useListPrefs(handle);
+  const arranged = useMemo(() => {
+    const roomOf = (x: { kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] }) =>
+      x.kind === 'open' ? x.room : x.item.e.room;
     const list: ({ kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] })[] = [
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    const sorted = list.sort(
-      (a, b) => at(b.kind === 'open' ? b.room : b.item.e.room) - at(a.kind === 'open' ? a.room : a.item.e.room),
+    // The bWallet Lounge is the yellow card above this list (LoungeCard, pinned as before), so it isn't a row here.
+    return arrange(
+      list.filter((x) => !(x.kind === 'open' && isLounge(x.room.ticker))),
+      prefs,
+      (x) => roomKeyOf(roomOf(x)?.ticker ?? (x.kind === 'token' ? x.item.e.key : '')),
+      (x) => {
+        const r = roomOf(x);
+        return r ? roomActivity(r) : 0;
+      },
     );
-    // The bWallet Lounge is pinned at the top (owner, 9 Oct 2026).
-    // The bWallet Lounge is the yellow card above this list (LoungeCard), so it isn't a row here.
-    return loungeFirst(sorted, (x) => (x.kind === 'open' ? x.room.ticker : x.item.e.room?.ticker)).filter(
-      (x) => !(x.kind === 'open' && isLounge(x.room.ticker)),
+  }, [myOpen, tokenMine, prefs]);
+  const yours = arranged.main;
+  // A new message brings an archived (not muted) or deleted chat back: record that.
+  useEffect(() => {
+    if (arranged.unarchive.length || arranged.unhide.length) updatePrefs((p) => settle(p, arranged));
+  }, [arranged, updatePrefs]);
+  // Opening a chat clears a hand-set "unread" mark.
+  const openTickerKey = open ? roomKeyOf(open.room.ticker) : null;
+  useEffect(() => {
+    if (openTickerKey) updatePrefs((p) => (isMarked(p, openTickerKey) ? setMarked(p, openTickerKey, false) : p));
+  }, [openTickerKey, updatePrefs]);
+  const rowCommands: RowCommands = {
+    prefs,
+    update: updatePrefs,
+    markRead: (key) => {
+      const r = (rooms ?? []).find((x) => roomKeyOf(x.ticker) === key);
+      if (!r) return;
+      setRooms((cur) => cur?.map((x) => (x.ticker === r.ticker ? { ...x, unread: 0 } : x)) ?? cur);
+      void client.markRead(r.ticker).catch(() => {});
+    },
+    leave: async (key) => {
+      const r = (rooms ?? []).find((x) => roomKeyOf(x.ticker) === key);
+      if (!r) return;
+      await client.openRoomAction(r.ticker, 'leave');
+      refresh(true);
+    },
+  };
+  const wrapRow = (row: ChatRowInfo | null, face: React.ReactNode) =>
+    row ? (
+      <ChatSwipeRow row={row} commands={rowCommands}>
+        {face}
+      </ChatSwipeRow>
+    ) : (
+      face
     );
-  }, [myOpen, tokenMine]);
+  const renderYour = (y: (typeof yours)[number]) =>
+    y.kind === 'open' ? (
+      <OpenRoomRow
+        key={y.room.ticker}
+        room={y.room}
+        me={handle ?? ''}
+        onOpen={() => openOpenRoom(y.room)}
+        commands={rowCommands}
+      />
+    ) : (
+      renderTokenRow(y.item)
+    );
+
+  // Keep the order stable while the list is being scrolled; apply the fresh order once it stops.
+  const [scrolling, setScrolling] = useState(false);
+  const scrollIdle = useRef<number | null>(null);
+  const onListScroll = () => {
+    if (!scrolling) setScrolling(true);
+    if (scrollIdle.current) window.clearTimeout(scrollIdle.current);
+    scrollIdle.current = window.setTimeout(() => setScrolling(false), 250);
+  };
+  const shownKeys = useRef<string[]>([]);
+  const yourKey = (x: (typeof yours)[number]) => (x.kind === 'open' ? `o:${x.room.ticker}` : `t:${x.item.e.key}`);
+  const yoursShown = scrolling ? stableOrder(shownKeys.current, yours, yourKey) : yours;
+  shownKeys.current = yoursShown.map(yourKey);
 
   const openOpenRoom = (room: ChatRoom, joinSpace = false) => {
     setRooms((cur) => cur?.map((r) => (r.ticker === room.ticker ? { ...r, unread: 0 } : r)) ?? cur);
@@ -2574,6 +2722,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       );
     }
     const unread = e.status === 'member' ? (e.room?.unread ?? 0) : 0;
+    const rowKey = e.status === 'member' && e.room ? roomKeyOf(e.room.ticker) : null;
+    const muted = !!rowKey && isMuted(prefs, rowKey);
     const sub = !ROOMS
       ? STORE_ROOM_NOTE
       : e.status === 'start'
@@ -2585,44 +2735,49 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             : '';
     return (
       <li key={e.key}>
-        <button
-          onClick={() => void openEntry(e)}
-          disabled={!!opening || !ROOMS}
-          className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
-        >
-          <Avatar title={e.gate.symbol} roomKey={e.key} />
-          <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
-            <div className="flex items-baseline gap-2">
-              <span className={`flex-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</span>
-              <span className="text-[11px] shrink-0" style={{ color: unread ? GOLD : MUTED }}>
-                {opening === e.key
-                  ? 'opening…'
-                  : e.room
-                    ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
-                    : ''}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mt-[2px]">
-              <span
-                className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
-                style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
-              >
-                <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
-              </span>
-              <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
-                {sub}
-              </span>
-              {unread > 0 && (
-                <span
-                  className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
-                  style={{ background: GOLD, color: '#1a1300' }}
-                >
-                  {unread > 99 ? '99+' : unread}
+        {wrapRow(
+          rowKey && e.room ? { key: rowKey, ticker: e.room.ticker, title, at: roomActivity(e.room), unread } : null,
+          <button
+            onClick={() => void openEntry(e)}
+            disabled={!!opening || !ROOMS}
+            className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+            style={{ background: BG }}
+          >
+            <Avatar title={e.gate.symbol} roomKey={e.key} />
+            <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+              <div className="flex items-baseline gap-2">
+                <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                  <span className={ELLIPSIS}>{title}</span>
+                  <MutedMark muted={muted} />
                 </span>
-              )}
+                <span className="text-[11px] shrink-0" style={{ color: unread && !muted ? GOLD : MUTED }}>
+                  {opening === e.key
+                    ? 'opening…'
+                    : e.room
+                      ? listTimeLabel(e.room.last_message?.created_at ?? e.room.updated_at)
+                      : ''}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-[2px]">
+                <span
+                  className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[10px] font-bold"
+                  style={{ background: '#2a2208', color: GOLD, border: '1px solid #3a2f0c' }}
+                >
+                  <Coins size={10} /> {amountLabel(e.holding.amountRaw, e.gate)}
+                </span>
+                <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                  {sub}
+                </span>
+                <RowBadge
+                  unread={unread}
+                  marked={!!rowKey && isMarked(prefs, rowKey)}
+                  muted={muted}
+                  pinned={!!rowKey && isPinned(prefs, rowKey)}
+                />
+              </div>
             </div>
-          </div>
-        </button>
+          </button>,
+        )}
       </li>
     );
   };
@@ -2631,6 +2786,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     <div
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: BG }}
+      onScroll={onListScroll}
     >
       <PullToRefresh onRefresh={refresh} disabled={!handle} />
       <TopNav />
@@ -2726,11 +2882,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             )}
           </div>
         )}
-        {handle && rooms === null && !listError && (
-          <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            Loading chatrooms…
-          </div>
-        )}
+        {handle && rooms === null && !listError && <SkeletonRows label="Loading chatrooms" />}
         {handle && indexing && (
           <div
             className="mx-4 mt-3 mb-1 flex items-center gap-3 rounded-xl px-3 py-3 text-xs"
@@ -2785,7 +2937,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               onJoin={() => void openLounge(true)}
             />
             <ListLabel>Your rooms</ListLabel>
-            {yours.length === 0 && (
+            {yours.length === 0 && arranged.archived.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
                 You haven’t joined any rooms yet. Pick a public room below or start your own.
               </p>
@@ -2807,13 +2959,17 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     }}
                   />
                 ))}
-              {yours.map((y) =>
-                y.kind === 'open' ? (
-                  <OpenRoomRow key={y.room.ticker} room={y.room} me={handle} onOpen={() => openOpenRoom(y.room)} />
-                ) : (
-                  renderTokenRow(y.item)
-                ),
-              )}
+              <ArchivedGroup
+                identity={handle}
+                count={arranged.archived.length}
+                unread={arranged.archived.reduce(
+                  (n, y) => n + ((y.kind === 'open' ? y.room.unread : y.item.e.room?.unread) ?? 0),
+                  0,
+                )}
+              >
+                {arranged.archived.map(renderYour)}
+              </ArchivedGroup>
+              {yoursShown.map(renderYour)}
             </ul>
 
             <ListLabel>Public rooms</ListLabel>
@@ -2852,11 +3008,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             {ROOMS && (
               <>
                 <ListLabel>Token rooms</ListLabel>
-                {entries === null && (
-                  <div className="text-center text-xs py-4" style={{ color: MUTED }}>
-                    Loading token rooms…
-                  </div>
-                )}
+                {entries === null && <SkeletonRows count={3} label="Loading token rooms" />}
                 {entries && entries.length === 0 && (
                   <div className="px-8 pt-4 pb-6 text-center">
                     <p className="text-sm text-white font-semibold">No token rooms yet</p>
@@ -2925,7 +3077,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           }}
           onBack={() => {
             setOpen(null);
-            refresh();
+            refresh(true);
           }}
         />
       )}
@@ -3036,10 +3188,13 @@ const DmConversation = (p: DmConversationProps) => (
 );
 
 const ChatPage = () => (
-  <ChatTabs
-    rooms={(header) => <RoomsPage header={header} />}
-    dms={(header) => <DmsPage header={header} Conversation={DmConversation} />}
-  />
+  <>
+    <ChatTabs
+      rooms={(header) => <RoomsPage header={header} />}
+      dms={(header) => <DmsPage header={header} Conversation={DmConversation} />}
+    />
+    <UndoToastHost />
+  </>
 );
 
 export default ChatPage;
