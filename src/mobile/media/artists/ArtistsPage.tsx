@@ -1,12 +1,13 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { GuestCtx } from './guestCtx';
+import { LOAD_FAILED, playErrorMessage } from './playError';
 import { HEADLINE_ALBUM } from '../featured/featured';
 import { resumeAt } from '../../url/resume';
 import { logStep, setPending } from '../../onboarding/funnel/funnel';
 import { BMUSIC_FUNNEL } from '../../onboarding/funnel/products';
 import { GetWalletSheet } from '../../onboarding/funnel/FunnelSheets';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Home, Pause, Play } from 'lucide-react';
+import { ChevronLeft, Home, Loader2, Pause, Play } from 'lucide-react';
 import { TopNav } from '../../../components/TopNav';
 import { BMUSIC_HOST, SHARE_ALBUMS, type ShareAlbum } from '../../../web/shareAlbums';
 
@@ -295,6 +296,8 @@ export const GuestAlbum = () => {
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [ask, setAsk] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => () => audio.current?.pause(), []);
   if (!al) return <Index />;
   // The funnel (onboarding/funnel): track 1 is the album's free headline, a local asset, so it plays with no wallet
@@ -302,15 +305,32 @@ export const GuestAlbum = () => {
   const taste = al.tracks[0]?.title === HEADLINE_ALBUM.headline.title;
   const toggleTaste = () => {
     const a = (audio.current ??= new Audio(HEADLINE_ALBUM.headline.url));
+    a.preload = 'auto';
     a.onended = () => {
       setPlaying(false);
       setAsk(true);
     };
+    a.onerror = () => {
+      setLoading(false);
+      setPlaying(false);
+      setError(LOAD_FAILED);
+    };
     if (a.paused) {
       logStep(BMUSIC_FUNNEL.id, 'taste');
+      setError(null);
+      setLoading(true);
+      // After a load error the element stays errored; reload so "Try again" actually retries.
+      if (a.error) a.load();
       void a.play().then(
-        () => setPlaying(true),
-        () => setPlaying(false),
+        () => {
+          setLoading(false);
+          setPlaying(true);
+        },
+        (err: unknown) => {
+          setLoading(false);
+          setPlaying(false);
+          setError((e) => e ?? playErrorMessage(err));
+        },
       );
     } else {
       a.pause();
@@ -355,12 +375,25 @@ export const GuestAlbum = () => {
             </p>
             <button
               onClick={toggleTaste}
-              className="px-5 py-2.5 rounded-full font-bold text-black inline-flex items-center gap-2"
+              disabled={loading}
+              aria-busy={loading}
+              className="px-5 py-2.5 rounded-full font-bold text-black inline-flex items-center gap-2 disabled:opacity-80"
               style={{ background: GOLD }}
             >
-              {playing ? <Pause size={16} /> : <Play size={16} fill="#000" />}
-              {playing ? 'Pause' : 'Play track 1 free'}
+              {loading ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : playing ? (
+                <Pause size={16} />
+              ) : (
+                <Play size={16} fill="#000" />
+              )}
+              {loading ? 'Loading…' : playing ? 'Pause' : 'Play track 1 free'}
             </button>
+            {error && (
+              <p role="alert" className="text-[13px] mt-2" style={{ color: '#f87171' }}>
+                {error}
+              </p>
+            )}
           </>
         ) : (
           <>
