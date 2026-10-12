@@ -292,7 +292,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       title: 'Money',
       items: [
         { id: 'tokens', label: 'Wallet', icon: I.wallet, to: '/bsv-wallet', kind: 'tokens' },
-        { id: 'nfts', label: 'NFTs', icon: I.nfts, to: '/bsv-wallet', kind: 'nfts' },
+        // Its own library page, /wallet/nfts (nfts/NftLibraryPage.tsx).
+        { id: 'nfts', label: 'NFTs', icon: I.nfts, to: '/m/nfts' },
         { id: 'friends', label: 'Friends', icon: I.friends, to: '/bsv-wallet', kind: 'friends' },
         {
           id: 'tickets',
@@ -433,9 +434,10 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         (onWallet ? allItems.find((i) => i.kind === kind) : undefined));
   const seg = pathname.split('/').filter(Boolean).pop() ?? '';
   const page = {
-    title:
-      current?.label.replace(/\s*\(⌘L\)$/, '') ??
-      (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : ''),
+    title: pathname.startsWith('/m/nfts/')
+      ? 'NFT'
+      : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
+        (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
     root: !!current,
   };
   const navBtn = (it: Item) =>
