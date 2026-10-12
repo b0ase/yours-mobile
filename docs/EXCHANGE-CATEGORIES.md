@@ -105,8 +105,25 @@ chip (`?people=1`): your Friends' tokens first, then everyone else's ("People");
 selling yet" (+ "Open their room" when the room is open to non-holders). The Friends page shows a friend's token
 the same way (lazy chunk, MARKET_ENABLED only). Pricing rule per token (bit-sign `lib/people-tokens.ts`): gentle
 curve by default (1¢ × 2^(distinct holders / 1000), one curve buy per identity key, owner can't buy, Supporter
-#1–100), flat opt-in, or off ("Ask to join"). The curve sale itself (auto-listing from the owner's supply) is not
-built yet.
+#1–100), flat opt-in, or off ("Ask to join").
+
+### Curve sales (live 13 Oct 2026)
+
+Design: **the person's own wallet pre-lists a tranche of their supply**; bit-sign never holds their token keys.
+- Seller (`SellMyToken.tsx`, the "Your token · Sales" card at the top of Markets → Friends): mode (gentle price
+  default / fixed price / ask to join), fixed price, joins on offer at a time (tranche, 1–50), open/close sales,
+  supporters list with Supporter #n. Opening sales makes the wallet lock `tranche` OrdLock v2 listings of `pack`
+  tokens (default 1) in one tx (`sellActions.createTranche`) at the current price in sats, and register the
+  outpoints with bit-sign (`POST /api/bitsign/people-tokens/settings`). The OrdLock pays the person directly, so
+  they don't need to be online. When their wallet opens the Friends market it refills sold slots and re-prices
+  when ≥10 new holders have joined (`curveSales.refillPlan`); closing sales cancels the listings.
+- Buyer (`BuyAndChat`): when `sales_open`, ask `GET .../quote` first (own/linked token → refused; already joined →
+  opens the room), buy one of the person's registered listings with `buyBsv21` in one sheet
+  ("Join $kim's room — 1¢ (Supporter #3)"), then `POST .../purchase { txid }` — bit-sign verifies the tx on
+  chain and records Supporter #n — and open the room. No curve listing → the cheapest resale, as before.
+- On chain an OrdLock is permissionless; a buy made around the wallet still moves tokens (the person was paid)
+  but earns no Supporter number and doesn't move the curve. Full notes: bit-sign `docs/PERSONAL-TOKEN-SALES.md`.
+- Copy: "join their room", never profit/price-going-up wording (tested in `curveSales.test.ts`).
 
 ## Exchange UI
 
