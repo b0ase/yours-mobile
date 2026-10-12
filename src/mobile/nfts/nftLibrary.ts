@@ -4,7 +4,7 @@
  */
 import type { WalletOutput } from '@bsv/sdk';
 import { getTagValue } from '../../utils/format';
-import { isListed } from '../media/nftBurn';
+import { ORDLOCK_V2_TAG } from '@1sat/types';
 
 /** What the grid draws for an item. Anything we can't name is 'unknown' (gold card, never grey). */
 export type NftType = 'image' | 'video' | 'audio' | 'html' | 'text' | 'unknown';
@@ -42,8 +42,11 @@ export type LibraryItem = {
   type: NftType;
   /** Collection id from the wallet's tags ('' when none is known). */
   collection: string;
+  /** In an OrdLock v2 listing (the only live contract; 1Sat withdrew v1 on 12 Oct 2026). */
   listed: boolean;
-  /** Listing price in satoshis, when the listing tag carries one. */
+  /** Still locked in a withdrawn OrdLock v1 listing: never shown as for sale, and not sendable from here. */
+  legacyListing: boolean;
+  /** v2 listing price in satoshis, when the listing tag carries one. */
   price?: number;
   /** Signed and queued but not on chain yet (unbroadcast.ts PENDING_ON_CHAIN): actions are off. */
   pending: boolean;
@@ -61,7 +64,9 @@ type Source = {
 
 export const toLibraryItem = (m: Source, order: number): LibraryItem => {
   const tags = m.output.tags;
-  const price = Number(getTagValue(tags, 'price'));
+  const listed = (tags ?? []).includes(ORDLOCK_V2_TAG);
+  const legacyListing = !listed && (tags ?? []).includes('ordlock');
+  const price = listed ? Number(getTagValue(tags, 'price')) : NaN;
   return {
     outpoint: m.output.outpoint.replace('.', '_'),
     origin: m.origin.replace('.', '_'),
@@ -69,7 +74,8 @@ export const toLibraryItem = (m: Source, order: number): LibraryItem => {
     contentType: m.type,
     type: nftTypeOf(m.type),
     collection: getTagValue(tags, 'collection') || getTagValue(tags, 'collectionId') || '',
-    listed: isListed(m.output),
+    listed,
+    legacyListing,
     price: Number.isFinite(price) && price > 0 ? price : undefined,
     pending: !!m.pending,
     order,

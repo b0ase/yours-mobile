@@ -45,13 +45,19 @@ describe('nftTypeOf', () => {
 
 describe('toLibraryItem', () => {
   test('reads collection, listing, price and pending', () => {
-    const i = item('Fox #1', 'image/png', ['collection:col1', 'ordlock', 'price:5000'], 3, true);
+    const i = item('Fox #1', 'image/png', ['collection:col1', 'ordlock2', 'price:5000'], 3, true);
     expect(i.outpoint).toBe(`${'a'.repeat(64)}_3`);
     expect(i.collection).toBe('col1');
     expect(i.listed).toBe(true);
     expect(i.price).toBe(5000);
     expect(i.pending).toBe(true);
     expect(i.type).toBe('image');
+  });
+  test('a withdrawn v1 listing is never shown as listed', () => {
+    const i = item('old', 'image/png', ['ordlock', 'price:9000']);
+    expect(i.listed).toBe(false);
+    expect(i.legacyListing).toBe(true);
+    expect(i.price).toBeUndefined();
   });
   test('plain item', () => {
     const i = item('x', undefined);
@@ -65,7 +71,7 @@ describe('filters, sort, search, groups', () => {
   const all = [
     item('Track 2', 'audio/mpeg', ['collection:vex'], 0),
     item('Fox #10', 'image/png', ['collection:fox'], 1),
-    item('Fox #2', 'image/png', ['collection:fox', 'ordlock'], 2),
+    item('Fox #2', 'image/png', ['collection:fox', 'ordlock2'], 2),
     item('page', 'text/html', [], 3, true),
     item('mystery', undefined, [], 4, false, 'b'),
   ];
