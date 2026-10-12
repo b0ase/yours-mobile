@@ -1,0 +1,22 @@
+{
+  "platforms": [
+    {
+      "slug": "bwalletx",
+      "name": "bWalletX",
+      "url": "https://bwalletx.com",
+      "about": "Tokens made in bWalletX: PNEE notes and personal tokens."
+    },
+    {
+      "slug": "tokenblaster",
+      "name": "TokenBlaster",
+      "url": "https://www.tokenblaster.lol",
+      "about": "BlastPad bonding-curve coins and the arcade's game coins."
+    },
+    {
+      "slug": "1sat",
+      "name": "1Sat",
+      "url": "https://1sat.market",
+      "about": "BSV-21 tokens on the 1Sat market that no other platform lists."
+    }
+  ]
+}

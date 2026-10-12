@@ -131,6 +131,8 @@ export type ExchangeView =
   | { tab: 'swap' }
   | { tab: 'orders' }
   | { tab: 'more' }
+  | { tab: 'platforms' }
+  | { tab: 'platform'; slug: string }
   | { tab: 'trade'; id: string };
 
 /** A BSV-21 token id: <txid>_<vout>. */
@@ -138,7 +140,12 @@ export const TOKEN_ID = /^[0-9a-f]{64}_\d{1,6}$/i;
 
 /** The router's path under /m/exchange → which screen to show. Unknown segments fall back to Markets. */
 export const exchangeView = (rest: string): ExchangeView => {
-  const seg = rest.replace(/^\/+|\/+$/g, '').split('/')[0] ?? '';
+  const segs = rest.replace(/^\/+|\/+$/g, '').split('/');
+  const seg = segs[0] ?? '';
+  if (seg === 'platform' || seg === 'platforms') {
+    const slug = (segs[1] ?? '').toLowerCase();
+    return /^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) ? { tab: 'platform', slug } : { tab: 'platforms' };
+  }
   if (seg === 'swap') return { tab: 'swap' };
   if (seg === 'orders') return { tab: 'orders' };
   if (seg === 'collectibles') return { tab: 'more' };
@@ -149,6 +156,7 @@ export const exchangeView = (rest: string): ExchangeView => {
 
 export const EXCHANGE_ROUTE = '/m/exchange';
 export const tradeRoute = (id: string) => `${EXCHANGE_ROUTE}/${id}`;
+export const platformRoute = (slug?: string) => `${EXCHANGE_ROUTE}/platform${slug ? `/${slug}` : ''}`;
 
 // ── favourites + my trades (this device) ────────────────────────────────────
 
