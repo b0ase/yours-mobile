@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, X } from 'lucide-react';
 import { CardNftGrid } from './CardNftGrid';
+import { CardFramePicker } from './CardFramePicker';
+import type { MediaItem } from '../media/useWalletMedia';
 import {
   CARD_LIBRARY_MAX,
   addPicture,
@@ -11,6 +13,7 @@ import {
   saveCardLibrary,
   selectedPictureId,
   type CardPicture,
+  type CardPictureSource,
 } from './cardLibrary';
 import {
   MIN_BRIGHTNESS,
@@ -79,8 +82,11 @@ export function CardDesigner({
     }
     return true;
   };
-  const addToLibrary = (uri: string) => {
-    const saved = saveCardLibrary(libraryKey, addPicture(library, uri));
+  const [framing, setFraming] = useState<MediaItem | null>(null);
+  const framingRef = useRef(false);
+  framingRef.current = !!framing;
+  const addToLibrary = (uri: string, src?: CardPictureSource) => {
+    const saved = saveCardLibrary(libraryKey, addPicture(library, uri, undefined, src));
     if (saved) setLibrary(saved);
     if (applyImage(uri)) setNftSel(null);
   };
@@ -88,8 +94,15 @@ export function CardDesigner({
     const saved = saveCardLibrary(libraryKey, removePicture(library, id));
     setLibrary(saved ?? []);
   };
-  const pickNft = async (outpoint: string, url: string) => {
+  const pickNft = async (m: MediaItem) => {
     if (nftBusy) return;
+    if (m.kind === 'video') {
+      setImgErr('');
+      setFraming(m);
+      return;
+    }
+    const outpoint = m.output.outpoint;
+    const url = m.url;
     setImgErr('');
     setNftBusy(outpoint);
     try {
@@ -108,7 +121,11 @@ export function CardDesigner({
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (framingRef.current) setFraming(null);
+      else onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
@@ -309,11 +326,7 @@ export function CardDesigner({
             <p className="bw-cdes-empty">No pictures yet. Tap Use my picture to add one (up to {CARD_LIBRARY_MAX}).</p>
           )
         ) : (
-          <CardNftGrid
-            selected={customImage ? nftSel : null}
-            busy={nftBusy}
-            onPick={(outpoint, url) => void pickNft(outpoint, url)}
-          />
+          <CardNftGrid selected={customImage ? nftSel : null} busy={nftBusy} onPick={(m) => void pickNft(m)} />
         )}
         <p className="bw-cdes-note">Your pictures stay on this device. They aren’t uploaded anywhere.</p>
       </div>
@@ -325,6 +338,16 @@ export function CardDesigner({
           Done
         </button>
       </div>
+      {framing && (
+        <CardFramePicker
+          m={framing}
+          onClose={() => setFraming(null)}
+          onUse={(uri, src) => {
+            addToLibrary(uri, src);
+            setFraming(null);
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
