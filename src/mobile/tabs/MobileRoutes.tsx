@@ -41,6 +41,8 @@ const MobileRoutes = () => (
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
         <Route path="media" element={<MediaPage />} />
+        <Route path="media/album/:albumId" element={<MediaPage />} />
+        <Route path="media/browse" element={<MediaPage />} />
         {AddReleasePage && <Route path="media/new" element={<AddReleasePage />} />}
         <Route
           path="bpics"

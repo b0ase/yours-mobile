@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
+import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Home, LayoutGrid, Pause, Play } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
@@ -26,6 +26,33 @@ import { ErrorActions } from '../errors/ErrorActions';
  */
 // bWalletX only: absent from a store build (PAY_STREAM_ENABLED).
 const StreamAlbum = PAY_STREAM_ENABLED ? lazy(() => import('./stream/StreamAlbum')) : null;
+const FeaturedTracks = PAY_STREAM_ENABLED ? lazy(() => import('./stream/FeaturedTracks')) : null;
+
+/** Page layout: Cards (banner + shelves), List (tracks only), Hybrid (banner with tracks + track list). */
+type View = 'cards' | 'list' | 'hybrid';
+const VIEWS: { id: View; label: string }[] = [
+  { id: 'cards', label: 'Cards' },
+  { id: 'list', label: 'List' },
+  { id: 'hybrid', label: 'Hybrid' },
+];
+const VIEW_KEY = 'bwx.media.view';
+
+/** Store history: Back / Forward ride the router (history.state.idx), so the browser buttons agree. */
+const MEDIA_HOME = '/m/media';
+const albumPath = (id: string) => `${MEDIA_HOME}/album/${encodeURIComponent(id)}`;
+let maxIdx = 0;
+const historyIdx = (): number => {
+  const st = typeof window !== 'undefined' ? (window.history.state as { idx?: number } | null) : null;
+  return typeof st?.idx === 'number' ? st.idx : 0;
+};
+const readView = (): View => {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === 'cards' || v === 'list' || v === 'hybrid' ? v : 'hybrid';
+  } catch {
+    return 'hybrid';
+  }
+};
 
 const GOLD = '#FFD24D';
 const PANEL = '#111216';
@@ -159,8 +186,26 @@ const releaseQueue = (r: Release): Track[] =>
 
 const MediaPage = () => {
   const navigate = useNavigate();
-  const [release, setRelease] = useState<Entry | null>(null);
-  const close = () => (release ? setRelease(null) : navigate(-1));
+  const location = useLocation();
+  const navType = useNavigationType();
+  const { albumId } = useParams();
+  const browsing = location.pathname.endsWith('/media/browse');
+  /** Album page opened from a track row: the manifest index to start playing. */
+  const autoplay = (location.state as { autoplay?: number } | null)?.autoplay;
+  const setRelease = (e: Entry | null) => (e ? navigate(albumPath(e.id)) : navigate(MEDIA_HOME));
+  const idx = historyIdx();
+  if (navType === 'PUSH' || idx > maxIdx) maxIdx = idx;
+  const canForward = idx < maxIdx;
+  const [view, setViewRaw] = useState<View>(readView);
+  const setView = (v: View) => {
+    setViewRaw(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* not remembered: fine */
+    }
+  };
+  const close = () => navigate(-1);
   useBackClose(true, close);
   const { items, hasMore, loading, error, loadMore, reload } = useWalletMedia();
   const releases = useReleases();
@@ -227,6 +272,43 @@ const MediaPage = () => {
   });
   const myMusic = useMemo(() => music.map(own), [music]);
   const myVideo = useMemo(() => videos.map(own), [videos]);
+
+  // The album / release page comes from the URL (/m/media/album/<id>), so it is shareable and Back works.
+  const release: Entry | null = albumId
+    ? ([...free, ...published, ...myMusic, ...myVideo].find((e) => e.id === albumId) ?? null)
+    : null;
+
+  // Escape, and a swipe from the left edge on phone width, go back (Android Back: useBackClose above).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      if (document.querySelector('[role="dialog"], .fixed.inset-0')) return;
+      navigate(-1);
+    };
+    let sx = -1;
+    let sy = 0;
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      sx = window.innerWidth < 768 && t.clientX < 24 ? t.clientX : -1;
+      sy = t.clientY;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (sx < 0) return;
+      const t = e.changedTouches[0];
+      if (t.clientX - sx > 80 && Math.abs(t.clientY - sy) < 60) navigate(-1);
+      sx = -1;
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, [navigate]);
 
   const play = (e: Entry) => {
     if (nowPlaying?.id === e.id || (e.featured && nowPlaying?.id === e.featured.id)) return toggle();
@@ -356,6 +438,10 @@ const MediaPage = () => {
   };
 
   const isAlbum = (e: Entry) => e.id === HEADLINE_ALBUM.id;
+  const albums = free.filter(isAlbum);
+  /** While there is one album, its tracks list replaces the one-tile Albums shelf (List and Hybrid). */
+  const albumTracks = FeaturedTracks && view !== 'cards' && albums.length === 1 ? albums[0] : null;
+  const openAlbumAt = (e: Entry, index: number) => navigate(albumPath(e.id), { state: { autoplay: index } });
   const songs = [
     ...free.filter((e) => !isAlbum(e)),
     ...published.flatMap((p) => (p.release ? releaseTracks(p.release) : [])),
@@ -370,6 +456,7 @@ const MediaPage = () => {
     release && StreamAlbum && isAlbum(release) ? (
       <Suspense fallback={null}>
         <StreamAlbum
+          autoplay={autoplay}
           headline={{
             playing: isPlaying(release),
             duration: durations[HEADLINE_ALBUM.headline.id],
@@ -427,12 +514,62 @@ const MediaPage = () => {
         className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
         style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
       >
-        <button aria-label="Back" onClick={close} className="p-2">
-          <ArrowLeft size={20} color="#fff" />
-        </button>
-        <h1 className={`text-lg font-bold text-white ${ELLIPSIS}`}>{release ? release.title : 'Media'}</h1>
-        {!release && (
+        <nav className="flex items-center shrink-0" aria-label="Store navigation">
+          <button aria-label="Back" title="Back" onClick={close} className="p-1.5">
+            <ChevronLeft size={20} color="#fff" />
+          </button>
+          <button
+            aria-label="Forward"
+            title="Forward"
+            onClick={() => navigate(1)}
+            disabled={!canForward}
+            className="p-1.5"
+            style={{ opacity: canForward ? 1 : 0.3 }}
+          >
+            <ChevronRight size={20} color="#fff" />
+          </button>
+          <button aria-label="Media home" title="Media home" onClick={() => navigate(MEDIA_HOME)} className="p-1.5">
+            <Home size={17} color={!release && !browsing ? GOLD : '#fff'} />
+          </button>
+          <button
+            onClick={() => navigate(`${MEDIA_HOME}/browse`)}
+            className="ml-1 px-2 py-1 text-[11px] font-bold flex items-center gap-1"
+            style={{ border: `1px solid ${browsing ? GOLD : LINE}`, color: browsing ? GOLD : MUTED, borderRadius: 4 }}
+          >
+            <LayoutGrid size={12} /> Browse
+          </button>
+        </nav>
+        <h1 className={`text-sm md:text-base font-bold text-white min-w-0 ${ELLIPSIS}`}>
+          <button onClick={() => navigate(MEDIA_HOME)} className={release || browsing ? 'text-[#98A2B3]' : ''}>
+            Media
+          </button>
+          {browsing && <span> › Browse</span>}
+          {release && (
+            <>
+              <span style={{ color: MUTED }}> › {isAlbum(release) || release.release ? 'Albums' : 'Music'} › </span>
+              {release.title}
+            </>
+          )}
+        </h1>
+        {!release && !browsing && (
           <div className="ml-auto flex items-center gap-1.5 pr-2">
+            <div className="hidden sm:flex items-center mr-2" role="group" aria-label="View">
+              {VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setView(v.id)}
+                  aria-pressed={view === v.id}
+                  className="px-2 py-1 text-[11px] font-bold"
+                  style={{
+                    background: view === v.id ? PANEL : 'transparent',
+                    color: view === v.id ? GOLD : MUTED,
+                    border: `1px solid ${view === v.id ? GOLD : LINE}`,
+                  }}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
             {FILTERS.map((f) => (
               <button
                 key={f.id}
@@ -461,13 +598,40 @@ const MediaPage = () => {
         )}
       </div>
       <div className="w-full max-w-[1100px] mx-auto px-4 pt-5 flex flex-col gap-8">
-        {release ? (
+        {albumId && !release ? (
+          <p className="text-sm py-6 text-center" style={{ color: MUTED }}>
+            {loading ? 'Loading…' : 'This album is not in the store.'}
+          </p>
+        ) : release ? (
           releasePage
+        ) : browsing ? (
+          <BrowseView
+            entries={[...free, ...published].filter((e) => e.kind === 'music' || e.release)}
+            isAlbum={isAlbum}
+            renderTracks={(e) =>
+              isAlbum(e) && FeaturedTracks ? (
+                <Suspense fallback={null}>
+                  <FeaturedTracks
+                    headlinePlaying={isPlaying(e)}
+                    headlineDuration={durations[HEADLINE_ALBUM.headline.id]}
+                    onHeadline={() => play(e)}
+                    onTrack={(i) => openAlbumAt(e, i)}
+                    onAll={() => openEntry(e)}
+                  />
+                </Suspense>
+              ) : (
+                <div className="flex flex-col" style={{ borderTop: `1px solid ${LINE}` }}>
+                  {tracksOf(e).map(songRow)}
+                </div>
+              )
+            }
+            onOpen={openEntry}
+          />
         ) : (
           <>
-            {showMusic && hero && (
+            {showMusic && hero && view !== 'list' && (
               <section
-                className="relative overflow-hidden flex items-center gap-5 md:gap-8 p-4 md:p-6"
+                className="relative overflow-hidden flex flex-col lg:flex-row lg:items-center gap-5 lg:gap-8 p-4 md:p-6"
                 style={{
                   borderRadius: RADIUS,
                   border: `1px solid ${LINE}`,
@@ -475,29 +639,50 @@ const MediaPage = () => {
                 }}
               >
                 {isAlbum(hero) && <StillsBanner stills={VEXVOID_STILLS} className="absolute inset-0" />}
-                <button onClick={() => openEntry(hero)} className="relative w-[132px] md:w-[220px] shrink-0">
-                  <Cover e={hero} />
-                </button>
-                <div className="relative flex-1 min-w-0 flex flex-col gap-2">
-                  <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-                    {isAlbum(hero) ? 'Album · Headline track free' : `Featured${hero.free ? ' · Free to listen' : ''}`}
-                  </div>
-                  <div className="text-xl md:text-4xl font-black text-white leading-tight">{hero.title}</div>
-                  <div className="text-sm" style={{ color: MUTED }}>
-                    {hero.artist}
-                    {hero.sub ? ` · ${hero.sub}` : ''}
-                  </div>
-                  <div className="flex items-center gap-3 mt-2">
-                    <PlayBtn e={hero.release ? releaseTracks(hero.release)[0] : hero} big />
-                    <button
-                      onClick={() => openEntry(hero)}
-                      className="text-xs font-bold underline-offset-4 hover:underline"
-                      style={{ color: GOLD }}
-                    >
-                      {isAlbum(hero) ? 'View album' : 'View release'}
-                    </button>
+                <div className="relative flex items-center gap-5 md:gap-8 flex-1 min-w-0">
+                  <button onClick={() => openEntry(hero)} className="relative w-[132px] md:w-[220px] shrink-0">
+                    <Cover e={hero} />
+                  </button>
+                  <div className="relative flex-1 min-w-0 flex flex-col gap-2">
+                    <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+                      {isAlbum(hero)
+                        ? 'Album · Headline track free'
+                        : `Featured${hero.free ? ' · Free to listen' : ''}`}
+                    </div>
+                    <div className="text-xl md:text-4xl font-black text-white leading-tight">{hero.title}</div>
+                    <div className="text-sm" style={{ color: MUTED }}>
+                      {hero.artist}
+                      {hero.sub ? ` · ${hero.sub}` : ''}
+                    </div>
+                    <div className="flex items-center gap-3 mt-2">
+                      <PlayBtn e={hero.release ? releaseTracks(hero.release)[0] : hero} big />
+                      <button
+                        onClick={() => openEntry(hero)}
+                        className="text-xs font-bold underline-offset-4 hover:underline"
+                        style={{ color: GOLD }}
+                      >
+                        {isAlbum(hero) ? 'View album' : 'View release'}
+                      </button>
+                    </div>
                   </div>
                 </div>
+                {view === 'hybrid' && isAlbum(hero) && FeaturedTracks && (
+                  <div
+                    className="relative w-full lg:w-[44%] shrink-0 p-3"
+                    style={{ background: 'rgba(0,0,0,0.55)', borderRadius: 4 }}
+                  >
+                    <Suspense fallback={null}>
+                      <FeaturedTracks
+                        compact
+                        headlinePlaying={isPlaying(hero)}
+                        headlineDuration={durations[HEADLINE_ALBUM.headline.id]}
+                        onHeadline={() => play(hero)}
+                        onTrack={(i) => openAlbumAt(hero, i)}
+                        onAll={() => openEntry(hero)}
+                      />
+                    </Suspense>
+                  </div>
+                )}
                 {banner.length > 1 && (
                   <div className="absolute right-3 bottom-3 flex gap-1">
                     <button
@@ -513,7 +698,20 @@ const MediaPage = () => {
                 )}
               </section>
             )}
-            {showMusic && shelf(StreamAlbum ? 'Albums' : 'Free this week', free)}
+            {showMusic && albumTracks && FeaturedTracks && (
+              <Suspense fallback={null}>
+                <FeaturedTracks
+                  headlinePlaying={isPlaying(albumTracks)}
+                  headlineDuration={durations[HEADLINE_ALBUM.headline.id]}
+                  onHeadline={() => play(albumTracks)}
+                  onTrack={(i) => openAlbumAt(albumTracks, i)}
+                  onAll={() => openEntry(albumTracks)}
+                />
+              </Suspense>
+            )}
+            {showMusic &&
+              (!StreamAlbum || (view === 'cards' ? true : albums.length >= 2)) &&
+              shelf(StreamAlbum ? 'Albums' : 'Free this week', free)}
             {shelf(
               'New releases',
               published.filter((p) => (p.kind === 'music' ? showMusic : showVideo)),
@@ -556,5 +754,107 @@ const MediaPage = () => {
     </div>
   );
 };
+
+/**
+ * Browse: the iTunes column browser. Genre | Artist | Album; each pick narrows the next column, and the
+ * picked album's tracks show below. Built from what the store has (the album, published releases).
+ */
+function BrowseView(p: {
+  entries: Entry[];
+  isAlbum: (e: Entry) => boolean;
+  renderTracks: (e: Entry) => React.ReactNode;
+  onOpen: (e: Entry) => void;
+}) {
+  const genreOf = (e: Entry) => (e.release?.genre?.trim() || (e.kind === 'video' ? 'Video' : 'Music')) as string;
+  const all = (xs: string[]) => [...new Set(xs)].sort((a, b) => a.localeCompare(b));
+  const genres = all(p.entries.map(genreOf));
+  const [genre, setGenre] = useState<string | null>(null);
+  const [artist, setArtist] = useState<string | null>(null);
+  const [album, setAlbum] = useState<string | null>(null);
+  const g = genre ?? genres[0] ?? null;
+  const inGenre = p.entries.filter((e) => genreOf(e) === g);
+  const artists = all(inGenre.map((e) => e.artist));
+  const a = artist && artists.includes(artist) ? artist : (artists[0] ?? null);
+  const albums = inGenre.filter((e) => e.artist === a);
+  const picked = albums.find((e) => e.id === album) ?? albums[0] ?? null;
+  const col = (title: string, items: { id: string; label: string }[], sel: string | null, on: (id: string) => void) => (
+    <div className="flex-1 min-w-0 flex flex-col" style={{ borderRight: `1px solid ${LINE}` }}>
+      <div
+        className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest"
+        style={{ color: MUTED, borderBottom: `1px solid ${LINE}`, background: PANEL }}
+      >
+        {title}
+      </div>
+      <div className="flex flex-col max-h-[220px] overflow-y-auto">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            onClick={() => on(it.id)}
+            className={`px-2 py-1.5 text-left text-[13px] ${ELLIPSIS}`}
+            style={{
+              background: sel === it.id ? 'rgba(255,210,77,0.14)' : 'transparent',
+              color: sel === it.id ? GOLD : '#fff',
+            }}
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex" style={{ border: `1px solid ${LINE}`, borderRadius: RADIUS, overflow: 'hidden' }}>
+        {col(
+          'Genre',
+          genres.map((x) => ({ id: x, label: x })),
+          g,
+          (x) => {
+            setGenre(x);
+            setArtist(null);
+            setAlbum(null);
+          },
+        )}
+        {col(
+          'Artist',
+          artists.map((x) => ({ id: x, label: x })),
+          a,
+          (x) => {
+            setArtist(x);
+            setAlbum(null);
+          },
+        )}
+        {col(
+          'Album',
+          albums.map((e) => ({ id: e.id, label: e.title })),
+          picked?.id ?? null,
+          setAlbum,
+        )}
+      </div>
+      {picked && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="text-base font-bold text-white">
+              {picked.title}
+              <span className="font-normal text-sm" style={{ color: MUTED }}>
+                {' '}
+                · {picked.artist}
+              </span>
+            </h2>
+            <button onClick={() => p.onOpen(picked)} className="text-xs font-bold" style={{ color: GOLD }}>
+              {p.isAlbum(picked) ? 'View album' : 'View release'}
+            </button>
+          </div>
+          {p.renderTracks(picked)}
+        </div>
+      )}
+      {!p.entries.length && (
+        <p className="text-sm" style={{ color: MUTED }}>
+          Nothing in the store yet.
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default MediaPage;

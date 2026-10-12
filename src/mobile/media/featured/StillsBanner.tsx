@@ -28,7 +28,9 @@ export function StillsBanner({
   }, [stills.length]);
   return (
     <div
-      className={`relative overflow-hidden ${className ?? ''}`}
+      // `relative` only when the caller didn't position it: "relative absolute" lets relative win, and an
+      // absolute backdrop with no children then collapses to zero height (the invisible Desktop banner).
+      className={`${/\b(absolute|fixed)\b/.test(className ?? '') ? '' : 'relative '}overflow-hidden ${className ?? ''}`}
       style={{ background: 'radial-gradient(circle at 25% 30%, #5a420a 0%, #1c1606 45%, #000 100%)' }}
     >
       <style>{KEYFRAMES}</style>
@@ -50,7 +52,7 @@ export function StillsBanner({
       <div
         className="absolute inset-0"
         style={{
-          background: 'linear-gradient(90deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.25) 100%)',
+          background: 'linear-gradient(90deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.45) 50%, rgba(0,0,0,0.15) 100%)',
         }}
       />
       <div className="relative">{children}</div>
