@@ -19,7 +19,7 @@ describe('HOME', () => {
 
   test('dock b: tap = Home, hold = the agent page; top bar is Accounts · Calls · Airdrops · Media · Lock BSV', () => {
     const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
-    // Hold-to-talk lives in one shared hook (agent/useHoldToTalk + holdToTalk), used by the Dock and Agent b.
+    // Hold-to-talk lives in one shared hook (agent/useHoldToTalk + holdToTalk), used by the Dock and Ask b.
     const hook = readFileSync(join(import.meta.dir, '../agent/useHoldToTalk.ts'), 'utf8');
     const ctl = readFileSync(join(import.meta.dir, '../agent/holdToTalk.ts'), 'utf8');
     expect(dock).toContain('useHoldToTalk');
@@ -28,7 +28,7 @@ describe('HOME', () => {
     expect(dock).toContain("WebkitTouchCallout: 'none'");
     expect(hook).toContain('e.preventDefault()');
     const shell = readFileSync(join(import.meta.dir, 'PhoneShell.tsx'), 'utf8');
-    expect(shell).toContain("onAgent={() => navigate('/m/agent')}");
+    expect(shell).toContain("onAgent={() => navigate('/m/ask-b')}");
     const top = readFileSync(join(import.meta.dir, '../tabs/TopNav.tsx'), 'utf8');
     const row = top.slice(top.indexOf('owner round 3'));
     const order = [

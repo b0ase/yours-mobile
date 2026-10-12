@@ -7,7 +7,7 @@ import { AgentConversation } from './AgentConversation';
 import { useKeyboardInset } from '../ui/keyboardInset';
 
 /**
- * /m/agent — the b agent, opened by the top bar's centre b ("Ask b" in the phone layout) or the b agent tile in Apps.
+ * /m/ask-b — the b agent, opened by the top bar's centre b ("Ask b" in the phone layout) or the b agent tile in Apps.
  * Helps people use bWallet (guide.ts). Not free: either the user's own provider key (direct from the device) or
  * pay per message in BSV (paid.ts). See agent.ts. The conversation itself is AgentConversation.tsx.
  */
@@ -35,7 +35,7 @@ const AgentPage = () => {
           <ArrowLeft size={20} color="#fff" />
         </button>
         <img src={bGlyph} alt="" width={22} height={22} />
-        <h1 className="text-lg font-bold text-white shrink-0">Agent b</h1>
+        <h1 className="text-lg font-bold text-white shrink-0">Ask b</h1>
       </div>
       <AgentConversation />
     </div>

@@ -63,7 +63,7 @@ describe('phone layout screens', () => {
   });
 
   test('non-strip paths (settings, agent, /social, onboarding) are not pages', () => {
-    for (const p of ['/m/settings', '/m/agent', '/m/media', '/social', '/', '/create-wallet'])
+    for (const p of ['/m/settings', '/m/ask-b', '/m/media', '/social', '/', '/create-wallet'])
       expect(screenForPath(p)).toBeNull();
   });
 

@@ -3,7 +3,7 @@ import { AGENT_HANDOFF_EVENT, setAgentDraft } from '../agent/handoff';
 
 /**
  * Every error the wallet shows gets "Copy" and "Ask b" (owner, 10 Oct 2026). Ask b opens the b agent
- * (/m/agent) with the error already typed in, plus where it happened, the app version and the edition.
+ * (/m/ask-b) with the error already typed in, plus where it happened, the app version and the edition.
  *
  * ⚠ What leaves through either action is redacted first: an error can echo user input, and the person
  * may have pasted recovery words, a private key or a password into the field that failed. Never sent:
@@ -123,7 +123,7 @@ export const registerErrorNavigator = (nav: (path: string) => void, screen: () =
 };
 const currentScreen = () => (screenOf ? screenOf() : '');
 
-export const AGENT_PATH = '/m/agent';
+export const AGENT_PATH = '/m/ask-b';
 
 /** Open b with the error typed in (the person still presses send). */
 export const askB = (error: string) => {

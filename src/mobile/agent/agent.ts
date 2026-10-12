@@ -1,5 +1,5 @@
 /**
- * The b agent (top bar's centre b → /m/agent): a help assistant for using bWallet. It is NOT
+ * The b agent (top bar's centre b → /m/ask-b): a help assistant for using bWallet. It is NOT
  * free; it runs one of two ways, chosen in Settings › b agent (agentPrefs.ts):
  *   - 'own'  — the user's own provider key; the device calls the provider directly (providers.ts).
  *   - 'paid' — pay per message in BSV from the wallet, answered by bit-sign (paid.ts).

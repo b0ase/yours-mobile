@@ -247,7 +247,7 @@ export const AgentSettings = ({ Section, Row, Divider }: Props) => {
   const info = consentInfo(target);
   return (
     <>
-      <Section title="b agent">
+      <Section title="Ask b">
         <Row
           icon={<Bot size={16} />}
           label="Mode"

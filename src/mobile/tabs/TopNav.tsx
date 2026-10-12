@@ -58,7 +58,7 @@ import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
  * A hamburger at top-left opens a left drawer with the current account (name, handle,
  * verified), every account, Add / Import account and Settings. The centred b opens the
- * b agent (/m/agent).
+ * b agent (/m/ask-b).
  * Switching reuses upstream TopNav's sequence verbatim.
  */
 // Logo (owner, 4 Oct 2026): no x in any logo. Both editions now share bWalletX's look, gold b on black (store
@@ -429,7 +429,7 @@ const TopNavBar = () => {
       )}
 
       {/* Wide web layout (D7): a dropdown anchored under the sidebar account chip, not the phone drawer. Settings,
-          Connect CLI & MCP and Agent b live in the sidebar, so only accounts, add and sign out are here. */}
+          Connect CLI & MCP and Ask b live in the sidebar, so only accounts, add and sign out are here. */}
       {WIDE_ON && drawer && createPortal(wideMenu(), document.body)}
       <AnimatePresence>
         {drawer && !WIDE_ON && (
@@ -520,7 +520,7 @@ const TopNavBar = () => {
                   })}
                 {/* The classic layout reaches the b agent here (the phone layout has the dock b). */}
                 {showAgentInMenu(phone) &&
-                  action(<Sparkles size={16} color="#fff" />, 'Agent b', () => {
+                  action(<Sparkles size={16} color="#fff" />, 'Ask b', () => {
                     setDrawer(false);
                     const to = agentMenuTarget(pathname);
                     if (to === -1) navigate(-1);
@@ -639,7 +639,7 @@ const TopNavBar = () => {
           onAgent={
             showAgentInMenu(phone)
               ? {
-                  label: 'Agent b',
+                  label: 'Ask b',
                   go: () => {
                     setSheet(null);
                     setDrawer(false);

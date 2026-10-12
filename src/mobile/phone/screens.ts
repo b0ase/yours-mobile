@@ -3,7 +3,7 @@ import { MARKET_ENABLED, STORE_BUILD, screensFor } from '../storeBuild';
 /**
  * Phone layout swipe screens (docs/PHONE-LAYOUT-PLAN.md §3, §14). Pure: no React, so it is unit-tested.
  * Left to right: Wallet · Exchange · HOME · Apps · Games · People · Feed · Chat. The agent is not a page: it is the
- * hold-b sheet (Variant B), with /m/agent kept as a full-screen route outside the strip.
+ * hold-b sheet (Variant B), with /m/ask-b kept as a full-screen route outside the strip.
  */
 export type ScreenId = 'wallet' | 'exchange' | 'home' | 'apps' | 'games' | 'people' | 'feed' | 'chat';
 

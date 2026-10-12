@@ -158,7 +158,7 @@ const Tile = ({
 /**
  * The big b in the centre (owner, 8 Oct 2026; bChatX's b in bit-sign follows the same spec):
  * tap = HOME (the app grid) · press and hold (B_HOLD_MS) = talk to b: a sheet slides up with sound bars and the
- * live transcript; release = send it to b (/m/agent, through its normal send: consent, price, confirm);
+ * live transcript; release = send it to b (/m/ask-b, through its normal send: consent, price, confirm);
  * slide away then release = cancel. No mic / speech here: the hold opens b with the keyboard (as before) and a note.
  * The press is a pure state machine (gesture.ts bHold). iOS WKWebView swallows long presses and may cancel
  * pointer events, so touches drive it where there are any (pointer events for mouse/pen only), the callout and

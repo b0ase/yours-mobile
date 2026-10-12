@@ -5,7 +5,7 @@ import { ObsidianBackdrop } from '../ui/ObsidianBackdrop';
 import { prefersReducedMotion } from '../ui/obsidianPool';
 
 /**
- * Agent b's opening (owner, 11 Oct 2026): a pool of liquid obsidian with the gold b in the middle, which then makes
+ * Ask b's opening (owner, 11 Oct 2026): a pool of liquid obsidian with the gold b in the middle, which then makes
  * room for what b can do. Each option only fills in the message box; nothing is sent (or paid for) until Send.
  *
  * The pool is ui/ObsidianBackdrop (one shader, shared with the welcome / unlock / restore screens), uncapped here.

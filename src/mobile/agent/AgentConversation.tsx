@@ -44,7 +44,7 @@ const storeNoPaid: PaidBackend = {
 import { money } from '../money/money';
 
 /**
- * The b agent conversation (status, messages, composer). Shown on the full page (/m/agent, AgentPage.tsx).
+ * The b agent conversation (status, messages, composer). Shown on the full page (/m/ask-b, AgentPage.tsx).
  * Helps people use bWallet (guide.ts).
  * Not free: either the user's own provider key (direct from the device) or pay per message in
  * BSV (paid.ts). See agent.ts.

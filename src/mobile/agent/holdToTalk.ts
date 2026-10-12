@@ -3,7 +3,7 @@ import type { VoiceHandlers, VoiceStart } from './voice';
 import { usableTranscript, voiceNote, type VoicePlatform } from './voiceText';
 
 /**
- * Press-and-hold-to-talk on a b button: one implementation shared by the Dock's b and the Agent b composer's b.
+ * Press-and-hold-to-talk on a b button: one implementation shared by the Dock's b and the Ask b composer's b.
  * Gesture rules live in gesture.ts (bHold): tap · hold B_HOLD_MS = listen · release = done · slide away = cancel.
  * This controller adds the voice session and the sheet state; the React side is useHoldToTalk.
  */
