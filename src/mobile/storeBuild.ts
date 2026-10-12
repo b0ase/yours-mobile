@@ -308,3 +308,13 @@ export const dockItemsFor = <T extends { kind: string; id?: string; name?: strin
   );
 /** Release B (People): no buying or selling a person's tokens or apps in a store build. */
 export const peopleSellingEnabled = (store = STORE_BUILD) => !store;
+
+/**
+ * Media › "Add a release" (publish music / video as inscriptions): bWalletX only, absent from a store build
+ * (creator publishing with paid mint fees). Listening to published releases stays on in both editions.
+ */
+export const RELEASES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
