@@ -10,6 +10,8 @@ const SettingsHub = lazy(() => import('./SettingsHub'));
 const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
 const MarketPage = MARKET_ENABLED ? lazy(() => import('../market/MarketPage')) : null;
+// bPics (Apps › bPics): picture ordinals; mint, shared library, mine.
+const BPicsPage = lazy(() => import('../bpics/BPicsPage'));
 const FeedTab = lazy(() => import('../feed/FeedTab'));
 const ChatPage = lazy(() => import('./ChatPage'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
@@ -37,6 +39,14 @@ const MobileRoutes = () => (
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
         <Route path="media" element={<MediaPage />} />
+        <Route
+          path="bpics"
+          element={
+            <TermsGate>
+              <BPicsPage />
+            </TermsGate>
+          }
+        />
         {/* The top bar's centre b: the b agent. */}
         <Route path="agent" element={<AgentPage />} />
         <Route path="bmail" element={<BMailPage />} />

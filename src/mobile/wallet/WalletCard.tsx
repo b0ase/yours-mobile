@@ -24,6 +24,7 @@ import {
   clampLook,
   defaultPlacement,
   loadCardArtLook,
+  CARD_IMG_EVENT,
   loadCardImage,
   measureArtLuma,
   saveCardArtLook,
@@ -223,7 +224,12 @@ const WalletCardInner = ({
   const artKey = account?.pubKeys?.identityPubKey ?? '';
   // The account's own picture, when it chose one in the card designer (owner, 12 Oct 2026); bWalletX only.
   const [cardImage, setCardImage] = useState<string | null>(() => (bavatarArt ? loadCardImage(artKey) : null));
-  useEffect(() => setCardImage(bavatarArt ? loadCardImage(artKey) : null), [artKey, bavatarArt]);
+  useEffect(() => {
+    const read = () => setCardImage(bavatarArt ? loadCardImage(artKey) : null);
+    read();
+    window.addEventListener(CARD_IMG_EVENT, read);
+    return () => window.removeEventListener(CARD_IMG_EVENT, read);
+  }, [artKey, bavatarArt]);
   const frontArt = (bavatarArt && cardImage) || bavatarArt;
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;

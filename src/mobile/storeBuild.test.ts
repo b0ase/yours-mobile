@@ -440,7 +440,9 @@ describe('BSPACES_ENABLED: full bSpaces (token rooms, paid entry) is bWalletX on
     expect(cond(s, 'BSPACES_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
   test('the tile, the route and the in-room banner sit behind the flag', () => {
-    expect(src('./BrowserPage.tsx')).toContain('BSPACES_ENABLED ? [AGENT_TILE, BSPACES_TILE] : [AGENT_TILE]');
+    expect(src('./BrowserPage.tsx')).toContain(
+      'BSPACES_ENABLED ? [AGENT_TILE, BPICS_TILE, BSPACES_TILE] : [AGENT_TILE, BPICS_TILE]',
+    );
     expect(src('./tabs/MobileRoutes.tsx')).toContain(
       "BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null",
     );
