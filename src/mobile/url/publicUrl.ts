@@ -6,12 +6,13 @@
  *   /m/<page>              ↔ /<page>
  *   /bsv-wallet            ↔ /wallet
  *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
- *   /m/media/browse?artist=<name> ↔ /bmusic/artists/<artist>   (/bmusic/artists lists them)
+ *   /m/media/artists[/<artist>] ↔ /bmusic/artists[/<artist>]   (in-app artist screens, media/artists/)
+ *   /m/feed                ↔ /bchatx-feed   (old /feed links 308 there, src/web/vercel.json)
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
  * Other top-level app routes (/settings, …) keep their own path.
  */
-import { SHARE_ALBUMS, albumPublicPath, artistPublicPath } from '../media/shareAlbums';
+import { SHARE_ALBUMS, albumPublicPath } from '../media/shareAlbums';
 
 const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/browser']);
 /**
@@ -19,8 +20,9 @@ const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/brow
  * reopening /restore-wallet after that reload sent people round in a loop (owner, 11 Oct 2026).
  */
 const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore', '/sweep']);
+/** In-app artist screens (media/artists/ArtistsPage.tsx). */
+const ARTISTS_ROUTE = '/m/media/artists';
 const albumById = (id: string) => SHARE_ALBUMS.find((a) => a.id === id);
-const artistByName = (name: string | null) => SHARE_ALBUMS.find((a) => a.artist === name);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 
 /** Router location → address-bar path (with any remaining query). */
@@ -33,10 +35,8 @@ export const toPublic = (pathname: string, search: string): string => {
     q.delete('space');
   } else if (path.startsWith('/m/media/album/') && albumById(decodeURIComponent(path.slice(15)))) {
     path = albumPublicPath(albumById(decodeURIComponent(path.slice(15)))!);
-  } else if (path === '/m/media/browse' && artistByName(q.get('artist'))) {
-    path = artistPublicPath(artistByName(q.get('artist'))!.artistSlug);
-    q.delete('artist');
-  } else if (path === '/m/media' || path.startsWith('/m/media/')) path = `/bmusic${path.slice(8)}`;
+  } else if (path === '/m/feed') path = '/bchatx-feed';
+  else if (path === '/m/media' || path.startsWith('/m/media/')) path = `/bmusic${path.slice(8)}`;
   else if (path === '/bsv-wallet') path = '/wallet';
   else if (path.startsWith('/m/')) path = path.slice(2);
   const rest = q.toString();
@@ -63,9 +63,10 @@ export const toRouter = (pathname: string, search: string): string | null => {
   const artist = /^\/bmusic\/artists?\/([^/]+)$/.exec(path);
   if (artist) {
     const a = SHARE_ALBUMS.find((x) => x.artistSlug === artist[1]);
-    return a ? withQ('/m/media/browse', `artist=${encodeURIComponent(a.artist)}`) : withQ('/m/media/browse');
+    return withQ(a ? `/m/media/artists/${a.artistSlug}` : ARTISTS_ROUTE);
   }
-  if (path === '/bmusic/artists') return withQ('/m/media/browse');
+  if (path === '/bmusic/artists') return withQ(ARTISTS_ROUTE);
+  if (path === '/bchatx-feed' || path === '/feed') return withQ('/m/feed');
   if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
   if (path === '/wallet') return withQ('/bsv-wallet');
   if (TOP.has(path)) return withQ(path);

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Home, LayoutGrid, Pause, Play } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Home, LayoutGrid, Pause, Play, Users } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
@@ -538,6 +538,15 @@ const MediaPage = () => {
           >
             <LayoutGrid size={12} /> Browse
           </button>
+          {PAY_STREAM_ENABLED && (
+            <button
+              onClick={() => navigate(`${MEDIA_HOME}/artists`)}
+              className="ml-1 px-2 py-1 text-[11px] font-bold flex items-center gap-1"
+              style={{ border: `1px solid ${LINE}`, color: MUTED, borderRadius: 4 }}
+            >
+              <Users size={12} /> Artists
+            </button>
+          )}
         </nav>
         <h1 className={`text-sm md:text-base font-bold text-white min-w-0 ${ELLIPSIS}`}>
           <button onClick={() => navigate(MEDIA_HOME)} className={release || browsing ? 'text-[#98A2B3]' : ''}>
