@@ -38,6 +38,26 @@
   ],
   "redirects": [
     {
+      "source": "/calls",
+      "destination": "/bphone",
+      "permanent": true
+    },
+    {
+      "source": "/calls/:path*",
+      "destination": "/bphone/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/bPhone",
+      "destination": "/bphone",
+      "permanent": true
+    },
+    {
+      "source": "/bPhone/:path*",
+      "destination": "/bphone/:path*",
+      "permanent": true
+    },
+    {
       "source": "/market",
       "destination": "/exchange",
       "permanent": true

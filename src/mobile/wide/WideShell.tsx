@@ -319,7 +319,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       items: [
         { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
         { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat' },
-        { id: 'calls', label: 'Calls', icon: I.calls, to: CALLS_ROUTE },
+        { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
         { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
       ],

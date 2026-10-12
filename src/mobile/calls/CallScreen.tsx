@@ -224,7 +224,7 @@ export const CallScreen = () => {
             Closing this panel ends the call.{' '}
             {call.phase !== 'active' && (
               <button type="button" className="underline text-[#F5C542]" onClick={() => openCallsWindow()}>
-                Open Calls in a window
+                Open bPhone in a window
               </button>
             )}
           </div>
