@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AGENT_HANDOFF_EVENT, takeAgentDraft, takeAgentNote, takeAgentSend } from './handoff';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUp, Flag, Loader2, X } from 'lucide-react';
+import { Flag, Loader2, X } from 'lucide-react';
 import { sendBsv } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -31,7 +31,8 @@ import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agen
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
 import { ObsidianHero } from './ObsidianHero';
-import { AgentTalkButton } from './AgentTalkButton';
+import { AskBar } from './AskBar';
+import { loadThread, saveThread, screenContext } from './thread';
 import { FINAL_CODES, clearPending, errorCode, finalText, loadPending, savePending, type PendingPaid } from './pending';
 import { ReportSheet } from '../ugc/UgcSheets';
 
@@ -156,23 +157,33 @@ const QUICK_STARTS: { label: string; prompt: string }[] = [
 export const AgentConversation = ({
   compact = false,
   autoFocus = false,
+  variant = 'page',
+  screen,
 }: {
   compact?: boolean;
   autoFocus?: boolean;
+  /** 'page' = /m/ask-b; 'float' = the bar + dismissable bubbles over every Desktop page (owner, 12 Oct 2026). */
+  variant?: 'page' | 'float';
+  /** The route the user is on, told to b so answers fit the screen. */
+  screen?: string;
 }) => {
+  const float = variant === 'float';
   const navigate = useNavigate();
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const accountId = account?.addresses.identityAddress;
   // bWalletX only: in an agent account b may act, within the account's limits and loaded strategy (agents/agentTrade.ts).
-  const system = MARKET_ENABLED
+  const baseSystem = MARKET_ENABLED
     ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account')
     : BWALLET_GUIDE;
+  const system = baseSystem + screenContext(screen);
   const [prefs, setPrefs] = useAgentPrefs();
   const [keyScreen, setKeyScreen] = useState(false);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  // A request handed over from elsewhere (e.g. Mint › Contracts) arrives typed in, ready to send.
-  const [input, setInput] = useState(takeAgentDraft);
+  // Shared with the floating bar / full page (thread.ts), so "Open full chat" carries the conversation over.
+  const [messages, setMessages] = useState<AgentMessage[]>(() => loadThread(accountId));
+  useEffect(() => saveThread(accountId, messages), [accountId, messages]);
+  // A request handed over from elsewhere (e.g. Mint › Contracts) arrives typed in, ready to send (page only).
+  const [input, setInput] = useState(() => (float ? '' : takeAgentDraft()));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [price, setPrice] = useState<PriceInfo | null>(null);
@@ -182,11 +193,12 @@ export const AgentConversation = ({
   const [unanswered, setUnanswered] = useState<Unanswered | null>(null);
   /** Shown while a saved paid answer is fetched after a reload, then "ready". */
   // Hold the b to talk (phone/Dock.tsx): a short note when voice didn't work.
-  const [notice, setNotice] = useState<string | null>(() => takeAgentNote() || null);
+  const [notice, setNotice] = useState<string | null>(() => (float ? null : takeAgentNote() || null));
   // …or the spoken request, to send once the price / key status is known. Same send() as typing.
-  const [autoSend, setAutoSend] = useState(takeAgentSend);
+  const [autoSend, setAutoSend] = useState(() => !float && takeAgentSend());
   // Already open when the b was held: take the handoff now (a fresh mount took it above).
   useEffect(() => {
+    if (float) return;
     const onHandoff = () => {
       const draft = takeAgentDraft();
       const note = takeAgentNote();
@@ -196,7 +208,7 @@ export const AgentConversation = ({
     };
     window.addEventListener(AGENT_HANDOFF_EVENT, onHandoff);
     return () => window.removeEventListener(AGENT_HANDOFF_EVENT, onHandoff);
-  }, []);
+  }, [float]);
   // Third-party AI consent (agent/consent.ts): asked before the first message to each provider.
   const [consentAsk, setConsentAsk] = useState<((ok: boolean) => void) | null>(null);
   const [reportingReply, setReportingReply] = useState<{ text: string; index: number } | null>(null);
@@ -370,7 +382,7 @@ export const AgentConversation = ({
   /** Show a reply; in an agent account, run any actions it asked for and show each result. */
   const answer = async (before: AgentMessage[], reply: string) => {
     const { text, actions, bad } =
-      system === BWALLET_GUIDE ? { text: reply, actions: [], bad: 0 } : parseActions(reply);
+      baseSystem === BWALLET_GUIDE ? { text: reply, actions: [], bad: 0 } : parseActions(reply);
     let shown: AgentMessage[] = [...before, { role: 'assistant', text: text || 'Working on it.' }];
     setMessages(shown);
     if (bad)
@@ -472,6 +484,137 @@ export const AgentConversation = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSend, busy, statusKnown]);
 
+  const onTranscript = (t: string) => {
+    setNotice(null);
+    setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t).slice(0, MAX_INPUT));
+  };
+  const bar = (placement: 'float' | 'page') => (
+    <AskBar
+      value={input}
+      onChange={setInput}
+      onSend={() => void send()}
+      canSend={!busy && canSend && !unanswered}
+      onTranscript={onTranscript}
+      onNote={setNotice}
+      placement={placement}
+      autoFocus={autoFocus}
+      status={status}
+      onFocus={() => setFloatHidden(false)}
+    />
+  );
+
+  // Floating: dismissed bubbles hide here only; the thread (and /m/ask-b) keeps them.
+  const [dismissed, setDismissed] = useState<Set<number>>(() => new Set(messages.map((_, i) => i)));
+  const [floatHidden, setFloatHidden] = useState(false);
+  const [notesHidden, setNotesHidden] = useState(false);
+  useEffect(() => setNotesHidden(false), [error, notice]);
+  useEffect(() => {
+    if (!float) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFloatHidden(true);
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [float]);
+  useEffect(() => {
+    if (float && busy) setFloatHidden(false);
+  }, [float, busy]);
+  const floatList = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = floatList.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, busy]);
+
+  const sheets = (
+    <>
+      {consentAsk && (
+        <ConsentSheet
+          target={consentTarget(prefs.mode, prefs.provider)}
+          onAllow={() => consentAsk(true)}
+          onCancel={() => consentAsk(false)}
+        />
+      )}
+      {confirm && (
+        <ConfirmSheet
+          sats={confirm.sats}
+          bsvUsd={bsvUsd}
+          usd={price?.usd && confirm.sats === price.sats ? price.usd : null}
+          onPay={() => {
+            confirm.resolve(true);
+            setConfirm(null);
+          }}
+          onCancel={() => {
+            confirm.resolve(false);
+            setConfirm(null);
+          }}
+        />
+      )}
+    </>
+  );
+
+  if (float) {
+    const visible = floatHidden ? [] : messages.map((m, i) => ({ m, i })).filter(({ i }) => !dismissed.has(i));
+    const notes = !floatHidden && !notesHidden && (error || (notice && !busy));
+    const any = visible.length > 0 || busy || !!notes || (!!unanswered && !busy);
+    return (
+      <div className={`askb-float${any || input ? '' : ' is-collapsed'}`}>
+        {any && (
+          <>
+            <div className="askb-tools">
+              <button type="button" onClick={() => navigate('/m/ask-b')}>
+                Open full chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDismissed(new Set(messages.map((_, i) => i)));
+                  setNotesHidden(true);
+                }}
+              >
+                Clear all
+              </button>
+            </div>
+            <div ref={floatList} className="askb-bubbles" aria-live="polite" aria-label="Replies from b">
+              {visible.map(({ m, i }) => (
+                <div key={i} className={`askb-bubble ${m.role === 'user' ? 'user' : 'b'}`}>
+                  {m.text}
+                  <button
+                    type="button"
+                    className="askb-x"
+                    aria-label="Dismiss"
+                    onClick={() => setDismissed((d) => new Set(d).add(i))}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {busy && (
+                <div className="askb-bubble note">
+                  <Loader2 size={12} className="animate-spin inline mr-1" /> {notice ?? 'b is thinking…'}
+                </div>
+              )}
+              {notes && (
+                <div className={`askb-bubble note${error ? ' err' : ''}`}>
+                  {error ?? notice}
+                  <button type="button" className="askb-x" aria-label="Dismiss" onClick={() => setNotesHidden(true)}>
+                    ×
+                  </button>
+                </div>
+              )}
+              {unanswered && !busy && (
+                <button type="button" className="askb-bubble note" onClick={() => void retry()}>
+                  Paid — get the answer (no new payment)
+                </button>
+              )}
+            </div>
+          </>
+        )}
+        {bar('float')}
+        {sheets}
+      </div>
+    );
+  }
+
   const empty = messages.length === 0 && !busy;
   return (
     <div className="relative w-full flex-1 min-h-0 flex flex-col">
@@ -543,7 +686,7 @@ export const AgentConversation = ({
         />
       )}
 
-      <div className="relative z-10 flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+      <div className="askb-pagepad relative z-10 flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
@@ -595,81 +738,22 @@ export const AgentConversation = ({
         <div ref={endRef} />
       </div>
 
-      <form
-        className={`relative z-10 shrink-0 flex flex-col gap-1 ${empty ? 'mx-3 mb-3 rounded-3xl p-2' : 'px-3 pt-2'}`}
-        style={
-          empty
-            ? { background: '#000', border: '1px solid #ffffff14', boxShadow: '0 10px 40px rgba(0,0,0,.7)' }
-            : { paddingBottom: 10, borderTop: `1px solid ${LINE}` }
-        }
-        onSubmit={(e) => {
-          e.preventDefault();
-          void send();
-        }}
-      >
-        {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {QUICK_STARTS.map((q) => (
-              <button
-                key={q.label}
-                type="button"
-                onClick={() => setInput(q.prompt)}
-                className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
-                style={{ border: `1px solid ${GOLD}88`, color: GOLD, background: 'transparent' }}
-              >
-                {q.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex items-end gap-2">
-          {/* b on the left of the chat bar (owner, 12 Oct 2026): b, text, Send. */}
-          <AgentTalkButton
-            onTranscript={(t) => {
-              setNotice(null);
-              setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t).slice(0, MAX_INPUT));
-            }}
-            onNote={setNotice}
-          />
-          <textarea
-            data-agent-input
-            value={input}
-            onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={1}
-            autoFocus={autoFocus}
-            placeholder="Ask b"
-            aria-label="Ask b"
-            className="flex-1 resize-none rounded-2xl px-3 py-2 text-[14px] text-white outline-none max-h-32"
-            style={
-              empty
-                ? { background: '#000', border: '1px solid transparent' }
-                : { background: PANEL, border: `1px solid ${LINE}` }
-            }
-          />
-          <button
-            type="submit"
-            aria-label="Send"
-            disabled={busy || !input.trim() || !canSend || !!unanswered}
-            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-            style={{ background: GOLD }}
-          >
-            <ArrowUp size={18} color="#1a1300" />
-          </button>
+      {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
+        <div className="relative z-10 shrink-0 flex gap-1.5 overflow-x-auto px-3 pb-1">
+          {QUICK_STARTS.map((q) => (
+            <button
+              key={q.label}
+              type="button"
+              onClick={() => setInput(q.prompt)}
+              className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+              style={{ border: `1px solid ${GOLD}88`, color: GOLD, background: 'transparent' }}
+            >
+              {q.label}
+            </button>
+          ))}
         </div>
-      </form>
-      {consentAsk && (
-        <ConsentSheet
-          target={consentTarget(prefs.mode, prefs.provider)}
-          onAllow={() => consentAsk(true)}
-          onCancel={() => consentAsk(false)}
-        />
       )}
+      <div className="relative z-10 shrink-0">{bar('page')}</div>
       {reportingReply && (
         <ReportSheet
           title="Report this response"
@@ -682,21 +766,7 @@ export const AgentConversation = ({
           onClose={() => setReportingReply(null)}
         />
       )}
-      {confirm && (
-        <ConfirmSheet
-          sats={confirm.sats}
-          bsvUsd={bsvUsd}
-          usd={price?.usd && confirm.sats === price.sats ? price.usd : null}
-          onPay={() => {
-            confirm.resolve(true);
-            setConfirm(null);
-          }}
-          onCancel={() => {
-            confirm.resolve(false);
-            setConfirm(null);
-          }}
-        />
-      )}
+      {sheets}
     </div>
   );
 };
