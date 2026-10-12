@@ -20,6 +20,10 @@ import type { ChatMessage, ChatRoom } from './messages';
 import type { BchatContact } from './contacts';
 
 export const BCHAT_ORIGIN = 'https://www.bitcoinchat.online';
+/** Room attachments: bit-sign MAX_UPLOAD_BYTES (25 MB a file); one request up to 4 MB, else 3 MB parts. */
+export const ROOM_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+const ROOM_SINGLE_REQUEST_BYTES = 4 * 1024 * 1024;
+const ROOM_CHUNK_BYTES = 3 * 1024 * 1024;
 
 export type HttpResponse = { status: number; data: unknown };
 export type Http = (req: {
@@ -442,6 +446,83 @@ export class BchatClient {
       ...(replyTo ? { replyTo } : {}),
     });
     return r.message ?? null;
+  }
+
+  /** Bearer header for byte requests (media), or throws when signed out. */
+  private bearer(): string {
+    const active = getChatAccount();
+    if (this.session?.account && active && this.session.account !== active) this.session = null;
+    if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
+    return `Bearer ${this.session.token}`;
+  }
+
+  /**
+   * A room attachment's bytes (member-gated on bit-sign, so it cannot be a plain <video src>).
+   * Fetched only when the viewer taps it (chat/RoomMedia.tsx). Phone apps go through native HTTP.
+   */
+  async mediaBlob(ticker: string, mediaId: string, mime: string): Promise<Blob> {
+    const url = `${this.origin}${BchatClient.path(ticker)}/media/${encodeURIComponent(mediaId)}`;
+    const Authorization = this.bearer();
+    if (Capacitor.isNativePlatform()) {
+      const res = await CapacitorHttp.request({ method: 'GET', url, headers: { Authorization }, responseType: 'blob' });
+      if (res.status < 200 || res.status >= 300) throw new ChatApiError(`Could not load (${res.status})`, res.status);
+      const b64 = typeof res.data === 'string' ? res.data : '';
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: mime || 'application/octet-stream' });
+    }
+    const res = await fetch(url, { headers: { Authorization }, credentials: 'omit' });
+    if (!res.ok) throw new ChatApiError(`Could not load (${res.status})`, res.status);
+    const blob = await res.blob();
+    return mime && blob.type !== mime ? new Blob([blob], { type: mime }) : blob;
+  }
+
+  /**
+   * Upload a photo or video into a room (bit-sign POST rooms/[ticker]/media, or /media/chunk in
+   * 3 MB parts above 4 MB, as bChatX does). Free; the room's members see it in the thread.
+   * Browser builds only (web, desktop, extension): the phone apps' HTTP bridge has no multipart.
+   */
+  async uploadMedia(ticker: string, file: File, onProgress?: (fraction: number) => void): Promise<void> {
+    if (file.size > ROOM_UPLOAD_MAX_BYTES)
+      throw new ChatApiError(`Files can be up to ${ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB.`, 413);
+    const Authorization = this.bearer();
+    const base = `${this.origin}${BchatClient.path(ticker)}/media`;
+    const post = async (url: string, form: FormData) => {
+      const res = await fetch(url, { method: 'POST', headers: { Authorization }, body: form, credentials: 'omit' });
+      const data = (await res.json().catch(() => null)) as {
+        error?: string;
+        skipped?: { reason: string }[];
+        assembled?: boolean;
+      } | null;
+      if (!res.ok) throw new ChatApiError(data?.error || `Upload failed (${res.status})`, res.status, data);
+      if (data?.skipped?.length) throw new ChatApiError(data.skipped[0].reason, 400, data);
+      return data;
+    };
+    if (file.size <= ROOM_SINGLE_REQUEST_BYTES) {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      onProgress?.(0.1);
+      await post(base, form);
+      onProgress?.(1);
+      return;
+    }
+    const uploadId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const total = Math.ceil(file.size / ROOM_CHUNK_BYTES);
+    for (let seq = 0; seq < total; seq++) {
+      const form = new FormData();
+      form.append('uploadId', uploadId);
+      form.append('seq', String(seq));
+      form.append('total', String(total));
+      form.append('chunk', file.slice(seq * ROOM_CHUNK_BYTES, (seq + 1) * ROOM_CHUNK_BYTES), `${file.name}.part${seq}`);
+      if (seq === total - 1) {
+        form.append('filename', file.name);
+        form.append('mime', file.type || '');
+      }
+      const data = await post(`${base}/chunk`, form);
+      onProgress?.((seq + 1) / total);
+      if (seq === total - 1 && !data?.assembled) throw new ChatApiError('Upload did not complete', 500);
+    }
   }
 
   /** Toggle my emoji reaction on a message (bit-sign appends a `reaction` event; toggled server-side). */
