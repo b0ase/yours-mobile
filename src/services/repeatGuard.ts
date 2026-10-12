@@ -104,3 +104,38 @@ export function queuedSend(error: unknown): boolean {
 
 export const QUEUED_MESSAGE =
   "Sent. The network is slow to accept it right now, and your wallet will keep trying on its own. Don't pay again: check your History in a few minutes.";
+
+/**
+ * A queued send as a BRC-100 answer: { txid, pending: true, message, sendWithResults }. A site that reads txid gets
+ * one (and the outpoint it will have), and can show "pending" instead of an error. Null unless the error is a queued
+ * send with a txid. `pending` and `message` are extra fields; BRC-100 callers that don't know them ignore them.
+ */
+export type QueuedResult = {
+  txid: string;
+  pending: true;
+  message: string;
+  sendWithResults: { txid: string; status: 'sending' }[];
+  tx?: number[];
+};
+
+export function queuedResult(error: unknown): QueuedResult | null {
+  if (!queuedSend(error)) return null;
+  const e = error as { txid?: unknown; tx?: unknown; sendWithResults: { txid?: unknown }[] };
+  const txid =
+    typeof e.txid === 'string' && /^[0-9a-f]{64}$/i.test(e.txid)
+      ? e.txid
+      : e.sendWithResults
+          .map((r) => r?.txid)
+          .find((t): t is string => typeof t === 'string' && /^[0-9a-f]{64}$/i.test(t));
+  if (!txid) return null;
+  return {
+    txid,
+    pending: true,
+    message: QUEUED_MESSAGE,
+    sendWithResults: e.sendWithResults
+      .map((r) => r?.txid)
+      .filter((t): t is string => typeof t === 'string')
+      .map((t) => ({ txid: t, status: 'sending' as const })),
+    ...(Array.isArray(e.tx) ? { tx: e.tx as number[] } : {}),
+  };
+}

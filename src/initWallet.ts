@@ -5,6 +5,8 @@ import {
   type RecoverReport,
 } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
+import { sizeAwareBroadcast } from './services/bigBroadcast';
+import { releaseStuckSends, type QueuedSend, type ReleaseReport } from './services/stuckSends';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -141,6 +143,8 @@ export interface AccountContext {
   creditArriving: () => Promise<void>;
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
+  /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
+  releaseStuckSends: () => Promise<ReleaseReport>;
   /** True when the network already knows this txid (never abort such an action). */
   knownOnChain: (txid: string) => Promise<boolean>;
   /** Call to stop sync and destroy wallet */
@@ -306,6 +310,9 @@ export const initWallet = async (
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
     )}`,
   );
+
+  // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
+  if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
 
   // 3. Build the IndexedDB-backed permission store used by
   //    LocalWalletPermissionsManager for basket/cert/spending grants.
@@ -838,6 +845,36 @@ export const initWallet = async (
         runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
       }),
     knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    releaseStuckSends: () =>
+      releaseStuckSends({
+        listQueued: () =>
+          storage.runAsStorageProvider(async (sp) => {
+            const out: QueuedSend[] = [];
+            for (const t of await sp.findTransactions({
+              partial: { status: 'sending', isOutgoing: true },
+              noRawTx: true,
+            })) {
+              if (!t.txid) continue;
+              const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
+              out.push({
+                transactionId: t.transactionId,
+                txid: t.txid,
+                createdAt: new Date(t.created_at).getTime(),
+                attempts: req?.attempts ?? 0,
+                description: t.description,
+                satoshis: t.satoshis,
+              });
+            }
+            return out;
+          }),
+        knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+        cancel: (q) =>
+          storage.runAsStorageProvider(async (sp) => {
+            for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
+              await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
+            await sp.updateTransactionStatus('failed', q.transactionId);
+          }),
+      }),
     close,
   };
 };

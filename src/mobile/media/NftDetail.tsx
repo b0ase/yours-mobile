@@ -16,7 +16,7 @@ import { nftAvatarUri, normalizeOutpoint, ordinalsUrl } from './nftActions';
 import type { MediaItem } from './useWalletMedia';
 import { celebrateSend } from '../../components/sent/sent';
 import { nftSendButton, shortAddr } from './nftSend';
-import { txidOf, unbroadcastTxids } from './unbroadcast';
+import { txidOf, walletTxStates } from './unbroadcast';
 import {
   BURN_HOLD_MS,
   BURN_WORD,
@@ -68,11 +68,18 @@ export const NftDetail = ({
   const [sent, setSent] = useState<{ txid: string; name: string } | null>(null);
   const [failed, setFailed] = useState('');
   // An NFT from a mint the network never saw can't be sent (vexvoid, 11 Oct 2026: every try failed and hid it).
-  const [onChain, setOnChain] = useState<boolean | null>(null);
+  const [onChain, setOnChain] = useState<boolean | null>(item.pending ? false : null);
+  // Queued but not on chain yet ('sending'): pending, not owned; can't be sent or burned until it lands.
+  const [pending, setPending] = useState(!!item.pending);
   useEffect(() => {
     let live = true;
-    void unbroadcastTxids(apiContext.wallet)
-      .then((off) => live && setOnChain(!off.has(txidOf(item.output.outpoint))))
+    const txid = txidOf(item.output.outpoint);
+    void walletTxStates(apiContext.wallet)
+      .then((st) => {
+        if (!live) return;
+        setPending(st.pending.has(txid));
+        setOnChain(!st.offChain.has(txid) && !st.pending.has(txid));
+      })
       .catch(() => live && setOnChain(null));
     return () => {
       live = false;
@@ -248,6 +255,12 @@ export const NftDetail = ({
             >
               {short(sent.txid)}
             </a>
+          </div>
+        ) : onChain === false && pending ? (
+          <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
+            Pending, not on chain yet. Your wallet is still sending this mint to the network and keeps trying on its
+            own. You can send it once it lands. If the network refuses it, your wallet cancels it and the money comes
+            back.
           </div>
         ) : onChain === false ? (
           <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">

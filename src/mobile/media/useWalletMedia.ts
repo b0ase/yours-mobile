@@ -9,7 +9,7 @@ import { playQueue } from './player';
 import { safety } from '../market/safety';
 import { cachedMeta, resolveMeta } from './resolveMeta';
 import { countNew } from './nftActions';
-import { txidOf, unbroadcastTxids } from './unbroadcast';
+import { txidOf, walletTxStates } from './unbroadcast';
 
 /** One of the wallet's non-fungible inscriptions, streamed from ORDFS. */
 export type MediaItem = {
@@ -21,6 +21,8 @@ export type MediaItem = {
   origin: string;
   url: string;
   flagged: boolean;
+  /** Its transaction is signed and queued but not on chain yet (unbroadcast.ts PENDING_ON_CHAIN): not owned yet. */
+  pending?: boolean;
 };
 
 const PAGE = 50;
@@ -57,6 +59,7 @@ export const useWalletMedia = () => {
   // NFTs from mints/sends the network never saw are hidden (unbroadcast.ts); how many, for a one-line note.
   const [hiddenUnbroadcast, setHiddenUnbroadcast] = useState(0);
   const offChain = useRef<Set<string>>(new Set());
+  const pendingTx = useRef<Set<string>>(new Set());
   const toItem = useCallback(
     (o: WalletOutput): MediaItem => {
       // NFTs from other sites/markets can lack these tags: fall back to the indexer (resolveMeta.ts).
@@ -73,6 +76,7 @@ export const useWalletMedia = () => {
         // Your own items are never hidden; ones the Market filter would block are blurred (tap to reveal).
         flagged: safety().check({ ids: [o.outpoint, origin], texts: [getOutputName(o, '')] }).blocked,
         url: `${apiContext.services!.ordfs.getContentUrl(origin)}?outpoint=${o.outpoint}`,
+        pending: pendingTx.current.has(txidOf(o.outpoint)),
       };
     },
     [apiContext],
@@ -80,7 +84,9 @@ export const useWalletMedia = () => {
 
   const loadOffChain = useCallback(async () => {
     try {
-      offChain.current = await unbroadcastTxids(apiContext.wallet);
+      const states = await walletTxStates(apiContext.wallet);
+      offChain.current = states.offChain;
+      pendingTx.current = states.pending;
     } catch (e) {
       console.warn('[media] listActions for unbroadcast check failed:', e);
     }

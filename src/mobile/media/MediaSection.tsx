@@ -144,6 +144,11 @@ export const MediaSection = () => {
         {(item.kind === 'music' || item.kind === 'video') && (
           <Play size={14} className="absolute top-1.5 right-1.5" color="#fff" fill="#fff" />
         )}
+        {item.pending && (
+          <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold text-[#F5B800]">
+            Pending
+          </span>
+        )}
         <div
           className={`absolute bottom-0 inset-x-0 bg-black/60 px-1.5 py-1 text-[10px] text-white text-left ${ELLIPSIS}`}
         >
