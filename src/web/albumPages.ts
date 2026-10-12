@@ -47,7 +47,7 @@ const head = (html: string, m: Meta) => {
 const STYLE = `<style>
 #bwx-share{position:fixed;inset:0;z-index:2147483000;overflow-y:auto;background:#000;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
 #bwx-share .w{max-width:980px;margin:0 auto;padding:48px 16px 64px;display:flex;gap:40px;flex-wrap:wrap}
-#bwx-share img.c{width:min(360px,100%);aspect-ratio:1;border-radius:12px;box-shadow:0 0 0 1px rgba(245,184,0,.5),0 0 60px rgba(245,184,0,.15)}
+#bwx-share img.c{width:min(360px,100%);height:auto;aspect-ratio:1;align-self:flex-start;object-fit:cover;border-radius:12px;box-shadow:0 0 0 1px rgba(245,184,0,.5),0 0 60px rgba(245,184,0,.15)}
 #bwx-share .i{flex:1;min-width:260px}
 #bwx-share .k{color:#f5b800;font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase}
 #bwx-share h1{margin:10px 0 4px;font-size:40px;line-height:1.05;letter-spacing:-.02em}
