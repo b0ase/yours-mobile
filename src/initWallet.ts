@@ -39,7 +39,14 @@ import { refileLegacyBaskets } from './services/legacyBaskets';
 import { readReconcileRecord, reconcileStorage } from './services/storageReconcileBackground';
 import { shouldResumeReconcile } from './services/storageReconcile';
 import { showOneSatPrompt } from './services/oneSatPrompt';
-import { runTokenRecovery } from './services/tokenRecoveryWallet';
+import {
+  runSpendPass,
+  runStaleFix,
+  runStartupTokenHeal,
+  runTokenRecovery,
+  type TokenHealArgs,
+} from './services/tokenRecoveryWallet';
+import type { HealAction, SpendPassReport, StaleFixResult } from './services/tokenSendHeal';
 import { planAddressScan, resetSyncCursor } from './services/addressScan';
 import {
   checkReceiveAddresses,
@@ -118,6 +125,10 @@ export interface AccountContext {
   addRemote: (url: string) => Promise<void>;
   /** Find and import token outputs the wallet owns on chain but has no record of (tokenRecovery.ts). */
   recoverTokens: (options?: TokenRecoveryOptions) => Promise<TokenRecoveryResult>;
+  /** "Fix and send": one token's spent records dropped and its valid change imported (tokenSendHeal.ts). */
+  fixStaleToken: (tokenId: string) => Promise<StaleFixResult>;
+  /** Repair Sync's final pass: relinquish token outputs the overlay or chain reports spent. */
+  dropSpentTokens: () => Promise<SpendPassReport>;
   /** Run the address sync now, or join the run already in flight (services/addressResync.ts). Quiet = no spinner. */
   resyncAddresses: (options?: { quiet?: boolean }) => Promise<void>;
   /** When the last address sync finished (ms since epoch), 0 before the first. */
@@ -457,6 +468,35 @@ export const initWallet = async (
       addresses: () => [...syncContext.addressManager.getAddresses(), keys.identityAddress],
     });
 
+  const tokenHealArgs: TokenHealArgs & { addresses: () => string[] } = {
+    wallet: adminWallet,
+    listFailedActions: async () =>
+      (
+        await baseWallet.listFailedActions(
+          { labels: [], includeOutputs: true, includeOutputLockingScripts: true, limit: 200 },
+          false,
+        )
+      ).actions as unknown as HealAction[],
+    services: syncContext.services,
+    identityWif: keys.identityWif,
+    chain,
+    addresses: () => [...syncContext.addressManager.getAddresses(), keys.identityAddress],
+  };
+  const fixStaleToken = (tokenId: string) => runStaleFix(tokenHealArgs, tokenId);
+  const dropSpentTokens = () => runSpendPass(tokenHealArgs);
+  let tokenHealDone = false;
+  /** Once per open: token sends broadcast but left unfinished (a suspended Safari tab), then the usual walk. */
+  const startupTokenHeal = async () => {
+    if (tokenHealDone) return;
+    tokenHealDone = true;
+    try {
+      const r = await runStartupTokenHeal(tokenHealArgs);
+      if (r.imported.length || r.errors.length || r.journalled.length) console.log('[initWallet] token send heal:', r);
+    } catch (err) {
+      console.error('[initWallet] token send heal failed:', err);
+    }
+  };
+
   // Scan past maxKeyIndex (addresses handed out on other devices) and rescan history once whenever that window
   // reaches indexes this device never scanned: the sync's one resume cursor would otherwise skip their payments
   // (owner, 10 Oct 2026: 0.254 BSV at a fresh address never showed). services/addressScan.ts.
@@ -717,7 +757,9 @@ export const initWallet = async (
         console.log('[initWallet] Address sync complete:', result);
         // Token outputs no address scan can see (change of a send this storage
         // never recorded). Cheap when there is nothing to find; cached per tx.
-        recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
+        void startupTokenHeal().then(() =>
+          recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err)),
+        );
         void guard();
         // afterSync is a once-per-open hook, not for every background resync.
         if (options?.afterSync && !afterSyncDone) {
@@ -770,6 +812,8 @@ export const initWallet = async (
     setActiveStorage,
     addRemote,
     recoverTokens,
+    fixStaleToken,
+    dropSpentTokens,
     resyncAddresses,
     lastAddressSyncAt: addressSync.lastFinishedAt,
     addressSyncBusy: addressSync.busy,

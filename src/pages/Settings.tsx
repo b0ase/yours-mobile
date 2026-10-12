@@ -252,7 +252,22 @@ const SubPageHeader = ({ title, onBack }: SubPageHeaderProps) => (
   </div>
 );
 
+const describeTokens = (record: ReconcileRecord): string => {
+  const t = record.tokens;
+  if (!t) return '';
+  const parts: string[] = [];
+  if (t.recovered) parts.push(`${t.recovered} token ${t.recovered === 1 ? 'output' : 'outputs'} found`);
+  if (t.staleDropped.length)
+    parts.push(`${t.staleDropped.length} already-spent token ${t.staleDropped.length === 1 ? 'record' : 'records'} removed`);
+  return parts.length ? ` · ${parts.join(', ')}` : '';
+};
+
 const describeRepair = (record: ReconcileRecord, outcome: ReconcileOutcome): string => {
+  if (!record.remoteUrl && record.tokens && outcome !== 'running') return `Tokens checked${describeTokens(record)}`;
+  return describeRepairBase(record, outcome) + (outcome === 'running' ? '' : describeTokens(record));
+};
+
+const describeRepairBase = (record: ReconcileRecord, outcome: ReconcileOutcome): string => {
   switch (outcome) {
     case 'running':
       return record.phase ? `${REPAIR_PHASE_LABELS[record.phase]}...` : 'Starting...';
@@ -1137,8 +1152,16 @@ export const Settings = () => {
     try {
       const response = await runRepair(tokenIds);
       const recovered = response?.data?.tokensRecovered ?? 0;
-      if (recovered > 0) {
-        addSnackbar(`Found ${recovered} token ${recovered === 1 ? 'output' : 'outputs'} this wallet had missed`, 'success');
+      const dropped = response?.data?.staleDropped ?? 0;
+      if (recovered > 0 || dropped > 0) {
+        const parts = [
+          recovered > 0 ? `found ${recovered} token ${recovered === 1 ? 'output' : 'outputs'} this wallet had missed` : '',
+          dropped > 0 ? `removed ${dropped} already-spent token ${dropped === 1 ? 'record' : 'records'}` : '',
+        ].filter(Boolean);
+        const text = parts.join(', ');
+        addSnackbar(text.charAt(0).toUpperCase() + text.slice(1), 'success');
+      } else if (response?.success && response.data?.noRemote) {
+        addSnackbar('Tokens checked: nothing to fix', 'success');
       }
       if (response?.success) return;
       const after = (await chrome.storage.local.get(RECONCILE_RECORD_KEY))[RECONCILE_RECORD_KEY] as

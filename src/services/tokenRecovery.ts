@@ -82,6 +82,11 @@ export interface TokenRecoveryDeps {
 export interface TokenRecoveryOptions {
   /** Repair Sync: search the wider window too, and retry searches cached as not found. */
   thorough?: boolean;
+  /**
+   * "Fix and send" for one token: also search the hours before the block (level 2). A tab suspended between
+   * building and broadcasting a send (iOS Safari) puts the keyID's clock value well before the block.
+   */
+  wide?: boolean;
   maxHops?: number;
   /** Tokens to walk from their genesis even if this storage knows none of their outputs. */
   tokenIds?: string[];
@@ -96,16 +101,21 @@ export interface TokenRecoveryResult {
 
 const ACCEPT_STATES = new Set(['valid', 'queued']);
 
-/** Window levels in ms around a mined tx: 0 = the block interval, 1 = an hour either side. */
-export const searchWindow = (timing: TxTiming, nowMs: number, level: 0 | 1): [number, number] => {
+/**
+ * Window levels in ms around a mined tx: 0 = the block interval, 1 = an hour either side, 2 = the four hours
+ * before level 1 (only with `wide`; the keyID is taken before the broadcast, never after the block).
+ */
+export const searchWindow = (timing: TxTiming, nowMs: number, level: 0 | 1 | 2): [number, number] => {
   if (!timing.blockTime) {
     // Unmined: built at most a few hours ago.
+    if (level === 2) return [nowMs - 28 * 3600_000, nowMs - 24 * 3600_000];
     return level === 0 ? [nowMs - 2 * 3600_000, nowMs] : [nowMs - 24 * 3600_000, nowMs];
   }
   const block = timing.blockTime * 1000;
   const prev = (timing.prevBlockTime ?? timing.blockTime - 1200) * 1000;
   // Block timestamps drift from wall clocks; leave margin both sides.
   if (level === 0) return [Math.min(prev, block) - 10 * 60_000, block + 5 * 60_000];
+  if (level === 2) return [Math.min(prev, block) - 5 * 3600_000, Math.min(prev, block) - 3600_000];
   return [Math.min(prev, block) - 3600_000, block + 3600_000];
 };
 
@@ -188,10 +198,10 @@ export const recoverTokenOutputs = async (
         let keyID = await deps.cacheGet(keyCache);
         if (!keyID) {
           const timing = await deps.getTxTiming(txid);
-          const levels: (0 | 1)[] = opts.thorough ? [0, 1] : [0];
+          const levels: (0 | 1 | 2)[] = opts.wide ? [0, 1, 2] : opts.thorough ? [0, 1] : [0];
           for (const level of levels) {
             const doneKey = `tokenRecovery:none:${outpoint}:${level}`;
-            if (!opts.thorough && (await deps.cacheGet(doneKey))) continue;
+            if (!opts.thorough && !opts.wide && (await deps.cacheGet(doneKey))) continue;
             const [from, to] = searchWindow(timing, deps.now(), level);
             result.searched++;
             log(`searching ${outpoint} (${tokenId}) level ${level}`);

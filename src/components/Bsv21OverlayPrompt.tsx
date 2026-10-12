@@ -4,6 +4,8 @@ import { Theme } from '../theme.types';
 import { Button } from './Button';
 import { Show } from './Show';
 import { PageLoader } from './PageLoader';
+import { useState, useEffect } from 'react';
+import { formatBsvAmount, fundingCopy } from '../services/bsv21FundGuard';
 
 /**
  * Why sendBsv21 could not validate the transfer:
@@ -13,18 +15,37 @@ import { PageLoader } from './PageLoader';
  * - not-found: the overlay has never seen the token
  * - unseen: the overlay has not seen some of the outputs yet (e.g. just received)
  * - stale: the wallet lists outputs the overlay says are already spent
+ * - unreachable: the token details lookup failed (sendBsv21 reports this as 'token-not-found'; it is not a verdict)
  */
-export type Bsv21OverlayIssue = 'not-active' | 'queued' | 'not-valid' | 'not-found' | 'unseen' | 'stale';
+export type Bsv21OverlayIssue =
+  | 'not-active'
+  | 'queued'
+  | 'not-valid'
+  | 'not-found'
+  | 'unseen'
+  | 'stale'
+  | 'unreachable';
 
 export type Bsv21OverlayPromptProps = {
   show: boolean;
   theme: Theme;
   issue: Bsv21OverlayIssue;
   tokenName: string;
-  /** Satoshis the overlay asks for to activate; shown for not-active. */
+  /** Exact satoshis the indexer's funding template asks for (not-active). Without it nothing can be paid. */
   fundingSats?: number;
+  /** About how many future transfers the payment covers, from fee_per_output. */
+  fundingCovers?: number;
+  /** Why there is no amount (the template lookup failed). */
+  fundingError?: string;
   processingMessage?: string;
-  onFund: () => void;
+  /** Pays exactly `sats`, after the second confirm here. */
+  onFund: (sats: number) => void;
+  /** Fetch the funding template again. */
+  onRetryFunding?: () => void;
+  /** stale: drop spent records, import valid change, send again. */
+  onFixAndSend?: () => void;
+  /** unreachable: try the send again. */
+  onRetry?: () => void;
   onSendUnverified: () => void;
   onCancel: () => void;
 };
@@ -36,7 +57,7 @@ const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
     case 'not-active':
       return {
         title: 'Overlay not funded',
-        body: `The overlay that validates ${tokenName} isn't funded, so it can't confirm your tokens before you send them. Funding it turns validation back on for everyone holding ${tokenName}.`,
+        body: `The ${tokenName} indexer isn't funded, so it can't confirm your tokens before you send them. Anyone can fund it; it then checks transfers for everyone holding ${tokenName}. You can also send without the check, for free.`,
       };
     case 'queued':
       return {
@@ -56,7 +77,12 @@ const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
     case 'stale':
       return {
         title: 'Wallet out of date',
-        body: `Your ${tokenName} are fine, but this wallet's copy of them is out of date: it still lists tokens that were already sent. Go to Settings > Troubleshooting and tap Repair Sync, then try again.`,
+        body: `Your ${tokenName} are fine, but this wallet's copy of them is out of date: it still lists tokens that were already sent, and may be missing the change. Fix and send updates this wallet from the indexer, then sends.`,
+      };
+    case 'unreachable':
+      return {
+        title: "Couldn't reach the indexer",
+        body: `Couldn't reach the token indexer, so your ${tokenName} could not be checked. Nothing was sent. Try again.`,
       };
     case 'not-found':
       return {
@@ -66,15 +92,41 @@ const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
   }
 };
 
-const formatBsv = (sats: number) => `${(sats / 1e8).toLocaleString(undefined, { maximumFractionDigits: 8 })} BSV`;
-
 export const Bsv21OverlayPrompt = (props: Bsv21OverlayPromptProps) => {
-  const { show, theme, issue, tokenName, fundingSats, processingMessage, onFund, onSendUnverified, onCancel } = props;
+  const {
+    show,
+    theme,
+    issue,
+    tokenName,
+    fundingSats,
+    fundingCovers,
+    fundingError,
+    processingMessage,
+    onFund,
+    onRetryFunding,
+    onFixAndSend,
+    onRetry,
+    onSendUnverified,
+    onCancel,
+  } = props;
+  // Second step before any payment: the exact amount, not refundable, then Pay.
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!show || issue !== 'not-active') setConfirming(false);
+  }, [show, issue, fundingSats]);
+  const amountKnown = !!fundingSats && fundingSats > 0;
 
   const contrast = theme.color.global.contrast;
   const gray = theme.color.global.gray;
   const bg = theme.color.global.walletBackground;
-  const { title, body } = copy(issue, tokenName);
+  const base = copy(issue, tokenName);
+  const { title, body } =
+    confirming && amountKnown
+      ? {
+          title: `Pay ${formatBsvAmount(fundingSats!)}?`,
+          body: `${fundingCopy(fundingSats!, tokenName, fundingCovers)} This does not send your tokens; send again after it is funded.`,
+        }
+      : base;
   const canFund = issue === 'not-active';
 
   return (
@@ -118,31 +170,80 @@ export const Bsv21OverlayPrompt = (props: Bsv21OverlayPromptProps) => {
                   {body}
                 </p>
 
-                <Show when={canFund && !!fundingSats}>
+                <Show when={canFund}>
                   <div className="w-full mb-5">
                     <div
                       className="flex justify-between items-center px-3 py-2 rounded-lg text-sm"
                       style={{ backgroundColor: `${contrast}08` }}
                     >
-                      <span style={{ color: gray }}>Funding</span>
-                      <span className="font-semibold" style={{ color: contrast }}>
-                        ~{formatBsv(fundingSats ?? 0)}
+                      <span style={{ color: gray }}>Indexer fee</span>
+                      <span className="font-semibold" style={{ color: amountKnown ? contrast : WARN }}>
+                        {amountKnown ? formatBsvAmount(fundingSats!) : 'Unknown'}
                       </span>
                     </div>
                     <p className="text-[11px] mt-1.5 leading-relaxed text-left px-1" style={{ color: gray }}>
-                      An estimate. If the overlay finds more history than expected, it may ask for a small top-up.
+                      {amountKnown
+                        ? fundingCopy(fundingSats!, tokenName, fundingCovers)
+                        : (fundingError ?? "Couldn't get the indexer's price, so nothing can be paid.") +
+                          ' Try again, or send unverified for free.'}
                     </p>
                   </div>
                 </Show>
 
                 <div className="flex flex-col items-center gap-2 w-[87%]">
-                  <Show
-                    when={canFund}
-                    whenFalseContent={<Button theme={theme} type="primary" label="OK" onClick={onCancel} />}
-                  >
-                    <Button theme={theme} type="primary" label="Fund overlay" onClick={onFund} />
-                    <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
-                  </Show>
+                  {canFund ? (
+                    amountKnown ? (
+                      confirming ? (
+                        <>
+                          <Button
+                            theme={theme}
+                            type="primary"
+                            label={`Pay ${formatBsvAmount(fundingSats!)}`}
+                            onClick={() => onFund(fundingSats!)}
+                          />
+                          <Button
+                            theme={theme}
+                            type="secondary-outline"
+                            label="Back"
+                            onClick={() => setConfirming(false)}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            theme={theme}
+                            type="primary"
+                            label="Fund indexer"
+                            onClick={() => setConfirming(true)}
+                          />
+                          <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
+                        </>
+                      )
+                    ) : (
+                      <>
+                        <Button theme={theme} type="primary" label="Fund indexer" disabled onClick={() => undefined} />
+                        <Button
+                          theme={theme}
+                          type="secondary-outline"
+                          label="Get price again"
+                          onClick={() => onRetryFunding?.()}
+                        />
+                        <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
+                      </>
+                    )
+                  ) : issue === 'stale' && onFixAndSend ? (
+                    <>
+                      <Button theme={theme} type="primary" label="Fix and send" onClick={onFixAndSend} />
+                      <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
+                    </>
+                  ) : issue === 'unreachable' && onRetry ? (
+                    <>
+                      <Button theme={theme} type="primary" label="Try again" onClick={onRetry} />
+                      <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
+                    </>
+                  ) : (
+                    <Button theme={theme} type="primary" label="OK" onClick={onCancel} />
+                  )}
                 </div>
 
                 <div className="w-full mt-5 pt-4" style={{ borderTop: `1px solid ${gray}22` }}>
