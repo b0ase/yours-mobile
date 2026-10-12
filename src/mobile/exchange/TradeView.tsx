@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { buyBsv21 } from '@1sat/actions';
 import { ArrowLeft, Star } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -155,6 +156,7 @@ export const TradeView = ({
     setBusy(true);
     try {
       const outpoint = walletOutpoint(listing.outpoint);
+      await assertOrdLockV2(outpoint);
       const res = await buyBsv21.execute(purchaseContext(apiContext, outpoint), {
         tokenId: id,
         outpoint,

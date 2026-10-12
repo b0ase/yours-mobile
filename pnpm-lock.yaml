@@ -5,18 +5,18 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@1sat/actions@~0.0': 0.0.230
-  '@1sat/client@~0.0': 0.0.59
-  '@1sat/connect@~0.0': 0.0.101
-  '@1sat/permission-module-ui@~0.0': 0.0.68
-  '@1sat/permission-module@~0.0': 0.0.73
-  '@1sat/sweep-ui@~0.0': 0.0.108
-  '@1sat/templates@~0.0': 0.0.41
-  '@1sat/types@~0.0': 0.0.50
-  '@1sat/utils@~0.0': 0.0.40
+  '@1sat/actions@~0.0': 0.0.234
+  '@1sat/client@~0.0': 0.0.63
+  '@1sat/connect@~0.0': 0.0.105
+  '@1sat/permission-module-ui@~0.0': 0.0.72
+  '@1sat/permission-module@~0.0': 0.0.77
+  '@1sat/sweep-ui@~0.0': 0.0.112
+  '@1sat/templates@~0.0': 0.0.43
+  '@1sat/types@~0.0': 0.0.52
+  '@1sat/utils@~0.0': 0.0.42
   '@1sat/vault@~0.0': 0.0.3
-  '@1sat/wallet-browser@~0.0': 0.0.102
-  '@1sat/wallet@~0.0': 0.0.116
+  '@1sat/wallet-browser@~0.0': 0.0.106
+  '@1sat/wallet@~0.0': 0.0.120
   '@adobe/css-tools@^4': 4.5.0
   '@babel/code-frame@^7': 7.29.7
   '@babel/compat-data@^7': 7.29.7
@@ -519,38 +519,38 @@ importers:
   .:
     dependencies:
       '@1sat/actions':
-        specifier: 0.0.230
-        version: 0.0.230(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+        specifier: 0.0.234
+        version: 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/client':
-        specifier: 0.0.59
-        version: 0.0.59(@bsv/sdk@2.8.11)
+        specifier: 0.0.63
+        version: 0.0.63(@bsv/sdk@2.8.11)
       '@1sat/connect':
-        specifier: 0.0.101
-        version: 0.0.101(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
+        specifier: 0.0.105
+        version: 0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
       '@1sat/permission-module':
-        specifier: 0.0.73
-        version: 0.0.73(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+        specifier: 0.0.77
+        version: 0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/permission-module-ui':
-        specifier: 0.0.68
-        version: 0.0.68(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+        specifier: 0.0.72
+        version: 0.0.72(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/sweep-ui':
-        specifier: 0.0.108
-        version: 0.0.108(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)
+        specifier: 0.0.112
+        version: 0.0.112(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)
       '@1sat/templates':
-        specifier: 0.0.41
-        version: 0.0.41(@bsv/sdk@2.8.11)
+        specifier: 0.0.43
+        version: 0.0.43(@bsv/sdk@2.8.11)
       '@1sat/types':
-        specifier: 0.0.50
-        version: 0.0.50(@bsv/sdk@2.8.11)
+        specifier: 0.0.52
+        version: 0.0.52(@bsv/sdk@2.8.11)
       '@1sat/utils':
-        specifier: 0.0.40
-        version: 0.0.40(@bsv/sdk@2.8.11)
+        specifier: 0.0.42
+        version: 0.0.42(@bsv/sdk@2.8.11)
       '@1sat/wallet':
-        specifier: 0.0.116
-        version: 0.0.116(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+        specifier: 0.0.120
+        version: 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@1sat/wallet-browser':
-        specifier: 0.0.102
-        version: 0.0.102(@1sat/client@0.0.59(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+        specifier: 0.0.106
+        version: 0.0.106(@1sat/client@0.0.63(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/message-box-client':
         specifier: 2.5.4
         version: 2.5.4(@bsv/sdk@2.8.11)(supports-color@7.2.0)
@@ -816,64 +816,64 @@ importers:
 
 packages:
 
-  '@1sat/actions@0.0.230':
-    resolution: {integrity: sha512-MRE2JbVi0zFs35Q/bP29Cmw5lzTTZekz2QF7Fbv8WbUzTPrObfqKO1YnUNqni0Ip1e74vsb/E8j1AQU5jsh31A==}
+  '@1sat/actions@0.0.234':
+    resolution: {integrity: sha512-0XyCw/U/GYNTgnDpWQWWMmkyUHiZUlP3l3rGzaNkWtKWRdKwBealfqIsz6F4pQc2c5TAmqYqZqVqvu1166dpGQ==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/client@0.0.59':
-    resolution: {integrity: sha512-SoxXJbNa4dYuesrAltY5mERENnO6cVWMqN88GxIOms2UUv+9+QExSeciba+rq6h8ThMPaktQS1lAGyn3tod+5w==}
+  '@1sat/client@0.0.63':
+    resolution: {integrity: sha512-GjMY65KOAVJhNOjpTC31cLlVlIkL4WQXytp7OsF6BbxjTddz06VAbuODeY+8t/QfnGEWQ2SFq6FMwKbBQrP+DA==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/connect@0.0.101':
-    resolution: {integrity: sha512-eswmZTxTGyLu4HXt5R/i4AXun3MRi0i2Q8qNs7x4ERKZSnauMfmh3IL4ueB/RthH5iJ4IQXz3XT9kls+l7z1IQ==}
+  '@1sat/connect@0.0.105':
+    resolution: {integrity: sha512-kdaHTUTXL9ln3Zr3FJE3Lfn2FqJ9klxaALfvIFfCR4Qb4NrAJ8n+Amx3ooozP/SHkB9v/HKOZzfypuokmMfZcA==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/permission-module-ui@0.0.68':
-    resolution: {integrity: sha512-/O/bI7w0jHzK8KwLn08SQhMf7JwS+UDwDgb1zh3Q+K1/JLYx57242zmli8GAlFB+qqqYTwI0uw976W7UvZKIBw==}
+  '@1sat/permission-module-ui@0.0.72':
+    resolution: {integrity: sha512-/tcsTOy9ktNmFh5ooO+zCPFI0fpZ8Z0CVVpztVzAmmOdpdkBrZlU+cfL1dCXxVP/Hg2/AWXWnf52SpTK/6OGwA==}
     peerDependencies:
       react: 18.3.1
 
-  '@1sat/permission-module@0.0.73':
-    resolution: {integrity: sha512-7R2I6LG1HrOK45K17kYC11uJAbNtcXrEe4fYbsGT5xK71Ou812jMbmKt/w79MfrFsXourQlRXA/fQP7oQV6hQA==}
+  '@1sat/permission-module@0.0.77':
+    resolution: {integrity: sha512-lQsJg2yAcL0F8Um5QwId+AhuGWi3V0+ab5h1Q0fqiAuWewEWAy8qxWzTMQSlQD9NdvWG3FkQWQvM9hkgKZVqyg==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/sweep-ui@0.0.108':
-    resolution: {integrity: sha512-Ewp+ybXEYlKr9Uk+BlKGyKr+tqt7jNAYEYocTBDTPDa5sA/3Cbd1eMC7/J+QL70y+5cMANAbNPi79sB1117bvA==}
+  '@1sat/sweep-ui@0.0.112':
+    resolution: {integrity: sha512-YoSFVX46W9Yr+iqGvJVmMc8Pw4vmFPCjlULy+zB/JIvdxCKjPlhB+hMFz9v+wADvu0o7A+s+6lxOYJc+rQzKDw==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
       react: 18.3.1
 
-  '@1sat/templates@0.0.41':
-    resolution: {integrity: sha512-r/gQ/F4xuZRC13x0RApp+CANQKRKYOoyz9pB2z2W0mVtypFKPCa04ScWzeaYwU8P91qJjLRUJ4Lg1PMoSFYbTg==}
+  '@1sat/templates@0.0.43':
+    resolution: {integrity: sha512-y8P6W0YBP5H0G569DelP8RGX7tLBtrA3Og9zIwxSqYcBawvbhoyKy/ReEBcjmOTg6GtIgf3WbEF99HyFL5GNcQ==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/types@0.0.50':
-    resolution: {integrity: sha512-F3tFqk9daBMWdew0NePJsRavZwMhtQK3DXX7RYthC/nwuOdWFI43ZU5Es7vWC6wsQIB3r/34x3nC43Cq9pDdNw==}
+  '@1sat/types@0.0.52':
+    resolution: {integrity: sha512-qlhXz3VvvEcrlMyo6OzEVXXRASEZ3fYpXZANXjPwcfsPMKKNLc8iG2bxPjHie4rp8WlSQl9zxx6qmts/Hg5hDw==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/utils@0.0.40':
-    resolution: {integrity: sha512-ML7bd4/M+N2rKixNyPGnn5NY5x/7otjAfN1DsnKbOuLOkSGtCL8mnxlmQZl8n5nKsuQkfvjegQQpV10pElk8Iw==}
+  '@1sat/utils@0.0.42':
+    resolution: {integrity: sha512-G4DtpSLv3hhTBb36IFfm8HUwa+knd4RYmdnWEK4ejPsyXgMuwzU6m/Bm0gdEFOiIQbo/83747h8zPEM/eEvahQ==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
 
   '@1sat/vault@0.0.3':
     resolution: {integrity: sha512-YEqW0aP9KPlcqhzXaqgCcEUWYEuYO5apdkbwGZPFc7DMI6wP4e9OKa9pfjnYcVbOgg9kpBvEG0ka3W46xjgCLA==}
 
-  '@1sat/wallet-browser@0.0.102':
-    resolution: {integrity: sha512-ZDdXd6q68sYPwvcKied6z6oVSJi4mM7bVVxdN7KUI/d53nXMSgXyp/L0lj47XiZgkU1QcO5tn7LZ8EaLzwNwKQ==}
+  '@1sat/wallet-browser@0.0.106':
+    resolution: {integrity: sha512-3pCh4xRx7XeuTDfdehNhE1KzijsHMp0AZJEpZcbZG/j7QLAkBp93fM6wZj98qfUKbmfEW8WnBehZjj3UD6/Ugw==}
     peerDependencies:
-      '@1sat/client': 0.0.59
+      '@1sat/client': 0.0.63
       '@bsv/sdk': 2.8.11
       '@bsv/wallet-toolbox-client': ^2.14.4
 
-  '@1sat/wallet@0.0.116':
-    resolution: {integrity: sha512-Q9idQ7IZkL+1uWWJ+D9rpKjTvv4IrlVLqlHHuo67xzVCMQpqZy+56rKj1JzLeBYT+qpDIwQBesT5ev+2C7d+Tw==}
+  '@1sat/wallet@0.0.120':
+    resolution: {integrity: sha512-6kIijz6UL31rsesdUul/WDXtlBhz6JkTrV9S3gZd4FnDWW5urWgxzuaX9OTG6NKZwxUsqRr5hpmBXUWPhIeuHg==}
     peerDependencies:
       '@bsv/sdk': 2.8.11
       '@bsv/wallet-toolbox-client': ^2.14.4
@@ -1076,6 +1076,12 @@ packages:
 
   '@bopen-io/wallet-toolbox-client@2.14.5':
     resolution: {integrity: sha512-4xK1Zp2zTc34675t4okwwmzOcW9U5XmRBc6Hl0Aqp/xMh4WewF+M99Xpli0qzMVYj4RikNFtb4pR4PiuPpgdPg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@bsv/sdk': 2.8.11
+
+  '@bopen-io/wallet-toolbox-client@2.14.8':
+    resolution: {integrity: sha512-+baSe50r+VR/K//r3UWiPcuu0nyrok3GtXCmNBCmDDox8PIQ9cNRVB5e8XNeqz1aQp2wu2/KNMnDmDbyeEEi5A==}
     engines: {node: '>=22'}
     peerDependencies:
       '@bsv/sdk': 2.8.11
@@ -1583,6 +1589,9 @@ packages:
     resolution: {integrity: sha512-3cKScz9Jx2/Pr9ijj1OzGlBDfcmx7OMVBt4+P1uRR0SSW4cm1/y3Mo4OY3lfkuaYifMNBW8Wz6lQHbs1bihr7A==}
     engines: {node: '>=16.0.0'}
 
+  '@ipld/dag-cbor@10.0.2':
+    resolution: {integrity: sha512-1eCD4YMTlkx5i36oQUmeAojLS/wu+XCd1Gs31BA0afk0TaVkhnyMofIAT/pi0wV3HS3/G7QSN/1NibhiksMyZQ==}
+
   '@isaacs/fs-minipass@4.0.1':
     resolution: {integrity: sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==}
     engines: {node: '>=18.0.0'}
@@ -1624,6 +1633,7 @@ packages:
     engines: {node: ^22.20 || ^24.12 || >=25}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@noble/ciphers@2.4.0':
     resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
@@ -1770,66 +1780,79 @@ packages:
     resolution: {integrity: sha512-hV+W1r8HM84PER4If94QuzrrD0DNk4CxobNhVUiz9ZiiWHDzJss4Jra2AYGH1a7GOTzjS1sIyZ35yYEhw/aq+g==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-arm-musleabihf@4.63.6':
     resolution: {integrity: sha512-5dWs/GENZufRph8PEfl0TrNH/R3DHJA+VxF/dqlfV2oUZfxRtN3qmFXg2DZj8DYM8d+Vd3dgZtuVmoBE/nb2YQ==}
     cpu: [arm]
     os: [linux]
+    libc: [musl]
 
   '@rollup/rollup-linux-arm64-gnu@4.63.6':
     resolution: {integrity: sha512-inQYLPVIUvYk+s7zpxQldqwrajUNs+t4TJjPGzsdPTvsT8gsQXVcW/sQFolHZ3YSWVk0nMMwU7TtRi0Ow+QMuw==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-arm64-musl@4.63.6':
     resolution: {integrity: sha512-sH+0MV1HmDC1q7+bQnlN9ywKBmHqkA2EdD/hHYrrz654ybc+vNC1FRNyzuYKicMQVtZZ4X2jz0osJYmsOtnj4g==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@rollup/rollup-linux-loong64-gnu@4.63.6':
     resolution: {integrity: sha512-mCECvRr6HGekdBc6dvHzUWubqEti4JyOqlNePrOzl4Wimk26iW5Zy9rld2mQbC9id1NYjfF8nHLFq5fr3CuOKQ==}
     cpu: [loong64]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-loong64-musl@4.63.6':
     resolution: {integrity: sha512-bb9rdoCPwM4DEsbOP3CJgFnvhSJ3XKCUYyUhxnlSs/XGT0DknpOYgLCPbK8VUzwl+cZGzFQm0KbBYRaSGZC2YQ==}
     cpu: [loong64]
     os: [linux]
+    libc: [musl]
 
   '@rollup/rollup-linux-ppc64-gnu@4.63.6':
     resolution: {integrity: sha512-aIJRoGCHev45JSu7JMzVrMzu1NX3nQrXx1Vb/6y4AblxW7JpCMpk4e8C6lHzvSElxi3UEcMdFJldsuWQjV1ddA==}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-ppc64-musl@4.63.6':
     resolution: {integrity: sha512-LvjnulezHjiaM5Ga9MPCDLTVddjvcrJhZc6vEz9fxeFRGPJsPAX9HuTuPTUQ3l8d+nYpZB/xWzUpuKJlLQm3VQ==}
     cpu: [ppc64]
     os: [linux]
+    libc: [musl]
 
   '@rollup/rollup-linux-riscv64-gnu@4.63.6':
     resolution: {integrity: sha512-YmhSBeYZwJ937s8tKpYAhms48N+tj7e+oFkbkVVxfMRdAiynK2AxqRapJXB4utyXxc/iYTkMfPRQ+7ZP0IO78w==}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-musl@4.63.6':
     resolution: {integrity: sha512-9+YukhzqTvJvzfDXJJzkURK9TDY01nofNH3pyHGuucGC4xPvBVtIfCAqJjkjnmBEGJYNXB8sBc2EDt7xDgGenw==}
     cpu: [riscv64]
     os: [linux]
+    libc: [musl]
 
   '@rollup/rollup-linux-s390x-gnu@4.63.6':
     resolution: {integrity: sha512-9G5AtEkpN/A89BILHHEL9aYRYTuFjwa8PUQqoEg8SDrwOZBKpwYqNlQCBNI5QPwGrf7qFlb6LNFilo8FCSA3Wg==}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-x64-gnu@4.63.6':
     resolution: {integrity: sha512-Ezx2E5D6Siz805j41x91JiGbzuCm8i2U98U37SQ7ytY737+wsJq+P9nPL6UmqDww491zO7MTivYOTrtmTTeCSw==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@rollup/rollup-linux-x64-musl@4.63.6':
     resolution: {integrity: sha512-8EZ1Q3PB7yUjvR4MbFAnCBF1wF0XRe5QQqbtlJXP7ZX5C8iYlSQJugUhj9oS0gbUP4jp9qGhaIgFnV9Nvod86Q==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@rollup/rollup-openbsd-x64@4.63.6':
     resolution: {integrity: sha512-3JI27TALItfZ/qaxXKdbRXfV6WepUoUa3IN07FE+1xxoRdl3JIyrp5PiDF0vOHsPgEiOFkF8s3B3BRymQkdwGA==}
@@ -1933,24 +1956,28 @@ packages:
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@tailwindcss/oxide-linux-arm64-musl@4.3.3':
     resolution: {integrity: sha512-Md44bD6veX/PC5iyF8cDVnw4HBIANZepRZZ7a8DQOvkfo5WUBwcp6iAuCUz23u+4SUkhJlD3eL7hNdW8ezd/kA==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@tailwindcss/oxide-linux-x64-gnu@4.3.3':
     resolution: {integrity: sha512-tx7us1muwOKAKWao2v/GaafFeQboE6aj88vC6ziN2NCGcRm8gWUhwjzg+YdVB1e4boAtdtma4L43onunI6NS4w==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@tailwindcss/oxide-linux-x64-musl@4.3.3':
     resolution: {integrity: sha512-SJxX60smvHgasZoBy11dX6YRjXJFovwWBoedhbQPOBzgFWBHGB+TVPWB9BxzR7TTxU8FQZAI2AyiNCMzFm8Img==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@tailwindcss/oxide-wasm32-wasi@4.3.3':
     resolution: {integrity: sha512-jx1+rPhY/5Ympkktd656HBWEBLxP7dH06losBLjjf5vgCODXvi9KhtftWcMIwTFIDqBr7cRnQkdLnAG+IOlGvQ==}
@@ -2445,6 +2472,10 @@ packages:
   cbor2@2.4.0:
     resolution: {integrity: sha512-s6+CPoEI6tgwasK2cWMTXt5sy8Yxo4vgRmKgkJSCdKDL/0bHU3aYJoYeHRX7/oywKYA3bxcpqEYkXkrdHe0+0Q==}
     engines: {node: '>=22'}
+
+  cborg@6.1.3:
+    resolution: {integrity: sha512-Kb/wD/AFuVcqvVjR+HYNOjNiuhVJ2C+RWxQE2Yqq2WVlVkRjdvVLkkM6QsL3NMsBRh+rgNc+aXmcraA+X0HObQ==}
+    hasBin: true
 
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
@@ -3108,24 +3139,28 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.32.0:
     resolution: {integrity: sha512-UpQkoenr4UJEzgVIYpI80lDFvRmPVg6oqboNHfoH4CQIfNA+HOrZ7Mo7KZP02dC6LjghPQJeBsvXhJod/wnIBg==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.32.0:
     resolution: {integrity: sha512-V7Qr52IhZmdKPVr+Vtw8o+WLsQJYCTd8loIfpDaMRWGUZfBOYEJeyJIkqGIDMZPwPx24pUMfwSxxI8phr/MbOA==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.32.0:
     resolution: {integrity: sha512-bYcLp+Vb0awsiXg/80uCRezCYHNg1/l3mt0gzHnWV9XP1W5sKa5/TCdGWaR/zBM2PeF/HbsQv/j2URNOiVuxWg==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.32.0:
     resolution: {integrity: sha512-8SbC8BR40pS6baCM8sbtYDSwEVQd4JlFTOlaD3gWGHfThTcABnNDBda6eTZeqbofalIJhFx0qKzgHJmcPTnGdw==}
@@ -3248,6 +3283,9 @@ packages:
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+
+  multiformats@14.0.5:
+    resolution: {integrity: sha512-vbIm83F2yZ1pWJGS0yl0ysracIvv56LtbrIyiIQHoLdYDJOMoLfVFsXhh9DUH4SFdkdkFhucyWniihsNzVEjkQ==}
 
   nanoid@3.3.19:
     resolution: {integrity: sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==}
@@ -4075,15 +4113,16 @@ packages:
 
 snapshots:
 
-  '@1sat/actions@0.0.230(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
+  '@1sat/actions@0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
     dependencies:
-      '@1sat/client': 0.0.59(@bsv/sdk@2.8.11)
-      '@1sat/templates': 0.0.41(@bsv/sdk@2.8.11)
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
-      '@1sat/utils': 0.0.40(@bsv/sdk@2.8.11)
-      '@1sat/wallet': 0.0.116(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
+      '@1sat/templates': 0.0.43(@bsv/sdk@2.8.11)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
+      '@1sat/utils': 0.0.42(@bsv/sdk@2.8.11)
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/message-box-client': 2.5.4(@bsv/sdk@2.8.11)(supports-color@7.2.0)
       '@bsv/sdk': 2.8.11
+      '@ipld/dag-cbor': 10.0.2
       xdelta3-wasm: 1.0.0
     transitivePeerDependencies:
       - '@bsv/wallet-toolbox-client'
@@ -4092,15 +4131,15 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@1sat/client@0.0.59(@bsv/sdk@2.8.11)':
+  '@1sat/client@0.0.63(@bsv/sdk@2.8.11)':
     dependencies:
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@bsv/sdk': 2.8.11
-      '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11)'
+      '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.8(@bsv/sdk@2.8.11)'
 
-  '@1sat/connect@0.0.101(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)':
+  '@1sat/connect@0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)':
     dependencies:
-      '@1sat/wallet': 0.0.116(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
       '@sigma-auth/better-auth-plugin': 0.0.92(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bsv/sdk@2.8.11)(better-auth@1.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(typescript@5.9.3)(zod@4.6.5)
       better-auth: 1.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -4138,10 +4177,10 @@ snapshots:
       - vue
       - zod
 
-  '@1sat/permission-module-ui@0.0.68(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
+  '@1sat/permission-module-ui@0.0.72(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
     dependencies:
-      '@1sat/permission-module': 0.0.73(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
+      '@1sat/permission-module': 0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       react: 18.3.1
     transitivePeerDependencies:
       - '@bsv/sdk'
@@ -4151,12 +4190,13 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@1sat/permission-module@0.0.73(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
+  '@1sat/permission-module@0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
     dependencies:
-      '@1sat/actions': 0.0.230(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
-      '@1sat/templates': 0.0.41(@bsv/sdk@2.8.11)
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
-      '@1sat/wallet': 0.0.116(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/actions': 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+      '@1sat/templates': 0.0.43(@bsv/sdk@2.8.11)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
+      '@1sat/utils': 0.0.42(@bsv/sdk@2.8.11)
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
     transitivePeerDependencies:
       - '@bsv/wallet-toolbox-client'
@@ -4165,13 +4205,13 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@1sat/sweep-ui@0.0.108(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)':
+  '@1sat/sweep-ui@0.0.112(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)':
     dependencies:
-      '@1sat/actions': 0.0.230(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
-      '@1sat/client': 0.0.59(@bsv/sdk@2.8.11)
-      '@1sat/connect': 0.0.101(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
-      '@1sat/utils': 0.0.40(@bsv/sdk@2.8.11)
+      '@1sat/actions': 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+      '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
+      '@1sat/connect': 0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
+      '@1sat/utils': 0.0.42(@bsv/sdk@2.8.11)
       '@bsv/sdk': 2.8.11
       bitcoin-backup: 0.0.11(@bsv/sdk@2.8.11)
       class-variance-authority: 0.7.1
@@ -4216,38 +4256,41 @@ snapshots:
       - vue
       - zod
 
-  '@1sat/templates@0.0.41(@bsv/sdk@2.8.11)':
+  '@1sat/templates@0.0.43(@bsv/sdk@2.8.11)':
     dependencies:
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@bsv/sdk': 2.8.11
+      '@ipld/dag-cbor': 10.0.2
       cbor2: 2.4.0
+      cborg: 6.1.3
 
-  '@1sat/types@0.0.50(@bsv/sdk@2.8.11)':
+  '@1sat/types@0.0.52(@bsv/sdk@2.8.11)':
     dependencies:
       '@bsv/sdk': 2.8.11
 
-  '@1sat/utils@0.0.40(@bsv/sdk@2.8.11)':
+  '@1sat/utils@0.0.42(@bsv/sdk@2.8.11)':
     dependencies:
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@bsv/sdk': 2.8.11
+      '@ipld/dag-cbor': 10.0.2
       image-meta: 0.2.2
 
   '@1sat/vault@0.0.3': {}
 
-  '@1sat/wallet-browser@0.0.102(@1sat/client@0.0.59(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
+  '@1sat/wallet-browser@0.0.106(@1sat/client@0.0.63(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
     dependencies:
-      '@1sat/client': 0.0.59(@bsv/sdk@2.8.11)
-      '@1sat/wallet': 0.0.116(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
       '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11)'
     transitivePeerDependencies:
       - sigma-protocol
 
-  '@1sat/wallet@0.0.116(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
+  '@1sat/wallet@0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
     dependencies:
-      '@1sat/client': 0.0.59(@bsv/sdk@2.8.11)
-      '@1sat/templates': 0.0.41(@bsv/sdk@2.8.11)
-      '@1sat/types': 0.0.50(@bsv/sdk@2.8.11)
+      '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
+      '@1sat/templates': 0.0.43(@bsv/sdk@2.8.11)
+      '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@bopen-io/templates': 1.2.3(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
       '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11)'
@@ -4456,6 +4499,13 @@ snapshots:
       sigma-protocol: 0.1.10(@bsv/sdk@2.8.11)
 
   '@bopen-io/wallet-toolbox-client@2.14.5(@bsv/sdk@2.8.11)':
+    dependencies:
+      '@bsv/sdk': 2.8.11
+      '@noble/hashes': 2.4.0
+      hash-wasm: 4.12.0
+      idb: 8.0.3
+
+  '@bopen-io/wallet-toolbox-client@2.14.8(@bsv/sdk@2.8.11)':
     dependencies:
       '@bsv/sdk': 2.8.11
       '@noble/hashes': 2.4.0
@@ -4893,6 +4943,11 @@ snapshots:
       wrap-ansi: 7.0.0
     transitivePeerDependencies:
       - supports-color
+
+  '@ipld/dag-cbor@10.0.2':
+    dependencies:
+      cborg: 6.1.3
+      multiformats: 14.0.5
 
   '@isaacs/fs-minipass@4.0.1':
     dependencies:
@@ -5745,6 +5800,8 @@ snapshots:
     dependencies:
       '@cto.af/wtf8': 0.0.6
 
+  cborg@6.1.3: {}
+
   chalk@4.1.2:
     dependencies:
       ansi-styles: 4.3.0
@@ -6527,6 +6584,8 @@ snapshots:
   motion-utils@11.18.1: {}
 
   ms@2.1.3: {}
+
+  multiformats@14.0.5: {}
 
   nanoid@3.3.19: {}
 

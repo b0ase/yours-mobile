@@ -12,6 +12,7 @@
  * book; live mode buys the cheapest listing or sends BSV.
  */
 import { buyBsv21, sendBsv, type OneSatContext } from '@1sat/actions';
+import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { appendAgentLog, getAgentAccount } from './agentAccounts';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
 import { describeRules } from './describeRules';
@@ -133,6 +134,11 @@ export const runAgentAction = async (
   if (!g.ok) return { ok: false, text: `Refused: ${g.reason}` };
   if (g.paper) return { ok: true, text: `Paper buy: ${pick.label} for $${usd.toFixed(2)}` };
   const outpoint = walletOutpoint(pick.outpoint);
+  try {
+    await assertOrdLockV2(outpoint);
+  } catch (e) {
+    return { ok: false, text: e instanceof Error ? e.message : 'Listing check failed' };
+  }
   const res = await buyBsv21.execute(purchaseContext(ctx, outpoint), {
     tokenId: a.token,
     outpoint,
