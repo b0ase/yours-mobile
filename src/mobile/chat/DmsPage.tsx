@@ -6,13 +6,14 @@ import { syncBlocks } from '../ugc/blocks';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
-import { isNative } from '../native';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { loadFollows } from '../feed/store';
 import { getFriends, onFriends, refreshFriends } from '../calls/friends';
 import { onDmRequest, onRoomTicker, takeDmRequest, takeRoomTicker } from './segmentNav';
-import { BchatClient, ChatApiError, defaultHttp, loadSession, needsHandle, saveSession } from './api';
+import { BchatClient, ChatApiError, needsHandle, saveSession } from './api';
+import { dmsCacheKey, fetchRooms, onRooms, sharedChatClient } from './sharedRooms';
+import { readListCache } from '../ui/listCache';
 import { HandleFlow } from '../names/HandleFlow';
 import { walletSigner } from './signer';
 import { listTimeLabel, previewText, roomTitle, type ChatRoom } from './messages';
@@ -89,12 +90,16 @@ export const DmsPage = ({
   Conversation: ComponentType<DmConversationProps>;
 }) => {
   const { apiContext } = useServiceContext();
-  const client = useMemo(() => new BchatClient(defaultHttp(isNative), loadSession()), []);
+  const client = useMemo(() => sharedChatClient(), []);
+  const { chromeStorageService } = useServiceContext();
+  const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const [handle, setHandle] = useState<string | null>(client.handle);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [rooms, setRooms] = useState<ChatRoom[] | null>(null);
+  // Cache first, like the room list: the last DMs list shows at once (chat/sharedRooms.ts writes it).
+  const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(dmsCacheKey(identityAddress)));
+  useEffect(() => onRooms(setRooms), []);
   const [listError, setListError] = useState('');
   const [bchatContacts, setBchatContacts] = useState<BchatContact[]>([]);
   const [friends, setFriends] = useState(getFriends());
@@ -159,12 +164,8 @@ export const DmsPage = ({
 
   const refresh = useCallback(() => {
     if (!handle || !online) return;
-    client
-      .rooms()
-      .then((r) => {
-        setRooms(r);
-        setListError('');
-      })
+    fetchRooms(client, identityAddress)
+      .then(() => setListError(''))
       .catch((e) => {
         if (e instanceof ChatApiError && e.status === 401) return authLost();
         setListError(errText(e));
@@ -173,7 +174,7 @@ export const DmsPage = ({
       .contacts()
       .then(setBchatContacts)
       .catch(() => undefined);
-  }, [client, handle, online, authLost]);
+  }, [client, handle, online, authLost, identityAddress]);
 
   useEffect(refresh, [refresh]);
   useEffect(() => {
@@ -207,8 +208,7 @@ export const DmsPage = ({
     setProblem('');
     try {
       const ticker = await client.openDirect(target);
-      const all = await client.rooms();
-      setRooms(all);
+      const all = await fetchRooms(client, identityAddress, 0);
       const room = all.find((r) => r.ticker === ticker) ?? { id: ticker, ticker, name: null };
       setSheet(null);
       setInput('');
@@ -268,10 +268,8 @@ export const DmsPage = ({
     const take = () => {
       const t = takeRoomTicker(true);
       if (!t) return;
-      void client
-        .rooms()
+      void fetchRooms(client, identityAddress)
         .then((all) => {
-          setRooms(all);
           setOpen(all.find((r) => r.ticker.toUpperCase() === t) ?? { id: t, ticker: t, name: null });
         })
         .catch((e) => {

@@ -39,19 +39,12 @@ import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
 import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
-import { readListCache, writeListCache } from '../ui/listCache';
+import { readListCache } from '../ui/listCache';
+import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sharedRooms';
 import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import {
-  BchatClient,
-  ChatApiError,
-  defaultHttp,
-  loadSession,
-  needsHandle,
-  saveSession,
-  SESSION_EVENT,
-} from '../chat/api';
+import { BchatClient, ChatApiError, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import { defaultPictures } from '../chat/roomArt';
@@ -2119,7 +2112,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const online = useOnline();
-  const client = useMemo(() => new BchatClient(defaultHttp(isNative), loadSession()), []);
+  const client = useMemo(() => sharedChatClient(), []);
   const [handle, setHandle] = useState<string | null>(client.handle);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState('');
@@ -2156,7 +2149,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   // Cache first (owner round 6): the last room list shows at once; the live list replaces it quietly.
-  const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(`chat:rooms:${identityAddress}`));
+  const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(roomsCacheKey(identityAddress)));
+  // Either segment's rooms() fetch updates this list too (chat/sharedRooms.ts).
+  useEffect(() => onRooms(setRooms), []);
   // My X / Google picture (names/socialAvatar.ts) goes to bit-sign once, so other people's bubbles show it
   // instead of my initial; bit-sign keeps a photo chosen there. Remembered per handle + picture.
   const socialAvatar = chromeStorageService.getCurrentAccountObject().account?.settings?.socialProfile?.avatar ?? '';
@@ -2302,13 +2297,8 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       .openRooms()
       .then((d) => setPublicRooms(parsePublicRooms(d)))
       .catch(() => {});
-    client
-      .rooms()
-      .then((r) => {
-        setRooms(r);
-        writeListCache(`chat:rooms:${identityAddress}`, r, 100);
-        setListError('');
-      })
+    fetchRooms(client, identityAddress)
+      .then(() => setListError(''))
       .catch((e) => {
         if (e instanceof ChatApiError && e.status === 401) return authLost();
         setListError(errText(e));
