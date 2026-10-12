@@ -11,10 +11,10 @@ import {
   DEFAULT_STORAGE_REMOTE_URL,
   FEE_PER_KB,
   HOSTED_YOURS_IMAGE,
-  INACTIVITY_LIMIT,
   MAINNET_ADDRESS_PREFIX,
 } from '../utils/constants';
 import { decrypt, encrypt, generateRandomSalt } from '../utils/crypto';
+import { NEVER_LOCK, lockTimeoutMs } from '../utils/lockTimeout';
 import { derivePassKey, type UsbUnlockMaterial } from './passKey';
 import { probeSticks } from './UsbKey.service';
 import { Keys } from '../utils/keys';
@@ -514,14 +514,12 @@ export class ChromeStorageService {
     return accounts[selectedAccount]?.settings?.customFeeRate ?? FEE_PER_KB;
   };
 
-  /** Returns the auto-lock timeout in milliseconds. Defaults to INACTIVITY_LIMIT (10 minutes). Capped at 24 hours. */
+  /** Returns the auto-lock timeout in milliseconds, or NEVER_LOCK (Infinity), the default (utils/lockTimeout.ts). */
   getLockTimeout = (): number => {
-    if (!this.storage) return INACTIVITY_LIMIT;
+    if (!this.storage) return NEVER_LOCK;
     const { accounts, selectedAccount } = this.storage as ChromeStorageObject;
-    if (!accounts || !selectedAccount) return INACTIVITY_LIMIT;
-    const minutes = accounts[selectedAccount]?.settings?.lockTimeout;
-    if (!minutes || minutes < 1) return INACTIVITY_LIMIT;
-    return Math.min(minutes, 1440) * 60 * 1000;
+    if (!accounts || !selectedAccount) return NEVER_LOCK;
+    return lockTimeoutMs(accounts[selectedAccount]?.settings);
   };
 
   getAllAccounts = (): Account[] => {

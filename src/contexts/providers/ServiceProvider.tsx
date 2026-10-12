@@ -1,7 +1,7 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { KeysService } from '../../services/Keys.service';
-import { INACTIVITY_LIMIT } from '../../utils/constants';
+import { isSessionExpired } from '../../utils/lockTimeout';
 import { ServiceContext, ServiceContextProps } from '../ServiceContext';
 import { createContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -54,12 +54,13 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const lockRef = useRef<() => void>(() => setIsLocked(true));
   useEffect(() => {
     if (services?.chromeStorageService) {
-      const timestamp = Date.now();
-      const twentyMinutesAgo = timestamp - 20 * 60 * 1000;
-      services.chromeStorageService.update({ lastActiveTime: isLocked ? twentyMinutesAgo : timestamp, isLocked });
+      // A lock writes lastActiveTime 0: with auto-lock Never there is no time window to fall out of.
+      services.chromeStorageService.update({ lastActiveTime: isLocked ? 0 : Date.now(), isLocked });
       // Notify background to destroy decrypted keys only on actual lock transitions,
       // not on initial render (where isLocked starts as true before checkLockState runs)
       if (isLocked && prevIsLockedRef.current === false) {
+        // Also drop this page's cached passKey, so a later lock check here cannot see the old session.
+        void services.chromeStorageService.clearPassKey().catch(() => undefined);
         chrome.runtime.sendMessage({ action: 'WALLET_LOCKED' }).catch(() => {});
       }
       prevIsLockedRef.current = isLocked;
@@ -82,8 +83,7 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
           setIsLocked(false);
         } else {
           const passKey = await chromeStorageService.getPassKey();
-          const withinTimeout =
-            !!lastActiveTime && Date.now() - Number(lastActiveTime) <= chromeStorageService.getLockTimeout();
+          const withinTimeout = !isSessionExpired(lastActiveTime, chromeStorageService.getLockTimeout());
           setIsLocked(!(passKey && withinTimeout));
         }
 
@@ -128,7 +128,7 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
         setChatAccount(result?.selectedAccount);
         setChatReceiveAddress(result?.account?.addresses?.bsvAddress);
         const lastActiveTime = result?.lastActiveTime;
-        const timeout = chromeStorageService.getLockTimeout() ?? INACTIVITY_LIMIT;
+        const timeout = chromeStorageService.getLockTimeout();
 
         if (!result?.account?.encryptedKeys) {
           setIsLocked(false);
@@ -136,7 +136,7 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         const passKey = await chromeStorageService.getPassKey();
-        const timedOut = !lastActiveTime || Date.now() - Number(lastActiveTime) > timeout;
+        const timedOut = isSessionExpired(lastActiveTime, timeout);
 
         if (timedOut || !passKey) {
           lockWallet();

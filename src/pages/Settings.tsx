@@ -74,6 +74,9 @@ import ProgressBar from '@ramonak/react-progress-bar';
 
 import { derivePasswordKey } from '../services/passKey';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { MAX_LOCK_TIMEOUT_MINUTES, lockTimeoutMinutes } from '../utils/lockTimeout';
+
+const LOCK_TIMEOUT_CHOICES = [1, 5, 10, 15, 30, 60, 240, 1440];
 import { getDisplayCurrency, setDisplayCurrency, type DisplayCurrency } from '../utils/displayCurrency';
 import { usePrefs } from '../mobile/settings/usePrefs';
 import {
@@ -319,7 +322,8 @@ export const Settings = () => {
   const currentAccount = chromeStorageService.getCurrentAccountObject();
   const [customFeeRate, setCustomFeeRate] = useState(currentAccount.account?.settings.customFeeRate ?? FEE_PER_KB);
   const [displayCurrency, setDisplayCurrencyState] = useState<DisplayCurrency>(getDisplayCurrency);
-  const [lockTimeout, setLockTimeout] = useState(currentAccount.account?.settings.lockTimeout ?? 10);
+  // 0 = Never (the default): chat, Spaces, feed and mail need the wallet to stay open.
+  const [lockTimeout, setLockTimeout] = useState(() => lockTimeoutMinutes(currentAccount.account?.settings));
   const [selectedAccountIdentityAddress, setSelectedAccountIdentityAddress] = useState<string | undefined>();
 
   // --- USB key security ---
@@ -781,8 +785,6 @@ export const Settings = () => {
     }
   };
 
-  const MAX_LOCK_TIMEOUT_MINUTES = 1440; // 24 hours
-
   const commitCustomFeeRate = useCallback(async () => {
     const rate = customFeeRate;
     if (!rate || rate < 1) {
@@ -803,28 +805,23 @@ export const Settings = () => {
     chrome.runtime.sendMessage({ action: 'UPDATE_FEE_RATE', feeRate: rate }).catch(() => {});
   }, [customFeeRate, chromeStorageService, currentAccount, addSnackbar]);
 
-  const commitLockTimeout = useCallback(async () => {
-    let minutes = lockTimeout;
-    if (!minutes || minutes < 1) {
-      minutes = 10;
+  const commitLockTimeout = useCallback(
+    async (value: number) => {
+      const minutes = !value || value < 1 ? 0 : Math.min(Math.floor(value), MAX_LOCK_TIMEOUT_MINUTES);
       setLockTimeout(minutes);
-      if (lockTimeout !== undefined && lockTimeout < 1) addSnackbar('Lock timeout must be at least 1 minute', 'error');
-    }
-    if (minutes > MAX_LOCK_TIMEOUT_MINUTES) {
-      minutes = MAX_LOCK_TIMEOUT_MINUTES;
-      setLockTimeout(minutes);
-    }
-    const { account, selectedAccount } = chromeStorageService.getCurrentAccountObject();
-    if (!account || !selectedAccount) return;
-    const key: keyof ChromeStorageObject = 'accounts';
-    const update: Partial<ChromeStorageObject['accounts']> = {
-      [selectedAccount]: {
-        ...account,
-        settings: { ...account.settings, lockTimeout: minutes },
-      },
-    };
-    await chromeStorageService.updateNested(key, update);
-  }, [lockTimeout, chromeStorageService, addSnackbar]);
+      const { account, selectedAccount } = chromeStorageService.getCurrentAccountObject();
+      if (!account || !selectedAccount) return;
+      const key: keyof ChromeStorageObject = 'accounts';
+      const update: Partial<ChromeStorageObject['accounts']> = {
+        [selectedAccount]: {
+          ...account,
+          settings: { ...account.settings, lockTimeout: minutes, lockTimeoutChosen: true },
+        },
+      };
+      await chromeStorageService.updateNested(key, update);
+    },
+    [chromeStorageService],
+  );
 
   const handleMasterBackup = async (password?: string) => {
     // Derive here: runtime messages fan out to every open extension page, so
@@ -995,18 +992,24 @@ export const Settings = () => {
         <Divider />
         <SettingRow
           icon={<Lock size={16} />}
-          label="Auto-Lock (min)"
-          description="Lock wallet after inactivity"
+          label="Auto-lock"
+          description="Lock anytime with ⌘L or the menu."
           right={
-            <Input
-              theme={theme}
-              placeholder="10"
-              type="number"
-              onChange={(e) => setLockTimeout(Number(e.target.value))}
-              onBlur={() => commitLockTimeout()}
+            <select
+              aria-label="Auto-lock"
               value={lockTimeout}
-              style={{ width: '5rem', margin: 0 }}
-            />
+              onChange={(e) => void commitLockTimeout(Number(e.target.value))}
+              style={{ border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
+            >
+              <option value={0}>Never (recommended for chat and Spaces)</option>
+              {[...new Set([...LOCK_TIMEOUT_CHOICES, ...(lockTimeout ? [lockTimeout] : [])])]
+                .sort((a, b) => a - b)
+                .map((m) => (
+                  <option key={m} value={m}>
+                    After {m} minute{m === 1 ? '' : 's'}
+                  </option>
+                ))}
+            </select>
           }
         />
         <Divider />
