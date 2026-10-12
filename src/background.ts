@@ -72,7 +72,15 @@ import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/
 import { finishInterruptedReconcile, reconcileStorage } from './services/storageReconcileBackground';
 import { RECONCILE_RECORD_KEY, reconcileOutcome, type ReconcileRecord } from './services/storageReconcile';
 import { USB_HANDLE_DB_NAME } from './services/UsbKey.service';
-import { QUEUED_MESSAGE, RepeatGuard, queuedSend, repeatRefusal, requestFingerprint } from './services/repeatGuard';
+import {
+  QUEUED_MESSAGE,
+  RepeatGuard,
+  queuedResult,
+  queuedSend,
+  repeatRefusal,
+  requestFingerprint,
+} from './services/repeatGuard';
+import { releasedMessage } from './services/stuckSends';
 import { CALL_NOTIFICATION_PREFIX, CALL_RING_ALARM, callNotification, callsToAnnounce, fetchIncoming } from './services/callRinger';
 import { openCallsWindow } from './mobile/calls/popout';
 import {
@@ -360,6 +368,17 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       if (r.failed || r.error) console.log('[background] failed-action review:', r);
     });
     void preferLocalStorage(accountContext);
+    // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
+    void accountContext.releaseStuckSends().then((r) => {
+      if (r.queued || r.error) console.log('[background] queued-send review:', r);
+      if (!r.released.length) return;
+      chrome.notifications?.create(`bwx-released-${Date.now()}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Payment cancelled',
+        message: releasedMessage(r.released),
+      });
+    });
   }
 
   return accountContext?.wallet ?? null;
@@ -3394,8 +3413,12 @@ if (isInServiceWorker) {
       } catch (err) {
         // Queued to retry is not a failure: the wallet will send it. Say so, and guard against paying again.
         if (queuedSend(err)) {
-          await withRepeatGuard((g) => g.record(fingerprint, { origin: message.originator }));
-          throw new Error(QUEUED_MESSAGE);
+          const queued = queuedResult(err);
+          await withRepeatGuard((g) => g.record(fingerprint, { origin: message.originator, txid: queued?.txid }));
+          // With its txid, answer like a send (BRC-100 callers read txid) and say it's pending; else the old message.
+          if (!queued) throw new Error(QUEUED_MESSAGE);
+          sendResponse({ type: CWIEventName.CREATE_ACTION, success: true, data: queued });
+          return true;
         }
         throw err;
       }
@@ -3480,6 +3503,15 @@ if (isInServiceWorker) {
         data: result,
       });
     } catch (error) {
+      // Queued to retry is not a failure (services/repeatGuard.ts): answer with the txid, marked pending.
+      const queued = queuedResult(error);
+      if (queued) {
+        console.warn('[signAction] queued for retry, answering pending:', queued.txid);
+        await withRepeatGuard((g) => g.signed(message.params.reference, queued.txid));
+        endChain();
+        sendResponse({ type: CWIEventName.SIGN_ACTION, success: true, data: queued });
+        return true;
+      }
       console.error('[signAction] Error:', error);
       if (error && typeof error === 'object') {
         const { sendWithResults, txid, code } = error as Record<string, unknown>;

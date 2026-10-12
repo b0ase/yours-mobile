@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { RepeatGuard, REPEAT_WINDOW_MS, queuedSend, repeatRefusal, requestFingerprint } from './repeatGuard';
+import {
+  QUEUED_MESSAGE,
+  RepeatGuard,
+  REPEAT_WINDOW_MS,
+  queuedResult,
+  queuedSend,
+  repeatRefusal,
+  requestFingerprint,
+} from './repeatGuard';
 
 const lock = (h: string) => `76a914${h.repeat(40).slice(0, 40)}88ac`;
 const ord = (body: string) => `0063036f7264${body}68`;
@@ -58,5 +66,24 @@ describe('queuedSend', () => {
     expect(queuedSend({ sendWithResults: [{ status: 'sending' }] })).toBe(true);
     expect(queuedSend({ sendWithResults: [{ status: 'failed' }] })).toBe(false);
     expect(queuedSend(new Error('x'))).toBe(false);
+  });
+});
+
+describe('queuedResult', () => {
+  const txid = 'ab'.repeat(32);
+  test('a queued send answers with its txid, marked pending', () => {
+    const r = queuedResult({ txid, sendWithResults: [{ txid, status: 'sending' }] });
+    expect(r?.txid).toBe(txid);
+    expect(r?.pending).toBe(true);
+    expect(r?.message).toBe(QUEUED_MESSAGE);
+    expect(r?.sendWithResults).toEqual([{ txid, status: 'sending' }]);
+  });
+  test('falls back to the txid in sendWithResults', () => {
+    expect(queuedResult({ sendWithResults: [{ txid, status: 'sending' }] })?.txid).toBe(txid);
+  });
+  test('null for real failures and queued sends without a txid', () => {
+    expect(queuedResult({ txid, sendWithResults: [{ txid, status: 'failed' }] })).toBeNull();
+    expect(queuedResult(new Error('x'))).toBeNull();
+    expect(queuedResult({ sendWithResults: [{ status: 'sending' }] })).toBeNull();
   });
 });
