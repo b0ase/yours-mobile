@@ -8,14 +8,17 @@
  */
 
 // ── sponsorship: bWalletX pays for each new artist's first listener plays ───────────────────────────────────────
-/** Plays bWalletX sponsors per artist (about 4 cents per artist at 1 sat/sec). */
+/** Plays bWalletX sponsors per artist (1,000 × ~180 sats ≈ 180,000 sats ≈ $0.036 at $20/BSV). */
 export const SPONSOR_PLAYS_PER_ARTIST = 1000;
 /** Sats one sponsored play may cost at most (a 3-minute track at 1 sat/sec, rounded up). */
 export const SPONSOR_MAX_SATS_PER_PLAY = 240;
-/** Hard cap per artist, in sats, whatever the play count. */
-export const SPONSOR_CAP_SATS_PER_ARTIST = 60_000;
-/** Hard cap across all artists in one calendar month, in sats. */
-export const SPONSOR_CAP_SATS_PER_MONTH = 2_000_000;
+/** Hard cap per artist = 1,000 plays at the per-play max: 240,000 sats ≈ $0.048 at $20/BSV. */
+export const SPONSOR_CAP_SATS_PER_ARTIST = SPONSOR_PLAYS_PER_ARTIST * SPONSOR_MAX_SATS_PER_PLAY;
+/**
+ * Hard cap across all artists in one calendar month: 100 artists' full 1,000 plays (the Founding 100) =
+ * 24,000,000 sats ≈ $4.80 at $20/BSV.
+ */
+export const SPONSOR_CAP_SATS_PER_MONTH = 100 * SPONSOR_CAP_SATS_PER_ARTIST;
 
 export type SponsorState = {
   /** Plays already sponsored for this artist (all time). */

@@ -54,6 +54,18 @@ describe('rank formula', () => {
 });
 
 describe('sponsorship caps', () => {
+  test('caps allow the full first 1,000 plays per artist, even at the max play cost', () => {
+    let st = { artistPlays: 0, artistSats: 0, monthSats: 0 };
+    for (let i = 0; i < SPONSOR_PLAYS_PER_ARTIST; i++) {
+      const d = sponsorPlay(st, 240);
+      expect(d.ok).toBe(true);
+      st = { artistPlays: st.artistPlays + 1, artistSats: st.artistSats + 240, monthSats: st.monthSats + 240 };
+    }
+    expect(st.artistSats).toBe(SPONSOR_CAP_SATS_PER_ARTIST);
+    expect(sponsorPlay(st, 1)).toEqual({ ok: false, reason: 'artist-plays' });
+    expect(SPONSOR_CAP_SATS_PER_ARTIST).toBe(240_000);
+    expect(SPONSOR_CAP_SATS_PER_MONTH).toBe(24_000_000);
+  });
   const s = { artistPlays: 0, artistSats: 0, monthSats: 0 };
   test('pays a normal play', () => expect(sponsorPlay(s, 180)).toEqual({ ok: true, sats: 180 }));
   test('stops at 1,000 plays', () => {

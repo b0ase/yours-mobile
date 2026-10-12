@@ -18,9 +18,9 @@ migration `supabase/migrations/20261014_bmusic_artist_programme.sql` (not run).
 
 ## Sponsored plays
 
-bWalletX pays for each new artist's first **1,000 listener plays** (≈ 4 cents per artist at 1 sat/sec) from the
+bWalletX pays for each new artist's first **1,000 listener plays** (1,000 plays × ~180 sats ≈ 180,000 sats ≈ $0.036 per artist at $20/BSV) from the
 "bWalletX sponsor pot". The page shows **"Free to listen — sponsored by bWalletX"** while plays remain.
-Hard caps: 240 sats per play, 60,000 sats per artist, 2,000,000 sats per calendar month across all artists
+Hard caps (at $20/BSV): 240 sats per play; 240,000 sats per artist (≈ $0.048, exactly 1,000 plays at the per-play max, so the cap never cuts the first 1,000 plays short); 24,000,000 sats per calendar month across all artists (≈ $4.80, the Founding 100's full 1,000 plays each)
 (`sponsorPlay`). Play fees are paid by the fee pot (`artist-play`, docs/FEE-POT.md).
 
 ## Sales share into the artist's listener pot
@@ -72,6 +72,6 @@ None of this is in a store build: the flags are literal env checks and the strin
 ## What the owner does
 
 1. Say the server is clean; approve and run the migration.
-2. Fund the bWalletX sponsor pot (a few dollars covers ~100 artists).
+2. Fund the bWalletX sponsor pot (≈ $4.80 covers 100 artists' full 1,000 plays at $20/BSV).
 3. Set `BMUSIC_ARTIST_PROGRAMME=1` on bitcoin-music, then build Desktop with `VITE_ARTIST_PROGRAMME=1`.
 4. Publish the bwalletx.com/artists page (branch `feat/artist-programme` in bwalletx-site) once it is live.
