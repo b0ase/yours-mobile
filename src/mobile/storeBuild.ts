@@ -329,3 +329,14 @@ export const PAY_STREAM_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * PNEE vaults (owner, 12 Oct 2026; src/mobile/pnee/): lock BSV in a vault, mint PNEEs up to 10x, send, close.
+ * bWalletX only, like the rest of PNEEs (Back PNEEs sat behind MARKET_ENABLED). Literal env check so Vite inlines
+ * it and Rollup drops the lazy PneeFlow / PneeVaults / PneeWallet chunks and the contract kit from the store bundle.
+ */
+export const PNEE_VAULTS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

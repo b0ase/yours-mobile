@@ -343,3 +343,10 @@ The owner approved free Spaces in bWallet. `FREE_SPACES_ENABLED` and `roomSpaces
 
 - **Paid listening (11 Oct 2026, bWalletX only, `PAID_LISTENING_ENABLED`):** per-minute paid listening in Spaces (BSV or BSV-21, paid to speakers / issuer / burned). `PaidListening.tsx` is a lazy chunk behind the inlined flag, so the store bundle has none of it. The store grep also checks `Paid listening|space-listen`.
 - **Pay-per-second streaming (12 Oct 2026, bWalletX only, `PAY_STREAM_ENABLED`):** the bMusic FIRST 12 album on Media (one budget approval, then one payment per second from a session key). `stream/StreamAlbum.tsx` is a lazy chunk behind the inlined flag and the session sweeper is a lazy import behind it in `NotifyEngine.tsx`, so the store bundle has none of it. The store grep should also check `Listening budget|bmusic session|stream/payto`.
+- **PNEE vaults (12 Oct 2026, bWalletX only, `PNEE_VAULTS_ENABLED`):** lock BSV in a PNEE vault, mint PNEEs up to 10x, send, top up, close (src/mobile/pnee/). `PneeFlow`, `PneeVaults` and `PneeWallet` are lazy chunks behind the inlined flag, and the contract kit and vault code load only from them, so the store bundle has none of it (checked 12 Oct 2026: the grep below returns nothing on `build:mobile:store`). The store grep should also check `Back PNEEs|PNEE vault|pnee vault|bwxburn|api/pnee|Lock BSV to back PNEEs`.
+
+Full store-bundle grep as of 12 Oct 2026 (must return nothing after `pnpm build:mobile:store`):
+
+```
+grep -rlE "/api/bitsign/agent/(price|quote|turn)|Subscribe with|TokenBlaster|launch/new|bSpaces|BPOSITIVE|Holders can enter|Back bWalletX|bwalletx-fund|Listeners pay|Pay at the door|Paid listening|space-listen|Listening budget|bmusic session|stream/payto|Back PNEEs|PNEE vault|pnee vault|bwxburn|api/pnee|Lock BSV to back PNEEs" build-mobile/
+```

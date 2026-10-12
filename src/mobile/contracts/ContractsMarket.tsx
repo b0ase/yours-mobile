@@ -16,6 +16,57 @@ import {
 } from './market';
 import { CONTRACT_DISCLAIMER, contractEnvelope, contractSaleProblems, parseDescriptor } from './contractNft';
 import { ErrorActions } from '../errors/ErrorActions';
+import { useNavigate } from 'react-router-dom';
+import { BACK_PNEE_ROUTE } from '../notes/backPnee';
+import { PNEE_ICON } from '../notes/pnee';
+import { PNEE_VAULTS_ENABLED } from '../storeBuild';
+
+/** Exchange › Contracts: PNEE vaults are live (owner, 12 Oct 2026). The public list of every vault is on bwalletx.com. */
+export const PNEE_BACKING_URL = 'https://bwalletx.com/backing';
+export const PNEE_LIVE_TEXT =
+  'Live. Lock BSV in your own vault, mint PNEEs up to a tenth of its value, send them, close by burning them. Every vault is on the public backing page.';
+
+const PneeLiveCard = () => {
+  const navigate = useNavigate();
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-xl px-3 py-3"
+      style={{ background: CARD, border: `1px solid ${GOLD}55` }}
+    >
+      <div className="flex items-center gap-2">
+        <img src={PNEE_ICON} alt="" className="w-6 h-6" />
+        <span className="flex-1 text-sm font-semibold text-white">PNEE vaults</span>
+        <span
+          className="text-[11px] font-bold rounded-full px-2 py-0.5"
+          style={{ background: '#32D58322', color: '#32D583' }}
+        >
+          Live
+        </span>
+      </div>
+      <p className="text-xs m-0" style={{ color: MUTED }}>
+        {PNEE_LIVE_TEXT}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => navigate(BACK_PNEE_ROUTE)}
+          className="flex-1 rounded-lg py-2 text-xs font-bold border-0"
+          style={{ background: GOLD, color: '#010101' }}
+        >
+          Back PNEEs
+        </button>
+        <button
+          type="button"
+          onClick={() => window.open(PNEE_BACKING_URL, '_blank', 'noopener')}
+          className="flex-1 rounded-lg py-2 text-xs font-bold bg-transparent"
+          style={{ border: `1px solid ${GOLD}55`, color: GOLD }}
+        >
+          See the backing
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -122,6 +173,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
         {CONTRACT_DISCLAIMER}
       </p>
+      {PNEE_VAULTS_ENABLED && <PneeLiveCard />}
       {items === null && !error && (
         <p className="text-xs text-center py-8 m-0" style={{ color: MUTED }}>
           Loading contracts…
@@ -137,9 +189,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
       )}
       {items !== null && shown.length === 0 && (
         <p className="text-xs text-center py-8 m-0" style={{ color: MUTED }}>
-          {filter === 'bond'
-            ? 'No bonds or notes listed yet. PNEEs, penny stablecoins backed by locked BSV, are being built and will appear here.'
-            : 'No contracts published yet.'}
+          {filter === 'bond' ? 'No other bonds or notes listed yet.' : 'No contracts published yet.'}
         </p>
       )}
       {shown.map((c) => {

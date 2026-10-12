@@ -1,6 +1,13 @@
 # $1 bonds backed by BSV
 
-Status: **design note, not started** · Owner idea: 5 Oct 2026 · bWalletX only
+Status: **built as PNEE vaults** (12 Oct 2026, branch feat/pnee-vaults) · Owner idea: 5 Oct 2026 · bWalletX only
+
+> **PNEE vaults (12 Oct 2026).** The wallet now opens real BondVault contracts (bwalletx-bond, `PNEE_PARAMS`):
+> 1 PNEE = 1¢ (a BondToken unit), mint up to 10x (1000%, on-chain), anyone may close a vault below 150% by
+> burning its PNEEs at a 10% discount (the rest goes to the owner), no fee. Code: `src/mobile/pnee/` (scripts
+> from the pinned kit, `vaults.ts` for lock / mint / send / top up / close), server: `site/api/pnee.js` (5 Rabin
+> price signers + burn attester, keys from env only; the vault list), public pages: bwalletx.com/pnee and
+> /backing. The notes below are the original design note.
 
 ## The idea
 

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
-import { MARKET_ENABLED } from '../storeBuild';
+import { MARKET_ENABLED, PNEE_VAULTS_ENABLED } from '../storeBuild';
 import { useNavigate } from 'react-router-dom';
 import { routeFor } from '../tabs/tabs';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -13,6 +13,10 @@ import { Lock } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
 
 type Bal = { id: string; amount: number; icon: string | null };
+
+// Wallet › PNEEs (owner, 12 Oct 2026): PNEEs minted from vaults, their history and Send. Not in the store bundle.
+const PneeWallet = PNEE_VAULTS_ENABLED ? lazy(() => import('../pnee/PneeWallet')) : null;
+const loadVaults = PNEE_VAULTS_ENABLED ? () => import('../pnee/vaults') : null;
 
 /**
  * Wallet › default balances under BSV and MNEE (owner, 5 Oct 2026): Penny Notes ($PNEE, shown in dollars) and, while
@@ -61,7 +65,24 @@ export const DefaultTokenCards = () => {
       live = false;
     };
   }, [indexed, addrs?.bsvAddress, addrs?.ordAddress, addrs?.identityAddress]); // eslint-disable-line react-hooks/exhaustive-deps
-  const pnee = indexed > 0 ? indexed : pending;
+  // PNEEs minted from vaults (the wallet's 'pnee' basket), in dollars; read lazily so the store bundle has none of it.
+  const [vaultPnee, setVaultPnee] = useState(0);
+  const [pneeOpen, setPneeOpen] = useState(false);
+  useEffect(() => {
+    const wallet = (apiContext as { wallet?: unknown } | undefined)?.wallet;
+    if (!loadVaults || !wallet) return;
+    let live = true;
+    void loadVaults()
+      .then(async (m) => {
+        const { coins } = await m.listCoins(wallet as Parameters<typeof m.listCoins>[0]);
+        if (live) setVaultPnee(Number(m.pneeBalance(coins)) / 100);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [apiContext, pneeOpen]);
+  const pnee = (indexed > 0 ? indexed : pending) + vaultPnee;
   const mine = link ? of(link.tokenId) : undefined;
   const sub = (text: string) => (
     <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
@@ -77,7 +98,8 @@ export const DefaultTokenCards = () => {
         balance={pnee}
         decimals={PNEE_DECIMALS}
         usdBalance={pnee}
-        showPointer={false}
+        showPointer={!!PneeWallet}
+        onClick={PneeWallet ? () => setPneeOpen(true) : undefined}
         subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
         // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
         // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
@@ -89,11 +111,16 @@ export const DefaultTokenCards = () => {
         // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
         // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
         secondaryAction={
-          MARKET_ENABLED
+          PNEE_VAULTS_ENABLED
             ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
             : undefined
         }
       />
+      {PneeWallet && pneeOpen && (
+        <Suspense fallback={null}>
+          <PneeWallet onClose={() => setPneeOpen(false)} onVaults={() => (setPneeOpen(false), navigate('/m/lock'))} />
+        </Suspense>
+      )}
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (
         <AssetRow

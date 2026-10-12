@@ -301,13 +301,13 @@ describe('store build has no Market', () => {
     expect(r).toMatch(/const MarketPage = MARKET_ENABLED \? lazy\(/);
     expect(r).toMatch(/\{MarketPage && <Route path="market"/);
   });
-  test('Buy / Get PNEEs / Back PNEEs entry points are behind MARKET_ENABLED', () => {
+  test('Buy / Get PNEEs entry points are behind MARKET_ENABLED; Back PNEEs behind PNEE_VAULTS_ENABLED', () => {
     expect(src('./chat/OpenTokenRoomButton.tsx')).toMatch(/if \(!id \|\| !MARKET_ENABLED\) return null/);
     expect(src('./wallet/FriendToken.tsx')).toMatch(/!MARKET_ENABLED \? null/);
     const cards = src('./wallet/DefaultTokenCards.tsx');
     expect(cards).toMatch(/PNEE_TOKEN_ID && MARKET_ENABLED/);
-    expect(cards).toMatch(/MARKET_ENABLED\s*\?\s*\{ label: BACK_PNEE_LABEL/);
-    expect(src('./locks/LockScreen.tsx')).toMatch(/MARKET_ENABLED && backPnee === 'card' && \(\s*<BackPneeSheet/);
+    expect(cards).toMatch(/PNEE_VAULTS_ENABLED\s*\?\s*\{ label: BACK_PNEE_LABEL/);
+    expect(src('./locks/LockScreen.tsx')).toMatch(/\{PneeFlow && backPnee && \(/);
     expect(src('./radarApps.ts')).toMatch(/const BUY_APPS[^=]*= MARKET_ENABLED\s*\?/);
   });
   test('Apps tab: no exchange / swap tiles or market / on-ramp groups in a store build', async () => {
@@ -529,5 +529,28 @@ describe('PAY_STREAM_ENABLED: pay-per-second streaming is bWalletX only', () => 
       "PAY_STREAM_ENABLED ? lazy(() => import('./stream/StreamAlbum')) : null",
     );
     expect(src('./notify/NotifyEngine.tsx')).toContain('if (!PAY_STREAM_ENABLED || isLocked || !wallet) return;');
+  });
+});
+
+describe('PNEE_VAULTS_ENABLED: PNEE vaults are bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env; every vault screen is a lazy chunk behind it', async () => {
+    const { PNEE_VAULTS_ENABLED } = await import('./storeBuild');
+    expect(PNEE_VAULTS_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'PNEE_VAULTS_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+    const lock = src('./locks/LockScreen.tsx');
+    expect(lock).toContain("PNEE_VAULTS_ENABLED ? lazy(() => import('../pnee/PneeFlow')) : null");
+    expect(lock).toContain("PNEE_VAULTS_ENABLED ? lazy(() => import('../pnee/PneeVaults')) : null");
+    expect(src('./wallet/DefaultTokenCards.tsx')).toContain(
+      "PNEE_VAULTS_ENABLED ? lazy(() => import('../pnee/PneeWallet')) : null",
+    );
+    // nothing outside the lazy chunks imports the vault code or the kit
+    for (const f of ['./locks/LockScreen.tsx', './wallet/DefaultTokenCards.tsx', './contracts/ContractsMarket.tsx'])
+      expect(src(f)).not.toMatch(/from '\.\.\/pnee\/(vaults|script|kit)/);
   });
 });

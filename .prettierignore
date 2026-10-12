@@ -41,3 +41,7 @@ src/pages/usb/RepickFlow.tsx
 src/pages/usb/RestoreFlow.tsx
 src/pages/usb/UsbFlow.tsx
 src/services/usbBackup.ts
+
+# PNEE contract kit, copied byte for byte from bwalletx-bond `pnpm kit` (sha256 pinned in src/mobile/pnee/script.test.ts).
+src/mobile/pnee/kit/
+site/lib/pnee-kit.json

@@ -40,8 +40,8 @@ describe('Back PNEEs flow order (owner, 10 Oct 2026)', () => {
       (acc, ev) => [...acc, nextBackPneeStep(acc[acc.length - 1], ev)],
       ['card'],
     );
-  test('card → amount → build → done → wallet', () => {
-    expect(run(['lock', 'continue', 'locked', 'toWallet'])).toEqual(['card', 'amount', 'build', 'done', 'wallet']);
+  test('card → amount → confirm → done → wallet', () => {
+    expect(run(['lock', 'continue', 'locked', 'toWallet'])).toEqual(['card', 'amount', 'confirm', 'done', 'wallet']);
   });
   test('the card always comes first: continue/locked do nothing on the card', () => {
     expect(nextBackPneeStep('card', 'continue')).toBe('card');
@@ -50,28 +50,43 @@ describe('Back PNEEs flow order (owner, 10 Oct 2026)', () => {
   test('closing early returns to the Wallet, never Pots & Locks', () => {
     expect(nextBackPneeStep('card', 'close')).toBe('wallet');
     expect(nextBackPneeStep('amount', 'close')).toBe('wallet');
-    expect(nextBackPneeStep('build', 'close')).toBe('wallet');
+    expect(nextBackPneeStep('confirm', 'close')).toBe('wallet');
     expect(nextBackPneeStep('done', 'close')).toBe('wallet');
   });
   test('back walks the steps backwards', () => {
-    expect(nextBackPneeStep('build', 'back')).toBe('amount');
+    expect(nextBackPneeStep('confirm', 'back')).toBe('amount');
     expect(nextBackPneeStep('amount', 'back')).toBe('card');
   });
   test('Pots & Locks only when chosen on the done card', () => {
     expect(nextBackPneeStep('done', 'toPots')).toBe('pots');
-    expect(['card', 'amount', 'build'].map((s) => nextBackPneeStep(s as never, 'toPots'))).toEqual([
+    expect(['card', 'amount', 'confirm'].map((s) => nextBackPneeStep(s as never, 'toPots'))).toEqual([
       'card',
       'amount',
-      'build',
+      'confirm',
     ]);
   });
   test('done card text', () => {
-    expect(backPneeDoneTitle(0.5)).toBe('Locked 0.5 BSV to back PNEEs.');
+    expect(backPneeDoneTitle(0.5)).toBe('Locked 0.5 BSV in a PNEE vault.');
     expect(BACK_PNEE_DONE_HINT).toContain('Pots & Locks');
   });
   test('LockScreen reads the router location, not window.location (MemoryRouter never sets window.location.search)', async () => {
     const src = await Bun.file(new URL('../locks/LockScreen.tsx', import.meta.url)).text();
     expect(src).toContain('isBackPneeMode(location.search)');
     expect(src).not.toContain('isBackPneeMode(window.location.search)');
+  });
+});
+
+describe('Back PNEEs opens a vault, never a plain time-lock (owner, 12 Oct 2026)', () => {
+  test('LockScreen no longer fills the time-lock builder for the PNEEs pot', async () => {
+    const src = await Bun.file(new URL('../locks/LockScreen.tsx', import.meta.url)).text();
+    expect(src).not.toContain('lockForPnee');
+    expect(src).not.toContain('setPot(PNEE_POT)');
+    expect(src).not.toMatch(/PNEEs backing/);
+    expect(src).toContain("lazy(() => import('../pnee/PneeFlow'))");
+  });
+  test('the flow locks through the vault code', async () => {
+    const flow = await Bun.file(new URL('../pnee/PneeFlow.tsx', import.meta.url)).text();
+    expect(flow).toContain('lockVault(');
+    expect(flow).not.toContain('createLock(');
   });
 });
