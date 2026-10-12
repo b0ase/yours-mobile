@@ -7,12 +7,13 @@ import { getTagValue } from '../../utils/format';
 import { ORDLOCK_V2_TAG } from '@1sat/types';
 
 /** What the grid draws for an item. Anything we can't name is 'unknown' (gold card, never grey). */
-export type NftType = 'image' | 'video' | 'audio' | 'html' | 'text' | 'unknown';
+export type NftType = 'image' | 'video' | 'audio' | 'model' | 'html' | 'text' | 'unknown';
 
 export const NFT_TYPES: { id: NftType; label: string }[] = [
   { id: 'image', label: 'Images' },
   { id: 'video', label: 'Video' },
   { id: 'audio', label: 'Audio' },
+  { id: 'model', label: '3D' },
   { id: 'html', label: 'HTML' },
   { id: 'text', label: 'Text' },
   { id: 'unknown', label: 'Other' },
@@ -28,6 +29,7 @@ export const nftTypeOf = (contentType: string | null | undefined): NftType => {
   if (t.startsWith('image/')) return 'image';
   if (t.startsWith('video/')) return 'video';
   if (t.startsWith('audio/')) return 'audio';
+  if (t === 'model/gltf-binary' || t === 'model/gltf+json' || t === 'model/vnd.usdz+zip') return 'model';
   if (t === 'text/html' || t === 'application/xhtml+xml') return 'html';
   if (t.startsWith('text/') || TEXT_TYPES.has(t)) return 'text';
   return 'unknown';
