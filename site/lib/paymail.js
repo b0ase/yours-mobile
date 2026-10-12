@@ -207,7 +207,11 @@ const RESERVED_MSG = 'That alias is reserved';
 const SYSTEM_TLDS = ['agent', 'bot', 'x', 'gmail'];
 const DOT_LIKE = /[.\u00B7\u0387\u2024\u2027\u2219\u22C5\u30FB\u3002\uFE52\uFF0E\uFF61\uFF65\u02D9\u0701\u0702\u2E33]/;
 const DOT_MSG = "Names can't contain a dot. Names after a dot are kept for agents and system accounts.";
-const foldAlias = (a) => String(a || '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '').toLowerCase();
+const foldAlias = (a) =>
+  String(a || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
+    .toLowerCase();
 function dotRefusal(alias) {
   const f = foldAlias(alias);
   if (!DOT_LIKE.test(f)) return null;
