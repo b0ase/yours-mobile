@@ -46,6 +46,7 @@ export const PasswordFields = ({
 }) => {
   const [show, setShow] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
   // Suggestion box under the empty field on focus, like a browser's own "Use strong password".
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -100,15 +101,19 @@ export const PasswordFields = ({
         <PasswordRevealButton shown={show} onToggle={() => setShow((s) => !s)} inputRef={passwordRef} />
       </div>
       {(newWallet || confirmAlways) && (
-        <input
-          className={field}
-          type={type}
-          name="confirm-password"
-          autoComplete="new-password"
-          placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-        />
+        <div className="relative">
+          <input
+            ref={confirmRef}
+            className={field}
+            type={type}
+            name="confirm-password"
+            autoComplete="new-password"
+            placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+          <PasswordRevealButton shown={show} onToggle={() => setShow((s) => !s)} inputRef={confirmRef} />
+        </div>
       )}
       {newWallet && (
         <div className="flex items-center gap-3 text-xs">
