@@ -26,6 +26,7 @@ import { getErrorMessage } from '../../utils/tools';
 import { useWalletMedia, playMusic, type MediaItem } from '../media/useWalletMedia';
 import { VideoPoster } from '../media/VideoPoster';
 import { NftDetail } from '../media/NftDetail';
+import { NftHeader, NftHero, PendingCard } from '../media/NftHero';
 import { ordinalsUrl } from '../media/nftActions';
 import { itemInfo } from '../market/indexer';
 import {
@@ -50,9 +51,6 @@ const ROUTE = '/m/nfts';
 const MIN_TILE = 170;
 const GAP = 12;
 const CAPTION = 52;
-const PENDING_TEXT = 'Pending, not on chain yet';
-const PENDING_WHY =
-  'This NFT’s transaction is signed and queued but the network hasn’t confirmed it yet. Send, listing and download open once it’s on chain.';
 
 /** unbroadcast.ts PENDING_ON_CHAIN, via useWalletMedia. */
 const isPending = (m: MediaItem) => !!m.pending;
@@ -312,28 +310,30 @@ const DetailPanel = ({
       className="flex flex-col h-full overflow-y-auto bg-[#0b0c0f] border-l border-white/10"
       aria-label={`${it.name} details`}
     >
-      <div className="flex items-center justify-between px-4 py-3">
-        <span className="text-sm font-semibold text-white truncate">{it.name}</span>
-        <button aria-label="Close" onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10">
+      <div className="relative">
+        <NftHero m={m} pending={!!it.pending} />
+        <button
+          aria-label="Close"
+          onClick={onClose}
+          className="absolute top-3 right-3 z-10 h-9 w-9 flex items-center justify-center rounded-full bg-black/60 backdrop-blur hover:bg-black/80"
+        >
           <X size={18} color="#fff" />
         </button>
       </div>
-      <div className="relative flex items-center justify-center bg-black" style={{ height: 360 }}>
-        <Preview m={m} type={it.type} large />
-      </div>
-      <div className="px-4 py-4 flex flex-col gap-3">
-        {it.pending && (
-          <div className="rounded-xl bg-[#F5B800]/10 border border-[#F5B800]/40 p-3 text-xs text-[#F5B800]">
-            <div className="font-semibold">{PENDING_TEXT}</div>
-            <div className="mt-1 text-[#e6d08a]">{PENDING_WHY}</div>
-          </div>
-        )}
-        <div>
-          <Row label="Name">{it.name}</Row>
-          {it.collection && <Row label="Collection">{it.collection}</Row>}
+      <div className="px-4 py-4 flex flex-col gap-4">
+        <NftHeader
+          name={it.name}
+          collection={it.collection ? collectionLabel(it.collection) : undefined}
+          contentType={it.contentType}
+          size={facts.size}
+          status={it.pending ? 'pending' : it.listed ? 'listed' : 'onchain'}
+          origin={it.origin}
+          chainLink={ordinalsUrl(it.origin) || undefined}
+        />
+        {it.pending && <PendingCard />}
+        <div className="rounded-2xl bg-[#111216] border border-white/5 px-3 py-1">
           {facts.description && <Row label="Description">{facts.description}</Row>}
           <Row label="Outpoint">{it.outpoint}</Row>
-          <Row label="Origin">{it.origin}</Row>
           <Row label="Minted">{facts.mintDate ?? (it.pending ? 'Not yet' : '…')}</Row>
           <Row label="Held in">
             {it.listed
@@ -396,7 +396,9 @@ const DetailPanel = ({
             sent from here.
           </p>
         )}
-        {it.pending && <p className="text-[11px] text-[#98A2B3]">Actions are off until it’s on chain.</p>}
+        {it.pending && (
+          <p className="text-[11px] text-[#e6d08a]">Send, Download and Open on chain are off until it lands.</p>
+        )}
         {msg && <p className="text-xs text-[#98A2B3] break-all">{msg}</p>}
       </div>
       {sending && (
