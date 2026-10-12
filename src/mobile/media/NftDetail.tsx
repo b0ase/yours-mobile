@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import validate from 'bitcoin-address-validation';
 import { sendOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { Copy, ExternalLink, Send, UserCircle, X } from 'lucide-react';
+import { Copy, ExternalLink, Flame, Send, UserCircle, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -17,6 +17,18 @@ import type { MediaItem } from './useWalletMedia';
 import { celebrateSend } from '../../components/sent/sent';
 import { nftSendButton, shortAddr } from './nftSend';
 import { txidOf, unbroadcastTxids } from './unbroadcast';
+import {
+  BURN_HOLD_MS,
+  BURN_WORD,
+  burnAvailability,
+  burnConfirmEnabled,
+  burnNft,
+  copiesOf,
+  isListed,
+  isLocked,
+  shortOutpoint,
+  toUnderscore,
+} from './nftBurn';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
@@ -28,7 +40,18 @@ const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)
  * Listing an NFT for sale is not offered: OrdLock listing creation is disabled for ordinals
  * (ORDLOCK_LISTING_DISABLED); bWallet's Sell covers BSV-21 only. Portalled like MediaViewer.
  */
-export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose: () => void; onSent: () => void }) => {
+export const NftDetail = ({
+  item,
+  all = [],
+  onClose,
+  onSent,
+}: {
+  item: MediaItem;
+  /** Everything the wallet holds, for the copies / last-copy check before a burn. */
+  all?: MediaItem[];
+  onClose: () => void;
+  onSent: () => void;
+}) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
@@ -55,6 +78,53 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
       live = false;
     };
   }, [apiContext.wallet, item.output.outpoint]);
+
+  // Burn (nftBurn.ts): offered only for on-chain, unlisted, unlocked items; confirm by typing BURN or a 2 s hold.
+  const [burning, setBurning] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [held, setHeld] = useState(false);
+  const [burnBusy, setBurnBusy] = useState(false);
+  const [burnErr, setBurnErr] = useState('');
+  const [burned, setBurned] = useState('');
+  const hold = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outpoint = toUnderscore(item.output.outpoint);
+  const copies = copiesOf(item, all);
+  const burnable = burnAvailability({ onChain, listed: isListed(item.output), locked: isLocked(item.output) });
+  const startHold = () => {
+    if (hold.current) clearTimeout(hold.current);
+    hold.current = setTimeout(() => setHeld(true), BURN_HOLD_MS);
+  };
+  const endHold = () => {
+    if (hold.current) clearTimeout(hold.current);
+    hold.current = null;
+  };
+  useEffect(() => endHold, []);
+  const canBurn = burnConfirmEnabled({ typed, held, busy: burnBusy, done: !!burned });
+  const burn = async () => {
+    if (!canBurn) return;
+    setBurnBusy(true);
+    setBurnErr('');
+    try {
+      const r = await burnNft(apiContext, item.output);
+      if ('error' in r) return setBurnErr(r.error);
+      setBurned(r.txid);
+      setBurning(false);
+      onSent();
+    } catch (e) {
+      setBurnErr(`Not confirmed: ${e instanceof Error ? e.message : String(e)}. Check History before burning again.`);
+    } finally {
+      setBurnBusy(false);
+      setHeld(false);
+    }
+  };
+  const copyOutpoint = async () => {
+    try {
+      await navigator.clipboard.writeText(outpoint);
+      setMsg('Outpoint copied');
+    } catch {
+      setMsg(outpoint);
+    }
+  };
 
   const copy = async () => {
     try {
@@ -167,7 +237,7 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
             <UserCircle size={16} /> Set as my avatar
           </button>
         )}
-        {sent ? (
+        {burned || burning ? null : sent ? (
           <div className="flex flex-col gap-1 rounded-xl bg-[#17191E] p-3">
             <span className="text-sm font-semibold text-[#A1FF8B]">Sent to {sent.name}</span>
             <a
@@ -181,7 +251,8 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
           </div>
         ) : onChain === false ? (
           <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
-            Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent.
+            Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent or
+            burned. Nothing on chain needs burning.
           </div>
         ) : !sending ? (
           <button onClick={() => setSending(true)} className={`${btn} bg-[#17191E] text-white`}>
@@ -221,6 +292,100 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
                 setSending(false);
                 setTo('');
                 setFailed('');
+              }}
+              className="text-xs text-[#98A2B3] py-1"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+        {burned ? (
+          <div className="flex flex-col gap-1 rounded-xl bg-[#17191E] p-3">
+            <span className="text-sm font-semibold text-[#F97066]">Burned</span>
+            <a
+              href={`https://whatsonchain.com/tx/${burned}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-[#98A2B3] underline break-all"
+            >
+              View on WhatsOnChain · {short(burned)}
+            </a>
+          </div>
+        ) : sent || sending ? null : !burnable.show ? (
+          burnable.reason && onChain !== false && <p className="text-[11px] text-[#667085]">{burnable.reason}</p>
+        ) : !burning ? (
+          <button
+            onClick={() => setBurning(true)}
+            className={`${btn} border border-[#F97066]/40 bg-transparent text-[#F97066]`}
+          >
+            <Flame size={16} /> Burn
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3 rounded-xl border border-[#F97066]/40 bg-[#17191E] p-3">
+            <div className="flex items-center gap-3">
+              {item.kind === 'images' ? (
+                <img src={item.url} alt="" className="h-12 w-12 rounded-lg object-cover" />
+              ) : item.kind === 'video' ? (
+                <video src={item.url} muted playsInline className="h-12 w-12 rounded-lg object-cover" />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#0b0c0f]">
+                  <Flame size={18} color="#F97066" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{item.name}</div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[11px] text-[#98A2B3]">{shortOutpoint(outpoint)}</span>
+                  <button aria-label="Copy outpoint" onClick={() => void copyOutpoint()} className="p-1">
+                    <Copy size={12} color="#98A2B3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-white">
+              Burning is permanent. This NFT will be destroyed and can&apos;t be recovered.
+            </p>
+            {copies.length === 0 ? (
+              <p className="rounded-lg bg-[#F97066]/15 p-2 text-xs font-semibold text-[#F97066]">
+                This is your only copy.
+              </p>
+            ) : (
+              <p className="text-xs text-[#98A2B3]">
+                You hold {copies.length} other {copies.length === 1 ? 'copy' : 'copies'} of this file.
+              </p>
+            )}
+            <label className="text-[11px] text-[#98A2B3]">
+              Type {BURN_WORD} to confirm
+              <input
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                autoCapitalize="characters"
+                autoComplete="off"
+                aria-label={`Type ${BURN_WORD} to confirm`}
+                className="mt-1 w-full rounded-lg bg-[#0b0c0f] px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-[#F97066]"
+              />
+            </label>
+            <button
+              disabled={burnBusy || !!burned}
+              onClick={() => void burn()}
+              onPointerDown={() => !canBurn && startHold()}
+              onPointerUp={endHold}
+              onPointerLeave={endHold}
+              onPointerCancel={endHold}
+              className={`${btn} w-full text-white disabled:opacity-40`}
+              style={{ background: canBurn ? '#D92D20' : '#5c1a14' }}
+            >
+              <Flame size={16} />{' '}
+              {burnBusy ? 'Burning…' : canBurn ? 'Burn forever' : 'Type BURN, or hold for 2 seconds'}
+            </button>
+            {burnErr && <p className="text-xs text-[#F97066] break-words">{burnErr}</p>}
+            <button
+              disabled={burnBusy}
+              onClick={() => {
+                setBurning(false);
+                setTyped('');
+                setHeld(false);
+                setBurnErr('');
               }}
               className="text-xs text-[#98A2B3] py-1"
             >
