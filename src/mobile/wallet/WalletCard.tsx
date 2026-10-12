@@ -14,7 +14,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { Check, Copy, Loader2, PenLine, RefreshCw, ScanLine, SlidersHorizontal } from 'lucide-react';
+import { Check, Copy, Loader2, PenLine, RefreshCw, RotateCcw, ScanLine, SlidersHorizontal } from 'lucide-react';
 import { myPayUri } from '../scan/payUri';
 import { isBWalletX } from '../storeBuild';
 import {
@@ -671,7 +671,7 @@ const WalletCardInner = ({
               </div>
             </div>
           </div>
-          {/* Same plain pen, same spot as the front (owner, 11 Oct 2026): flips back to the front. On Android the
+          {/* Swivel, same spot as the front's pen (owner, 12 Oct 2026: pen on the front, swivel on the back): flips back to the front. On Android the
               back's copy targets used to swallow every tap, so this is the reliable way home. */}
           <button
             type="button"
@@ -684,7 +684,7 @@ const WalletCardInner = ({
               flip();
             }}
           >
-            <PenLine size={20} aria-hidden="true" />
+            <RotateCcw size={20} aria-hidden="true" />
           </button>
         </div>
       </div>
