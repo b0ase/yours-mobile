@@ -6,7 +6,7 @@
  *   /m/<page>              ↔ /<page>
  *   /bsv-wallet            ↔ /wallet
  *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
- *   /m/media/browse?artist=<name> ↔ /bmusic/artist/<artist>
+ *   /m/media/browse?artist=<name> ↔ /bmusic/artists/<artist>   (/bmusic/artists lists them)
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
  * Other top-level app routes (/settings, …) keep their own path.
@@ -60,11 +60,12 @@ export const toRouter = (pathname: string, search: string): string | null => {
     const a = SHARE_ALBUMS.find((x) => x.artistSlug === album[1] && x.slug === album[2]);
     return a ? withQ(`/m/media/album/${encodeURIComponent(a.id)}`) : withQ('/m/media');
   }
-  const artist = /^\/bmusic\/artist\/([^/]+)$/.exec(path);
+  const artist = /^\/bmusic\/artists?\/([^/]+)$/.exec(path);
   if (artist) {
     const a = SHARE_ALBUMS.find((x) => x.artistSlug === artist[1]);
     return a ? withQ('/m/media/browse', `artist=${encodeURIComponent(a.artist)}`) : withQ('/m/media/browse');
   }
+  if (path === '/bmusic/artists') return withQ('/m/media/browse');
   if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
   if (path === '/wallet') return withQ('/bsv-wallet');
   if (TOP.has(path)) return withQ(path);

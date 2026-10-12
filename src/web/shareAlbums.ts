@@ -12,6 +12,12 @@ export type ShareAlbum = ShareAlbumRoute & {
   /** Square cover, emitted next to the static page. */
   cover: string;
   sponsoredBy?: string;
+  /** Artist page extras (one per artist; read from the artist's first album). */
+  artistBio?: string;
+  artistCover?: string;
+  artistSite?: string;
+  /** bMusic video stream (manifest path on BMUSIC_HOST) and its release id, shown on the artist page. */
+  video?: { title: string; manifest: string; releaseId: string };
   /** One line on the share page and card: what is free and what is paid. */
   pricing: string;
   /** sponsored: the sponsor's pot pays (free to the listener); otherwise 1 sat/sec. */
@@ -26,6 +32,14 @@ const COPY: Record<string, Omit<ShareAlbum, keyof ShareAlbumRoute>> = {
       'Echoes in the Abyss by VexVoid on bWalletX: first 6 tracks free (sponsored by VexVoid), tracks 7–12 at 1 sat/sec',
     cover: 'src/mobile/media/featured/vexvoid-cover.jpg',
     sponsoredBy: 'VexVoid',
+    artistBio: 'V3XV0ID: trainyards, rooftops, the void',
+    artistCover: 'https://bitcoin-music.vercel.app/bmusic/streams/first-12/cover.jpg',
+    artistSite: 'https://www.vexvoid.com/album',
+    video: {
+      title: 'Four Ton Shadow',
+      manifest: '/bmusic/streams/four-ton-shadow-video/manifest.json',
+      releaseId: 'four-ton-shadow-video-01',
+    },
     pricing: 'First 6 tracks free (sponsored by VexVoid) · tracks 7–12 at 1 sat/sec',
     tracks: [
       { title: 'Echoes in the Abyss', seconds: 116, sponsored: true },
@@ -43,6 +57,9 @@ const COPY: Record<string, Omit<ShareAlbum, keyof ShareAlbumRoute>> = {
     ],
   },
 };
+
+/** bMusic server the artist page reads live prices, listeners and the sponsor pot from (CORS *). */
+export const BMUSIC_HOST = 'https://bitcoin-music.vercel.app';
 
 export const SHARE_ALBUMS: ShareAlbum[] = ROUTES.map((r) => {
   const c = COPY[r.id];

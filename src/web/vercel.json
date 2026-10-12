@@ -46,6 +46,11 @@
       "source": "/media/:path*",
       "destination": "/bmusic/:path*",
       "permanent": true
+    },
+    {
+      "source": "/bmusic/artist/:slug",
+      "destination": "/bmusic/artists/:slug",
+      "permanent": true
     }
   ]
 }
