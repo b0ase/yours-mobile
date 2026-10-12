@@ -47,15 +47,18 @@ describe('shareable album and artist paths', () => {
     expect(toPublic('/m/media/album/other', '')).toBe('/bmusic/album/other');
   });
   test('artist page round trip', () => {
-    expect(toRouter('/bmusic/artists/vexvoid', '')).toBe('/m/media/browse?artist=VexVoid');
-    expect(toPublic('/m/media/browse', '?artist=VexVoid')).toBe('/bmusic/artists/vexvoid');
+    expect(toRouter('/bmusic/artists/vexvoid', '')).toBe('/m/media/artists/vexvoid');
+    expect(toPublic('/m/media/artists/vexvoid', '')).toBe('/bmusic/artists/vexvoid');
+    expect(toPublic('/m/media/artists', '')).toBe('/bmusic/artists');
+    expect(toRouter('/bchatx-feed', '')).toBe('/m/feed');
+    expect(toPublic('/m/feed', '')).toBe('/bchatx-feed');
   });
   test('the store is /bmusic; old /media links still open it', () => {
     expect(toPublic('/m/media', '')).toBe('/bmusic');
     expect(toRouter('/bmusic', '')).toBe('/m/media');
     expect(toRouter('/media', '')).toBe('/m/media');
-    expect(toRouter('/bmusic/artist/vexvoid', '')).toBe('/m/media/browse?artist=VexVoid');
-    expect(toRouter('/bmusic/artists', '')).toBe('/m/media/browse');
+    expect(toRouter('/bmusic/artist/vexvoid', '')).toBe('/m/media/artists/vexvoid');
+    expect(toRouter('/bmusic/artists', '')).toBe('/m/media/artists');
     expect(toRouter('/media/artist/vexvoid/album/echoes-in-the-abyss', '')).toBe('/m/media/album/first-12');
   });
   test('unknown album falls back to Media', () => {

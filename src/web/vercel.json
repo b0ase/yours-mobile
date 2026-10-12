@@ -48,6 +48,16 @@
       "permanent": true
     },
     {
+      "source": "/feed",
+      "destination": "/bchatx-feed",
+      "permanent": true
+    },
+    {
+      "source": "/feed/:path*",
+      "destination": "/bchatx-feed/:path*",
+      "permanent": true
+    },
+    {
       "source": "/bmusic/artist/:slug",
       "destination": "/bmusic/artists/:slug",
       "permanent": true
