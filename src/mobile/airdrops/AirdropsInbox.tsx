@@ -1,11 +1,13 @@
 /**
  * Wallet › Airdrops: tokens and NFTs that arrived unsolicited (inbox.ts). Keep / Hide per item. Nothing in
- * here renders inscription markup or opens issuer links (notes are React text, links never clickable): NFTs show a resized image or a placeholder that
- * previews in a fully sandboxed iframe (no scripts, opaque origin) only on tap.
+ * here renders inscription markup or opens issuer links (notes are React text, links never clickable): NFTs show a
+ * resized image; tapping it opens a viewer that uses only <img>, <video>, <audio> or plain text (AirdropNft.tsx).
+ * Keep on an NFT syncs the address so the wallet takes the NFT into its list, then says where it went.
  */
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Check, Coins, EyeOff, FileCode, Flag, ShieldAlert } from 'lucide-react';
+import { Check, Coins, EyeOff, Flag, ShieldAlert } from 'lucide-react';
+import { listOrdinals, syncAddresses } from '@1sat/actions';
+import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { avatarFor } from '../chat/avatars';
@@ -17,10 +19,10 @@ import { IssuerBadge } from '../issuer/IssuerBadge';
 import { useIssuer } from '../issuer/useIssuer';
 import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { ReportSheet } from '../ugc/UgcSheets';
-import { thumbUrl } from '../market/thumbs';
 import { SwipeRow } from '../swipe/SwipeRow';
 import { showUndo } from '../swipe/undo';
-import { hide, keep, markSeen, type AirdropItem } from './inbox';
+import { hide, inWalletList, keep, markSeen, type AirdropItem } from './inbox';
+import { NftThumb, NftViewer, useSenderName } from './AirdropNft';
 import { trustIssuer } from './quarantine';
 import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
 import { useAirdrops } from './useAirdrops';
@@ -31,59 +33,17 @@ const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
 const short = (s: string) => (s.length > 16 ? `${s.slice(0, 6)}…${s.slice(-6)}` : s);
 
-const NftThumb = ({ id }: { id: string }) => {
-  const [bad, setBad] = useState(false);
-  const [preview, setPreview] = useState(false);
-  const url = thumbUrl(id);
-  if (url && !bad)
-    return (
-      <img
-        src={url}
-        alt=""
-        loading="lazy"
-        onError={() => setBad(true)}
-        className="w-12 h-12 rounded-lg object-cover bg-[#2b2f36] shrink-0"
-      />
-    );
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setPreview(true)}
-        className="w-12 h-12 rounded-lg bg-[#2b2f36] flex flex-col items-center justify-center shrink-0 text-[8px] leading-tight text-[#98A2B3]"
-        title="HTML content: tap to preview in sandbox"
-      >
-        <FileCode size={14} />
-        tap to preview
-      </button>
-      {preview &&
-        createPortal(
-          <div className="fixed inset-0 z-[260] bg-black/80 flex flex-col p-4 gap-2" onClick={() => setPreview(false)}>
-            <p className="text-[11px] text-[#98A2B3] m-0">
-              Sandboxed preview: scripts are off and it can&apos;t reach your wallet. Tap outside to close.
-            </p>
-            <iframe
-              title="Sandboxed preview"
-              src={`https://ordfs.network/${id.replace('.', '_')}`}
-              sandbox=""
-              referrerPolicy="no-referrer"
-              className="flex-1 w-full rounded-xl bg-white"
-            />
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-};
-
 /** The issuer: avatar + $handle (verified badge for tokens) or a short address. */
 const useIssuerName = (item: AirdropItem) => {
   const info = useIssuer(item.asset.kind === 'token' ? item.asset.id : null);
-  const handle = info?.status === 'verified' && info.handle ? info.handle.replace(/^\$/, '') : null;
+  // NFTs (and tokens without a verified issuer): the sender's $name from their key or address (sender.ts).
+  const sender = useSenderName(item, item.asset.kind === 'nft');
+  const verified = info?.status === 'verified' && info.handle ? info.handle.replace(/^\$/, '') : null;
+  const handle = verified ?? (item.asset.kind === 'nft' ? sender.handle : null);
   return {
     handle,
     verified: info?.status === 'verified',
-    label: handle ? `$${safeName(handle)}` : short(item.from || item.issuer),
+    label: handle ? `$${safeName(handle)}` : item.asset.kind === 'nft' ? sender.label : short(item.from || item.issuer),
   };
 };
 
@@ -170,6 +130,7 @@ const Row = ({
   const { handleSelect } = useBottomMenu();
   const who = useIssuerName(item);
   const [reporting, setReporting] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const symbol = item.asset.kind === 'token' ? item.asset.symbol : undefined;
   const reply = () => {
     if (!who.handle) return;
@@ -198,7 +159,7 @@ const Row = ({
             <IssuerBadge tokenId={item.asset.id} compact />
           ) : (
             <span className="text-[11px]" style={{ color: MUTED }}>
-              Unverified sender
+              {who.handle ? 'bWallet name, not verified by an issuer' : 'Unknown sender'}
             </span>
           )}
         </div>
@@ -209,17 +170,25 @@ const Row = ({
       {item.note && <NoteBody text={item.note} issuerKept={issuerKept} label={who.label} />}
       <div className="flex items-center gap-3">
         {item.asset.kind === 'nft' ? (
-          <NftThumb id={item.asset.id} />
+          <NftThumb item={item} onOpen={() => setViewing(true)} />
         ) : (
           <div className="w-12 h-12 rounded-lg bg-[#2b2f36] flex items-center justify-center shrink-0">
             <Coins size={18} color={MUTED} />
           </div>
         )}
-        <div className="min-w-0 flex-1 text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
-          {item.asset.kind === 'nft'
-            ? 'NFT'
-            : `${item.asset.qty ? `${Number(item.asset.qty).toLocaleString()} ` : ''}$${item.asset.symbol ?? short(item.asset.id)}`}
-        </div>
+        {item.asset.kind === 'nft' ? (
+          <button
+            type="button"
+            onClick={() => setViewing(true)}
+            className="min-w-0 flex-1 text-left text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap"
+          >
+            NFT from {who.label} <span style={{ color: GOLD }}>· View</span>
+          </button>
+        ) : (
+          <div className="min-w-0 flex-1 text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
+            {`${item.asset.qty ? `${Number(item.asset.qty).toLocaleString()} ` : ''}$${item.asset.symbol ?? short(item.asset.id)}`}
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-1.5">
         <button
@@ -250,6 +219,7 @@ const Row = ({
           <Flag size={12} />
         </button>
       </div>
+      {viewing && <NftViewer item={item} onClose={() => setViewing(false)} />}
       {reporting && (
         <ReportSheet
           title={`Report ${who.label}`}
@@ -270,9 +240,97 @@ const Row = ({
   );
 };
 
-/** The unstamped items (airdrops) list, shown inside bMail › Requests. */
+type KeptStatus = 'checking' | 'in' | 'pending';
+
+/** Takes kept NFTs into the wallet's list: the address sync the NFTs tab's Refresh runs, then a look at the list. */
+const useKeepNft = () => {
+  const { apiContext, chromeStorageService } = useServiceContext();
+  return async (item: AirdropItem): Promise<KeptStatus> => {
+    try {
+      const count = (chromeStorageService.getCurrentAccountObject().account?.settings?.maxKeyIndex ?? 4) + 1;
+      await syncAddresses.execute(apiContext, { count });
+    } catch (e) {
+      console.warn('[airdrops] syncAddresses after Keep failed:', e);
+    }
+    try {
+      const { outputs } = await listOrdinals.execute(apiContext, { limit: 200, offset: 0 });
+      return inWalletList(
+        item,
+        outputs.map((o) => o.outpoint),
+      )
+        ? 'in'
+        : 'pending';
+    } catch {
+      return 'pending';
+    }
+  };
+};
+
+/** After Keep: where the NFT went, with a link. Never just gone; if the wallet can't list it yet, why. */
+const KeptNotice = ({
+  item,
+  status,
+  onOpenNfts,
+  onDismiss,
+}: {
+  item: AirdropItem;
+  status: KeptStatus;
+  onOpenNfts: () => void;
+  onDismiss: () => void;
+}) => {
+  const who = useSenderName(item);
+  const [viewing, setViewing] = useState(false);
+  return (
+    <div className="flex items-center gap-3 rounded-xl px-3 py-3" style={{ background: '#0c2a1c' }} role="status">
+      <NftThumb item={item} onOpen={() => setViewing(true)} />
+      <div className="min-w-0 flex-1 flex flex-col gap-1">
+        <span className="text-sm font-semibold text-white">
+          {status === 'checking' ? 'Moving to your NFTs…' : 'Moved to your NFTs'}
+        </span>
+        <span className="text-[11px] leading-snug" style={{ color: MUTED }}>
+          {status === 'pending'
+            ? `From ${who.label}. The wallet hasn't indexed it yet (the transaction may still be unconfirmed), so NFTs shows it under "Kept airdrops" until it does. It's safe at your address.`
+            : `From ${who.label}.`}
+        </span>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenNfts}
+            className="min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-bold"
+            style={{ background: GOLD, color: '#010101' }}
+          >
+            Open in NFTs
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-semibold bg-[#2b2f36] text-white"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+      {viewing && <NftViewer item={item} onClose={() => setViewing(false)} />}
+    </div>
+  );
+};
+
+/** The airdrops list, shown inside bMail › Quarantine. */
 export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
   const { items, visible, state, loading, error, update } = useAirdrops();
+  const { handleSelect } = useBottomMenu();
+  const keepNft = useKeepNft();
+  const [kept, setKept] = useState<{ item: AirdropItem; status: KeptStatus }[]>([]);
+  const openNfts = () => {
+    handleSelect('ords' as Parameters<typeof handleSelect>[0]);
+    onLeave();
+  };
+  /** Keep (also Trust): an NFT gets a notice and is taken into the wallet's list. */
+  const afterKeep = (i: AirdropItem) => {
+    if (i.asset.kind !== 'nft') return;
+    setKept((k) => [{ item: i, status: 'checking' }, ...k.filter((x) => x.item.key !== i.key)]);
+    void keepNft(i).then((status) => setKept((k) => k.map((x) => (x.item.key === i.key ? { ...x, status } : x))));
+  };
   const known = keptIssuers(items, state.kept);
   // Opening the mailbox clears the badge (items stay listed until Keep or Hide).
   useEffect(() => update((s) => markSeen(s)), [update]);
@@ -303,6 +361,15 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
           <ErrorActions message={String(error)} />
         </div>
       )}
+      {kept.map((k) => (
+        <KeptNotice
+          key={k.item.key}
+          item={k.item}
+          status={k.status}
+          onOpenNfts={openNfts}
+          onDismiss={() => setKept((x) => x.filter((y) => y.item.key !== k.item.key))}
+        />
+      ))}
       {!visible.length && (
         <p className="text-xs text-center py-4 m-0" style={{ color: MUTED }}>
           {loading ? 'Checking your history…' : 'No unstamped items.'}
@@ -312,7 +379,11 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
         // Swipe (bMail rows): left = Hide (undoable), right = Keep (undoable). Buttons stay on the card too.
         const doKeep = () => {
           update((s) => keep(s, i.key));
-          showUndo('Kept', () => update((s) => ({ ...s, kept: s.kept.filter((k) => k !== i.key) })));
+          afterKeep(i);
+          showUndo('Kept', () => {
+            update((s) => ({ ...s, kept: s.kept.filter((k) => k !== i.key) }));
+            setKept((x) => x.filter((y) => y.item.key !== i.key));
+          });
         };
         const doHide = () => {
           const issuerWasHidden = state.hiddenIssuers.includes(i.issuer);
@@ -358,9 +429,13 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
               item={i}
               issuerKept={known.has(i.issuer)}
               onLeave={onLeave}
-              onKeep={() => update((s) => keep(s, i.key))}
+              onKeep={() => {
+                update((s) => keep(s, i.key));
+                afterKeep(i);
+              }}
               onTrust={() => {
                 update((s) => trustIssuer(keep(s, i.key), i.issuer));
+                afterKeep(i);
                 showUndo('Trusted: their tokens skip Quarantine', () =>
                   update((s) => ({
                     ...s,

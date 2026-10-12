@@ -10,6 +10,9 @@ import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { getTagValue } from '../../utils/format';
 import type { Weapon } from '../three3d/ordnance';
 import { TOKENBLASTER_ENABLED } from '../storeBuild';
+import { KeptAirdrops } from '../airdrops/AirdropNft';
+import { inWalletList, keptNfts } from '../airdrops/inbox';
+import { useAirdrops } from '../airdrops/useAirdrops';
 
 // 1Sat Ordnance guns (tokenblaster.lol): bWalletX only, not in a store build even as code.
 const WeaponTile = TOKENBLASTER_ENABLED
@@ -53,6 +56,13 @@ export const MediaSection = () => {
     }
   };
   const [filter, setFilter] = useState<Filter>('all');
+  // NFTs kept from bMail › Quarantine that the wallet's list doesn't hold yet (shown with the reason).
+  const drops = useAirdrops();
+  const keptPending = useMemo(() => {
+    if (loading && !items.length) return [];
+    const have = items.map((i) => i.output.outpoint);
+    return keptNfts(drops.items, drops.state).filter((i) => !inWalletList(i, have));
+  }, [drops.items, drops.state, items, loading]);
   const [open, setOpen] = useState<MediaItem | null>(null);
 
   // 3D: genuine 1Sat Ordnance guns (origin listed by tokenblaster.lol as paid), keyed by outpoint.
@@ -196,7 +206,8 @@ export const MediaSection = () => {
             </button>
           </div>
         )}
-        {!loading && shown.length === 0 && (
+        <KeptAirdrops pending={keptPending} />
+        {!loading && shown.length === 0 && !keptPending.length && (
           <p className="text-sm text-[#98A2B3] text-center py-10">
             {items.length === 0 ? 'No inscriptions in this wallet yet.' : 'Nothing in this filter.'}
           </p>

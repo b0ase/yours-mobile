@@ -5,6 +5,7 @@ import { classifyEvent, findListings } from '../wallet/historyEvents';
 import { isUnsolicited, loadItems, saveItems, saveSolicited, toItems } from './inbox';
 import { noteForTx } from './note';
 import { poisonDataFrom, savePoisonData } from './poison';
+import { withSender } from './sender';
 
 /** Refresh at most this often in the background (the badge); the inbox screen can force it. */
 export const REFRESH_MS = 10 * 60_000;
@@ -50,6 +51,7 @@ export const refreshAirdrops = (
     items = items.map((i) =>
       syms.get(i.asset.id)?.sym ? { ...i, asset: { ...i.asset, symbol: syms.get(i.asset.id)?.sym } } : i,
     );
+    items = items.map((i) => withSender(i, byId.get(i.txid), own));
     items = items.map((i) => {
       const n = noteForTx(byId.get(i.txid)?.vout, i.asset);
       return n ? { ...i, note: n.text } : i;

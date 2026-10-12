@@ -5,6 +5,7 @@
  */
 import type { LocalInfo, RawTx } from './txHistory';
 import { trailingP2pkh } from './historyEvents';
+import { pubkeyFromScriptSig } from '../airdrops/sender';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const PACE_MS = 350;
@@ -62,7 +63,7 @@ export type WocTx = {
   blocktime?: number;
   blockheight?: number;
   confirmations?: number;
-  vin: { txid?: string; vout?: number; coinbase?: string }[];
+  vin: { txid?: string; vout?: number; coinbase?: string; scriptSig?: { hex?: string } }[];
   vout: { n: number; value: number; scriptPubKey?: { hex?: string; addresses?: string[] } }[];
 };
 
@@ -71,7 +72,11 @@ export const toRawTx = (t: WocTx): RawTx => ({
   time: t.blocktime || t.time || undefined,
   blockHeight: t.blockheight || undefined,
   confirmations: t.confirmations ?? 0,
-  vin: t.vin.map((i) => (i.coinbase ? { coinbase: i.coinbase } : { txid: i.txid, vout: i.vout })),
+  vin: t.vin.map((i) => {
+    if (i.coinbase) return { coinbase: i.coinbase };
+    const pubkey = pubkeyFromScriptSig(i.scriptSig?.hex);
+    return pubkey ? { txid: i.txid, vout: i.vout, pubkey } : { txid: i.txid, vout: i.vout };
+  }),
   vout: t.vout.map((o) => {
     const hex = o.scriptPubKey?.hex ?? '';
     const listed = o.scriptPubKey?.addresses ?? [];
