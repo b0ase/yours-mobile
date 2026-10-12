@@ -30,7 +30,18 @@ const day = (t: number) =>
  * One standing order: payee, amount, next payment, Pause/Resume (one tap), Cancel. With `rate`, a dollar order shows
  * about how much BSV it would take today (it pays that day's rate when due); with `pots`, a Pays-from picker.
  */
-export const SubscriptionCard = ({ sub, rate, pots }: { sub: Subscription; rate?: number; pots?: Pot[] }) => {
+export const SubscriptionCard = ({
+  sub,
+  rate,
+  pots,
+  potLabel,
+}: {
+  sub: Subscription;
+  rate?: number;
+  pots?: Pot[];
+  /** Shown as "Paid from <pot>" when there is no Pays-from picker (the Pots & Locks › Subscriptions tab). */
+  potLabel?: string;
+}) => {
   const st = STATUS[sub.status];
   const next = nextDue(sub);
   const live = sub.status === 'active' || sub.status === 'lowFunds';
@@ -76,6 +87,11 @@ export const SubscriptionCard = ({ sub, rate, pots }: { sub: Subscription; rate?
             ))}
           </select>
         </label>
+      )}
+      {potLabel && !(pots && pots.length > 1 && !over) && (
+        <div className="text-xs" style={{ color: MUTED }}>
+          Paid from {potLabel}
+        </div>
       )}
       {sub.lastError && !over && (
         <div className="text-xs" style={{ color: '#FDA29B' }}>

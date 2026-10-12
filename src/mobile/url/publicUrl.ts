@@ -23,7 +23,7 @@ const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/brow
  * Set-up and restore screens are never put in the address bar or reopened from it: restoring reloads the page, and
  * reopening /restore-wallet after that reload sent people round in a loop (owner, 11 Oct 2026).
  */
-const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore', '/sweep']);
+export const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore', '/sweep']);
 /** In-app artist screens (media/artists/ArtistsPage.tsx). */
 const ARTISTS_ROUTE = '/m/media/artists';
 /** Wallet pages with their own route: /m/<page>[/…] ↔ /wallet/<page>[/…]. */
