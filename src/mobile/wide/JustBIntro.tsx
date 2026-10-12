@@ -9,7 +9,7 @@ const LOAD_MS = 2500;
 const FADE_MS = 900;
 
 /**
- * Desktop opens with the Just b advert (owner, 11 Oct 2026): the black-and-gold desert, "Just" and the gold b, then
+ * Desktop opens with the Just b advert (owner, 11 Oct 2026): the black-and-gold desert and a big gold b, then
  * it fades into the wallet. Once per browser session; a click or any key skips it; reduced motion skips it.
  */
 export const JustBIntro = () => {
@@ -74,7 +74,7 @@ export const JustBIntro = () => {
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
       />
       <h1
-        aria-label="Just b"
+        aria-label="b"
         style={{
           position: 'absolute',
           inset: 0,
@@ -82,16 +82,19 @@ export const JustBIntro = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '0.18em',
           color: '#fff',
-          fontSize: 'clamp(56px, 9vw, 140px)',
+          fontSize: 'clamp(160px, 28vw, 380px)',
           fontWeight: 800,
           letterSpacing: '-0.02em',
           textShadow: '0 4px 40px rgba(0,0,0,.5)',
         }}
       >
-        Just
-        <img src={mark} alt="" style={{ height: '0.86em', width: 'auto', maxWidth: 'none' }} />
+        {/* Just the b, big (owner, 12 Oct 2026: "we don't need the word 'just' there at all"). */}
+        <img
+          src={mark}
+          alt=""
+          style={{ height: '1em', width: 'auto', maxWidth: 'none', filter: 'drop-shadow(0 6px 40px rgba(0,0,0,.5))' }}
+        />
       </h1>
     </div>
   );
