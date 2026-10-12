@@ -7,6 +7,7 @@ import { loadSession } from '../chat/api';
 import { mentionNames } from './notify';
 import { startNotify, stopNotify } from './engine';
 import { startPots, stopPots } from '../pots/potsEngine';
+import { PAY_STREAM_ENABLED } from '../storeBuild';
 
 /**
  * App-wide, renders nothing: keeps the notification poller (engine.ts) running for the unlocked
@@ -46,6 +47,14 @@ const NotifyEngine = () => {
     startPots({ store: chromeStorageService });
   }, [isLocked, chromeStorageService]);
   useEffect(() => stopPots, []);
+  // Pay-per-second streaming: sweep any session key a closed page left funded (media/stream/session.ts).
+  useEffect(() => {
+    const wallet = apiContext?.wallet;
+    if (!PAY_STREAM_ENABLED || isLocked || !wallet) return;
+    void import('../media/stream/session')
+      .then((s) => (s.listSessions().length ? s.recoverSessions(wallet) : null))
+      .catch((e) => console.warn('[bmusic] session recovery failed', e));
+  }, [apiContext, isLocked]);
   return null;
 };
 

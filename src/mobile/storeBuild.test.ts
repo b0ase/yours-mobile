@@ -513,3 +513,21 @@ describe('Free Spaces in the store edition (owner, 10 Oct 2026)', () => {
     expect(STORE_ROOM_NOTE).toContain('bchatx.com');
   });
 });
+
+describe('PAY_STREAM_ENABLED: pay-per-second streaming is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env; the album and the sweeper are behind it', async () => {
+    const { PAY_STREAM_ENABLED } = await import('./storeBuild');
+    expect(PAY_STREAM_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'PAY_STREAM_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+    expect(src('./media/MediaPage.tsx')).toContain(
+      "PAY_STREAM_ENABLED ? lazy(() => import('./stream/StreamAlbum')) : null",
+    );
+    expect(src('./notify/NotifyEngine.tsx')).toContain('if (!PAY_STREAM_ENABLED || isLocked || !wallet) return;');
+  });
+});
