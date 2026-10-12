@@ -97,3 +97,33 @@ export const postSegment = (
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then((r) => json<KeyResponse>(r));
+
+/** The sponsor pot (GET /api/bmusic/stream/sponsored): while `sponsored`, the pot pays each second for the listener. */
+export type SponsorStatus = {
+  sponsored: boolean;
+  sponsor: string;
+  capSats: number;
+  spentSats: number;
+  /** Sats the pot holds now (sponsored is true only while it holds funds). */
+  potSats?: number;
+  fundAddress?: string;
+};
+/** A sponsored segment: the pot paid (or had already paid) for it; same key fields as a paid one. */
+export type SponsoredKeyResponse = Omit<KeyResponse, 'next'> & {
+  sponsoredBy: string;
+  next: { segment: number } | null;
+};
+
+export const getSponsored = (albumId: string, f: Fetch = fetch, base = BMUSIC_URL) =>
+  f(`${base}/api/bmusic/stream/sponsored?albumId=${encodeURIComponent(albumId)}`).then((r) => json<SponsorStatus>(r));
+
+export const postSponsored = (
+  body: { trackId: string; segment: number; listener: string; sig: string },
+  f: Fetch = fetch,
+  base = BMUSIC_URL,
+) =>
+  f(`${base}/api/bmusic/stream/sponsored`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<SponsoredKeyResponse>(r));

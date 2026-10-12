@@ -64,6 +64,17 @@ export const ACTIVE_SESSIONS = new Set<string>();
 
 export const newSessionId = () => Utils.toHex(Random(16));
 
+/**
+ * A sponsored session: the same deterministic session key (signer and BRC-2 recipient), no funding and no
+ * record, since there is nothing to sweep.
+ */
+export async function openSponsoredSession(
+  wallet: Pick<WalletInterface, 'createHmac'>,
+): Promise<{ id: string; key: PrivateKey }> {
+  const id = newSessionId();
+  return { id, key: await deriveSessionKey(wallet, id) };
+}
+
 /** Fund a new session with ONE wallet createAction (the budget sheet's approval). */
 export async function openSession(
   wallet: Wallet,
