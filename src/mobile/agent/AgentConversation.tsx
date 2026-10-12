@@ -477,13 +477,27 @@ export const AgentConversation = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSend, busy, statusKnown]);
 
+  const empty = messages.length === 0 && !busy;
   return (
-    <div className="w-full flex-1 min-h-0 flex flex-col">
+    <div className="relative w-full flex-1 min-h-0 flex flex-col">
+      {/* Empty chat: the pool fills the whole section, edge to edge, and the composer floats over it (owner, 12 Oct 2026). */}
+      {empty && (
+        <div className="absolute inset-0 z-0">
+          <ObsidianHero
+            compact={compact}
+            extra={MARKET_ENABLED ? QUICK_STARTS : []}
+            onPick={(prompt) => {
+              setInput(prompt);
+              document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();
+            }}
+          />
+        </div>
+      )}
       {/* Price / key status: a small yellow banner under the title row (owner, 5 Oct 2026). Tap for Settings. */}
       <button
         type="button"
         onClick={() => navigate('/m/settings')}
-        className="shrink-0 w-full px-4 py-1 text-[11px] leading-tight font-semibold text-left border-0 overflow-hidden text-ellipsis whitespace-nowrap"
+        className="relative z-10 shrink-0 w-full px-4 py-1 text-[11px] leading-tight font-semibold text-left border-0 overflow-hidden text-ellipsis whitespace-nowrap"
         style={{ background: '#F5B800', color: '#1a1300' }}
       >
         {status}
@@ -494,7 +508,7 @@ export const AgentConversation = ({
       {/* Shown until dismissed (✕), remembered per account on this device (owner, 8 Oct 2026: "a lot of text"). */}
       {(prefs.mode !== 'own' || keyReady === false) && !nudgeHidden && (
         <div
-          className="shrink-0 w-full flex items-center"
+          className="relative z-10 shrink-0 w-full flex items-center"
           style={{ background: PANEL, borderBottom: `1px solid ${LINE}` }}
         >
           <button
@@ -534,17 +548,7 @@ export const AgentConversation = ({
         />
       )}
 
-      <div className="relative flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-        {messages.length === 0 && !busy && (
-          <ObsidianHero
-            compact={compact}
-            extra={MARKET_ENABLED ? QUICK_STARTS : []}
-            onPick={(prompt) => {
-              setInput(prompt);
-              document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();
-            }}
-          />
-        )}
+      <div className="relative z-10 flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
@@ -597,8 +601,12 @@ export const AgentConversation = ({
       </div>
 
       <form
-        className="shrink-0 flex flex-col gap-1 px-3 pt-2"
-        style={{ paddingBottom: 10, borderTop: `1px solid ${LINE}` }}
+        className={`relative z-10 shrink-0 flex flex-col gap-1 ${empty ? 'mx-3 mb-3 rounded-3xl p-2' : 'px-3 pt-2'}`}
+        style={
+          empty
+            ? { background: '#000', border: '1px solid #ffffff14', boxShadow: '0 10px 40px rgba(0,0,0,.7)' }
+            : { paddingBottom: 10, borderTop: `1px solid ${LINE}` }
+        }
         onSubmit={(e) => {
           e.preventDefault();
           void send();
@@ -635,7 +643,11 @@ export const AgentConversation = ({
             placeholder="Ask b"
             aria-label="Ask b"
             className="flex-1 resize-none rounded-2xl px-3 py-2 text-[14px] text-white outline-none max-h-32"
-            style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            style={
+              empty
+                ? { background: '#000', border: '1px solid transparent' }
+                : { background: PANEL, border: `1px solid ${LINE}` }
+            }
           />
           {VOICE_INPUT_ENABLED && (
             <button
