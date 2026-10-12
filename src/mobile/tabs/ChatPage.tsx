@@ -482,7 +482,9 @@ const Conversation = ({
       .catch(() => {});
     void client.whoIsTyping(room.ticker).then(setTyping);
   }, [client, room.ticker, messages, online, viewerIsAdmin, me]);
-  usePoll(poll, THREAD_POLL_MS, !loading);
+  // Hidden (phone pager peek / display:none): no polling; the list catches up when shown.
+  const offScreen = useInPeek();
+  usePoll(poll, THREAD_POLL_MS, !loading && !offScreen);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
@@ -678,8 +680,7 @@ const Conversation = ({
     requestAnimationFrame(() => composer.current?.focus());
   };
 
-  // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it.
-  const offScreen = useInPeek();
+  // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it (offScreen).
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
@@ -2297,28 +2298,33 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle, identityAddress]);
 
-  const refresh = useCallback(() => {
-    if (!handle || !online) return;
-    void walletHoldings(apiContext)
-      .then((h) => {
-        setHoldings(h);
-        writeListCache(`chat:holdings:${identityAddress}`, h, 200);
-      })
-      .catch(() => setHoldings([]));
-    client
-      .openRooms()
-      .then((d) => setPublicRooms(parsePublicRooms(d)))
-      .catch(() => {});
-    fetchRooms(client, identityAddress)
-      .then(() => setListError(''))
-      .catch((e) => {
-        if (e instanceof ChatApiError && e.status === 401) return authLost();
-        setListError(errText(e));
-      });
-  }, [client, apiContext, handle, online, authLost, identityAddress]);
+  /** `force` skips the shared rooms() reuse window (leaving a room, Try again). */
+  const refresh = useCallback(
+    (force?: unknown) => {
+      if (!handle || !online) return;
+      void walletHoldings(apiContext)
+        .then((h) => {
+          setHoldings(h);
+          writeListCache(`chat:holdings:${identityAddress}`, h, 200);
+        })
+        .catch(() => setHoldings([]));
+      client
+        .openRooms()
+        .then((d) => setPublicRooms(parsePublicRooms(d)))
+        .catch(() => {});
+      fetchRooms(client, identityAddress, force === true ? 0 : undefined)
+        .then(() => setListError(''))
+        .catch((e) => {
+          if (e instanceof ChatApiError && e.status === 401) return authLost();
+          setListError(errText(e));
+        });
+    },
+    [client, apiContext, handle, online, authLost, identityAddress],
+  );
 
   useEffect(refresh, [refresh]);
-  usePoll(refresh, LIST_POLL_MS, !!handle && !open);
+  const listHidden = useInPeek();
+  usePoll(refresh, LIST_POLL_MS, !!handle && !open && !listHidden);
 
   // Rooms you hold the token for but are not in yet: ask bChat whether they exist.
   useEffect(() => {
@@ -2978,7 +2984,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           }}
           onBack={() => {
             setOpen(null);
-            refresh();
+            refresh(true);
           }}
         />
       )}

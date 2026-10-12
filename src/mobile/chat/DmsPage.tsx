@@ -15,6 +15,7 @@ import { BchatClient, ChatApiError, needsHandle, saveSession } from './api';
 import { dmsCacheKey, fetchRooms, onRooms, sharedChatClient } from './sharedRooms';
 import { readListCache } from '../ui/listCache';
 import { afterPaint } from '../ui/afterPaint';
+import { useInPeek } from '../phone/pageEl';
 import { SkeletonRows } from './SkeletonRows';
 import { HandleFlow } from '../names/HandleFlow';
 import { walletSigner } from './signer';
@@ -92,6 +93,8 @@ export const DmsPage = ({
   Conversation: ComponentType<DmConversationProps>;
 }) => {
   const { apiContext } = useServiceContext();
+  // Hidden (phone pager peek): no list polling.
+  const hidden = useInPeek();
   const client = useMemo(() => sharedChatClient(), []);
   const { chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
@@ -164,26 +167,29 @@ export const DmsPage = ({
     setRooms(null);
   }, [client]);
 
-  const refresh = useCallback(() => {
-    if (!handle || !online) return;
-    fetchRooms(client, identityAddress)
-      .then(() => setListError(''))
-      .catch((e) => {
-        if (e instanceof ChatApiError && e.status === 401) return authLost();
-        setListError(errText(e));
-      });
-    client
-      .contacts()
-      .then(setBchatContacts)
-      .catch(() => undefined);
-  }, [client, handle, online, authLost, identityAddress]);
+  const refresh = useCallback(
+    (force?: unknown) => {
+      if (!handle || !online) return;
+      fetchRooms(client, identityAddress, force === true ? 0 : undefined)
+        .then(() => setListError(''))
+        .catch((e) => {
+          if (e instanceof ChatApiError && e.status === 401) return authLost();
+          setListError(errText(e));
+        });
+      client
+        .contacts()
+        .then(setBchatContacts)
+        .catch(() => undefined);
+    },
+    [client, handle, online, authLost, identityAddress],
+  );
 
   useEffect(refresh, [refresh]);
   useEffect(() => {
-    if (!handle || open) return;
+    if (!handle || open || hidden) return;
     const id = window.setInterval(() => document.visibilityState === 'visible' && refresh(), LIST_POLL_MS);
     return () => window.clearInterval(id);
-  }, [handle, open, refresh]);
+  }, [handle, open, hidden, refresh]);
   useEffect(() => {
     const off = onFriends(setFriends);
     void refreshFriends().catch(() => undefined);
@@ -518,7 +524,7 @@ export const DmsPage = ({
           onAuthLost={authLost}
           onBack={() => {
             setOpen(null);
-            refresh();
+            refresh(true);
           }}
         />
       )}
