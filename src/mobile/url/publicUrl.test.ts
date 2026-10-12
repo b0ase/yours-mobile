@@ -118,4 +118,13 @@ describe('Pots & Locks tabs', () => {
       expect(toRouter(pub, '')).toBe(router);
     }
   });
+  test('bPhone: /m/calls ↔ /bphone, any case, old /calls', () => {
+    expect(toPublic('/m/calls', '')).toBe('/bphone');
+    expect(toPublic('/m/calls/x', '?a=1')).toBe('/bphone/x?a=1');
+    expect(toRouter('/bphone', '')).toBe('/m/calls');
+    expect(toRouter('/bPhone', '')).toBe('/m/calls');
+    expect(toRouter('/BPHONE/x', '?a=1')).toBe('/m/calls/x?a=1');
+    expect(toRouter('/calls', '')).toBe('/m/calls');
+    expect(toRouter('/bphones', '')).toBe('/m/bphones');
+  });
 });

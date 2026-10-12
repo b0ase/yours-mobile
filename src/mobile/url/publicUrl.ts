@@ -9,6 +9,7 @@
  *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
  *   /m/media/artists[/<artist>] ↔ /bmusic/artists[/<artist>]   (in-app artist screens, media/artists/)
  *   /m/exchange[/…]        ↔ /exchange[/…]   (old /market[/…] links open the Exchange; vercel.json 308s them too)
+ *   /m/calls[/…]           ↔ /bphone[/…]   (any case, e.g. /bPhone; old /calls links 308 there, vercel.json)
  *   /m/feed                ↔ /bchatx-feed   (old /feed links 308 there, src/web/vercel.json)
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
@@ -41,7 +42,8 @@ export const toPublic = (pathname: string, search: string): string => {
     q.delete('space');
   } else if (path.startsWith('/m/media/album/') && albumById(decodeURIComponent(path.slice(15)))) {
     path = albumPublicPath(albumById(decodeURIComponent(path.slice(15)))!);
-  } else if (path === '/m/feed') path = '/bchatx-feed';
+  } else if (path === '/m/calls' || path.startsWith('/m/calls/')) path = `/bphone${path.slice(8)}`;
+  else if (path === '/m/feed') path = '/bchatx-feed';
   else if (path === '/m/media' || path.startsWith('/m/media/')) path = `/bmusic${path.slice(8)}`;
   else if (path === '/bsv-wallet') path = '/wallet';
   else if (path.startsWith('/m/') && WALLET_PAGES.test(path.slice(2))) path = `/wallet${path.slice(2)}`;
@@ -73,6 +75,8 @@ export const toRouter = (pathname: string, search: string): string | null => {
     return withQ(a ? `/m/media/artists/${a.artistSlug}` : ARTISTS_ROUTE);
   }
   if (path === '/bmusic/artists') return withQ(ARTISTS_ROUTE);
+  const phone = /^\/(?:bphone|calls)(?=\/|$)/i.exec(path);
+  if (phone) return withQ(`/m/calls${path.slice(phone[0].length)}`);
   if (path === '/bchatx-feed' || path === '/feed') return withQ('/m/feed');
   if (path === '/market' || path.startsWith('/market/')) return withQ(`/m/exchange${path.slice(7)}`);
   if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
