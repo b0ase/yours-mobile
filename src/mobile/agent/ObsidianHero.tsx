@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import bGlyph from '../brand/bwalletx-glyph.svg';
-import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
+import { IDEAS, ideaPrompt, shuffled } from './ideas';
 import { ObsidianBackdrop } from '../ui/ObsidianBackdrop';
 import { prefersReducedMotion } from '../ui/obsidianPool';
 
@@ -13,41 +13,10 @@ import { prefersReducedMotion } from '../ui/obsidianPool';
 
 type Option = { label: string; prompt: string };
 
-// Opens with "Ask b", then gentle questions (owner, 12 Oct 2026), not commands.
+// "Ask b", then ~100 things b can help with, shuffled once per page load (ideas.ts). Each only fills the bar.
 const OPTIONS: Option[] = [
   { label: 'Ask b', prompt: 'Hi b. What can you help me with?' },
-  {
-    label: 'Would you like to create a savings pot?',
-    prompt: 'Help me create a savings pot. Ask me what it is for, how much, and until when.',
-  },
-  {
-    label: 'Is there someone you’d like to send money to?',
-    prompt: 'Help me send BSV to someone. Ask me who to and how much.',
-  },
-  {
-    label: 'Shall we set up pocket money for someone?',
-    prompt: 'Help me set up a regular payment to someone, like pocket money. Ask me who, how much and how often.',
-  },
-  ...(MARKET_ENABLED
-    ? [
-        {
-          label: 'Curious about a token?',
-          prompt: 'Tell me about a token I might like, then ask if I want to buy some and how much.',
-        },
-      ]
-    : []),
-  ...(BSPACES_ENABLED
-    ? [
-        {
-          label: 'Fancy going live in a Space?',
-          prompt: 'Help me start a live Space in one of my rooms. Ask me which room and the topic.',
-        },
-      ]
-    : []),
-  {
-    label: 'Is anything not working as it should?',
-    prompt: "Something isn't working in my wallet. Help me find out what and fix it.",
-  },
+  ...shuffled(IDEAS).map((i) => ({ label: i.label, prompt: ideaPrompt(i.label) })),
 ];
 
 /** How long each suggestion floats in the pool, and its fade. */

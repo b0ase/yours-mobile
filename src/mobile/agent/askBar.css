@@ -1,0 +1,168 @@
+/* The Ask b bar (AskBar.tsx) and its floating reply bubbles (AgentConversation variant="float"). Obsidian + gold. */
+.askb-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 4px;
+  border-radius: 999px;
+  background: #050505;
+  border: 1px solid rgba(255, 210, 77, 0.35);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+}
+.askb-bar.place-inline,
+.askb-bar.place-page {
+  margin: 0 12px 10px;
+}
+.askb-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: #fff;
+  font-size: 14px;
+  line-height: 20px;
+  padding: 6px 4px;
+  max-height: 120px;
+}
+.askb-input::placeholder {
+  color: #98a2b3;
+}
+.askb-send {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 0;
+  background: #ffd24d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.askb-send:disabled {
+  opacity: 0.4;
+}
+.askb-bar :is([data-testid='agent-talk-b']) {
+  width: 34px;
+  height: 34px;
+}
+
+/* Desktop /m/ask-b: thinner, centred, ~84px above the bottom (owner, 12 Oct 2026). */
+html.ww-on .askb-bar.place-page {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  width: min(640px, calc(100% - 32px));
+  margin: 0;
+  z-index: 20;
+}
+html.ww-on .askb-pagepad {
+  padding-bottom: 150px;
+}
+
+/* Floating, every Desktop page: bottom-centre, over the content. */
+.askb-float {
+  position: fixed;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.askb-float > * {
+  pointer-events: auto;
+}
+.askb-bubbles {
+  max-height: min(55vh, 520px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+}
+.askb-bubble {
+  position: relative;
+  max-width: 88%;
+  border-radius: 18px;
+  padding: 8px 30px 8px 12px;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  animation: askb-in 0.18s ease-out;
+}
+.askb-bubble.user {
+  align-self: flex-end;
+  background: #ffd24d;
+  color: #1a1300;
+}
+.askb-bubble.b {
+  align-self: flex-start;
+  background: rgba(16, 17, 20, 0.96);
+  color: #f2f2f0;
+  border: 1px solid #2b2f36;
+}
+.askb-bubble.note {
+  align-self: flex-start;
+  background: rgba(16, 17, 20, 0.96);
+  color: #98a2b3;
+  border: 1px solid #2b2f36;
+  font-size: 12px;
+}
+.askb-bubble.err {
+  color: #ff6b6b;
+}
+.askb-x {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.askb-x:hover {
+  opacity: 1;
+}
+.askb-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  font-size: 12px;
+}
+.askb-tools button {
+  border: 0;
+  background: rgba(5, 5, 5, 0.85);
+  color: #ffd24d;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+@keyframes askb-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+/* Very narrow: just the round b until it's opened. */
+@media (max-width: 420px) {
+  .askb-float.is-collapsed {
+    left: auto;
+    right: 16px;
+    transform: none;
+    width: auto;
+  }
+  .askb-float.is-collapsed .askb-input,
+  .askb-float.is-collapsed .askb-send {
+    display: none;
+  }
+}

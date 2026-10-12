@@ -32,7 +32,7 @@ import {
 } from '../../utils/displayCurrency';
 import { wwOpen } from './flag';
 import { LockCoin } from '../tabs/TopNav';
-import { HomeButton } from '../phone/Dock';
+import { AgentConversation } from '../agent/AgentConversation';
 import { useWalletFeed } from './walletFeed';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
@@ -374,13 +374,25 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     if (v && to[v]) navigate(to[v]);
   }, [pathname, navigate]);
 
-  // ⌘K: the real b agent. ⌘L: lock.
+  // ⌘K or "/": focus the Ask b bar (floating, or the /m/ask-b one). ⌘L: lock.
   useEffect(() => {
+    const focusBar = () => {
+      const el = document.querySelector<HTMLTextAreaElement>('[data-agent-input]');
+      if (el) el.focus();
+      else navigate('/m/ask-b');
+    };
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+      if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        focusBar();
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key === 'k') {
         e.preventDefault();
-        navigate('/m/ask-b');
+        focusBar();
       } else if (e.key === 'l') {
         e.preventDefault();
         void lockWallet();
@@ -474,7 +486,14 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       </aside>
       <main className="ww-main">
         <header className="ww-top">
-          <button className="ww-search" onClick={() => navigate('/m/ask-b')}>
+          <button
+            className="ww-search"
+            onClick={() => {
+              const el = document.querySelector<HTMLTextAreaElement>('[data-agent-input]');
+              if (el) el.focus();
+              else navigate('/m/ask-b');
+            }}
+          >
             <Icon d={I.search} />
             <span className="ww-grow">Ask b to do something…</span>
             <kbd>⌘K</kbd>
@@ -532,12 +551,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </div>
         </WidePage>
       </main>
-      {/* The phone dock's gold b, floating: click opens b, press and hold to talk (same component and gesture). */}
-      {!bapp && !pathname.startsWith('/m/ask-b') && (
-        <div className="ww-fab" title="b agent: click to open, hold to talk">
-          <HomeButton onHome={() => navigate('/m/ask-b')} onAgent={() => navigate('/m/ask-b')} disabled={false} />
-        </div>
-      )}
+      {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026). */}
+      {!bapp && !pathname.startsWith('/m/ask-b') && <AgentConversation variant="float" screen={pathname} />}
     </div>,
     document.body,
   );
