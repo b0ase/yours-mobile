@@ -2,6 +2,7 @@
 import { decrypt } from '../utils/crypto';
 import type { PlatformHooks } from '../platform';
 import { YoursNative, isNative, type BiometryType } from './native';
+import { afterUnlockRead, enrolmentOffer, lockScreenMode, type UnlockRead } from './biometricDecision';
 
 /**
  * Face ID / Touch ID / fingerprint unlock, layered on upstream's own unlock
@@ -25,6 +26,7 @@ const LABELS: Record<BiometryType, string> = {
 };
 const ENROLLED = (account: string) => `bio:enrolled:${account}`;
 const DECLINED = 'bio:declined';
+const REENROL = (account: string) => `bio:reenrol:${account}`;
 const SEALED = (account: string) => `passKey:${account}`;
 
 let biometry: BiometryType = 'none';
@@ -79,14 +81,37 @@ const toast = (text: string) => {
 
 // Enrolment -----------------------------------------------------------------
 
+const capitalised = () => label().charAt(0).toUpperCase() + label().slice(1);
+
+const enrol = async (id: string, passKey: string) => {
+  try {
+    await YoursNative.biometricSet({ key: SEALED(id), value: passKey });
+    await flag.set(ENROLLED(id));
+    await flag.clear(REENROL(id));
+    toast(`${capitalised()} unlock is on`);
+  } catch (error: any) {
+    if (error?.code !== 'cancelled') toast(`Couldn't turn on ${label()}`);
+  }
+};
+
 const offerEnrolment = async () => {
-  if (offeredThisSession || document.querySelector('.yours-overlay, .yours-sheet-backdrop')) return;
+  const overlayOpen = !!document.querySelector('.yours-overlay, .yours-sheet-backdrop');
+  if (offeredThisSession || overlayOpen) return;
   offeredThisSession = true;
   const { passKey } = await chromeApi.storage.session.get('passKey');
-  if (typeof passKey !== 'string') return;
   const { id, encryptedKeys } = await selectedAccount();
-  if (!id || !encryptedKeys) return;
-  if ((await flag.get(ENROLLED(id))) || (await flag.get(DECLINED))) return;
+  const offer = enrolmentOffer({
+    hasPassKey: typeof passKey === 'string',
+    hasAccount: !!id && !!encryptedKeys,
+    enrolled: !!id && (await flag.get(ENROLLED(id))),
+    needsReenrol: !!id && (await flag.get(REENROL(id))),
+    declined: await flag.get(DECLINED),
+    offeredThisSession: false,
+    overlayOpen,
+  });
+  if (offer === 'none' || !id) return;
+  // It was on and broke (e.g. a new fingerprint was added): set it up again; the system prompt is the consent.
+  if (offer === 'reenrol') return void (await enrol(id, passKey));
   const yes = await sheet(
     `Unlock with ${label()}?`,
     `Use ${label()} instead of your password to unlock your wallet on this device. Your password still works and is still needed for backups and sensitive settings.`,
@@ -94,19 +119,14 @@ const offerEnrolment = async () => {
     'Not now',
   );
   if (!yes) return void (await flag.set(DECLINED));
-  try {
-    await YoursNative.biometricSet({ key: SEALED(id), value: passKey });
-    await flag.set(ENROLLED(id));
-    toast(`${label()} unlock is on`);
-  } catch (error: any) {
-    if (error?.code !== 'cancelled') toast(`Couldn't turn on ${label()}`);
-  }
+  await enrol(id, passKey);
 };
 
 const disable = async () => {
   const { id } = await selectedAccount();
   await YoursNative.biometricRemove({ key: id ? SEALED(id) : '' });
   if (id) await flag.clear(ENROLLED(id));
+  if (id) await flag.clear(REENROL(id));
   await flag.set(DECLINED);
 };
 
@@ -115,23 +135,33 @@ const disable = async () => {
 const unlock = async (): Promise<boolean> => {
   const { id, encryptedKeys } = await selectedAccount();
   if (!id || !encryptedKeys) return false;
-  let passKey: string | null;
+  let passKey: string | null = null;
+  let read: UnlockRead;
   try {
     passKey = (await YoursNative.biometricGet({ key: SEALED(id), reason: 'Unlock your wallet' })).value;
+    const valid =
+      !!passKey &&
+      (await decrypt(encryptedKeys, passKey)
+        .then((plain) => (JSON.parse(plain), true))
+        .catch(() => false));
+    read = { kind: 'value', valid };
   } catch (error: any) {
-    if (error?.code !== 'cancelled') toast(`${label()} didn't work. Use your password.`);
+    console.warn('[biometric] unlock failed:', error?.code, error?.message);
+    read = { kind: error?.code === 'cancelled' ? 'cancelled' : 'error' };
+  }
+  const outcome = afterUnlockRead(read);
+  if (outcome === 'keep') {
+    if (read.kind === 'error') toast(`${capitalised()} didn't work. Use your password.`);
     return false;
   }
-  const valid =
-    !!passKey &&
-    (await decrypt(encryptedKeys, passKey)
-      .then((plain) => (JSON.parse(plain), true))
-      .catch(() => false));
-  if (!valid) {
-    // Password changed, or biometrics re-enrolled: the sealed key is useless now.
+  if (outcome === 'broken' || !passKey) {
+    // A new fingerprint was added, the password changed, or the sealed item is gone: the sealed key is useless.
+    // Remember that it was on, so the lock screen says so and the next password unlock sets it up again.
+    console.warn('[biometric] sealed passKey no longer works; re-enrol after a password unlock');
     await YoursNative.biometricRemove({ key: SEALED(id) });
     await flag.clear(ENROLLED(id));
-    toast(`Enter your password to turn ${label()} back on`);
+    await flag.set(REENROL(id));
+    toast(reenrolNotice());
     return false;
   }
   offeredThisSession = true;
@@ -143,10 +173,17 @@ const unlock = async (): Promise<boolean> => {
 
 // Platform hooks -------------------------------------------------------------
 
-const isEnrolled = async () => {
+const reenrolNotice = () => `${capitalised()} needs setting up again: unlock with your password once`;
+
+const enrolmentState = async () => {
   const { id } = await selectedAccount();
-  return !!id && (await flag.get(ENROLLED(id)));
+  if (!id) return { enrolled: false, needsReenrol: false };
+  return { enrolled: await flag.get(ENROLLED(id)), needsReenrol: await flag.get(REENROL(id)) };
 };
+
+const isEnrolled = async () => lockScreenMode(await enrolmentState()) === 'prompt';
+
+const notice = async () => (lockScreenMode(await enrolmentState()) === 'reenrol' ? reenrolNotice() : undefined);
 
 /**
  * Returns the hooks for src/platform.ts, or {} when biometrics aren't
@@ -168,12 +205,13 @@ export const initBiometricUnlock = async (chrome: any): Promise<PlatformHooks> =
 
   return {
     quickUnlock: {
-      label: `Unlock with ${label()}`,
+      label: `Use ${label()}`,
       disableLabel: `Stop using ${label()}`,
       isAvailable: isEnrolled,
       unlock,
       disable,
       autoPrompt: true,
+      notice,
     },
     onWalletReady: () => void offerEnrolment(),
   };

@@ -24,6 +24,11 @@ export type QuickUnlock = {
   disable?: () => Promise<void>;
   /** Prompt as soon as the lock screen appears. */
   autoPrompt?: boolean;
+  /**
+   * When not available: a note to show instead, e.g. "Fingerprint needs setting up again: unlock with your
+   * password once". Undefined shows nothing.
+   */
+  notice?: () => Promise<string | undefined>;
 };
 
 export type PlatformHooks = {
