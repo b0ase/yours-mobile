@@ -26,8 +26,26 @@ export const NEW_USER_DAYS = 30;
 export const MAX_ACTIONS_PER_USER_DAY = 200;
 /** Most one action's fee may be (sats): a big transaction is the user's to pay. */
 export const MAX_FEE_SATS_PER_ACTION = 500;
-/** Monthly budget in sats (≈ $10/month; the owner sets FEE_POT_MONTHLY_SATS on the server). */
-export const DEFAULT_MONTHLY_BUDGET_SATS = 50_000;
+/** Monthly budget in US dollars (server env FEE_POT_MONTHLY_USD), converted to sats at reserve time. */
+export const DEFAULT_MONTHLY_BUDGET_USD = 10;
+/**
+ * Hard ceiling in sats whatever the price says (server env FEE_POT_MAX_MONTHLY_SATS): 100,000,000 sats = 1 BSV
+ * (≈ $20 at $20/BSV), so a bad or crashed price feed can never spend more than this in a month.
+ */
+export const DEFAULT_MAX_MONTHLY_SATS = 100_000_000;
+
+/**
+ * This month's budget in sats: `usd` at `usdPerBsv`, never above `ceilingSats`. No usable price = 0 (the pot pays
+ * nothing rather than guess). $10 at $20/BSV = 50,000,000 sats.
+ */
+export const monthlyBudgetSats = (
+  usd = DEFAULT_MONTHLY_BUDGET_USD,
+  usdPerBsv: number,
+  ceilingSats = DEFAULT_MAX_MONTHLY_SATS,
+): number => {
+  if (!(usdPerBsv > 0) || !(usd > 0) || !Number.isFinite(usdPerBsv)) return 0;
+  return Math.min(Math.max(0, Math.floor(ceilingSats)), Math.floor((usd / usdPerBsv) * 1e8));
+};
 /** Network fee rate the service pays at (sat per kB). */
 export const FEE_RATE_SAT_PER_KB = 100;
 /** Bytes the service's own input and change output add (P2PKH in + out). */
@@ -60,18 +78,14 @@ export const feeFor = (bytes: number, rate = FEE_RATE_SAT_PER_KB) =>
 const isKind = (k: string): k is FeePotKind => (FEE_POT_KINDS as readonly string[]).includes(k);
 
 /** Will the pot pay this action's network fee? All caps are checked before anything is signed. */
-export function feePotDecision(
-  req: FeePotRequest,
-  usage: FeePotUsage,
-  monthlyBudgetSats = DEFAULT_MONTHLY_BUDGET_SATS,
-): FeePotDecision {
+export function feePotDecision(req: FeePotRequest, usage: FeePotUsage, budgetSats: number): FeePotDecision {
   if (!isKind(req.kind)) return { ok: false, reason: 'kind' };
   const ageDays = (req.now.getTime() - req.userCreatedAt.getTime()) / 86_400_000;
   if (req.kind !== 'artist-play' && !(ageDays >= 0 && ageDays < NEW_USER_DAYS)) return { ok: false, reason: 'not-new' };
   if (usage.userToday >= MAX_ACTIONS_PER_USER_DAY) return { ok: false, reason: 'user-day' };
   const feeSats = feeFor(req.txBytes + SPONSOR_OVERHEAD_BYTES);
   if (feeSats > MAX_FEE_SATS_PER_ACTION) return { ok: false, reason: 'too-big' };
-  if (usage.monthSats + feeSats > monthlyBudgetSats) return { ok: false, reason: 'month-budget' };
+  if (usage.monthSats + feeSats > budgetSats) return { ok: false, reason: 'month-budget' };
   return { ok: true, feeSats };
 }
 

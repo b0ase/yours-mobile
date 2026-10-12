@@ -17,12 +17,12 @@ Covered:
 
 ## Caps (all checked before anything is signed)
 
-| Cap                  | Value                                                    | Where                      |
-| -------------------- | -------------------------------------------------------- | -------------------------- |
-| Per user per UTC day | 200 actions                                              | `MAX_ACTIONS_PER_USER_DAY` |
-| Per action           | 500 sats fee max (bigger txs are the user's to pay)      | `MAX_FEE_SATS_PER_ACTION`  |
-| Per month, all users | `FEE_POT_MONTHLY_SATS` (default 50,000 sats ≈ $10/month) | server env                 |
-| Fee rate             | 100 sat/kB                                               | `FEE_RATE_SAT_PER_KB`      |
+| Cap                  | Value                                                                                                                                                                                                                                     | Where                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Per user per UTC day | 200 actions                                                                                                                                                                                                                               | `MAX_ACTIONS_PER_USER_DAY` |
+| Per action           | 500 sats fee max (bigger txs are the user's to pay)                                                                                                                                                                                       | `MAX_FEE_SATS_PER_ACTION`  |
+| Per month, all users | `FEE_POT_MONTHLY_USD` (default $10), converted to sats at reserve time from the price feed; hard ceiling `FEE_POT_MAX_MONTHLY_SATS` (default 100,000,000 sats = 1 BSV). $10 at $20/BSV = 50,000,000 sats. No price = the pot pays nothing | server env                 |
+| Fee rate             | 100 sat/kB                                                                                                                                                                                                                                | `FEE_RATE_SAT_PER_KB`      |
 
 Rules: `src/mobile/feePot/feePot.ts` (tested in `feePot.test.ts`); the server mirrors them in
 `bitcoin-music lib/feepot/limits.ts` and is the authority.
@@ -68,6 +68,6 @@ Vercel. Rotate by setting a new key and sweeping the old address.
 
 1. Say the server is clean.
 2. Approve and run `supabase/migrations/20261014b_feepot.sql` (bitcoin-music).
-3. Generate a key, set `FEE_POT_WIF` and `FEE_POT_MONTHLY_SATS` on the bitcoin-music Vercel project, fund the address
+3. Generate a key, set `FEE_POT_WIF`, `FEE_POT_MONTHLY_USD` (10) and optionally `FEE_POT_MAX_MONTHLY_SATS` on the bitcoin-music Vercel project, fund the address
    (≈ $10/month).
 4. Set `FEE_POT_ENABLED=1` on the server, then build the wallet with `VITE_FEE_POT=1`.
