@@ -1,4 +1,8 @@
 /* The Ask b bar (AskBar.tsx) and its floating reply bubbles (AgentConversation variant="float"). Obsidian + gold. */
+/* Bar height = 34px button + 2x4px padding + 2x1px border. Offsets below add one bar-height of lift (owner, 12 Oct 2026). */
+:root {
+  --askb-bar-h: 44px;
+}
 .askb-bar {
   display: flex;
   align-items: center;
@@ -48,25 +52,25 @@
   height: 34px;
 }
 
-/* Desktop /m/ask-b: thinner, centred, ~84px above the bottom (owner, 12 Oct 2026). */
+/* Desktop /m/ask-b: thinner, centred, 84px + one bar-height above the bottom (owner, 12 Oct 2026). */
 html.ww-on .askb-bar.place-page {
   position: absolute;
   left: 50%;
-  bottom: 84px;
+  bottom: calc(84px + var(--askb-bar-h));
   transform: translateX(-50%);
   width: min(640px, calc(100% - 32px));
   margin: 0;
   z-index: 20;
 }
 html.ww-on .askb-pagepad {
-  padding-bottom: 150px;
+  padding-bottom: calc(150px + var(--askb-bar-h));
 }
 
 /* Floating, every Desktop page: bottom-centre, over the content. */
 .askb-float {
   position: fixed;
   left: 50%;
-  bottom: max(20px, env(safe-area-inset-bottom));
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--askb-bar-h));
   transform: translateX(-50%);
   width: min(560px, calc(100vw - 32px));
   z-index: 60;
