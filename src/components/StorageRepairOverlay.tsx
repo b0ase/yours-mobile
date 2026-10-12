@@ -92,11 +92,13 @@ export const StorageRepairOverlay = () => {
         ? 'Sync Repair Failed'
         : 'Sync Repair Incomplete';
   const subtitle = running
-    ? 'This can take a few minutes'
+    ? 'Checking this wallet against its backup and the chain'
     : success
-      ? record?.rescan?.stale.length
-        ? `Local and remote storage match. ${record.rescan.stale.length} already-spent output${record.rescan.stale.length === 1 ? '' : 's'} marked spent`
-        : 'Local and remote storage match'
+      ? record?.released?.length
+        ? `Local and remote storage match. ${record.released.length} unsent send${record.released.length === 1 ? '' : 's'} released, so what ${record.released.length === 1 ? 'it' : 'they'} held is back`
+        : record?.rescan?.stale.length
+          ? `Local and remote storage match. ${record.rescan.stale.length} already-spent output${record.rescan.stale.length === 1 ? '' : 's'} marked spent`
+          : 'Local and remote storage match'
       : 'Nothing was removed from your wallet';
   const color = running || success ? ACCENT : FAIL;
 
@@ -183,7 +185,7 @@ export const StorageRepairOverlay = () => {
                     </span>
                     {state === 'active' && !!record.phaseItems && (
                       <span className="text-[11px] tabular-nums" style={{ color: GRAY }}>
-                        {record.phaseItems.toLocaleString()}
+                        {record.phaseItems.toLocaleString()} done
                       </span>
                     )}
                   </div>
@@ -193,7 +195,7 @@ export const StorageRepairOverlay = () => {
 
             {running ? (
               <p className="text-[11px] mt-4" style={{ color: DIM }}>
-                Keep this window open until it finishes
+                You can close this window: the repair keeps going in the background
               </p>
             ) : (
               <motion.div

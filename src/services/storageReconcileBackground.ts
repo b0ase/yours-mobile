@@ -8,6 +8,10 @@ import {
 } from '@bsv/wallet-toolbox-client';
 import type { OneSatServices } from '@1sat/wallet-browser';
 import {
+  isFullPass,
+  needsVerifyReread,
+  mapPool,
+  withRetry,
   advanceOffsets,
   type ChainAnswers,
   type ChainTxStatus,
@@ -144,18 +148,26 @@ const push = async (
   return totals;
 };
 
+/** Indexer batches in flight at once: fast on big wallets, gentle enough for public indexers (with 429 backoff). */
+const CHAIN_CONCURRENCY = 6;
+
 const askChain = async (services: OneSatServices, outpoints: string[], txids: string[]): Promise<ChainAnswers> => {
   const spends = new Map<string, string | null>();
-  for (let i = 0; i < outpoints.length; i += SPENDS_BATCH) {
-    const batch = outpoints.slice(i, i + SPENDS_BATCH);
-    const result = await services.txo.getSpends(batch.map((o) => o.replace('.', '_')));
-    batch.forEach((o, j) => spends.set(o, result[j] ?? null));
-  }
+  const batches: string[][] = [];
+  for (let i = 0; i < outpoints.length; i += SPENDS_BATCH) batches.push(outpoints.slice(i, i + SPENDS_BATCH));
+  const statusBatches: string[][] = [];
+  for (let i = 0; i < txids.length; i += SPENDS_BATCH) statusBatches.push(txids.slice(i, i + SPENDS_BATCH));
   const statuses = new Map<string, ChainTxStatus>();
-  if (txids.length > 0) {
-    const { results } = await services.getStatusForTxids(txids);
-    for (const r of results) statuses.set(r.txid, r.status);
-  }
+  await Promise.all([
+    mapPool(batches, CHAIN_CONCURRENCY, async (batch) => {
+      const result = await withRetry(() => services.txo.getSpends(batch.map((o) => o.replace('.', '_'))));
+      batch.forEach((o, j) => spends.set(o, result[j] ?? null));
+    }),
+    mapPool(statusBatches, CHAIN_CONCURRENCY, async (batch) => {
+      const { results } = await withRetry(() => services.getStatusForTxids(batch));
+      for (const r of results) statuses.set(r.txid, r.status);
+    }),
+  ]);
   return { spends, statuses };
 };
 
@@ -167,7 +179,7 @@ const applyVerdict = async (
   vout: number,
   verdict: SpendVerdict,
 ): Promise<boolean> => {
-  if (verdict.kind === 'unresolved') return false;
+  if (verdict.kind === 'unresolved' || verdict.kind === 'release') return false;
   const [tx] = await local.findTransactions({ partial: { userId, txid } });
   if (!tx) return false;
   const [output] = await local.findOutputs({ partial: { userId, transactionId: tx.transactionId, vout } });
@@ -214,11 +226,16 @@ export const reconcileStorage = async (
   remoteUrl: string,
   trigger: ReconcileTrigger,
   resumeAttempts?: number,
+  opts: { full?: boolean } = {},
 ): Promise<ReconcileRecord> => {
+  // Pushes only what changed since the last repair of this pair (its own sync state); the migration and an explicit
+  // "full" run resend everything. The first ever run has no state, so it is full anyway (owner, 12 Oct 2026: 21 min).
+  const fullPass = isFullPass(trigger, opts);
   const record: ReconcileRecord = {
     startedAt: new Date().toISOString(),
     trigger,
     ...(resumeAttempts ? { resumeAttempts } : {}),
+    full: fullPass,
     appVersion: chrome.runtime.getManifest().version,
     remoteUrl,
   };
@@ -278,14 +295,34 @@ export const reconcileStorage = async (
       record.spendConflicts = conflicts;
 
       await enter('push-to-remote');
-      record.pushedToRemote = await push(local, localSettings, remote, remoteSettings, identityKey, true, onChunk);
+      record.pushedToRemote = await push(local, localSettings, remote, remoteSettings, identityKey, fullPass, onChunk);
       await enter('push-to-local');
-      record.pushedToLocal = await push(remote, remoteSettings, local, localSettings, identityKey, true, onChunk);
+      record.pushedToLocal = await push(remote, remoteSettings, local, localSettings, identityKey, fullPass, onChunk);
 
       await enter('apply-corrections');
       const { user } = await local.findOrInsertUser(identityKey);
       record.corrected = [];
+      // Never-broadcast local sends holding outputs: abort each once (wallet-toolbox returns its inputs).
+      const released = new Set<string>();
       for (const c of conflicts) {
+        if (c.verdict.kind !== 'release' || released.has(c.verdict.txid)) continue;
+        const key = c.verdict.txid;
+        try {
+          const r = await local.abortAction(
+            { identityKey, userId: user.userId },
+            { reference: key.startsWith('ref:') ? key.slice(4) : key },
+          );
+          if (r.aborted) released.add(key);
+        } catch (e) {
+          console.warn('[reconcile] could not release never-broadcast send', key, e);
+        }
+      }
+      record.released = [...released];
+      for (const c of conflicts) {
+        if (c.verdict.kind === 'release') {
+          if (released.has(c.verdict.txid)) record.corrected.push(c.outpoint);
+          continue;
+        }
         if (await applyVerdict(local, user.userId, c.txid, c.vout, c.verdict)) record.corrected.push(c.outpoint);
       }
       for (const st of stale) {
@@ -306,8 +343,18 @@ export const reconcileStorage = async (
       }
 
       await enter('verify');
-      const localAfter = await readIndex(local, identityKey, localSettings.storageIdentityKey, onChunk);
-      const remoteAfter = await readIndex(remote, identityKey, remoteSettings.storageIdentityKey, onChunk);
+      // Nothing moved and both stores already agreed: re-reading both copies would only repeat the first read.
+      const changed = needsVerifyReread({
+        pushed: [record.pushedToRemote, record.pushedToLocal],
+        corrected: record.corrected.length,
+        oneSided: oneSidedCount(diff.onlyLocal) + oneSidedCount(diff.onlyRemote),
+      });
+      const localAfter = changed
+        ? await readIndex(local, identityKey, localSettings.storageIdentityKey, onChunk)
+        : localIndex;
+      const remoteAfter = changed
+        ? await readIndex(remote, identityKey, remoteSettings.storageIdentityKey, onChunk)
+        : remoteIndex;
       const after = diffIndexes(localAfter, remoteAfter);
       record.verify = {
         onlyLocal: oneSidedCount(after.onlyLocal),
