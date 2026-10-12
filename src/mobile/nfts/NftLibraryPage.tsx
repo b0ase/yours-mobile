@@ -54,8 +54,8 @@ const PENDING_TEXT = 'Pending, not on chain yet';
 const PENDING_WHY =
   'This NFT’s transaction is signed and queued but the network hasn’t confirmed it yet. Send, listing and download open once it’s on chain.';
 
-/** `pending` comes from unbroadcast.ts PENDING_ON_CHAIN via useWalletMedia once that lands; absent = on chain. */
-const isPending = (m: MediaItem) => !!(m as MediaItem & { pending?: boolean }).pending;
+/** unbroadcast.ts PENDING_ON_CHAIN, via useWalletMedia. */
+const isPending = (m: MediaItem) => !!m.pending;
 
 /* ---------- Previews ---------- */
 
