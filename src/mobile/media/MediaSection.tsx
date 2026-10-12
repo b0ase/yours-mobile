@@ -36,7 +36,7 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 export const MediaSection = () => {
   const navigate = useNavigate();
-  const { items, hasMore, loading, error, loadMore, reload, refresh } = useWalletMedia();
+  const { items, hasMore, loading, error, loadMore, reload, refresh, hiddenUnbroadcast } = useWalletMedia();
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNote, setRefreshNote] = useState('');
   const doRefresh = async () => {
@@ -211,6 +211,22 @@ export const MediaSection = () => {
             {loading ? 'Loading…' : 'Load more'}
           </button>
         )}
+        {hiddenUnbroadcast > 0 && (
+          <p className="text-[11px] text-center text-[#98A2B3]">
+            {hiddenUnbroadcast} item{hiddenUnbroadcast === 1 ? '' : 's'} from a mint or send that never reached the
+            blockchain
+            {hiddenUnbroadcast === 1 ? ' is' : ' are'} hidden: there is nothing on chain to send.
+          </p>
+        )}
+        {/* A refresh at the bottom too, where the eye ends up after scrolling (owner, 12 Oct 2026). */}
+        <button
+          onClick={() => void doRefresh()}
+          disabled={refreshing}
+          className="flex items-center justify-center gap-2 rounded-xl bg-[#17191E] py-2.5 text-xs font-semibold text-white"
+        >
+          <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Refreshing NFTs…' : 'Refresh NFTs'}
+        </button>
       </div>
 
       {open && <NftDetail item={open} onClose={() => setOpen(null)} onSent={reload} />}

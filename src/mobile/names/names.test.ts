@@ -6,7 +6,7 @@ import {
   parseRecipient,
   resolveRecipient,
   scriptToAddress,
-  TOKENS_UNSUPPORTED,
+  HANDCASH_NO_TOKENS,
   UNBOUND_NAME,
   type Fetch,
 } from './names';
@@ -76,7 +76,7 @@ describe('paymail resolution', () => {
     });
     expect(r.ordAddress).toBeUndefined();
     expect(calls.some((c) => c.includes('handcash.io/.well-known') && !c.includes('cloud'))).toBe(false);
-    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: TOKENS_UNSUPPORTED });
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: HANDCASH_NO_TOKENS });
     expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: 'boase@handcash.io' });
   });
 
