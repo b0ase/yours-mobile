@@ -198,7 +198,25 @@ function parseHandle(handle, env = process.env) {
 }
 
 const RESERVED_MSG = 'That alias is reserved';
+/**
+ * Everything after a dot is the system's (owner, 12 Oct 2026; same rule as bit-sign lib/handle-tld.ts).
+ * A person never claims a dotted name. The only dotted aliases here are `.x` / `.gmail`, issued by the
+ * Continue with X / Google path (ticket-gated below). `.agent` (token agents) and `.bot` (system bots)
+ * are never issued by this registry. Unicode dot look-alikes and zero-width characters count.
+ */
+const SYSTEM_TLDS = ['agent', 'bot', 'x', 'gmail'];
+const DOT_LIKE = /[.\u00B7\u0387\u2024\u2027\u2219\u22C5\u30FB\u3002\uFE52\uFF0E\uFF61\uFF65\u02D9\u0701\u0702\u2E33]/;
+const DOT_MSG = "Names can't contain a dot. Names after a dot are kept for agents and system accounts.";
+const foldAlias = (a) => String(a || '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '').toLowerCase();
+function dotRefusal(alias) {
+  const f = foldAlias(alias);
+  if (!DOT_LIKE.test(f)) return null;
+  // The one system path that issues dotted names here: a proven X / Gmail name.
+  return SOCIAL_RE.test(f) ? null : DOT_MSG;
+}
 function validAlias(alias) {
+  const dot = dotRefusal(alias);
+  if (dot) return dot;
   if (!aliasOk(alias)) return 'Alias must be 1-32 chars: a-z, 0-9, - or _ (not at the ends)';
   if (reservedBase(alias)) return RESERVED_MSG;
   return null;
@@ -867,6 +885,8 @@ module.exports = {
   parseHandle,
   parseHandleParts,
   validAlias,
+  dotRefusal,
+  SYSTEM_TLDS,
   signedMessage,
   verifySigned,
   deriveDestination,

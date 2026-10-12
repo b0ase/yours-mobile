@@ -480,6 +480,20 @@ describe('reserved names (owner, 9 Oct 2026)', () => {
   });
 });
 
+describe('everything after a dot is the system\'s', () => {
+  test('people can never claim .agent, .bot or any other dotted name', () => {
+    for (const a of ['vexvoid.agent', 'VexVoid.AGENT', 'someone.bot', 'alex.1111', 'shop.com', 'vexvoid\u2024agent', 'vexvoid\uFF0Eagent', 'vex\u200Bvoid.agent', 'vexvoid\u3002bot'])
+      expect(pm.validAlias(a)).toBe(pm.dotRefusal(a) || 'expected a refusal');
+  });
+  test('the ticket-gated social names still pass the dot rule', () => {
+    for (const a of ['b0asex.x', 'theirname.gmail']) expect(pm.dotRefusal(a)).toBeNull();
+    expect(pm.SYSTEM_TLDS).toEqual(expect.arrayContaining(['agent', 'bot', 'x', 'gmail']));
+  });
+  test('plain names are untouched', () => {
+    for (const a of ['vexvoid', 'vexvoid-agent', 'bot']) expect(pm.dotRefusal(a)).toBeNull();
+  });
+});
+
 describe('renamed handles keep receiving', () => {
   test('an old name answers as the new one via bit-sign', async () => {
     const store = memStore();
