@@ -52,24 +52,23 @@ const OPTIONS: Option[] = [
 const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
 // Domain-warped noise as a height field, lit like polished volcanic glass: near-black body, soft white sheen,
 // and a faint warm glow where the gold b sits.
-// Blacker, slower, smoother (owner, 12 Oct 2026): darker body and sheen, ~1/3 the drift speed, broader waves.
 const FRAG = `precision mediump float;
 uniform vec2 r;uniform float t;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
 return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
-float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*n(p);p=p*2.03+vec2(1.7,9.2);a*=.5;}return v;}
-float H(vec2 p){vec2 q=vec2(fbm(p+t*.014),fbm(p+vec2(5.2,1.3)-t*.011));return fbm(p+1.6*q);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*n(p);p=p*2.03+vec2(1.7,9.2);a*=.5;}return v;}
+float H(vec2 p){vec2 q=vec2(fbm(p+t*.04),fbm(p+vec2(5.2,1.3)-t*.03));return fbm(p+2.2*q);}
 void main(){
 vec2 uv=(gl_FragCoord.xy-.5*r)/min(r.x,r.y);
-vec2 p=uv*1.1;float e=.009;
-float c=H(p);vec3 N=normalize(vec3(c-H(p+vec2(e,0)),c-H(p+vec2(0,e)),.02));
+vec2 p=uv*1.6;float e=.004;
+float c=H(p);vec3 N=normalize(vec3(c-H(p+vec2(e,0)),c-H(p+vec2(0,e)),.012));
 vec3 L=normalize(vec3(-.4,.6,.7));
-float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),24.);
+float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),38.);
 float sheen=pow(max(dot(N,normalize(vec3(.3,.2,1.))),0.),6.);
 float d=length(uv);
-vec3 col=vec3(.004,.004,.006)+vec3(.045,.048,.06)*sheen+vec3(.6,.61,.66)*spec*.45;
-col+=vec3(.96,.72,.0)*.08*exp(-d*d*5.)*(.6+.4*sheen);
+vec3 col=vec3(.014,.014,.018)+vec3(.09,.095,.115)*sheen+vec3(.7,.71,.76)*spec*.7;
+col+=vec3(.96,.72,.0)*.10*exp(-d*d*5.)*(.6+.4*sheen);
 col*=smoothstep(1.25,.25,d);
 gl_FragColor=vec4(col,1.);}`;
 
@@ -106,7 +105,7 @@ const usePool = (canvas: React.RefObject<HTMLCanvasElement | null>, still: boole
     const uT = gl.getUniformLocation(prog, 't');
     // Half resolution, capped: the pool is soft, so this is invisible and keeps the GPU cool.
     const size = () => {
-      const s = Math.min(window.devicePixelRatio || 1, 1.5) * 0.75;
+      const s = Math.min(window.devicePixelRatio || 1, 1.5) * 0.5;
       el.width = Math.max(1, Math.round(el.clientWidth * s));
       el.height = Math.max(1, Math.round(el.clientHeight * s));
       gl.viewport(0, 0, el.width, el.height);
