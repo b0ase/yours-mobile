@@ -623,6 +623,14 @@ export const AgentConversation = ({
           </div>
         )}
         <div className="flex items-end gap-2">
+          {/* b on the left of the chat bar (owner, 12 Oct 2026): b, text, Send. */}
+          <AgentTalkButton
+            onTranscript={(t) => {
+              setNotice(null);
+              setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t).slice(0, MAX_INPUT));
+            }}
+            onNote={setNotice}
+          />
           <textarea
             data-agent-input
             value={input}
@@ -643,13 +651,6 @@ export const AgentConversation = ({
                 ? { background: '#000', border: '1px solid transparent' }
                 : { background: PANEL, border: `1px solid ${LINE}` }
             }
-          />
-          <AgentTalkButton
-            onTranscript={(t) => {
-              setNotice(null);
-              setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t).slice(0, MAX_INPUT));
-            }}
-            onNote={setNotice}
           />
           <button
             type="submit"
