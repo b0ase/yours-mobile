@@ -35,6 +35,8 @@ const TicketsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ 
 const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.CreditsPage })));
 // Wallet › NFTs library (Desktop /wallet/nfts[/<outpoint>], docs/NFT-LIBRARY.md).
 const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
+// Desktop sidebar › Friends (/wallet/friends, docs/FRIENDS.md).
+const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
 // No app-wide error boundary upstream: one throw blanked the whole page (owner, 6 Oct 2026).
@@ -70,6 +72,8 @@ const MobileRoutes = () => (
         <Route path="nfts/:outpoint" element={<NftLibraryPage />} />
         <Route path="tickets" element={<TicketsPage />} />
         <Route path="credits" element={<CreditsPage />} />
+        <Route path="friends" element={<FriendsPage />} />
+        <Route path="friends/:slug" element={<FriendsPage />} />
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}

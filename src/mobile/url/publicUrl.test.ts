@@ -99,4 +99,10 @@ describe('wallet pages under /wallet', () => {
     expect(toPublic('/bsv-wallet', '')).toBe('/wallet');
     expect(toRouter('/wallet', '')).toBe('/bsv-wallet');
   });
+  test('friends and a friend round trip', () => {
+    expect(toPublic('/m/friends', '')).toBe('/wallet/friends');
+    expect(toPublic('/m/friends/alice', '')).toBe('/wallet/friends/alice');
+    expect(toRouter('/wallet/friends', '')).toBe('/m/friends');
+    expect(toRouter('/wallet/friends/alice/', '')).toBe('/m/friends/alice');
+  });
 });

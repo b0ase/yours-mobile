@@ -294,7 +294,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'tokens', label: 'Wallet', icon: I.wallet, to: '/bsv-wallet', kind: 'tokens' },
         // Its own library page, /wallet/nfts (nfts/NftLibraryPage.tsx).
         { id: 'nfts', label: 'NFTs', icon: I.nfts, to: '/m/nfts' },
-        { id: 'friends', label: 'Friends', icon: I.friends, to: '/bsv-wallet', kind: 'friends' },
+        // Its own page with a deep link per friend (/wallet/friends/<handle>, owner 12 Oct 2026).
+        { id: 'friends', label: 'Friends', icon: I.friends, to: '/m/friends' },
         {
           id: 'tickets',
           label: 'Tickets',
@@ -433,11 +434,15 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       : (allItems.find((i) => i.to && !i.kind && pathname === i.to.split('?')[0]) ??
         (onWallet ? allItems.find((i) => i.kind === kind) : undefined));
   const seg = pathname.split('/').filter(Boolean).pop() ?? '';
+  // A friend's page (/m/friends/<slug>) keeps the Friends title: the slug can be an identity key.
+  const friendPage = pathname.startsWith('/m/friends/');
   const page = {
     title: pathname.startsWith('/m/nfts/')
       ? 'NFT'
-      : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
-        (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
+      : friendPage
+        ? 'Friends'
+        : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
+          (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
     root: !!current,
   };
   const navBtn = (it: Item) =>
