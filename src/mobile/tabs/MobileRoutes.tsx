@@ -65,6 +65,8 @@ const MobileRoutes = () => (
         <Route path="bmail" element={<BMailPage />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="lock" element={<LockScreen />} />
+        <Route path="lock/locks" element={<LockScreen />} />
+        <Route path="lock/subscriptions" element={<LockScreen />} />
         <Route path="lock/verify" element={<LockVerify />} />
         <Route path="nfts" element={<NftLibraryPage />} />
         <Route path="nfts/:outpoint" element={<NftLibraryPage />} />

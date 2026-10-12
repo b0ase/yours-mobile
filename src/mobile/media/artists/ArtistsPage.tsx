@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import { GuestCtx } from './guestCtx';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Home } from 'lucide-react';
+import { ChevronLeft, Home, Play } from 'lucide-react';
 import { TopNav } from '../../../components/TopNav';
 import { BMUSIC_HOST, SHARE_ALBUMS, type ShareAlbum } from '../../../web/shareAlbums';
 
@@ -13,8 +14,20 @@ import { BMUSIC_HOST, SHARE_ALBUMS, type ShareAlbum } from '../../../web/shareAl
 const GOLD = '#FFD24D';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
-const HOME = '/m/media';
+const HOME_ROUTE = '/m/media';
+const HOME = HOME_ROUTE;
 const ROOT = '/m/media/artists';
+
+/** "Get bWalletX / Unlock to listen" for a guest. */
+export const GuestPrompt = ({ label = 'Unlock to listen' }: { label?: string }) => {
+  const guest = useContext(GuestCtx);
+  if (!guest) return null;
+  return (
+    <button onClick={guest} className="px-5 py-2.5 rounded-full font-bold text-black" style={{ background: GOLD }}>
+      {label}
+    </button>
+  );
+};
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const bsv = (s: number) => `${(s / 1e8).toLocaleString(undefined, { maximumFractionDigits: 8 })} BSV`;
@@ -35,6 +48,7 @@ type Board = { listeners?: Listener[]; anonCount?: number };
 type Pot = { potSats?: number; capSats?: number; sponsored?: boolean };
 
 const Price = ({ id, site }: { id: string; site?: string }) => {
+  const guest = useContext(GuestCtx);
   const [r, setR] = useState<Release | null>(null);
   useEffect(() => {
     void getJson<Release>(`/api/bmusic/release/${id}`).then(setR);
@@ -47,6 +61,12 @@ const Price = ({ id, site }: { id: string; site?: string }) => {
       </div>
     );
   if (!r.forSale || !r.mintPriceSats || !site) return null;
+  if (guest)
+    return (
+      <button onClick={guest} className="block text-[12px]" style={{ color: GOLD }}>
+        Buy the original · {bsv(r.mintPriceSats)}
+      </button>
+    );
   return (
     <a href={site} target="_blank" rel="noopener noreferrer" className="text-[12px]" style={{ color: GOLD }}>
       Buy the original · {bsv(r.mintPriceSats)}
@@ -56,6 +76,8 @@ const Price = ({ id, site }: { id: string; site?: string }) => {
 
 const Bar = ({ title, slug }: { title?: string; slug?: boolean }) => {
   const navigate = useNavigate();
+  // A guest has no Media store (it needs the wallet): Home is the artists list.
+  const HOME = useContext(GuestCtx) ? ROOT : HOME_ROUTE;
   return (
     <div
       className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
@@ -237,15 +259,109 @@ const Artist = ({ albums }: { albums: ShareAlbum[] }) => {
   );
 };
 
-const ArtistsPage = () => {
+/** Guest top bar: the wallet's TopNav needs an unlocked account, so a guest gets the logo and one way in. */
+const GuestTop = () => {
+  const guest = useContext(GuestCtx);
+  return (
+    <div
+      className="fixed top-0 inset-x-0 z-20 h-14 flex items-center justify-between px-4"
+      style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+    >
+      <span className="font-extrabold text-white tracking-tight">
+        bWallet<span style={{ color: GOLD }}>X</span>
+      </span>
+      <button
+        onClick={guest ?? undefined}
+        className="px-4 py-1.5 rounded-full text-sm font-bold text-black"
+        style={{ background: GOLD }}
+      >
+        Get bWalletX / Unlock
+      </button>
+    </div>
+  );
+};
+
+/** Guest album page (/bmusic/artist/<artist>/album/<slug>): cover, tracks, prices; playing needs the wallet. */
+export const GuestAlbum = () => {
+  const navigate = useNavigate();
+  const { albumId } = useParams();
+  const al = SHARE_ALBUMS.find((x) => x.id === albumId);
+  if (!al) return <Index />;
+  return (
+    <div className="px-4 py-6 max-w-5xl mx-auto w-full flex flex-wrap gap-10">
+      <img
+        src={coverOf(al)}
+        alt={al.title}
+        className="w-full max-w-[360px] aspect-square object-cover rounded-xl self-start"
+        style={{ boxShadow: `0 0 0 1px ${GOLD}80, 0 0 60px ${GOLD}26` }}
+      />
+      <div className="flex-1 min-w-[260px] text-white">
+        <div className="text-[12px] font-bold tracking-[.18em] uppercase" style={{ color: GOLD }}>
+          Album
+        </div>
+        <h2 className="text-4xl font-bold mt-2 mb-1">{al.title}</h2>
+        <button onClick={() => navigate(`${ROOT}/${al.artistSlug}`)} className="text-lg text-[#ddd]">
+          {al.artist}
+        </button>
+        <div className="mt-3 font-semibold" style={{ color: GOLD }}>
+          {al.pricing}
+        </div>
+        <p className="text-[13px] mt-2 mb-3" style={{ color: MUTED }}>
+          Listening, even to the free sponsored tracks, runs through your own bWalletX: it holds the key each second of
+          music is unlocked with. Make one free in a minute, or unlock yours, and you come straight back here.
+        </p>
+        <GuestPrompt />
+        <ol className="mt-6 border-t" style={{ borderColor: '#222' }}>
+          {al.tracks.map((t, i) => (
+            <li
+              key={i}
+              className="flex items-center gap-3 py-2 px-0.5 border-b text-sm"
+              style={{ borderColor: '#222' }}
+            >
+              <GuestPlay n={i + 1} />
+              <span className="flex-1">
+                {t.title}
+                <Price id={trackId(al, i)} site={al.artistSite} />
+              </span>
+              <span style={{ color: '#777' }}>{mmss(t.seconds)}</span>
+              <span
+                className="w-24 text-right text-[11px] font-bold uppercase"
+                style={{ color: t.sponsored ? GOLD : '#777' }}
+              >
+                {t.sponsored ? `On ${al.sponsoredBy ?? al.artist}` : '1 sat/sec'}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+};
+
+const GuestPlay = ({ n }: { n: number }) => {
+  const guest = useContext(GuestCtx);
+  return (
+    <button
+      aria-label={`Play track ${n}: unlock to listen`}
+      title="Unlock to listen"
+      onClick={guest ?? undefined}
+      className="w-6 flex justify-end"
+    >
+      <Play size={14} color={GOLD} />
+    </button>
+  );
+};
+
+const ArtistsPage = ({ album }: { album?: boolean }) => {
+  const guest = useContext(GuestCtx);
   const { slug } = useParams();
   const albums = slug ? ARTISTS.find((x) => x[0].artistSlug === slug) : undefined;
   return (
     <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
-      <TopNav />
+      {guest ? <GuestTop /> : <TopNav />}
       <div className="h-14 shrink-0" aria-hidden />
-      <Bar title={albums?.[0].artist} slug={!!slug} />
-      {albums ? <Artist albums={albums} /> : <Index />}
+      <Bar title={album ? 'Album' : albums?.[0].artist} slug={!!slug || !!album} />
+      {album ? <GuestAlbum /> : albums ? <Artist albums={albums} /> : <Index />}
     </div>
   );
 };

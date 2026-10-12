@@ -69,8 +69,11 @@ import { isBackPneeMode } from '../notes/backPnee';
 import { MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { listSubs, monthlyUsd } from '../pots/pots';
 import { fundAvailable } from '../pots/fund';
+import { LOCK_TAB_PATH, lockTabFor, type LockTab } from '../pots/subsList';
 
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
+// Pots & Locks › Subscriptions (bWalletX only: absent from a store build even as code).
+const SubscriptionsTab = SUBSCRIPTIONS_ENABLED ? lazy(() => import('../pots/SubscriptionsTab')) : null;
 import { verifyLockTx, type VerifyResult } from './verify';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
 import {
@@ -170,6 +173,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const [pot, setPot] = useState<string | undefined>(undefined);
   const [openPot, setOpenPot] = useState<string | null>(null);
   const [showSubs, setShowSubs] = useState(false);
+  const tab = lockTabFor(location.pathname, SUBSCRIPTIONS_ENABLED);
   const [openFund, setOpenFund] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -593,221 +597,265 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       <>
         {header('Pots & Locks', () => navigate(-1))}
         <div className="px-4 flex flex-col gap-3">
-          <div className="flex gap-2">
-            <button
-              onClick={() => startLock()}
-              className={`${btn} flex-1 flex items-center justify-center gap-2`}
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              <LockIcon size={16} /> Lock BSV
-            </button>
-            <button
-              onClick={() => {
-                setOpenPot('__start');
-                requestAnimationFrame(() =>
-                  document.getElementById('start-pot')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
-                );
-              }}
-              className={`${btn} flex-1 flex items-center justify-center gap-2 text-white`}
-              style={{ border: `1px solid ${LINE}` }}
-            >
-              <Plus size={16} /> Pot
-            </button>
-          </div>
-          <div className={card} style={cardStyle}>
-            <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-              In pots
-            </div>
-            <div className="text-3xl font-extrabold text-white">{fmtBsv(totals.locked)}</div>
-            <div className="text-xs" style={{ color: MUTED }}>
-              {pots.length} pot{pots.length === 1 ? '' : 's'} · {totals.count} lock{totals.count === 1 ? '' : 's'}
-              {totals.next ? ` · next unlock ≈ block ${totals.next}` : ''}
-              {est(totals.locked)}
-            </div>
-            {totals.ready > 0 && (
+          <Seg<LockTab>
+            value={tab}
+            options={[
+              ['pots', 'Pots'],
+              ['locks', 'Locks'],
+              ...(SUBSCRIPTIONS_ENABLED ? ([['subscriptions', 'Subscriptions']] as [LockTab, string][]) : []),
+            ]}
+            onChange={(t) => navigate(LOCK_TAB_PATH[t], { replace: true })}
+          />
+          {tab === 'subscriptions' ? (
+            <Suspense fallback={null}>{SubscriptionsTab && <SubscriptionsTab />}</Suspense>
+          ) : tab === 'locks' ? (
+            <>
               <button
-                disabled={busy}
-                onClick={() => void claim()}
-                className={btn}
+                onClick={() => startLock()}
+                className={`${btn} flex items-center justify-center gap-2`}
                 style={{ background: GOLD, color: '#1a1300' }}
               >
-                Claim {fmtBsv(totals.ready)} ready now
+                <LockIcon size={16} /> Lock BSV
               </button>
-            )}
-          </div>
-          {payouts && payouts.length > 0 && (
-            <div className={card} style={cardStyle}>
-              <div className="text-sm font-bold text-white">Claimed</div>
-              {payouts.map((p) => (
-                <div key={p.plan.id} className="flex flex-col gap-1 text-xs" style={{ color: MUTED }}>
-                  <span className="text-white font-semibold">{p.plan.label}</span>
-                  {p.lines.map((l, i) => (
-                    <span key={i}>{l}</span>
-                  ))}
-                  {p.batch && (
-                    <div className="flex flex-col gap-2 mt-1">
-                      <span>
-                        Lock the next {p.batch.pieces.length} payouts (
-                        {fmtBsv(p.batch.pieces.reduce((a, x) => a + x.sats, 0))}) on the same schedule? This is a new
-                        lock and cannot be undone.
-                      </span>
-                      <button
-                        disabled={busy}
-                        className={btn}
-                        style={{ background: GOLD, color: '#1a1300' }}
-                        onClick={() => void doBatch(p.plan.id, p.batch!)}
-                      >
-                        Lock next payouts
-                      </button>
-                    </div>
-                  )}
-                  {p.relock && (
-                    <div className="flex flex-col gap-2 mt-1">
-                      <span>
-                        Re-lock the extra {fmtBsv(p.relock.sats)}{' '}
-                        {p.relock.extend
-                          ? `as a new payout after your last one (block ${p.relock.height})`
-                          : `into your next payout (block ${p.relock.height})`}
-                        ? This is a new lock and cannot be undone. Or keep it in your wallet.
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          disabled={busy}
-                          className={`${btn} flex-1`}
-                          style={{ background: GOLD, color: '#1a1300' }}
-                          onClick={() => void doRelock(p.plan.id, p.relock!)}
-                        >
-                          Re-lock surplus
-                        </button>
-                        <button
-                          className={`${btn} flex-1 text-white`}
-                          style={{ border: `1px solid ${LINE}` }}
-                          onClick={() =>
-                            setPayouts((ps) => ps?.map((x) => (x === p ? { ...x, relock: undefined } : x)) ?? null)
-                          }
-                        >
-                          Keep in wallet
-                        </button>
-                      </div>
-                    </div>
-                  )}
+              {plans.length === 0 ? (
+                <div className={card} style={cardStyle}>
+                  <div className="text-sm font-bold text-white">No locks yet</div>
+                  <p className="text-xs m-0" style={{ color: MUTED }}>
+                    Every lock you make, in any pot, is listed here with when it unlocks.
+                  </p>
                 </div>
-              ))}
-            </div>
-          )}
-          {pots.map((pt) => {
-            const open = openPot === pt.id;
-            return (
-              <div key={pt.id} className="flex flex-col gap-2">
+              ) : (
+                [...plans].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(renderPlan)
+              )}
+              <button
+                className="text-xs py-2 flex items-center gap-1 justify-center"
+                style={{ color: MUTED }}
+                onClick={() => setView({ kind: 'verify' })}
+              >
+                <ShieldCheck size={14} /> Verify any lock
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setOpenPot(open ? null : pt.id)}
-                  aria-expanded={open}
-                  className={`${card} text-left`}
-                  style={cardStyle}
+                  onClick={() => startLock()}
+                  className={`${btn} flex-1 flex items-center justify-center gap-2`}
+                  style={{ background: GOLD, color: '#1a1300' }}
                 >
-                  <div className="flex justify-between items-center gap-2">
-                    <span className="text-sm font-bold text-white truncate">{pt.name}</span>
-                    <span className="flex items-center gap-1 text-sm font-bold text-white">
-                      {fmtBsv(pt.locked)}
-                      {open ? <ChevronUp size={16} color={MUTED} /> : <ChevronDown size={16} color={MUTED} />}
-                    </span>
+                  <LockIcon size={16} /> Lock BSV
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenPot('__start');
+                    requestAnimationFrame(() =>
+                      document.getElementById('start-pot')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+                    );
+                  }}
+                  className={`${btn} flex-1 flex items-center justify-center gap-2 text-white`}
+                  style={{ border: `1px solid ${LINE}` }}
+                >
+                  <Plus size={16} /> Pot
+                </button>
+              </div>
+              <div className={card} style={cardStyle}>
+                <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+                  In pots
+                </div>
+                <div className="text-3xl font-extrabold text-white">{fmtBsv(totals.locked)}</div>
+                <div className="text-xs" style={{ color: MUTED }}>
+                  {pots.length} pot{pots.length === 1 ? '' : 's'} · {totals.count} lock{totals.count === 1 ? '' : 's'}
+                  {totals.next ? ` · next unlock ≈ block ${totals.next}` : ''}
+                  {est(totals.locked)}
+                </div>
+                {totals.ready > 0 && (
+                  <button
+                    disabled={busy}
+                    onClick={() => void claim()}
+                    className={btn}
+                    style={{ background: GOLD, color: '#1a1300' }}
+                  >
+                    Claim {fmtBsv(totals.ready)} ready now
+                  </button>
+                )}
+              </div>
+              {payouts && payouts.length > 0 && (
+                <div className={card} style={cardStyle}>
+                  <div className="text-sm font-bold text-white">Claimed</div>
+                  {payouts.map((p) => (
+                    <div key={p.plan.id} className="flex flex-col gap-1 text-xs" style={{ color: MUTED }}>
+                      <span className="text-white font-semibold">{p.plan.label}</span>
+                      {p.lines.map((l, i) => (
+                        <span key={i}>{l}</span>
+                      ))}
+                      {p.batch && (
+                        <div className="flex flex-col gap-2 mt-1">
+                          <span>
+                            Lock the next {p.batch.pieces.length} payouts (
+                            {fmtBsv(p.batch.pieces.reduce((a, x) => a + x.sats, 0))}) on the same schedule? This is a
+                            new lock and cannot be undone.
+                          </span>
+                          <button
+                            disabled={busy}
+                            className={btn}
+                            style={{ background: GOLD, color: '#1a1300' }}
+                            onClick={() => void doBatch(p.plan.id, p.batch!)}
+                          >
+                            Lock next payouts
+                          </button>
+                        </div>
+                      )}
+                      {p.relock && (
+                        <div className="flex flex-col gap-2 mt-1">
+                          <span>
+                            Re-lock the extra {fmtBsv(p.relock.sats)}{' '}
+                            {p.relock.extend
+                              ? `as a new payout after your last one (block ${p.relock.height})`
+                              : `into your next payout (block ${p.relock.height})`}
+                            ? This is a new lock and cannot be undone. Or keep it in your wallet.
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              disabled={busy}
+                              className={`${btn} flex-1`}
+                              style={{ background: GOLD, color: '#1a1300' }}
+                              onClick={() => void doRelock(p.plan.id, p.relock!)}
+                            >
+                              Re-lock surplus
+                            </button>
+                            <button
+                              className={`${btn} flex-1 text-white`}
+                              style={{ border: `1px solid ${LINE}` }}
+                              onClick={() =>
+                                setPayouts((ps) => ps?.map((x) => (x === p ? { ...x, relock: undefined } : x)) ?? null)
+                              }
+                            >
+                              Keep in wallet
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {pots.map((pt) => {
+                const open = openPot === pt.id;
+                return (
+                  <div key={pt.id} className="flex flex-col gap-2">
+                    <button
+                      onClick={() => setOpenPot(open ? null : pt.id)}
+                      aria-expanded={open}
+                      className={`${card} text-left`}
+                      style={cardStyle}
+                    >
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-sm font-bold text-white truncate">{pt.name}</span>
+                        <span className="flex items-center gap-1 text-sm font-bold text-white">
+                          {fmtBsv(pt.locked)}
+                          {open ? <ChevronUp size={16} color={MUTED} /> : <ChevronDown size={16} color={MUTED} />}
+                        </span>
+                      </div>
+                      <div className="text-xs" style={{ color: MUTED }}>
+                        {pt.id === PNEE_POT ? 'Locked to back PNEEs · ' : ''}
+                        {pt.plans.length} lock{pt.plans.length === 1 ? '' : 's'}
+                        {pt.ready > 0
+                          ? ` · ${fmtBsv(pt.ready)} ready to claim`
+                          : pt.next
+                            ? ` · locked until ≈ ${fmtDate(new Date(Date.now() + (pt.next - height) * 600_000))}`
+                            : ''}
+                        {est(pt.locked)}
+                      </div>
+                    </button>
+                    {open && (
+                      <>
+                        {pt.plans.map(renderPlan)}
+                        <button
+                          onClick={() =>
+                            pt.id === PNEE_POT
+                              ? setBackPnee('amount')
+                              : startLock(pt.id === 'other' ? undefined : pt.id)
+                          }
+                          className="text-xs py-1 flex items-center gap-1 justify-center"
+                          style={{ color: GOLD }}
+                        >
+                          <Plus size={14} /> Add to {potName(pt.id)}
+                        </button>
+                      </>
+                    )}
                   </div>
+                );
+              })}
+              {SUBSCRIPTIONS_ENABLED && fundAvailable() && (
+                <button
+                  onClick={() => {
+                    setOpenFund(true);
+                    setShowSubs(true);
+                  }}
+                  className={`${card} text-left`}
+                  style={{ ...cardStyle, border: `1px solid ${GOLD}55`, background: '#F5B80014' }}
+                >
+                  <span className="text-sm font-bold text-white">Back bWalletX</span>
                   <div className="text-xs" style={{ color: MUTED }}>
-                    {pt.id === PNEE_POT ? 'Locked to back PNEEs · ' : ''}
-                    {pt.plans.length} lock{pt.plans.length === 1 ? '' : 's'}
-                    {pt.ready > 0
-                      ? ` · ${fmtBsv(pt.ready)} ready to claim`
-                      : pt.next
-                        ? ` · locked until ≈ ${fmtDate(new Date(Date.now() + (pt.next - height) * 600_000))}`
-                        : ''}
-                    {est(pt.locked)}
+                    Support development with a monthly amount from its own pot. Stop any time.
                   </div>
                 </button>
-                {open && (
-                  <>
-                    {pt.plans.map(renderPlan)}
-                    <button
-                      onClick={() =>
-                        pt.id === PNEE_POT ? setBackPnee('amount') : startLock(pt.id === 'other' ? undefined : pt.id)
-                      }
-                      className="text-xs py-1 flex items-center gap-1 justify-center"
-                      style={{ color: GOLD }}
-                    >
-                      <Plus size={14} /> Add to {potName(pt.id)}
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
-          {SUBSCRIPTIONS_ENABLED && fundAvailable() && (
-            <button
-              onClick={() => {
-                setOpenFund(true);
-                setShowSubs(true);
-              }}
-              className={`${card} text-left`}
-              style={{ ...cardStyle, border: `1px solid ${GOLD}55`, background: '#F5B80014' }}
-            >
-              <span className="text-sm font-bold text-white">Back bWalletX</span>
-              <div className="text-xs" style={{ color: MUTED }}>
-                Support development with a monthly amount from its own pot. Stop any time.
-              </div>
-            </button>
+              )}
+              {SUBSCRIPTIONS_ENABLED && (
+                <button onClick={() => setShowSubs(true)} className={`${card} text-left`} style={cardStyle}>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-sm font-bold text-white">Subscriptions</span>
+                    <ChevronDown size={16} color={MUTED} className="-rotate-90" />
+                  </div>
+                  <div className="text-xs" style={{ color: MUTED }}>
+                    {(() => {
+                      const live = listSubs().filter((x) => x.status === 'active' || x.status === 'lowFunds');
+                      return live.length
+                        ? `${live.length} paying from your pots${rate > 0 ? ` · about $${monthlyUsd(live, rate).toFixed(2)} a month` : ''}`
+                        : 'Priced in dollars, paid from a pot you choose. Pause or cancel any time.';
+                    })()}
+                  </div>
+                </button>
+              )}
+              {(plans.length === 0 || openPot === '__start') && (
+                <div id="start-pot" className={card} style={cardStyle}>
+                  <div className="text-sm font-bold text-white">Start a pot</div>
+                  <p className="text-xs m-0" style={{ color: MUTED }}>
+                    A pot is BSV you lock for something: until a date, or as payouts over time. Nobody can unlock it
+                    early, not even you. Pick one to fill in example values, then check them.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {TEMPLATES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => startPot(t)}
+                        className="rounded-full px-3 py-2 text-xs font-bold"
+                        style={{ border: `1px solid ${LINE}`, color: '#fff', background: PANEL }}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                    {MARKET_ENABLED && (
+                      <button
+                        onClick={() => setBackPnee('card')}
+                        className="rounded-full px-3 py-2 text-xs font-bold"
+                        style={{ border: `1px solid ${GOLD}`, color: GOLD, background: PANEL }}
+                      >
+                        Back PNEEs
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              <button
+                className="text-xs py-2 flex items-center gap-1 justify-center"
+                style={{ color: MUTED }}
+                onClick={() => setView({ kind: 'verify' })}
+              >
+                <ShieldCheck size={14} /> Verify any lock
+              </button>
+            </>
           )}
-          {SUBSCRIPTIONS_ENABLED && (
-            <button onClick={() => setShowSubs(true)} className={`${card} text-left`} style={cardStyle}>
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-sm font-bold text-white">Subscriptions</span>
-                <ChevronDown size={16} color={MUTED} className="-rotate-90" />
-              </div>
-              <div className="text-xs" style={{ color: MUTED }}>
-                {(() => {
-                  const live = listSubs().filter((x) => x.status === 'active' || x.status === 'lowFunds');
-                  return live.length
-                    ? `${live.length} paying from your pots${rate > 0 ? ` · about $${monthlyUsd(live, rate).toFixed(2)} a month` : ''}`
-                    : 'Priced in dollars, paid from a pot you choose. Pause or cancel any time.';
-                })()}
-              </div>
-            </button>
-          )}
-          {(plans.length === 0 || openPot === '__start') && (
-            <div id="start-pot" className={card} style={cardStyle}>
-              <div className="text-sm font-bold text-white">Start a pot</div>
-              <p className="text-xs m-0" style={{ color: MUTED }}>
-                A pot is BSV you lock for something: until a date, or as payouts over time. Nobody can unlock it early,
-                not even you. Pick one to fill in example values, then check them.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {TEMPLATES.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => startPot(t)}
-                    className="rounded-full px-3 py-2 text-xs font-bold"
-                    style={{ border: `1px solid ${LINE}`, color: '#fff', background: PANEL }}
-                  >
-                    {t.name}
-                  </button>
-                ))}
-                {MARKET_ENABLED && (
-                  <button
-                    onClick={() => setBackPnee('card')}
-                    className="rounded-full px-3 py-2 text-xs font-bold"
-                    style={{ border: `1px solid ${GOLD}`, color: GOLD, background: PANEL }}
-                  >
-                    Back PNEEs
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-          <button
-            className="text-xs py-2 flex items-center gap-1 justify-center"
-            style={{ color: MUTED }}
-            onClick={() => setView({ kind: 'verify' })}
-          >
-            <ShieldCheck size={14} /> Verify any lock
-          </button>
         </div>
       </>
     );

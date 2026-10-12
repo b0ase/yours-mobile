@@ -100,3 +100,16 @@ describe('wallet pages under /wallet', () => {
     expect(toRouter('/wallet', '')).toBe('/bsv-wallet');
   });
 });
+
+describe('Pots & Locks tabs', () => {
+  test('both ways', () => {
+    for (const [router, pub] of [
+      ['/m/lock', '/lock'],
+      ['/m/lock/locks', '/lock/locks'],
+      ['/m/lock/subscriptions', '/lock/subscriptions'],
+    ]) {
+      expect(toPublic(router, '')).toBe(pub);
+      expect(toRouter(pub, '')).toBe(router);
+    }
+  });
+});

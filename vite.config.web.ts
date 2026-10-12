@@ -21,6 +21,8 @@ const STALE_BUILD = `(${installStaleBuildCheck.toString()})();`;
 const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
 /** The wide build is bWalletX Desktop (owner, 9 Oct 2026: "web" is the classic wallet, the beta becomes "desktop"). */
 const DESKTOP = process.env.VITE_WIDE_WEB === '1';
+/** Root for links in the shell: absolute on Desktop (deep paths serve index.html), relative on the classic web. */
+const ROOT = DESKTOP ? '/' : './';
 const APP_TITLE = DESKTOP ? 'bWalletX Desktop' : 'bWalletX';
 
 // desktop.bwalletx.com share card (owner, 9 Oct 2026). Source: bwalletx-site media-src/og/og-desktop-v1.html.
@@ -52,9 +54,9 @@ const webShell = (): Plugin => ({
           [
             '    <meta name="description" content="bWalletX: the BSV wallet for tokens, media and apps." />',
             ...(DESKTOP ? DESKTOP_SHARE : []),
-            '    <link rel="manifest" href="./manifest.webmanifest" />',
-            '    <link rel="icon" href="./favicon.ico" sizes="any" />',
-            '    <link rel="apple-touch-icon" href="./icons/icon192.png" />',
+            `    <link rel="manifest" href="${ROOT}manifest.webmanifest" />`,
+            `    <link rel="icon" href="${ROOT}favicon.ico" sizes="any" />`,
+            `    <link rel="apple-touch-icon" href="${ROOT}icons/icon192.png" />`,
             '    <meta name="apple-mobile-web-app-capable" content="yes" />',
             `    <meta name="apple-mobile-web-app-title" content="${APP_TITLE}" />`,
             '  </head>',
@@ -180,6 +182,9 @@ export default mergeConfig(
     plugins: [webShell(), webCss(), albumPages()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
+    // Desktop serves index.html for deep paths (/lock/subscriptions, /m/feed): relative ./assets/ would resolve to
+    // /lock/assets/… and 404 (blank page). Absolute paths there; the classic web build keeps its relative base.
+    ...(DESKTOP ? { base: '/' } : {}),
     build: { outDir: 'build-web', sourcemap: false },
     define: { __BWALLET_WEB__: 'true' },
   }),

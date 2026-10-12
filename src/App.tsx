@@ -1,4 +1,4 @@
-import { lazy, Suspense, useContext, useEffect } from 'react';
+import { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';
 import { Show } from './components/Show';
 import { UnlockWallet } from './components/UnlockWallet';
@@ -32,6 +32,15 @@ import { IS_EXTENSION } from './mobile/extension';
 import { isWebApp } from './mobile/webApp';
 import { UrlSync } from './mobile/url/UrlSync';
 
+import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
+import { guestMusicRoute } from './mobile/media/artists/guestRoute';
+
+// bMusic artist/album pages are readable without a wallet on web/Desktop (bWalletX only: prices are not in a store
+// build). Decided once at load from the address bar; only those read-only routes (guestRoute.ts).
+const GUEST_START =
+  PAY_STREAM_ENABLED && typeof window !== 'undefined' && isWebApp() ? guestMusicRoute(window.location.pathname) : null;
+const GuestMusic = PAY_STREAM_ENABLED ? lazy(() => import('./mobile/media/artists/GuestMusic')) : null;
+
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
 
@@ -47,6 +56,10 @@ export const App = () => {
   const menuContext = useContext(BottomMenuContext);
 
   const walletBg = theme.color.global.walletBackground;
+  // Guest view until the visitor asks for the wallet; an already unlocked wallet just opens the page in the app.
+  const [guest, setGuest] = useState(GUEST_START);
+  const hasWallet = !!chromeStorageService?.getCurrentAccountObject?.()?.account?.encryptedKeys;
+  const showGuest = !!(guest && GuestMusic && (isLocked || !hasWallet));
 
   useActivityDetector(isLocked, isReady, chromeStorageService);
 
@@ -105,6 +118,11 @@ export const App = () => {
                 <StorageRepairOverlay />
                 <SentHost />
                 {IS_EXTENSION && <PanelPrompt />}
+                {showGuest && GuestMusic && guest && (
+                  <Suspense fallback={null}>
+                    <GuestMusic route={guest} onWallet={() => setGuest(null)} />
+                  </Suspense>
+                )}
                 <Show when={!isLocked} whenFalseContent={<UnlockWallet onUnlock={handleUnlock} />}>
                   <UsbGate>
                     <UsbBackupRunner />
