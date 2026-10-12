@@ -1,6 +1,7 @@
 import { APP_NAME } from '../storeBuild';
-import { useState } from 'react';
-import { Check, Copy, Eye, EyeOff, Wand2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { PasswordRevealButton } from '../../components/PasswordRevealButton';
+import { Check, Copy, Wand2 } from 'lucide-react';
 
 /**
  * Create Account password (owner, 4 Oct 2026): a strong generated password, an eye to show it, and
@@ -44,6 +45,8 @@ export const PasswordFields = ({
   setConfirm: (v: string) => void;
 }) => {
   const [show, setShow] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
   // Suggestion box under the empty field on focus, like a browser's own "Use strong password".
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -65,6 +68,7 @@ export const PasswordFields = ({
       <input type="text" name="username" autoComplete="username" value={username || APP_NAME} readOnly hidden />
       <div className="relative">
         <input
+          ref={passwordRef}
           className={field}
           type={type}
           name="new-password"
@@ -94,26 +98,22 @@ export const PasswordFields = ({
             </span>
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setShow((s) => !s)}
-          aria-label={show ? 'Hide password' : 'Show password'}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-transparent border-0"
-          style={{ color: '#98A2B3' }}
-        >
-          {show ? <EyeOff size={16} /> : <Eye size={16} />}
-        </button>
+        <PasswordRevealButton shown={show} onToggle={() => setShow((s) => !s)} inputRef={passwordRef} />
       </div>
       {(newWallet || confirmAlways) && (
-        <input
-          className={field}
-          type={type}
-          name="confirm-password"
-          autoComplete="new-password"
-          placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-        />
+        <div className="relative">
+          <input
+            ref={confirmRef}
+            className={field}
+            type={type}
+            name="confirm-password"
+            autoComplete="new-password"
+            placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+          <PasswordRevealButton shown={show} onToggle={() => setShow((s) => !s)} inputRef={confirmRef} />
+        </div>
       )}
       {newWallet && (
         <div className="flex items-center gap-3 text-xs">
