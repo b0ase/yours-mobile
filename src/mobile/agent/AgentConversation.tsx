@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AGENT_HANDOFF_EVENT, takeAgentDraft, takeAgentNote, takeAgentSend } from './handoff';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUp, Flag, Loader2, Mic, X } from 'lucide-react';
+import { ArrowUp, Flag, Loader2, X } from 'lucide-react';
 import { sendBsv } from '@1sat/actions';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -31,6 +31,7 @@ import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agen
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
 import { ObsidianHero } from './ObsidianHero';
+import { AgentTalkButton } from './AgentTalkButton';
 import { FINAL_CODES, clearPending, errorCode, finalText, loadPending, savePending, type PendingPaid } from './pending';
 import { ReportSheet } from '../ugc/UgcSheets';
 
@@ -151,12 +152,6 @@ const QUICK_STARTS: { label: string; prompt: string }[] = [
       'Help me buy or sell a strategy on Exchange › Strategies: compare listings, or fill in the listing spec for mine and suggest a price.',
   },
 ];
-
-/**
- * Voice seam (docs/PHONE-LAYOUT-PLAN.md §15 V2): the mic button renders only when this is true. Voice input is
- * not built yet, so it stays hidden.
- */
-export const VOICE_INPUT_ENABLED = false;
 
 export const AgentConversation = ({
   compact = false,
@@ -649,16 +644,13 @@ export const AgentConversation = ({
                 : { background: PANEL, border: `1px solid ${LINE}` }
             }
           />
-          {VOICE_INPUT_ENABLED && (
-            <button
-              type="button"
-              aria-label="Speak to b"
-              className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-              style={{ border: `1px solid ${LINE}` }}
-            >
-              <Mic size={18} color={GOLD} />
-            </button>
-          )}
+          <AgentTalkButton
+            onTranscript={(t) => {
+              setNotice(null);
+              setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t).slice(0, MAX_INPUT));
+            }}
+            onNote={setNotice}
+          />
           <button
             type="submit"
             aria-label="Send"
