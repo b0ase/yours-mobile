@@ -9,7 +9,6 @@ import {
   MAX_POT_SHARE_PCT,
   potSharePct,
   SPONSOR_PLAYS_PER_ARTIST,
-  suggestOwnLock,
 } from './programme';
 import { artistPageUrl, claimArtist, getDashboard, saveTracks, type ArtistDashboard, type TrackChoice } from './api';
 
@@ -230,12 +229,6 @@ const JoinArtistPage = () => {
             <div>Listener pot: {dash.potSats.toLocaleString()} sats</div>
             <div>Free plays left: {dash.sponsoredPlaysLeft}</div>
             <div>Rank: {dash.rank ?? '–'}</div>
-            {suggestOwnLock(dash.salesSats, false) && (
-              <div className="col-span-2" style={{ color: MUTED }}>
-                You have sales income. You can lock some of your own BSV behind your page: your BSV, held until a date,
-                then back to you.
-              </div>
-            )}
           </div>
         ) : (
           <p style={{ color: MUTED }}>Your plays, listeners, sales and pot show here once your page is live.</p>
