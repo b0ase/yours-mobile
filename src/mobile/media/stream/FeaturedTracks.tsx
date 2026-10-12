@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { HEADLINE_ALBUM } from '../featured/featured';
 import { VEXVOID_THUMBS } from '../featured/stills';
 import { SponsorBadge } from './SponsorBadge';
@@ -11,7 +12,7 @@ const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).p
 
 /**
  * The album's tracks as compact rows, for the Media page (bWalletX only, lazy under PAY_STREAM_ENABLED):
- * `compact` = the first rows inside the featured banner with "See all"; otherwise the full list with thumbs.
+ * `compact` = the first rows inside the featured banner; "See all" expands them in place; otherwise the full list with thumbs.
  * Tap the headline = play it free; tap another = open the album page on that track (index in the manifest).
  */
 export default function FeaturedTracks(p: {
@@ -26,7 +27,8 @@ export default function FeaturedTracks(p: {
   const [sponsor] = useSponsor();
   const rows = view ? view.paid : [];
   const total = rows.length + 1;
-  const shown = p.compact ? rows.slice(0, 5) : rows;
+  const [all, setAll] = useState(false);
+  const shown = p.compact && !all ? rows.slice(0, 5) : rows;
   const thumb = (n: number) => VEXVOID_THUMBS[n % VEXVOID_THUMBS.length];
   const tag = (t: string, gold: boolean) => (
     <span
@@ -104,13 +106,23 @@ export default function FeaturedTracks(p: {
       </div>
       {p.compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
-          <button
-            onClick={p.onAll}
-            className="text-xs font-bold underline-offset-4 hover:underline"
-            style={{ color: GOLD }}
-          >
-            See all {m ? total : ''} tracks
-          </button>
+          {rows.length > shown.length || all ? (
+            <button
+              onClick={() => setAll((x) => !x)}
+              className="text-xs font-bold underline-offset-4 hover:underline"
+              style={{ color: GOLD }}
+            >
+              {all ? 'Show fewer' : `See all ${m ? total : ''} tracks`}
+            </button>
+          ) : (
+            <button
+              onClick={p.onAll}
+              className="text-xs font-bold underline-offset-4 hover:underline"
+              style={{ color: GOLD }}
+            >
+              View album
+            </button>
+          )}
           <SponsorBadge s={sponsor} />
         </div>
       )}

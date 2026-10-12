@@ -46,3 +46,30 @@ export const isWriterDocument = (map: Record<string, unknown> | null | undefined
   const app = String(map?.app ?? '').toLowerCase();
   return app === 'bitcoin-writer' || app === 'bitcoinwriter';
 };
+
+/**
+ * One entry per inscription: the same origin (or outpoint) can be listed twice, e.g. a page overlap, or a
+ * queued transfer next to its on-chain copy. Keeps the on-chain one over a pending one, else the later
+ * (newest) listing, at the position of the first. Origins compare with `.` and `_` as the same separator.
+ */
+export const dedupeByOrigin = <T extends { origin: string; pending?: boolean; output: { outpoint: string } }>(
+  items: T[],
+): T[] => {
+  const key = (i: T) => (i.origin || i.output.outpoint).replace('.', '_');
+  const at = new Map<string, number>();
+  const out: T[] = [];
+  for (const i of items) {
+    const k = key(i);
+    const op = i.output.outpoint.replace('.', '_');
+    const n = at.get(k) ?? at.get(`op:${op}`);
+    if (n === undefined) {
+      at.set(k, out.length);
+      at.set(`op:${op}`, out.length);
+      out.push(i);
+    } else if (!(i.pending && !out[n].pending)) {
+      out[n] = i;
+      at.set(`op:${op}`, n);
+    }
+  }
+  return out;
+};
