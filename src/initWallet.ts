@@ -15,6 +15,7 @@ import {
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
+import { preserveOriginalErrors } from './services/permissionAbortGuard';
 import {
   syncAddresses,
   syncMessages,
@@ -314,11 +315,13 @@ export const initWallet = async (
 
   // 5. Wrap with permissions manager for external app access control.
   // Grants persist in IndexedDB (off-chain) via LocalWalletPermissionsManager.
-  const wallet = new LocalWalletPermissionsManager(
-    baseWallet,
-    ADMIN_ORIGINATOR,
-    { permissionModules: assetModules },
-    { store: permissionStore },
+  const wallet = preserveOriginalErrors(
+    new LocalWalletPermissionsManager(
+      baseWallet,
+      ADMIN_ORIGINATOR,
+      { permissionModules: assetModules },
+      { store: permissionStore },
+    ),
   );
 
   // 5. Initialize sync context (derives addresses, creates services, queue, addressManager).

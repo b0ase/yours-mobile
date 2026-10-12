@@ -83,6 +83,10 @@ export type Resolved = {
   pubkey?: string;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
   ordAddress?: string;
+  /** A $name that wasn't ours but a lookalike is (0/o, 1/l/i): "did you mean $b0asey?" (12 Oct 2026). */
+  didYouMean?: string;
+  /** Resolved outside bWalletX (HandCash), after ours had no such name. */
+  external?: 'handcash';
 };
 
 export class ResolveError extends Error {}
@@ -276,15 +280,50 @@ export const resolveHandle = async (
   domain: string = BWALLET_PAYMAIL_DOMAIN,
 ): Promise<Resolved> => {
   const input = `$${p.handle}`;
+  let didYouMean: string | undefined;
   if (domain && PAYMAIL_RE.test(`${p.handle}@${domain}`)) {
     try {
       const ours = await resolvePaymail(f, `${p.handle}@${domain}`, input);
       if (ours.pubkey) return ours;
     } catch {
-      /* not one of ours → HandCash */
+      /* not one of ours → a lookalike of ours, then HandCash */
     }
+    didYouMean = await ourLookalike(f, p.handle, domain);
   }
-  return resolvePaymail(f, p.paymail, input);
+  try {
+    const hc = await resolvePaymail(f, p.paymail, input);
+    return { ...hc, external: 'handcash', ...(didYouMean ? { didYouMean } : {}) };
+  } catch (e) {
+    if (didYouMean) throw new ResolveError(`No bWalletX name ${input}. Did you mean ${didYouMean}?`);
+    throw e;
+  }
+};
+
+/** Swaps people mix up when reading a handle: 0↔o, 1↔l, 1↔i. Single swaps only, at most 8. */
+export const lookalikes = (handle: string): string[] => {
+  const swap: Record<string, string[]> = { '0': ['o'], o: ['0'], '1': ['l', 'i'], l: ['1'], i: ['1'] };
+  const out = new Set<string>();
+  for (let i = 0; i < handle.length && out.size < 8; i++)
+    for (const r of swap[handle[i]] ?? []) out.add(handle.slice(0, i) + r + handle.slice(i + 1));
+  out.delete(handle);
+  return [...out];
+};
+
+/** The first lookalike of `handle` that IS one of our names, as `$name`, or undefined. */
+export const ourLookalike = async (f: Fetch, handle: string, domain: string): Promise<string | undefined> => {
+  const found = await Promise.all(
+    lookalikes(handle).map(async (h) => {
+      try {
+        // Only "does our server know this alias" (pki answers with a key); payment capabilities don't matter here.
+        const pki = str((await getCapabilities(f, domain))[CAP.pki]);
+        const key = pki ? str((await tryJson<Fields>(f, fill(pki, h, domain)))?.pubkey) : undefined;
+        return key ? `$${h}` : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return found.find(Boolean);
 };
 
 export const resolveRecipient = async (
@@ -307,6 +346,8 @@ export const resolveRecipient = async (
 };
 
 export const TOKENS_UNSUPPORTED = "This name can't receive tokens";
+export const HANDCASH_NO_TOKENS =
+  "That is a HandCash name, and HandCash can't hold NFTs or tokens. Use a bWalletX name or an ordinals address.";
 
 /** Pick the destination for a send. Tokens only go to a name with an ordinal-receive address. */
 /**
@@ -323,7 +364,8 @@ export const destinationFor = (
 ): { ok: true; to: string } | { ok: false; error: string } => {
   if (opnsBinding(r) === 'unbound') return { ok: false, error: UNBOUND_NAME };
   if (asset === 'bsv') return { ok: true, to: r.target };
-  return r.ordAddress ? { ok: true, to: r.ordAddress } : { ok: false, error: TOKENS_UNSUPPORTED };
+  if (r.ordAddress) return { ok: true, to: r.ordAddress };
+  return { ok: false, error: r.external === 'handcash' ? HANDCASH_NO_TOKENS : TOKENS_UNSUPPORTED };
 };
 
 export type Availability =

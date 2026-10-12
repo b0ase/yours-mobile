@@ -9,6 +9,7 @@ import { playQueue } from './player';
 import { safety } from '../market/safety';
 import { cachedMeta, resolveMeta } from './resolveMeta';
 import { countNew } from './nftActions';
+import { txidOf, unbroadcastTxids } from './unbroadcast';
 
 /** One of the wallet's non-fungible inscriptions, streamed from ORDFS. */
 export type MediaItem = {
@@ -53,7 +54,9 @@ export const useWalletMedia = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
+  // NFTs from mints/sends the network never saw are hidden (unbroadcast.ts); how many, for a one-line note.
+  const [hiddenUnbroadcast, setHiddenUnbroadcast] = useState(0);
+  const offChain = useRef<Set<string>>(new Set());
   const toItem = useCallback(
     (o: WalletOutput): MediaItem => {
       // NFTs from other sites/markets can lack these tags: fall back to the indexer (resolveMeta.ts).
@@ -73,6 +76,24 @@ export const useWalletMedia = () => {
       };
     },
     [apiContext],
+  );
+
+  const loadOffChain = useCallback(async () => {
+    try {
+      offChain.current = await unbroadcastTxids(apiContext.wallet);
+    } catch (e) {
+      console.warn('[media] listActions for unbroadcast check failed:', e);
+    }
+  }, [apiContext]);
+  /** Media outputs that are really on chain, counting the ones left out. */
+  const visible = useCallback(
+    (outputs: WalletOutput[], reset: boolean) => {
+      const media = outputs.filter(isMediaOutput);
+      const keep = media.filter((o) => !offChain.current.has(txidOf(o.outpoint)));
+      setHiddenUnbroadcast((n) => (reset ? 0 : n) + media.length - keep.length);
+      return keep.map(toItem);
+    },
+    [toItem],
   );
 
   // Repair: look up NFTs missing their type or origin, then redraw them with their real image.
@@ -95,9 +116,11 @@ export const useWalletMedia = () => {
     if (loading || !hasMore) return;
     setLoading(true);
     try {
+      if (offset === 0) await loadOffChain();
       const { outputs } = await listWithRetry(apiContext, PAGE, offset);
       setError('');
-      setItems((prev) => [...prev, ...outputs.filter(isMediaOutput).map(toItem)]);
+      const next = visible(outputs, offset === 0);
+      setItems((prev) => [...prev, ...next]);
       setOffset((n) => n + outputs.length);
       setHasMore(outputs.length === PAGE);
     } catch (e) {
@@ -105,7 +128,7 @@ export const useWalletMedia = () => {
     } finally {
       setLoading(false);
     }
-  }, [apiContext, offset, hasMore, loading, toItem]);
+  }, [apiContext, offset, hasMore, loading, loadOffChain, visible]);
 
   useEffect(() => {
     void loadMore();
@@ -117,10 +140,11 @@ export const useWalletMedia = () => {
   useEffect(() => {
     if (!reloadKey) return;
     setLoading(true);
-    listWithRetry(apiContext, PAGE, 0)
+    loadOffChain()
+      .then(() => listWithRetry(apiContext, PAGE, 0))
       .then(({ outputs }) => {
         setError('');
-        setItems(outputs.filter(isMediaOutput).map(toItem));
+        setItems(visible(outputs, true));
         setOffset(outputs.length);
         setHasMore(outputs.length === PAGE);
       })
@@ -153,8 +177,9 @@ export const useWalletMedia = () => {
     const before = itemsRef.current.map((i) => i.output.outpoint);
     setLoading(true);
     try {
+      await loadOffChain();
       const { outputs } = await listWithRetry(apiContext, PAGE, 0);
-      const next = outputs.filter(isMediaOutput).map(toItem);
+      const next = visible(outputs, true);
       setError('');
       setItems(next);
       setOffset(outputs.length);
@@ -172,9 +197,9 @@ export const useWalletMedia = () => {
     } finally {
       setLoading(false);
     }
-  }, [apiContext, chromeStorageService, toItem]);
+  }, [apiContext, chromeStorageService, loadOffChain, visible]);
 
-  return { items, hasMore, loading, error, loadMore, reload, refresh };
+  return { items, hasMore, loading, error, loadMore, reload, refresh, hiddenUnbroadcast };
 };
 
 /** Queues every music item in `list` and starts at `item`. */

@@ -161,6 +161,16 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                   <div className="text-[10px]" style={{ color: gray }}>
                     {asset === 'token' && d.ok && r.via !== 'opns-owner' ? 'Paymail ordinal address' : VIA_LABEL[r.via]}
                   </div>
+                  {r.didYouMean && (
+                    <button
+                      type="button"
+                      onClick={() => onType(r.didYouMean!)}
+                      className="mt-1 text-xs font-semibold border-0 bg-transparent p-0 cursor-pointer"
+                      style={{ color: '#FFD24D' }}
+                    >
+                      Did you mean {r.didYouMean}? (a bWalletX name)
+                    </button>
+                  )}
                   {opnsBinding(r) === 'bound' && (
                     <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
                       <Check size={11} /> Verified on chain · bound to {short(r.pubkey ?? '')}
