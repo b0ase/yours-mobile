@@ -81,6 +81,7 @@ import {
   requestFingerprint,
 } from './services/repeatGuard';
 import { releasedMessage } from './services/stuckSends';
+import { createSendRetry, SEND_RETRY_ALARM } from './services/sendRetry';
 import {
   createActionBytes,
   kickSendWaiting,
@@ -177,6 +178,42 @@ const dropWalletContext = (reason: string) => {
  * "Wallet not available" — which left the first MNEE lookup after an unlock at zero.
  */
 let initInFlight: Promise<WalletInterface | null> | null = null;
+
+/** The stuck-send review, with a notification for any send it released (services/stuckSends.ts). */
+const reviewQueuedSends = async (ctx: AccountContext) => {
+  const r = await ctx.releaseStuckSends();
+  if (r.queued || r.error) console.log('[background] queued-send review:', r);
+  if (r.released.length)
+    chrome.notifications?.create(`bwx-released-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Payment cancelled',
+      message: releasedMessage(r.released),
+    });
+  return r;
+};
+
+/** Retries queued sends every few minutes while any exist (services/sendRetry.ts). */
+const sendRetry = createSendRetry({
+  sendWaiting: async () => (accountContext ? await accountContext.sendWaitingNow() : ''),
+  review: async () => (accountContext ? await reviewQueuedSends(accountContext) : { queued: 1, error: 'wallet closed' }),
+  alarms: chrome.alarms,
+});
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== SEND_RETRY_ALARM) return;
+  if (!accountContext) {
+    // Worker woke for the alarm: open the wallet if it is unlocked; a locked wallet keeps the alarm for later.
+    const ok = await ensureWallet(true).then(
+      () => true,
+      () => false,
+    );
+    if (!ok || !accountContext) return;
+  }
+  await sendRetry.tick();
+});
+(globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
+  if (pageHidden() === false && sendRetry.armed() && accountContext) void sendRetry.tick();
+});
 
 const initializeWallet = (): Promise<WalletInterface | null> => {
   const run = runInitializeWallet();
@@ -377,15 +414,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     });
     void preferLocalStorage(accountContext);
     // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
-    void accountContext.releaseStuckSends().then((r) => {
-      if (r.queued || r.error) console.log('[background] queued-send review:', r);
-      if (!r.released.length) return;
-      chrome.notifications?.create(`bwx-released-${Date.now()}`, {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: 'Payment cancelled',
-        message: releasedMessage(r.released),
-      });
+    // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
+    void reviewQueuedSends(accountContext).then((r) => {
+      if (r.queued > 0 || r.error) sendRetry.arm();
     });
   }
 
@@ -3443,7 +3474,10 @@ if (isInServiceWorker) {
       if (ref && bytes > 0) bigRefBytes.set(ref, bytes + (result.signableTransaction?.tx?.length ?? 0));
       if (delayed && result.txid) {
         result = pendingShape(result);
-        if (accountContext) kickSendWaiting(accountContext.sendWaitingNow);
+        if (accountContext) {
+          sendRetry.arm();
+          kickSendWaiting(sendRetry.tick);
+        }
       }
       await withRepeatGuard((g) =>
         g.record(fingerprint, {
@@ -3539,7 +3573,10 @@ if (isInServiceWorker) {
       let result = await w.signAction(delayed ? withDelayedBroadcast(message.params) : message.params, message.originator);
       if (delayed && result?.txid) {
         result = pendingShape(result);
-        if (accountContext) kickSendWaiting(accountContext.sendWaitingNow);
+        if (accountContext) {
+          sendRetry.arm();
+          kickSendWaiting(sendRetry.tick);
+        }
       }
       console.log('[signAction] Success', result?.txid ? `txid=${result.txid}` : '');
       await withRepeatGuard((g) => g.signed(message.params.reference, result?.txid));
