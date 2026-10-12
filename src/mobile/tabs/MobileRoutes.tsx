@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import { BSPACES_ENABLED, MARKET_ENABLED, RELEASES_ENABLED } from '../storeBuild';
@@ -53,7 +53,9 @@ const MobileRoutes = () => (
           }
         />
         {/* The top bar's centre b: the b agent. */}
-        <Route path="agent" element={<AgentPage />} />
+        <Route path="ask-b" element={<AgentPage />} />
+        {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
+        <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="lock" element={<LockScreen />} />

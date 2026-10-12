@@ -330,7 +330,7 @@ const Shell = () => {
         const go = pullReached(s.pull);
         showPull(0);
         if (go) {
-          navigate('/m/agent');
+          navigate('/m/ask-b');
           // Focus the composer once it is there (iOS may only show the keyboard on a tap).
           window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus(), 350);
         }
@@ -428,7 +428,7 @@ const Shell = () => {
           badges={badges}
           onOpen={open}
           onHome={goHome}
-          onAgent={() => navigate('/m/agent')}
+          onAgent={() => navigate('/m/ask-b')}
           onChange={(next) => {
             // An app leaving the dock goes to the first free slot on the app screens (never lost). Page tiles
             // (Wallet…) are placed by the app-screens store itself (appScreensStore.ts reconcile).

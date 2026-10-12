@@ -705,7 +705,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             <Divider />
             <Row
               icon={<Sparkles size={16} />}
-              label="b agent"
+              label="Ask b"
               description={B_AGENT_DESC}
               onClick={() => setScreen('bagent')}
             />
@@ -953,7 +953,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
         </Screen>
       )}
       {screen === 'bagent' && (
-        <Screen title="b agent" onBack={() => setScreen(null)}>
+        <Screen title="Ask b" onBack={() => setScreen(null)}>
           <AgentSettings Section={Section} Row={Row} Divider={Divider} />
         </Screen>
       )}

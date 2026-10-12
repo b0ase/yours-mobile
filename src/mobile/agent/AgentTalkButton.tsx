@@ -6,7 +6,7 @@ import { voiceNote } from './voiceText';
 const GOLD = '#FFD24D';
 
 /**
- * Push-to-talk in Agent b's chat bar (owner, 12 Oct 2026): the Dock's round gold b, scaled to the bar.
+ * Push-to-talk in Ask b's chat bar (owner, 12 Oct 2026): the Dock's round gold b, scaled to the bar.
  * Hold = listen (bars + live transcript); release = the words land in the composer to edit and send (never sent
  * for you); slide away or Escape = cancel. Without voice on this device: a note, and the b just focuses the composer.
  */

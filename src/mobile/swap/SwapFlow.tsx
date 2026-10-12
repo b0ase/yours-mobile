@@ -774,7 +774,7 @@ const Track = ({
         {swap.stage === 'done' ? <Cta onClick={onBack}>Back to wallet</Cta> : null}
         <button
           type="button"
-          onClick={() => navigate('/m/agent')}
+          onClick={() => navigate('/m/ask-b')}
           className="w-full h-12 rounded-2xl text-[15px] font-bold cursor-pointer bg-transparent"
           style={{ border: `1px solid ${C.chip}`, color: C.text }}
         >

@@ -286,8 +286,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const onWallet = pathname === '/bsv-wallet';
   const hiddenKind = (k: string) => STORE_BUILD && STORE_HIDDEN_WALLET_KINDS.includes(k);
   const groups: { title: string; items: Item[] }[] = [
-    // Agent b first, above everything (owner, 11 Oct 2026).
-    { title: '', items: [{ id: 'agent', label: 'Agent b', icon: I.agent, to: '/m/agent' }] },
+    // Ask b first, above everything (owner, 11 Oct 2026).
+    { title: '', items: [{ id: 'agent', label: 'Ask b', icon: I.agent, to: '/m/ask-b' }] },
     {
       title: 'Money',
       items: [
@@ -380,7 +380,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key === 'k') {
         e.preventDefault();
-        navigate('/m/agent');
+        navigate('/m/ask-b');
       } else if (e.key === 'l') {
         e.preventDefault();
         void lockWallet();
@@ -474,7 +474,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       </aside>
       <main className="ww-main">
         <header className="ww-top">
-          <button className="ww-search" onClick={() => navigate('/m/agent')}>
+          <button className="ww-search" onClick={() => navigate('/m/ask-b')}>
             <Icon d={I.search} />
             <span className="ww-grow">Ask b to do something…</span>
             <kbd>⌘K</kbd>
@@ -533,9 +533,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         </WidePage>
       </main>
       {/* The phone dock's gold b, floating: click opens b, press and hold to talk (same component and gesture). */}
-      {!bapp && !pathname.startsWith('/m/agent') && (
+      {!bapp && !pathname.startsWith('/m/ask-b') && (
         <div className="ww-fab" title="b agent: click to open, hold to talk">
-          <HomeButton onHome={() => navigate('/m/agent')} onAgent={() => navigate('/m/agent')} disabled={false} />
+          <HomeButton onHome={() => navigate('/m/ask-b')} onAgent={() => navigate('/m/ask-b')} disabled={false} />
         </div>
       )}
     </div>,

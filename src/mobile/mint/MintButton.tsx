@@ -271,7 +271,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
                     else if (t.agent) {
                       setAgentDraft(t.agent);
                       onClose();
-                      navigate('/m/agent');
+                      navigate('/m/ask-b');
                     }
                   }}
                 />
