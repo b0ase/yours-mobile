@@ -29,6 +29,8 @@ import { InviteCard, type SpaceLink } from './InviteCard';
 import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
 import { ErrorActions } from '../errors/ErrorActions';
+import { RegularSpaces } from './RegularSpaces';
+import { roomPageUrl } from './schedule';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -78,6 +80,12 @@ const SpacesPage = () => {
     next.delete('invite');
     next.set('space', slug);
     setParams(next, { replace: true });
+  };
+
+  // Featured / Regular Spaces Join: in the app when signed in, else the room's guest-first page on bChatX.
+  const joinPublic = (ticker: string, name: string) => {
+    if (client.handle) setOpen({ ticker, name, spaceOpen: true });
+    else window.open(roomPageUrl(ticker), '_blank', 'noopener');
   };
 
   const load = useCallback(async () => {
@@ -141,98 +149,104 @@ const SpacesPage = () => {
         />
       )}
 
-      {!client.handle ? (
-        <Empty>
-          Open Chat once to sign in to rooms, then come back.
-          <button
-            onClick={() => navigate('/m/chat')}
-            className="mt-4 rounded-full px-5 py-2 font-semibold"
-            style={{ background: GOLD, color: '#010101' }}
-          >
-            Open Chat
-          </button>
-        </Empty>
-      ) : rows === null ? (
-        <Empty>
-          <Radio size={28} color={GOLD} className="animate-pulse" />
-        </Empty>
-      ) : (
-        <div className="flex-1 overflow-y-auto pb-24">
-          <Label>Live now</Label>
-          {live.length === 0 && (
-            <p className="px-4 text-sm" style={{ color: MUTED }}>
-              No live spaces in your rooms right now.
-            </p>
-          )}
-          {live.map(({ room, state }) => (
+      <div className="flex-1 overflow-y-auto pb-24">
+        <RegularSpaces onJoin={joinPublic} />
+        {!client.handle ? (
+          <Empty>
+            Listening works without signing in. Open Chat once to sign in and see Spaces in your own rooms.
             <button
-              key={room.ticker}
-              onClick={() => openRoom(room)}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left"
-              style={{ borderBottom: `1px solid ${LINE}` }}
+              onClick={() => navigate('/m/chat')}
+              className="mt-4 rounded-full px-5 py-2 font-semibold"
+              style={{ background: GOLD, color: '#010101' }}
             >
-              <SpaceAvatar room={room} title={roomTitle(room, me)} live />
-              <span className="flex-1 min-w-0">
-                <span className="block font-semibold truncate">{state.space?.title || roomTitle(room, me)}</span>
-                <span className="block text-xs truncate" style={{ color: MUTED }}>
-                  {roomTitle(room, me)} ·{' '}
-                  {stageOf(state)
-                    .map((p) => `$${p.handle}`)
-                    .slice(0, 3)
-                    .join(', ')}{' '}
-                  · {audienceLine(audienceCount(state))}
-                </span>
-              </span>
-              <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: GOLD, color: '#010101' }}>
-                Join
-              </span>
+              Open Chat
             </button>
-          ))}
-
-          {hostable.length > 0 && <Label>Start one in a room you run</Label>}
-          {hostable.map(({ room }) => (
-            <div
-              key={room.ticker}
-              className="flex items-center gap-3 px-4 py-3"
-              style={{ borderBottom: `1px solid ${LINE}` }}
-            >
-              <SpaceAvatar room={room} title={roomTitle(room, me)} />
-              <span className="flex-1 truncate">{roomTitle(room, me)}</span>
-              {/* The room's group chat, next to its Go live (owner, 11 Oct 2026). */}
-              <button
-                onClick={() => {
-                  requestRoomByTicker(room.ticker, false);
-                  navigate('/m/chat');
-                }}
-                aria-label={`Chat in ${roomTitle(room, me)}`}
-                className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white"
-                style={{ border: `1px solid ${LINE}` }}
-              >
-                <MessageCircle size={12} /> Chat
-              </button>
-              <button
-                onClick={() => openRoom(room, roomTitle(room, me))}
-                className="rounded-full px-3 py-1 text-xs font-semibold"
-                style={{ border: `1px solid ${GOLD}`, color: GOLD }}
-              >
-                Go live
-              </button>
-            </div>
-          ))}
-          <p className="px-4 pt-4 text-xs" style={{ color: MUTED }}>
-            Token issuers can also start a space from their room’s chat. Only holders of a room’s token can join its
-            space.
-          </p>
-          {error && (
-            <div className="flex flex-col gap-1.5">
-              <p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
-                {error}
+          </Empty>
+        ) : rows === null ? (
+          <Empty>
+            <Radio size={28} color={GOLD} className="animate-pulse" />
+          </Empty>
+        ) : (
+          <div>
+            <Label>Live in your rooms</Label>
+            {live.length === 0 && (
+              <p className="px-4 text-sm" style={{ color: MUTED }}>
+                No live spaces in your rooms right now.
               </p>
-              <ErrorActions message={String(error)} />
-            </div>
-          )}
-        </div>
-      )}
+            )}
+            {live.map(({ room, state }) => (
+              <button
+                key={room.ticker}
+                onClick={() => openRoom(room)}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                style={{ borderBottom: `1px solid ${LINE}` }}
+              >
+                <SpaceAvatar room={room} title={roomTitle(room, me)} live />
+                <span className="flex-1 min-w-0">
+                  <span className="block font-semibold truncate">{state.space?.title || roomTitle(room, me)}</span>
+                  <span className="block text-xs truncate" style={{ color: MUTED }}>
+                    {roomTitle(room, me)} ·{' '}
+                    {stageOf(state)
+                      .map((p) => `$${p.handle}`)
+                      .slice(0, 3)
+                      .join(', ')}{' '}
+                    · {audienceLine(audienceCount(state))}
+                  </span>
+                </span>
+                <span
+                  className="rounded-full px-3 py-1 text-xs font-bold"
+                  style={{ background: GOLD, color: '#010101' }}
+                >
+                  Join
+                </span>
+              </button>
+            ))}
+
+            {hostable.length > 0 && <Label>Start one in a room you run</Label>}
+            {hostable.map(({ room }) => (
+              <div
+                key={room.ticker}
+                className="flex items-center gap-3 px-4 py-3"
+                style={{ borderBottom: `1px solid ${LINE}` }}
+              >
+                <SpaceAvatar room={room} title={roomTitle(room, me)} />
+                <span className="flex-1 truncate">{roomTitle(room, me)}</span>
+                {/* The room's group chat, next to its Go live (owner, 11 Oct 2026). */}
+                <button
+                  onClick={() => {
+                    requestRoomByTicker(room.ticker, false);
+                    navigate('/m/chat');
+                  }}
+                  aria-label={`Chat in ${roomTitle(room, me)}`}
+                  className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white"
+                  style={{ border: `1px solid ${LINE}` }}
+                >
+                  <MessageCircle size={12} /> Chat
+                </button>
+                <button
+                  onClick={() => openRoom(room, roomTitle(room, me))}
+                  className="rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+                >
+                  Go live
+                </button>
+              </div>
+            ))}
+            <p className="px-4 pt-4 text-xs" style={{ color: MUTED }}>
+              Token issuers can also start a space from their room’s chat. Only holders of a room’s token can join its
+              space.
+            </p>
+            {error && (
+              <div className="flex flex-col gap-1.5">
+                <p className="px-4 pt-2 text-xs" style={{ color: '#F97066' }}>
+                  {error}
+                </p>
+                <ErrorActions message={String(error)} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {open && <DoorKeeper client={client} ticker={open.ticker} me={me} />}
       {open && (
@@ -263,7 +277,7 @@ const Label = ({ children }: { children: React.ReactNode }) => (
 );
 
 const Empty = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex-1 flex flex-col items-center justify-center px-8 text-center text-sm" style={{ color: MUTED }}>
+  <div className="py-8 flex flex-col items-center justify-center px-8 text-center text-sm" style={{ color: MUTED }}>
     {children}
   </div>
 );
