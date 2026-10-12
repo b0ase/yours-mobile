@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import validate from 'bitcoin-address-validation';
 import { sendOrdinals } from '@1sat/actions';
@@ -15,6 +15,8 @@ import { setLocalAvatar } from '../names/avatar';
 import { nftAvatarUri, normalizeOutpoint, ordinalsUrl } from './nftActions';
 import type { MediaItem } from './useWalletMedia';
 import { celebrateSend } from '../../components/sent/sent';
+import { nftSendButton, shortAddr } from './nftSend';
+import { txidOf, unbroadcastTxids } from './unbroadcast';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
@@ -36,8 +38,23 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
   const [msg, setMsg] = useState('');
   const [sending, setSending] = useState(false);
   const [to, setTo] = useState('');
-  const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Step 1 (who): what the name box resolved. Step 2: one "Send to <name>" button (nftSend.ts).
+  const [status, setStatus] = useState<'empty' | 'typing' | 'loading' | 'error' | 'ready'>('empty');
+  const [toName, setToName] = useState<string | undefined>();
+  const [sent, setSent] = useState<{ txid: string; name: string } | null>(null);
+  const [failed, setFailed] = useState('');
+  // An NFT from a mint the network never saw can't be sent (vexvoid, 11 Oct 2026: every try failed and hid it).
+  const [onChain, setOnChain] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void unbroadcastTxids(apiContext.wallet)
+      .then((off) => live && setOnChain(!off.has(txidOf(item.output.outpoint))))
+      .catch(() => live && setOnChain(null));
+    return () => {
+      live = false;
+    };
+  }, [apiContext.wallet, item.output.outpoint]);
 
   const copy = async () => {
     try {
@@ -68,8 +85,9 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
 
   const send = async () => {
     const assetId = readAssetIdTag(item.output.tags);
-    if (!assetId) return setMsg('This NFT is missing a tracking id and cannot be sent yet. Try Refresh.');
+    if (!assetId) return setFailed('This NFT is missing a tracking id and cannot be sent yet. Try Refresh.');
     setBusy(true);
+    setFailed('');
     try {
       const res = await sendOrdinals.execute(apiContext, { transfers: [{ id: assetId, address: to }] });
       if (!res.txid || res.error) {
@@ -82,19 +100,20 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
             : known,
         );
       }
-      setMsg(`Sent. ${short(res.txid)}`);
+      const name = toName && toName !== to ? toName : shortAddr(to);
+      setSent({ txid: res.txid, name });
       celebrateSend(res, { amount: { kind: 'nft', count: 1, name: item.name }, recipients: [to] });
       setSending(false);
-      setConfirm(false);
       onSent();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Send failed');
+      setFailed(e instanceof Error ? e.message : 'Not sent. Check History before sending again.');
     } finally {
       setBusy(false);
     }
   };
 
   const validTo = !!to && validate(to);
+  const button = nftSendButton({ to: validTo ? to : '', name: toName, status, busy, onChain });
   const btn = 'flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold';
 
   return createPortal(
@@ -148,43 +167,65 @@ export const NftDetail = ({ item, onClose, onSent }: { item: MediaItem; onClose:
             <UserCircle size={16} /> Set as my avatar
           </button>
         )}
-        {!sending ? (
+        {sent ? (
+          <div className="flex flex-col gap-1 rounded-xl bg-[#17191E] p-3">
+            <span className="text-sm font-semibold text-[#A1FF8B]">Sent to {sent.name}</span>
+            <a
+              href={`https://whatsonchain.com/tx/${sent.txid}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-[#98A2B3] underline break-all"
+            >
+              {short(sent.txid)}
+            </a>
+          </div>
+        ) : onChain === false ? (
+          <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
+            Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent.
+          </div>
+        ) : !sending ? (
           <button onClick={() => setSending(true)} className={`${btn} bg-[#17191E] text-white`}>
             <Send size={16} /> Send
           </button>
         ) : (
           <div className="flex flex-col gap-2 rounded-xl bg-[#17191E] p-3">
+            <div className="text-xs font-semibold text-[#98A2B3]">Who gets it?</div>
             <NameInput
               theme={theme}
               value={to}
               asset="token"
+              autoConfirm
+              onStatus={(st, r) => {
+                setStatus(st);
+                setToName(r ? (r.displayName ?? r.input) : undefined);
+              }}
               onChange={(v) => {
                 setTo(v);
-                setConfirm(false);
+                setFailed('');
               }}
               style={{ width: '100%', margin: 0 }}
             />
-            {to && !validTo && <p className="text-xs text-[#F97066]">Not a valid address.</p>}
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setSending(false);
-                  setConfirm(false);
-                  setTo('');
-                }}
-                className={`${btn} flex-1 bg-[#2b2f36] text-white`}
-              >
-                Cancel
-              </button>
-              <button
-                disabled={!validTo || busy}
-                onClick={() => (confirm ? void send() : setConfirm(true))}
-                className={`${btn} flex-1 text-[#010101] disabled:opacity-40`}
-                style={{ background: confirm ? '#FFD24D' : '#A1FF8B' }}
-              >
-                {busy ? 'Sending…' : confirm ? `Confirm send to ${short(to)}` : 'Send'}
-              </button>
-            </div>
+            {to && !validTo && status === 'ready' && <p className="text-xs text-[#F97066]">Not a valid address.</p>}
+            <button
+              disabled={!button.enabled}
+              onClick={() => void send()}
+              className={`${btn} w-full text-[#010101] disabled:opacity-40`}
+              style={{ background: '#FFD24D' }}
+            >
+              <Send size={16} /> {button.label}
+            </button>
+            {button.enabled && <div className="text-center text-[11px] text-[#667085]">to {shortAddr(to)}</div>}
+            {failed && <p className="text-xs text-[#F97066] break-words">{failed}</p>}
+            <button
+              onClick={() => {
+                setSending(false);
+                setTo('');
+                setFailed('');
+              }}
+              className="text-xs text-[#98A2B3] py-1"
+            >
+              Cancel
+            </button>
           </div>
         )}
         {msg && <p className="text-xs text-[#98A2B3] break-all">{msg}</p>}
