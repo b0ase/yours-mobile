@@ -1,7 +1,8 @@
 /**
- * Albums with a pretty, shareable address on desktop.bwalletx.com (owner, 12 Oct 2026):
- *   /media/artist/<artist>/album/<slug> ↔ /m/media/album/<id>
- *   /media/artist/<artist>              ↔ /m/media/browse?artist=<name>
+ * Albums with a pretty, shareable address on desktop.bwalletx.com (owner, 12 Oct 2026). The music store lives at
+ * /bmusic (owner, 12 Oct 2026: /media is for the user's own media); old /media/... links 308 there (src/web/vercel.json):
+ *   /bmusic/artist/<artist>/album/<slug> ↔ /m/media/album/<id>
+ *   /bmusic/artist/<artist>              ↔ /m/media/browse?artist=<name>
  * vite.config.web.ts also writes a static page per album and artist with its own share card, so X, Twetch and
  * bChatX (which do not run JavaScript) see the album, not the generic wallet card. Add an entry here and its page
  * text in src/web/shareAlbums.ts. Only the address parts live here: this file is in the app bundle, and the page text
@@ -20,5 +21,5 @@ export const SHARE_ALBUMS: ShareAlbumRoute[] = [
   },
 ];
 
-export const albumPublicPath = (a: ShareAlbumRoute) => `/media/artist/${a.artistSlug}/album/${a.slug}`;
-export const artistPublicPath = (artistSlug: string) => `/media/artist/${artistSlug}`;
+export const albumPublicPath = (a: ShareAlbumRoute) => `/bmusic/artist/${a.artistSlug}/album/${a.slug}`;
+export const artistPublicPath = (artistSlug: string) => `/bmusic/artist/${artistSlug}`;

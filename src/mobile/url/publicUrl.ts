@@ -5,8 +5,10 @@
  *   /m/spaces?space=<slug> ↔ /spaces/<slug>   (a permanent Space, e.g. /spaces/bwallet-lounge)
  *   /m/<page>              ↔ /<page>
  *   /bsv-wallet            ↔ /wallet
- *   /m/media/album/<id>    ↔ /media/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
- *   /m/media/browse?artist=<name> ↔ /media/artist/<artist>
+ *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
+ *   /m/media/browse?artist=<name> ↔ /bmusic/artist/<artist>
+ *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
+ *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
  * Other top-level app routes (/settings, …) keep their own path.
  */
 import { SHARE_ALBUMS, albumPublicPath, artistPublicPath } from '../media/shareAlbums';
@@ -34,7 +36,8 @@ export const toPublic = (pathname: string, search: string): string => {
   } else if (path === '/m/media/browse' && artistByName(q.get('artist'))) {
     path = artistPublicPath(artistByName(q.get('artist'))!.artistSlug);
     q.delete('artist');
-  } else if (path === '/bsv-wallet') path = '/wallet';
+  } else if (path === '/m/media' || path.startsWith('/m/media/')) path = `/bmusic${path.slice(8)}`;
+  else if (path === '/bsv-wallet') path = '/wallet';
   else if (path.startsWith('/m/')) path = path.slice(2);
   const rest = q.toString();
   return rest ? `${path}?${rest}` : path;
@@ -42,7 +45,8 @@ export const toPublic = (pathname: string, search: string): string => {
 
 /** Address-bar path on first load → router path to open, or null to keep the app's own start. */
 export const toRouter = (pathname: string, search: string): string | null => {
-  const path = pathname.replace(/\/+$/, '') || '/';
+  // Old /media/… store links (posted before the move to /bmusic) still open the store.
+  const path = (pathname.replace(/\/+$/, '') || '/').replace(/^\/media(?=\/|$)/, '/bmusic');
   if (path === '/' || ONBOARDING.has(path) || /\.[a-z0-9]+$/i.test(path)) return null;
   const q = search.replace(/^\?/, '');
   const withQ = (p: string, extra?: string) => {
@@ -51,16 +55,17 @@ export const toRouter = (pathname: string, search: string): string | null => {
   };
   const space = /^\/spaces\/([^/]+)$/.exec(path);
   if (space) return SLUG.test(space[1]) ? withQ('/m/spaces', `space=${encodeURIComponent(space[1])}`) : '/m/spaces';
-  const album = /^\/media\/artist\/([^/]+)\/album\/([^/]+)$/.exec(path);
+  const album = /^\/bmusic\/artist\/([^/]+)\/album\/([^/]+)$/.exec(path);
   if (album) {
     const a = SHARE_ALBUMS.find((x) => x.artistSlug === album[1] && x.slug === album[2]);
     return a ? withQ(`/m/media/album/${encodeURIComponent(a.id)}`) : withQ('/m/media');
   }
-  const artist = /^\/media\/artist\/([^/]+)$/.exec(path);
+  const artist = /^\/bmusic\/artist\/([^/]+)$/.exec(path);
   if (artist) {
     const a = SHARE_ALBUMS.find((x) => x.artistSlug === artist[1]);
     return a ? withQ('/m/media/browse', `artist=${encodeURIComponent(a.artist)}`) : withQ('/m/media/browse');
   }
+  if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
   if (path === '/wallet') return withQ('/bsv-wallet');
   if (TOP.has(path)) return withQ(path);
   return withQ(`/m${path}`);

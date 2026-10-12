@@ -105,8 +105,8 @@ const write = (dir: string, path: string, html: string) => {
 /** Writes the album and artist pages into the built site `dir` (needs dir/index.html). */
 export const writeAlbumPages = (dir: string, origin: string, root: string) => {
   const shell = readFileSync(join(dir, 'index.html'), 'utf8');
-  const coverPath = (a: ShareAlbum) => `/media/covers/${a.artistSlug}-${a.slug}.jpg`;
-  mkdirSync(join(dir, 'media/covers'), { recursive: true });
+  const coverPath = (a: ShareAlbum) => `/bmusic/covers/${a.artistSlug}-${a.slug}.jpg`;
+  mkdirSync(join(dir, 'bmusic/covers'), { recursive: true });
   for (const a of SHARE_ALBUMS) {
     copyFileSync(resolve(root, a.cover), join(dir, coverPath(a)));
     copyFileSync(resolve(root, 'src/web', a.og), join(dir, a.og));

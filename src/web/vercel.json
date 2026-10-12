@@ -35,5 +35,17 @@
       "source": "/((?!assets/|icons/|api/)[^.]*)",
       "destination": "/index.html"
     }
+  ],
+  "redirects": [
+    {
+      "source": "/media",
+      "destination": "/bmusic",
+      "permanent": true
+    },
+    {
+      "source": "/media/:path*",
+      "destination": "/bmusic/:path*",
+      "permanent": true
+    }
   ]
 }
