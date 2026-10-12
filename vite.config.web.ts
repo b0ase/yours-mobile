@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { readFileSync, readdirSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
 import { writeAlbumPages } from './src/web/albumPages';
+import { installStaleBuildCheck } from './src/web/staleBuild';
 
 /**
  * bWalletX web wallet (web.bwalletx.com): the mobile UI as a static site (build-web/), for any
@@ -14,13 +15,8 @@ import { writeAlbumPages } from './src/web/albumPages';
  */
 
 const BANNER = 'Web wallet beta — your keys stay in this browser. Connecting other websites is coming soon.';
-/**
- * A tab keeps the build it first loaded (an SPA never refetches index.html), so tabs opened before a deploy showed an
- * older layout next to newer ones (owner, 9 Oct 2026: "sometimes full width, sometimes half"). When the tab comes
- * back into view, compare this page's main-*.js with the live index.html and reload if a newer build is out. The
- * wallet's keys stay encrypted in localStorage and the unlock session in sessionStorage, both survive a reload.
- */
-const STALE_BUILD = `(function(){var m=document.querySelector('script[type=module][src*="main-"]');if(!m)return;var mine=m.getAttribute('src').split('/').pop(),busy=0;function check(){if(busy||document.visibilityState!=='visible')return;busy=1;fetch('./',{cache:'no-store'}).then(function(r){return r.ok?r.text():''}).then(function(h){var x=/assets\\/(main-[^"']+\\.js)/.exec(h);if(x&&x[1]!==mine)location.reload()}).catch(function(){}).then(function(){busy=0})}document.addEventListener('visibilitychange',check);addEventListener('focus',check)})();`;
+/** Newer build pick-up without reloading under the user: src/web/staleBuild.ts (inlined, self-contained). */
+const STALE_BUILD = `(${installStaleBuildCheck.toString()})();`;
 
 const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
 /** The wide build is bWalletX Desktop (owner, 9 Oct 2026: "web" is the classic wallet, the beta becomes "desktop"). */

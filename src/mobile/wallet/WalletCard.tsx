@@ -167,8 +167,13 @@ const WalletCardInner = ({
           plan();
         }, d);
     };
+    // Focus and visibilitychange both fire on return: one silent refresh a minute at most (the timer covers the rest).
+    let lastQuiet = 0;
     const quiet = () => {
-      if (visible()) refreshRef.current?.(false);
+      if (visible() && Date.now() - lastQuiet >= 60_000) {
+        lastQuiet = Date.now();
+        refreshRef.current?.(false);
+      }
       plan();
     };
     plan();
