@@ -24,3 +24,16 @@ export const FEATURED_TRACKS: readonly FeaturedTrack[] = [
 export const featuredQueue = (t: FeaturedTrack): Track[] => [
   { id: t.id, title: `${t.title} · ${t.artist}`, url: t.url, artwork: t.artwork },
 ];
+
+/**
+ * Media's one music product (owner, 12 Oct 2026): the VexVoid album "Echoes in the Abyss", led by its free headline
+ * track, followed by the pay-per-second tracks from the bMusic stream (stream/album.ts). Shown as one album, never as
+ * a separate single plus a separate stream.
+ */
+export const HEADLINE_ALBUM = {
+  id: 'album:vexvoid-echoes-in-the-abyss',
+  title: 'Echoes in the Abyss',
+  artist: 'VexVoid',
+  cover: vexvoidCover,
+  headline: FEATURED_TRACKS[0],
+} as const;

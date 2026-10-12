@@ -16,3 +16,12 @@ describe('featured tracks', () => {
     expect(q[0].url).toBe('/assets/echoes.mp3');
   });
 });
+
+describe('the album', () => {
+  test('one album led by the free headline track, with the VexVoid cover', async () => {
+    const { HEADLINE_ALBUM } = await import('./featured');
+    expect(HEADLINE_ALBUM.title).toBe('Echoes in the Abyss');
+    expect(HEADLINE_ALBUM.headline).toBe(FEATURED_TRACKS[0]);
+    expect(HEADLINE_ALBUM.cover).toBe('/assets/cover.jpg');
+  });
+});

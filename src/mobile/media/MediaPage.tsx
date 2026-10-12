@@ -5,7 +5,9 @@ import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
 import { getState, pauseAudio, playQueue, subscribe, toggle, type Track } from './player';
-import { FEATURED_TRACKS, featuredQueue, type FeaturedTrack } from './featured/featured';
+import { FEATURED_TRACKS, featuredQueue, HEADLINE_ALBUM, type FeaturedTrack } from './featured/featured';
+import { VEXVOID_STILLS } from './featured/stills';
+import { StillsBanner } from './featured/StillsBanner';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { useReleases } from './releases/useReleases';
 import type { Release } from './releases/releases';
@@ -172,18 +174,32 @@ const MediaPage = () => {
   const music = useMemo(() => items.filter((i) => i.kind === 'music'), [items]);
   const videos = useMemo(() => items.filter((i) => i.kind === 'video'), [items]);
 
+  // bWalletX: one product, the album, led by its free headline track. Store builds (no paid streaming) keep the single.
   const free: Entry[] = useMemo(
     () =>
-      FEATURED_TRACKS.map((t) => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        cover: t.artwork,
-        free: true,
-        kind: 'music' as const,
-        sub: t.label,
-        featured: t,
-      })),
+      StreamAlbum
+        ? [
+            {
+              id: HEADLINE_ALBUM.id,
+              title: HEADLINE_ALBUM.title,
+              artist: HEADLINE_ALBUM.artist,
+              cover: HEADLINE_ALBUM.cover,
+              free: true,
+              kind: 'music' as const,
+              sub: 'Album · headline track free',
+              featured: HEADLINE_ALBUM.headline,
+            },
+          ]
+        : FEATURED_TRACKS.map((t) => ({
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            cover: t.artwork,
+            free: true,
+            kind: 'music' as const,
+            sub: t.label,
+            featured: t,
+          })),
     [],
   );
   const published: Entry[] = useMemo(
@@ -213,7 +229,7 @@ const MediaPage = () => {
   const myVideo = useMemo(() => videos.map(own), [videos]);
 
   const play = (e: Entry) => {
-    if (nowPlaying?.id === e.id) return toggle();
+    if (nowPlaying?.id === e.id || (e.featured && nowPlaying?.id === e.featured.id)) return toggle();
     if (e.featured) return playQueue(featuredQueue(e.featured), 0);
     if (e.release) {
       const q = releaseQueue(e.release);
@@ -232,7 +248,9 @@ const MediaPage = () => {
   const isPlaying = (e: Entry) =>
     player.playing &&
     !!nowPlaying &&
-    (nowPlaying.id === e.id || (!!e.release && e.id === e.release.origin && nowPlaying.id.startsWith(`${e.id}#`)));
+    (nowPlaying.id === e.id ||
+      (!!e.featured && nowPlaying.id === e.featured.id) ||
+      (!!e.release && e.id === e.release.origin && nowPlaying.id.startsWith(`${e.id}#`)));
 
   // Banner: free releases first, then published releases, then the wallet's own music; square covers only.
   const banner = useMemo(() => [...free, ...published, ...myMusic].slice(0, 5), [free, published, myMusic]);
@@ -337,51 +355,67 @@ const MediaPage = () => {
     );
   };
 
-  const songs = [...free, ...published.flatMap((p) => (p.release ? releaseTracks(p.release) : [])), ...myMusic].filter(
-    (e) => e.kind === 'music',
-  );
+  const isAlbum = (e: Entry) => e.id === HEADLINE_ALBUM.id;
+  const songs = [
+    ...free.filter((e) => !isAlbum(e)),
+    ...published.flatMap((p) => (p.release ? releaseTracks(p.release) : [])),
+    ...myMusic,
+  ].filter((e) => e.kind === 'music');
   const showMusic = filter !== 'video';
   const showVideo = filter !== 'music';
 
   const tracksOf = (r: Entry): Entry[] => (r.release && r.id === r.release.origin ? releaseTracks(r.release) : [r]);
 
-  const releasePage = release && (
-    <div className="flex flex-col md:flex-row gap-6 md:gap-8">
-      <div className="w-full md:w-[320px] shrink-0">
-        <Cover e={release} />
-      </div>
-      <div className="flex-1 min-w-0 flex flex-col gap-4">
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-            {release.item ? 'In your wallet' : `${release.sub ?? 'Single'} · Free`}
+  const releasePage =
+    release && StreamAlbum && isAlbum(release) ? (
+      <Suspense fallback={null}>
+        <StreamAlbum
+          headline={{
+            playing: isPlaying(release),
+            duration: durations[HEADLINE_ALBUM.headline.id],
+            onPlay: () => play(release),
+          }}
+        />
+      </Suspense>
+    ) : (
+      release && (
+        <div className="flex flex-col md:flex-row gap-6 md:gap-8">
+          <div className="w-full md:w-[320px] shrink-0">
+            <Cover e={release} />
           </div>
-          <h1 className="text-2xl md:text-3xl font-black text-white mt-1">{release.title}</h1>
-          <div className="text-sm mt-1" style={{ color: MUTED }}>
-            {release.artist}
-            {release.aiMade ? ' · AI-made' : ''}
+          <div className="flex-1 min-w-0 flex flex-col gap-4">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+                {release.item ? 'In your wallet' : `${release.sub ?? 'Single'} · Free`}
+              </div>
+              <h1 className="text-2xl md:text-3xl font-black text-white mt-1">{release.title}</h1>
+              <div className="text-sm mt-1" style={{ color: MUTED }}>
+                {release.artist}
+                {release.aiMade ? ' · AI-made' : ''}
+              </div>
+              {release.release?.description && (
+                <p className="text-sm mt-3 whitespace-pre-line" style={{ color: '#d0d5dd' }}>
+                  {release.release.description}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => play(tracksOf(release)[0])}
+                className="px-5 py-2 text-sm font-bold flex items-center gap-2"
+                style={{ background: GOLD, color: '#1a1300', borderRadius: 4 }}
+              >
+                {isPlaying(release) ? <Pause size={16} /> : <Play size={16} fill="#1a1300" />}
+                {isPlaying(release) ? 'Pause' : release.item ? 'Play' : 'Listen free'}
+              </button>
+            </div>
+            <div className="flex flex-col mt-2" style={{ borderTop: `1px solid ${LINE}` }}>
+              {tracksOf(release).map(songRow)}
+            </div>
           </div>
-          {release.release?.description && (
-            <p className="text-sm mt-3 whitespace-pre-line" style={{ color: '#d0d5dd' }}>
-              {release.release.description}
-            </p>
-          )}
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => play(tracksOf(release)[0])}
-            className="px-5 py-2 text-sm font-bold flex items-center gap-2"
-            style={{ background: GOLD, color: '#1a1300', borderRadius: 4 }}
-          >
-            {isPlaying(release) ? <Pause size={16} /> : <Play size={16} fill="#1a1300" />}
-            {isPlaying(release) ? 'Pause' : release.item ? 'Play' : 'Listen free'}
-          </button>
-        </div>
-        <div className="flex flex-col mt-2" style={{ borderTop: `1px solid ${LINE}` }}>
-          {tracksOf(release).map(songRow)}
-        </div>
-      </div>
-    </div>
-  );
+      )
+    );
 
   return (
     <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
@@ -440,12 +474,13 @@ const MediaPage = () => {
                   background: 'linear-gradient(120deg, #1c1606 0%, #0a0a0a 55%, #000 100%)',
                 }}
               >
-                <button onClick={() => openEntry(hero)} className="w-[132px] md:w-[220px] shrink-0">
+                {isAlbum(hero) && <StillsBanner stills={VEXVOID_STILLS} className="absolute inset-0" />}
+                <button onClick={() => openEntry(hero)} className="relative w-[132px] md:w-[220px] shrink-0">
                   <Cover e={hero} />
                 </button>
-                <div className="flex-1 min-w-0 flex flex-col gap-2">
+                <div className="relative flex-1 min-w-0 flex flex-col gap-2">
                   <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-                    Featured{hero.free ? ' · Free to listen' : ''}
+                    {isAlbum(hero) ? 'Album · Headline track free' : `Featured${hero.free ? ' · Free to listen' : ''}`}
                   </div>
                   <div className="text-xl md:text-4xl font-black text-white leading-tight">{hero.title}</div>
                   <div className="text-sm" style={{ color: MUTED }}>
@@ -459,7 +494,7 @@ const MediaPage = () => {
                       className="text-xs font-bold underline-offset-4 hover:underline"
                       style={{ color: GOLD }}
                     >
-                      View release
+                      {isAlbum(hero) ? 'View album' : 'View release'}
                     </button>
                   </div>
                 </div>
@@ -478,12 +513,7 @@ const MediaPage = () => {
                 )}
               </section>
             )}
-            {showMusic && StreamAlbum && (
-              <Suspense fallback={null}>
-                <StreamAlbum />
-              </Suspense>
-            )}
-            {showMusic && shelf('Free this week', free)}
+            {showMusic && shelf(StreamAlbum ? 'Albums' : 'Free this week', free)}
             {shelf(
               'New releases',
               published.filter((p) => (p.kind === 'music' ? showMusic : showVideo)),

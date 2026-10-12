@@ -20,6 +20,10 @@ export type Manifest = {
   albumId: string;
   title: string;
   artist?: string;
+  /** Square album art, when the manifest gains one. */
+  cover?: string;
+  /** trackId of the album's free headline track. */
+  headline?: string;
   satsPerSegment: number;
   segmentSeconds: number;
   endpoint: string;
