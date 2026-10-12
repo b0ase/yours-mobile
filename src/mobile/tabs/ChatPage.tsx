@@ -40,6 +40,7 @@ import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
 import { readListCache, writeListCache } from '../ui/listCache';
+import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import {
@@ -418,25 +419,56 @@ const Conversation = ({
     [onAuthLost, onLocked],
   );
 
+  // Instant open (chat/threadCache.ts): show the cached tail at once, then fetch only what is newer.
+  // latestPage only when nothing is cached for this room and identity.
   useEffect(() => {
     let live = true;
-    setLoading(true);
-    client
-      .latestPage(room.ticker)
-      .then((p) => {
+    const show = (cached: ChatMessage[]) => {
+      setMessages(mergeMessages([], visibleMessages(cached, viewerIsAdmin)));
+      setHasMore(true);
+      setLoading(false);
+      const cursor = latestCursor(cached);
+      if (!cursor) return;
+      client
+        .since(room.ticker, cursor)
+        .then((fresh) => {
+          if (!live) return;
+          writeThread(me, room.ticker, fresh);
+          const shown = visibleMessages(fresh, viewerIsAdmin);
+          if (shown.length) setMessages((cur) => mergeMessages(cur, shown, { dropOrphanEdits: true }));
+          setError('');
+          void client.markRead(room.ticker).catch(() => {});
+        })
+        .catch((e) => live && fail(e));
+    };
+    const fetchLatest = () => {
+      setLoading(true);
+      client
+        .latestPage(room.ticker)
+        .then((p) => {
+          if (!live) return;
+          writeThread(me, room.ticker, p.messages);
+          setMessages(mergeMessages([], visibleMessages(p.messages, viewerIsAdmin)));
+          setHasMore(p.hasMore);
+          setHiddenBefore(p.hiddenBefore ?? null);
+          setError('');
+          void client.markRead(room.ticker).catch(() => {});
+        })
+        .catch((e) => live && fail(e))
+        .finally(() => live && setLoading(false));
+    };
+    const peek = peekThread(me, room.ticker);
+    if (peek) show(peek);
+    else
+      void readThread(me, room.ticker).then((cached) => {
         if (!live) return;
-        setMessages(mergeMessages([], visibleMessages(p.messages, viewerIsAdmin)));
-        setHasMore(p.hasMore);
-        setHiddenBefore(p.hiddenBefore ?? null);
-        setError('');
-        void client.markRead(room.ticker).catch(() => {});
-      })
-      .catch((e) => live && fail(e))
-      .finally(() => live && setLoading(false));
+        if (cached) show(cached);
+        else fetchLatest();
+      });
     return () => {
       live = false;
     };
-  }, [client, room.ticker, fail, viewerIsAdmin]);
+  }, [client, room.ticker, fail, viewerIsAdmin, me]);
 
   const poll = useCallback(() => {
     const cursor = latestCursor(messages);
@@ -444,6 +476,7 @@ const Conversation = ({
     client
       .since(room.ticker, cursor)
       .then((fresh) => {
+        if (fresh.length) writeThread(me, room.ticker, fresh);
         const shown = visibleMessages(fresh, viewerIsAdmin);
         if (!shown.length) return;
         setMessages((cur) => mergeMessages(cur, shown, { dropOrphanEdits: true }));
@@ -451,7 +484,7 @@ const Conversation = ({
       })
       .catch(() => {});
     void client.whoIsTyping(room.ticker).then(setTyping);
-  }, [client, room.ticker, messages, online, viewerIsAdmin]);
+  }, [client, room.ticker, messages, online, viewerIsAdmin, me]);
   usePoll(poll, THREAD_POLL_MS, !loading);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
@@ -594,6 +627,7 @@ const Conversation = ({
     go()
       .then((saved) => {
         paidFor.current.delete(localId);
+        if (saved) writeThread(me, room.ticker, [saved]);
         // A private bot reply (lounge-bot) settles in place of the never-stored command.
         // Any other unstored reply (/b help, Lounge commands) never matches the optimistic copy: drop it.
         setMessages((cur) => {
@@ -2146,6 +2180,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       })
       .catch(() => undefined);
   }, [client, handle, socialAvatar]);
+  useEffect(warmThreadCache, []);
   const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
