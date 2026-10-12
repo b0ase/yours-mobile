@@ -39,7 +39,10 @@ import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
 import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
-import { readListCache } from '../ui/listCache';
+import { readListCache, writeListCache } from '../ui/listCache';
+import { afterPaint } from '../ui/afterPaint';
+import { stableOrder } from '../chat/listOrder';
+import { SkeletonRows } from '../chat/SkeletonRows';
 import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sharedRooms';
 import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -104,6 +107,7 @@ const NewSpaceSheet = BSPACES_ENABLED
 import {
   amountLabel,
   buildTokenRoomList,
+  holdingsFromRooms,
   holdLine,
   parseGateRefusal,
   parseInvitee,
@@ -2164,16 +2168,19 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     } catch {
       /* no storage */
     }
-    client
-      .publishAvatar(socialAvatar)
-      .then(() => {
-        try {
-          localStorage.setItem(key, socialAvatar);
-        } catch {
-          /* no storage */
-        }
-      })
-      .catch(() => undefined);
+    // Not needed for the first paint (chat snappy): after it.
+    return afterPaint(() =>
+      client
+        .publishAvatar(socialAvatar)
+        .then(() => {
+          try {
+            localStorage.setItem(key, socialAvatar);
+          } catch {
+            /* no storage */
+          }
+        })
+        .catch(() => undefined),
+    );
   }, [client, handle, socialAvatar]);
   useEffect(warmThreadCache, []);
   const autoTried = useRef(false);
@@ -2282,16 +2289,21 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   useEffect(() => {
     if (!handle) return;
     setIgnored(loadInviteList(handle, 'ignored'));
-    void syncBlocks(client);
     setAccepted(loadInviteList(handle, 'accepted'));
-    if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+    return afterPaint(() => {
+      void syncBlocks(client);
+      if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle, identityAddress]);
 
   const refresh = useCallback(() => {
     if (!handle || !online) return;
     void walletHoldings(apiContext)
-      .then(setHoldings)
+      .then((h) => {
+        setHoldings(h);
+        writeListCache(`chat:holdings:${identityAddress}`, h, 200);
+      })
       .catch(() => setHoldings([]));
     client
       .openRooms()
@@ -2321,27 +2333,37 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       .map((h) => `${h.kind}:${h.id}`)
       .filter((k) => !mine.has(k) && now - (lookedAt.current.get(k) ?? 0) > LOOKUP_TTL_MS)
       .slice(0, 20);
-    todo.forEach((k) => lookedAt.current.set(k, now));
-    void Promise.all(
-      todo.map((k) =>
-        client
-          .tokenRoom(k)
-          .then((d) => parseLookup(d))
-          .catch(() => null),
-      ),
-    ).then((found) => {
-      const ok = found.filter((l): l is TokenRoomLookup => !!l);
-      ok.forEach(
-        (l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }),
-      );
-      const add = Object.fromEntries(ok.map((l) => [l.key, l]));
-      if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
+    if (!todo.length) return;
+    return afterPaint(() => {
+      todo.forEach((k) => lookedAt.current.set(k, now));
+      void Promise.all(
+        todo.map((k) =>
+          client
+            .tokenRoom(k)
+            .then((d) => parseLookup(d))
+            .catch(() => null),
+        ),
+      ).then((found) => {
+        const ok = found.filter((l): l is TokenRoomLookup => !!l);
+        ok.forEach(
+          (l) => l.personal?.tokenId && rememberPersonal({ name: l.personal.name, tokenId: l.personal.tokenId }),
+        );
+        const add = Object.fromEntries(ok.map((l) => [l.key, l]));
+        if (Object.keys(add).length) setLookups((cur) => ({ ...cur, ...add }));
+      });
     });
   }, [client, handle, holdings, rooms]);
 
+  // Cold open: token rows render from the cached holdings, or from the cached rooms themselves,
+  // before the wallet's holdings arrive (no rows popping in later).
+  const cachedHoldings = useMemo(() => readListCache<Holding>(`chat:holdings:${identityAddress}`), [identityAddress]);
+  const listHoldings = useMemo(
+    () => holdings ?? cachedHoldings ?? (rooms ? holdingsFromRooms(rooms) : null),
+    [holdings, cachedHoldings, rooms],
+  );
   const entries = useMemo(
-    () => (holdings && rooms ? buildTokenRoomList(holdings, rooms, lookups) : null),
-    [holdings, rooms, lookups],
+    () => (listHoldings && rooms ? buildTokenRoomList(listHoldings, rooms, lookups) : null),
+    [listHoldings, rooms, lookups],
   );
   const personalOf = useCallback(
     (e: TokenRoomEntry) => (e.room ? personalOfRoom(e.room) : null) ?? lookups[e.key]?.personal ?? null,
@@ -2389,6 +2411,19 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       (x) => !(x.kind === 'open' && isLounge(x.room.ticker)),
     );
   }, [myOpen, tokenMine]);
+
+  // Keep the order stable while the list is being scrolled; apply the fresh order once it stops.
+  const [scrolling, setScrolling] = useState(false);
+  const scrollIdle = useRef<number | null>(null);
+  const onListScroll = () => {
+    if (!scrolling) setScrolling(true);
+    if (scrollIdle.current) window.clearTimeout(scrollIdle.current);
+    scrollIdle.current = window.setTimeout(() => setScrolling(false), 250);
+  };
+  const shownKeys = useRef<string[]>([]);
+  const yourKey = (x: (typeof yours)[number]) => (x.kind === 'open' ? `o:${x.room.ticker}` : `t:${x.item.e.key}`);
+  const yoursShown = scrolling ? stableOrder(shownKeys.current, yours, yourKey) : yours;
+  shownKeys.current = yoursShown.map(yourKey);
 
   const openOpenRoom = (room: ChatRoom, joinSpace = false) => {
     setRooms((cur) => cur?.map((r) => (r.ticker === room.ticker ? { ...r, unread: 0 } : r)) ?? cur);
@@ -2656,6 +2691,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     <div
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: BG }}
+      onScroll={onListScroll}
     >
       <PullToRefresh onRefresh={refresh} disabled={!handle} />
       <TopNav />
@@ -2751,11 +2787,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             )}
           </div>
         )}
-        {handle && rooms === null && !listError && (
-          <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            Loading chatrooms…
-          </div>
-        )}
+        {handle && rooms === null && !listError && <SkeletonRows label="Loading chatrooms" />}
         {handle && indexing && (
           <div
             className="mx-4 mt-3 mb-1 flex items-center gap-3 rounded-xl px-3 py-3 text-xs"
@@ -2832,7 +2864,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     }}
                   />
                 ))}
-              {yours.map((y) =>
+              {yoursShown.map((y) =>
                 y.kind === 'open' ? (
                   <OpenRoomRow key={y.room.ticker} room={y.room} me={handle} onOpen={() => openOpenRoom(y.room)} />
                 ) : (
@@ -2877,11 +2909,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             {ROOMS && (
               <>
                 <ListLabel>Token rooms</ListLabel>
-                {entries === null && (
-                  <div className="text-center text-xs py-4" style={{ color: MUTED }}>
-                    Loading token rooms…
-                  </div>
-                )}
+                {entries === null && <SkeletonRows count={3} label="Loading token rooms" />}
                 {entries && entries.length === 0 && (
                   <div className="px-8 pt-4 pb-6 text-center">
                     <p className="text-sm text-white font-semibold">No token rooms yet</p>

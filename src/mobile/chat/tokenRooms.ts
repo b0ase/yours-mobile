@@ -376,3 +376,15 @@ export const parseInvitee = (input: string): { handle: string } | { address: str
   const h = s.replace(/^\$/, '');
   return /^[\w.-]{1,64}$/.test(h) ? { handle: h.toLowerCase() } : null;
 };
+
+/**
+ * Cold open before the wallet's holdings arrive: stand-in holdings for the token rooms the user is
+ * already in (from the cached room list), at the gate minimum, so those rows render at once.
+ * Replaced by the real holdings as soon as they load.
+ */
+export const holdingsFromRooms = (rooms: ChatRoom[]): Holding[] =>
+  rooms.flatMap((r) => {
+    const g = gateOfRoom(r);
+    const k = g ? parseTokenKey(g.key) : null;
+    return g && k ? [{ kind: k.kind, id: k.id, symbol: g.symbol, dec: g.dec, amountRaw: g.minRaw }] : [];
+  });

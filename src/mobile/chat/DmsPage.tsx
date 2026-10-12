@@ -14,6 +14,8 @@ import { onDmRequest, onRoomTicker, takeDmRequest, takeRoomTicker } from './segm
 import { BchatClient, ChatApiError, needsHandle, saveSession } from './api';
 import { dmsCacheKey, fetchRooms, onRooms, sharedChatClient } from './sharedRooms';
 import { readListCache } from '../ui/listCache';
+import { afterPaint } from '../ui/afterPaint';
+import { SkeletonRows } from './SkeletonRows';
 import { HandleFlow } from '../names/HandleFlow';
 import { walletSigner } from './signer';
 import { listTimeLabel, previewText, roomTitle, type ChatRoom } from './messages';
@@ -192,7 +194,7 @@ export const DmsPage = ({
   const [blockTick, setBlockTick] = useState(0);
   useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
   useEffect(() => {
-    if (handle) void syncBlocks(client);
+    if (handle) return afterPaint(() => void syncBlocks(client));
   }, [client, handle]);
   const dms = useMemo(
     () => (rooms ? dmRooms(rooms).filter((r) => !isBlocked(roomTitle(r, handle || ''))) : null),
@@ -334,11 +336,7 @@ export const DmsPage = ({
           </div>
         )}
 
-        {handle && dms === null && !listError && (
-          <div className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            Loading messages…
-          </div>
-        )}
+        {handle && dms === null && !listError && <SkeletonRows label="Loading messages" />}
         {handle && listError && dms === null && (
           <div className="text-center text-xs pt-10 text-[#F97066]">
             {listError}
