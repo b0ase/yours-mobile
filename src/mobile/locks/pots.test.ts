@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { groupPots, potName, PNEE_POT } from './pots';
+import { artistFromSearch, artistOfPot, artistPot, groupPots, potName, PNEE_POT } from './pots';
 import type { LockPlan } from './schedule';
 
 const plan = (id: string, pot: string | undefined, sats: number, height: number, claimed = false): LockPlan => ({
@@ -41,5 +41,20 @@ describe('Pots & Locks grouping', () => {
     const [p] = groupPots([plan('x', PNEE_POT, 300, 10, true)], 1000);
     expect(p.locked).toBe(0);
     expect(p.ready).toBe(0);
+  });
+});
+
+describe('artist backing pots', () => {
+  test('artist:<slug> is its own pot, named for the artist', () => {
+    expect(potName(artistPot('vexvoid'))).toBe('Backing vexvoid');
+    expect(artistOfPot('artist:vexvoid')).toBe('vexvoid');
+    expect(artistOfPot('pnee')).toBeNull();
+    const pots = groupPots([plan('a', artistPot('vexvoid'), 5000, 900)], 100);
+    expect(pots[0].id).toBe('artist:vexvoid');
+  });
+  test('?artist= only takes a clean slug', () => {
+    expect(artistFromSearch('?artist=vex-void')).toBe('vex-void');
+    expect(artistFromSearch('?artist=../x')).toBeNull();
+    expect(artistFromSearch('')).toBeNull();
   });
 });

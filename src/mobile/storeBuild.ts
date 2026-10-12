@@ -329,3 +329,26 @@ export const PAY_STREAM_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * bMusic artist programme (docs/ARTIST-PROGRAMME.md): "Join as an artist", sponsored plays, sales share into the
+ * listener pot, fan locks behind an artist. bWalletX only and OFF by default: it needs the bMusic server's
+ * programme routes, which stay off until the owner says the server is clean (VITE_ARTIST_PROGRAMME=1 to show it).
+ * Literal env checks so a store build and a default build drop the code.
+ */
+export const ARTIST_PROGRAMME_ENABLED: boolean =
+  import.meta.env.VITE_ARTIST_PROGRAMME === '1' &&
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  );
+
+/** Network fees on us (docs/FEE-POT.md): OFF by default, never in a store build (VITE_FEE_POT=1 to try it). */
+export const FEE_POT_ENABLED: boolean =
+  import.meta.env.VITE_FEE_POT === '1' &&
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  );

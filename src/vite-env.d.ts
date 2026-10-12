@@ -11,6 +11,10 @@ interface ImportMetaEnv {
   readonly VITE_LIVE_CHAT?: string;
   /** bMusic server base URL (src/mobile/media/stream/api.ts). */
   readonly VITE_BMUSIC_URL?: string;
+  /** '1' = show the bMusic artist programme (off by default; needs the server). */
+  readonly VITE_ARTIST_PROGRAMME?: string;
+  /** '1' = ask the fee pot to pay network fees (off by default; needs the server). */
+  readonly VITE_FEE_POT?: string;
 }
 
 interface ImportMeta {

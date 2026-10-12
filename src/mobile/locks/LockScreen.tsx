@@ -64,7 +64,7 @@ import {
 import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
 import { BackPneeSheet } from '../notes/BackPneeSheet';
 import { BackPneeDoneSheet } from '../notes/BackPneeDoneSheet';
-import { groupPots, PNEE_POT, potName } from './pots';
+import { artistFromSearch, artistOfPot, artistPot, groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
 import { MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { listSubs, monthlyUsd } from '../pots/pots';
@@ -75,6 +75,8 @@ const PotsScreen = lazy(() => import('../pots/PotsScreen'));
 // Pots & Locks › Subscriptions (bWalletX only: absent from a store build even as code).
 const SubscriptionsTab = SUBSCRIPTIONS_ENABLED ? lazy(() => import('../pots/SubscriptionsTab')) : null;
 import { verifyLockTx, type VerifyResult } from './verify';
+import { ARTIST_PROGRAMME_ENABLED } from '../storeBuild';
+import { registerBacking } from '../media/artists/programme/api';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
 import {
   CURVE_NAMES,
@@ -171,6 +173,8 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   };
   /** The pot the lock being built goes into (LockPlan.pot); undefined = Other locks. */
   const [pot, setPot] = useState<string | undefined>(undefined);
+  // bMusic artist programme: /m/lock?artist=<slug> starts a lock behind that artist (off unless the flag is on).
+  const [backArtist] = useState(() => (ARTIST_PROGRAMME_ENABLED ? artistFromSearch(location.search) : null));
   const [openPot, setOpenPot] = useState<string | null>(null);
   const [showSubs, setShowSubs] = useState(false);
   const tab = lockTabFor(location.pathname, SUBSCRIPTIONS_ENABLED);
@@ -330,7 +334,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setBusy(true);
     try {
       const pr = schedule as PercentResult;
-      await createLock(
+      const made = await createLock(
         apiContext,
         account,
         {
@@ -372,6 +376,8 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       setTyped('');
       setView({ kind: 'list' });
       if (pneeFromWallet && pot === PNEE_POT) setPneeDone(Number(amountBsv));
+      const artist = ARTIST_PROGRAMME_ENABLED ? artistOfPot(pot) : null;
+      if (artist && apiContext) void registerBacking(apiContext, artist, made);
       await refresh();
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : 'Lock failed', 'error');
@@ -544,6 +550,17 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setBackPnee(null);
     setView({ kind: 'new' });
   };
+  // Backing an artist: one lock to a date (a year by default), labelled, in the artist's pot.
+  useEffect(() => {
+    if (!backArtist) return;
+    setKind('once');
+    setUnlockOn(dayInput(new Date(Date.now() + 365 * 86_400_000)));
+    setLabel(`Backing ${backArtist}`);
+    setTemplateUsed(null);
+    setPot(artistPot(backArtist));
+    setView({ kind: 'new' });
+    // Once, on entry from an artist page.
+  }, [backArtist]);
   /** Back from the builder: in the Back PNEEs flow that is the amount sheet, otherwise the list. */
   const backFromNew = () => {
     setView({ kind: 'list' });

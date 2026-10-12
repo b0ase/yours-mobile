@@ -8,6 +8,16 @@ import { TEMPLATES } from './templates';
 
 export const PNEE_POT = 'pnee';
 export const OTHER_POT = 'other';
+/** Backing a bMusic artist (docs/ARTIST-PROGRAMME.md): pot id 'artist:<slug>'. */
+export const ARTIST_POT_PREFIX = 'artist:';
+export const artistPot = (slug: string) => ARTIST_POT_PREFIX + slug;
+export const artistOfPot = (id: string | undefined) =>
+  id?.startsWith(ARTIST_POT_PREFIX) ? id.slice(ARTIST_POT_PREFIX.length) : null;
+/** ?artist=<slug> on the Lock screen starts a lock behind that artist. */
+export const artistFromSearch = (search: string) => {
+  const s = new URLSearchParams(search).get('artist') ?? '';
+  return /^[a-z0-9-]{2,40}$/.test(s) ? s : null;
+};
 
 export type Pot = {
   id: string;
@@ -22,14 +32,16 @@ export type Pot = {
 };
 
 export const potName = (id: string) =>
-  id === PNEE_POT
-    ? 'PNEEs'
-    : id === OTHER_POT
-      ? 'Other locks'
-      : (TEMPLATES.find((t) => t.id === id)?.name ?? 'Other locks');
+  artistOfPot(id)
+    ? `Backing ${artistOfPot(id)}`
+    : id === PNEE_POT
+      ? 'PNEEs'
+      : id === OTHER_POT
+        ? 'Other locks'
+        : (TEMPLATES.find((t) => t.id === id)?.name ?? 'Other locks');
 
 const potOf = (p: LockPlan) =>
-  p.pot === PNEE_POT || TEMPLATES.some((t) => t.id === p.pot) ? (p.pot as string) : OTHER_POT;
+  p.pot === PNEE_POT || artistOfPot(p.pot) || TEMPLATES.some((t) => t.id === p.pot) ? (p.pot as string) : OTHER_POT;
 
 /** Plans grouped into pots: PNEEs first, Other locks last, the rest by most locked. */
 export function groupPots(plans: LockPlan[], height: number): Pot[] {
