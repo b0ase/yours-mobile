@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
-import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
+import { BSPACES_ENABLED, MARKET_ENABLED, RELEASES_ENABLED } from '../storeBuild';
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
 const SettingsHub = lazy(() => import('./SettingsHub'));
@@ -15,6 +15,8 @@ const BPicsPage = lazy(() => import('../bpics/BPicsPage'));
 const FeedTab = lazy(() => import('../feed/FeedTab'));
 const ChatPage = lazy(() => import('./ChatPage'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
+// bWalletX only: absent from a store build (RELEASES_ENABLED).
+const AddReleasePage = RELEASES_ENABLED ? lazy(() => import('../media/releases/AddReleasePage')) : null;
 const AgentPage = lazy(() => import('../agent/AgentPage'));
 // The top bar's mailbox: bMail in the content area, between the top bar and the tab bar.
 const BMailPage = lazy(() => import('../bmail/BMailPage'));
@@ -39,6 +41,7 @@ const MobileRoutes = () => (
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
         <Route path="media" element={<MediaPage />} />
+        {AddReleasePage && <Route path="media/new" element={<AddReleasePage />} />}
         <Route
           path="bpics"
           element={

@@ -1,26 +1,48 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Music, Pause, Play, Video } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
-import { getState, pauseAudio, playQueue, subscribe, toggle } from './player';
+import { getState, pauseAudio, playQueue, subscribe, toggle, type Track } from './player';
 import { FEATURED_TRACKS, featuredQueue, type FeaturedTrack } from './featured/featured';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
+import { useReleases } from './releases/useReleases';
+import type { Release } from './releases/releases';
+import { RELEASES_ENABLED } from '../storeBuild';
 import { TopNav } from '../../components/TopNav';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { ErrorActions } from '../errors/ErrorActions';
 
 /**
- * /m/media — the top bar's Play button. The wallet's music and video inscriptions as a player:
- * "Now playing" / featured hero, music as a track list, video as 16:9 cards. The app-wide
- * MiniPlayer stays docked above the tab bar. Wallet › NFTs keeps the full library (images too).
+ * /m/media — a music store front in bWalletX black and gold: a banner of featured square covers,
+ * shelves of square covers, a song list and a release page. Only real content: the free featured
+ * tracks (featured.ts), releases published with bwallet-media MAP tags (releases.ts) and the wallet's
+ * own music / video inscriptions. No purchase path exists for this media yet, so every button is
+ * Free / Listen / Play (owned) — no prices. Square covers everywhere; items without a cover get
+ * generated gold square art, never a grey box.
  */
 const GOLD = '#FFD24D';
-const PANEL = '#17191E';
+const PANEL = '#111216';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
+const RADIUS = 6;
+
+/** One playable thing on the page, whatever its source. */
+type Entry = {
+  id: string;
+  title: string;
+  artist: string;
+  cover?: string;
+  free: boolean;
+  kind: 'music' | 'video';
+  aiMade?: boolean;
+  sub?: string;
+  featured?: FeaturedTrack;
+  item?: MediaItem;
+  release?: Release;
+};
 
 type Filter = 'all' | 'music' | 'video';
 const FILTERS: { id: Filter; label: string }[] = [
@@ -29,175 +51,333 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'video', label: 'Video' },
 ];
 
+const fmt = (s?: number) =>
+  s && isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '';
+
 const usePlayer = () => {
   const [s, setS] = useState(getState);
   useEffect(() => subscribe(setS), []);
   return s;
 };
 
-const Thumb = ({ item, className }: { item: MediaItem; className: string }) => (
-  <div className={`relative overflow-hidden ${className}`} style={{ background: PANEL }}>
-    <Blurred forceBlur={item.flagged}>
-      {item.kind === 'video' ? (
-        <video src={`${item.url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+/** Track lengths from the audio metadata (featured mp3s are small local assets). */
+const useDurations = (tracks: readonly FeaturedTrack[]) => {
+  const [d, setD] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const els = tracks.map((t) => {
+      const a = new Audio();
+      a.preload = 'metadata';
+      a.onloadedmetadata = () => setD((p) => ({ ...p, [t.id]: a.duration }));
+      a.src = t.url;
+      return a;
+    });
+    return () => els.forEach((a) => a.removeAttribute('src'));
+  }, [tracks]);
+  return d;
+};
+
+const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+/** Gold-by-default square art for items with no cover of their own. */
+const GoldArt = ({ seed, title }: { seed: string; title: string }) => {
+  const h = hash(seed);
+  const glyph = (title.trim()[0] || 'b').toUpperCase();
+  return (
+    <div
+      className="w-full h-full flex items-center justify-center"
+      style={{
+        background: `radial-gradient(circle at ${20 + (h % 60)}% ${20 + ((h >> 3) % 60)}%, #FFE58A 0%, #D9A520 28%, #5a420a 62%, #0b0b0b 100%)`,
+      }}
+    >
+      <span className="font-black" style={{ color: '#0b0b0b', fontSize: '42cqw', lineHeight: 1, opacity: 0.85 }}>
+        {glyph}
+      </span>
+    </div>
+  );
+};
+
+/** A crisp 1:1 cover: real art when there is one, gold art otherwise. */
+const Cover = ({ e, size }: { e: Entry; size?: number }) => (
+  <div
+    className="relative overflow-hidden shrink-0 aspect-square"
+    style={{
+      width: size ?? '100%',
+      borderRadius: RADIUS,
+      background: '#000',
+      containerType: 'inline-size',
+      boxShadow: '0 6px 18px rgba(0,0,0,0.55)',
+    }}
+  >
+    <Blurred forceBlur={!!e.item?.flagged}>
+      {e.cover ? (
+        <img src={e.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
+      ) : e.kind === 'video' && e.item ? (
+        <video
+          src={`${e.item.url}#t=0.1`}
+          muted
+          playsInline
+          preload="metadata"
+          className="w-full h-full object-cover"
+        />
       ) : (
-        <div
-          className="w-full h-full flex items-center justify-center"
-          style={{ background: 'linear-gradient(145deg, #2a2310, #17191E)' }}
-        >
-          <Music size={22} color={GOLD} />
-        </div>
+        <GoldArt seed={e.id} title={e.title} />
       )}
     </Blurred>
+    {e.aiMade && (
+      <span
+        className="absolute left-1.5 top-1.5 px-1.5 py-0.5 text-[9px] font-bold uppercase"
+        style={{ background: 'rgba(0,0,0,0.7)', color: GOLD, borderRadius: 3 }}
+      >
+        AI-made
+      </span>
+    )}
   </div>
 );
 
+/** A release's tracks as rows: one Entry per track, sharing the release cover. */
+const releaseTracks = (r: Release): Entry[] =>
+  r.tracks.map((t, i) => ({
+    id: `${r.origin}#${i}`,
+    title: t.title,
+    artist: r.artist,
+    cover: r.coverUrl,
+    free: true,
+    kind: t.kind,
+    aiMade: r.ai,
+    release: r,
+  }));
+
+const releaseQueue = (r: Release): Track[] =>
+  r.tracks
+    .map((t, i) => ({ id: `${r.origin}#${i}`, title: `${t.title} · ${r.artist}`, url: t.url, artwork: r.coverUrl }))
+    .filter((_, i) => r.tracks[i].kind === 'music');
+
 const MediaPage = () => {
   const navigate = useNavigate();
-  const close = () => navigate(-1);
+  const [release, setRelease] = useState<Entry | null>(null);
+  const close = () => (release ? setRelease(null) : navigate(-1));
   useBackClose(true, close);
   const { items, hasMore, loading, error, loadMore, reload } = useWalletMedia();
+  const releases = useReleases();
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<MediaItem | null>(null);
+  const [slide, setSlide] = useState(0);
   const player = usePlayer();
   const nowPlaying = player.queue[player.index];
+  const durations = useDurations(FEATURED_TRACKS);
 
-  const playable = useMemo(() => items.filter((i) => i.kind === 'music' || i.kind === 'video'), [items]);
-  const music = useMemo(() => playable.filter((i) => i.kind === 'music'), [playable]);
-  const videos = useMemo(() => playable.filter((i) => i.kind === 'video'), [playable]);
-  const featured = music[0] ?? videos[0];
+  const music = useMemo(() => items.filter((i) => i.kind === 'music'), [items]);
+  const videos = useMemo(() => items.filter((i) => i.kind === 'video'), [items]);
 
-  const play = (item: MediaItem) => {
-    if (item.kind === 'music') return playMusic(music, item);
+  const free: Entry[] = useMemo(
+    () =>
+      FEATURED_TRACKS.map((t) => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        cover: t.artwork,
+        free: true,
+        kind: 'music' as const,
+        sub: t.label,
+        featured: t,
+      })),
+    [],
+  );
+  const published: Entry[] = useMemo(
+    () =>
+      releases.map((r) => ({
+        id: r.origin,
+        title: r.title,
+        artist: r.artist,
+        cover: r.coverUrl,
+        free: true,
+        kind: r.tracks.some((t) => t.kind === 'music') ? ('music' as const) : ('video' as const),
+        aiMade: r.ai,
+        sub: [r.genre, r.tracks.length > 1 ? `${r.tracks.length} tracks` : 'Single'].filter(Boolean).join(' · '),
+        release: r,
+      })),
+    [releases],
+  );
+  const own = (i: MediaItem): Entry => ({
+    id: i.output.outpoint,
+    title: i.name,
+    artist: 'In your wallet',
+    free: false,
+    kind: i.kind === 'video' ? 'video' : 'music',
+    item: i,
+  });
+  const myMusic = useMemo(() => music.map(own), [music]);
+  const myVideo = useMemo(() => videos.map(own), [videos]);
+
+  const play = (e: Entry) => {
+    if (nowPlaying?.id === e.id) return toggle();
+    if (e.featured) return playQueue(featuredQueue(e.featured), 0);
+    if (e.release) {
+      const q = releaseQueue(e.release);
+      const at = Math.max(
+        0,
+        q.findIndex((t) => t.id === e.id),
+      );
+      if (q.length) return playQueue(q, at);
+      return;
+    }
+    if (!e.item) return;
+    if (e.item.kind === 'music') return playMusic(music, e.item);
     pauseAudio();
-    setOpen(item);
+    setOpen(e.item);
   };
+  const isPlaying = (e: Entry) =>
+    player.playing &&
+    !!nowPlaying &&
+    (nowPlaying.id === e.id || (!!e.release && e.id === e.release.origin && nowPlaying.id.startsWith(`${e.id}#`)));
 
-  const hero = nowPlaying ? (
-    <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
-      <div
-        className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: 'linear-gradient(145deg, #3a2f0c, #17191E)' }}
-      >
-        <Music size={24} color={GOLD} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-          Now playing
-        </div>
-        <div className={`text-base font-bold text-white ${ELLIPSIS}`}>{nowPlaying.title}</div>
-        <div className="text-xs" style={{ color: MUTED }}>
-          Track {player.index + 1} of {player.queue.length}
-        </div>
-      </div>
-      <button
-        aria-label={player.playing ? 'Pause' : 'Play'}
-        onClick={toggle}
-        className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: GOLD }}
-      >
-        {player.playing ? <Pause size={20} color="#1a1300" /> : <Play size={20} color="#1a1300" fill="#1a1300" />}
-      </button>
-    </div>
-  ) : featured ? (
+  // Banner: free releases first, then published releases, then the wallet's own music; square covers only.
+  const banner = useMemo(() => [...free, ...published, ...myMusic].slice(0, 5), [free, published, myMusic]);
+  useEffect(() => {
+    if (banner.length < 2) return;
+    const t = setInterval(() => setSlide((s) => (s + 1) % banner.length), 7000);
+    return () => clearInterval(t);
+  }, [banner.length]);
+  const hero = banner[slide % Math.max(banner.length, 1)];
+
+  const PlayBtn = ({ e, big }: { e: Entry; big?: boolean }) => (
     <button
-      onClick={() => play(featured)}
-      className="w-full rounded-2xl overflow-hidden text-left"
-      style={{ background: PANEL, border: `1px solid ${LINE}` }}
+      aria-label={isPlaying(e) ? 'Pause' : 'Play'}
+      onClick={(ev) => {
+        ev.stopPropagation();
+        play(e);
+      }}
+      className={`${big ? 'w-12 h-12' : 'w-9 h-9'} rounded-full flex items-center justify-center shrink-0`}
+      style={{ background: GOLD }}
     >
-      <Thumb item={featured} className="w-full aspect-video" />
-      <div className="p-4 flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-            Featured · {featured.kind === 'music' ? 'Music' : 'Video'}
-          </div>
-          <div className={`text-base font-bold text-white ${ELLIPSIS}`}>{featured.name}</div>
-        </div>
-        <span className="w-12 h-12 rounded-full flex items-center justify-center shrink-0" style={{ background: GOLD }}>
-          <Play size={20} color="#1a1300" fill="#1a1300" />
-        </span>
-      </div>
-    </button>
-  ) : null;
-
-  // Free to play (FEATURED_TRACKS): a card of its own, outside the wallet's library.
-  const featuredCard = (t: FeaturedTrack) => {
-    const active = nowPlaying?.id === t.id;
-    return (
-      <button
-        key={t.id}
-        onClick={() => (active ? toggle() : playQueue(featuredQueue(t), 0))}
-        className="w-full flex items-center gap-3 rounded-2xl p-3 text-left"
-        style={{ background: PANEL, border: `1px solid ${active ? GOLD : LINE}` }}
-      >
-        <img src={t.artwork} alt="" className="w-16 h-16 rounded-xl object-cover shrink-0" loading="lazy" />
-        <span className="flex-1 min-w-0">
-          <span className="block text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-            Free to play · {t.label}
-          </span>
-          <span className={`block text-base font-bold text-white ${ELLIPSIS}`}>{t.title}</span>
-          <span className="block text-xs" style={{ color: MUTED }}>
-            {t.artist}
-          </span>
-        </span>
-        <span className="w-11 h-11 rounded-full flex items-center justify-center shrink-0" style={{ background: GOLD }}>
-          {active && player.playing ? (
-            <Pause size={18} color="#1a1300" />
-          ) : (
-            <Play size={18} color="#1a1300" fill="#1a1300" />
-          )}
-        </span>
-      </button>
-    );
-  };
-
-  const track = (item: MediaItem, n: number) => {
-    const active = nowPlaying?.id === item.output.outpoint;
-    return (
-      <button
-        key={item.output.outpoint}
-        onClick={() => (active ? toggle() : play(item))}
-        className="w-full flex items-center gap-3 py-2 text-left"
-      >
-        <span className="w-5 text-xs text-right shrink-0" style={{ color: active ? GOLD : MUTED }}>
-          {n + 1}
-        </span>
-        <Thumb item={item} className="w-12 h-12 rounded-lg shrink-0" />
-        <span className={`flex-1 min-w-0 text-sm font-semibold ${ELLIPSIS}`} style={{ color: active ? GOLD : '#fff' }}>
-          {item.name}
-        </span>
-        <span
-          className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-          style={{ border: `1px solid ${LINE}` }}
-        >
-          {active && player.playing ? <Pause size={14} color={GOLD} /> : <Play size={14} color={GOLD} fill={GOLD} />}
-        </span>
-      </button>
-    );
-  };
-
-  const videoCard = (item: MediaItem) => (
-    <button key={item.output.outpoint} onClick={() => play(item)} className="w-full text-left">
-      <div className="relative rounded-2xl overflow-hidden" style={{ border: `1px solid ${LINE}` }}>
-        <Thumb item={item} className="w-full aspect-video" />
-        <span
-          className="absolute inset-0 m-auto w-14 h-14 rounded-full flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.55)', border: `1px solid ${GOLD}` }}
-        >
-          <Play size={22} color={GOLD} fill={GOLD} />
-        </span>
-      </div>
-      <div className={`mt-2 text-sm font-semibold text-white ${ELLIPSIS}`}>{item.name}</div>
+      {isPlaying(e) ? (
+        <Pause size={big ? 20 : 14} color="#1a1300" />
+      ) : (
+        <Play size={big ? 20 : 14} color="#1a1300" fill="#1a1300" />
+      )}
     </button>
   );
 
-  const section = (title: string, icon: React.ReactNode, body: React.ReactNode) => (
-    <section className="flex flex-col gap-2">
-      <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest" style={{ color: MUTED }}>
-        {icon} {title}
-      </h2>
-      {body}
-    </section>
+  /** Right-hand button on a song row: Free for free tracks, Play for what the wallet already holds. */
+  const PriceBtn = ({ e }: { e: Entry }) => (
+    <button
+      onClick={(ev) => {
+        ev.stopPropagation();
+        play(e);
+      }}
+      className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide shrink-0"
+      style={{ border: `1px solid ${GOLD}`, color: GOLD, borderRadius: 4 }}
+    >
+      {e.free ? 'Free' : 'Play'}
+    </button>
+  );
+
+  const openEntry = (e: Entry) => (e.kind === 'music' || e.release ? setRelease(e) : play(e));
+
+  const shelf = (title: string, list: Entry[]) =>
+    list.length > 0 && (
+      <section className="flex flex-col gap-3" key={title}>
+        <h2 className="flex items-baseline justify-between">
+          <span className="text-base font-bold text-white">{title}</span>
+          <span className="text-[11px]" style={{ color: MUTED }}>
+            {list.length} {list.length === 1 ? 'item' : 'items'}
+          </span>
+        </h2>
+        <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
+          {list.map((e) => (
+            <button key={e.id} onClick={() => openEntry(e)} className="w-[140px] md:w-[168px] shrink-0 text-left group">
+              <div className="relative">
+                <Cover e={e} />
+                <span className="absolute right-2 bottom-2 opacity-90 md:opacity-0 md:group-hover:opacity-100 transition">
+                  <PlayBtn e={e} />
+                </span>
+              </div>
+              <div className={`mt-2 text-[13px] font-semibold text-white ${ELLIPSIS}`}>{e.title}</div>
+              <div className={`text-[12px] ${ELLIPSIS}`} style={{ color: MUTED }}>
+                {e.artist}
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+
+  const songRow = (e: Entry, n: number) => {
+    const active = nowPlaying?.id === e.id;
+    return (
+      <div
+        key={e.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => play(e)}
+        onKeyDown={(k) => k.key === 'Enter' && play(e)}
+        className="flex items-center gap-3 py-2 px-2 cursor-pointer"
+        style={{ borderBottom: `1px solid ${LINE}`, background: active ? 'rgba(255,210,77,0.06)' : undefined }}
+      >
+        <span className="w-6 text-sm font-bold text-right shrink-0" style={{ color: active ? GOLD : MUTED }}>
+          {n + 1}
+        </span>
+        <Cover e={{ ...e, aiMade: false }} size={44} />
+        <span className="flex-1 min-w-0">
+          <span className={`block text-sm font-semibold ${ELLIPSIS}`} style={{ color: active ? GOLD : '#fff' }}>
+            {e.title}
+          </span>
+          <span className={`block text-xs ${ELLIPSIS}`} style={{ color: MUTED }}>
+            {e.artist}
+          </span>
+        </span>
+        <span className="text-xs tabular-nums w-10 text-right shrink-0" style={{ color: MUTED }}>
+          {fmt(e.featured ? durations[e.id] : active ? player.duration : undefined)}
+        </span>
+        <PriceBtn e={e} />
+      </div>
+    );
+  };
+
+  const songs = [...free, ...published.flatMap((p) => (p.release ? releaseTracks(p.release) : [])), ...myMusic].filter(
+    (e) => e.kind === 'music',
+  );
+  const showMusic = filter !== 'video';
+  const showVideo = filter !== 'music';
+
+  const tracksOf = (r: Entry): Entry[] => (r.release && r.id === r.release.origin ? releaseTracks(r.release) : [r]);
+
+  const releasePage = release && (
+    <div className="flex flex-col md:flex-row gap-6 md:gap-8">
+      <div className="w-full md:w-[320px] shrink-0">
+        <Cover e={release} />
+      </div>
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+            {release.item ? 'In your wallet' : `${release.sub ?? 'Single'} · Free`}
+          </div>
+          <h1 className="text-2xl md:text-3xl font-black text-white mt-1">{release.title}</h1>
+          <div className="text-sm mt-1" style={{ color: MUTED }}>
+            {release.artist}
+            {release.aiMade ? ' · AI-made' : ''}
+          </div>
+          {release.release?.description && (
+            <p className="text-sm mt-3 whitespace-pre-line" style={{ color: '#d0d5dd' }}>
+              {release.release.description}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => play(tracksOf(release)[0])}
+            className="px-5 py-2 text-sm font-bold flex items-center gap-2"
+            style={{ background: GOLD, color: '#1a1300', borderRadius: 4 }}
+          >
+            {isPlaying(release) ? <Pause size={16} /> : <Play size={16} fill="#1a1300" />}
+            {isPlaying(release) ? 'Pause' : release.item ? 'Play' : 'Listen free'}
+          </button>
+        </div>
+        <div className="flex flex-col mt-2" style={{ borderTop: `1px solid ${LINE}` }}>
+          {tracksOf(release).map(songRow)}
+        </div>
+      </div>
+    </div>
   );
 
   return (
@@ -213,55 +393,125 @@ const MediaPage = () => {
         <button aria-label="Back" onClick={close} className="p-2">
           <ArrowLeft size={20} color="#fff" />
         </button>
-        <h1 className="text-lg font-bold text-white">Media</h1>
-      </div>
-      <div className="px-4 pt-4 flex flex-col gap-5">
-        {hero}
-        {filter !== 'video' && FEATURED_TRACKS.length > 0 && (
-          <div className="flex flex-col gap-2">{FEATURED_TRACKS.map(featuredCard)}</div>
-        )}
-        <div className="flex gap-1.5">
-          {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className="rounded-full px-4 py-1.5 text-xs font-bold"
-              style={{
-                background: filter === f.id ? GOLD : PANEL,
-                color: filter === f.id ? '#1a1300' : MUTED,
-                border: `1px solid ${filter === f.id ? GOLD : LINE}`,
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        {error && (
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs text-[#F97066]">{error}</p>
-            <ErrorActions message={String(error)} />
+        <h1 className={`text-lg font-bold text-white ${ELLIPSIS}`}>{release ? release.title : 'Media'}</h1>
+        {!release && (
+          <div className="ml-auto flex items-center gap-1.5 pr-2">
+            {FILTERS.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                className="px-3 py-1 text-xs font-bold"
+                style={{
+                  borderRadius: 4,
+                  background: filter === f.id ? GOLD : PANEL,
+                  color: filter === f.id ? '#1a1300' : MUTED,
+                  border: `1px solid ${filter === f.id ? GOLD : LINE}`,
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+            {RELEASES_ENABLED && (
+              <button
+                onClick={() => navigate('/m/media/new')}
+                className="ml-2 px-3 py-1 text-xs font-bold"
+                style={{ borderRadius: 4, border: `1px solid ${GOLD}`, color: GOLD }}
+              >
+                Add a release
+              </button>
+            )}
           </div>
         )}
-        {!loading && playable.length === 0 && (
-          <p className="text-sm text-center py-10" style={{ color: MUTED }}>
-            No music or video of your own yet. Mint some from the Wallet tab.
-          </p>
-        )}
-        {filter !== 'video' &&
-          music.length > 0 &&
-          section('Music', <Music size={12} />, <div className="flex flex-col">{music.map(track)}</div>)}
-        {filter !== 'music' &&
-          videos.length > 0 &&
-          section('Video', <Video size={12} />, <div className="flex flex-col gap-4">{videos.map(videoCard)}</div>)}
-        {hasMore && (
-          <button
-            onClick={() => void loadMore()}
-            disabled={loading}
-            className="rounded-xl py-2.5 text-xs font-semibold"
-            style={{ background: PANEL, color: MUTED }}
-          >
-            {loading ? 'Loading…' : 'Load more'}
-          </button>
+      </div>
+      <div className="w-full max-w-[1100px] mx-auto px-4 pt-5 flex flex-col gap-8">
+        {release ? (
+          releasePage
+        ) : (
+          <>
+            {showMusic && hero && (
+              <section
+                className="relative overflow-hidden flex items-center gap-5 md:gap-8 p-4 md:p-6"
+                style={{
+                  borderRadius: RADIUS,
+                  border: `1px solid ${LINE}`,
+                  background: 'linear-gradient(120deg, #1c1606 0%, #0a0a0a 55%, #000 100%)',
+                }}
+              >
+                <button onClick={() => openEntry(hero)} className="w-[132px] md:w-[220px] shrink-0">
+                  <Cover e={hero} />
+                </button>
+                <div className="flex-1 min-w-0 flex flex-col gap-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
+                    Featured{hero.free ? ' · Free to listen' : ''}
+                  </div>
+                  <div className="text-xl md:text-4xl font-black text-white leading-tight">{hero.title}</div>
+                  <div className="text-sm" style={{ color: MUTED }}>
+                    {hero.artist}
+                    {hero.sub ? ` · ${hero.sub}` : ''}
+                  </div>
+                  <div className="flex items-center gap-3 mt-2">
+                    <PlayBtn e={hero.release ? releaseTracks(hero.release)[0] : hero} big />
+                    <button
+                      onClick={() => openEntry(hero)}
+                      className="text-xs font-bold underline-offset-4 hover:underline"
+                      style={{ color: GOLD }}
+                    >
+                      View release
+                    </button>
+                  </div>
+                </div>
+                {banner.length > 1 && (
+                  <div className="absolute right-3 bottom-3 flex gap-1">
+                    <button
+                      aria-label="Previous"
+                      onClick={() => setSlide((s) => (s - 1 + banner.length) % banner.length)}
+                    >
+                      <ChevronLeft size={18} color={MUTED} />
+                    </button>
+                    <button aria-label="Next" onClick={() => setSlide((s) => (s + 1) % banner.length)}>
+                      <ChevronRight size={18} color={MUTED} />
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
+            {showMusic && shelf('Free this week', free)}
+            {shelf(
+              'New releases',
+              published.filter((p) => (p.kind === 'music' ? showMusic : showVideo)),
+            )}
+            {showMusic && shelf('Your music', myMusic)}
+            {showVideo && shelf('Your videos', myVideo)}
+            {showMusic && songs.length > 0 && (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-base font-bold text-white">Songs</h2>
+                <div className="flex flex-col" style={{ borderTop: `1px solid ${LINE}` }}>
+                  {songs.map(songRow)}
+                </div>
+              </section>
+            )}
+            {error && (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs text-[#F97066]">{error}</p>
+                <ErrorActions message={String(error)} />
+              </div>
+            )}
+            {!loading && items.length === 0 && (
+              <p className="text-sm text-center py-4" style={{ color: MUTED }}>
+                No music or video of your own yet. Mint some from the Wallet tab.
+              </p>
+            )}
+            {hasMore && (
+              <button
+                onClick={() => void loadMore()}
+                disabled={loading}
+                className="py-2.5 text-xs font-semibold"
+                style={{ background: PANEL, color: MUTED, borderRadius: RADIUS }}
+              >
+                {loading ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </>
         )}
       </div>
       {open && <MediaViewer item={open} onClose={() => setOpen(null)} />}
