@@ -694,15 +694,20 @@ const WalletCardInner = ({
         <CardDesigner
           art={frontArt}
           look={look}
-          isDefault={!savedLook}
+          isDefault={!savedLook && !cardImage}
           handle={t.tag || cardPaymail(names.paymail)}
           balance={unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
           sub={unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
           onChange={setLook}
-          onReset={() => setLook(null)}
+          onReset={() => {
+            setLook(null);
+            setImage(null);
+          }}
           onClose={() => setAdjusting(false)}
           customImage={!!cardImage}
           onImage={setImage}
+          libraryKey={artKey}
+          currentImage={cardImage}
         />
       )}
       {sig.ui}

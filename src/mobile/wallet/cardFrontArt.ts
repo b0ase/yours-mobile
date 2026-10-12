@@ -178,7 +178,7 @@ export function fitWithin(w: number, h: number, max = CARD_IMG_MAX): { w: number
 }
 
 /** Reads a picture the user picked and returns a resized JPEG data URI, or throws a plain-English error. */
-export async function prepareCardImage(file: File): Promise<string> {
+export async function prepareCardImage(file: Blob): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('That file isn’t a picture.');
   const url = URL.createObjectURL(file);
   try {
@@ -202,6 +202,26 @@ export async function prepareCardImage(file: File): Promise<string> {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** Image NFTs that can go on the card: raster pictures only (no SVG markup, video or HTML). */
+export function isCardNftType(contentType: string | null | undefined): boolean {
+  const t = (contentType ?? '').toLowerCase().split(';')[0].trim();
+  return t.startsWith('image/') && t !== 'image/svg+xml';
+}
+
+/** Fetches an image NFT (ORDFS content URL) and resizes it like an uploaded picture. */
+export async function prepareCardImageFromUrl(url: string): Promise<string> {
+  let blob: Blob;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(String(r.status));
+    blob = await r.blob();
+  } catch {
+    throw new Error('That NFT couldn’t be loaded. Check your connection and try again.');
+  }
+  if (!isCardNftType(blob.type)) throw new Error('Only picture NFTs can go on the card.');
+  return prepareCardImage(blob);
 }
 
 const lumaCache = new Map<string, number>();

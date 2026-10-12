@@ -2,6 +2,16 @@ import { hueTurnFor, shownHueFor } from './cardHue';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, X } from 'lucide-react';
+import { CardNftGrid } from './CardNftGrid';
+import {
+  CARD_LIBRARY_MAX,
+  addPicture,
+  loadCardLibrary,
+  removePicture,
+  saveCardLibrary,
+  selectedPictureId,
+  type CardPicture,
+} from './cardLibrary';
 import {
   MIN_BRIGHTNESS,
   PLACE_MAX,
@@ -11,6 +21,7 @@ import {
   artStyle,
   clampLook,
   prepareCardImage,
+  prepareCardImageFromUrl,
   type CardArtLook,
 } from './cardFrontArt';
 
@@ -34,6 +45,8 @@ export function CardDesigner({
   onClose,
   customImage,
   onImage,
+  libraryKey,
+  currentImage,
 }: {
   art: string;
   look: CardArtLook;
@@ -48,7 +61,47 @@ export function CardDesigner({
   customImage: boolean;
   /** A new picture (data URI), or null to go back to the bAvatar art. Returns false when it couldn't be saved. */
   onImage: (uri: string | null) => boolean;
+  /** The account's identity key: My pictures are kept per account on this device. */
+  libraryKey: string;
+  /** The picture now on the card (data URI), for outlining it in My pictures. */
+  currentImage: string | null;
 }) {
+  const [tab, setTab] = useState<'pictures' | 'nfts'>('pictures');
+  const [library, setLibrary] = useState<CardPicture[]>(() => loadCardLibrary(libraryKey));
+  useEffect(() => setLibrary(loadCardLibrary(libraryKey)), [libraryKey]);
+  const [nftSel, setNftSel] = useState<string | null>(null);
+  const [nftBusy, setNftBusy] = useState<string | null>(null);
+  const selectedPic = selectedPictureId(library, currentImage);
+  const applyImage = (uri: string) => {
+    if (!onImage(uri)) {
+      setImgErr('This device has no room left to keep that picture.');
+      return false;
+    }
+    return true;
+  };
+  const addToLibrary = (uri: string) => {
+    const saved = saveCardLibrary(libraryKey, addPicture(library, uri));
+    if (saved) setLibrary(saved);
+    if (applyImage(uri)) setNftSel(null);
+  };
+  const dropFromLibrary = (id: string) => {
+    const saved = saveCardLibrary(libraryKey, removePicture(library, id));
+    setLibrary(saved ?? []);
+  };
+  const pickNft = async (outpoint: string, url: string) => {
+    if (nftBusy) return;
+    setImgErr('');
+    setNftBusy(outpoint);
+    try {
+      if (applyImage(await prepareCardImageFromUrl(url))) setNftSel(outpoint);
+    } catch (err) {
+      setImgErr(err instanceof Error ? err.message : 'That NFT couldn’t be used.');
+    } finally {
+      setNftBusy(null);
+    }
+  };
+  const press = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [imgErr, setImgErr] = useState('');
   const drag = useRef<{ x: number; y: number; lx: number; ly: number; w: number; h: number } | null>(null);
@@ -174,14 +227,14 @@ export function CardDesigner({
             if (!f) return;
             setImgErr('');
             try {
-              if (!onImage(await prepareCardImage(f))) setImgErr('This device has no room left to keep that picture.');
+              addToLibrary(await prepareCardImage(f));
             } catch (err) {
               setImgErr(err instanceof Error ? err.message : 'That picture couldn’t be used.');
             }
           }}
         />
         <button type="button" className="bw-cdes-pick" onClick={() => fileRef.current?.click()}>
-          <ImagePlus size={16} aria-hidden="true" /> {customImage ? 'Choose another picture' : 'Use my picture'}
+          <ImagePlus size={16} aria-hidden="true" /> Use my picture
         </button>
         {customImage && (
           <button type="button" className="bw-cdes-artback" onClick={() => onImage(null)}>
@@ -193,7 +246,76 @@ export function CardDesigner({
             {imgErr}
           </p>
         )}
-        <p className="bw-cdes-note">Your picture stays on this device. It isn’t uploaded anywhere.</p>
+        <div className="bw-cdes-seg" role="tablist" aria-label="Picture source">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'pictures'}
+            className={tab === 'pictures' ? 'on' : ''}
+            onClick={() => setTab('pictures')}
+          >
+            My pictures
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'nfts'}
+            className={tab === 'nfts' ? 'on' : ''}
+            onClick={() => setTab('nfts')}
+          >
+            My NFTs
+          </button>
+        </div>
+        {tab === 'pictures' ? (
+          library.length ? (
+            <div className="bw-cdes-lib" aria-label="My pictures">
+              {library.map((p) => (
+                <div key={p.id} className={`bw-cdes-libitem${selectedPic === p.id ? ' is-on' : ''}`}>
+                  <button
+                    type="button"
+                    className="bw-cdes-libpic"
+                    aria-label="Put this picture on the card"
+                    aria-pressed={selectedPic === p.id}
+                    onPointerDown={() => {
+                      longPressed.current = false;
+                      press.current = setTimeout(() => {
+                        longPressed.current = true;
+                        dropFromLibrary(p.id);
+                      }, 600);
+                    }}
+                    onPointerUp={() => press.current && clearTimeout(press.current)}
+                    onPointerLeave={() => press.current && clearTimeout(press.current)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onClick={() => {
+                      if (longPressed.current) return;
+                      setImgErr('');
+                      if (applyImage(p.uri)) setNftSel(null);
+                    }}
+                  >
+                    <img src={p.uri} alt="" draggable={false} />
+                  </button>
+                  <button
+                    type="button"
+                    className="bw-cdes-libx"
+                    aria-label="Remove this picture"
+                    onClick={() => dropFromLibrary(p.id)}
+                  >
+                    <X size={12} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="bw-cdes-empty">No pictures yet. Tap Use my picture to add one (up to {CARD_LIBRARY_MAX}).</p>
+          )
+        ) : (
+          <CardNftGrid
+            selected={customImage ? nftSel : null}
+            busy={nftBusy}
+            onPick={(outpoint, url) => void pickNft(outpoint, url)}
+          />
+        )}
+        <p className="bw-cdes-note">Your pictures stay on this device. They aren’t uploaded anywhere.</p>
       </div>
       <div className="bw-cdes-actions">
         <button type="button" className="bw-cdes-reset" onClick={onReset} disabled={isDefault}>
