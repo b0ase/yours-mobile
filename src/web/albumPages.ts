@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { SHARE_ALBUMS, albumPublicPath, artistPublicPath, type ShareAlbum } from '../mobile/media/shareAlbums';
+import { albumPublicPath, artistPublicPath } from '../mobile/media/shareAlbums';
+import { SHARE_ALBUMS, type ShareAlbum } from './shareAlbums';
 
 /**
  * Static pages for shareable album and artist links (owner, 12 Oct 2026). Crawlers (X, Twetch, bChatX's OG fetcher)
