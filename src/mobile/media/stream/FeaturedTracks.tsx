@@ -1,7 +1,8 @@
 import { HEADLINE_ALBUM } from '../featured/featured';
 import { VEXVOID_THUMBS } from '../featured/stills';
 import { SponsorBadge } from './SponsorBadge';
-import { useManifest, useSponsor } from './useAlbum';
+import { isSponsoredTrack } from './keySource';
+import { sponsorName, useManifest, useSponsor } from './useAlbum';
 
 const GOLD = '#FFD24D';
 const LINE = '#2b2f36';
@@ -23,7 +24,6 @@ export default function FeaturedTracks(p: {
 }) {
   const { m, error, view } = useManifest();
   const [sponsor] = useSponsor();
-  const sponsored = !!sponsor?.sponsored;
   const rows = view ? view.paid : [];
   const total = rows.length + 1;
   const shown = p.compact ? rows.slice(0, 5) : rows;
@@ -91,8 +91,8 @@ export default function FeaturedTracks(p: {
               i + 2,
               track.title,
               fmt(track.segments * m.segmentSeconds),
-              sponsored ? 'Sponsored' : '1 sat/sec',
-              sponsored,
+              isSponsoredTrack(sponsor, track.trackId) ? `Sponsored by ${sponsorName(sponsor!)}` : '1 sat/sec',
+              isSponsoredTrack(sponsor, track.trackId),
               () => p.onTrack(index),
             ),
           )}

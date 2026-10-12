@@ -2,6 +2,7 @@ import { defineConfig, mergeConfig, type Plugin } from 'vite';
 import { resolve } from 'path';
 import { readFileSync, readdirSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
+import { writeAlbumPages } from './src/web/albumPages';
 
 /**
  * bWalletX web wallet (web.bwalletx.com): the mobile UI as a static site (build-web/), for any
@@ -156,6 +157,14 @@ const webShell = (): Plugin => ({
   },
 });
 
+/** Desktop: a static page with its own share card per shareable album and artist (src/web/albumPages.ts). */
+const albumPages = (): Plugin => ({
+  name: 'bwallet-album-pages',
+  closeBundle() {
+    if (DESKTOP) writeAlbumPages(resolve(__dirname, 'build-web'), 'https://desktop.bwalletx.com', __dirname);
+  },
+});
+
 // Loaded after mobile.css so its rules win (see src/web/web.css).
 const webCss = (): Plugin => ({
   name: 'bwallet-web-css',
@@ -172,7 +181,7 @@ const webCss = (): Plugin => ({
 export default mergeConfig(
   mobileConfig,
   defineConfig({
-    plugins: [webShell(), webCss()],
+    plugins: [webShell(), webCss(), albumPages()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
     build: { outDir: 'build-web', sourcemap: false },

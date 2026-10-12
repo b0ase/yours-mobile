@@ -31,7 +31,9 @@ export const SponsorBadge = ({ s }: { s: SponsorStatus | null }) =>
   s?.sponsored ? (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <span className="text-sm font-bold" style={{ color: GOLD }}>
-        Sponsored by {sponsorName(s)} — free to listen
+        {s.payToPlayTracks?.length && s.sponsoredTracks?.length
+          ? `First ${s.sponsoredTracks.length} tracks free: sponsored by ${sponsorName(s)}`
+          : `Sponsored by ${sponsorName(s)} — free to listen`}
       </span>
       <PotGauge s={s} />
     </div>

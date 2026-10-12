@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, PublicKey, Signature, Utils } from '@bsv/sdk';
 import { StreamHttpError, type SponsoredKeyResponse } from './api';
-import { pickKeySource, SponsoredKeySource, type KeySource } from './keySource';
+import { isSponsoredTrack, pickKeySource, SponsoredKeySource, trackSourceKind, type KeySource } from './keySource';
 import { deriveSessionKey, openSponsoredSession } from './session';
 import {
+  PayToPlay,
   signSponsored,
   SPONSOR_502_TRIES,
   SPONSOR_PACE_MS,
@@ -194,5 +195,49 @@ describe('sponsored listening', () => {
       resumed.push(n);
     }
     expect(resumed).toEqual([2, 3]);
+  });
+});
+
+describe('per-track sponsorship (first-12: 1–6 sponsored, 7–12 pay to play)', () => {
+  const status = {
+    sponsored: true,
+    sponsor: 'vexvoid',
+    capSats: 1000,
+    spentSats: 0,
+    sponsoredTracks: ['first-12-01', 'first-12-02', 'first-12-03', 'first-12-04', 'first-12-05', 'first-12-06'],
+    payToPlayTracks: ['first-12-07', 'first-12-08', 'first-12-09', 'first-12-10', 'first-12-11', 'first-12-12'],
+  };
+  test('source is chosen per track', () => {
+    expect(trackSourceKind(status, 'first-12-03')).toBe('sponsored');
+    expect(trackSourceKind(status, 'first-12-07')).toBe('perSecond');
+    expect(trackSourceKind({ ...status, sponsored: false }, 'first-12-03')).toBe('perSecond');
+    // An older server without the lists: the pot covers every track.
+    expect(trackSourceKind({ sponsored: true, sponsor: 'v', capSats: 1, spentSats: 0 }, 'first-12-09')).toBe(
+      'sponsored',
+    );
+    expect(trackSourceKind(null, 'first-12-01')).toBe('perSecond');
+  });
+  test('410 payToPlay switches only that track to paid; the pot is not ended', async () => {
+    const key = PrivateKey.fromRandom();
+    const p = new SponsoredPayer({
+      key,
+      sleep: async () => {},
+      post: async (b) => {
+        if (b.trackId === 'first-12-07')
+          throw new StreamHttpError(410, 'this track is pay to play', { error: 'x', payToPlay: true });
+        return ok(b.segment);
+      },
+    });
+    await expect(p.pay('first-12-07', 0)).rejects.toBeInstanceOf(PayToPlay);
+    expect(p.status).toBe('ready');
+    await expect(p.pay('first-12-06', 0)).resolves.toBeDefined();
+  });
+  test('the sponsored key source refuses an uncovered track without a request', async () => {
+    let calls = 0;
+    const key = PrivateKey.fromRandom();
+    const p = new SponsoredPayer({ key, sleep: async () => {}, post: async (b) => (calls++, ok(b.segment)) });
+    const src = new SponsoredKeySource(p, key, (t) => isSponsoredTrack(status, t));
+    await expect(src.segmentKey('first-12-08', 0)).rejects.toBeInstanceOf(PayToPlay);
+    expect(calls).toBe(0);
   });
 });

@@ -5,14 +5,20 @@
  *   /m/spaces?space=<slug> ↔ /spaces/<slug>   (a permanent Space, e.g. /spaces/bwallet-lounge)
  *   /m/<page>              ↔ /<page>
  *   /bsv-wallet            ↔ /wallet
+ *   /m/media/album/<id>    ↔ /media/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
+ *   /m/media/browse?artist=<name> ↔ /media/artist/<artist>
  * Other top-level app routes (/settings, …) keep their own path.
  */
+import { SHARE_ALBUMS, albumPublicPath, artistPublicPath } from '../media/shareAlbums';
+
 const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/browser']);
 /**
  * Set-up and restore screens are never put in the address bar or reopened from it: restoring reloads the page, and
  * reopening /restore-wallet after that reload sent people round in a loop (owner, 11 Oct 2026).
  */
 const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore', '/sweep']);
+const albumById = (id: string) => SHARE_ALBUMS.find((a) => a.id === id);
+const artistByName = (name: string | null) => SHARE_ALBUMS.find((a) => a.artist === name);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 
 /** Router location → address-bar path (with any remaining query). */
@@ -23,6 +29,11 @@ export const toPublic = (pathname: string, search: string): string => {
   if (path === '/m/spaces' && SLUG.test(q.get('space') ?? '')) {
     path = `/spaces/${q.get('space')}`;
     q.delete('space');
+  } else if (path.startsWith('/m/media/album/') && albumById(decodeURIComponent(path.slice(15)))) {
+    path = albumPublicPath(albumById(decodeURIComponent(path.slice(15)))!);
+  } else if (path === '/m/media/browse' && artistByName(q.get('artist'))) {
+    path = artistPublicPath(artistByName(q.get('artist'))!.artistSlug);
+    q.delete('artist');
   } else if (path === '/bsv-wallet') path = '/wallet';
   else if (path.startsWith('/m/')) path = path.slice(2);
   const rest = q.toString();
@@ -40,6 +51,16 @@ export const toRouter = (pathname: string, search: string): string | null => {
   };
   const space = /^\/spaces\/([^/]+)$/.exec(path);
   if (space) return SLUG.test(space[1]) ? withQ('/m/spaces', `space=${encodeURIComponent(space[1])}`) : '/m/spaces';
+  const album = /^\/media\/artist\/([^/]+)\/album\/([^/]+)$/.exec(path);
+  if (album) {
+    const a = SHARE_ALBUMS.find((x) => x.artistSlug === album[1] && x.slug === album[2]);
+    return a ? withQ(`/m/media/album/${encodeURIComponent(a.id)}`) : withQ('/m/media');
+  }
+  const artist = /^\/media\/artist\/([^/]+)$/.exec(path);
+  if (artist) {
+    const a = SHARE_ALBUMS.find((x) => x.artistSlug === artist[1]);
+    return a ? withQ('/m/media/browse', `artist=${encodeURIComponent(a.artist)}`) : withQ('/m/media/browse');
+  }
   if (path === '/wallet') return withQ('/bsv-wallet');
   if (TOP.has(path)) return withQ(path);
   return withQ(`/m${path}`);

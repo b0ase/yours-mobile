@@ -606,6 +606,7 @@ const MediaPage = () => {
           releasePage
         ) : browsing ? (
           <BrowseView
+            artist={new URLSearchParams(location.search).get('artist')}
             entries={[...free, ...published].filter((e) => e.kind === 'music' || e.release)}
             isAlbum={isAlbum}
             renderTracks={(e) =>
@@ -760,6 +761,8 @@ const MediaPage = () => {
  * picked album's tracks show below. Built from what the store has (the album, published releases).
  */
 function BrowseView(p: {
+  /** Opened from an artist link (/media/artist/<artist>): start on that artist. */
+  artist?: string | null;
   entries: Entry[];
   isAlbum: (e: Entry) => boolean;
   renderTracks: (e: Entry) => React.ReactNode;
@@ -768,8 +771,10 @@ function BrowseView(p: {
   const genreOf = (e: Entry) => (e.release?.genre?.trim() || (e.kind === 'video' ? 'Video' : 'Music')) as string;
   const all = (xs: string[]) => [...new Set(xs)].sort((a, b) => a.localeCompare(b));
   const genres = all(p.entries.map(genreOf));
-  const [genre, setGenre] = useState<string | null>(null);
-  const [artist, setArtist] = useState<string | null>(null);
+  const [genre, setGenre] = useState<string | null>(() =>
+    p.artist ? (p.entries.map((e) => (e.artist === p.artist ? genreOf(e) : null)).find(Boolean) ?? null) : null,
+  );
+  const [artist, setArtist] = useState<string | null>(p.artist ?? null);
   const [album, setAlbum] = useState<string | null>(null);
   const g = genre ?? genres[0] ?? null;
   const inGenre = p.entries.filter((e) => genreOf(e) === g);
