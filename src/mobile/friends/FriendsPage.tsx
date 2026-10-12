@@ -1,3 +1,4 @@
+import { TipButton } from '../tip/TipButton';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -581,6 +582,16 @@ const FriendDetail = ({ fr, data }: { fr: Friend; data: Data }) => {
             <Star size={14} fill={fr.favourite ? 'currentColor' : 'none'} />{' '}
             {fr.favourite ? 'Favourite' : 'Add to favourites'}
           </button>
+          <TipButton
+            to={{
+              name: fr.dollar || fr.title,
+              identityKey: c.identityKey ?? undefined,
+              paymail: sendTo && !/^1/.test(sendTo) ? sendTo : undefined,
+              address: c.address ?? undefined,
+            }}
+            context={{ kind: 'person' }}
+            className="self-start"
+          />
           {c.handle && !isEmailHandle(c.handle) && (
             <a className="fr-btn" href={`https://bwalletx.com/$${c.handle}`} target="_blank" rel="noreferrer">
               View profile

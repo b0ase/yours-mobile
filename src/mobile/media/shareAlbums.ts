@@ -9,7 +9,15 @@
  * (prices) must stay out of store builds.
  */
 /** The address parts of a shareable album. */
-export type ShareAlbumRoute = { id: string; slug: string; title: string; artist: string; artistSlug: string };
+export type ShareAlbumRoute = {
+  id: string;
+  slug: string;
+  title: string;
+  artist: string;
+  artistSlug: string;
+  /** Where the artist's tips go: $handle or paymail (tip/TipButton.tsx). */
+  tipTo?: string;
+};
 
 export const SHARE_ALBUMS: ShareAlbumRoute[] = [
   {
@@ -18,6 +26,7 @@ export const SHARE_ALBUMS: ShareAlbumRoute[] = [
     title: 'Echoes in the Abyss',
     artist: 'VexVoid',
     artistSlug: 'vexvoid',
+    tipTo: '$vexvoid',
   },
 ];
 
