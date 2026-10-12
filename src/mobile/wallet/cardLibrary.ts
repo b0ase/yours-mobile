@@ -6,7 +6,9 @@
 /** Most pictures kept per account; the oldest drops off when a new one is added. */
 export const CARD_LIBRARY_MAX = 12;
 
-export type CardPicture = { id: string; uri: string };
+/** A frame taken from a video NFT remembers where it came from: the NFT origin and the time in seconds. */
+export type CardPictureSource = { origin: string; t: number };
+export type CardPicture = { id: string; uri: string; src?: CardPictureSource };
 
 const LIB_KEY = (key: string) => 'bw-card-lib:' + key.toLowerCase();
 
@@ -21,9 +23,14 @@ export function pictureId(uri: string): string {
 }
 
 /** Adds a picture to the front; a picture already there moves to the front; the list is capped at `max`. */
-export function addPicture(list: CardPicture[], uri: string, max = CARD_LIBRARY_MAX): CardPicture[] {
+export function addPicture(
+  list: CardPicture[],
+  uri: string,
+  max = CARD_LIBRARY_MAX,
+  src?: CardPictureSource,
+): CardPicture[] {
   const id = pictureId(uri);
-  return [{ id, uri }, ...list.filter((p) => p.id !== id)].slice(0, Math.max(0, max));
+  return [{ id, uri, ...(src ? { src } : {}) }, ...list.filter((p) => p.id !== id)].slice(0, Math.max(0, max));
 }
 
 export function removePicture(list: CardPicture[], id: string): CardPicture[] {

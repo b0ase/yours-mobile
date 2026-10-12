@@ -2301,3 +2301,85 @@ button.bw-mail-card:active {
   outline-offset: 2px;
   border-radius: 8px;
 }
+/* Card designer › video NFT tiles + frame picker (12 Oct 2026). Gold by default, video edge to edge. */
+.bw-cdes-vidgold {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle at 30% 25%, #f5b800 0%, #8a6400 45%, #0b0b0c 100%);
+}
+.bw-cdes-vidbadge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  display: flex;
+  padding: 3px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #f5b800;
+  pointer-events: none;
+}
+.bw-cdes-libpic {
+  position: relative;
+}
+.bw-cdes > .bw-cdes-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  background: #070605;
+  overflow-y: auto;
+}
+.bw-cdes-frame > * {
+  width: 100%;
+  max-width: 520px;
+}
+.bw-cdes-frame > .bw-cdes-framevid {
+  width: calc(100% + 32px);
+  max-width: none;
+  margin: 0 -16px;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+.bw-cdes-framevid video {
+  display: block;
+  width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+}
+.bw-cdes-framegold {
+  width: 100%;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #f5b800;
+  font-size: 14px;
+  background: radial-gradient(circle at 50% 40%, rgba(245, 184, 0, 0.25), #0b0b0c 70%);
+}
+.bw-cdes-framebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bw-cdes-framebar input[type='range'] {
+  flex: 1;
+  accent-color: #f5b800;
+}
+.bw-cdes-framet {
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  color: #8e8e89;
+  font-variant-numeric: tabular-nums;
+}
