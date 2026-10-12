@@ -21,7 +21,14 @@ import { purchaseError } from './purchase';
 import { addHistory, bsvLabel, fiatLabel, unitPriceLabel } from './exchangeData';
 import { usePeopleTokens } from './usePeopleTokens';
 import { joinLabel, peopleSections, tokenFor, type PersonToken } from './people';
-import { fetchQuote, joinSheetTitle, pickCurveListing, quoteAction, recordPurchase, supporterBadge } from './curveSales';
+import {
+  fetchQuote,
+  joinSheetTitle,
+  pickCurveListing,
+  quoteAction,
+  recordPurchase,
+  supporterBadge,
+} from './curveSales';
 import { SellMyToken } from './SellMyToken';
 import { SELL_ENABLED } from '../sell/sell';
 
@@ -180,7 +187,8 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
                   {curve ? joinSheetTitle(token.handle, curve.cents, curve.supporter) : `Join $${token.handle}'s room`}
                 </div>
                 <div className="text-xs" style={{ color: MUTED }}>
-                  {curve ? `${best.label} from $${token.handle}. ` : `Buy ${best.label}. `}Holding their token opens their room.
+                  {curve ? `${best.label} from $${token.handle}. ` : `Buy ${best.label}. `}Holding their token opens
+                  their room.
                 </div>
               </div>
             </div>

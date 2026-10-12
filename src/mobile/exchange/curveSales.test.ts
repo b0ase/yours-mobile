@@ -15,7 +15,14 @@ import {
 import { parsePeople } from './people';
 
 const A = 'a'.repeat(64);
-const sales = (o: Partial<CurveSales> = {}): CurveSales => ({ open: true, tranche: 10, pack: 1, listings: [], priced_at_holders: 0, ...o });
+const sales = (o: Partial<CurveSales> = {}): CurveSales => ({
+  open: true,
+  tranche: 10,
+  pack: 1,
+  listings: [],
+  priced_at_holders: 0,
+  ...o,
+});
 
 describe('curve sales: buyer', () => {
   test('one sheet title: Join $kim’s room — 1¢ (Supporter #3)', () => {
@@ -27,7 +34,9 @@ describe('curve sales: buyer', () => {
     expect(quoteAction({ ok: false, reason: 'own_token', message: '' })).toBe('hide');
     expect(quoteAction({ ok: false, reason: 'already_bought', message: '' })).toBe('open-room');
     expect(quoteAction({ ok: false, reason: 'not_listed', message: '' })).toBe('resale');
-    expect(quoteAction({ ok: true, price_usd_cents: 1, price_sats: 2, supporter: 1, pack: 1, listings: [] })).toBe('buy');
+    expect(quoteAction({ ok: true, price_usd_cents: 1, price_sats: 2, supporter: 1, pack: 1, listings: [] })).toBe(
+      'buy',
+    );
   });
   test('buys only a registered curve listing (never a resale), cheapest first', () => {
     const market = [
@@ -54,7 +63,10 @@ describe('curve sales: buyer', () => {
   });
   test('a refusal is not retried', async () => {
     let n = 0;
-    const f = (async () => (n++, new Response(JSON.stringify({ ok: false, reason: 'already_bought' }), { status: 409 }))) as unknown as typeof fetch;
+    const f = (async () => (
+      n++,
+      new Response(JSON.stringify({ ok: false, reason: 'already_bought' }), { status: 409 })
+    )) as unknown as typeof fetch;
     expect((await recordPurchase(`${A}_0`, 'c'.repeat(64), f, 5, 0)).reason).toBe('already_bought');
     expect(n).toBe(1);
   });

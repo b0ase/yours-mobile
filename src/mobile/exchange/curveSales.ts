@@ -19,11 +19,23 @@ export const BITSIGN = 'https://www.bit-sign.online';
 
 export type SalesMode = 'curve' | 'flat' | 'off';
 
-export type CurveSales = { open: boolean; tranche: number; pack: number; listings: string[]; priced_at_holders: number };
+export type CurveSales = {
+  open: boolean;
+  tranche: number;
+  pack: number;
+  listings: string[];
+  priced_at_holders: number;
+};
 
 export type SalesSettings = {
   token_id: string;
-  pricing: { mode: SalesMode; usd_cents?: number; start_usd_cents?: number; step_holders?: number; max_per_buyer?: number };
+  pricing: {
+    mode: SalesMode;
+    usd_cents?: number;
+    start_usd_cents?: number;
+    step_holders?: number;
+    max_per_buyer?: number;
+  };
   sales: CurveSales;
   holders: number;
   price_usd_cents: number | null;
@@ -31,7 +43,14 @@ export type SalesSettings = {
 };
 
 export type Quote =
-  | { ok: true; price_usd_cents: number; price_sats: number | null; supporter: number | null; pack: number; listings: string[] }
+  | {
+      ok: true;
+      price_usd_cents: number;
+      price_sats: number | null;
+      supporter: number | null;
+      pack: number;
+      listings: string[];
+    }
   | { ok: false; reason: string; message: string };
 
 export const normOutpoint = (o: string) => o.trim().toLowerCase().replace('.', '_');
@@ -56,7 +75,11 @@ export const pickCurveListing = <L extends { outpoint: string; priceSats: number
   market: readonly L[],
 ): L | null => {
   const reg = new Set(quoteListings.map(normOutpoint));
-  return [...market].filter((l) => l.buyable && reg.has(normOutpoint(l.outpoint))).sort((a, b) => a.priceSats - b.priceSats)[0] ?? null;
+  return (
+    [...market]
+      .filter((l) => l.buyable && reg.has(normOutpoint(l.outpoint)))
+      .sort((a, b) => a.priceSats - b.priceSats)[0] ?? null
+  );
 };
 
 /** US cents per listing → sats (rounded up; at least 1). */
@@ -70,7 +93,12 @@ export const listingPriceSats = (centsEach: number, pack: number, usdPerBsv: num
  *             (the curve has moved ≥ ~0.7%, i.e. ≥ 10 holders on the default step); else list the gap.
  */
 export type RefillPlan = { cancel: string[]; list: number };
-export const refillPlan = (sales: CurveSales, live: readonly string[], holders: number, mode: SalesMode): RefillPlan => {
+export const refillPlan = (
+  sales: CurveSales,
+  live: readonly string[],
+  holders: number,
+  mode: SalesMode,
+): RefillPlan => {
   if (!sales.open || mode === 'off') return { cancel: [...live], list: 0 };
   const stale = mode === 'curve' && holders - sales.priced_at_holders >= 10;
   if (stale) return { cancel: [...live], list: sales.tranche };
@@ -101,14 +129,16 @@ const json = async <T>(r: Response): Promise<T> => {
 };
 
 export const fetchQuote = (tokenId: string, f: F = fetch) =>
-  f(`${BITSIGN}/api/bitsign/people-tokens/quote?token_id=${encodeURIComponent(tokenId)}`, { headers: auth(), credentials: 'omit' }).then(
-    (r) => json<Quote>(r),
-  );
+  f(`${BITSIGN}/api/bitsign/people-tokens/quote?token_id=${encodeURIComponent(tokenId)}`, {
+    headers: auth(),
+    credentials: 'omit',
+  }).then((r) => json<Quote>(r));
 
 export const fetchSettings = (tokenId: string, f: F = fetch) =>
-  f(`${BITSIGN}/api/bitsign/people-tokens/settings?token_id=${encodeURIComponent(tokenId)}`, { headers: auth(), credentials: 'omit' }).then(
-    (r) => json<SalesSettings>(r),
-  );
+  f(`${BITSIGN}/api/bitsign/people-tokens/settings?token_id=${encodeURIComponent(tokenId)}`, {
+    headers: auth(),
+    credentials: 'omit',
+  }).then((r) => json<SalesSettings>(r));
 
 export const saveSettings = (body: Record<string, unknown> & { token_id: string }, f: F = fetch) =>
   f(`${BITSIGN}/api/bitsign/people-tokens/settings`, {
@@ -121,7 +151,13 @@ export const saveSettings = (body: Record<string, unknown> & { token_id: string 
 export type PurchaseResult = { ok: boolean; supporter?: number | null; reason?: string; message?: string };
 
 /** Report a curve buy. The tx can take a moment to reach WhatsOnChain: retry "not on chain yet". */
-export const recordPurchase = async (tokenId: string, txid: string, f: F = fetch, tries = 6, waitMs = 2500): Promise<PurchaseResult> => {
+export const recordPurchase = async (
+  tokenId: string,
+  txid: string,
+  f: F = fetch,
+  tries = 6,
+  waitMs = 2500,
+): Promise<PurchaseResult> => {
   for (let i = 0; ; i++) {
     const r = await f(`${BITSIGN}/api/bitsign/people-tokens/purchase`, {
       method: 'POST',

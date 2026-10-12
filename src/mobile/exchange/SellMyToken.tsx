@@ -145,7 +145,10 @@ export const SellMyToken = ({ token, rate }: { token: PersonToken; rate: number 
         </button>
       </section>
       {open && (
-        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/60" onClick={() => !busy && setOpen(false)}>
+        <div
+          className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/60"
+          onClick={() => !busy && setOpen(false)}
+        >
           <div
             className="w-full md:max-w-[440px] max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3 text-sm"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
@@ -161,7 +164,13 @@ export const SellMyToken = ({ token, rate }: { token: PersonToken; rate: number 
                 ] as const
               ).map(([m, title, sub]) => (
                 <label key={m} className="flex items-start gap-2 cursor-pointer">
-                  <input type="radio" name="sales-mode" checked={mode === m} onChange={() => setMode(m)} className="mt-1" />
+                  <input
+                    type="radio"
+                    name="sales-mode"
+                    checked={mode === m}
+                    onChange={() => setMode(m)}
+                    className="mt-1"
+                  />
                   <span>
                     <span className="text-white font-semibold">{title}</span>
                     <span className="block text-[11px]" style={{ color: MUTED }}>
@@ -195,7 +204,8 @@ export const SellMyToken = ({ token, rate }: { token: PersonToken; rate: number 
               </label>
             )}
             <p className="text-[11px] m-0" style={{ color: MUTED }}>
-              Your wallet puts these up from your own tokens and tops them up when it is open. Payments go straight to you.
+              Your wallet puts these up from your own tokens and tops them up when it is open. Payments go straight to
+              you.
             </p>
             <div className="flex gap-2">
               {mode !== 'off' && (

@@ -235,7 +235,14 @@ const ERRORS: Record<string, string> = {
 };
 const friendly = (e: string | undefined) => (e ? (ERRORS[e] ?? e) : undefined);
 
-export type CreateTrancheInput = { tokenId: string; symbol: string; dec: number; pack: bigint; count: number; priceSats: number };
+export type CreateTrancheInput = {
+  tokenId: string;
+  symbol: string;
+  dec: number;
+  pack: bigint;
+  count: number;
+  priceSats: number;
+};
 
 /**
  * Personal-token curve sales: lock `count` listings of `pack` tokens each, at `priceSats` per listing,
@@ -250,7 +257,10 @@ export async function createTranche(ctx: OneSatContext, input: CreateTrancheInpu
   const script = buildListingScript(tokenId, input.pack, cancel, pay, input.priceSats).toHex();
   const res = await sendBsv21.execute(ctx, {
     tokenId,
-    recipients: Array.from({ length: count }, () => ({ amount: input.pack.toString(), destination: { lockingScript: script } })),
+    recipients: Array.from({ length: count }, () => ({
+      amount: input.pack.toString(),
+      destination: { lockingScript: script },
+    })),
   } as Parameters<typeof sendBsv21.execute>[1]);
   if (!res.txid || res.error) throw new Error(friendly(res.error) ?? 'Listings were not broadcast');
   const vouts = listingVouts(res.tx, tokenId);

@@ -110,6 +110,7 @@ curve by default (1¢ × 2^(distinct holders / 1000), one curve buy per identity
 ### Curve sales (live 13 Oct 2026)
 
 Design: **the person's own wallet pre-lists a tranche of their supply**; bit-sign never holds their token keys.
+
 - Seller (`SellMyToken.tsx`, the "Your token · Sales" card at the top of Markets → Friends): mode (gentle price
   default / fixed price / ask to join), fixed price, joins on offer at a time (tranche, 1–50), open/close sales,
   supporters list with Supporter #n. Opening sales makes the wallet lock `tranche` OrdLock v2 listings of `pack`
