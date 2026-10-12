@@ -142,6 +142,8 @@ const usePool = (canvas: React.RefObject<HTMLCanvasElement | null>, still: boole
 /** How long each suggestion floats in the pool, and its fade. */
 const LINE_MS = 3600;
 const FADE_MS = 900;
+/** One start time per page load, shared by every hero. */
+const HERO_EPOCH = Date.now();
 
 /**
  * Ask b (owner, 11 Oct 2026: "pure simplicity"): the obsidian pool, a big gold b in the middle, and one suggestion at
@@ -166,21 +168,17 @@ export const ObsidianHero = ({
   });
   const failed = usePool(canvas, still);
   const lines = [...OPTIONS, ...extra];
-  const [i, setI] = useState(0);
-  const [shown, setShown] = useState(false);
+  // Clock-driven: the line index and fade come from one page-load clock, so re-renders never stack timers
+  // or reset to "Ask b" (owner, 12 Oct 2026: fades glitching).
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    // Wait a beat with the b alone, then cycle: fade in, hold, fade out, next.
-    const t = setTimeout(
-      () => {
-        if (shown) {
-          setShown(false);
-          setTimeout(() => setI((n) => (n + 1) % lines.length), FADE_MS);
-        } else setShown(true);
-      },
-      shown ? LINE_MS : i === 0 ? 1400 : 200,
-    );
-    return () => clearTimeout(t);
-  }, [shown, i, lines.length]);
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const cycle = LINE_MS + FADE_MS;
+  const since = Math.max(0, now - HERO_EPOCH - 1400);
+  const i = Math.floor(since / cycle) % Math.max(1, lines.length);
+  const shown = now - HERO_EPOCH >= 1400 && since % cycle < LINE_MS;
   const line = lines[i % lines.length];
   const mark = compact ? 120 : 176;
   return (
@@ -201,9 +199,14 @@ export const ObsidianHero = ({
         type="button"
         onClick={() => onPick(line.prompt)}
         aria-live="polite"
-        className="relative mt-8 border-0 bg-transparent px-6 text-lg font-light tracking-wide cursor-pointer"
+        className="relative mt-10 border-0 bg-transparent px-6 cursor-pointer"
         style={{
-          color: '#EDE6D0',
+          color: '#F3E7C2',
+          fontWeight: 500,
+          fontSize: compact ? 22 : 30,
+          letterSpacing: '-0.01em',
+          lineHeight: 1.25,
+          maxWidth: 720,
           textShadow: '0 2px 18px rgba(0,0,0,.9)',
           opacity: shown || still ? 1 : 0,
           filter: shown || still ? 'blur(0)' : 'blur(6px)',
