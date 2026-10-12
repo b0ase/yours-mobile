@@ -4,7 +4,6 @@ import {
   artistSlug,
   isEarlyBacker,
   isFoundingArtist,
-  lockPower,
   rankArtists,
   rankScore,
   referralShare,
@@ -14,40 +13,60 @@ import {
   splitSale,
   sponsoredPlaysLeft,
   sponsorPlay,
-  suggestOwnLock,
 } from './programme';
 
 describe('rank formula', () => {
-  test('zero is zero; more of anything ranks higher', () => {
-    expect(rankScore({ plays30d: 0, fanLockPower: 0, ownLockPower: 0 })).toBe(0);
-    const base = { plays30d: 100, fanLockPower: 1e6, ownLockPower: 0 };
-    expect(rankScore({ ...base, plays30d: 200 })).toBeGreaterThan(rankScore(base));
-    expect(rankScore({ ...base, fanLockPower: 2e6 })).toBeGreaterThan(rankScore(base));
-    expect(rankScore({ ...base, ownLockPower: 1e5 })).toBeGreaterThan(rankScore(base));
+  const none = { payments30d: [], selfKeys: [], sponsoredPlays30d: 0 };
+  test('zero is zero', () => expect(rankScore(none)).toBe(0));
+
+  test('linear in money paid to the artist', () => {
+    const one = rankScore({ ...none, payments30d: [{ payer: 'f', sats: 10_000 }] });
+    const ten = rankScore({ ...none, payments30d: [{ payer: 'f', sats: 100_000 }] });
+    expect(one).toBe(11_000);
+    expect(ten).toBe(101_000);
+    const artists = [
+      { ...none, slug: 'small', payments30d: [{ payer: 'a', sats: 5_000 }] },
+      { ...none, slug: 'big', payments30d: [{ payer: 'w', sats: 1_000_000 }] },
+      {
+        ...none,
+        slug: 'mid',
+        payments30d: [
+          { payer: 'b', sats: 50_000 },
+          { payer: 'c', sats: 50_000 },
+        ],
+      },
+    ];
+    expect(rankArtists(artists).map((x) => x.slug)).toEqual(['big', 'mid', 'small']);
   });
 
-  test('documented value: 1,000 plays + 1M fan sat-days + 0 own', () => {
-    // 0.5·2·log10(1001) + 0.35·log10(1000001) ≈ 3.0004 + 2.1
-    expect(rankScore({ plays30d: 1000, fanLockPower: 1e6, ownLockPower: 0 })).toBeCloseTo(5.1004, 3);
+  test("the artist's own payments are left out", () => {
+    const self = {
+      payments30d: [
+        { payer: 'me', sats: 1e9 },
+        { payer: 'my-other-wallet', sats: 1e9 },
+      ],
+      selfKeys: ['me', 'my-other-wallet'],
+      sponsoredPlays30d: 0,
+    };
+    expect(rankScore(self)).toBe(0);
+    expect(rankScore({ ...self, payments30d: [...self.payments30d, { payer: 'fan', sats: 500 }] })).toBe(1500);
   });
 
-  test('one huge backer does not swamp real listening', () => {
-    const listened = { slug: 'a', plays30d: 5000, fanLockPower: 1e5, ownLockPower: 0 };
-    const whale = { slug: 'b', plays30d: 10, fanLockPower: 1e9, ownLockPower: 0 };
-    expect(rankArtists([whale, listened])[0].slug).toBe('a');
-  });
-
-  test('lock power is sats × days left, never negative', () => {
-    expect(lockPower(1000, 30)).toBe(30_000);
-    expect(lockPower(1000, -2)).toBe(0);
+  test('a new artist with sponsored plays only still ranks', () => {
+    expect(rankScore({ ...none, sponsoredPlays30d: 200 })).toBeGreaterThan(0);
+    expect(
+      rankArtists([
+        { ...none, slug: 'a' },
+        { ...none, slug: 'b', sponsoredPlays30d: 3 },
+      ])[0].slug,
+    ).toBe('b');
   });
 
   test('ties order by slug', () => {
-    const z = { plays30d: 1, fanLockPower: 0, ownLockPower: 0 };
     expect(
       rankArtists([
-        { ...z, slug: 'b' },
-        { ...z, slug: 'a' },
+        { ...none, slug: 'b' },
+        { ...none, slug: 'a' },
       ]).map((x) => x.slug),
     ).toEqual(['a', 'b']);
   });
@@ -133,15 +152,11 @@ describe('badges and slugs', () => {
     expect(isFoundingArtist(101)).toBe(false);
     expect(isFoundingArtist(0)).toBe(false);
   });
-  test('early backer', () => {
-    expect(isEarlyBacker(3, 200)).toBe(true);
-    expect(isEarlyBacker(400, 10)).toBe(true);
-    expect(isEarlyBacker(400, 40)).toBe(false);
-  });
-  test('own lock suggested once there is sales income', () => {
-    expect(suggestOwnLock(50_000, false)).toBe(false);
-    expect(suggestOwnLock(150_000, false)).toBe(true);
-    expect(suggestOwnLock(150_000, true)).toBe(false);
+  test('early backer = first 100 paying fans', () => {
+    expect(isEarlyBacker(1)).toBe(true);
+    expect(isEarlyBacker(100)).toBe(true);
+    expect(isEarlyBacker(101)).toBe(false);
+    expect(isEarlyBacker(0)).toBe(false);
   });
   test('slug', () => {
     expect(artistSlug('Vex Void!')).toBe('vex-void');

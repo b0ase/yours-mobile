@@ -93,8 +93,8 @@ export const getDashboard = (slug: string, f: Fetch = fetch, base = BMUSIC_URL) 
 export const artistPageUrl = (slug: string) => `https://desktop.bwalletx.com/bmusic/artists/${slug}`;
 
 /**
- * Tell bMusic a fan locked BSV behind an artist (shown on the artist page as a backer). The server checks the
- * lock on chain before listing it; the coins stay the fan's and come back to them at the unlock date.
+ * Tell bMusic a fan locked BSV in an artist's pot. Kept for the Locks screen only: locks are refundable, so the
+ * server no longer lists them as backers or counts them in rank (owner, 12 Oct 2026).
  */
 export const registerBacking = (
   ctx: OneSatContext,
@@ -116,7 +116,8 @@ export const registerBacking = (
     base,
   );
 
-export type Backer = { name: string; sats: number; daysLeft: number; earlyBacker: boolean };
+/** A fan who paid the artist in the last 30 days (streams, tips, originals, tickets). Locks are not listed. */
+export type Backer = { name: string; earlyBacker: boolean };
 export type ArtistPublic = {
   sponsoredBy: 'bwalletx' | null;
   sponsoredPlaysLeft: number;

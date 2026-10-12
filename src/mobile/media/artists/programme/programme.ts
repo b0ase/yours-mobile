@@ -3,7 +3,7 @@
  * the bMusic server (bitcoin-music lib/bmusic/programme.ts) mirrors these numbers and is the authority; the app
  * uses them to show the same figures the server will apply.
  *
- * Wording rule for anything shown from here: fan locks are "your BSV, held until a date, then back to you".
+ * Wording rule for anything shown from here: backing an artist means paying them for their music.
  * Never invest / earn / returns / yield.
  */
 
@@ -64,33 +64,44 @@ export function splitSale(saleSats: number, pct: unknown = DEFAULT_POT_SHARE_PCT
 }
 
 // ── rank ────────────────────────────────────────────────────────────────────────────────────────────────────────
-/** Lock power of one lock: sats × days left (0 once it has opened). */
-export const lockPower = (sats: number, daysLeft: number) => Math.max(0, sats) * Math.max(0, daysLeft);
+// Owner, 12 Oct 2026: the honest signal is money paid to the artist for their art. Locks are refundable, so they
+// play no part in rank. Linear: a big fan may buy the chart, as long as the money goes to the artist.
 
-export type RankInput = {
-  /** Plays in the last 30 days (sponsored and paid). */
-  plays30d: number;
-  /** Sum of lockPower over fans' open locks behind the artist. */
-  fanLockPower: number;
-  /** Sum of lockPower over the artist's own open locks. */
-  ownLockPower: number;
+/** One payment to the artist in the window: paid stream time, a tip, an original bought, a ticket. */
+export type ArtistPayment = {
+  /** Payer identity key (or wallet id the server links to one). */
+  payer: string;
+  /** Sats paid to the artist. */
+  sats: number;
 };
 
-/** Weights (docs/ARTIST-PROGRAMME.md › Rank). */
-export const RANK_WEIGHTS = { plays: 0.5, fans: 0.35, own: 0.15 } as const;
-/** Plays are scaled so 1,000 plays (log 3 → 6) weighs like 1M sat-days of lock power (log 6). */
-export const PLAYS_SCALE = 2;
+export type RankInput = {
+  /** Payments to the artist in the last 30 days. */
+  payments30d: readonly ArtistPayment[];
+  /** The artist's own identity key and linked wallets: their payments are left out (paying yourself is free). */
+  selfKeys: readonly string[];
+  /** Sponsored (free to the listener) plays in the last 30 days. */
+  sponsoredPlays30d: number;
+};
+
+/** Small extras so new artists with no sales still appear: sats-equivalent per unique payer and per sponsored play. */
+export const RANK_PER_PAYER_SATS = 1000;
+export const RANK_PER_SPONSORED_PLAY_SATS = 10;
+
+/** Payments that count: positive, whole sats, not from the artist's own keys. */
+export const countedPayments = ({ payments30d, selfKeys }: Pick<RankInput, 'payments30d' | 'selfKeys'>) => {
+  const self = new Set(selfKeys);
+  return payments30d.filter((p) => !self.has(p.payer) && Number.isFinite(p.sats) && p.sats > 0);
+};
+
 /**
- * score = 0.5 · 2·log10(1 + plays30d) + 0.35 · log10(1 + fanLockPower) + 0.15 · log10(1 + ownLockPower).
- * Lock power is in sat-days; log10 keeps one big backer from swamping plays.
+ * score = Σ sats paid by others (linear) + 1,000 · unique payers + 10 · sponsored plays, all over 30 days.
  */
-export const rankScore = ({ plays30d, fanLockPower, ownLockPower }: RankInput): number => {
-  const l = (x: number) => Math.log10(1 + Math.max(0, x));
-  return (
-    RANK_WEIGHTS.plays * PLAYS_SCALE * l(plays30d) +
-    RANK_WEIGHTS.fans * l(fanLockPower) +
-    RANK_WEIGHTS.own * l(ownLockPower)
-  );
+export const rankScore = (input: RankInput): number => {
+  const paid = countedPayments(input);
+  const sats = paid.reduce((n, p) => n + Math.floor(p.sats), 0);
+  const payers = new Set(paid.map((p) => p.payer)).size;
+  return sats + RANK_PER_PAYER_SATS * payers + RANK_PER_SPONSORED_PLAY_SATS * Math.max(0, input.sponsoredPlays30d);
 };
 
 /** Artists in rank order (highest score first; ties by slug so the order is stable). */
@@ -102,17 +113,9 @@ export const FOUNDING_ARTISTS = 100;
 /** `joinedOrder` is 1 for the first artist to claim a page. */
 export const isFoundingArtist = (joinedOrder: number) => joinedOrder >= 1 && joinedOrder <= FOUNDING_ARTISTS;
 
-/** Early backer: one of the first 50 fans to lock behind an artist, or locked in the artist's first 30 days. */
-export const EARLY_BACKERS = 50;
-export const EARLY_BACKER_DAYS = 30;
-export const isEarlyBacker = (backerOrder: number, daysAfterArtistJoined: number) =>
-  (backerOrder >= 1 && backerOrder <= EARLY_BACKERS) ||
-  (daysAfterArtistJoined >= 0 && daysAfterArtistJoined < EARLY_BACKER_DAYS);
-
-/** Suggest the artist's own lock once sales income passes this (sats). */
-export const OWN_LOCK_SUGGEST_SATS = 100_000;
-export const suggestOwnLock = (salesSats: number, hasOwnLock: boolean) =>
-  !hasOwnLock && salesSats >= OWN_LOCK_SUGGEST_SATS;
+/** Early backer: one of the first 100 fans to pay the artist (`payerOrder` 1 = first paying fan). */
+export const EARLY_BACKERS = 100;
+export const isEarlyBacker = (payerOrder: number) => payerOrder >= 1 && payerOrder <= EARLY_BACKERS;
 
 // ── referral: our own fee from fans an artist brings in, for 12 months ──────────────────────────────────────────
 export const REFERRAL_MONTHS = 12;

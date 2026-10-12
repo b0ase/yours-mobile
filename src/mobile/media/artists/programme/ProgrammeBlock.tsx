@@ -1,5 +1,4 @@
 import { useContext, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { GuestCtx } from '../guestCtx';
 import { getArtistPublic, type ArtistPublic } from './api';
 
@@ -8,11 +7,10 @@ const MUTED = '#98A2B3';
 
 /**
  * Artist page extras from the artist programme (docs/ARTIST-PROGRAMME.md): "Free to listen — sponsored by
- * bWalletX", the Founding artist badge, and fans who lock BSV behind the artist. Renders nothing until the bMusic
+ * bWalletX", the Founding artist badge, and fans who paid the artist (backers). Renders nothing until the bMusic
  * server answers (its programme routes are off by default).
  */
 export const ProgrammeBlock = ({ slug }: { slug: string }) => {
-  const navigate = useNavigate();
   const guest = useContext(GuestCtx);
   const [p, setP] = useState<ArtistPublic | null>(null);
   useEffect(() => {
@@ -33,7 +31,7 @@ export const ProgrammeBlock = ({ slug }: { slug: string }) => {
       )}
       <h3 className="mt-5 text-xl font-bold">Backers</h3>
       <p className="text-[13px] mt-1" style={{ color: MUTED }}>
-        Fans who lock BSV behind this artist: your BSV, held until a date, then back to you.
+        Fans who paid this artist for their music in the last 30 days: streams, tips, originals and tickets.
       </p>
       <ol className="mt-2">
         {p.backers.slice(0, 20).map((b, i) => (
@@ -44,18 +42,22 @@ export const ProgrammeBlock = ({ slug }: { slug: string }) => {
                 Early backer
               </span>
             )}
-            <span style={{ color: '#777' }}>{b.daysLeft} days left</span>
           </li>
         ))}
       </ol>
       {!guest && (
         <button
-          onClick={() => navigate(`/m/lock/locks?artist=${encodeURIComponent(slug)}`)}
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           className="mt-3 px-5 py-2 rounded-full font-bold text-black"
           style={{ background: GOLD }}
         >
           Back this artist
         </button>
+      )}
+      {!guest && (
+        <p className="text-[12px] mt-1" style={{ color: MUTED }}>
+          Play a paid track or buy an original above: the money goes to the artist.
+        </p>
       )}
     </div>
   );

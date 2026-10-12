@@ -29,28 +29,29 @@ Default **10%** of each track / original / ticket sale goes to the artist's own 
 sponsored plays going after bWalletX's 1,000. The artist sets 0–50% (`splitSale`; the pot's part rounds down,
 the artist keeps the rest).
 
-## Fan locks ("Back this artist")
+## Backing an artist
 
-A fan locks their own BSV behind an artist with the existing Locks machinery (pot id `artist:<slug>`, one lock to a
-date, a year by default). Wording: **"your BSV, held until a date, then back to you"**. Never invest, earn,
-returns or yield. The lock is registered with bMusic (`POST /api/bmusic/artists/back`); the server checks it on
-chain before listing the fan as a backer. **Early backer** badge: one of the first 50 backers, or locked in the
-artist's first 30 days.
+**"Back this artist" means paying the artist for their music**: paid stream time, tips, originals bought,
+tickets. Owner, 12 Oct 2026: that is the honest signal. Locks are refundable, so they are a cheap signal and play
+**no part** in the artist page's backer list or in rank. Lock features (Pots & Locks) are unchanged elsewhere.
+Never invest, earn, returns or yield.
 
-The artist's own optional lock is suggested once their sales pass 100,000 sats (`suggestOwnLock`).
+**Early backer** badge: one of the first 100 fans to pay the artist (`isEarlyBacker(payerOrder)`).
 
 ## Rank
 
 ```
-lockPower(lock)  = sats × days left            (0 once open)
-score = 0.50 · 2 · log10(1 + plays in last 30 days)
-      + 0.35 ·     log10(1 + Σ fans' lockPower)
-      + 0.15 ·     log10(1 + Σ artist's own lockPower)
+counted = payments to the artist in the last 30 days, minus any from the artist's own identity / linked wallets
+score   = Σ counted sats                       (linear)
+        + 1,000 · unique paying fans           (RANK_PER_PAYER_SATS)
+        +    10 · sponsored plays in 30 days    (RANK_PER_SPONSORED_PLAY_SATS)
 ```
 
-Plays are scaled ×2 so 1,000 plays weighs like 1M sat-days of lock power; log10 stops one large backer
-swamping real listening. Ties sort by slug. Rank orders `/bmusic/artists`, picks the featured artist and orders
-Spaces Music night. Example: 1,000 plays + 1M fan sat-days + no own lock = 5.10 (tested).
+Linear on purpose (owner, 12 Oct 2026): a big fan may buy the chart, as long as the money goes to the artist.
+The one guard is self-payment: the artist's own keys are excluded, since paying yourself costs only fees. Sats
+are measured at payment (USD at time of payment where the server has it). The small payer and sponsored-play
+terms let a new artist with no sales still appear. Ties sort by slug. Rank orders `/bmusic/artists`, picks the
+featured artist and orders Spaces Music night.
 
 ## Referral
 
