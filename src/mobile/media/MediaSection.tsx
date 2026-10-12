@@ -240,7 +240,7 @@ export const MediaSection = () => {
         </button>
       </div>
 
-      {open && <NftDetail item={open} onClose={() => setOpen(null)} onSent={reload} />}
+      {open && <NftDetail item={open} all={items} onClose={() => setOpen(null)} onSent={reload} />}
       {cabinet && LazyCabinet && (
         <Suspense fallback={null}>
           <LazyCabinet weapon={cabinet} owned onClose={() => setCabinet(null)} />
