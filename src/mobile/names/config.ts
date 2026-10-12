@@ -16,3 +16,9 @@ export const BWALLET_PAYMAIL_API =
 
 /** Earlier bWallet paymail domains: every name still answers there (pay.bwallet.space PAYMAIL_DOMAINS). */
 export const LEGACY_PAYMAIL_DOMAINS = ['bwallet.space'];
+
+/**
+ * BRC-169 ecosystem domain written on OpNS names registered here (profile.domain). Readers fetch
+ * https://bwalletx.com/manifest.json and resolve <name>@bwalletx.com through our paymail (site/lib/opnsResolve.js).
+ */
+export const OPNS_PROFILE_DOMAIN = 'bwalletx.com';
