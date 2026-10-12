@@ -4,15 +4,15 @@ import { Pause, Play, Square } from 'lucide-react';
 import type { PrivateKey } from '@bsv/sdk';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { pauseAudio } from '../player';
-import { getPayTo, postSegment, postSponsored } from './api';
+import { getPayTo, postSegment, postSponsored, type SponsorStatus } from './api';
 import { HEADLINE_ALBUM } from '../featured/featured';
 import { VEXVOID_STILLS, VEXVOID_THUMBS } from '../featured/stills';
 import { StillsBanner } from '../featured/StillsBanner';
 import { StreamEngine } from './engine';
-import { PerSecondKeySource, pickKeySource, SponsoredKeySource } from './keySource';
+import { isSponsoredTrack, PerSecondKeySource, pickKeySource, SponsoredKeySource, trackSourceKind } from './keySource';
 import { paymentsPerSecond, SessionPayer, type PayerSnapshot } from './payer';
 import { ACTIVE_SESSIONS, forgetSession, openSession, openSponsoredSession, sweepFirst } from './session';
-import { SponsorEnded, SponsoredPayer, type SponsorSnapshot } from './sponsor';
+import { PayToPlay, SponsorEnded, SponsoredPayer, type SponsorSnapshot } from './sponsor';
 import { PotGauge, SponsorBadge } from './SponsorBadge';
 import { SPONSOR_ALBUM_ID, sponsorName, useManifest, useSponsor } from './useAlbum';
 import { boardChoice, claimSession, setBoardChoice } from './board';
@@ -65,6 +65,8 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
   const asked = useRef<Set<string>>(new Set());
   const { m, error: loadError, view } = useManifest();
   const [sheet, setSheet] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
+  /** Sponsored tracks play free; the budget sheet only appears when a pay-to-play track starts or the pot runs out. */
+  const sponsorRef = useRef<SponsorStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [snap, setSnap] = useState<PayerSnapshot | null>(null);
   const [sSnap, setSSnap] = useState<SponsorSnapshot | null>(null);
@@ -77,9 +79,14 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
   const session = useRef<Session | null>(null);
 
   const [sponsor, setSponsor, sponsorKnown] = useSponsor(playing ? 15_000 : undefined);
+  sponsorRef.current = sponsor;
   const sponsored = !!sponsor?.sponsored;
-  // The budget covers the paid tracks only: the headline is free.
-  const albumSeconds = m && view ? view.paid.reduce((s, p) => s + p.track.segments * m.segmentSeconds, 0) : 0;
+  const covered = (trackId: string) => isSponsoredTrack(sponsor, trackId);
+  // The budget covers the pay-to-play tracks only: the headline is free and the pot pays for the sponsored ones.
+  const albumSeconds =
+    m && view
+      ? view.paid.filter((p) => !covered(p.track.trackId)).reduce((s, p) => s + p.track.segments * m.segmentSeconds, 0)
+      : 0;
 
   /** Stop paying and return the leftover to the wallet. */
   const end = useCallback(async () => {
@@ -135,13 +142,17 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
       await end();
       const { id, key } = await openSponsoredSession(wallet);
       const sp = new SponsoredPayer({ key, post: (b) => postSponsored(b), onChange: setSSnap });
-      const keys = pickKeySource({ sponsored: new SponsoredKeySource(sp, key) })!;
+      const keys = pickKeySource({
+        sponsored: new SponsoredKeySource(sp, key, (t) => isSponsoredTrack(sponsorRef.current, t)),
+      })!;
       const engine: StreamEngine = new StreamEngine(m, keys, {
         onTrack: setTrack,
         onPlaying: setPlaying,
         onAlbumEnd: () => void end(),
         onError: (e) => {
-          if (e instanceof SponsorEnded) {
+          // The album moved on to a pay-to-play track (or the server said so): ask for a budget from here.
+          if (e instanceof PayToPlay) setSheet({ track: engine.index, from: engine.seg });
+          else if (e instanceof SponsorEnded) {
             setSponsor((x) => (x ? { ...x, sponsored: false } : x));
             setNotice({ track: engine.index, from: engine.seg });
           } else setProblem(e instanceof Error ? e.message : String(e));
@@ -199,7 +210,10 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
 
   const playAt = (index: number) => {
     const s = session.current;
-    if (!s) return sponsored ? void startSponsored(index) : setSheet({ track: index });
+    const kind = m ? trackSourceKind(sponsor, m.tracks[index].trackId) : 'perSecond';
+    // Each track uses its own source: switching between sponsored and paid starts the other kind of session.
+    if (!s || (kind === 'sponsored') !== !!s.sponsor)
+      return kind === 'sponsored' ? void startSponsored(index) : setSheet({ track: index });
     if (s.engine.index === index) return s.engine.paused ? s.engine.resume() : s.engine.pause();
     void s.engine.playTrack(index);
   };
@@ -291,13 +305,14 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
             <div className="text-sm mt-1" style={{ color: '#e6e8ec' }}>
               Headline track: {HEADLINE_ALBUM.headline.title} · <span style={{ color: GOLD }}>free</span>
             </div>
-            {sponsored ? (
-              <SponsorBadge s={sponsor} />
-            ) : (
-              <div className="text-xs" style={{ color: MUTED }}>
-                Other tracks: 1 sat/sec to the artist + network fee
-              </div>
-            )}
+            {sponsored && <SponsorBadge s={sponsor} />}
+            <div className="text-xs" style={{ color: MUTED }}>
+              {sponsored && sponsor?.payToPlayTracks?.length
+                ? 'Tracks 7–12 are pay to play: 1 sat/sec to the artist + network fee'
+                : sponsored
+                  ? ''
+                  : 'Other tracks: 1 sat/sec to the artist + network fee'}
+            </div>
             <div className="mt-2">
               <button
                 onClick={playHeadline}
@@ -505,8 +520,8 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
                 <span className="text-xs" style={{ color: MUTED }}>
                   {fmt(t.segments * m.segmentSeconds)}
                 </span>
-                <span className="text-[10px] font-bold uppercase" style={{ color: sponsored ? GOLD : MUTED }}>
-                  {sponsored ? 'Sponsored' : '1 sat/sec'}
+                <span className="text-[10px] font-bold uppercase" style={{ color: covered(t.trackId) ? GOLD : MUTED }}>
+                  {covered(t.trackId) ? `Sponsored by ${sponsor ? sponsorName(sponsor) : 'VexVoid'}` : '1 sat/sec'}
                 </span>
               </button>
             ))}
@@ -526,6 +541,9 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           albumSeconds={albumSeconds}
           satsPerSecond={m.satsPerSegment}
           topUp={!!sheet.topUp}
+          payToPlay={
+            sponsored && !!sponsor?.payToPlayTracks?.length ? (sponsor ? sponsorName(sponsor) : 'VexVoid') : null
+          }
           busy={busy}
           onCancel={() => {
             setSheet(null);
@@ -550,6 +568,8 @@ function BudgetSheet(p: {
   albumSeconds: number;
   satsPerSecond: number;
   topUp: boolean;
+  /** Artist name when some tracks are sponsored and the rest pay to play. */
+  payToPlay?: string | null;
   busy: boolean;
   onAllow: (sats: number) => void;
   onCancel: () => void;
@@ -579,6 +599,11 @@ function BudgetSheet(p: {
           <h3 className="text-xl font-black text-white mt-1">
             Allow up to {sats.toLocaleString()} sats for this album
           </h3>
+          {p.payToPlay && (
+            <p className="text-sm mt-2 text-white">
+              Tracks 7–12 are pay to play: 1 sat/sec to {p.payToPlay} + network fee
+            </p>
+          )}
           <p className="text-xs mt-2" style={{ color: MUTED }}>
             ≈ {p.satsPerSecond + SEGMENT_FEE} sats per second: {p.satsPerSecond} to the artist + {SEGMENT_FEE} network
             fee (one payment every second). Pause stops paying. Whatever is left comes back to your wallet when you

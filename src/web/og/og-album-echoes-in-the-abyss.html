@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- Share card for desktop.bwalletx.com/media/artist/vexvoid/album/echoes-in-the-abyss (1200x630).
+     Render: chrome --headless --screenshot --window-size=1200,630 this file, then convert to JPEG under 300 KB. -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #000;
+        font-family: 'Space Grotesk', sans-serif;
+        color: #fff;
+      }
+      .bg {
+        position: absolute;
+        inset: 0;
+        background: url(../../mobile/media/featured/stills/still-3.webp) center/cover;
+        filter: brightness(0.32) saturate(0.8);
+      }
+      .sh {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(90deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.2) 45%, rgba(0, 0, 0, 0.75)),
+          radial-gradient(ellipse 50% 60% at 26% 50%, rgba(245, 184, 0, 0.16), transparent 70%);
+      }
+      .cover {
+        position: absolute;
+        left: 70px;
+        top: 75px;
+        width: 480px;
+        height: 480px;
+        border-radius: 14px;
+        box-shadow:
+          0 0 0 1px rgba(245, 184, 0, 0.55),
+          0 20px 80px rgba(0, 0, 0, 0.8),
+          0 0 70px rgba(245, 184, 0, 0.18);
+      }
+      .r {
+        position: absolute;
+        left: 610px;
+        right: 60px;
+        top: 92px;
+      }
+      .k {
+        font: 500 22px/1 'Space Grotesk';
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #f5b800;
+      }
+      h1 {
+        margin: 22px 0 0;
+        font: 700 76px/1 'Space Grotesk';
+        letter-spacing: -0.035em;
+      }
+      .a {
+        margin-top: 16px;
+        font: 500 38px/1 'Space Grotesk';
+        color: #e8e8e8;
+      }
+      .l {
+        margin-top: 46px;
+        font: 500 25px/1.35 'Space Grotesk';
+        color: #fff;
+      }
+      .l b {
+        color: #f5b800;
+        font-weight: 700;
+      }
+      .p {
+        display: inline-block;
+        margin-top: 22px;
+        padding: 10px 18px;
+        border: 1.5px solid #f5b800;
+        border-radius: 999px;
+        font: 700 22px/1 'Space Grotesk';
+        color: #f5b800;
+      }
+      .m {
+        position: absolute;
+        right: 60px;
+        bottom: 52px;
+        height: 70px;
+        filter: drop-shadow(0 0 24px rgba(245, 184, 0, 0.6));
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg"></div>
+    <div class="sh"></div>
+    <img class="cover" src="../../mobile/media/featured/vexvoid-cover.jpg" alt="" />
+    <div class="r">
+      <div class="k">Album</div>
+      <h1>Echoes in the Abyss</h1>
+      <div class="a">VexVoid</div>
+      <div class="l"><b>Listen on bWalletX</b><br />First 6 tracks free, sponsored by VexVoid</div>
+      <div class="p">Tracks 7–12 at 1 sat/sec</div>
+    </div>
+    <img class="m" src="logo.svg" alt="" />
+  </body>
+</html>

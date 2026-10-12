@@ -55,6 +55,8 @@ export class StreamHttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** The error response's JSON body, when it had one (e.g. { payToPlay: true }). */
+    public body?: Record<string, unknown>,
   ) {
     super(`${status}: ${message}`);
   }
@@ -64,7 +66,7 @@ type Fetch = typeof fetch;
 
 const json = async <T>(r: Response): Promise<T> => {
   const body = (await r.json().catch(() => ({}))) as { error?: string };
-  if (!r.ok) throw new StreamHttpError(r.status, body.error ?? r.statusText);
+  if (!r.ok) throw new StreamHttpError(r.status, body.error ?? r.statusText, body as Record<string, unknown>);
   return body as T;
 };
 
@@ -107,6 +109,10 @@ export type SponsorStatus = {
   /** Sats the pot holds now (sponsored is true only while it holds funds). */
   potSats?: number;
   fundAddress?: string;
+  /** Tracks the pot pays for (first-12: 01–06). Absent on older servers: every track. */
+  sponsoredTracks?: string[];
+  /** Tracks that are always pay to play (first-12: 07–12), 1 sat/sec from the listener's budget. */
+  payToPlayTracks?: string[];
 };
 /** A sponsored segment: the pot paid (or had already paid) for it; same key fields as a paid one. */
 export type SponsoredKeyResponse = Omit<KeyResponse, 'next'> & {

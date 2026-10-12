@@ -6,7 +6,8 @@ import { StreamHttpError, type SponsoredKeyResponse } from './api';
  * The listener only signs each request with the session key (also the BRC-2 recipient of the segment key).
  * Paced to one request per second (the server allows about 1 per 0.7 s). 429 backs off and retries; 502
  * retries the same segment up to 3 times; 410 (pot empty, capped or closed) ends sponsorship: the caller
- * switches to the paid flow from the same segment.
+ * switches to the paid flow from the same segment. 410 { payToPlay: true } is different: only that track is paid
+ * (PayToPlay), the pot still sponsors the others.
  */
 export const SPONSOR_PACE_MS = 1000;
 export const SPONSOR_502_TRIES = 3;
@@ -23,6 +24,17 @@ export class SponsorEnded extends Error {
     this.name = 'SponsorEnded';
   }
 }
+
+/** 410 { payToPlay: true }: this track is not sponsored. Switch this track to the paid flow; the pot is fine. */
+export class PayToPlay extends Error {
+  constructor(readonly trackId: string) {
+    super('This track is pay to play');
+    this.name = 'PayToPlay';
+  }
+}
+
+export const isPayToPlay410 = (e: unknown) =>
+  e instanceof StreamHttpError && e.status === 410 && e.body?.payToPlay === true;
 
 export type SponsorStats = { seconds: number; payments: number; lastTxid: string | null; recent: number[] };
 export type SponsorSnapshot = {
@@ -100,6 +112,11 @@ export class SponsoredPayer {
         return r;
       } catch (e) {
         const status = e instanceof StreamHttpError ? e.status : 0;
+        if (isPayToPlay410(e)) {
+          this.status = 'ready';
+          this.emit();
+          throw new PayToPlay(trackId);
+        }
         if (status === 410) {
           this.status = 'ended';
           this.error = e instanceof Error ? e.message : String(e);
