@@ -5,6 +5,7 @@ import type { MediaKind } from './media';
 import { pauseAudio } from './player';
 import { Blurred } from '../market/NftCard';
 import { NftDetail } from './NftDetail';
+import { VideoPoster } from './VideoPoster';
 import { refreshMessage } from './nftActions';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { getTagValue } from '../../utils/format';
@@ -129,15 +130,7 @@ export const MediaSection = () => {
           {item.kind === 'images' && (
             <img src={item.url} alt={item.name} loading="lazy" className="w-full h-full object-cover" />
           )}
-          {item.kind === 'video' && (
-            <video
-              src={`${item.url}#t=0.1`}
-              muted
-              playsInline
-              preload="metadata"
-              className="w-full h-full object-cover"
-            />
-          )}
+          {item.kind === 'video' && <VideoPoster outpoint={item.origin || item.output.outpoint} title={item.name} />}
           {(item.kind === 'music' || item.kind === 'other') && (
             <div className="w-full h-full flex items-center justify-center">
               {item.kind === 'music' ? (

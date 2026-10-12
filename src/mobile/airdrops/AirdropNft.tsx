@@ -9,6 +9,8 @@ import { FileQuestion, FileText, Image as ImageIcon, Music, Video, X } from 'luc
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { cachedMeta, resolveMeta } from '../media/resolveMeta';
+import { VideoPoster } from '../media/VideoPoster';
+import { loadVideoBlobUrl, useVideoPoster } from '../media/videoCover';
 import { accountNamesFor } from '../names/accountNames';
 import { lookupPaymail } from '../names/paymail';
 import type { AirdropItem } from './inbox';
@@ -108,6 +110,38 @@ const KindIcon = ({ kind, size = 16 }: { kind: ViewKind | undefined; size?: numb
   return <FileQuestion size={size} />;
 };
 
+/** The NFT's inscribed name, once the indexer lookup has run. */
+const nftTitle = (item: AirdropItem) =>
+  cachedMeta(contentOutpoint(item))?.name ?? cachedMeta(item.asset.id)?.name ?? undefined;
+
+/**
+ * Video source for the viewer: the file downloaded into a blob: URL (the content hosts don't serve byte ranges, which
+ * iOS needs to stream), falling back to the remote URL if the download fails or is too large.
+ */
+const useVideoSrc = (item: AirdropItem, type: string | undefined, enabled: boolean) => {
+  const remote = nftUrls(item).content;
+  const op = contentOutpoint(item);
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled || !type) return;
+    const ac = new AbortController();
+    let made: string | null = null;
+    void loadVideoBlobUrl(op, type, ac.signal).then((u) => {
+      if (ac.signal.aborted) {
+        if (u) URL.revokeObjectURL(u);
+        return;
+      }
+      made = u;
+      setSrc(u ?? remote);
+    });
+    return () => {
+      ac.abort();
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [op, type, enabled, remote]);
+  return src;
+};
+
 // ─── Thumbnail ───────────────────────────────────────────────────────────────
 
 /** The NFT's thumbnail; tapping it opens the viewer. A failed thumbnail shows its type icon and "Open", never a blank. */
@@ -127,7 +161,9 @@ export const NftThumb = ({ item, onOpen, size = 48 }: { item: AirdropItem; onOpe
       className="rounded-lg bg-[#2b2f36] shrink-0 overflow-hidden flex flex-col items-center justify-center text-[10px] leading-tight"
       style={{ ...box, color: MUTED }}
     >
-      {thumb && !bad ? (
+      {v?.kind === 'video' ? (
+        <VideoPoster outpoint={contentOutpoint(item)} title={nftTitle(item)} compact={size < 72} />
+      ) : thumb && !bad ? (
         <img src={thumb} alt="" loading="lazy" onError={() => setBad(true)} className="w-full h-full object-cover" />
       ) : (
         <>
@@ -167,9 +203,11 @@ export const NftViewer = ({ item, onClose }: { item: AirdropItem; onClose: () =>
   useBackClose(true, onClose);
   const who = useSenderName(item);
   const v = useViewKind(item);
-  const { content, thumb } = nftUrls(item);
+  const { content } = nftUrls(item);
   const [failed, setFailed] = useState(false);
   const kind = v?.kind;
+  const poster = useVideoPoster(kind === 'video' ? contentOutpoint(item) : null);
+  const videoSrc = useVideoSrc(item, v?.type, kind === 'video');
   return createPortal(
     <div
       className="fixed inset-0 z-[260] flex flex-col bg-black"
@@ -194,10 +232,15 @@ export const NftViewer = ({ item, onClose }: { item: AirdropItem; onClose: () =>
             Loading…
           </p>
         )}
-        {content && !failed && kind === 'video' && (
+        {content && !failed && kind === 'video' && videoSrc === undefined && (
+          <div className="w-48 h-48 rounded-xl overflow-hidden">
+            <VideoPoster outpoint={contentOutpoint(item)} title={nftTitle(item)} />
+          </div>
+        )}
+        {content && !failed && kind === 'video' && videoSrc && (
           <video
-            src={content}
-            poster={thumb ?? undefined}
+            src={videoSrc}
+            poster={poster ?? undefined}
             controls
             autoPlay
             playsInline
