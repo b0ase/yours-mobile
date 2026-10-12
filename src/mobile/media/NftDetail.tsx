@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import validate from 'bitcoin-address-validation';
 import { sendOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { Copy, ExternalLink, Flame, Send, UserCircle, X } from 'lucide-react';
+import { Copy, Flame, Send, UserCircle, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { NftHeader, NftHero, PendingCard } from './NftHero';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import type { ChromeStorageObject } from '../../services/types/chromeStorage.types';
@@ -140,15 +141,6 @@ export const NftDetail = ({
     }
   };
 
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(origin);
-      setMsg('Copied');
-    } catch {
-      setMsg(origin);
-    }
-  };
-
   const setAvatar = async () => {
     const uri = nftAvatarUri(origin);
     const account = chromeStorageService.getCurrentAccountObject().account;
@@ -205,47 +197,26 @@ export const NftDetail = ({
       className="fixed inset-0 z-[200] flex flex-col bg-black overflow-y-auto"
       style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <div className="flex items-center justify-between px-4 py-3">
-        <span className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{item.name}</span>
-        <button aria-label="Close" onClick={onClose} className="p-2">
-          <X size={20} color="#fff" />
+      <div className="relative">
+        <NftHero m={item} pending={pending} />
+        <button
+          aria-label="Close"
+          onClick={onClose}
+          className="absolute top-3 right-3 z-10 h-9 w-9 flex items-center justify-center rounded-full bg-black/60 backdrop-blur"
+        >
+          <X size={18} color="#fff" />
         </button>
-      </div>
-      <div className="flex items-center justify-center bg-[#0b0c0f]" style={{ minHeight: '45vh', maxHeight: '60vh' }}>
-        {item.kind === 'video' && <video src={item.url} controls playsInline className="max-w-full max-h-[60vh]" />}
-        {item.kind === 'images' && (
-          <img
-            src={item.url}
-            alt={item.name}
-            className="max-w-full max-h-[60vh] object-contain"
-            style={{ imageRendering: 'pixelated' }}
-          />
-        )}
-        {item.kind === 'music' && <audio src={item.url} controls className="w-[90%]" />}
-        {item.kind === 'other' && (
-          <iframe src={item.url} title={item.name} sandbox="" className="w-full h-[50vh] bg-white" />
-        )}
       </div>
 
       <div className="px-4 py-4 flex flex-col gap-3">
-        <div>
-          <div className="text-lg font-semibold text-white">{item.name}</div>
-          {collection && <div className="text-xs text-[#98A2B3]">Collection {short(collection)}</div>}
-          <div className="text-[11px] text-[#667085]">{item.type ?? 'unknown type'}</div>
-        </div>
-        <div className="flex items-center gap-2 rounded-xl bg-[#17191E] px-3 py-2">
-          <span className="text-[11px] text-[#98A2B3] shrink-0">Origin</span>
-          <span className={`text-[11px] text-white flex-1 ${ELLIPSIS}`}>{origin}</span>
-          <button aria-label="Copy origin" onClick={() => void copy()} className="p-1">
-            <Copy size={14} color="#98A2B3" />
-          </button>
-          {link && (
-            <a href={link} target="_blank" rel="noreferrer" aria-label="View on 1satordinals.com" className="p-1">
-              <ExternalLink size={14} color="#98A2B3" />
-            </a>
-          )}
-        </div>
-
+        <NftHeader
+          name={item.name}
+          collection={collection ? `Collection ${short(collection)}` : undefined}
+          contentType={item.type}
+          status={pending ? 'pending' : isListed(item.output) ? 'listed' : onChain ? 'onchain' : 'checking'}
+          origin={origin}
+          chainLink={link || undefined}
+        />
         {item.kind === 'images' && (
           <button onClick={() => void setAvatar()} className={`${btn} bg-[#A1FF8B] text-[#010101]`}>
             <UserCircle size={16} /> Set as my avatar
@@ -264,18 +235,18 @@ export const NftDetail = ({
             </a>
           </div>
         ) : onChain === false && pending ? (
-          <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
-            Pending, not on chain yet. Your wallet is still sending this mint to the network and keeps trying on its
-            own. You can send it once it lands. If the network refuses it, your wallet cancels it and the money comes
-            back.
-          </div>
+          <PendingCard />
         ) : onChain === false ? (
           <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
             Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent or
             burned. Nothing on chain needs burning.
           </div>
         ) : !sending ? (
-          <button onClick={() => setSending(true)} className={`${btn} bg-[#17191E] text-white`}>
+          <button
+            onClick={() => setSending(true)}
+            className={`${btn} text-[#010101]`}
+            style={{ background: '#F5B800' }}
+          >
             <Send size={16} /> Send
           </button>
         ) : (
