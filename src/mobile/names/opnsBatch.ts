@@ -35,6 +35,15 @@ export const parseNameList = (text: string): ParsedList => {
   return { names, invalid };
 };
 
+/** Why a name from the list can't be minted, in plain words (shown on its red chip). */
+export const invalidReason = (name: string): string => {
+  if (/[A-Z]/.test(name)) return 'lower-case only';
+  if (/\s/.test(name)) return 'no spaces';
+  if (/\./.test(name)) return 'no dots';
+  if (/_/.test(name)) return 'no underscores; use -';
+  return 'letters, numbers and - only';
+};
+
 /**
  * Mint order: alphabetical, which puts every prefix before the names that extend it
  * (b0as < b0ase < b0asex) and keeps names sharing a prefix together, so later names reuse it.
@@ -222,6 +231,9 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
   }
   return { stopped: 'finished', state };
 };
+
+/** Router path of the page inside bMint (public URL /bmint/opns; old /opns-mint links redirect there). */
+export const OPNS_MINT_ROUTE = '/m/bmint/opns';
 
 /** ?mint=a,b,c on the names screen pre-fills the list (not a visible product button). */
 export const mintParam = (search: string): string => {

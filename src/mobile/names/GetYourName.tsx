@@ -488,7 +488,7 @@ export const GetYourName = ({
             </button>
           </div>
 
-          <Link to="/m/opns-mint" className="text-[11px] self-start" style={{ color: gold }}>
+          <Link to="/m/bmint/opns" className="text-[11px] self-start" style={{ color: gold }}>
             Mint a list of names
           </Link>
           {result?.status === 'invalid' && (

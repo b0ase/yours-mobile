@@ -38,6 +38,11 @@
   ],
   "redirects": [
     {
+      "source": "/opns-mint",
+      "destination": "/bmint/opns",
+      "permanent": true
+    },
+    {
       "source": "/calls",
       "destination": "/bphone",
       "permanent": true
