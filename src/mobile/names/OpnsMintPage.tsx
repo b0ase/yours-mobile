@@ -48,6 +48,7 @@ import {
   type OwnedForSale,
 } from './opnsSell';
 import { OpnsSellSection } from './OpnsSellSection';
+import { OpnsGiftSection } from './OpnsGiftSection';
 import { OpnsBuySheet } from './OpnsSheets';
 
 /**
@@ -897,7 +898,7 @@ export const OpnsMintPage = () => {
           </p>
         )}
 
-        {MARKET_ENABLED && (
+        {MARKET_ENABLED ? (
           <OpnsSellSection
             ctx={apiContext}
             identityAddress={identityAddress}
@@ -905,6 +906,8 @@ export const OpnsMintPage = () => {
             owned={owned}
             onChanged={() => void refreshOwned()}
           />
+        ) : (
+          <OpnsGiftSection ctx={apiContext} owned={owned} onChanged={() => void refreshOwned()} />
         )}
       </div>
 
