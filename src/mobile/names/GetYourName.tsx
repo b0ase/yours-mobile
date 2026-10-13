@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { askNotifyPermissionOnce } from '../notify/engine';
@@ -487,6 +488,9 @@ export const GetYourName = ({
             </button>
           </div>
 
+          <Link to="/m/opns-mint" className="text-[11px] self-start" style={{ color: gold }}>
+            Mint a list of names
+          </Link>
           {result?.status === 'invalid' && (
             <p className="text-xs" style={{ color: '#ff4444' }}>
               {result.reason}

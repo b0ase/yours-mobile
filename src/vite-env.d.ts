@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   /** '1' = App Store / Google Play build (src/mobile/storeBuild.ts). */
   readonly VITE_STORE_BUILD?: string;
   readonly VITE_CHANNEL?: string;
+  readonly VITE_OPNS_FEE_ADDRESS?: string;
   /** Live chat relay base URL (src/mobile/chat/live.ts); default https://rt.b0ase.com. */
   readonly VITE_RT_URL?: string;
   /** '0' = build without the live chat stream. */
