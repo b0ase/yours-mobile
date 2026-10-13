@@ -101,7 +101,8 @@ export const BAPPS: BApp[] = [
   },
   {
     name: 'bMint',
-    url: 'https://www.bitcoin-mint.com/mint',
+    // In the wallet (bmint/BmintPage.tsx), not bitcoin-mint.com: a path opens by route (BrowserPage bappTile).
+    url: '/m/bmint',
     verb: 'Design, stamp and mint tokens, currency and media on-chain',
     group: 'featured',
     status: 'live',

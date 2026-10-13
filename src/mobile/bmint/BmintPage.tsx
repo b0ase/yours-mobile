@@ -1,14 +1,19 @@
-import { lazy, Suspense } from 'react';
-import { Link, NavLink, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { Link, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { AtSign, BadgeCheck, Camera, Disc3, Landmark } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { BMINT_NOTES_ENABLED } from '../storeBuild';
+import { setAgentDraft } from '../agent/handoff';
+import { mintTilesShown, MintSheet } from '../mint/MintButton';
+import { HandleFlow } from '../names/HandleFlow';
+import { BMINT_NOTES_ENABLED, RELEASES_ENABLED, STORE_BUILD } from '../storeBuild';
 import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
 import './bmint.css';
 
 /**
- * bMint (/m/bmint, Desktop and web): the design-and-mint tools ported from The Bitcoin Corporation
- * Mint (bcorp-mint). Phase 1 is Notes; OpNS names (/m/bmint/opns) is a sibling built separately.
+ * bMint (/m/bmint, Desktop and web): the hub for every mint type the wallet has (useHub below), plus the
+ * tools ported from The Bitcoin Corporation Mint (bcorp-mint): Notes and OpNS names (/m/bmint/opns).
  * See docs/BMINT-PORT-PLAN.md. Notes is never in a store build, not even as code (BMINT_NOTES_ENABLED).
  * Notes are fixed designs issued only by The Bitcoin Corporation Mint (owner, 13 Oct 2026): the owner
  * (lib/studioAccess.ts allow-list) gets the note studio; everyone else sees the designs as a showcase.
@@ -18,25 +23,9 @@ const NotesShowcase = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesShow
 
 // OpNS names (names/OpnsMintPage.tsx, its own chunk) renders inside the shell at /m/bmint/opns.
 const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
+const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 
 const BASE = '/m/bmint';
-
-/** Gold rosette art for the Notes tile (drawn, so no picture loads on the landing page). */
-const rosette = (() => {
-  const paths: string[] = [];
-  for (let r = 0; r < 14; r++) {
-    const pts: string[] = [];
-    for (let i = 0; i <= 240; i++) {
-      const t = (i / 240) * Math.PI * 2;
-      const rad = 60 + r * 7 + 10 * Math.sin(12 * t + r * 0.4);
-      pts.push(`${(200 + rad * Math.cos(t)).toFixed(1)},${(120 + rad * Math.sin(t)).toFixed(1)}`);
-    }
-    paths.push(
-      `<polyline points="${pts.join(' ')}" fill="none" stroke="%23c9a84c" stroke-opacity="0.55" stroke-width="0.7"/>`,
-    );
-  }
-  return `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 240'>${paths.join('').replace(/"/g, "'")}</svg>")`;
-})();
 
 const Tab = ({ to, children, end }: { to: string; children: string; end?: boolean }) => (
   <NavLink to={to} end={end} className={({ isActive }) => `bm-tab${isActive ? ' active' : ''}`}>
@@ -44,45 +33,160 @@ const Tab = ({ to, children, end }: { to: string; children: string; end?: boolea
   </NavLink>
 );
 
-const Landing = ({ owner }: { owner: boolean }) => (
-  <div className="bm-body">
-    <div className="bm-hero">
-      <span className="bm-chip">bMint</span>
-      <h1>
-        The <span>Mint</span>
-      </h1>
-      <p>Mint on-chain names to your wallet with one approval, and see the notes of The Bitcoin Corporation Mint.</p>
+type HubTile = { id: string; icon: ReactNode; title: string; sub: string; to?: string; agent?: string };
+
+/**
+ * Every mint type the wallet already has, one tile each, opening the existing flow (owner, 13 Oct 2026):
+ *   Mint sheet types (mint/MintButton.tsx MINT_TILES, store gating applied there) → /m/bmint/mint/<id>
+ *     (the sheet over this page with that type preselected); its "with b" types open Ask b with the request typed.
+ *   bAvatar (bavatar/BavatarMintSheet) and your $handle (names/HandleFlow; paid feature, !STORE_BUILD so the store bundle drops it)
+ *     → /m/bmint/mint/bavatar | handle. bPics → /m/bpics. A music release (RELEASES_ENABLED) → /m/media/new.
+ *   OpNS names → /m/bmint/opns. Notes (BMINT_NOTES_ENABLED) → /m/bmint/notes.
+ */
+const useHub = (owner: boolean) => {
+  const sheet = mintTilesShown();
+  const make: HubTile[] = sheet.filter((t) => !t.agent).map((t) => ({ ...t, to: `${BASE}/mint/${t.id}` }));
+  const withB: HubTile[] = sheet.filter((t) => t.agent);
+  const studio: HubTile[] = [
+    {
+      id: 'bpics',
+      icon: <Camera size={18} />,
+      title: 'bPics',
+      sub: "Mint your photos; browse everyone's",
+      to: '/m/bpics',
+    },
+    ...(RELEASES_ENABLED
+      ? [
+          {
+            id: 'release',
+            icon: <Disc3 size={18} />,
+            title: 'A music release',
+            sub: 'A single or album, listed in bMusic',
+            to: '/m/media/new',
+          },
+        ]
+      : []),
+    ...(NotesPage
+      ? [
+          {
+            id: 'notes',
+            icon: <Landmark size={18} />,
+            title: owner ? 'Note studio' : "The Mint's notes",
+            sub: owner ? "Design the Mint's notes" : 'Issued by The Bitcoin Corporation Mint',
+            to: `${BASE}/notes`,
+          },
+        ]
+      : []),
+  ];
+  const identity: HubTile[] = [
+    {
+      id: 'opns',
+      icon: <AtSign size={18} />,
+      title: 'OpNS names',
+      sub: 'On-chain names that point at you',
+      to: `${BASE}/opns`,
+    },
+    {
+      id: 'bavatar',
+      icon: <BadgeCheck size={18} />,
+      title: 'Your bAvatar',
+      sub: 'Your art, $name and number as an ordinal',
+      to: `${BASE}/mint/bavatar`,
+    },
+    ...(!STORE_BUILD
+      ? [
+          {
+            id: 'handle',
+            icon: <AtSign size={18} />,
+            title: 'Your $handle',
+            sub: 'Claim a handle; its personal token comes with it',
+            to: `${BASE}/mint/handle`,
+          },
+        ]
+      : []),
+  ];
+  return [
+    { title: 'Make', tiles: make },
+    { title: 'Studio', tiles: studio },
+    { title: 'Names & identity', tiles: identity },
+    { title: 'With b', tiles: withB },
+  ].filter((g) => g.tiles.length);
+};
+
+const TypeTile = ({ t }: { t: HubTile }) => {
+  const navigate = useNavigate();
+  const body = (
+    <>
+      <span className="bm-type-ico">{t.icon}</span>
+      <span className="bm-type-title">{t.title}</span>
+      <span className="bm-type-sub">{t.sub}</span>
+    </>
+  );
+  if (t.agent)
+    return (
+      <button
+        type="button"
+        className="bm-type"
+        onClick={() => {
+          setAgentDraft(t.agent!);
+          navigate('/m/ask-b');
+        }}
+      >
+        {body}
+      </button>
+    );
+  return (
+    <Link to={t.to!} className="bm-type">
+      {body}
+    </Link>
+  );
+};
+
+const Landing = ({ owner }: { owner: boolean }) => {
+  const groups = useHub(owner);
+  return (
+    <div className="bm-body">
+      <div className="bm-hero">
+        <span className="bm-chip">bMint</span>
+        <h1>
+          The <span>Mint</span>
+        </h1>
+        <p>Everything you can mint, in one place. Whatever you make is yours on chain: keep it, send it or sell it.</p>
+      </div>
+      {groups.map((g) => (
+        <section key={g.title} className="bm-group" aria-label={g.title}>
+          <h2 className="bm-group-title">{g.title}</h2>
+          <div className="bm-types">
+            {g.tiles.map((t) => (
+              <TypeTile key={t.id} t={t} />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
-    <div className="bm-tiles">
-      {NotesPage && (
-        <Link to={`${BASE}/notes`} className="bm-tile">
-          <span className="bm-tile-art" style={{ backgroundImage: rosette, opacity: 1 }} />
-          <span className="bm-chip">Notes</span>
-          <h2>{owner ? 'Note studio' : "The Mint's notes"}</h2>
-          <p>
-            {owner
-              ? "Design the Mint's notes. Save drafts, export PNG or SVG."
-              : 'Designed and issued by The Bitcoin Corporation Mint.'}
-          </p>
-        </Link>
-      )}
-      <Link to={`${BASE}/opns`} className="bm-tile">
-        <span
-          className="bm-tile-art"
-          style={{
-            backgroundImage: `url(${mintMark})`,
-            backgroundSize: '55%',
-            backgroundRepeat: 'no-repeat',
-            opacity: 0.25,
-          }}
-        />
-        <span className="bm-chip">Names</span>
-        <h2>OpNS names</h2>
-        <p>Mint on-chain names that point at your identity.</p>
-      </Link>
-    </div>
-  </div>
-);
+  );
+};
+
+/** /m/bmint/mint/<type>: the existing flow for that type, over the hub. Closing returns to the hub. */
+const MintOpen = ({ owner }: { owner: boolean }) => {
+  const { type = '' } = useParams();
+  const navigate = useNavigate();
+  const close = () => navigate(BASE, { replace: true });
+  const flow =
+    type === 'bavatar' ? (
+      <BavatarMintSheet onClose={close} />
+    ) : type === 'handle' && !STORE_BUILD ? (
+      <HandleFlow onClose={close} />
+    ) : (
+      <MintSheet exchangeRate={0} start={type} onClose={close} />
+    );
+  return (
+    <>
+      <Landing owner={owner} />
+      {createPortal(<Suspense fallback={null}>{flow}</Suspense>, document.body)}
+    </>
+  );
+};
 
 const useOwner = () => {
   const { chromeStorageService } = useServiceContext();
@@ -106,6 +210,9 @@ export const BmintPage = () => {
           </span>
         </Link>
         <nav className="bm-tabs" aria-label="bMint">
+          <Tab to={BASE} end>
+            Mint
+          </Tab>
           {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
           <Tab to={`${BASE}/opns`}>OpNS names</Tab>
         </nav>
@@ -114,6 +221,7 @@ export const BmintPage = () => {
         <Routes>
           {Notes && <Route path="notes" element={<Notes />} />}
           <Route path="opns" element={<OpnsMintPage />} />
+          <Route path="mint/:type" element={<MintOpen owner={owner} />} />
           <Route path="*" element={<Landing owner={owner} />} />
         </Routes>
       </Suspense>

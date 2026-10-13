@@ -200,8 +200,9 @@ const hostOf = (url: string) => {
   }
 };
 
+// A bApp whose url is a wallet path (bMint: /m/bmint) is a wallet screen: a sys: tile, opened by route.
 const bappTile = (a: BApp): Tile => ({
-  key: `b:${a.url}`,
+  key: a.url.startsWith('/') ? `sys:${a.name}` : `b:${a.url}`,
   name: a.name,
   url: a.url,
   icon: a.icon,
@@ -450,7 +451,7 @@ const ArrangeGrid = ({
 };
 
 const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) => g.tiles)];
-allowFrameUrls(ALL_TILES.filter((t) => !t.bapp?.noFrame).map((t) => t.url));
+allowFrameUrls(ALL_TILES.filter((t) => !t.bapp?.noFrame && !t.url.startsWith('/')).map((t) => t.url));
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
 // The featured suite: our own bApps, then the ones with their original icons, then Treechat and Twetch.
