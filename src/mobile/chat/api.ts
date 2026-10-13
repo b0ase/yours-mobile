@@ -595,6 +595,24 @@ export class BchatClient {
     return this.call('GET', `${BchatClient.path(ticker)}/space/green-room`);
   }
 
+  /**
+   * Is a Space live in this room, asked WITHOUT membership: the same public guest route bChatX's
+   * /s/<room> and the profile stage use (404 = nothing live; 200 / 403 sign-in or holders / 409 not
+   * on the SFU = a live Space exists). The fallback when the member-gated GET space fails (not
+   * signed in to bChat yet, not a member row), so the room still shows "Live now".
+   */
+  async spaceLivePublic(ticker: string): Promise<'live' | 'none' | 'unknown'> {
+    try {
+      await this.call('POST', `${BchatClient.path(ticker)}/space/guest-token`, {}, false);
+      return 'live';
+    } catch (e) {
+      const st = e instanceof ChatApiError ? e.status : 0;
+      if (st === 404) return 'none';
+      if (st === 403 || st === 409) return 'live';
+      return 'unknown';
+    }
+  }
+
   /** Listen anonymously: a hidden, listen-only token. No participant row; still member-gated (ticket). */
   async spaceAnonToken(ticker: string): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space/anon-token`, {});
