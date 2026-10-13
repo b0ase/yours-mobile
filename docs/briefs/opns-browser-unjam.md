@@ -1,7 +1,9 @@
 # Brief: unjam the browser OpNS minter (cloud session)
 
-Repo `bwalletX`, branch `bwallet` (remotes `origin` and `bcorp`, push `bwallet:main` to bcorp). pnpm only. Owner
-rule: merge yourself when all gates pass; never touch keys, never spend, never run a live mint.
+GitHub repo **bitcoin-corp/bwallet**, branch **main** (the owner's Mac has it as `/Volumes/2026/Projects/bwalletX`
+branch `bwallet`, remote `bcorp`; `b0ase/yours-mobile` branch `bwallet` is the same code). Work on a branch off
+`main`, open a PR, and merge it yourself when all gates pass (owner rule). pnpm only. Never touch keys, never
+spend, never run a live mint. The owner then runs `git pull bcorp main` on the Mac and deploys.
 
 ## Symptom (owner, 13 Oct 2026)
 
@@ -60,8 +62,7 @@ mine-tree cache still treats them as ours. `ordinals.1sat.app` (the names overla
 
 `pnpm run format:check` · `pnpm typecheck` · `pnpm lint --max-warnings 0` · `pnpm test` · `pnpm build:mobile` ·
 `pnpm build:mobile:store` + the store greps in `docs/STORE-AUDIT.md` (no buy/sell/offer wording in `build-mobile/`)
-· `pnpm build:mobile` again. Then push `origin bwallet` and `bcorp bwallet:main` (fast-forward only) and note the
-commit in `/Users/b0ase/.claude/handoffs/Volumes-2026-Projects-bwalletx-x/latest.md` if you can reach it; otherwise
-in the PR/commit message. The owner deploys with the Dock app "Deploy bWalletX".
+· `pnpm build:mobile` again. Then merge the PR into `main`. Put a short summary of what changed and the merge commit
+in the PR description. The owner pulls and deploys with the Dock app "Deploy bWalletX".
 
 Do not touch `~/.bwalletx/` or the running CLI job on the owner's Mac.
