@@ -73,7 +73,7 @@ export const PasswordFields = ({
           type={type}
           name="new-password"
           autoComplete={newWallet ? 'new-password' : 'current-password'}
-          placeholder={newWallet ? 'Password' : 'Your wallet password'}
+          placeholder={newWallet ? 'Master password' : 'Your master password (not a new one)'}
           value={password}
           onChange={(e) => {
             setPassword(e.target.value);
@@ -108,7 +108,7 @@ export const PasswordFields = ({
             type={type}
             name="confirm-password"
             autoComplete="new-password"
-            placeholder={newWallet ? 'Confirm password' : 'Your wallet password again'}
+            placeholder={newWallet ? 'Master password again' : 'Your master password again'}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
@@ -141,8 +141,8 @@ export const PasswordFields = ({
         <label className="flex items-start gap-2 mt-1 text-xs" style={{ color: '#D0D5DD' }}>
           <input type="checkbox" required className="mt-0.5" />
           <span>
-            I've saved this password somewhere safe. {APP_NAME} can't show it again; only your recovery phrase can reset
-            it.
+            I've saved this master password somewhere safe. {APP_NAME} can't show it again; only your recovery phrase
+            can reset it.
           </span>
         </label>
       )}

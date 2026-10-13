@@ -7,7 +7,6 @@ import { APP_NAME } from './storeBuild';
  */
 export function onboardingError(action: string, error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error ?? '');
-  if (msg === 'Unauthorized!')
-    return `Wrong password: use the password you unlock ${APP_NAME} with (one for all accounts).`;
+  if (msg === 'Unauthorized!') return `Wrong password: use your master password, the one you unlock ${APP_NAME} with.`;
   return `Couldn't ${action} the account${msg ? `: ${msg}` : '.'}`;
 }

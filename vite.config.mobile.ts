@@ -247,11 +247,16 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
     [
       "{newWallet ? 'Create password' : 'New Account'}",
-      "{newWallet ? 'Create password' : isAgentCreatePending() ? 'New agent account' : 'New account'}",
+      "{newWallet ? 'Create your master password' : isAgentCreatePending() ? 'New agent account' : 'New account'}",
     ],
     [
       "{newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}",
-      `{newWallet ? 'This will be used to unlock your wallet.' : 'Enter the password you unlock ${STORE_APP_NAME} with (one password for all your accounts). Next you will get this account\\'s own 12-word recovery phrase.'}`,
+      `{newWallet ? 'Your master password unlocks the wallet and every account in it. You will type it again whenever you add an account.' : 'Type your master password, the one you unlock ${STORE_APP_NAME} with. Don\\'t make up a new one: your master password unlocks every account. Next you will get this account\\'s own 12-word recovery phrase.'}`,
+    ],
+    // Add account: the box itself says "your wallet password", and a short password says so (not "Invalid Password!").
+    [
+      "addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');",
+      "addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Wrong password: use your master password, the one you unlock the wallet with.', 'error');",
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
