@@ -1,14 +1,17 @@
 import type { OneSatContext } from '@1sat/actions';
+import { OpNS } from '@1sat/templates';
 import { Transaction } from '@bsv/sdk';
 import type { Fetch } from './names';
 import { EXPECTED_HASHES } from './opnsPow';
 import {
   fetchMineNode,
+  isCharClaimed,
   isTaken,
   loadNode,
   mintStep,
   OPNS_CHARSET,
   randomPrefix,
+  type LoadedNode,
   type MineNode,
   type MintStepResult,
 } from './opnsMint';
@@ -115,6 +118,13 @@ const pickNode = (tree: OpnsTree | undefined, name: string, indexed: MineNode | 
   return null;
 };
 
+/** The child node `domain` minted in the same tx as this restated parent (output 1), when that is what it is. */
+const childOf = (node: LoadedNode, domain: string): string | null => {
+  const out = node.tx.outputs[1];
+  const st = node.vout === 0 && out ? OpNS.decode(out.lockingScript) : null;
+  return st?.domain === domain ? `${node.tx.id('hex')}.1` : null;
+};
+
 const catchingUp = (name: string) =>
   `The name tree for "${name}" is still catching up with your last mints. Wait for them to confirm (about 10 minutes), then try again.`;
 
@@ -152,6 +162,16 @@ export const mineName = async (
     if (!name.startsWith(domain)) throw new Error(`Tree node "${domain}" isn't a prefix of "${name}"`);
     if (domain === name) break;
     const char = name.charCodeAt(domain.length);
+    if (isCharClaimed(node.state.claimed, char)) {
+      // This node already has our next char mined (e.g. it is the restated parent of our own unconfirmed mint
+      // and the cache / indexer pointed back at it). Mining it again fails the covenant: go to the child.
+      const child = childOf(node, domain + name[domain.length]);
+      if (!child || tree?.isSpent(child) || retries++ >= 3) throw new Error(catchingUp(name));
+      outpoint = child;
+      beefHint = node.beef;
+      fromIndexer = false;
+      continue;
+    }
     const charIndex = Math.max(0, domain.length - first.domain.length);
     const remainingAfter = name.length - domain.length - 1;
 

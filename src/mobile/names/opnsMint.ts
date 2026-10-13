@@ -1,7 +1,7 @@
 import { OpNS } from '@1sat/templates';
 import { OPNS_BASKET, P1SAT_PROTOCOL } from '@1sat/types';
 import { buildOrdinalCustomInstructions, executeTrackedAction, type OneSatContext } from '@1sat/actions';
-import { Beef, P2PKH, PublicKey, Script, Transaction, Utils, type CreateActionArgs } from '@bsv/sdk';
+import { Beef, P2PKH, PublicKey, Script, Spend, Transaction, Utils, type CreateActionArgs } from '@bsv/sdk';
 import { SERVICES, type Fetch } from './names';
 
 /**
@@ -64,6 +64,46 @@ export type MintPlan = {
   restated: Script;
   child: Script;
   inscription: Script;
+};
+
+/**
+ * True when `char` is already claimed in a node's bitfield. The covenant OP_VERIFYs that the mined char's bit
+ * was clear (bug 13 Oct 2026: re-mining "i" from the restated "dan" node e03354a0…:0, which already had "i"
+ * claimed, failed at PC 2703 — the trailing change outputs had nothing to do with it).
+ */
+export const isCharClaimed = (claimed: number[], char: number) => {
+  const byte = char >> 3;
+  return byte < claimed.length && (claimed[byte] & (1 << (char & 7))) !== 0;
+};
+
+/**
+ * Run the covenant locally with the SDK interpreter (same check a node does) so a transaction that would be
+ * rejected is never signed off or broadcast. Throws with the interpreter's message.
+ */
+export const verifyCovenantSpend = (tx: Transaction, idx: number, parent: Transaction, vout: number) => {
+  const input = tx.inputs[idx];
+  const out = parent.outputs[vout];
+  if (!input.unlockingScript) throw new Error('OpNS unlock missing');
+  const spend = new Spend({
+    sourceTXID: parent.id('hex'),
+    sourceOutputIndex: vout,
+    sourceSatoshis: out.satoshis ?? 0,
+    lockingScript: out.lockingScript,
+    transactionVersion: tx.version,
+    otherInputs: tx.inputs.filter((_, j) => j !== idx),
+    outputs: tx.outputs,
+    inputIndex: idx,
+    unlockingScript: input.unlockingScript,
+    inputSequence: input.sequence ?? 0xffffffff,
+    lockTime: tx.lockTime,
+  });
+  let ok = false;
+  try {
+    ok = spend.validate();
+  } catch (e) {
+    throw new Error(`OpNS covenant check failed locally, not broadcast: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!ok) throw new Error('OpNS covenant check failed locally, not broadcast');
 };
 
 /** The three covenant-mandated outputs for mining `char` from `node` with solution `hash`. */
@@ -174,6 +214,10 @@ export const mintStep = async (
   nonce: number[],
   hash: number[],
 ): Promise<MintStepResult> => {
+  if (isCharClaimed(node.state.claimed, char))
+    throw new Error(
+      `"${String.fromCharCode(char)}" is already mined under "${node.state.domain}"; use its child node instead`,
+    );
   const keyID = node.outpoint;
   const { publicKey } = await ctx.wallet.getPublicKey({
     protocolID: P1SAT_PROTOCOL,
@@ -233,6 +277,8 @@ export const mintStep = async (
         throw new Error(
           `OpNS unlock is ${unlock.toBinary().length} bytes but ${declared} were reserved (${tx.outputs.length - 3} change outputs)`,
         );
+      tx.inputs[idx].unlockingScript = unlock;
+      verifyCovenantSpend(tx, idx, node.tx, node.vout);
       return { [idx]: { unlockingScript: unlock.toHex() } };
     });
   } catch (e) {

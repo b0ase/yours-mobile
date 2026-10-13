@@ -159,6 +159,81 @@ describe('batching + resume', () => {
   });
 });
 
+describe('listing retries (aaro: WERR_REVIEW_ACTIONS after aar listed)', () => {
+  const REVIEW = 'Undelayed createAction or signAction results require review.';
+  const mk2 = () =>
+    newSellBatch(
+      [
+        { name: 'aar', id: 'i1' },
+        { name: 'aaro', id: 'i2' },
+      ],
+      50,
+      {},
+      1,
+    ) as SellState;
+  test('a refused broadcast is retried after a pause and the batch carries on', async () => {
+    let n = 0;
+    const slept: number[] = [];
+    const r = await runSellBatch(
+      {
+        list: async (it) => {
+          if (it.name === 'aaro' && n++ === 0) throw new Error(REVIEW);
+          return `tx-${it.name}`;
+        },
+        isListed: () => false,
+        save: () => undefined,
+        onUpdate: () => undefined,
+        sleep: async (ms) => void slept.push(ms),
+      },
+      mk2(),
+      new AbortController().signal,
+    );
+    expect(r.stopped).toBe('finished');
+    expect(r.state.items.map((i) => i.txid)).toEqual(['tx-aar', 'tx-aaro']);
+    expect(slept.length).toBe(1);
+  });
+  test('never lists twice: a refused attempt that actually went out is marked listed', async () => {
+    let listed = false;
+    const r = await runSellBatch(
+      {
+        list: async (it) => {
+          if (it.name === 'aaro') {
+            listed = true;
+            throw new Error(REVIEW);
+          }
+          return 'tx';
+        },
+        isListed: (name) => name === 'aaro' && listed,
+        save: () => undefined,
+        onUpdate: () => undefined,
+        sleep: async () => undefined,
+      },
+      mk2(),
+      new AbortController().signal,
+    );
+    expect(r.stopped).toBe('finished');
+    expect(r.state.items[1].note).toBe('Already listed');
+  });
+  test('still failing after the retries stops cleanly with the name pending for Resume', async () => {
+    const r = await runSellBatch(
+      {
+        list: async (it) => {
+          if (it.name === 'aaro') throw new Error(REVIEW);
+          return 'tx';
+        },
+        isListed: () => false,
+        save: () => undefined,
+        onUpdate: () => undefined,
+        sleep: async () => undefined,
+      },
+      mk2(),
+      new AbortController().signal,
+    );
+    expect(r.stopped).toBe('error');
+    expect(r.state.items[1].status).toBe('pending');
+  });
+});
+
 describe('search states', () => {
   const fmt = (sats: number) => `$${(sats / 2_000_000).toFixed(2)}`;
   test('free / mine / listed → Buy for $X / taken; store edition never offers Buy', () => {

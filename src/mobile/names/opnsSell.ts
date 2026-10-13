@@ -157,7 +157,20 @@ export type SellDeps = {
   isListed: (name: string) => boolean;
   save: (s: SellState) => void;
   onUpdate: (s: SellState) => void;
+  /** Pause before retrying a listing the wallet's broadcast refused (default 5 s). */
+  sleep?: (ms: number) => Promise<void>;
 };
+
+/**
+ * Broadcast refusals worth one more try: the wallet's WERR_REVIEW_ACTIONS ("Undelayed createAction or
+ * signAction results require review"), seen when a listing spends a name/change output from a chain of
+ * still-unconfirmed mints and the previous listing's change the broadcaster hasn't caught up with yet.
+ */
+export const isRetryableListError = (msg: string) =>
+  /REVIEW_ACTIONS|require review|missing.?inputs|orphan|double|conflict|not found|timeout|fetch/i.test(msg);
+
+const LIST_RETRIES = 2;
+const LIST_RETRY_MS = 5000;
 
 export type SellResult = { stopped: 'finished' | 'cancelled' | 'error'; error?: string; state: SellState };
 
@@ -177,14 +190,39 @@ export const runSellBatch = async (deps: SellDeps, start: SellState, signal: Abo
       set(i, { status: 'done', note: 'Already listed' });
       continue;
     }
-    try {
-      set(i, { status: 'listing', note: undefined });
-      const txid = await deps.list(it);
-      set(i, { status: 'done', txid });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      set(i, { status: 'pending', note: msg });
-      return { stopped: 'error', error: msg, state };
+    set(i, { status: 'listing', note: undefined });
+    let lastErr = '';
+    for (let attempt = 0; attempt <= LIST_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await (deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))))(LIST_RETRY_MS * attempt);
+        if (signal.aborted) {
+          set(i, { status: 'pending', note: undefined });
+          return { stopped: 'cancelled', state };
+        }
+        // The refused attempt may still have gone out: never list a name twice.
+        if (deps.isListed(it.name)) {
+          lastErr = '';
+          break;
+        }
+      }
+      try {
+        const txid = await deps.list(it);
+        lastErr = '';
+        set(i, { status: 'done', txid, note: undefined });
+        break;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        if (!isRetryableListError(lastErr)) break;
+      }
+    }
+    if (state.items[i].status === 'done') continue;
+    if (!lastErr && deps.isListed(it.name)) {
+      set(i, { status: 'done', note: 'Already listed' });
+      continue;
+    }
+    if (lastErr) {
+      set(i, { status: 'pending', note: lastErr });
+      return { stopped: 'error', error: lastErr, state };
     }
   }
   return { stopped: 'finished', state };

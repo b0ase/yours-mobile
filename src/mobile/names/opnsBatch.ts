@@ -303,15 +303,24 @@ export type RunResult = { stopped: 'finished' | 'cancelled' | 'error'; error?: s
  * with the message, so Resume retries it); Cancel stops it with the current name still pending.
  */
 export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSignal): Promise<RunResult> => {
-  let state = start;
+  // Resume: errors from the last run are stale (the fix may have shipped since); each name shows its own new result.
+  let state: BatchState = {
+    ...start,
+    items: start.items.map((it) =>
+      it.status === 'pending' || it.status === 'mining' || it.status === 'error'
+        ? { ...it, status: 'pending' as const, note: undefined }
+        : it,
+    ),
+  };
   const set = (i: number, patch: Partial<BatchItem>) => {
     state = { ...state, items: state.items.map((it, j) => (j === i ? { ...it, ...patch } : it)) };
     deps.save(state);
     deps.onUpdate(state);
   };
+  deps.onUpdate(state);
   for (let i = 0; i < state.items.length; i++) {
     const it = state.items[i];
-    if (it.status !== 'pending' && it.status !== 'mining') continue;
+    if (it.status !== 'pending') continue;
     if (signal.aborted) return { stopped: 'cancelled', state };
     try {
       if (deps.isMine(it.name) || deps.tree?.isOurs(it.name)) {

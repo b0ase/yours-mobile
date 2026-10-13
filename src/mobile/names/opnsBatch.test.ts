@@ -162,6 +162,27 @@ describe('runBatch', () => {
     expect(r2.state.items.every((i) => i.status === 'done')).toBe(true);
     expect(loadBatch(id, kv)!.items.every((i) => i.status === 'done')).toBe(true);
   });
+  test('Resume clears stale per-name errors (abiga: old unlock-length error) before retrying', async () => {
+    const start = batchOf('aaron', 'abigail', 'zed');
+    start.items[0].status = 'done';
+    start.items[1].note = 'The args parameter must be spend unlockingScript length 12810 exceeds expected length 6337';
+    start.items[2].status = 'error';
+    start.items[2].note = 'old failure';
+    const seen: (string | undefined)[][] = [];
+    const r = await runBatch(
+      {
+        fetch: fakeFetch(new Set()),
+        mine: async (n) => [{ txid: n }],
+        isMine: () => false,
+        save: () => {},
+        onUpdate: (s) => seen.push(s.items.map((i) => i.note)),
+      },
+      start,
+      new AbortController().signal,
+    );
+    expect(seen[0]).toEqual([undefined, undefined, undefined]);
+    expect(r.state.items.map((i) => i.status)).toEqual(['done', 'done', 'done']);
+  });
   test('a name already in the wallet is marked mine, not mined; fee paid per mined name', async () => {
     const fees: string[] = [];
     const r = await runBatch(
