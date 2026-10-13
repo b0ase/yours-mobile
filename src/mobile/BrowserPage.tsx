@@ -250,7 +250,9 @@ const GAME_SECTIONS = GAME_SOURCES.map((s) => ({
         key: `g:${g.name}`,
         name: g.name,
         url: g.url,
-        icon: RADAR_ICONS.get(bareHost(g.url)) ?? g.img,
+        // The game's own cover first, so each TokenBlaster arcade game gets its own tile instead of the shared
+        // TokenBlaster host icon (owner, 13 Oct 2026); host icon only for games without one.
+        icon: g.img ?? RADAR_ICONS.get(bareHost(g.url)),
         desc: g.desc,
       }),
     ),
