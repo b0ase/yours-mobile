@@ -51,6 +51,8 @@ const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 // Old /opns-mint links redirect there, keeping ?mint=.
 const BmintPage = lazy(() => import('../bmint/BmintPage'));
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
+// Desktop top bar bell: notifications as a page in the main column (notify/NotificationsPage.tsx).
+const NotificationsPage = lazy(() => import('../notify/NotificationsPage'));
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
 // No app-wide error boundary upstream: one throw blanked the whole page (owner, 6 Oct 2026).
@@ -83,6 +85,7 @@ const MobileRoutes = () => (
         <Route path="bmint/*" element={<BmintPage />} />
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="calls" element={<CallsPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
         <Route path="lock" element={<LockScreen />} />
         <Route path="lock/locks" element={<LockScreen />} />
         <Route path="lock/subscriptions" element={<LockScreen />} />
