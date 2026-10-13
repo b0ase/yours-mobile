@@ -6,7 +6,7 @@
  * webkitEnterFullscreen. Pending NFTs play from the wallet's own signed tx (nftViewer.localInscription).
  * Inscribed HTML only runs in sandbox="" (no scripts, no same-origin).
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Check,
   Copy,
@@ -24,6 +24,9 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import type { MediaItem } from './useWalletMedia';
 import { cachedPoster, loadVideoPoster } from './videoCover';
 import { isShortClip, localInscription, typeChip, viewerFor } from './nftViewer';
+
+// three.js only loads when a 3D NFT opens (keeps it out of the popup's first bundle).
+const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
 export const GOLD = '#F5B800';
 const AMBER = '#FFB020';
@@ -302,6 +305,12 @@ export const NftHero = ({ m, pending, poster }: { m: MediaItem; pending: boolean
   if (kind === 'video') return <VideoView src={src} poster={poster ?? autoPoster} />;
   if (kind === 'audio') return <AudioView src={src} name={m.name} />;
   if (kind === 'image') return <ImageView src={src} name={m.name} />;
+  if (kind === 'model')
+    return (
+      <Suspense fallback={<GoldArt icon={<Sparkles size={40} color={GOLD} className="animate-pulse" />} label="3D" />}>
+        <ModelViewer src={src} contentType={m.type ?? ''} poster={poster} />
+      </Suspense>
+    );
   if (kind === 'html')
     return (
       <iframe

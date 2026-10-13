@@ -22,7 +22,7 @@ export const DOWNSCALE_SUGGEST_BYTES = 1024 * 1024;
 export const MINT_FEE_RATE = 0.01;
 /** Rough bytes for inputs, change, envelope + MAP + SIGMA around the body. */
 export const TX_OVERHEAD_BYTES = 900; // inputs, change, fee output + issuer signature (MAP + AIP, ~300 B)
-export const ACCEPT = 'image/*,video/*,audio/*';
+export const ACCEPT = 'image/*,video/*,audio/*,.glb,.gltf,.usdz';
 
 // Store build: no fee to bCorp (storeBuild.ts).
 const configured = bcorpFeeAddress(typeof __MINT_FEE_ADDRESS__ === 'string' ? __MINT_FEE_ADDRESS__.trim() : '');
@@ -31,7 +31,8 @@ export const mintFeeAddress = (address = configured): string => (address && vali
 // Media plus documents (books, PDFs, text) and single-page websites (owner, 6 Oct 2026: mint more than pictures).
 export const isMintableType = (t: string) =>
   /^(image|video|audio)\//i.test(t) ||
-  /^(application\/pdf|application\/epub\+zip|text\/plain|text\/markdown|text\/html)$/i.test(t);
+  /^(application\/pdf|application\/epub\+zip|text\/plain|text\/markdown|text\/html)$/i.test(t) ||
+  /^model\/(gltf-binary|gltf\+json|vnd\.usdz\+zip)$/i.test(t);
 
 export type SizeCheck = { ok: true } | { ok: false; message: string };
 export const checkSize = (bytes: number, max = MAX_MINT_BYTES): SizeCheck => {

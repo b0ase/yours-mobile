@@ -6,6 +6,7 @@ import { mintMedia } from './mintMedia';
 import {
   AppWindow,
   BookOpen,
+  Box,
   Clapperboard,
   Coins,
   ExternalLink,
@@ -36,6 +37,7 @@ import {
   ACCEPT,
   BLOCKED_MESSAGE,
   blockedText,
+  buildMap,
   checkSize,
   DOWNSCALE_SUGGEST_BYTES,
   estimateCost,
@@ -48,6 +50,38 @@ import {
   type Collection,
 } from './mint';
 import { money, moneyWithSats } from '../money/money';
+import { captureVideoFrame } from '../wallet/cardVideoFrame';
+import {
+  detectModel,
+  fileFitsKind,
+  fmtBsv,
+  kindMap,
+  maxBytesFor,
+  MINT_KINDS,
+  mintTxBytes,
+  planEditions,
+  slowLandWarning,
+  validateKindFields,
+  type MintKind,
+} from './mintKinds';
+
+/** Cover / poster picture: a small JPEG so the companion inscription stays cheap. */
+const POSTER_EDGE = 512;
+const dataUriToFile = async (uri: string, name: string) => {
+  const b = await (await fetch(uri)).blob();
+  return new File([b], name, { type: b.type || 'image/jpeg' });
+};
+const coverFrom = async (file: File): Promise<File> => {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, POSTER_EDGE / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale);
+  c.height = Math.round(bmp.height * scale);
+  c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/jpeg', 0.82));
+  if (!blob) throw new Error('Could not read this picture');
+  return new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+};
 
 /**
  * "Mint" — gold button beside Receive / Send on the Wallet tab (build-time insert into
@@ -68,7 +102,8 @@ const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
 type Step = 'choose' | 'ticket' | 'token' | 'media' | 'done';
-type Picked = { file: File; url: string };
+/** `type` is the content type to inscribe (3D: from magic bytes, not the browser's guess). */
+type Picked = { file: File; url: string; type: string };
 
 const downscale = async (file: File, maxEdge = 2048, quality = 0.85): Promise<File> => {
   const bmp = await createImageBitmap(file);
@@ -112,6 +147,16 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
     label: 'photo, video or audio',
   });
   const [picked, setPicked] = useState<Picked | null>(null);
+  const [kindSel, setKindSel] = useState<MintKind | null>(null);
+  const [artist, setArtist] = useState('');
+  const [album, setAlbum] = useState('');
+  const [track, setTrack] = useState('');
+  const [editions, setEditions] = useState('1');
+  const [price, setPrice] = useState('');
+  const [poster, setPoster] = useState<{ file: File; url: string } | null>(null);
+  const [posterNote, setPosterNote] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const coverRef = useRef<HTMLInputElement>(null);
   const [fileError, setFileError] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -150,20 +195,85 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
   }, [collKind, newColl, existingId, collections]);
 
   const satsPerKb = chromeStorageService.getCustomFeeRate();
+  const maxBytes = maxBytesFor(kindSel);
+  const editionCount = collection.kind === 'none' ? Math.max(1, Math.floor(Number(editions)) || 1) : 1;
+  const plan = planEditions(editionCount, picked?.file.size ?? 0);
+  const usePoster = !!poster && collection.kind === 'none';
+  const txBytes = picked ? mintTxBytes(picked.file.size, plan, usePoster ? poster!.file.size : 0) : 0;
   const cost = picked
-    ? estimateCost(picked.file.size, satsPerKb, exchangeRate, { newCollection: collection.kind === 'new' })
+    ? estimateCost(txBytes, satsPerKb, exchangeRate, { newCollection: collection.kind === 'new' })
     : null;
+  const kindFields = {
+    artist,
+    album,
+    track,
+    editions: editionCount,
+    priceSats: price.trim() ? Number(price) : undefined,
+  };
+  const setPosterFile = (f: File | null) => {
+    setPoster((old) => {
+      if (old) URL.revokeObjectURL(old.url);
+      return f ? { file: f, url: URL.createObjectURL(f) } : null;
+    });
+  };
 
-  const pick = (file: File | undefined) => {
+  const pick = async (file: File | undefined) => {
     setFileError('');
+    setPosterNote('');
     if (!file) return;
-    if (!isMintableType(file.type))
+    if (kindSel && !fileFitsKind(kindSel, file.type, file.name))
+      return setFileError(`Pick ${MINT_KINDS.find((k) => k.id === kindSel)!.hint}.`);
+    let type = file.type;
+    if (kindSel === '3d') {
+      const head = new Uint8Array(
+        await file.slice(0, file.name.toLowerCase().endsWith('.gltf') ? file.size : 64).arrayBuffer(),
+      );
+      const isJson = head[0] === 0x7b || /\.gltf$/i.test(file.name);
+      const check = detectModel(isJson ? new Uint8Array(await file.arrayBuffer()) : head);
+      if (!check.ok) return setFileError(check.message);
+      type = check.contentType;
+    } else if (!isMintableType(type))
       return setFileError('Pick a photo, video, audio file, PDF, ebook, text or HTML page.');
-    const size = checkSize(file.size);
-    if (!size.ok && !file.type.startsWith('image/')) return setFileError(size.message);
+    const size = checkSize(file.size, maxBytes);
+    if (!size.ok && !type.startsWith('image/')) return setFileError(size.message);
     if (!size.ok) setFileError(size.message);
-    setPicked({ file, url: URL.createObjectURL(file) });
+    const url = URL.createObjectURL(file);
+    setPicked({ file, url, type });
+    setPosterFile(null);
     if (!title) setTitle(file.name.replace(/\.\w+$/, '').slice(0, 100));
+    // 3D: render a still on this device for the cover (gold card if it can't be drawn; USDZ has no renderer here).
+    if (kindSel === '3d' && type !== 'model/vnd.usdz+zip') {
+      setPosterNote('Drawing a cover picture…');
+      import('../three3d/snapshot')
+        .then(({ snapshot }) => snapshot(url, {}, `mint:${file.name}:${file.size}:${file.lastModified}`))
+        .then((u) => dataUriToFile(u, 'cover.png'))
+        .then((f) => {
+          setPosterFile(f);
+          setPosterNote('');
+        })
+        .catch(() => setPosterNote('No cover picture: it shows as a gold card.'));
+    }
+  };
+
+  const takeFrame = async () => {
+    const el = videoRef.current;
+    if (!el) return;
+    try {
+      setPosterFile(await dataUriToFile(captureVideoFrame(el, POSTER_EDGE), 'cover.jpg'));
+      setPosterNote('');
+    } catch (e) {
+      setPosterNote(e instanceof Error ? e.message : 'Could not use this frame');
+    }
+  };
+
+  const pickCover = async (f: File | undefined) => {
+    if (!f) return;
+    try {
+      setPosterFile(await coverFrom(f));
+      setPosterNote('');
+    } catch (e) {
+      setPosterNote(e instanceof Error ? e.message : 'Could not read this picture');
+    }
   };
 
   const shrink = async () => {
@@ -172,7 +282,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
       const small = await downscale(picked.file);
       const size = checkSize(small.size);
       setFileError(size.ok ? '' : size.message);
-      setPicked({ file: small, url: URL.createObjectURL(small) });
+      setPicked({ file: small, url: URL.createObjectURL(small), type: small.type });
     } catch (e) {
       setFileError(e instanceof Error ? e.message : 'Could not shrink this image');
     }
@@ -180,10 +290,11 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
   const review = () => {
     if (!picked) return setFormError('Pick a file to mint.');
-    const size = checkSize(picked.file.size);
+    const size = checkSize(picked.file.size, maxBytes);
     if (!size.ok) return setFormError(size.message);
     if (collKind === 'existing' && collection.kind !== 'existing') return setFormError('Choose a collection.');
-    const err = validateForm({ title, description, collection });
+    const err =
+      validateForm({ title, description, collection }) ?? (kindSel ? validateKindFields(kindSel, kindFields) : null);
     setFormError(err ?? '');
     if (!err) setConfirming(true);
   };
@@ -197,13 +308,33 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
     }
     setBusy(true);
     try {
+      const none = collection.kind === 'none';
+      const posterVout = usePoster ? plan.outputs : undefined;
       const res = await mintMedia(apiContext, {
         base64Content: fileToBase64(await picked.file.arrayBuffer()),
-        contentType: picked.file.type,
+        contentType: picked.type,
         title,
         description,
         collection,
         feeSats: cost.feeSats,
+        ...(none &&
+          kindSel && {
+            map: { ...buildMap({ title, description, collection }), ...kindMap(kindSel, kindFields, plan, posterVout) },
+            copies: plan.outputs,
+          }),
+        ...(usePoster && {
+          poster: {
+            base64Content: fileToBase64(await poster!.file.arrayBuffer()),
+            contentType: poster!.file.type,
+            map: {
+              app: 'bWallet',
+              type: 'ord',
+              name: `${title.trim()} (cover)`.slice(0, 100),
+              subType: 'poster',
+              posterOf: '_0',
+            },
+          },
+        }),
       });
       setTxid(res.txid);
       setConfirming(false);
@@ -217,7 +348,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
     }
   };
 
-  const kind = picked?.file.type.split('/')[0];
+  const kind = kindSel === '3d' ? 'model' : picked?.type.split('/')[0];
   const input = 'w-full rounded-xl px-3 py-2 text-sm outline-none border bg-transparent';
   const inputStyle = { borderColor: BORDER, color: '#fff' };
 
@@ -266,6 +397,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
                   onClick={() => {
                     if (t.media) {
                       setMedia(t.media);
+                      setKindSel(t.kind ?? null);
                       setStep('media');
                     } else if (t.step) setStep(t.step);
                     else if (t.agent) {
@@ -290,12 +422,44 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
         {step === 'media' && (
           <div className="flex flex-col gap-3 text-sm">
+            {kindSel && (
+              <div
+                className="grid grid-cols-4 gap-1 rounded-xl p-1 border"
+                style={{ borderColor: BORDER }}
+                role="tablist"
+              >
+                {MINT_KINDS.map((k) => (
+                  <button
+                    key={k.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={kindSel === k.id}
+                    onClick={() => {
+                      if (k.id === kindSel) return;
+                      setKindSel(k.id);
+                      setMedia({ accept: k.accept, label: k.hint });
+                      setPicked(null);
+                      setPosterFile(null);
+                      setFileError('');
+                    }}
+                    className="rounded-lg py-2 text-xs font-bold border-0 cursor-pointer"
+                    style={
+                      kindSel === k.id
+                        ? { background: GOLD, color: '#1a1400' }
+                        : { background: 'transparent', color: '#ccc' }
+                    }
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <input
               ref={inputRef}
               type="file"
               accept={media.accept}
               className="hidden"
-              onChange={(e) => pick(e.target.files?.[0])}
+              onChange={(e) => void pick(e.target.files?.[0])}
             />
             <button
               type="button"
@@ -314,7 +478,17 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
                   <img src={picked.url} alt="" className="w-full max-h-64 object-contain bg-black" />
                 )}
                 {kind === 'video' && (
-                  <video src={picked.url} controls playsInline className="w-full max-h-64 bg-black" />
+                  <video ref={videoRef} src={picked.url} controls playsInline className="w-full max-h-64 bg-black" />
+                )}
+                {kind === 'model' && (
+                  <div className="flex items-center gap-2 px-3 py-4 text-sm" style={{ color: '#ddd' }}>
+                    {poster ? (
+                      <img src={poster.url} alt="" className="w-16 h-16 object-contain rounded-lg bg-black" />
+                    ) : (
+                      <Box size={20} color={GOLD} />
+                    )}{' '}
+                    {picked.file.name}
+                  </div>
                 )}
                 {kind === 'audio' && <audio src={picked.url} controls className="w-full" />}
                 {(kind === 'application' || kind === 'text') && (
@@ -323,7 +497,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
                   </div>
                 )}
                 <div className="px-3 py-2 text-xs" style={{ color: '#bbb' }}>
-                  {picked.file.type} · {formatBytes(picked.file.size)}
+                  {picked.type} · {formatBytes(picked.file.size)}
                   {kind === 'image' && picked.file.size > DOWNSCALE_SUGGEST_BYTES && (
                     <button
                       type="button"
@@ -338,6 +512,69 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
               </div>
             )}
             {fileError && <p style={{ color: '#ff6b6b' }}>{fileError}</p>}
+            {picked && slowLandWarning(txBytes) && (
+              <p className="text-xs m-0" style={{ color: '#FFB020' }}>
+                {slowLandWarning(txBytes)}
+              </p>
+            )}
+
+            {picked && (kindSel === 'music' || kindSel === 'video') && (
+              <div className="flex items-center gap-2">
+                {poster ? (
+                  <img src={poster.url} alt="Cover" className="w-14 h-14 object-cover rounded-lg" />
+                ) : (
+                  <div
+                    className="w-14 h-14 rounded-lg flex items-center justify-center"
+                    style={{ background: 'radial-gradient(circle at 30% 20%, #4a3806 0%, #1a1405 60%, #0b0c0f 100%)' }}
+                  >
+                    {kindSel === 'music' ? <Music size={20} color={GOLD} /> : <Clapperboard size={20} color={GOLD} />}
+                  </div>
+                )}
+                {kindSel === 'music' ? (
+                  <>
+                    <input
+                      ref={coverRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => void pickCover(e.target.files?.[0])}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => coverRef.current?.click()}
+                      className="bg-transparent border rounded-xl px-3 py-2 cursor-pointer text-xs"
+                      style={{ borderColor: BORDER, color: GOLD }}
+                    >
+                      {poster ? 'Change cover art' : 'Add cover art (or keep gold)'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void takeFrame()}
+                    className="bg-transparent border rounded-xl px-3 py-2 cursor-pointer text-xs"
+                    style={{ borderColor: BORDER, color: GOLD }}
+                  >
+                    Use the current frame as the cover
+                  </button>
+                )}
+                {poster && (
+                  <button
+                    type="button"
+                    onClick={() => setPosterFile(null)}
+                    className="bg-transparent border-0 cursor-pointer text-xs underline"
+                    style={{ color: '#999' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            )}
+            {posterNote && (
+              <p className="text-xs m-0" style={{ color: '#999' }}>
+                {posterNote}
+              </p>
+            )}
 
             <input
               className={input}
@@ -347,6 +584,70 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
               maxLength={100}
               onChange={(e) => setTitle(e.target.value)}
             />
+            {kindSel === 'music' && (
+              <>
+                <input
+                  className={input}
+                  style={inputStyle}
+                  placeholder="Artist"
+                  value={artist}
+                  maxLength={100}
+                  onChange={(e) => setArtist(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <input
+                    className={input}
+                    style={inputStyle}
+                    placeholder="Album"
+                    value={album}
+                    maxLength={100}
+                    onChange={(e) => setAlbum(e.target.value)}
+                  />
+                  <input
+                    className={input}
+                    style={{ ...inputStyle, maxWidth: 96 }}
+                    placeholder="Track #"
+                    inputMode="numeric"
+                    value={track}
+                    maxLength={3}
+                    onChange={(e) => setTrack(e.target.value.replace(/\D/g, ''))}
+                  />
+                </div>
+              </>
+            )}
+            {kindSel && collKind === 'none' && (
+              <div className="flex gap-2 items-center">
+                <label className="flex items-center gap-2 text-xs flex-1" style={{ color: '#bbb' }}>
+                  Editions
+                  <input
+                    className={input}
+                    style={{ ...inputStyle, maxWidth: 88 }}
+                    inputMode="numeric"
+                    aria-label="Editions"
+                    value={editions}
+                    maxLength={4}
+                    onChange={(e) => setEditions(e.target.value.replace(/\D/g, ''))}
+                  />
+                </label>
+                {kindSel === 'music' && (
+                  <input
+                    className={input}
+                    style={{ ...inputStyle, maxWidth: 170 }}
+                    placeholder="Original price (sats)"
+                    inputMode="numeric"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))}
+                  />
+                )}
+              </div>
+            )}
+            {kindSel && editionCount > 1 && (
+              <p className="text-xs m-0" style={{ color: '#999' }}>
+                {plan.mode === 'inline'
+                  ? `1 of ${editionCount}: ${editionCount} copies in one transaction, each its own NFT.`
+                  : `1 of ${editionCount}: one numbered master inscription (copies of a big file would multiply the fee).`}
+              </p>
+            )}
             <textarea
               className={input}
               style={inputStyle}
@@ -393,7 +694,7 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
             )}
             {cost && (
               <p className="text-xs" style={{ color: '#bbb' }}>
-                Estimated network fee: {money(cost.networkSats, exchangeRate)}
+                Estimated network fee: {money(cost.networkSats, exchangeRate)} ({fmtBsv(cost.networkSats)})
                 {cost.txCount > 1 ? ' (2 transactions: collection + item)' : ''}
                 {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
                 {moneyWithSats(cost.totalSats, exchangeRate)}
@@ -413,7 +714,10 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
 
         {step === 'done' && (
           <div className="flex flex-col gap-3 text-sm">
-            <p>"{title.trim()}" was inscribed. It will appear in Media shortly.</p>
+            <p>
+              "{title.trim()}" was inscribed. It will appear in Media{kindSel === 'music' ? ' › Music' : ''} shortly
+              {txBytes > 10 * 1024 * 1024 ? ' (Pending until it lands, which can take a few minutes)' : ''}.
+            </p>
             <a
               href={wocTxUrl(txid)}
               target="_blank"
@@ -439,8 +743,15 @@ const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: (
         show={confirming}
         theme={theme}
         lineItems={[
-          { address: `Inscribe "${title.trim()}"`, amount: picked ? formatBytes(picked.file.size) : '' },
-          ...(cost ? [{ address: 'Network fee (est.)', amount: `${money(cost.networkSats, exchangeRate)}` }] : []),
+          { address: `Inscribe "${title.trim()}"`, amount: picked ? formatBytes(txBytes) : '' },
+          ...(cost
+            ? [
+                {
+                  address: 'Network fee (est.)',
+                  amount: `${money(cost.networkSats, exchangeRate)} · ${fmtBsv(cost.networkSats)}`,
+                },
+              ]
+            : []),
           ...(cost && cost.feeSats > 0
             ? [{ address: 'bWallet mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }]
             : []),
@@ -461,6 +772,8 @@ type MintTile = {
   sub: string;
   when: () => boolean;
   media?: { accept: string; label: string };
+  /** Picture / Music / Video / 3D: the media step shows that type's fields (mintKinds.ts). */
+  kind?: MintKind;
   step?: Step;
   agent?: string;
 };
@@ -477,6 +790,7 @@ const MINT_TILES: MintTile[] = [
     sub: 'One of a kind, or a numbered collection',
     when: () => true,
     media: { accept: 'image/*', label: 'an image' },
+    kind: 'picture',
   },
   {
     id: 'music',
@@ -485,6 +799,7 @@ const MINT_TILES: MintTile[] = [
     sub: 'Tracks fans own and play in their wallet',
     when: () => true,
     media: { accept: 'audio/*', label: 'an audio file' },
+    kind: 'music',
   },
   {
     id: 'video',
@@ -493,6 +808,16 @@ const MINT_TILES: MintTile[] = [
     sub: 'Clips, shorts or a whole film',
     when: () => true,
     media: { accept: 'video/*', label: 'a video' },
+    kind: 'video',
+  },
+  {
+    id: '3d',
+    icon: <Box size={18} />,
+    title: '3D models',
+    sub: 'GLB, glTF or USDZ; spin it in the wallet',
+    when: () => true,
+    media: { accept: MINT_KINDS[3].accept, label: MINT_KINDS[3].hint },
+    kind: '3d',
   },
   {
     id: 'books',

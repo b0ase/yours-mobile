@@ -38,7 +38,7 @@ describe('nftTypeOf', () => {
   test('unknown', () => {
     expect(nftTypeOf(undefined)).toBe('unknown');
     expect(nftTypeOf('')).toBe('unknown');
-    expect(nftTypeOf('model/gltf-binary')).toBe('unknown');
+    expect(nftTypeOf('model/stl')).toBe('unknown');
     expect(nftTypeOf('application/octet-stream')).toBe('unknown');
   });
 });

@@ -6,7 +6,8 @@
  * (withIssuerSignature) and registration with bit-sign after broadcast (registerIssuer).
  */
 import { inscribe, mintCollection, mintCollectionItem, type OneSatContext } from '@1sat/actions';
-import { Transaction, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
+import { Hash, Script, Transaction, Utils, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
+import { buildInscriptionScript } from '@1sat/templates';
 import { withIssuerSignature } from '../issuer/issuerSign';
 import { registerIssuer } from '../issuer/issuerVerify';
 import { buildMap, collectionIdFrom, MINT_APP, withFeeOutput, type Collection } from './mint';
@@ -21,6 +22,10 @@ export type MintMediaInput = {
   feeSats: number;
   /** MAP to inscribe instead of buildMap's (no collection only), e.g. bPics' share tag (bpics/bpics.ts). */
   map?: Record<string, string>;
+  /** No collection only: N identical inscription outputs in this one tx (mintKinds.planEditions; 1 = just one). */
+  copies?: number;
+  /** No collection only: a companion image inscription in the same tx (vout = copies), referenced as MAP poster "_n". */
+  poster?: { base64Content: string; contentType: string; map: Record<string, string> };
 };
 export type MintMediaResult = {
   txid: string;
@@ -60,6 +65,83 @@ export function meterFees(ctx: OneSatContext): { ctx: OneSatContext; total: () =
   return { ctx: { ...ctx, wallet } as OneSatContext, total: () => (unknown ? null : sum) };
 }
 
+const OP_IF = 0x63;
+const OP_ENDIF = 0x68;
+const OP_RETURN = 0x6a;
+
+/** The owner lock of a 1Sat inscription script: [OP_FALSE OP_IF ord … OP_ENDIF] <lock> [OP_RETURN MAP…]. */
+export function lockOfInscription(hex: string): Script | null {
+  const c = Script.fromHex(hex).chunks;
+  if (c[0]?.op !== 0 || c[1]?.op !== OP_IF) return null;
+  const end = c.findIndex((ch, i) => i > 1 && ch.op === OP_ENDIF);
+  if (end < 0) return null;
+  const rest = c.slice(end + 1);
+  const ret = rest.findIndex((ch) => ch.op === OP_RETURN);
+  const lock = ret < 0 ? rest : rest.slice(0, ret);
+  return lock.length ? new Script(lock) : null;
+}
+
+/** 1Sat stamps `id:<actionId>_<index>` per basketed output before createAction; keep the index true after inserting. */
+export function restampIds<T extends { basket?: string; tags?: string[] }>(outputs: T[]): T[] {
+  const idTag = outputs.flatMap((o) => o.tags ?? []).find((t) => t.startsWith('id:'));
+  const actionId = idTag?.slice(3).replace(/_\d+$/, '');
+  if (!actionId) return outputs;
+  return outputs.map((o, i) =>
+    o.basket ? { ...o, tags: [...(o.tags ?? []).filter((t) => !t.startsWith('id:')), `id:${actionId}_${i}`] } : o,
+  );
+}
+
+type ExtraOuts = { copies: number; poster?: MintMediaInput['poster'] };
+
+/**
+ * A context whose wallet, on the NEXT createAction, puts N-1 copies of output 0 (the inscription) right after it,
+ * then the poster inscription (same owner lock and wallet instructions, its own type/sha256 tags). Outputs are
+ * not randomised by inscribe, so the editions are vouts 0…N-1 and the poster is vout N.
+ */
+export function withExtraOutputs(ctx: OneSatContext, extra: ExtraOuts): OneSatContext {
+  const copies = Math.max(1, Math.floor(extra.copies) || 1);
+  if (copies === 1 && !extra.poster) return ctx;
+  let done = false;
+  const wallet = new Proxy(ctx.wallet as WalletInterface, {
+    get(target, prop, receiver) {
+      if (prop === 'createAction' && !done) {
+        return (args: CreateActionArgs, originator?: string) => {
+          done = true;
+          const outs = args.outputs ?? [];
+          const first = outs[0];
+          if (!first) return target.createAction(args, originator);
+          const added = Array.from({ length: copies - 1 }, (_, i) => ({
+            ...first,
+            outputDescription: `Inscription (edition ${i + 2} of ${copies})`,
+          }));
+          if (extra.poster) {
+            const lock = lockOfInscription(first.lockingScript);
+            if (!lock) throw new Error('Could not attach the cover picture');
+            const body = Utils.toArray(extra.poster.base64Content, 'base64');
+            const script = buildInscriptionScript(
+              lock,
+              new Uint8Array(body),
+              extra.poster.contentType,
+              extra.poster.map,
+            );
+            const tags = (first.tags ?? []).filter((t) => !t.startsWith('type:') && !t.startsWith('sha256:'));
+            added.push({
+              ...first,
+              lockingScript: script.toHex(),
+              outputDescription: 'Cover picture (inscription)',
+              tags: [`type:${extra.poster.contentType}`, ...tags, `sha256:${Utils.toHex(Hash.sha256(body))}`],
+            });
+          }
+          return target.createAction({ ...args, outputs: restampIds([first, ...added, ...outs.slice(1)]) }, originator);
+        };
+      }
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+  return { ...ctx, wallet } as OneSatContext;
+}
+
 export async function mintMedia(apiContext: OneSatContext, m: MintMediaInput): Promise<MintMediaResult> {
   const meter = meterFees(apiContext);
   const base = meter.ctx;
@@ -78,7 +160,8 @@ export async function mintMedia(apiContext: OneSatContext, m: MintMediaInput): P
   let res: { txid?: string; error?: string };
   let collectionId: string | undefined;
   if (collection.kind === 'none') {
-    res = await inscribe.execute(signed(withFeeOutput(base, feeSats)), {
+    const extras = withExtraOutputs(base, { copies: m.copies ?? 1, poster: m.poster });
+    res = await inscribe.execute(signed(withFeeOutput(extras, feeSats)), {
       base64Content,
       contentType,
       map: m.map ?? buildMap({ title: name, description, collection }),

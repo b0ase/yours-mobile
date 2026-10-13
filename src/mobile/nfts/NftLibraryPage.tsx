@@ -4,11 +4,12 @@
  * opens a detail panel with only the actions that work today. Inscribed HTML only ever runs in a sandboxed iframe
  * without scripts or same-origin; audio never plays until pressed.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cancelOrdinalListing } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
 import {
+  Box,
   Copy,
   Download,
   ExternalLink,
@@ -45,6 +46,8 @@ import {
   type SortKey,
 } from './nftLibrary';
 import { WalletTabs } from './WalletTabs';
+
+const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
 const GOLD = '#F5B800';
 const ROUTE = '/m/nfts';
@@ -131,6 +134,14 @@ const Preview = ({ m, type, large }: { m: MediaItem; type: NftType; large?: bool
       </div>
     ) : (
       <GoldCard icon={<Music size={26} color={GOLD} />} label="Audio" title={m.name} />
+    );
+  if (type === 'model')
+    return large ? (
+      <Suspense fallback={<GoldCard icon={<Box size={40} color={GOLD} />} label="3D" title={m.name} />}>
+        <ModelViewer src={m.url} contentType={m.type ?? ''} />
+      </Suspense>
+    ) : (
+      <GoldCard icon={<Box size={26} color={GOLD} />} label="3D" title={m.name} />
     );
   if (type === 'html') return <HtmlFrame url={m.url} title={m.name} interactive={large} />;
   if (type === 'text') return <TextCard url={m.url} title={m.name} />;
