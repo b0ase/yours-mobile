@@ -1016,7 +1016,7 @@ export const Settings = () => {
               onChange={(e) => void commitLockTimeout(Number(e.target.value))}
               style={{ border: '1px solid #444', borderRadius: 8, padding: '4px 6px' }}
             >
-              <option value={0}>Never (recommended for chat and Spaces)</option>
+              <option value={0}>Never (recommended)</option>
               {[...new Set([...LOCK_TIMEOUT_CHOICES, ...(lockTimeout ? [lockTimeout] : [])])]
                 .sort((a, b) => a - b)
                 .map((m) => (
