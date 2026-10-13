@@ -1,7 +1,6 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { AtSign, BadgeCheck, Camera, Disc3, Landmark } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { setAgentDraft } from '../agent/handoff';
 import { mintTilesShown, MintSheet } from '../mint/MintButton';
@@ -9,6 +8,7 @@ import { HandleFlow } from '../names/HandleFlow';
 import { BMINT_NOTES_ENABLED, RELEASES_ENABLED, STORE_BUILD } from '../storeBuild';
 import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
+import { HubArt } from './HubArt';
 import './bmint.css';
 
 /**
@@ -33,7 +33,7 @@ const Tab = ({ to, children, end }: { to: string; children: string; end?: boolea
   </NavLink>
 );
 
-type HubTile = { id: string; icon: ReactNode; title: string; sub: string; to?: string; agent?: string };
+type HubTile = { id: string; title: string; sub: string; to?: string; agent?: string };
 
 /**
  * Every mint type the wallet already has, one tile each, opening the existing flow (owner, 13 Oct 2026):
@@ -50,7 +50,6 @@ const useHub = (owner: boolean) => {
   const studio: HubTile[] = [
     {
       id: 'bpics',
-      icon: <Camera size={18} />,
       title: 'bPics',
       sub: "Mint your photos; browse everyone's",
       to: '/m/bpics',
@@ -59,7 +58,6 @@ const useHub = (owner: boolean) => {
       ? [
           {
             id: 'release',
-            icon: <Disc3 size={18} />,
             title: 'A music release',
             sub: 'A single or album, listed in bMusic',
             to: '/m/media/new',
@@ -70,7 +68,6 @@ const useHub = (owner: boolean) => {
       ? [
           {
             id: 'notes',
-            icon: <Landmark size={18} />,
             title: owner ? 'Note studio' : "The Mint's notes",
             sub: owner ? "Design the Mint's notes" : 'Issued by The Bitcoin Corporation Mint',
             to: `${BASE}/notes`,
@@ -81,14 +78,12 @@ const useHub = (owner: boolean) => {
   const identity: HubTile[] = [
     {
       id: 'opns',
-      icon: <AtSign size={18} />,
       title: 'OpNS names',
       sub: 'On-chain names that point at you',
       to: `${BASE}/opns`,
     },
     {
       id: 'bavatar',
-      icon: <BadgeCheck size={18} />,
       title: 'Your bAvatar',
       sub: 'Your art, $name and number as an ordinal',
       to: `${BASE}/mint/bavatar`,
@@ -97,7 +92,6 @@ const useHub = (owner: boolean) => {
       ? [
           {
             id: 'handle',
-            icon: <AtSign size={18} />,
             title: 'Your $handle',
             sub: 'Claim a handle; its personal token comes with it',
             to: `${BASE}/mint/handle`,
@@ -117,7 +111,7 @@ const TypeTile = ({ t }: { t: HubTile }) => {
   const navigate = useNavigate();
   const body = (
     <>
-      <span className="bm-type-ico">{t.icon}</span>
+      <HubArt id={t.id} agent={!!t.agent} />
       <span className="bm-type-title">{t.title}</span>
       <span className="bm-type-sub">{t.sub}</span>
     </>
