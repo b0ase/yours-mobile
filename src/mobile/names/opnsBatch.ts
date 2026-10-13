@@ -282,6 +282,8 @@ export type RunDeps = {
    * "Minted · not listed" and the next name is mined.
    */
   afterMint?: (name: string) => Promise<string>;
+  /** OpNS Vault (opnsVault.ts): asked at listing time; a kept / to-gift name is never auto-listed. */
+  keep?: (name: string) => boolean;
   isMine: (name: string) => boolean;
   /** Our local mine-tree cache: names minted this session/recently count as ours while unconfirmed. */
   tree?: OpnsTree;
@@ -348,7 +350,9 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
       const feeTxid = deps.payFee ? await deps.payFee(it.name) : undefined;
       const minted = feeTxid ? [...txids, feeTxid] : txids;
       set(i, { status: 'done', txids: minted });
-      if (deps.afterMint && steps.length) {
+      if (deps.afterMint && steps.length && deps.keep?.(it.name)) {
+        set(i, { note: 'In your Vault · not listed' });
+      } else if (deps.afterMint && steps.length) {
         try {
           const listTxid = await deps.afterMint(it.name);
           set(i, { listed: true, note: undefined, txids: [...minted, listTxid] });

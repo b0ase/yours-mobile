@@ -155,6 +155,8 @@ export type SellDeps = {
   list: (item: SellItem) => Promise<string>;
   /** Already listed in the wallet (e.g. listed before the window closed): don't list it twice. */
   isListed: (name: string) => boolean;
+  /** OpNS Vault: a kept / to-gift name is never listed, even from a queue approved before it was vaulted. */
+  keep?: (name: string) => boolean;
   save: (s: SellState) => void;
   onUpdate: (s: SellState) => void;
   /** Pause before retrying a listing the wallet's broadcast refused (default 5 s). */
@@ -188,6 +190,10 @@ export const runSellBatch = async (deps: SellDeps, start: SellState, signal: Abo
     if (signal.aborted) return { stopped: 'cancelled', state };
     if (deps.isListed(it.name)) {
       set(i, { status: 'done', note: 'Already listed' });
+      continue;
+    }
+    if (deps.keep?.(it.name)) {
+      set(i, { status: 'error', note: 'In your Vault' });
       continue;
     }
     set(i, { status: 'listing', note: undefined });

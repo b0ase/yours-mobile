@@ -15,9 +15,10 @@ import {
   type SellState,
   usdOrSats,
 } from './opnsSell';
-import { OpnsSellSheet } from './OpnsSheets';
+import { OpnsSellSheet, OpnsVaultCancelSheet } from './OpnsSheets';
 import { OpnsGiftPanel } from './OpnsGiftPanel';
 import { withoutGifted } from './opnsGift';
+import { addToShelf, isProtected, moveIntoVault, removeFromVault, shelfOf, type VaultState } from './opnsVault';
 
 /**
  * bMint › OpNS names › Owned names (bWalletX; the store edition shows OpnsGiftSection): Gift and Sell. Tick names, "List selected for $1", one approval, then each name is
@@ -45,11 +46,18 @@ export const OpnsSellSection = (p: {
   rate: number;
   owned: OwnedForSale[];
   onChanged: () => void;
+  /** OpNS Vault (opnsVault.ts): vaulted / to-gift names can't be listed. */
+  vault?: VaultState;
+  onVault?: (v: VaultState) => void;
 }) => {
   const { ctx, identityAddress, rate } = p;
   const [gifted, setGifted] = useState<Set<string>>(new Set());
   const [gifting, setGifting] = useState<OwnedForSale[] | null>(null);
   const owned = useMemo(() => withoutGifted(p.owned, gifted), [p.owned, gifted]);
+  const vaultRef = useRef(p.vault);
+  vaultRef.current = p.vault;
+  const kept = (n: string) => !!vaultRef.current && isProtected(vaultRef.current, n);
+  const [toVault, setToVault] = useState<OwnedForSale | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState<SellState | null>(() => loadSellBatch(identityAddress));
@@ -64,8 +72,12 @@ export const OpnsSellSection = (p: {
   useEffect(() => setBatch(loadSellBatch(identityAddress)), [identityAddress]);
   useEffect(() => () => abort.current?.abort(), []);
 
-  const unlisted = useMemo(() => owned.filter((o) => o.listedSats === null), [owned]);
+  const unlisted = useMemo(
+    () => owned.filter((o) => o.listedSats === null && !(p.vault && isProtected(p.vault, o.name))),
+    [owned, p.vault],
+  );
   const chosen = unlisted.filter((o) => picked.has(o.name));
+  const toGift = owned.filter((o) => p.vault && shelfOf(p.vault, o.name) === 'gift');
   const chosenAll = owned.filter((o) => picked.has(o.name));
   const usdFor = (name: string) => parseUsdInput(prices[name] ?? '') ?? OPNS_SELL_USD;
   const customPrices = Object.fromEntries(chosen.map((o) => [o.name, usdFor(o.name)]));
@@ -93,6 +105,7 @@ export const OpnsSellSection = (p: {
         {
           list: (it) => listOpnsName(ctx, it.id, it.sats),
           isListed: (n) => ownedRef.current.some((o) => o.name === n && o.listedSats !== null),
+          keep: kept,
           save: (s) => saveSellBatch(identityAddress, s),
           onUpdate: setBatch,
         },
@@ -142,6 +155,30 @@ export const OpnsSellSection = (p: {
     } finally {
       setBusyId('');
     }
+  };
+
+  const keep = async (o: OwnedForSale, cancel: boolean) => {
+    setToVault(null);
+    if (!p.vault || !p.onVault) return;
+    const v = p.vault;
+    const onVault = p.onVault;
+    setPicked((s) => {
+      const n = new Set(s);
+      n.delete(o.name);
+      return n;
+    });
+    if (cancel) setBusyId(o.id);
+    const r = await moveIntoVault(
+      {
+        add: (n) => onVault(addToShelf(v, 'keep', [n])),
+        cancel: async (id) => void (ctx && (await unlistOpnsName(ctx, id))),
+      },
+      o,
+      cancel,
+    );
+    setBusyId('');
+    if (r.error) setMsg(`${o.name} is in your Vault, but its listing is still live: ${r.error}`);
+    if (r.cancelled) p.onChanged();
   };
 
   const left = sellRemaining(batch);
@@ -255,14 +292,17 @@ export const OpnsSellSection = (p: {
         <ul className="m-0 p-0 list-none flex flex-col">
           {owned.map((o) => {
             const listed = o.listedSats !== null;
+            const shelf = p.vault ? shelfOf(p.vault, o.name) : null;
             const on = picked.has(o.name);
             return (
               <li
                 key={o.name}
-                className="flex items-center justify-between gap-3 py-2 text-[13px]"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 py-2 text-[13px]"
                 style={{ borderTop: `1px solid ${HAIR}` }}
               >
-                <label className={`flex items-center gap-3 min-w-0 ${running || gifting ? '' : 'cursor-pointer'}`}>
+                <label
+                  className={`flex items-center gap-3 min-w-0 flex-1 basis-32 ${running || gifting ? '' : 'cursor-pointer'}`}
+                >
                   <input
                     type="checkbox"
                     checked={on}
@@ -275,8 +315,27 @@ export const OpnsSellSection = (p: {
                     {o.name}
                   </span>
                 </label>
-                <span className="flex items-center gap-2 shrink-0">
-                  {listed ? (
+                <span className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+                  {p.vault && p.onVault && (
+                    <button
+                      type="button"
+                      className={ghostBtn}
+                      style={{ color: shelf ? MUTED : GOLD, border: `1px solid ${HAIR}` }}
+                      disabled={running || busyId === o.id}
+                      onClick={() => {
+                        if (shelf && p.vault && p.onVault) p.onVault(removeFromVault(p.vault, o.name));
+                        else if (listed) setToVault(o);
+                        else void keep(o, false);
+                      }}
+                    >
+                      {shelf ? 'Move out' : 'Keep in Vault'}
+                    </button>
+                  )}
+                  {shelf === 'keep' && !listed ? (
+                    <span className="text-xs font-semibold" style={{ color: GOLD }}>
+                      In your Vault
+                    </span>
+                  ) : shelf === 'gift' && !listed ? null : listed ? (
                     <>
                       <span className="text-xs font-semibold" style={{ color: GOLD }}>
                         For sale · {usdOrSats(o.listedSats ?? 0, rate)}
@@ -311,7 +370,12 @@ export const OpnsSellSection = (p: {
                   <button
                     type="button"
                     className={ghostBtn}
-                    style={{ color: GOLD, border: `1px solid ${HAIR}` }}
+                    style={
+                      shelf === 'gift'
+                        ? { color: '#000', background: GOLD, border: `1px solid ${GOLD}` }
+                        : { color: GOLD, border: `1px solid ${HAIR}` }
+                    }
+                    title={shelf === 'gift' ? 'On your To-gift shelf' : undefined}
                     disabled={!ctx || running || !!gifting || busyId === o.id}
                     onClick={() => setGifting([o])}
                     aria-label={`Gift ${o.name}`}
@@ -325,6 +389,18 @@ export const OpnsSellSection = (p: {
         </ul>
       )}
 
+      {!gifting && toGift.length > 0 && (
+        <button
+          type="button"
+          className={`${goldBtn} w-full py-3 text-[14px]`}
+          style={{ background: GOLD_DIM, color: GOLD }}
+          disabled={!ctx || running}
+          onClick={() => setGifting(toGift)}
+        >
+          Gift your To-gift names ({toGift.length})
+        </button>
+      )}
+
       {gifting && (
         <OpnsGiftPanel
           key={gifting.map((g) => g.name).join(',')}
@@ -332,6 +408,8 @@ export const OpnsSellSection = (p: {
           names={gifting}
           onGifted={(names) => {
             setGifted((g) => new Set([...g, ...names]));
+            // Gifted names leave the Vault / To-gift shelves.
+            if (p.vault && p.onVault) p.onVault(names.reduce((v, n) => removeFromVault(v, n), p.vault));
             setPicked(new Set());
             p.onChanged();
           }}
@@ -371,6 +449,15 @@ export const OpnsSellSection = (p: {
         <p className="m-0 text-xs" role="status" style={{ color: MUTED }}>
           {msg}
         </p>
+      )}
+
+      {toVault && (
+        <OpnsVaultCancelSheet
+          name={toVault.name}
+          onAllow={() => void keep(toVault, true)}
+          onKeepListed={() => void keep(toVault, false)}
+          onClose={() => setToVault(null)}
+        />
       )}
 
       {sheet && (
