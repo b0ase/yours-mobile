@@ -743,6 +743,26 @@ body,
   justify-content: space-between;
   gap: 8px;
 }
+.bw-wcard-avatarbtn {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: transform 140ms ease-out;
+}
+.bw-wcard-avatarbtn:hover {
+  transform: scale(1.06);
+}
+.bw-wcard-avatarbtn:active {
+  transform: scale(0.96);
+}
+.bw-wcard-avatarbtn:focus-visible {
+  outline: 2px solid #f5b800;
+  outline-offset: 2px;
+}
 .bw-wcard-holder {
   display: flex;
   align-items: center;

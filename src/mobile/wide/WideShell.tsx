@@ -37,6 +37,7 @@ import { useWalletFeed } from './walletFeed';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
+import { useAvatar } from '../names/useAvatar';
 import { WidePage, WideEmpty } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
@@ -271,6 +272,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     account?.name ?? '',
     account?.settings?.socialProfile?.displayName ?? '',
   );
+  // The account's own picture (names/useAvatar: X / Google photo, NFT or bAvatar), the same one the card shows.
+  const myPic = useAvatar(account?.addresses?.identityAddress);
 
   const [section, setSection] = useState<'settings' | 'tools'>('settings');
   const go = (it: Item) => {
@@ -473,7 +476,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </span>
         </div>
         <button className="ww-account" onClick={() => wwOpen('drawer')} title="Accounts">
-          <PersonPic className="ww-av" handle={names.handle || account?.name || 'b'} />
+          {myPic ? (
+            <img className="ww-av" src={myPic} alt="" referrerPolicy="no-referrer" style={{ objectFit: 'cover' }} />
+          ) : (
+            <PersonPic className="ww-av" handle={names.handle || account?.name || 'b'} />
+          )}
           <div className="ww-grow">
             <div className="ww-clip">{names.displayName || account?.name || 'Account'}</div>
             <div className="ww-muted ww-small ww-clip">

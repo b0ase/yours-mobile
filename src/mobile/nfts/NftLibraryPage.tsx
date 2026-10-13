@@ -46,6 +46,8 @@ import {
   type SortKey,
 } from './nftLibrary';
 import { WalletTabs } from './WalletTabs';
+import { BavatarKeep } from './BavatarKeep';
+import { isBavatarItem } from '../names/pictureSource';
 
 const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
@@ -526,6 +528,8 @@ const NftLibraryPage = () => {
     }
   };
 
+  // The account's minted bAvatar, if this wallet holds it (BavatarKeep shows it either way).
+  const bavatarOp = lib.find((i) => isBavatarItem(i.name))?.outpoint;
   const audioMedia = useMemo(() => media.filter((m) => m.kind === 'music'), [media]);
 
   return (
@@ -604,6 +608,7 @@ const NftLibraryPage = () => {
             </span>
           </div>
           {error && <div className="text-xs text-[#F97066]">{error}</div>}
+          <BavatarKeep mintedOutpoint={bavatarOp} onOpen={(op) => navigate(`${ROUTE}/${op}`)} />
         </div>
 
         <div

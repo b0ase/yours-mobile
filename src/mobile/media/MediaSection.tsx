@@ -14,6 +14,8 @@ import { TOKENBLASTER_ENABLED } from '../storeBuild';
 import { KeptAirdrops } from '../airdrops/AirdropNft';
 import { inWalletList, keptNfts } from '../airdrops/inbox';
 import { useAirdrops } from '../airdrops/useAirdrops';
+import { BavatarKeep } from '../nfts/BavatarKeep';
+import { isBavatarItem } from '../names/pictureSource';
 
 // 1Sat Ordnance guns (tokenblaster.lol): bWalletX only, not in a store build even as code.
 const WeaponTile = TOKENBLASTER_ENABLED
@@ -181,6 +183,11 @@ export const MediaSection = () => {
             </button>
           </div>
         </div>
+        {/* Your bAvatar, minted or not (nfts/BavatarKeep): replacing the card picture never loses it. */}
+        <BavatarKeep
+          mintedOutpoint={items.find((i) => isBavatarItem(i.name))?.output.outpoint.replace('.', '_')}
+          onOpen={(op) => navigate(`/m/nfts/${op}`)}
+        />
         <div className="flex gap-1.5 overflow-x-auto">
           {FILTERS.filter((f) => f.id !== '3d' || guns.size > 0).map((f) => (
             <button

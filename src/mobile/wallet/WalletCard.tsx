@@ -38,6 +38,8 @@ import { CardDesigner } from './CardDesigner';
 const YELLOW_CARD = !isBWalletX();
 
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
+const PictureSheet = lazy(() => import('./PictureSheet'));
+import { usePictureReturn } from './pictureReturn';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
@@ -203,6 +205,9 @@ const WalletCardInner = ({
   };
   const [handleOpen, setHandleOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  // Tap the avatar: "Your picture" (X / Google photo, an NFT, or the bAvatar). Back from X / Google lands here.
+  const [pictureOpen, setPictureOpen] = useState(false);
+  usePictureReturn((message) => addSnackbar(message, 'success'));
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
@@ -391,7 +396,23 @@ const WalletCardInner = ({
           <div className="bw-wcard-head">
             <div className="bw-wcard-top">
               <div className="bw-wcard-holder">
-                <AccountAvatar src={avatar} size={31} id={id} />
+                {ghost ? (
+                  <AccountAvatar src={avatar} size={31} id={id} />
+                ) : (
+                  <button
+                    type="button"
+                    className="bw-wcard-avatarbtn"
+                    aria-label="Change your picture"
+                    tabIndex={flipped ? -1 : 0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPictureOpen(true);
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <AccountAvatar src={avatar} size={31} id={id} />
+                  </button>
+                )}
                 {t.tag ? (
                   <>
                     {/* Copy sits LEFT of the paymail (owner rule); the front shows the FULL bWalletX paymail
@@ -732,6 +753,11 @@ const WalletCardInner = ({
       {scanOpen && (
         <Suspense fallback={null}>
           <ScanSheet receiveAddress={receiveAddress} onClose={() => setScanOpen(false)} />
+        </Suspense>
+      )}
+      {pictureOpen && (
+        <Suspense fallback={null}>
+          <PictureSheet onClose={() => setPictureOpen(false)} />
         </Suspense>
       )}
     </div>
