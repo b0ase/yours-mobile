@@ -12,6 +12,7 @@ import { requestChatRoom } from '../chat/nav';
 import { tokenKey } from '../chat/tokenRooms';
 import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { fetchDeployJson, parseLinks, parseUtility, type LinkKind, type TokenLink } from './linkData';
+import { fetchTokenProfile } from './tokenProfile';
 
 const XMark = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden fill="currentColor">
@@ -44,18 +45,23 @@ export const TokenLinks = ({
 }) => {
   const { handleSelect } = useBottomMenu();
   const [deploy, setDeploy] = useState<unknown>(null);
+  const [profile, setProfile] = useState<unknown>(null);
   const [ask, setAsk] = useState<TokenLink | null>(null);
   useEffect(() => {
     let live = true;
     setDeploy(null);
-    if (tokenId) void fetchDeployJson(tokenId).then((j) => live && setDeploy(j));
+    setProfile(null);
+    if (tokenId) {
+      void fetchDeployJson(tokenId).then((j) => live && setDeploy(j));
+      void fetchTokenProfile(tokenId).then((j) => live && setProfile(j));
+    }
     return () => {
       live = false;
     };
   }, [tokenId]);
-  // The issuer's own on-chain deploy fields lead; a launchpad's API fills gaps.
-  const links = parseLinks(deploy, extra);
-  const utility = parseUtility(deploy, extra);
+  // Issuer-signed on-chain profile (highest v) leads, then the deploy inscription; a launchpad's API fills gaps.
+  const links = parseLinks(profile, deploy, extra);
+  const utility = parseUtility(profile, deploy, extra);
   const key =
     !STORE_BUILD && tokenId && room && tokenRoomsEnabled() ? tokenKey('bsv21', tokenId.replace('.', '_')) : null;
   if (!links.length && !utility && !key) return null;
