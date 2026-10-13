@@ -85,6 +85,12 @@ describe('wallet pages under /wallet', () => {
     expect(toPublic(`/m/nfts/${op}`, '')).toBe(`/wallet/nfts/${op}`);
     expect(toRouter(`/wallet/nfts/${op}`, '')).toBe(`/m/nfts/${op}`);
   });
+  test('bMint OpNS names: /bmint/opns round trip, keeps ?mint=', () => {
+    expect(toPublic('/m/bmint/opns', '?mint=a,b')).toBe('/bmint/opns?mint=a%2Cb');
+    expect(toRouter('/bmint/opns', '?mint=a,b')).toBe('/m/bmint/opns?mint=a,b');
+    expect(toRouter('/opns-mint', '?mint=a')).toBe('/m/opns-mint?mint=a');
+  });
+
   test('tickets round trip; old /tickets still opens', () => {
     expect(toPublic('/m/tickets', '')).toBe('/wallet/tickets');
     expect(toRouter('/wallet/tickets', '')).toBe('/m/tickets');

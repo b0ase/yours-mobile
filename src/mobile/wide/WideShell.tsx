@@ -439,10 +439,12 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const page = {
     title: pathname.startsWith('/m/nfts/')
       ? 'NFT'
-      : friendPage
-        ? 'Friends'
-        : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
-          (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
+      : pathname.startsWith('/m/bmint')
+        ? 'bMint'
+        : friendPage
+          ? 'Friends'
+          : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
+            (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
     root: !!current,
   };
   const navBtn = (it: Item) =>

@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { listOpns, sendBsv } from '@1sat/actions';
 import { ApprovalCard, Chip } from '../../components/approval/ApprovalCard';
 import { CARD } from '../../components/approval/cardTheme';
 import { PayHero } from '../../components/approval/ApprovalHeroes';
+import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useTheme } from '../../hooks/useTheme';
-import { fetchExchangeRate } from '../../utils/wallet';
-import { moneyNow, usdToSats } from '../money/money';
+import { fetchExchangeRate, getWalletBalance } from '../../utils/wallet';
+import { loadLastBalance } from '../wallet/balanceLoad';
+import { fmtSats, fmtUsd, satsToUsd, useBsvUsd, usdToSats } from '../money/money';
 import { ownedFromOutputs } from './accountName';
 import { NODE_SCRIPT_ESTIMATE, PHONE_HASHRATE } from './GetYourName';
+import { estimateMintFee } from './opnsMint';
 import {
   checkNames,
+  invalidReason,
   loadBatch,
   mintParam,
   newBatch,
@@ -23,20 +27,29 @@ import {
   remaining,
   runBatch,
   saveBatch,
-  serviceFeeUsd,
   summarise,
   type BatchState,
-  type PlannedName,
+  type NameCheck,
 } from './opnsBatch';
 import { formatEta, mineName } from './opnsRegister';
 
 /**
- * /opns-mint (Desktop / web: desktop.bwalletx.com/opns-mint): "Mint a list" of OpNS names from this wallet.
- * Type or upload a .txt list (or open with ?mint=a,b,c), check it live, approve ONE sheet with the total,
- * then the names are mined one after another with the normal mint path. The queue is saved, so closing
- * the window and coming back offers Resume. See opnsBatch.ts.
+ * bMint › OpNS names (Desktop / web: desktop.bwalletx.com/bmint/opns; old /opns-mint links redirect here).
+ * Three steps: add names (drop a .txt, choose a file, or paste; ?mint=a,b,c pre-fills) → live check →
+ * an itemised invoice with ONE gold button that opens the single approval sheet. Then the names are mined
+ * one after another with the normal mint path; the queue is saved, so a closed window offers Resume.
+ * See opnsBatch.ts.
  */
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+
+const GOLD = '#FFD24D';
+const GOLD_DIM = 'rgba(255,210,77,0.14)';
+const TEXT = '#f4f1e8';
+const MUTED = 'rgba(244,241,232,0.58)';
+const HAIR = 'rgba(255,255,255,0.08)';
+const GREEN = '#3ddc84';
+const RED = '#ff5a5a';
+const CARD_BG = 'rgba(12,12,14,0.92)';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Waiting',
@@ -47,63 +60,160 @@ const STATUS_LABEL: Record<string, string> = {
   error: 'Error',
 };
 
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/** Gold mark for the empty state and the finished view: a name tag on a block (no grey placeholders). */
+const GoldArt = ({ size = 96 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 96 96" aria-hidden="true" className="shrink-0">
+    <defs>
+      <linearGradient id="opns-g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#FFE58A" />
+        <stop offset="0.55" stopColor="#FFD24D" />
+        <stop offset="1" stopColor="#B8860B" />
+      </linearGradient>
+    </defs>
+    <rect x="8" y="8" width="80" height="80" rx="22" fill="#0b0b0d" stroke="url(#opns-g)" strokeWidth="2" />
+    <path d="M26 58 48 36h18v18L44 76z" fill="none" stroke="url(#opns-g)" strokeWidth="3.5" strokeLinejoin="round" />
+    <circle cx="59" cy="43" r="3.5" fill="url(#opns-g)" />
+    <path d="M22 30h22M22 22h34" stroke="url(#opns-g)" strokeWidth="3" strokeLinecap="round" opacity="0.6" />
+  </svg>
+);
+
+const Step = (p: { n: number; title: string; sub?: string; on: boolean; children: ReactNode }) => (
+  <section
+    className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
+    style={{ background: CARD_BG, border: `1px solid ${p.on ? 'rgba(255,210,77,0.28)' : HAIR}` }}
+  >
+    <header className="flex items-center gap-3">
+      <span
+        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+        style={{ background: p.on ? GOLD : GOLD_DIM, color: p.on ? '#000' : GOLD }}
+      >
+        {p.n}
+      </span>
+      <div className="flex flex-col">
+        <h2 className="m-0 text-[15px] font-semibold tracking-tight" style={{ color: TEXT }}>
+          {p.title}
+        </h2>
+        {p.sub && (
+          <span className="text-xs" style={{ color: MUTED }}>
+            {p.sub}
+          </span>
+        )}
+      </div>
+    </header>
+    {p.children}
+  </section>
+);
+
+const goldBtn =
+  'rounded-xl font-semibold border-0 cursor-pointer transition-[filter,transform] duration-150 ease-out hover:brightness-110 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
+const ghostBtn =
+  'rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer bg-transparent border-0 transition-colors duration-150 hover:bg-white/5 focus-visible:outline focus-visible:outline-2';
+
 export const OpnsMintPage = () => {
-  const { theme } = useTheme();
   const { apiContext, chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  const rate = useBsvUsd();
   const [text, setText] = useState(() => mintParam(window.location.search));
-  const [owned, setOwned] = useState<Set<string>>(new Set());
-  const [plan, setPlan] = useState<PlannedName[] | null>(null);
+  const [checks, setChecks] = useState<Record<string, NameCheck>>({});
   const [checking, setChecking] = useState(false);
   const [sheet, setSheet] = useState(false);
   const [batch, setBatch] = useState<BatchState | null>(() => loadBatch(identityAddress));
   const [running, setRunning] = useState(false);
   const [msg, setMsg] = useState('');
+  const [drag, setDrag] = useState(false);
+  const [paste, setPaste] = useState('');
+  const [balance, setBalance] = useState<number | null>(() => loadLastBalance(identityAddress));
   const abort = useRef<AbortController | null>(null);
-  const ownedRef = useRef(owned);
-  ownedRef.current = owned;
+  const fileInput = useRef<HTMLInputElement>(null);
+  const ownedRef = useRef<Set<string>>(new Set());
 
   const parsed = useMemo(() => parseNameList(text), [text]);
+  const ordered = useMemo(() => orderForMinting(parsed.names), [parsed.names]);
+  const allChecked = ordered.length > 0 && ordered.every((n) => checks[n]);
+  const plan = useMemo(
+    () => (allChecked ? planBatch(ordered.map((n) => checks[n])) : null),
+    [allChecked, ordered, checks],
+  );
   const summary = plan ? summarise(plan, NODE_SCRIPT_ESTIMATE, PHONE_HASHRATE) : null;
-  const feeUsd = summary ? serviceFeeUsd(summary.toMint) : 0;
+  const perChar = estimateMintFee(NODE_SCRIPT_ESTIMATE);
+  const feePerNameSats = OPNS_FEE_ADDRESS ? (usdToSats(OPNS_FEE_USD_PER_NAME, rate) ?? 0) : 0;
+  const serviceSats = summary ? summary.toMint * feePerNameSats : 0;
+  const totalSats = summary ? summary.feeSats + serviceSats : 0;
+  const usd = (sats: number) => {
+    const v = satsToUsd(sats, rate);
+    return v == null ? '' : `≈ ${fmtUsd(v)}`;
+  };
+  const shortfall = balance != null && summary ? Math.max(0, totalSats - balance) : 0;
 
   const refreshOwned = async () => {
     if (!apiContext) return ownedRef.current;
     try {
       const r = await listOpns.execute(apiContext, { includeTags: true, limit: 1000 });
-      const s = new Set(ownedFromOutputs(r.outputs).map((o) => o.name));
-      setOwned(s);
-      ownedRef.current = s;
-      return s;
+      ownedRef.current = new Set(ownedFromOutputs(r.outputs).map((o) => o.name));
     } catch {
-      return ownedRef.current;
+      /* keep the last known set */
     }
+    return ownedRef.current;
   };
+  const refreshBalance = () =>
+    getWalletBalance()
+      .then((s) => {
+        if (Number.isFinite(s)) setBalance(s);
+      })
+      .catch(() => {});
+
   useEffect(() => {
     void refreshOwned();
+    void refreshBalance();
     setBatch(loadBatch(identityAddress));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiContext, identityAddress]);
   useEffect(() => () => abort.current?.abort(), []);
 
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
-    const body = await file.text();
-    setText((t) => (t.trim() ? `${t.trim()}\n${body}` : body));
-    setPlan(null);
-  };
+  // Live check: new names are looked up shortly after they are added (so the ?mint= prefill checks at once).
+  const key = ordered.join(',');
+  useEffect(() => {
+    const todo = ordered.filter((n) => !checks[n]);
+    if (!todo.length || running) return;
+    let live = true;
+    const t = setTimeout(async () => {
+      setChecking(true);
+      setMsg('');
+      try {
+        const mine = await refreshOwned();
+        for (const n of todo) {
+          if (!live) return;
+          const [c] = await checkNames(f, [n], (x) => mine.has(x));
+          if (live) setChecks((prev) => ({ ...prev, [n]: c }));
+        }
+      } catch {
+        if (live) setMsg('Lookup failed. Check your connection; it tries again when the list changes.');
+      } finally {
+        if (live) setChecking(false);
+      }
+    }, 400);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, running]);
 
-  const check = async () => {
-    setChecking(true);
-    setMsg('');
-    try {
-      const mine = await refreshOwned();
-      const checks = await checkNames(f, orderForMinting(parsed.names), (n) => mine.has(n));
-      setPlan(planBatch(checks));
-    } catch {
-      setMsg('Lookup failed. Check your connection and try again.');
-    } finally {
-      setChecking(false);
+  const addText = (body: string) => setText((t) => (t.trim() ? `${t.trim()}\n${body}` : body));
+  const addFiles = async (files: FileList | null | undefined) => {
+    for (const file of Array.from(files ?? [])) addText(await file.text());
+  };
+  const removeName = (name: string) =>
+    setText([...parsed.names, ...parsed.invalid].filter((n) => n !== name).join('\n'));
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDrag(false);
+    if (e.dataTransfer.files?.length) void addFiles(e.dataTransfer.files);
+    else {
+      const t = e.dataTransfer.getData('text/plain');
+      if (t) addText(t);
     }
   };
 
@@ -137,8 +247,8 @@ export const OpnsMintPage = () => {
       );
       if (r.stopped === 'error') setMsg(`Stopped: ${r.error}. Fix it, then Resume.`);
       else if (r.stopped === 'cancelled') setMsg('Paused. Characters already mined stay yours; Resume any time.');
-      else setMsg('All done. New names show under Names you own once indexed.');
       void refreshOwned();
+      void refreshBalance();
     } finally {
       abort.current = null;
       setRunning(false);
@@ -154,169 +264,468 @@ export const OpnsMintPage = () => {
     void run(b);
   };
 
-  const fg = theme.color.global.contrast;
-  const gray = theme.color.global.gray;
-  const row = theme.color.global.row;
-  const gold = '#FFD24D';
-  const btn = 'px-3 py-1.5 rounded-lg text-xs font-semibold border-0 cursor-pointer disabled:opacity-50';
+  const startOver = () => {
+    saveBatch(identityAddress, null);
+    setBatch(null);
+    setText('');
+    setChecks({});
+    setMsg('');
+  };
+
   const left = remaining(batch);
-  const totalLabel = summary ? `${moneyNow(summary.feeSats)}${feeUsd ? ` + $${feeUsd} service fee` : ''}` : '';
+  const showProgress = !!batch && batch.items.length > 0;
+  const finished = showProgress && !running && left === 0;
+  const minted = batch?.items.filter((i) => i.status === 'done').map((i) => i.name) ?? [];
+  const empty = !parsed.names.length && !parsed.invalid.length;
+  const toMint = plan?.filter((p) => p.chars > 0) ?? [];
+  const checkedCount = ordered.filter((n) => checks[n]).length;
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-4 flex flex-col gap-3">
-      <h1 className="text-lg font-semibold m-0" style={{ color: fg }}>
-        Mint a list of names
-      </h1>
-      <p className="text-xs m-0" style={{ color: gray }}>
-        On-chain OpNS names, mined on this device and locked to this wallet. You pay network fees only
-        {OPNS_FEE_ADDRESS ? ` plus a $${OPNS_FEE_USD_PER_NAME} service fee per name` : ''}.
-      </p>
-
-      {batch && batch.items.length > 0 && (
-        <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: row }}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold" style={{ color: fg }}>
-              {left ? `${left} of ${batch.items.length} names to go` : `${batch.items.length} names processed`}
+    <div
+      className="relative w-full h-full overflow-y-auto overscroll-contain"
+      style={{ background: '#050506', paddingTop: '3.5rem', paddingBottom: 'calc(var(--dock-h, 3.75rem) + 96px)' }}
+    >
+      <TopNav />
+      <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 pt-5 flex flex-col gap-4">
+        <div className="flex items-start gap-4">
+          <GoldArt size={56} />
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: GOLD }}>
+              bMint
             </span>
-            <span className="flex gap-2">
-              {running ? (
-                <button type="button" className={btn} onClick={() => abort.current?.abort()}>
-                  Pause
-                </button>
-              ) : left ? (
-                <button
-                  type="button"
-                  className={btn}
-                  style={{ background: gold, color: '#000' }}
-                  onClick={() => void run(batch)}
-                >
-                  Resume
-                </button>
-              ) : null}
-              {!running && (
-                <button
-                  type="button"
-                  className={btn}
-                  onClick={() => {
-                    saveBatch(identityAddress, null);
-                    setBatch(null);
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </span>
-          </div>
-          {batch.items.map((it) => (
-            <div key={it.name} className="flex items-center justify-between gap-2 text-xs">
-              <span style={{ color: fg }}>{it.name}</span>
-              <span className="flex flex-col items-end" style={{ color: it.status === 'done' ? '#2ecc71' : gray }}>
-                <span>
-                  {STATUS_LABEL[it.status]}
-                  {it.note ? ` · ${it.note}` : ''}
-                </span>
-                {it.txids.map((t) => (
-                  <a
-                    key={t}
-                    href={`https://whatsonchain.com/tx/${t}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: gold }}
-                  >
-                    {t.slice(0, 10)}…
-                  </a>
-                ))}
-              </span>
-            </div>
-          ))}
-          <p className="text-[10px] m-0" style={{ color: gray }}>
-            Keep this window open while mining. If it closes, come back here and tap Resume.
-          </p>
-        </div>
-      )}
-
-      {!running && (
-        <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: row }}>
-          <textarea
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              setPlan(null);
-            }}
-            rows={8}
-            placeholder={'One name per line, or separated by commas\nname-one\nname-two'}
-            aria-label="Names to mint"
-            className="w-full rounded-lg p-2 text-xs bg-transparent outline-none font-mono"
-            style={{ color: fg, border: '1px solid #3a2f0c' }}
-          />
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-xs cursor-pointer" style={{ color: gold }}>
-              Upload a .txt list
-              <input
-                type="file"
-                accept=".txt,text/plain"
-                className="hidden"
-                onChange={(e) => {
-                  void upload(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              className={btn}
-              style={{ background: gold, color: '#000' }}
-              disabled={checking || !parsed.names.length}
-              onClick={() => void check()}
-            >
-              {checking ? 'Checking…' : `Check ${parsed.names.length} name${parsed.names.length === 1 ? '' : 's'}`}
-            </button>
-          </div>
-          {parsed.invalid.length > 0 && (
-            <p className="text-[11px] m-0" style={{ color: '#ff4444' }}>
-              Not valid (a-z, 0-9 and - only), left out: {parsed.invalid.join(', ')}
+            <h1 className="m-0 text-2xl font-bold tracking-tight" style={{ color: TEXT }}>
+              OpNS names
+            </h1>
+            <p className="m-0 text-[13px] leading-relaxed" style={{ color: MUTED }}>
+              On-chain 1Sat names you own. Anyone can claim a name first, and network fees aren't refundable.
             </p>
-          )}
+          </div>
         </div>
-      )}
 
-      {plan && summary && !running && (
-        <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: row }}>
-          {plan.map((p) => (
-            <div key={p.name} className="flex items-center justify-between text-xs">
-              <span style={{ color: fg }}>{p.name}</span>
-              <span style={{ color: p.state === 'free' ? '#2ecc71' : gray }}>
-                {p.state === 'taken'
-                  ? 'Taken'
-                  : p.state === 'mine'
-                    ? 'Already yours'
-                    : p.domain === null
-                      ? 'Free, but no tree node found; try later'
-                      : `Free · ${p.chars} char${p.chars === 1 ? '' : 's'} from "${p.from || '(root)'}"`}
-              </span>
-            </div>
-          ))}
-          <p className="text-xs m-0" style={{ color: fg }}>
-            {summary.toMint} names · {summary.chars} transactions · ~{totalLabel} · {formatEta(summary.seconds)} of
-            mining
-          </p>
-          <button
-            type="button"
-            className={`self-start ${btn}`}
-            style={{ background: gold, color: '#000' }}
-            disabled={!summary.toMint || !apiContext}
-            onClick={() => setSheet(true)}
+        {showProgress && (
+          <section
+            className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
+            style={{ background: CARD_BG, border: '1px solid rgba(255,210,77,0.28)' }}
           >
-            Mint {summary.toMint} name{summary.toMint === 1 ? '' : 's'}
-          </button>
-        </div>
-      )}
+            {finished ? (
+              <div className="flex flex-col items-center text-center gap-2 py-2">
+                <GoldArt size={72} />
+                <h2 className="m-0 text-lg font-semibold tracking-tight" style={{ color: TEXT }}>
+                  {minted.length ? 'You now own' : 'Nothing new was minted'}
+                </h2>
+                {minted.length > 0 && (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {minted.map((n) => (
+                      <span
+                        key={n}
+                        className="px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: GOLD_DIM, color: GOLD }}
+                      >
+                        {n}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="m-0 text-xs" style={{ color: MUTED }}>
+                  New names appear in your names list once indexed, usually within a few minutes.
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <Link
+                    to="/settings"
+                    className={`${goldBtn} px-4 py-2 text-sm no-underline`}
+                    style={{ background: GOLD, color: '#000' }}
+                  >
+                    See your names
+                  </Link>
+                  <button
+                    type="button"
+                    className={ghostBtn}
+                    style={{ color: GOLD, border: `1px solid ${HAIR}` }}
+                    onClick={startOver}
+                  >
+                    Mint more
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <h2 className="m-0 text-[15px] font-semibold" style={{ color: TEXT }}>
+                      {running ? 'Minting' : 'Paused'} · {batch.items.length - left} of {batch.items.length} done
+                    </h2>
+                    <span className="text-xs" style={{ color: MUTED }}>
+                      Keep this window open. If it closes, come back here and Resume.
+                    </span>
+                  </div>
+                  {running ? (
+                    <button
+                      type="button"
+                      className={ghostBtn}
+                      style={{ color: TEXT, border: `1px solid ${HAIR}` }}
+                      onClick={() => abort.current?.abort()}
+                    >
+                      Pause
+                    </button>
+                  ) : (
+                    <span className="flex gap-2">
+                      <button type="button" className={ghostBtn} style={{ color: MUTED }} onClick={startOver}>
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        className={`${goldBtn} px-4 py-1.5 text-xs`}
+                        style={{ background: GOLD, color: '#000' }}
+                        onClick={() => void run(batch)}
+                      >
+                        Resume
+                      </button>
+                    </span>
+                  )}
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: GOLD_DIM }}>
+                  <div
+                    className="h-full rounded-full transition-[width] duration-300 ease-out"
+                    style={{ background: GOLD, width: `${((batch.items.length - left) / batch.items.length) * 100}%` }}
+                  />
+                </div>
+              </>
+            )}
+            <ul className="m-0 p-0 list-none flex flex-col">
+              {batch.items.map((it) => (
+                <li
+                  key={it.name}
+                  className="flex items-start justify-between gap-3 py-2 text-[13px]"
+                  style={{ borderTop: `1px solid ${HAIR}` }}
+                >
+                  <span className="font-medium break-all" style={{ color: TEXT }}>
+                    {it.name}
+                  </span>
+                  <span className="flex flex-col items-end text-right shrink-0">
+                    <span
+                      style={{
+                        color: it.status === 'done' ? GREEN : it.status === 'mining' ? GOLD : it.note ? RED : MUTED,
+                      }}
+                    >
+                      {STATUS_LABEL[it.status]}
+                      {it.note ? ` · ${it.note}` : ''}
+                    </span>
+                    {it.txids.map((t) => (
+                      <a
+                        key={t}
+                        href={`https://whatsonchain.com/tx/${t}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-mono"
+                        style={{ color: GOLD }}
+                      >
+                        {t.slice(0, 8)}…{t.slice(-6)}
+                      </a>
+                    ))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      {msg && (
-        <p className="text-xs m-0" style={{ color: gray }}>
-          {msg}
-        </p>
-      )}
+        {!showProgress && (
+          <>
+            <Step n={1} title="Add names" sub="Drop a .txt list, choose a file, or paste names." on={empty}>
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label="Drop a .txt list of names, or press to choose a file"
+                onClick={() => fileInput.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click();
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDrag(true);
+                }}
+                onDragLeave={() => setDrag(false)}
+                onDrop={onDrop}
+                className="rounded-2xl flex flex-col items-center justify-center gap-2 text-center cursor-pointer transition-colors duration-150 focus-visible:outline focus-visible:outline-2"
+                style={{
+                  minHeight: empty ? 200 : 112,
+                  padding: 20,
+                  border: `1.5px dashed ${drag ? GOLD : 'rgba(255,210,77,0.35)'}`,
+                  background: drag ? 'rgba(255,210,77,0.08)' : 'rgba(255,210,77,0.03)',
+                }}
+              >
+                {empty && <GoldArt size={64} />}
+                <span className="text-sm font-semibold" style={{ color: TEXT }}>
+                  {drag ? 'Drop to add' : 'Drop your .txt list here'}
+                </span>
+                <span className="text-xs" style={{ color: MUTED }}>
+                  or <span style={{ color: GOLD }}>choose a file</span> · one name per line, or comma separated
+                </span>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".txt,text/plain"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    void addFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (paste.trim()) addText(paste);
+                  setPaste('');
+                }}
+              >
+                <input
+                  value={paste}
+                  onChange={(e) => setPaste(e.target.value)}
+                  onPaste={(e) => {
+                    const t = e.clipboardData.getData('text');
+                    if (/[\n,]/.test(t)) {
+                      e.preventDefault();
+                      addText(t);
+                    }
+                  }}
+                  placeholder="Paste or type names, then Add"
+                  aria-label="Paste or type names"
+                  className="flex-1 min-w-0 rounded-xl px-3 py-2.5 text-sm outline-none focus-visible:ring-2"
+                  style={{ background: '#0b0b0d', color: TEXT, border: `1px solid ${HAIR}` }}
+                />
+                <button
+                  type="submit"
+                  className={`${goldBtn} px-4 text-sm`}
+                  style={{ background: GOLD_DIM, color: GOLD }}
+                  disabled={!paste.trim()}
+                >
+                  Add
+                </button>
+              </form>
+              {!empty && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs" style={{ color: MUTED }}>
+                      {plural(parsed.names.length, 'name')}
+                      {parsed.invalid.length ? ` · ${parsed.invalid.length} can't be used` : ''}
+                    </span>
+                    <button type="button" className={ghostBtn} style={{ color: MUTED }} onClick={() => setText('')}>
+                      Clear all
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {parsed.names.map((n) => (
+                      <span
+                        key={n}
+                        className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-xs font-medium"
+                        style={{ background: GOLD_DIM, color: GOLD }}
+                      >
+                        {n}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${n}`}
+                          className="w-4 h-4 rounded-full border-0 bg-transparent cursor-pointer leading-none p-0 hover:bg-white/10"
+                          style={{ color: GOLD }}
+                          onClick={() => removeName(n)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    {parsed.invalid.map((n) => (
+                      <span
+                        key={`x-${n}`}
+                        className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-xs font-medium"
+                        style={{ background: 'rgba(255,90,90,0.12)', color: RED }}
+                      >
+                        {n} <span style={{ opacity: 0.75 }}>· {invalidReason(n)}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${n}`}
+                          className="w-4 h-4 rounded-full border-0 bg-transparent cursor-pointer leading-none p-0 hover:bg-white/10"
+                          style={{ color: RED }}
+                          onClick={() => removeName(n)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Step>
+
+            {ordered.length > 0 && (
+              <Step
+                n={2}
+                title="Check"
+                sub={
+                  checking || !allChecked
+                    ? `Looking up ${checkedCount} of ${ordered.length}…`
+                    : 'Live on-chain status. Names that start the same reuse each other’s characters.'
+                }
+                on={!allChecked}
+              >
+                <ul className="m-0 p-0 list-none flex flex-col">
+                  {ordered.map((n) => {
+                    const p = plan?.find((x) => x.name === n);
+                    const c = checks[n];
+                    const [label, color] = !c
+                      ? ['Checking…', MUTED]
+                      : c.state === 'taken'
+                        ? ['Taken', RED]
+                        : c.state === 'mine'
+                          ? ['Already yours', GOLD]
+                          : c.domain === null
+                            ? ['Free · try again later', MUTED]
+                            : ['Free', GREEN];
+                    return (
+                      <li
+                        key={n}
+                        className="flex items-center justify-between gap-3 py-2 text-[13px]"
+                        style={{ borderTop: `1px solid ${HAIR}` }}
+                      >
+                        <span className="font-medium break-all" style={{ color: TEXT }}>
+                          {n}
+                        </span>
+                        <span className="flex items-center gap-3 shrink-0">
+                          {p && p.chars > 0 && (
+                            <span className="text-xs tabular-nums" style={{ color: MUTED }}>
+                              {plural(p.chars, 'char')} to mine
+                            </span>
+                          )}
+                          <span className="font-semibold text-xs" style={{ color }}>
+                            {label}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Step>
+            )}
+
+            {plan && summary && (
+              <Step n={3} title="Invoice" sub="What you pay, before anything is signed." on={summary.toMint > 0}>
+                {summary.toMint === 0 ? (
+                  <p className="m-0 text-[13px]" style={{ color: MUTED }}>
+                    Nothing to mint: every name is taken or already yours. Add more names above.
+                  </p>
+                ) : (
+                  <>
+                    <table className="w-full text-[13px] border-collapse">
+                      <thead>
+                        <tr style={{ color: MUTED }}>
+                          <th className="text-left font-medium pb-2 text-xs">Name</th>
+                          <th className="text-right font-medium pb-2 text-xs">Txs</th>
+                          <th className="text-right font-medium pb-2 text-xs">Network fee</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {toMint.map((p) => (
+                          <tr key={p.name} style={{ borderTop: `1px solid ${HAIR}` }}>
+                            <td className="py-2 break-all" style={{ color: TEXT }}>
+                              {p.name}
+                            </td>
+                            <td className="py-2 text-right tabular-nums" style={{ color: MUTED }}>
+                              {p.chars}
+                            </td>
+                            <td className="py-2 text-right tabular-nums" style={{ color: TEXT }}>
+                              {fmtSats(p.chars * perChar)}
+                              <span className="block text-[11px]" style={{ color: MUTED }}>
+                                {usd(p.chars * perChar)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {OPNS_FEE_ADDRESS && (
+                          <tr style={{ borderTop: `1px solid ${HAIR}` }}>
+                            <td className="py-2" style={{ color: TEXT }} colSpan={2}>
+                              Service fee · ${OPNS_FEE_USD_PER_NAME} × {summary.toMint}
+                            </td>
+                            <td className="py-2 text-right tabular-nums" style={{ color: TEXT }}>
+                              {feePerNameSats ? fmtSats(serviceSats) : '—'}
+                              <span className="block text-[11px]" style={{ color: MUTED }}>
+                                {fmtUsd(summary.toMint * OPNS_FEE_USD_PER_NAME)}
+                              </span>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ borderTop: '1px solid rgba(255,210,77,0.35)' }}>
+                          <td className="pt-3 font-semibold" style={{ color: TEXT }}>
+                            Total · {plural(summary.toMint, 'name')}
+                          </td>
+                          <td className="pt-3 text-right tabular-nums" style={{ color: MUTED }}>
+                            {summary.chars}
+                          </td>
+                          <td className="pt-3 text-right tabular-nums font-bold" style={{ color: GOLD }}>
+                            {fmtSats(totalSats)}
+                            <span className="block text-xs font-medium" style={{ color: TEXT }}>
+                              {usd(totalSats)}
+                            </span>
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl p-3" style={{ background: '#0b0b0d', border: `1px solid ${HAIR}` }}>
+                        <span style={{ color: MUTED }}>Mining time</span>
+                        <div className="text-sm font-semibold mt-0.5" style={{ color: TEXT }}>
+                          {formatEta(summary.seconds)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl p-3" style={{ background: '#0b0b0d', border: `1px solid ${HAIR}` }}>
+                        <span style={{ color: MUTED }}>Wallet balance</span>
+                        <div className="text-sm font-semibold mt-0.5 tabular-nums" style={{ color: TEXT }}>
+                          {balance == null ? '—' : fmtSats(balance)}
+                          <span className="text-[11px] font-normal ml-1" style={{ color: MUTED }}>
+                            {balance == null ? '' : usd(balance)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    {shortfall > 0 && (
+                      <div
+                        role="alert"
+                        className="rounded-xl px-3 py-2.5 text-xs"
+                        style={{
+                          background: 'rgba(255,90,90,0.1)',
+                          color: RED,
+                          border: '1px solid rgba(255,90,90,0.25)',
+                        }}
+                      >
+                        You need {fmtSats(shortfall)} more{usd(shortfall) ? ` (${usd(shortfall)})` : ''}. Add BSV to
+                        this wallet, or remove some names.
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className={`${goldBtn} w-full py-3.5 text-[15px]`}
+                      style={{ background: GOLD, color: '#000', boxShadow: '0 8px 28px rgba(255,210,77,0.18)' }}
+                      disabled={!apiContext || shortfall > 0}
+                      onClick={() => setSheet(true)}
+                    >
+                      Mint {plural(summary.toMint, 'name')} · pay {fmtSats(totalSats)}
+                      {usd(totalSats) ? ` ${usd(totalSats)}` : ''}
+                    </button>
+                  </>
+                )}
+              </Step>
+            )}
+          </>
+        )}
+
+        {msg && (
+          <p className="m-0 text-xs" style={{ color: MUTED }}>
+            {msg}
+          </p>
+        )}
+      </div>
 
       {sheet &&
         summary &&
@@ -333,31 +742,26 @@ export const OpnsMintPage = () => {
             <ApprovalCard
               ours
               site="bWalletX"
-              siteSub="OpNS names"
+              siteSub="bMint · OpNS names"
               onClose={() => setSheet(false)}
               hero={
-                <PayHero
-                  amount={`~${moneyNow(summary.feeSats)}`}
-                  sub={feeUsd ? `+ $${feeUsd} service fee` : 'network fees'}
-                />
+                <PayHero amount={usd(totalSats).replace('≈ ', '~') || fmtSats(totalSats)} sub={fmtSats(totalSats)} />
               }
               title={
                 <>
-                  Mint <span style={{ color: CARD.gold }}>{summary.toMint}</span> names
+                  Own <span style={{ color: CARD.gold }}>{summary.toMint}</span> names on-chain
                 </>
               }
               primary={{ label: 'Allow', onClick: approve }}
               secondary={{ label: 'Not now', onClick: () => setSheet(false) }}
             >
               <div className="flex flex-wrap gap-2">
-                {plan
-                  .filter((p) => p.state === 'free' && p.chars > 0)
-                  .map((p) => (
-                    <Chip key={p.name}>{p.name}</Chip>
-                  ))}
+                {toMint.map((p) => (
+                  <Chip key={p.name}>{p.name}</Chip>
+                ))}
               </div>
               <div className="flex flex-wrap gap-2">
-                <Chip>{summary.chars} transactions</Chip>
+                <Chip>{plural(summary.chars, 'transaction')}</Chip>
                 <Chip>{formatEta(summary.seconds)}</Chip>
                 <Chip>Locked to your wallet</Chip>
               </div>
