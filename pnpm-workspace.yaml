@@ -513,3 +513,11 @@ overrides:
 # pnpm 11+ reads settings here, not from .npmrc. Keep the flat layout .npmrc asks for: vite.config.base.ts
 # sets preserveSymlinks, which cannot follow the symlinked store (react-router-dom -> react-router).
 nodeLinker: hoisted
+
+# Dependency build scripts (pnpm 12 refuses unlisted ones with ERR_PNPM_IGNORED_BUILDS):
+# esbuild and sharp need theirs (native binaries); puppeteer's only downloads a browser, @1sat/vault's isn't needed.
+allowBuilds:
+  esbuild: true
+  sharp: true
+  puppeteer: false
+  '@1sat/vault': false
