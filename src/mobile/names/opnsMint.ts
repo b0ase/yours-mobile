@@ -185,16 +185,23 @@ export const mintStep = async (
     options: { randomizeOutputs: false, acceptDelayedBroadcast: false },
   };
 
-  const res = await executeTrackedAction(ctx.wallet, args, undefined, node.beef, async (tx: Transaction) => {
-    const idx = tx.inputs.findIndex(
-      (i) =>
-        (i.sourceTXID ?? i.sourceTransaction?.id('hex')) === node.tx.id('hex') && i.sourceOutputIndex === node.vout,
-    );
-    if (idx < 0) throw new Error('Name tree input missing from the transaction');
-    if (!tx.inputs[idx].sourceTransaction) tx.inputs[idx].sourceTransaction = node.tx;
-    const unlock = await OpNS.unlock(char, nonce, ownerScript).sign(tx, idx);
-    return { [idx]: { unlockingScript: unlock.toHex() } };
-  });
+  let res: Awaited<ReturnType<typeof executeTrackedAction>>;
+  try {
+    res = await executeTrackedAction(ctx.wallet, args, undefined, node.beef, async (tx: Transaction) => {
+      const idx = tx.inputs.findIndex(
+        (i) =>
+          (i.sourceTXID ?? i.sourceTransaction?.id('hex')) === node.tx.id('hex') && i.sourceOutputIndex === node.vout,
+      );
+      if (idx < 0) throw new Error('Name tree input missing from the transaction');
+      if (!tx.inputs[idx].sourceTransaction) tx.inputs[idx].sourceTransaction = node.tx;
+      const unlock = await OpNS.unlock(char, nonce, ownerScript).sign(tx, idx);
+      return { [idx]: { unlockingScript: unlock.toHex() } };
+    });
+  } catch (e) {
+    // A rejected broadcast (e.g. WERR_REVIEW_ACTIONS on a double-spent node) must not leave a reservation behind.
+    await abortFailedAction(ctx, e);
+    throw e;
+  }
   if ('error' in res && res.error) throw new Error(String(res.error));
   if (!res.txid) throw new Error('Mint was not broadcast');
   return {
@@ -203,6 +210,27 @@ export const mintStep = async (
     newDomain: plan.newDomain,
     childOutpoint: `${res.txid}.1`,
   };
+};
+
+/** txid / reference of the failed action, from a wallet error (WERR_REVIEW_ACTIONS carries the txid). */
+export const failedActionRef = (e: unknown): string | null => {
+  const o = (e ?? {}) as { txid?: unknown; reference?: unknown; notDelayedResults?: { txid?: string }[] };
+  if (typeof o.reference === 'string' && o.reference) return o.reference;
+  if (typeof o.txid === 'string' && o.txid) return o.txid;
+  const nd = o.notDelayedResults?.find((r) => r?.txid)?.txid;
+  if (nd) return nd;
+  return String(e).match(/\b[0-9a-f]{64}\b/i)?.[0] ?? null;
+};
+
+/** Best effort: release the wallet's hold on a failed mint (abortAction throws if it is already resolved). */
+export const abortFailedAction = async (ctx: OneSatContext, e: unknown) => {
+  const reference = failedActionRef(e);
+  if (!reference) return;
+  try {
+    await ctx.wallet.abortAction({ reference });
+  } catch {
+    /* already failed/aborted on the wallet side */
+  }
 };
 
 /** Random 27-byte nonce prefix for a mining job. */
