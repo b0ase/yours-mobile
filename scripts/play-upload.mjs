@@ -3,6 +3,7 @@
  *
  *   node scripts/play-upload.mjs --list                  # show each track's current releases
  *   node scripts/play-upload.mjs [--track internal]      # upload dist/bwallet-*-play.aab to that track
+ *   node scripts/play-upload.mjs --promote <code> --track production   # roll an uploaded bundle out (sent for review)
  *
  * Tracks: internal (default), alpha (closed), beta (open), production. Credentials as play-listing.mjs:
  * ~/.yours-mobile/play-service-account.json (override with PLAY_SERVICE_ACCOUNT), read at runtime, never in the repo.
@@ -17,6 +18,8 @@ const KEY_FILE = process.env.PLAY_SERVICE_ACCOUNT ?? join(homedir(), '.yours-mob
 const args = process.argv.slice(2);
 const LIST = args.includes('--list');
 const TRACK = args.includes('--track') ? args[args.indexOf('--track') + 1] : 'internal';
+// --promote <versionCode>: put an already-uploaded bundle on TRACK (e.g. internal → production), no upload.
+const PROMOTE = args.includes('--promote') ? String(args[args.indexOf('--promote') + 1]) : '';
 const VERSION = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')).version;
 
 const key = JSON.parse(readFileSync(KEY_FILE, 'utf8'));
@@ -65,6 +68,22 @@ try {
       for (const r of t.releases ?? [])
         console.log(`${t.track}: ${r.name ?? '-'} codes=${(r.versionCodes ?? []).join(',')} status=${r.status}`);
     if (!tracks.length) console.log('(no tracks yet)');
+  } else if (PROMOTE) {
+    console.log(`▸ promoting versionCode ${PROMOTE} to ${TRACK}`);
+    await call(
+      'PUT',
+      `${API}/edits/${edit}/tracks/${TRACK}`,
+      JSON.stringify({ track: TRACK, releases: [{ name: `${VERSION} (${PROMOTE})`, versionCodes: [PROMOTE], status: 'completed' }] }),
+      { 'content-type': 'application/json' },
+    );
+    try {
+      await call('POST', `${API}/edits/${edit}:commit`);
+      console.log(`✓ ${VERSION} (${PROMOTE}) released to ${TRACK} and sent for review`);
+    } catch (e) {
+      if (!/sent for review automatically|changesNotSentForReview/i.test(String(e))) throw e;
+      await call('POST', `${API}/edits/${edit}:commit?changesNotSentForReview=true`);
+      console.log(`! ${VERSION} (${PROMOTE}) on ${TRACK} but NOT sent for review (another change is in review): send it in Play Console › Publishing overview`);
+    }
   } else {
     const files = readdirSync('dist');
     const aab = files.includes(`bwallet-${VERSION}-play.aab`)
