@@ -10,6 +10,13 @@ import { BCHAT_ORIGIN } from '../chat/api';
 export const faceArtUrl = (handle: string): string =>
   `${BCHAT_ORIGIN}/api/bavatar/${encodeURIComponent(cleanName(handle))}.svg`;
 
+/**
+ * A speaker's own uploaded bChatX banner (public endpoint; 404 when they have none). Camera-off tiles try this
+ * first so an artist's own banner shows (owner, 11 Oct 2026), and fall back to the gold bAvatar on error.
+ */
+export const bannerUrl = (handle: string): string =>
+  `${BCHAT_ORIGIN}/api/public/banner/${encodeURIComponent(cleanName(handle))}`;
+
 const local = new Map<string, string>();
 export function faceArtLocal(handle: string): string {
   const k = cleanName(handle);

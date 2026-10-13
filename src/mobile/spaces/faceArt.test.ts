@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { faceArtLocal, faceArtUrl } from './faceArt';
+import { bannerUrl, faceArtLocal, faceArtUrl } from './faceArt';
 
 describe('Space participant default picture (gold bAvatar)', () => {
   test('network art resolves the handle on bChatX, cleaned', () => {
@@ -10,5 +10,8 @@ describe('Space participant default picture (gold bAvatar)', () => {
     expect(a.startsWith('data:image/svg+xml')).toBe(true);
     expect(faceArtLocal('$B0ASEX')).toBe(a);
     expect(faceArtLocal('testy')).not.toBe(a);
+  });
+  test('uploaded banner is the public bChatX banner for the cleaned handle', () => {
+    expect(bannerUrl('$VexVoid')).toBe('https://www.bitcoinchat.online/api/public/banner/vexvoid');
   });
 });
