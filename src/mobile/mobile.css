@@ -758,6 +758,13 @@ body,
   white-space: nowrap;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
+/* The full paymail (b0asex@bwalletx.com) is longer than a $handle: smaller, and it shrinks to an ellipsis. */
+.bw-wcard-handle.is-paymail {
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: clamp(12px, 3.9vw, 16px);
+  font-weight: 700;
+}
 .bw-wcard-icon {
   padding: 2px;
   background: none;

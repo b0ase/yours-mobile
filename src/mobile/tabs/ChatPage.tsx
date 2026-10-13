@@ -1612,7 +1612,13 @@ const InviteSheet = ({
         <div className="text-[11px] font-semibold uppercase tracking-wide mt-6 mb-2" style={{ color: MUTED }}>
           Send token to
         </div>
-        <NameInput theme={theme} asset="token" value={to} onChange={setTo} placeholder="$handle, paymail or address" />
+        <NameInput
+          theme={theme}
+          asset="token"
+          value={to}
+          onChange={setTo}
+          placeholder={`$name (${APP_NAME}), paymail or address`}
+        />
         <div
           className="mt-2 flex items-center gap-2 rounded-2xl px-3"
           style={{ background: PANEL, border: `1px solid ${LINE}` }}
@@ -1706,7 +1712,7 @@ const BansSheet = ({ client, ticker, onClose }: { client: BchatClient; ticker: s
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="$handle or address"
+          placeholder={`$name (${APP_NAME}) or address`}
           autoCapitalize="none"
           autoCorrect="off"
           className="flex-1 bg-transparent py-3 text-white outline-none"

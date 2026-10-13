@@ -125,7 +125,7 @@ export default function ScanSheet({
               <input
                 value={paste}
                 onChange={(e) => setPaste(e.target.value)}
-                placeholder="Or paste an address, $handle or link"
+                placeholder="Or paste an address, $name (bWalletX) or link"
                 aria-label="Paste a code"
                 className="flex-1 min-w-0 rounded-xl px-3 py-2.5 text-sm text-white outline-none"
                 style={{ background: PANEL, border: '1px solid #2A2A2C' }}

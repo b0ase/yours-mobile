@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { destinationFor, HANDCASH_NO_TOKENS, lookalikes, resolveHandle, type Fetch } from './names';
+import { lookalikes, resolveHandle, type Fetch } from './names';
 
 const mock =
   (routes: Record<string, unknown>): Fetch =>
@@ -41,16 +41,9 @@ describe('resolveHandle did-you-mean', () => {
     'https://bwalletx.com/.well-known/bsvalias': OUR_CAPS,
     'https://pay.example/id/b0asey@bwalletx.com': { pubkey: '03cd' },
   };
-  test('suggests our lookalike; NFTs refused to the HandCash name', async () => {
-    const r = await resolveHandle(mock(routes), { handle: 'boasey', paymail: 'boasey@handcash.io' }, 'bwalletx.com');
-    expect(r.didYouMean).toBe('$b0asey');
-    expect(r.external).toBe('handcash');
-    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: HANDCASH_NO_TOKENS });
-  });
-  test('no HandCash name either: a clear did-you-mean error', async () => {
-    const { ['https://cloud.handcash.io/.well-known/bsvalias']: _drop, ...rest } = routes;
-    await expect(
-      resolveHandle(mock(rest), { handle: 'boasey', paymail: 'boasey@handcash.io' }, 'bwalletx.com'),
-    ).rejects.toThrow('Did you mean $b0asey?');
+  test('unknown $name: suggests our lookalike, never the HandCash name', async () => {
+    await expect(resolveHandle(mock(routes), { handle: 'boasey' }, 'bwalletx.com')).rejects.toThrow(
+      'No bWalletX user called $boasey. Did you mean $b0asey?',
+    );
   });
 });

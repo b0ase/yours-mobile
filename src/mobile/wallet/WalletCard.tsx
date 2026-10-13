@@ -394,7 +394,19 @@ const WalletCardInner = ({
                 <AccountAvatar src={avatar} size={31} id={id} />
                 {t.tag ? (
                   <>
-                    <span className="bw-wcard-handle">{t.tag}</span>
+                    {/* Copy sits LEFT of the paymail (owner rule); the front shows the FULL bWalletX paymail
+                        (owner, 13 Oct 2026) so it never reads as a universal BSV handle. */}
+                    <button
+                      type="button"
+                      onClick={copy(t.copy)}
+                      aria-label={`Copy ${t.copy}`}
+                      className="bw-wcard-icon"
+                    >
+                      <Copy size={15} color="var(--bw-wcard-muted, #98A2B3)" />
+                    </button>
+                    <span className={`bw-wcard-handle${t.front.includes('@') ? ' is-paymail' : ''}`} title={t.front}>
+                      {t.front}
+                    </span>
                     {verified && (
                       <span
                         aria-label="Verified identity"
@@ -404,14 +416,6 @@ const WalletCardInner = ({
                         <Check size={13} strokeWidth={3} />
                       </span>
                     )}
-                    <button
-                      type="button"
-                      onClick={copy(t.copy)}
-                      aria-label={`Copy ${t.copy}`}
-                      className="bw-wcard-icon"
-                    >
-                      <Copy size={15} color="var(--bw-wcard-muted, #98A2B3)" />
-                    </button>
                   </>
                 ) : (
                   <button

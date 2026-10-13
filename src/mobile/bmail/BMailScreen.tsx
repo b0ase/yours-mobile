@@ -621,7 +621,7 @@ const Compose = ({
     <div className="flex flex-col gap-2">
       <input
         className={input}
-        placeholder="To: $handle, paymail or name"
+        placeholder="To: $name (bWalletX), paymail or name"
         value={to}
         disabled={!!draft.to}
         onChange={(e) => {

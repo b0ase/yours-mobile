@@ -7,10 +7,11 @@ import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
  * something upstream's send code already understands (a P2PKH address or a paymail).
  *
  *   1ABC…            → address (passed straight through)
- *   $boase           → our paymail boase@<BWALLET_PAYMAIL_DOMAIN> if it exists, else
- *                      the HandCash handle boase@handcash.io
- *   $name@domain     → the paymail name@domain
- *   name@domain.tld  → paymail (bsvalias capability discovery)
+ *   $boase           → our paymail boase@<BWALLET_PAYMAIL_DOMAIN> (or the legacy bwallet.space)
+ *                      ONLY. Handles are bWalletX handles: never HandCash or any other
+ *                      service (owner, 13 Oct 2026), else "No bWalletX user called $boase".
+ *   $name@domain     → the paymail name@domain (explicit; flagged `external` if not ours)
+ *   name@domain.tld  → paymail (bsvalias capability discovery; flagged `external` if not ours)
  *   satchmo          → our paymail satchmo@<BWALLET_PAYMAIL_DOMAIN> first, else the
  *                      OpNS name (1Sat on-chain name) → current owner address
  *
@@ -23,7 +24,7 @@ export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type Parsed =
   | { kind: 'empty' }
   | { kind: 'address'; address: string }
-  | { kind: 'handle'; handle: string; paymail: string }
+  | { kind: 'handle'; handle: string }
   | { kind: 'paymail'; paymail: string }
   | { kind: 'opns'; name: string }
   | { kind: 'invalid'; reason: string };
@@ -32,8 +33,6 @@ const PAYMAIL_RE = /^([a-z0-9._+-]{1,64})@([a-z0-9-]+(\.[a-z0-9-]+)+)$/i;
 const HANDLE_RE = /^\$([a-z0-9_.-]{1,50})$/i;
 // OpNS names: the covenant only accepts a-z, 0-9 and - (opns.md "Character set").
 const OPNS_RE = /^[a-z0-9-]{1,64}$/i;
-
-export const HANDCASH_DOMAIN = 'handcash.io';
 
 export const parseRecipient = (raw: string): Parsed => {
   const s = cleanRecipient(raw);
@@ -44,7 +43,7 @@ export const parseRecipient = (raw: string): Parsed => {
   const h = s.match(HANDLE_RE);
   if (h) {
     const handle = h[1].toLowerCase();
-    return { kind: 'handle', handle, paymail: `${handle}@${HANDCASH_DOMAIN}` };
+    return { kind: 'handle', handle };
   }
   // `$name@domain` is a paymail with a `$` in front: accept it as the paymail.
   if (s.startsWith('$') && s.includes('@') && PAYMAIL_RE.test(s.slice(1))) {
@@ -87,11 +86,21 @@ export type Resolved = {
   ordAddress?: string;
   /** A $name that wasn't ours but a lookalike is (0/o, 1/l/i): "did you mean $b0asey?" (12 Oct 2026). */
   didYouMean?: string;
-  /** Resolved outside bWalletX (HandCash), after ours had no such name. */
-  external?: 'handcash';
+  /**
+   * The domain of an explicitly typed paymail that is NOT a bWalletX domain (e.g. "handcash.io").
+   * Only ever set for a full name@domain the user typed; a $handle never resolves outside bWalletX.
+   */
+  external?: string;
 };
 
 export class ResolveError extends Error {}
+
+/**
+ * The confirm-card line for an explicitly typed paymail outside bWalletX: the full paymail and its
+ * domain, so it is never mistaken for a bWalletX handle ("boase@handcash.io — outside bWalletX").
+ */
+export const externalLabel = (r: Pick<Resolved, 'input' | 'external'>): string | undefined =>
+  r.external ? `${r.input.replace(/^\$/, '').toLowerCase()} — outside bWalletX` : undefined;
 
 /**
  * Whether an OpNS name is bound to a wallet (signed identity key, opns.idKey) or only held at an address.
@@ -189,6 +198,7 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   const [alias, domain] = paymail.split('@');
   const caps = await getCapabilities(f, domain);
   const r: Partial<Resolved> = { input };
+  if (!isOurDomain(domain)) r.external = domain.toLowerCase();
 
   const prof = str(caps[CAP.publicProfile]);
   if (prof) {
@@ -270,35 +280,42 @@ export const resolveBareName = async (
   return resolveOpns(f, name);
 };
 
+/** A bWalletX paymail domain: the configured one (bwalletx.com) or a legacy one (bwallet.space). */
+export const isOurDomain = (d: string, domain: string = BWALLET_PAYMAIL_DOMAIN) => {
+  const x = d.toLowerCase();
+  return (!!domain && x === domain.toLowerCase()) || LEGACY_PAYMAIL_DOMAINS.includes(x);
+};
+
+export const noSuchUser = (input: string) => `No bWalletX user called ${input}`;
+
 /**
- * A `$name`: OUR paymail (name@<domain>, i.e. bwalletx.com) first, then HandCash. Our own names
- * ($b0asex.x, $richardwboase.gmail) live at bwalletx.com; dialling one used to go to handcash.io
- * and fail with "has no identity key". Ours only counts when the server knows the alias (pki
- * answers with a key), so a HandCash-only $name still reaches HandCash.
+ * A `$name` is a bWalletX handle and nothing else (owner, 13 Oct 2026): name@<domain> (bwalletx.com),
+ * then the legacy bwallet.space. It NEVER falls back to HandCash or any other service: a newcomer
+ * would think handles are universal and pay a stranger. Ours only counts when the server knows the
+ * alias (pki answers with a key). Unknown → a lookalike of ours ("did you mean"), else noSuchUser.
  */
 export const resolveHandle = async (
   f: Fetch,
-  p: { handle: string; paymail: string },
+  p: { handle: string },
   domain: string = BWALLET_PAYMAIL_DOMAIN,
 ): Promise<Resolved> => {
   const input = `$${p.handle}`;
-  let didYouMean: string | undefined;
-  if (domain && PAYMAIL_RE.test(`${p.handle}@${domain}`)) {
+  const domains = [...new Set([domain.toLowerCase(), ...LEGACY_PAYMAIL_DOMAINS].filter(Boolean))];
+  for (const d of domains) {
+    if (!PAYMAIL_RE.test(`${p.handle}@${d}`)) continue;
     try {
-      const ours = await resolvePaymail(f, `${p.handle}@${domain}`, input);
-      if (ours.pubkey) return ours;
+      const ours = await resolvePaymail(f, `${p.handle}@${d}`, input);
+      if (ours.pubkey) {
+        const { external: _ours, ...rest } = ours; // our own domain, whatever the build calls it
+        return rest;
+      }
     } catch {
-      /* not one of ours → a lookalike of ours, then HandCash */
+      /* not at this domain → next */
     }
-    didYouMean = await ourLookalike(f, p.handle, domain);
   }
-  try {
-    const hc = await resolvePaymail(f, p.paymail, input);
-    return { ...hc, external: 'handcash', ...(didYouMean ? { didYouMean } : {}) };
-  } catch (e) {
-    if (didYouMean) throw new ResolveError(`No bWalletX name ${input}. Did you mean ${didYouMean}?`);
-    throw e;
-  }
+  const didYouMean = domain ? await ourLookalike(f, p.handle, domain) : undefined;
+  if (didYouMean) throw new ResolveError(`${noSuchUser(input)}. Did you mean ${didYouMean}?`);
+  throw new ResolveError(noSuchUser(input));
 };
 
 /** Swaps people mix up when reading a handle: 0↔o, 1↔l, 1↔i. Single swaps only, at most 8. */
@@ -348,8 +365,6 @@ export const resolveRecipient = async (
 };
 
 export const TOKENS_UNSUPPORTED = "This name can't receive tokens";
-export const HANDCASH_NO_TOKENS =
-  "That is a HandCash name, and HandCash can't hold NFTs or tokens. Use a bWalletX name or an ordinals address.";
 
 /** Pick the destination for a send. Tokens only go to a name with an ordinal-receive address. */
 /**
@@ -367,7 +382,7 @@ export const destinationFor = (
   if (opnsBinding(r) === 'unbound') return { ok: false, error: UNBOUND_NAME };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordAddress) return { ok: true, to: r.ordAddress };
-  return { ok: false, error: r.external === 'handcash' ? HANDCASH_NO_TOKENS : TOKENS_UNSUPPORTED };
+  return { ok: false, error: TOKENS_UNSUPPORTED };
 };
 
 export type Availability =

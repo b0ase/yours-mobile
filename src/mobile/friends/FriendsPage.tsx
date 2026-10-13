@@ -302,7 +302,7 @@ const AddFriend = ({
             setCand(null);
             setErr('');
           }}
-          placeholder="Add a friend: $handle, paymail, @handle or identity key"
+          placeholder="Add a friend: $name (bWalletX), paymail, @handle or identity key"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}

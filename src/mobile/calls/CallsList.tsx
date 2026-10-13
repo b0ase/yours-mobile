@@ -772,7 +772,7 @@ export const CallsList = ({
                       setProblem('');
                     }}
                     onKeyDown={(e) => e.key === 'Enter' && void callName()}
-                    placeholder="$handle, paymail, name or @number"
+                    placeholder="$name (bWalletX), paymail, name or @number"
                     aria-label="Who to call"
                     autoCapitalize="none"
                     autoCorrect="off"
