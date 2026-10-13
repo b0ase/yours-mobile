@@ -91,3 +91,33 @@ export const OpnsSellSheet = (p: {
     </ApprovalCard>
   </Sheet>
 );
+
+/** Moving a listed name into the Vault: one approval to cancel its listing. */
+export const OpnsVaultCancelSheet = (p: {
+  name: string;
+  onAllow: () => void;
+  onKeepListed: () => void;
+  onClose: () => void;
+}) => (
+  <Sheet>
+    <ApprovalCard
+      ours
+      site="bWalletX"
+      siteSub="bMint · OpNS Vault"
+      onClose={p.onClose}
+      hero={<PayHero amount="Vault" sub="Plus a small network fee" badge="KEEP" />}
+      title={
+        <>
+          Keep <span style={{ color: CARD.gold }}>{p.name}</span> and cancel its listing
+        </>
+      }
+      primary={{ label: 'Allow', onClick: p.onAllow }}
+      secondary={{ label: 'Vault only, keep listed', onClick: p.onKeepListed }}
+    >
+      <div className="flex flex-wrap gap-2">
+        <Chip>Nobody can buy it after this</Chip>
+        <Chip>Never auto-listed again</Chip>
+      </div>
+    </ApprovalCard>
+  </Sheet>
+);

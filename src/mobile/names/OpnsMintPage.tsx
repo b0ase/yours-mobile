@@ -49,6 +49,9 @@ import {
 } from './opnsSell';
 import { OpnsSellSection } from './OpnsSellSection';
 import { OpnsBuySheet } from './OpnsSheets';
+import { useOpnsVault } from './useOpnsVault';
+import { OpnsVaultCounts, OpnsVaultSection } from './OpnsVaultSection';
+import { isProtected, vaultCounts, vaultedInBatch } from './opnsVault';
 
 /**
  * bMint › OpNS names (Desktop / web: desktop.bwalletx.com/bmint/opns; old /opns-mint links redirect here).
@@ -139,7 +142,9 @@ const ghostBtn =
 
 export const OpnsMintPage = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
-  const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  const identityAddress = account?.addresses?.identityAddress ?? '';
+  const vault = useOpnsVault(identityAddress, account?.pubKeys?.identityPubKey);
   const rate = useBsvUsd();
   const [text, setText] = useState(() => mintParam(window.location.search));
   const [checks, setChecks] = useState<Record<string, NameCheck>>({});
@@ -176,7 +181,13 @@ export const OpnsMintPage = () => {
   const perChar = estimateMintFee(NODE_SCRIPT_ESTIMATE);
   const feePerNameSats = OPNS_FEE_ADDRESS ? (usdToSats(OPNS_FEE_USD_PER_NAME, rate) ?? 0) : 0;
   const serviceSats = summary ? summary.toMint * feePerNameSats : 0;
-  const listFeeSats = summary && autoList ? summary.toMint * OPNS_LIST_FEE_ESTIMATE : 0;
+  const toVault = plan
+    ? vaultedInBatch(
+        vault.state,
+        plan.filter((p) => p.chars > 0).map((p) => p.name),
+      )
+    : [];
+  const listFeeSats = summary && autoList ? (summary.toMint - toVault.length) * OPNS_LIST_FEE_ESTIMATE : 0;
   const totalSats = summary ? summary.feeSats + serviceSats + listFeeSats : 0;
   const usd = (sats: number) => {
     const v = satsToUsd(sats, rate);
@@ -343,6 +354,8 @@ export const OpnsMintPage = () => {
             mineName({ ctx: apiContext, fetch: f, tree: opnsTreeFor(identityAddress) }, name, signal, () => undefined),
           payFee,
           afterMint: autoList ? listAfterMint : undefined,
+          // Read at listing time (and from storage), so names vaulted after approval are skipped too.
+          keep: (n) => isProtected(vault.current(), n),
           isMine: (n) => ownedRef.current.has(n),
           tree: opnsTreeFor(identityAddress),
           save: (s) => saveBatch(identityAddress, s),
@@ -411,6 +424,8 @@ export const OpnsMintPage = () => {
             </p>
           </div>
         </div>
+
+        <OpnsVaultCounts counts={vaultCounts(vault.state, owned)} />
 
         {showProgress && (
           <section
@@ -790,7 +805,7 @@ export const OpnsMintPage = () => {
                         {listFeeSats > 0 && (
                           <tr style={{ borderTop: `1px solid ${HAIR}` }}>
                             <td className="py-2" style={{ color: TEXT }} colSpan={2}>
-                              Listing fee (est.) · {summary.toMint} × {fmtSats(OPNS_LIST_FEE_ESTIMATE)}
+                              Listing fee (est.) · {summary.toMint - toVault.length} × {fmtSats(OPNS_LIST_FEE_ESTIMATE)}
                             </td>
                             <td className="py-2 text-right tabular-nums" style={{ color: TEXT }}>
                               {fmtSats(listFeeSats)}
@@ -862,6 +877,12 @@ export const OpnsMintPage = () => {
                         this wallet, or remove some names.
                       </div>
                     )}
+                    {toVault.length > 0 && (
+                      <p className="m-0 text-[13px] font-semibold" style={{ color: GOLD }}>
+                        {plural(toVault.length, 'name')} {toVault.length === 1 ? 'goes' : 'go'} straight to your Vault
+                        (not listed)
+                      </p>
+                    )}
                     {MARKET_ENABLED && (
                       <label className="flex items-center gap-2.5 text-[13px] cursor-pointer" style={{ color: TEXT }}>
                         <input
@@ -897,8 +918,12 @@ export const OpnsMintPage = () => {
           </p>
         )}
 
+        <OpnsVaultSection vault={vault.state} owned={new Set(owned.map((o) => o.name))} onChange={vault.set} />
+
         {MARKET_ENABLED && (
           <OpnsSellSection
+            vault={vault.state}
+            onVault={vault.set}
             ctx={apiContext}
             identityAddress={identityAddress}
             rate={rate}
