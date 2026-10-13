@@ -87,14 +87,46 @@ const pushLen = (n: number) => (n < 0x4c ? 1 : n <= 0xff ? 2 : n <= 0xffff ? 3 :
 const varIntLen = (n: number) => (n < 0xfd ? 1 : n <= 0xffff ? 3 : 5);
 
 /**
+ * wallet-toolbox managed change adds up to DEFAULT_MANAGED_CHANGE_MAX_OUTPUTS_PER_ACTION (8) P2PKH change
+ * outputs per action, and every one is pushed raw into the unlock as a trailing output. The old bound
+ * assumed 4: a wallet topping its change basket up (6 change outputs) made a 6405-byte unlock against a
+ * declared 6337 and signAction refused it (the toolbox error prints the HEX length, 12810 = 2 × 6405).
+ * 16 covers a raised per-action policy too; each spare output only costs ~34 bytes of fee (~3 sats/kB).
+ */
+export const MAX_TRAILING_OUTPUTS = 16;
+const UNLOCK_SLACK = 64;
+
+/**
  * Upper bound for the covenant unlock: char + nonce + ownerScript + trailing outputs
  * (`maxTrailing` P2PKH change outputs) + BIP-143 preimage (which embeds the node's script).
  * The wallet only rejects an unlock longer than this, so overestimating is safe (slightly higher fee).
  */
-export const estimateUnlockLength = (parentScriptLen: number, ownerScriptLen: number, maxTrailing = 4) => {
+export const estimateUnlockLength = (
+  parentScriptLen: number,
+  ownerScriptLen: number,
+  maxTrailing = MAX_TRAILING_OUTPUTS,
+) => {
   const preimage = 4 + 32 + 32 + 36 + varIntLen(parentScriptLen) + parentScriptLen + 8 + 4 + 32 + 4 + 4;
   const trailing = maxTrailing * (8 + 1 + 25);
-  return pushLen(1) + pushLen(32) + pushLen(ownerScriptLen) + pushLen(trailing) + pushLen(preimage);
+  return pushLen(1) + pushLen(32) + pushLen(ownerScriptLen) + pushLen(trailing) + pushLen(preimage) + UNLOCK_SLACK;
+};
+
+/** The wallet with createAction wrapped so the signable action's reference is remembered (to abort it on failure). */
+const trackReference = (wallet: OneSatContext['wallet']) => {
+  const seen: { reference: string | null } = { reference: null };
+  const wrapped = new Proxy(wallet, {
+    get(target, prop, receiver) {
+      if (prop === 'createAction')
+        return async (args: CreateActionArgs, originator?: string) => {
+          const r = await target.createAction(args, originator);
+          seen.reference = r?.signableTransaction?.reference ?? null;
+          return r;
+        };
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+  return { wallet: wrapped, seen };
 };
 
 /** Fee estimate per character at `satsPerKb` (default 100 sat/kB, the wallet's usual rate). */
@@ -186,8 +218,9 @@ export const mintStep = async (
   };
 
   let res: Awaited<ReturnType<typeof executeTrackedAction>>;
+  const tracked = trackReference(ctx.wallet);
   try {
-    res = await executeTrackedAction(ctx.wallet, args, undefined, node.beef, async (tx: Transaction) => {
+    res = await executeTrackedAction(tracked.wallet, args, undefined, node.beef, async (tx: Transaction) => {
       const idx = tx.inputs.findIndex(
         (i) =>
           (i.sourceTXID ?? i.sourceTransaction?.id('hex')) === node.tx.id('hex') && i.sourceOutputIndex === node.vout,
@@ -195,11 +228,17 @@ export const mintStep = async (
       if (idx < 0) throw new Error('Name tree input missing from the transaction');
       if (!tx.inputs[idx].sourceTransaction) tx.inputs[idx].sourceTransaction = node.tx;
       const unlock = await OpNS.unlock(char, nonce, ownerScript).sign(tx, idx);
+      const declared = args.inputs?.[0]?.unlockingScriptLength ?? 0;
+      if (unlock.toBinary().length > declared)
+        throw new Error(
+          `OpNS unlock is ${unlock.toBinary().length} bytes but ${declared} were reserved (${tx.outputs.length - 3} change outputs)`,
+        );
       return { [idx]: { unlockingScript: unlock.toHex() } };
     });
   } catch (e) {
     // A rejected broadcast (e.g. WERR_REVIEW_ACTIONS on a double-spent node) must not leave a reservation behind.
-    await abortFailedAction(ctx, e);
+    // A failed signAction (e.g. an unlock longer than reserved) carries no reference, so use the one createAction returned.
+    await abortFailedAction(ctx, e, tracked.seen.reference);
     throw e;
   }
   if ('error' in res && res.error) throw new Error(String(res.error));
@@ -223,8 +262,8 @@ export const failedActionRef = (e: unknown): string | null => {
 };
 
 /** Best effort: release the wallet's hold on a failed mint (abortAction throws if it is already resolved). */
-export const abortFailedAction = async (ctx: OneSatContext, e: unknown) => {
-  const reference = failedActionRef(e);
+export const abortFailedAction = async (ctx: OneSatContext, e: unknown, fallbackRef?: string | null) => {
+  const reference = failedActionRef(e) ?? fallbackRef ?? null;
   if (!reference) return;
   try {
     await ctx.wallet.abortAction({ reference });

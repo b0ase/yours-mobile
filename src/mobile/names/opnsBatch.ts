@@ -94,20 +94,78 @@ export const checkNames = async (
   names: string[],
   isMine: (name: string) => boolean,
   tree?: OpnsTree,
+  opts: { concurrency?: number; onResult?: (c: NameCheck) => void; signal?: AbortSignal } = {},
 ): Promise<NameCheck[]> => {
-  const out: NameCheck[] = [];
-  for (const name of names) {
-    if (isMine(name) || tree?.isOurs(name)) out.push({ name, state: 'mine' });
-    else if (await isTaken(f, name)) out.push({ name, state: 'taken' });
-    else {
-      const indexed = await fetchMineNode(f, name);
-      const idxDomain = indexed && !tree?.isSpent(indexed.outpoint) ? indexed.domain : null;
-      const local = tree?.best(name)?.domain ?? null;
-      const domain = local !== null && (idxDomain === null || local.length >= idxDomain.length) ? local : idxDomain;
-      out.push({ name, state: 'free', domain: domain ?? indexed?.domain ?? null });
+  const out: NameCheck[] = new Array(names.length);
+  const one = async (name: string): Promise<NameCheck> => {
+    if (isMine(name) || tree?.isOurs(name)) return { name, state: 'mine' };
+    const lookup = await cachedLookup(f, name);
+    if (lookup.taken) return { name, state: 'taken' };
+    const indexed = lookup.node;
+    const idxDomain = indexed && !tree?.isSpent(indexed.outpoint) ? indexed.domain : null;
+    const local = tree?.best(name)?.domain ?? null;
+    const domain = local !== null && (idxDomain === null || local.length >= idxDomain.length) ? local : idxDomain;
+    return { name, state: 'free', domain: domain ?? indexed?.domain ?? null };
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < names.length && !opts.signal?.aborted) {
+      const i = next++;
+      out[i] = await one(names[i]);
+      opts.onResult?.(out[i]);
     }
-  }
-  return out;
+  };
+  const n = Math.max(1, Math.min(opts.concurrency ?? CHECK_CONCURRENCY, names.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return out.filter(Boolean);
+};
+
+/** Parallel lookups for "Check": 8 at a time (was one name, two requests, at a time: ~1,000 names took minutes). */
+export const CHECK_CONCURRENCY = 8;
+/** A looked-up name is reused for this long, so editing a 1,000-name list doesn't look every name up again. */
+const LOOKUP_TTL_MS = 5 * 60_000;
+type Lookup = { taken: boolean; node: Awaited<ReturnType<typeof fetchMineNode>> };
+// Keyed by the fetch function too, so callers (and tests) with different backends never share answers.
+let lookupCaches = new WeakMap<Fetch, Map<string, { at: number; v: Promise<Lookup> }>>();
+export const clearLookupCache = () => {
+  lookupCaches = new WeakMap();
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** fetch with backoff on 429 / 5xx / network errors (the indexer rate-limits bursts). */
+export const withBackoff =
+  (f: Fetch, tries = 4, baseMs = 300): Fetch =>
+  async (url, init) => {
+    for (let a = 0; ; a++) {
+      try {
+        const res = await f(url, init);
+        if ((res.status === 429 || res.status >= 500) && a < tries - 1) {
+          await sleep(baseMs * 2 ** a);
+          continue;
+        }
+        return res;
+      } catch (e) {
+        if (a >= tries - 1) throw e;
+        await sleep(baseMs * 2 ** a);
+      }
+    }
+  };
+
+const cachedLookup = (f: Fetch, name: string, now = Date.now()): Promise<Lookup> => {
+  let lookupCache = lookupCaches.get(f);
+  if (!lookupCache) lookupCaches.set(f, (lookupCache = new Map()));
+  const hit = lookupCache.get(name);
+  if (hit && now - hit.at < LOOKUP_TTL_MS) return hit.v;
+  const bf = withBackoff(f);
+  const v = (async () => {
+    // Both lookups at once; the mine-node answer is only used when the name is free.
+    const [taken, node] = await Promise.all([isTaken(bf, name), fetchMineNode(bf, name).catch(() => null)]);
+    return { taken, node };
+  })();
+  lookupCache.set(name, { at: now, v });
+  v.catch(() => lookupCache.delete(name));
+  return v;
 };
 
 export type BatchSummary = { toMint: number; chars: number; feeSats: number; seconds: number };
@@ -125,8 +183,16 @@ export const summarise = (plan: PlannedName[], nodeScriptLen: number, hashRate: 
 // ---- the queue -----------------------------------------------------------------------------------------
 
 export type ItemStatus = 'pending' | 'mining' | 'done' | 'skipped' | 'mine' | 'error';
-export type BatchItem = { name: string; status: ItemStatus; txids: string[]; note?: string };
-export type BatchState = { v: 1; items: BatchItem[]; approvedSats: number; createdAt: number };
+export type BatchItem = { name: string; status: ItemStatus; txids: string[]; note?: string; chars?: number };
+/**
+ * `approvedSats` is the invoice total the one approval sheet showed. It is the batch's spending allowance:
+ * the queue spends up to that +10% (ALLOWANCE_MARGIN) without asking again, then stops. `spentSats` is what
+ * the mined characters cost so far (estimated per character). Pause stops spending; Clear revokes the allowance.
+ */
+export type BatchState = { v: 1; items: BatchItem[]; approvedSats: number; createdAt: number; spentSats?: number };
+export const ALLOWANCE_MARGIN = 1.1;
+export const allowanceCap = (s: BatchState) => Math.ceil(s.approvedSats * ALLOWANCE_MARGIN);
+export const allowanceLeft = (s: BatchState) => Math.max(0, allowanceCap(s) - (s.spentSats ?? 0));
 
 export const newBatch = (plan: PlannedName[], approvedSats: number, now = Date.now()): BatchState => ({
   v: 1,
@@ -134,7 +200,7 @@ export const newBatch = (plan: PlannedName[], approvedSats: number, now = Date.n
   createdAt: now,
   items: plan
     .filter((p) => p.state === 'free' && p.chars > 0)
-    .map((p) => ({ name: p.name, status: 'pending' as const, txids: [] })),
+    .map((p) => ({ name: p.name, status: 'pending' as const, txids: [], chars: p.chars })),
 });
 
 export const remaining = (s: BatchState | null) =>
@@ -195,7 +261,13 @@ export type RunDeps = {
   tree?: OpnsTree;
   save: (s: BatchState) => void;
   onUpdate: (s: BatchState) => void;
+  /** Network fee per mined character (estimateMintFee); with it the run keeps to the approved allowance. */
+  perCharSats?: number;
+  /** Service fee per name in sats (counts against the allowance too). */
+  perNameSats?: number;
 };
+
+export const ALLOWANCE_USED_UP = 'This batch has used its approved amount. Clear and approve the rest as a new batch';
 
 export type RunResult = { stopped: 'finished' | 'cancelled' | 'error'; error?: string; state: BatchState };
 
@@ -224,9 +296,20 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
         set(i, { status: 'skipped', note: 'Taken by someone else' });
         continue;
       }
+      if (deps.perCharSats && it.chars !== undefined) {
+        const need = it.chars * deps.perCharSats + (deps.perNameSats ?? 0);
+        if (need > allowanceLeft(state)) {
+          set(i, { status: 'pending', note: 'Over the approved amount' });
+          return { stopped: 'error', error: ALLOWANCE_USED_UP, state };
+        }
+      }
       set(i, { status: 'mining', note: undefined });
       const steps = await deps.mine(it.name, signal);
       const txids = [...it.txids, ...steps.map((s) => s.txid)];
+      state = {
+        ...state,
+        spentSats: (state.spentSats ?? 0) + steps.length * (deps.perCharSats ?? 0) + (deps.perNameSats ?? 0),
+      };
       const feeTxid = deps.payFee ? await deps.payFee(it.name) : undefined;
       set(i, { status: 'done', txids: feeTxid ? [...txids, feeTxid] : txids });
     } catch (e) {

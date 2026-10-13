@@ -14,6 +14,7 @@ import { ownedFromOutputs } from './accountName';
 import { NODE_SCRIPT_ESTIMATE, PHONE_HASHRATE } from './GetYourName';
 import { estimateMintFee } from './opnsMint';
 import {
+  ALLOWANCE_USED_UP,
   checkNames,
   invalidReason,
   loadBatch,
@@ -179,16 +180,30 @@ export const OpnsMintPage = () => {
     const todo = ordered.filter((n) => !checks[n]);
     if (!todo.length || running) return;
     let live = true;
+    const ctl = new AbortController();
     const t = setTimeout(async () => {
       setChecking(true);
       setMsg('');
       try {
         const mine = await refreshOwned();
-        for (const n of todo) {
-          if (!live) return;
-          const [c] = await checkNames(f, [n], (x) => mine.has(x), opnsTreeFor(identityAddress));
-          if (live) setChecks((prev) => ({ ...prev, [n]: c }));
-        }
+        // 8 lookups at a time; each result shows as it lands (batched into one render per frame).
+        let pending: Record<string, NameCheck> = {};
+        let raf = 0;
+        const flush = () => {
+          raf = 0;
+          const add = pending;
+          pending = {};
+          if (live) setChecks((prev) => ({ ...prev, ...add }));
+        };
+        await checkNames(f, todo, (x) => mine.has(x), opnsTreeFor(identityAddress), {
+          signal: ctl.signal,
+          onResult: (c) => {
+            pending[c.name] = c;
+            if (!raf) raf = requestAnimationFrame(flush);
+          },
+        });
+        if (raf) cancelAnimationFrame(raf);
+        flush();
       } catch {
         if (live) setMsg('Lookup failed. Check your connection; it tries again when the list changes.');
       } finally {
@@ -197,6 +212,7 @@ export const OpnsMintPage = () => {
     }, 400);
     return () => {
       live = false;
+      ctl.abort();
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -244,11 +260,14 @@ export const OpnsMintPage = () => {
           tree: opnsTreeFor(identityAddress),
           save: (s) => saveBatch(identityAddress, s),
           onUpdate: setBatch,
+          perCharSats: perChar,
+          perNameSats: feePerNameSats,
         },
         start,
         ctl.signal,
       );
-      if (r.stopped === 'error') setMsg(`Stopped: ${r.error}. Fix it, then Resume.`);
+      if (r.stopped === 'error' && r.error === ALLOWANCE_USED_UP) setMsg(`${ALLOWANCE_USED_UP}.`);
+      else if (r.stopped === 'error') setMsg(`Stopped: ${r.error}. Fix it, then Resume.`);
       else if (r.stopped === 'cancelled') setMsg('Paused. Characters already mined stay yours; Resume any time.');
       void refreshOwned();
       void refreshBalance();
@@ -261,7 +280,8 @@ export const OpnsMintPage = () => {
   const approve = () => {
     if (!plan || !summary) return;
     setSheet(false);
-    const b = newBatch(plan, summary.feeSats);
+    // The one approval is this batch's allowance: the invoice total (+10%), spent without further prompts.
+    const b = newBatch(plan, totalSats);
     saveBatch(identityAddress, b);
     setBatch(b);
     void run(b);

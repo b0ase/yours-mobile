@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { Fetch } from './names';
 import {
+  ALLOWANCE_USED_UP,
+  checkNames,
   loadBatch,
   mintParam,
   newBatch,
@@ -177,5 +179,73 @@ describe('runBatch', () => {
     expect(r.state.items.map((i) => i.status)).toEqual(['mine', 'done']);
     expect(fees).toEqual(['b']);
     expect(r.state.items[1].txids).toEqual(['b', 'fee-b']);
+  });
+});
+
+describe('checkNames speed', () => {
+  test('looks names up 8 at a time, streams each result, and caches answers', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let calls = 0;
+    const slow: Fetch = (async (u: string) => {
+      calls++;
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+      const name = decodeURIComponent(u.split('/').pop() ?? '');
+      const body = u.includes('/origin/') ? (name.endsWith('0') ? { outpoint: `${'a'.repeat(64)}.2` } : {}) : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as Fetch;
+    const names = Array.from({ length: 40 }, (_, i) => `n${i}`);
+    const seen: string[] = [];
+    const t0 = Date.now();
+    const out = await checkNames(slow, names, () => false, undefined, { onResult: (c) => seen.push(c.name) });
+    const ms = Date.now() - t0;
+    expect(out.map((c) => c.name)).toEqual(names);
+    expect(out.filter((c) => c.state === 'taken').length).toBe(4);
+    expect(seen.length).toBe(40);
+    expect(peak).toBeGreaterThan(8); // 8 names at once, two lookups each
+    expect(ms).toBeLessThan(40 * 2 * 20); // sequential took 1600ms here
+    const before = calls;
+    await checkNames(slow, names, () => false);
+    expect(calls).toBe(before); // cached
+  });
+  test('backs off and retries on 429', async () => {
+    let n = 0;
+    const flaky: Fetch = (async () => {
+      n++;
+      return n <= 1 ? new Response('', { status: 429 }) : new Response('{}', { status: 200 });
+    }) as Fetch;
+    const [c] = await checkNames(flaky, ['zz-retry'], () => false);
+    expect(c.state).toBe('free');
+  });
+});
+
+describe('batch allowance', () => {
+  test('one approval covers the batch up to its total +10%, then the run stops before overspending', async () => {
+    const plan = planBatch([
+      { name: 'aa', state: 'free', domain: '' },
+      { name: 'bb', state: 'free', domain: '' },
+      { name: 'cc', state: 'free', domain: '' },
+    ]);
+    // approved for 2 characters per name at 100 sats each = 600; cap 660
+    const start = newBatch(plan, 600);
+    let mines = 0;
+    const mine: MineOne = async (n) => (
+      mines++,
+      n === 'aa' ? [{ txid: '1' }, { txid: '2' }, { txid: '3' }, { txid: '4' }] : [{ txid: '5' }, { txid: '6' }]
+    );
+    const r = await runBatch(
+      { fetch: fakeFetch(new Set()), mine, isMine: () => false, save: () => {}, onUpdate: () => {}, perCharSats: 100 },
+      start,
+      new AbortController().signal,
+    );
+    // aa cost 400 (more than planned), bb 200 → 600 spent; cc needs 200 > 60 left
+    expect(mines).toBe(2);
+    expect(r.stopped).toBe('error');
+    expect(r.error).toBe(ALLOWANCE_USED_UP);
+    expect(r.state.spentSats).toBe(600);
+    expect(r.state.items.map((i) => i.status)).toEqual(['done', 'done', 'pending']);
   });
 });
