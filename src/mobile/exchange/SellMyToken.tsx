@@ -27,6 +27,7 @@ const MUTED = '#98A2B3';
  * Bring the person's live curve listings in line with their settings, from THEIR wallet (we hold no keys):
  * cancel when closed or re-pricing, list the gap at the current price, register the outpoints with bit-sign.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const syncCurveListings = async (
   ctx: Parameters<typeof createTranche>[0],
   token: PersonToken,
