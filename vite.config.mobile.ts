@@ -426,11 +426,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx#ptr': [
     [
       "import { getPlatform } from '../platform';",
-      "import { getPlatform } from '../platform';\nimport { PullToRefresh } from '../mobile/ui/PullToRefresh';\nimport { VideoBackground } from '../mobile/ui/VideoBackground';\nimport walletBg from '../mobile/brand/bg/wallet-card.mp4';\nimport walletPoster from '../mobile/brand/bg/wallet-card.jpg';",
+      "import { getPlatform } from '../platform';\nimport { PullToRefresh } from '../mobile/ui/PullToRefresh';\nimport { WalletRefreshListener } from '../mobile/wallet/WalletRefreshListener';\nimport { VideoBackground } from '../mobile/ui/VideoBackground';\nimport walletBg from '../mobile/brand/bg/wallet-card.mp4';\nimport walletPoster from '../mobile/brand/bg/wallet-card.jpg';",
     ],
     [
       "        style={{ minHeight: '100%' }}\n      >\n        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}",
-      "        style={{ minHeight: '100%' }}\n      >\n<PullToRefresh onRefresh={() => refreshUtxos({ notifyIfUnchanged: true })} />\n<VideoBackground src={walletBg} poster={walletPoster} scrim='dark' position='fixed' />\n        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}",
+      "        style={{ minHeight: '100%' }}\n      >\n<PullToRefresh onRefresh={() => refreshUtxos({ notifyIfUnchanged: true })} />\n<WalletRefreshListener onRefresh={() => refreshUtxos()} />\n<VideoBackground src={walletBg} poster={walletPoster} scrim='dark' position='fixed' />\n        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}",
     ],
     [
       'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',

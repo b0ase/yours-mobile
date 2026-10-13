@@ -681,6 +681,23 @@ export class BchatClient {
     return { tokenId: r.token_id ?? null, ticker: r.ticker ?? null };
   }
 
+  /**
+   * Link an existing token to this account's personal name (import, not mint). Body: the signed challenge
+   * (names/existingToken.ts). NEEDS bit-sign: POST /api/bitsign/rooms/personal-import verifying the identity
+   * signature and the issuer/holder proof, then binding name → token_id. Until it exists this 404s and the
+   * client falls back to opening the token room with personal_name (bound when the handle matches).
+   */
+  async importPersonalToken(body: {
+    name: string;
+    token_id: string;
+    message: string;
+    identity_key: string;
+    signature: string;
+    proof?: { address: string; signature: string } | null;
+  }): Promise<void> {
+    await this.call('POST', '/api/bitsign/rooms/personal-import', body);
+  }
+
   /** Room admin: the ban list. */
   async bans(ticker: string): Promise<{ handle: string | null; address: string | null; reason: string | null }[]> {
     const r = await this.call<{ bans?: { handle: string | null; address: string | null; reason: string | null }[] }>(

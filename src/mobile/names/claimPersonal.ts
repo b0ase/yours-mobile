@@ -10,6 +10,18 @@ import { rememberOwnToken } from '../tokens/indexFund';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings } from '../chat/holdings';
+import { requestRoomByTicker } from '../chat/segmentNav';
+import {
+  bsv20TakenError,
+  bsv20TickExists,
+  controlledTokens,
+  decideExisting,
+  duplicateNote,
+  linkImported,
+  signImport,
+  type ExistingChoice,
+  type TokenRef,
+} from './existingToken';
 import {
   PERSONAL_DECIMALS,
   PERSONAL_MIN,
@@ -68,10 +80,21 @@ export async function deployPersonalToken(
      * (bit-sign /api/bitsign/sponsor/mint), waits for the gift to sync, then mints.
      */
     payAddress?: string;
+    /** The user saw the "someone else already has a token called X" note and chose to mint anyway. */
+    acceptDuplicate?: boolean;
+    /** Tests / callers that already decided: skips the lookup. */
+    choice?: ExistingChoice;
   },
 ): Promise<PersonalLink> {
   const ticker = personalTicker(input.name);
   if (!ticker) throw new Error('That name cannot be a token ticker');
+  // Never a silent duplicate (owner, 13 Oct 2026): an existing token this account controls is imported, a
+  // BSV-20 tick is unique by protocol, and someone else's ticker needs the note first.
+  const choice = input.choice ?? (await existingChoice(ctx, input.name));
+  if (choice.kind === 'import')
+    throw new Error(`You already have the $${choice.token.sym} token. Import it instead of minting a new one.`);
+  if (choice.kind === 'bsv20-taken') throw new Error(bsv20TakenError(choice.tick));
+  if (choice.kind === 'mint-labelled' && !input.acceptDuplicate) throw new Error(duplicateNote(input.name));
   const bad = validateSupply(input.supply);
   if (bad) throw new Error(bad);
   const supply = cleanSupply(input.supply);
@@ -118,6 +141,59 @@ export async function deployPersonalToken(
   // Minting no longer pays indexing; "Set up $X's room" offers it later.
   rememberOwnToken({ tokenId: res.tokenId, ticker });
   return link;
+}
+
+/**
+ * What the personal-token step should offer for `handle`: import a token this wallet controls, refuse a
+ * taken BSV-20 tick, or mint (labelled when someone else's token already uses the ticker).
+ */
+export async function existingChoice(
+  ctx: OneSatContext,
+  handle: string,
+  client?: BchatClient,
+): Promise<ExistingChoice> {
+  const ticker = personalTicker(handle);
+  const [controlled, tick, bound] = await Promise.all([
+    controlledTokens(ctx).catch(() => [] as TokenRef[]),
+    ticker ? bsv20TickExists(ticker) : Promise.resolve(false),
+    (client ? Promise.resolve(client) : Promise.resolve(new BchatClient(defaultHttp(isNative), loadSession())))
+      .then((c) => c.personalToken(personalKey(handle)))
+      .then((r) => r.tokenId)
+      .catch(() => null),
+  ]);
+  const own = new Set(controlled.map((t) => t.tokenId));
+  const others = bound && !own.has(bound) ? 1 : 0;
+  // A BSV-20 tick only blocks when this wallet doesn't hold that tick itself (BSV-20 isn't listed above).
+  return decideExisting({ handle, controlled, othersBsv21: others, bsv20Tick: tick === true });
+}
+
+/**
+ * "We found the $X token — sign to import it": one identity signature over a challenge naming the token and
+ * the key, sent to bit-sign; the token becomes this account's personal token and its room opens. No mint.
+ */
+export async function importExistingToken(
+  ctx: OneSatContext,
+  identityAddress: string,
+  handle: string,
+  token: TokenRef,
+): Promise<{ link: PersonalLink; roomTicker: string | null }> {
+  const signed = await signImport(ctx, token.tokenId, handle);
+  const client = await chatClient(ctx);
+  // Server half pending (see BchatClient.importPersonalToken); the room open below still binds a matching handle.
+  await client
+    .importPersonalToken({
+      name: personalKey(handle),
+      token_id: token.tokenId,
+      message: signed.message,
+      identity_key: signed.identityKey,
+      signature: signed.signature,
+    })
+    .catch(() => undefined);
+  const link = linkImported(identityAddress, handle, token);
+  rememberOwnToken({ tokenId: link.tokenId, ticker: link.ticker });
+  const roomTicker = await openPersonalRoom(ctx, identityAddress, link, client).catch(() => null);
+  if (roomTicker) requestRoomByTicker(roomTicker, false);
+  return { link, roomTicker };
 }
 
 async function chatClient(ctx: OneSatContext): Promise<BchatClient> {
