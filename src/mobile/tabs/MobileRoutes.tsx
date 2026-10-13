@@ -49,6 +49,8 @@ const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
 const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 // OpNS "Mint a list" (/opns-mint, names/OpnsMintPage.tsx).
 const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
+// bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx.
+const BmintPage = lazy(() => import('../bmint/BmintPage'));
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
 // No app-wide error boundary upstream: one throw blanked the whole page (owner, 6 Oct 2026).
@@ -79,6 +81,7 @@ const MobileRoutes = () => (
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
         <Route path="opns-mint" element={<OpnsMintPage />} />
+        <Route path="bmint/*" element={<BmintPage />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="lock" element={<LockScreen />} />
         <Route path="lock/locks" element={<LockScreen />} />

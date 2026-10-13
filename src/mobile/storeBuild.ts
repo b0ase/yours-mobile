@@ -352,3 +352,15 @@ export const FEE_POT_ENABLED: boolean =
     import.meta.env.VITE_CHANNEL === 'ios-store' ||
     import.meta.env.VITE_CHANNEL === 'android-play'
   );
+
+/**
+ * bMint Notes (the banknote/coin designer at /bmint/notes): never in a store build, not even as code.
+ * A designed "banknote", even minted as art, reads to reviewers as issuing currency (Apple 3.1.5, Play
+ * financial services). Literal env check so Vite inlines it and Rollup drops the lazy import in
+ * bmint/BmintPage.tsx. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const BMINT_NOTES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

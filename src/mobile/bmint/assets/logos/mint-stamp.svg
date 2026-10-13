@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+  <circle cx="300" cy="300" r="250" fill="none" stroke="#ffffff" stroke-width="28" />
+  <circle cx="300" cy="300" r="190" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.6" />
+  <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="140" letter-spacing="18" fill="#ffffff">NPG</text>
+</svg>

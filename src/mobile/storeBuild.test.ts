@@ -532,3 +532,38 @@ describe('PAY_STREAM_ENABLED: pay-per-second streaming is bWalletX only', () => 
     expect(src('./notify/NotifyEngine.tsx')).toContain('if (!PAY_STREAM_ENABLED || isLocked || !wallet) return;');
   });
 });
+
+describe('BMINT_NOTES_ENABLED: the bMint banknote designer is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { BMINT_NOTES_ENABLED } = await import('./storeBuild');
+    expect(BMINT_NOTES_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BMINT_NOTES_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  // Evaluate the flag's own expression against each env, so both values are tested.
+  const flagFor = (env: Record<string, string>) => {
+    const expr = /export const BMINT_NOTES_ENABLED: boolean = ([^;]*);/s
+      .exec(src('./storeBuild.ts'))![1]
+      .replace(/import\.meta\.env/g, 'env');
+    return new Function('env', `return ${expr};`)(env) as boolean;
+  };
+  test.each([
+    [{ VITE_STORE_BUILD: '1' }, false],
+    [{ VITE_CHANNEL: 'ios-store' }, false],
+    [{ VITE_CHANNEL: 'android-play' }, false],
+    [{ VITE_CHANNEL: 'direct' }, true],
+    [{}, true],
+  ])('%o → %p', (env, enabled) => {
+    expect(flagFor(env)).toBe(enabled);
+  });
+  test('the Notes chunk is a lazy import behind the flag', () => {
+    expect(src('./bmint/BmintPage.tsx')).toMatch(
+      /BMINT_NOTES_ENABLED\s*\?\s*lazy\(\(\) => import\('\.\/notes\/NotesPage'\)\)/,
+    );
+  });
+});
