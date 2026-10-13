@@ -208,20 +208,34 @@ export async function scanAccount(
   accountPath: string,
   isUsed: (address: string) => Promise<boolean>,
   onProgress?: (checked: number, found: number) => void,
+  /** Addresses looked up at once (in parallel); the gap rule is applied in order afterwards. */
+  batch = 1,
 ): Promise<HdAddress[]> {
   const used: HdAddress[] = [];
   let checked = 0;
-  for (const chain of [0, 1] as const) {
+  const step = Math.max(1, Math.floor(batch));
+  // The two chains are independent: walk them at the same time.
+  const walk = async (chain: 0 | 1) => {
+    const hits: HdAddress[] = [];
     let misses = 0;
-    for (let i = 0; i < MAX_PER_CHAIN && misses < GAP; i++) {
-      const a = addressAt(account, accountPath, chain, i);
-      if (await isUsed(a.address)) {
-        used.push(a);
-        misses = 0;
-      } else misses++;
-      onProgress?.(++checked, used.length);
+    for (let i = 0; i < MAX_PER_CHAIN && misses < GAP; i += step) {
+      const window = Array.from({ length: Math.min(step, MAX_PER_CHAIN - i) }, (_, k) =>
+        addressAt(account, accountPath, chain, i + k),
+      );
+      const flags = await Promise.all(window.map((a) => isUsed(a.address)));
+      for (const [k, a] of window.entries()) {
+        if (misses >= GAP) break;
+        if (flags[k]) {
+          hits.push(a);
+          misses = 0;
+        } else misses++;
+        onProgress?.(++checked, used.length + hits.length);
+      }
     }
-  }
+    return hits;
+  };
+  const [receive, change] = await Promise.all([walk(0), walk(1)]);
+  used.push(...receive, ...change);
   return used;
 }
 

@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { useLegacyKeys } from './useLegacyKeys';
 import { accountNamesFor } from './accountNames';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
 import { PAID_FEATURES_ENABLED, handleCardText } from '../storeBuild';
 import { getPersonalLink, onPersonalChange } from './personalToken';
-import { recoverPersonalLink } from './claimPersonal';
+import { existingChoice, recoverPersonalLink } from './claimPersonal';
 import {
   clearPendingPrompt,
   dismissCard,
+  handleCardTitle,
   handleComplete,
   getPendingPrompt,
   isCardDismissed,
@@ -25,6 +27,7 @@ import {
  */
 export const HandleOnboarding = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
+  const legacy = useLegacyKeys();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses?.identityAddress;
   const [hasName, setHasName] = useState(() => !!accountNamesFor(id).payable);
@@ -59,6 +62,19 @@ export const HandleOnboarding = () => {
       .then((l) => l && setHasRoom(true))
       .catch(() => undefined);
   }, [apiContext, id, payable, hasRoom]);
+
+  // The handle matches a token this account controls: the card offers the import instead of a new mint.
+  const [importSym, setImportSym] = useState<string | null>(null);
+  useEffect(() => {
+    if (!apiContext || !id || !payable || hasRoom || !PAID_FEATURES_ENABLED) return setImportSym(null);
+    let live = true;
+    existingChoice(apiContext, payable, undefined, legacy)
+      .then((c) => live && setImportSym(c.kind === 'import' ? c.token.sym : null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [apiContext, id, payable, hasRoom, legacy]);
 
   // A restored wallet may already own a paymail / OpNS name: ask the chain first.
   useEffect(() => {
@@ -115,7 +131,7 @@ export const HandleOnboarding = () => {
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-bold" style={{ color: '#FFD24D' }}>
-          {hasName ? 'Open your $name room' : 'Get your $name'}
+          {handleCardTitle(hasName, importSym)}
         </div>
         <div className="text-[11px]" style={{ color: '#98A2B3' }}>
           {handleCardText(hasName)}

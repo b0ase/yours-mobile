@@ -141,3 +141,13 @@ export const pickHandleAlias = (
 /** Where closing Connect X / Google goes: back to Settings when opened from there, else the Wallet home. */
 export const socialCloseTarget = (openedByReturn: boolean): 'settings' | 'wallet' =>
   openedByReturn ? 'wallet' : 'settings';
+
+/**
+ * The Wallet card's title. A handle that matches a token this account already controls ($npg ↔ $NPG) is
+ * offered as an import, never as "Open your $name room" (which would mint a new token).
+ */
+export const handleCardTitle = (hasName: boolean, importSym?: string | null): string => {
+  if (!hasName) return 'Get your $name';
+  if (importSym) return `We found the $${importSym.replace(/^\$/, '').toUpperCase()} token — sign to import it`;
+  return 'Open your $name room';
+};

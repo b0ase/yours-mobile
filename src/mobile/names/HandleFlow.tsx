@@ -4,6 +4,7 @@ import { payNameFee } from './nameFee';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { useLegacyKeys } from './useLegacyKeys';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import {
@@ -25,6 +26,8 @@ import {
   PERSONAL_FEE_ESTIMATE_SATS,
   PERSONAL_NETWORK_FEE_SATS,
   deployPersonalToken,
+  existingChoice,
+  importExistingToken,
   openPersonalRoom,
   recoverPersonalLink,
 } from './claimPersonal';
@@ -41,6 +44,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
 import { moneyNow } from '../money/money';
+import { bsv20TakenError, duplicateNote, personalTokenLabel, type ExistingChoice } from './existingToken';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
@@ -71,6 +75,7 @@ export const HandleFlow = ({
 }) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
+  const legacy = useLegacyKeys();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const ordAddress = account?.addresses?.ordAddress ?? '';
@@ -144,6 +149,46 @@ export const HandleFlow = ({
       .catch(() => undefined);
   }, [apiContext, identityAddress, claimed, link]);
 
+  // Tokens that already use this ticker: import ours, refuse a taken BSV-20 tick, note someone else's.
+  const [choice, setChoice] = useState<ExistingChoice | null>(null);
+  const [importing, setImporting] = useState(false);
+  useEffect(() => {
+    if (link || !claimed || !apiContext || !withToken) return;
+    let live = true;
+    existingChoice(apiContext, claimed, undefined, legacy)
+      .then((c) => live && setChoice(c))
+      .catch(() => live && setChoice({ kind: 'mint' }));
+    return () => {
+      live = false;
+    };
+  }, [apiContext, claimed, link, withToken, legacy]);
+
+  const importToken = async () => {
+    if (choice?.kind !== 'import') return;
+    setImporting(false);
+    setBusy(true);
+    setTokenMsg('');
+    try {
+      const { link: l, roomTicker } = await importExistingToken(
+        apiContext,
+        identityAddress,
+        claimed,
+        choice.token,
+        legacy,
+      );
+      void showOnWallet(chromeStorageService, l.tokenId);
+      setTokenMsg(
+        roomTicker
+          ? `$${l.ticker} is now your token and its room is open.`
+          : `$${l.ticker} is now your token. Set up its room from Chat when you're ready.`,
+      );
+    } catch (e) {
+      setTokenMsg(e instanceof Error ? e.message : 'Import failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const mintToken = async (name = tokenName) => {
     setConfirming(false);
     setBusy(true);
@@ -155,7 +200,9 @@ export const HandleFlow = ({
         supply,
         payAddress: account?.addresses?.bsvAddress,
         avatar: account?.settings?.socialProfile?.avatar ?? account?.icon,
+        ...(choice ? { choice, acceptDuplicate: choice.kind === 'mint-labelled' } : {}),
       });
+      if (choice?.kind === 'mint-labelled') setTokenMsg(personalTokenLabel(name));
       // Its balance is local: show it on the Wallet tab now, not when an indexer catches up.
       void showOnWallet(chromeStorageService, l.tokenId);
       void askNotifyPermissionOnce();
@@ -433,7 +480,28 @@ export const HandleFlow = ({
                     {supplyError}
                   </span>
                 )}
-                {withToken && claimed && (
+                {withToken && claimed && choice?.kind === 'import' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setImporting(true)}
+                    className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
+                    style={{ background: GOLD, color: '#000' }}
+                  >
+                    We found the ${choice.token.sym.replace(/^\$/, '').toUpperCase()} token — sign to import it
+                  </button>
+                )}
+                {withToken && claimed && choice?.kind === 'bsv20-taken' && (
+                  <p className="text-[11px]" style={{ color: '#ff4444' }}>
+                    {bsv20TakenError(choice.tick)}
+                  </p>
+                )}
+                {withToken && claimed && choice?.kind === 'mint-labelled' && (
+                  <p className="text-[11px]" style={{ color: GOLD }}>
+                    {duplicateNote(claimed)}
+                  </p>
+                )}
+                {withToken && claimed && (choice?.kind === 'mint' || choice?.kind === 'mint-labelled') && (
                   <button
                     type="button"
                     disabled={busy || !ticker || !!supplyError}
@@ -490,6 +558,20 @@ export const HandleFlow = ({
           isProcessing={busy}
           onConfirm={() => void mintToken()}
           onCancel={() => setConfirming(false)}
+        />
+        <SendConfirmation
+          show={importing}
+          theme={theme}
+          lineItems={[
+            {
+              address: `Import $${choice?.kind === 'import' ? choice.token.sym.replace(/^\$/, '') : ''}`.slice(0, 16),
+              amount: 'Signature',
+            },
+          ]}
+          total="Free"
+          isProcessing={busy}
+          onConfirm={() => void importToken()}
+          onCancel={() => setImporting(false)}
         />
       </div>
     </div>,

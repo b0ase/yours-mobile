@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import { HD, Mnemonic, PrivateKey } from '@bsv/sdk';
 import { prepareSweepInputs, sweepBsv, sweepBsv21, sweepOrdinals } from '@1sat/actions';
 import type { IndexedOutput } from '@1sat/types';
@@ -30,6 +30,19 @@ import {
   type SfpOutput,
 } from './moneybutton';
 import { ErrorActions } from '../errors/ErrorActions';
+import {
+  buildPlan,
+  classifyOrdinal,
+  defaultSelection,
+  selectedWork,
+  sweepButtonLabel,
+  visibleResults,
+  type OrdinalKind,
+  type Plan,
+  type Result,
+} from './plan';
+import { mapLimit, rateLimiter, withBeefCache } from './speed';
+import { requestWalletRefresh, useGoToWallet } from '../wallet/walletRefresh';
 
 const GOLD = '#FFD24D';
 const PANEL = '#17191E';
@@ -39,16 +52,23 @@ const RED = '#F97066';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 
-/** GET from WhatsOnChain with 429 retries; null on 404. */
-const wocGet = async (path: string): Promise<Response | null> => {
+// Stay under the free API's ~3 requests a second, without waiting for each answer before the next ask.
+const wocSlot = rateLimiter(3);
+
+/** GET (or POST JSON) to WhatsOnChain with 429 retries; null on 404. */
+const wocGet = async (path: string, body?: unknown): Promise<Response | null> => {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await fetch(`${WOC}${path}`);
+    await wocSlot();
+    const r = await fetch(
+      `${WOC}${path}`,
+      body === undefined
+        ? undefined
+        : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    );
     if (r.status === 429) {
       await new Promise((ok) => setTimeout(ok, 1000 * (attempt + 1)));
       continue;
     }
-    // Stay under the free API's ~3 requests a second.
-    await new Promise((ok) => setTimeout(ok, 350));
     // WhatsOnChain answers 404 "Not Found" for an address or tx it has never seen.
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(`Lookup failed (${r.status})`);
@@ -70,6 +90,35 @@ const woCUsed = async (address: string): Promise<boolean> => (await wocHistory(a
 /** How many history transactions to read per address when looking for Money Button tokens. */
 const SFP_TX_LIMIT = 200;
 
+/** Raw tx hex for many txids: WhatsOnChain's bulk endpoint (20 a call), one by one if that fails. */
+const wocTxHexes = async (txids: string[]): Promise<{ txid: string; hex: string }[]> => {
+  const chunks: string[][] = [];
+  for (let i = 0; i < txids.length; i += 20) chunks.push(txids.slice(i, i + 20));
+  const parts = await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const r = await wocGet('/txs/hex', { txids: chunk });
+        const list = r ? ((await r.json()) as { txid?: string; hex?: string }[]) : [];
+        const got = Array.isArray(list) ? list.filter((t) => t.txid && t.hex) : [];
+        if (got.length) return got.map((t) => ({ txid: t.txid!, hex: t.hex!.trim() }));
+      } catch {
+        /* fall back below */
+      }
+      const one = await Promise.all(
+        chunk.map(async (txid) => {
+          const r = await wocGet(`/tx/${txid}/hex`).catch(() => null);
+          return r ? { txid, hex: (await r.text()).trim() } : null;
+        }),
+      );
+      return one.filter((t): t is { txid: string; hex: string } => !!t);
+    }),
+  );
+  return parts.flat();
+};
+
+/** Addresses looked up at once on an HD chain (the gap rule still applies in order). */
+const SCAN_BATCH = 10;
+
 type Found = {
   /** Which wallet types / paths had history, e.g. "Yours / bWalletX payment (m/44'/236'/0'/1/0)". */
   matches: string[];
@@ -79,8 +128,9 @@ type Found = {
   keyFor: Map<string, string>;
   /** Money Button (SFP) token outputs still held; never swept, listed only. */
   sfp: SfpOutput[];
+  /** BSV, NFTs, each token: what can be ticked, plus 1-sat outputs that may be tokens (never swept). */
+  plan: Plan;
 };
-type Result = { label: string; txid?: string; error?: string };
 
 const emptyAssets = (): ScannedAssets => ({
   funding: [],
@@ -141,6 +191,8 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const [error, setError] = useState('');
   const [found, setFound] = useState<Found | null>(null);
   const [results, setResults] = useState<Result[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const goToWallet = useGoToWallet();
   const cancelled = useRef(false);
   const busy = step === 'scanning' || step === 'sweeping';
 
@@ -151,6 +203,20 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
     onBack();
   };
   useBackClose(true, leave);
+  /** Done: to the Wallet home (where the swept coins now show), not back to Settings. */
+  const finish = () => {
+    setPhrase('');
+    setPassphrase('');
+    onBack();
+    goToWallet();
+  };
+  const toggle = (key: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
   useEffect(
     () => () => {
       cancelled.current = true;
@@ -208,6 +274,10 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       }
 
       // 2. Which of those addresses were ever used, across every layout (one wallet can match several).
+      // Every single key and every HD account is checked at the same time; the WhatsOnChain rate limit
+      // (wocSlot) paces the calls instead of waiting for each answer.
+      const t0 = performance.now();
+      setProgress('Finding coins…');
       const used = new Map<string, string>(); // address → wif
       const matches: string[] = [];
       const mbAddresses = new Set<string>(); // used addresses on Money Button's path (or a pasted key)
@@ -216,23 +286,34 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       // wallet, 7 Oct 2026), so matching only used addresses missed every token.
       const mbOwners = new Set<string>();
       const mbAccounts: OwnerAccount[] = [];
-      for (const [i, k] of singles.entries()) {
-        if (cancelled.current) return;
-        setProgress(`Checking ${k.wallet} ${k.label} key (${i + 1} of ${singles.length})`);
-        if (input.kind === 'wif' || (await woCUsed(k.address))) {
-          if (!used.has(k.address)) used.set(k.address, k.wif);
-          if (input.kind === 'wif') {
-            mbAddresses.add(k.address);
-            mbOwners.add(addressHash(k.address));
-          }
-          matches.push(input.kind === 'wif' ? `Private key (${k.address})` : `${k.wallet} ${k.label} (${k.path})`);
+      let checked = 0;
+      const tick = () => setProgress(`Finding coins… checked ${++checked} addresses`);
+      const isUsed = async (address: string) => {
+        if (cancelled.current) return false;
+        const u = await woCUsed(address);
+        tick();
+        return u;
+      };
+      const singleHits = await Promise.all(
+        singles.map(async (k) => ({ k, hit: input.kind === 'wif' || (await isUsed(k.address)) })),
+      );
+      for (const { k, hit } of singleHits) {
+        if (!hit) continue;
+        if (!used.has(k.address)) used.set(k.address, k.wif);
+        if (input.kind === 'wif') {
+          mbAddresses.add(k.address);
+          mbOwners.add(addressHash(k.address));
         }
+        matches.push(input.kind === 'wif' ? `Private key (${k.address})` : `${k.wallet} ${k.label} (${k.path})`);
       }
-      for (const { label, path, key } of accounts) {
-        if (cancelled.current) return;
-        const hits = await scanAccount(key, path, woCUsed, (checked, n) =>
-          setProgress(`${label}: checked ${checked} addresses, ${n} used`),
-        );
+      const accountHits = await Promise.all(
+        accounts.map(async (acc) => ({
+          ...acc,
+          hits: await scanAccount(acc.key, acc.path, isUsed, undefined, SCAN_BATCH),
+        })),
+      );
+      if (cancelled.current) return;
+      for (const { label, path, key, hits } of accountHits) {
         if (!hits.length) continue;
         matches.push(`${label}: ${hits.length} address${hits.length === 1 ? '' : 'es'}`);
         for (const h of hits) if (!used.has(h.address)) used.set(h.address, h.wif);
@@ -241,6 +322,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
           mbAccounts.push({ key, path, used: hits });
         }
       }
+      const t1 = performance.now();
       if (!used.size) {
         setError(
           'Nothing found on any known wallet layout. Check the phrase and passphrase, or try a custom path under Advanced.',
@@ -249,14 +331,33 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         return;
       }
 
-      // 3. What each used address holds now.
+      // 3. What each used address holds now (1Sat indexer, a few addresses at a time), and in parallel
+      // 4. Money Button tokens (SFP). Their scripts aren't P2PKH, so indexers don't list them under the
+      // address; read the address's own history and look for SFP outputs that name it.
+      const services = apiContext.services;
+      let done = 0;
+      setProgress(`Looking for coins and tokens: 0 of ${used.size} addresses`);
+      const scanAll = mapLimit([...used.entries()], 4, async ([address, wif]) => {
+        const r = await scanAddress(services, address);
+        setProgress(`Looking for coins and tokens: ${++done} of ${used.size} addresses`);
+        return { r, wif };
+      });
+      const sfpAll = (async (): Promise<SfpOutput[]> => {
+        if (!mbAddresses.size) return [];
+        const histories = await Promise.all([...mbAddresses].map((a) => wocHistory(a).catch(() => [])));
+        const txids = [...new Set(histories.flatMap((h) => h.slice(0, SFP_TX_LIMIT)))];
+        if (!txids.length || cancelled.current) return [];
+        const found = findOwnedSfp(await wocTxHexes(txids), mbOwners, mbAccounts);
+        if (!found.length) return [];
+        const spends = await services.txo.getSpends(found.map((o) => o.outpoint)).catch(() => []);
+        return found.filter((_, i) => !spends[i]);
+      })();
+      const [scanned, sfp] = await Promise.all([scanAll, sfpAll]);
+      if (cancelled.current) return;
       const assets = emptyAssets();
       const keyFor = new Map<string, string>();
       const tokens: TokenBalance[] = [];
-      for (const [i, [address, wif]] of [...used.entries()].entries()) {
-        if (cancelled.current) return;
-        setProgress(`Looking for coins and tokens: address ${i + 1} of ${used.size}`);
-        const r = await scanAddress(apiContext.services, address);
+      for (const { r, wif } of scanned) {
         const own = (o: IndexedOutput) => keyFor.set(o.outpoint, wif);
         [...r.funding, ...r.ordinals, ...r.opnsNames, ...r.bsv20Tokens, ...r.locked].forEach(own);
         r.bsv21Tokens.forEach((t) => t.outputs.forEach(own));
@@ -270,31 +371,30 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       }
       assets.bsv21Tokens = mergeTokens(tokens);
 
-      // 4. Money Button tokens (SFP). Their scripts aren't P2PKH, so indexers don't list them under the
-      // address; read the address's own history and look for SFP outputs that name it.
-      const sfp: SfpOutput[] = [];
-      if (mbAddresses.size) {
-        const txs: { txid: string; hex: string }[] = [];
-        const seen = new Set<string>();
-        for (const [i, address] of [...mbAddresses].entries()) {
-          const txids = (await wocHistory(address)).slice(0, SFP_TX_LIMIT);
-          for (const [j, txid] of txids.entries()) {
-            if (cancelled.current) return;
-            if (seen.has(txid)) continue;
-            seen.add(txid);
-            setProgress(`Looking for Money Button tokens: address ${i + 1} of ${mbAddresses.size}, tx ${j + 1}`);
-            const r = await wocGet(`/tx/${txid}/hex`);
-            if (r) txs.push({ txid, hex: (await r.text()).trim() });
-          }
+      // 5. Every 1-sat "ordinal": look up its origin. Token-like or unknown origins are never swept as NFTs.
+      const kinds = new Map<string, OrdinalKind>();
+      if (assets.ordinals.length) {
+        setProgress('Checking NFTs…');
+        const origins = [...new Set(assets.ordinals.map((o) => o.origin).filter((o): o is string => !!o))];
+        const records = new Map<string, unknown>();
+        for (let i = 0; i < origins.length; i += 50) {
+          const chunk = origins.slice(i, i + 50);
+          const got = await services.txo.getBatch(chunk, { sats: true }).catch(() => null);
+          chunk.forEach((o, k) => got?.[k] && records.set(o, got[k]));
         }
-        sfp.push(...findOwnedSfp(txs, mbOwners, mbAccounts));
-        if (sfp.length) {
-          const spends = await apiContext.services.txo.getSpends(sfp.map((o) => o.outpoint)).catch(() => []);
-          const held = sfp.filter((_, i) => !spends[i]);
-          sfp.splice(0, sfp.length, ...held);
-        }
+        for (const o of assets.ordinals)
+          kinds.set(o.outpoint, classifyOrdinal(o.events ?? [], o.origin ? (records.get(o.origin) ?? null) : null));
       }
-      setFound({ matches, addresses: used.size, assets, keyFor, sfp });
+      const plan = buildPlan(assets, kinds, {
+        bsv: `BSV (${moneyNow(assets.totalBsv)})`,
+        token: (t) => `${t.symbol || t.tokenId.slice(0, 8)}: ${tokenAmount(t.totalAmount, t.decimals)}`,
+      });
+      const t2 = performance.now();
+      console.info(
+        `[sweep] scan: find ${Math.round(t1 - t0)} ms (${checked} lookups), holdings ${Math.round(t2 - t1)} ms (${used.size} addresses)`,
+      );
+      setFound({ matches, addresses: used.size, assets, keyFor, sfp, plan });
+      setSelected(defaultSelection(plan));
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The scan failed. Try again.');
@@ -305,23 +405,37 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const sweep = async () => {
     if (!found) return;
     setStep('sweeping');
-    const { assets, keyFor } = found;
+    const t0 = performance.now();
+    const { keyFor } = found;
+    // Only what the user ticked. Possible tokens are never in the plan's classes, so never here.
+    const work = selectedWork(found.plan, selected);
     const out: Result[] = [];
     const toInputs = (os: IndexedOutput[]) =>
       os.map((o) => ({ outpoint: o.outpoint, satoshis: o.satoshis ?? 0, score: 0 }));
     const keysFor = (inputs: { outpoint: string }[]) => inputs.map((i) => PrivateKey.fromWif(keyFor.get(i.outpoint)!));
+    // Each input transaction's BEEF once, all in parallel (it used to be fetched twice, one by one).
+    const { ctx, prefetch } = withBeefCache(apiContext);
+    setProgress('Finding coins…');
+    await prefetch(
+      [...(work.bsv ? found.assets.funding : []), ...work.nfts, ...work.tokens.flatMap((t) => t.outputs)].map(
+        (o) => o.outpoint,
+      ),
+    );
+    let moved = false;
 
-    if (assets.funding.length) {
-      setProgress('Sweeping BSV…');
+    if (work.bsv && found.assets.funding.length) {
+      setProgress('Signing… BSV');
       try {
         // Only plain P2PKH coins are swept as BSV. Token outputs (Money Button SFP, anything with a
         // script we don't recognise) are kept back so they are never spent as plain BSV.
-        const prepared = await prepareSweepInputs(apiContext, toInputs(assets.funding));
+        const prepared = await prepareSweepInputs(ctx, toInputs(found.assets.funding));
         const { spendable: inputs, kept } = splitSpendable(prepared, new Set(found.sfp.map((o) => o.outpoint)));
         if (inputs.length) {
           const sats = inputs.reduce((n, i) => n + i.satoshis, 0);
-          const r = await sweepBsv.execute(apiContext, { inputs, keys: keysFor(inputs) });
+          setProgress('Sending… BSV');
+          const r = await sweepBsv.execute(ctx, { inputs, keys: keysFor(inputs) });
           out.push({ label: `BSV (${moneyNow(sats)})`, txid: r.txid, error: r.error });
+          moved ||= !r.error;
         }
         if (kept.length)
           out.push({
@@ -332,30 +446,43 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         out.push({ label: 'BSV', error: String(e) });
       }
     }
-    if (assets.ordinals.length) {
-      setProgress('Sweeping NFTs…');
+    if (work.nfts.length) {
+      setProgress('Signing… NFTs');
       try {
-        const inputs = await prepareSweepInputs(apiContext, toInputs(assets.ordinals));
-        const r = await sweepOrdinals.execute(apiContext, { inputs, keys: keysFor(inputs) });
-        out.push({ label: `NFTs (${assets.ordinals.length})`, txid: r.txid, error: r.error });
+        const inputs = await prepareSweepInputs(ctx, toInputs(work.nfts));
+        setProgress('Sending… NFTs');
+        const r = await sweepOrdinals.execute(ctx, { inputs, keys: keysFor(inputs) });
+        out.push({ label: `NFTs (${work.nfts.length})`, txid: r.txid, error: r.error });
+        moved ||= !r.error;
       } catch (e) {
         out.push({ label: 'NFTs', error: String(e) });
       }
     }
-    for (const t of assets.bsv21Tokens) {
+    for (const t of work.tokens) {
       const label = t.symbol || t.tokenId.slice(0, 8);
-      setProgress(`Sweeping ${label}…`);
+      setProgress(`Signing… ${label}`);
       try {
-        const inputs = await prepareSweepInputs(apiContext, toInputs(t.outputs));
-        const r = await sweepBsv21.execute(apiContext, {
+        const inputs = await prepareSweepInputs(ctx, toInputs(t.outputs));
+        setProgress(`Sending… ${label}`);
+        const r = await sweepBsv21.execute(ctx, {
           inputs: inputs.map((i) => ({ ...i, tokenId: t.tokenId, amount: t.totalAmount.toString() })),
           keys: keysFor(inputs),
         });
-        out.push({ label: `${label} (${tokenAmount(t.totalAmount, t.decimals)})`, txid: r.txid, error: r.error });
+        out.push({
+          label: `${label} (${tokenAmount(t.totalAmount, t.decimals)})`,
+          txid: r.txid,
+          error: r.error,
+          amount: t.totalAmount,
+        });
+        moved ||= !r.error;
       } catch (e) {
-        out.push({ label, error: String(e) });
+        out.push({ label, error: String(e), amount: t.totalAmount });
       }
     }
+    console.info(`[sweep] sweep: ${Math.round(performance.now() - t0)} ms`);
+    // The sweeps are this wallet's own actions, so the new outputs are already in its database: reload the
+    // home balance and token / NFT lists now rather than waiting for a tap on Refresh.
+    if (moved) requestWalletRefresh();
     setPhrase('');
     setPassphrase('');
     setResults(out);
@@ -363,7 +490,9 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   };
 
   const a = found?.assets;
-  const nothing = !!a && !a.funding.length && !a.ordinals.length && !a.bsv21Tokens.length;
+  const plan = found?.plan;
+  const nothing = !!plan && !plan.classes.length;
+  const shown = visibleResults(results);
   const skipped = a ? a.opnsNames.length + a.bsv20Tokens.length + a.locked.length : 0;
 
   return createPortal(
@@ -484,13 +613,17 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                 {a.totalBsv.toLocaleString()} sats in {a.funding.length} coin{a.funding.length === 1 ? '' : 's'}, from{' '}
                 {found.addresses} address{found.addresses === 1 ? '' : 'es'}
               </p>
-              <p className="text-sm text-white">
-                {a.ordinals.length} NFT{a.ordinals.length === 1 ? '' : 's'}
-              </p>
-              {a.bsv21Tokens.map((t) => (
-                <p key={t.tokenId} className="text-sm text-white">
-                  {t.symbol || t.tokenId.slice(0, 8)}: {tokenAmount(t.totalAmount, t.decimals)}
-                </p>
+              {plan?.classes.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.key)}
+                    onChange={() => toggle(c.key)}
+                    aria-label={`Sweep ${c.label}`}
+                    style={{ accentColor: GOLD }}
+                  />
+                  {c.label}
+                </label>
               ))}
               {!!skipped && (
                 <p className="text-[11px]" style={{ color: MUTED }}>
@@ -498,6 +631,22 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                 </p>
               )}
             </div>
+            {!!plan?.possibleTokens.length && (
+              <div className="rounded-2xl p-4 flex flex-col gap-1" style={{ background: PANEL }}>
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                  <AlertTriangle size={14} color={GOLD} /> Possible tokens — not swept
+                </p>
+                {plan.possibleTokens.map((o) => (
+                  <p key={o.outpoint} className="text-[11px] break-all" style={{ color: MUTED }}>
+                    {o.name || o.contentType || o.outpoint}
+                  </p>
+                ))}
+                <p className="text-[11px]" style={{ color: MUTED }}>
+                  These 1-sat items trace back to a token, or we couldn’t check where they came from. Moving one as an
+                  NFT could destroy the tokens inside it, so they stay where they are.
+                </p>
+              </div>
+            )}
             {!!found.sfp.length && (
               <div className="rounded-2xl p-4 flex flex-col gap-1" style={{ background: PANEL }}>
                 <p className="text-xs font-semibold text-white">Money Button tokens (kept, not swept)</p>
@@ -524,10 +673,11 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
             ) : (
               <button
                 onClick={() => void sweep()}
-                className="rounded-xl py-3 text-sm font-bold"
+                disabled={!selected.size}
+                className="rounded-xl py-3 text-sm font-bold disabled:opacity-40"
                 style={{ background: GOLD, color: '#1a1300' }}
               >
-                Sweep all to this account
+                {plan ? sweepButtonLabel(plan, selected) : 'Sweep'}
               </button>
             )}
             <p className="text-[11px]" style={{ color: MUTED }}>
@@ -541,7 +691,12 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
 
         {step === 'done' && (
           <>
-            {results.map((r) => (
+            {!shown.length && (
+              <p className="text-sm" style={{ color: MUTED }}>
+                Nothing to move.
+              </p>
+            )}
+            {shown.map((r) => (
               <div key={r.label} className="flex items-start gap-2 rounded-xl p-3" style={{ background: PANEL }}>
                 {r.error ? <X size={16} color={RED} /> : <Check size={16} color="#2ecc71" />}
                 <div className="flex flex-col min-w-0">
@@ -553,7 +708,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
               </div>
             ))}
             <button
-              onClick={leave}
+              onClick={finish}
               className="rounded-xl py-3 text-sm font-bold"
               style={{ background: GOLD, color: '#1a1300' }}
             >
