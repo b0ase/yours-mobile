@@ -34,7 +34,16 @@ export interface SpaceMediaCallbacks {
    * `handle.screen` identity (bit-sign `device: 'screen'`), so the phone keeps the voice.
    */
   onScreen?: (owner: string | null) => void;
+  /** My own broadcast (Broadcast › Share a tab or screen) started or stopped, incl. the browser's own Stop sharing. */
+  onBroadcast?: (on: boolean) => void;
 }
+
+/**
+ * Can this device broadcast a tab or screen? Desktop browsers (and the Chrome extension side panel)
+ * have getDisplayMedia; phone WebViews and iOS Safari do not, so the option is hidden there.
+ */
+export const canBroadcastScreen = () =>
+  !isNative && typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
 /** bit-sign's screen-device identity suffix: `alice.screen` is alice's laptop. */
 const SCREEN_SUFFIX = '.screen';
@@ -93,8 +102,8 @@ export class SpaceMedia {
         // 'balanced' drops a little frame rate before resolution on a weak uplink, instead of
         // the browser default for camera tracks which sheds resolution first (the blocky look).
         degradationPreference: 'balanced',
-        // Screen share: 1080p, 15fps, enough bitrate for text.
-        screenShareEncoding: { maxBitrate: 2_500_000, maxFramerate: 15 },
+        // Screen share: 1080p30 at 4 Mbps: enough for text AND a moving VJ mix (Broadcast).
+        screenShareEncoding: { maxBitrate: 4_000_000, maxFramerate: 30 },
       },
     });
     this.room = room;
@@ -135,8 +144,21 @@ export class SpaceMedia {
       })
       .on(RoomEvent.TrackMuted, () => this.emitVideos())
       .on(RoomEvent.TrackUnmuted, () => this.emitVideos())
-      .on(RoomEvent.LocalTrackPublished, () => this.emitVideos())
-      .on(RoomEvent.LocalTrackUnpublished, () => this.emitVideos())
+      .on(RoomEvent.LocalTrackPublished, (pub) => {
+        this.emitVideos();
+        if (pub.source === Track.Source.ScreenShare) {
+          this.emitScreen();
+          this.cb?.onBroadcast?.(true);
+        }
+      })
+      .on(RoomEvent.LocalTrackUnpublished, (pub) => {
+        this.emitVideos();
+        // Also fires when the browser's own "Stop sharing" bar ends the capture.
+        if (pub.source === Track.Source.ScreenShare) {
+          this.emitScreen();
+          this.cb?.onBroadcast?.(false);
+        }
+      })
       .on(RoomEvent.ParticipantDisconnected, (who: RemoteParticipant) => {
         if (this.videos.delete(who.identity)) this.emitVideos();
         if (this.screens.delete(who.identity)) this.emitScreen();
@@ -200,7 +222,15 @@ export class SpaceMedia {
     for (const h of live) this.reattach(h);
   }
 
+  private localScreen(): VideoTrack | null {
+    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    return (pub?.track as VideoTrack | undefined) ?? null;
+  }
+
   private currentScreen(): [string, VideoTrack] | null {
+    // My own broadcast first: the host sees exactly what the room sees.
+    const mine = this.localScreen();
+    if (mine) return [this.me, mine];
     const all = [...this.screens.entries()];
     return all.length ? all[all.length - 1] : null;
   }
@@ -261,6 +291,37 @@ export class SpaceMedia {
     return who?.audioLevel ?? 0;
   }
 
+  get broadcasting() {
+    return !!this.localScreen();
+  }
+
+  /**
+   * Broadcast a tab or screen into the Space (the AV mixer tab, a game, slides): LiveKit screen-share
+   * video plus the tab's sound where the browser offers it (Chrome: tick "Share tab audio").
+   * bit-sign's token already grants host and speakers `screen_share` + `screen_share_audio`; a
+   * listener's attempt is refused by the SFU. Throws if the picker is cancelled.
+   */
+  async startBroadcast() {
+    const lp = this.room?.localParticipant;
+    if (!lp) throw new Error('Not in a Space.');
+    if (!lp.permissions?.canPublish) throw new Error('Only the host and speakers can broadcast.');
+    await lp.setScreenShareEnabled(true, {
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      resolution: VideoPresets.h1080.resolution,
+      contentHint: 'motion',
+      preferCurrentTab: false,
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include',
+      systemAudio: 'include',
+    } as Parameters<typeof lp.setScreenShareEnabled>[1]);
+    this.emitScreen();
+  }
+
+  async stopBroadcast() {
+    await this.room?.localParticipant.setScreenShareEnabled(false).catch(() => undefined);
+    this.emitScreen();
+  }
+
   get canPublish() {
     return !!this.room?.localParticipant.permissions?.canPublish;
   }
@@ -295,6 +356,7 @@ export class SpaceMedia {
     if (!lp) return;
     await lp.setMicrophoneEnabled(false).catch(() => undefined);
     await lp.setCameraEnabled(false).catch(() => undefined);
+    await lp.setScreenShareEnabled(false).catch(() => undefined);
     this.emitVideos();
   }
 
