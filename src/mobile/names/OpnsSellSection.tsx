@@ -16,9 +16,11 @@ import {
   usdOrSats,
 } from './opnsSell';
 import { OpnsSellSheet } from './OpnsSheets';
+import { OpnsGiftPanel } from './OpnsGiftPanel';
+import { withoutGifted } from './opnsGift';
 
 /**
- * bMint › OpNS names › Owned names: tick names, "List selected for $1", one approval, then each name is
+ * bMint › OpNS names › Owned names (bWalletX; the store edition shows OpnsGiftSection): Gift and Sell. Tick names, "List selected for $1", one approval, then each name is
  * listed in turn (OrdLock v2, sellOpns) with progress; the queue is saved so a closed window can Resume.
  */
 const GOLD = '#FFD24D';
@@ -44,7 +46,10 @@ export const OpnsSellSection = (p: {
   owned: OwnedForSale[];
   onChanged: () => void;
 }) => {
-  const { ctx, identityAddress, rate, owned } = p;
+  const { ctx, identityAddress, rate } = p;
+  const [gifted, setGifted] = useState<Set<string>>(new Set());
+  const [gifting, setGifting] = useState<OwnedForSale[] | null>(null);
+  const owned = useMemo(() => withoutGifted(p.owned, gifted), [p.owned, gifted]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState<SellState | null>(() => loadSellBatch(identityAddress));
@@ -61,11 +66,13 @@ export const OpnsSellSection = (p: {
 
   const unlisted = useMemo(() => owned.filter((o) => o.listedSats === null), [owned]);
   const chosen = unlisted.filter((o) => picked.has(o.name));
+  const chosenAll = owned.filter((o) => picked.has(o.name));
   const usdFor = (name: string) => parseUsdInput(prices[name] ?? '') ?? OPNS_SELL_USD;
   const customPrices = Object.fromEntries(chosen.map((o) => [o.name, usdFor(o.name)]));
   const totalUsd = chosen.reduce((a, o) => a + usdFor(o.name), 0);
   const allSame = chosen.every((o) => usdFor(o.name) === OPNS_SELL_USD);
-  const allPicked = unlisted.length > 0 && chosen.length === unlisted.length;
+  const selectable = owned;
+  const allPicked = selectable.length > 0 && chosenAll.length === selectable.length;
 
   const toggle = (name: string) =>
     setPicked((s) => {
@@ -141,7 +148,7 @@ export const OpnsSellSection = (p: {
   const showProgress = !!batch && batch.items.length > 0;
   const done = showProgress ? batch.items.length - left : 0;
 
-  if (!owned.length && !showProgress) return null;
+  if (!owned.length && !showProgress && !gifting) return null;
 
   return (
     <section
@@ -158,15 +165,15 @@ export const OpnsSellSection = (p: {
             Owned names
           </h2>
           <span className="text-xs" style={{ color: MUTED }}>
-            Tick names to sell. Anyone can buy a listed name; cancel any time before it sells.
+            Tick names to sell or gift. Anyone can buy a listed name; cancel any time before it sells.
           </span>
         </div>
-        {unlisted.length > 1 && !showProgress && (
+        {selectable.length > 1 && !showProgress && !gifting && (
           <button
             type="button"
             className={`${ghostBtn} shrink-0 whitespace-nowrap`}
             style={{ color: GOLD }}
-            onClick={() => setPicked(allPicked ? new Set() : new Set(unlisted.map((o) => o.name)))}
+            onClick={() => setPicked(allPicked ? new Set() : new Set(selectable.map((o) => o.name)))}
           >
             {allPicked ? 'Select none' : 'Select all'}
           </button>
@@ -255,14 +262,14 @@ export const OpnsSellSection = (p: {
                 className="flex items-center justify-between gap-3 py-2 text-[13px]"
                 style={{ borderTop: `1px solid ${HAIR}` }}
               >
-                <label className={`flex items-center gap-3 min-w-0 ${listed || showProgress ? '' : 'cursor-pointer'}`}>
+                <label className={`flex items-center gap-3 min-w-0 ${running || gifting ? '' : 'cursor-pointer'}`}>
                   <input
                     type="checkbox"
                     checked={on}
-                    disabled={listed || running}
+                    disabled={running || !!gifting}
                     onChange={() => toggle(o.name)}
                     className="w-4 h-4 shrink-0 accent-[#FFD24D] cursor-pointer disabled:cursor-not-allowed"
-                    aria-label={`Sell ${o.name}`}
+                    aria-label={`Select ${o.name}`}
                   />
                   <span className="font-medium break-all" style={{ color: listed ? MUTED : TEXT }}>
                     {o.name}
@@ -301,6 +308,16 @@ export const OpnsSellSection = (p: {
                       Not listed
                     </span>
                   )}
+                  <button
+                    type="button"
+                    className={ghostBtn}
+                    style={{ color: GOLD, border: `1px solid ${HAIR}` }}
+                    disabled={!ctx || running || !!gifting || busyId === o.id}
+                    onClick={() => setGifting([o])}
+                    aria-label={`Gift ${o.name}`}
+                  >
+                    Gift
+                  </button>
                 </span>
               </li>
             );
@@ -308,7 +325,33 @@ export const OpnsSellSection = (p: {
         </ul>
       )}
 
-      {unlisted.length > 0 && (
+      {gifting && (
+        <OpnsGiftPanel
+          key={gifting.map((g) => g.name).join(',')}
+          ctx={ctx}
+          names={gifting}
+          onGifted={(names) => {
+            setGifted((g) => new Set([...g, ...names]));
+            setPicked(new Set());
+            p.onChanged();
+          }}
+          onClose={() => setGifting(null)}
+        />
+      )}
+
+      {!gifting && owned.length > 0 && (
+        <button
+          type="button"
+          className={`${goldBtn} w-full py-3 text-[14px]`}
+          style={{ background: 'transparent', color: GOLD, border: `1px solid rgba(255,210,77,0.45)` }}
+          disabled={!ctx || !chosenAll.length || running}
+          onClick={() => setGifting(chosenAll)}
+        >
+          {chosenAll.length > 1 ? `Gift ${chosenAll.length} selected` : 'Gift selected'}
+        </button>
+      )}
+
+      {!gifting && unlisted.length > 0 && (
         <button
           type="button"
           className={`${goldBtn} w-full py-3 text-[14px]`}
