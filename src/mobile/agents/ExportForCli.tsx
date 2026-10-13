@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { encryptAgentKeyFile, MIN_PASSPHRASE } from './agentKeyFile';
 import { isAgentAccount } from './agentAccounts';
+import { APP_NAME } from '../storeBuild';
 import { saveTextFile } from './saveText';
 import { ErrorActions } from '../errors/ErrorActions';
 
@@ -15,6 +16,15 @@ const CARD = '#17191E';
  * `bwalletx key import` (CLI / MCP, standalone mode). Agent accounts only, current account only (its keys
  * are the unlocked ones), wallet password required.
  */
+/** The key file's login in password managers: "opns.agent", like bChat's dotted names. */
+const agentLogin = (name: string) =>
+  `${
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '') || 'agent'
+  }.agent`;
+
 export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
   const { keysService } = useServiceContext();
   const [open, setOpen] = useState(false);
@@ -97,15 +107,19 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
         </>
       ) : (
         <>
+          {/* Hidden usernames, so the browser files each password under the right name instead of guessing
+              from a nearby field (owner, 13 Oct 2026: it saved the passphrase as "100"). */}
+          <input type="text" name="username" autoComplete="username" value={APP_NAME} readOnly hidden />
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Wallet password"
+            placeholder="Master password"
             autoComplete="current-password"
             className={input}
             style={style}
           />
+          <input type="text" name="agent-username" autoComplete="username" value={agentLogin(name)} readOnly hidden />
           <input
             type="password"
             value={pass}
