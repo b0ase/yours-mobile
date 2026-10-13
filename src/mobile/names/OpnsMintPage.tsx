@@ -15,6 +15,7 @@ import { NODE_SCRIPT_ESTIMATE, PHONE_HASHRATE } from './GetYourName';
 import { estimateMintFee } from './opnsMint';
 import {
   ALLOWANCE_USED_UP,
+  applySweep,
   checkNames,
   invalidReason,
   loadBatch,
@@ -34,6 +35,8 @@ import {
 } from './opnsBatch';
 import { formatEta, mineName } from './opnsRegister';
 import { opnsTreeFor } from './opnsTree';
+import { sweepDeadMints } from './opnsTxStatus';
+import { walletTxStates } from '../media/unbroadcast';
 import { MARKET_ENABLED } from '../storeBuild';
 import { checkOpnsAvailability } from './names';
 import { buyOpnsListing, listOpnsName } from './opnsBuy';
@@ -214,10 +217,52 @@ export const OpnsMintPage = () => {
       })
       .catch(() => {});
 
+  /**
+   * Mints the network never received (13 Oct 2026, opnsTxStatus.ts): checked against WhatsOnChain on page load, on
+   * Resume and before every name in a run; dead ones are evicted from the tree cache and their names go back to
+   * pending. `withWallet` also asks the wallet which of its own actions failed (dead at once, no grace period).
+   */
+  const sweep = async (withWallet: boolean) => {
+    let offChain: Set<string> | undefined;
+    if (withWallet && apiContext)
+      offChain = await walletTxStates(apiContext.wallet).then(
+        (s) => s.offChain,
+        () => undefined,
+      );
+    return sweepDeadMints(opnsTreeFor(identityAddress), f, { offChain });
+  };
+  /** Every address of every account in this wallet (agent accounts included): a name they own is ours, not "taken". */
+  const myAddresses = () => {
+    const out = new Set<string>();
+    for (const a of chromeStorageService.getAllAccounts())
+      for (const v of Object.values(a.addresses ?? {})) if (typeof v === 'string' && v) out.add(v);
+    return out;
+  };
+  const takenBy = async (name: string) => {
+    const a = await checkOpnsAvailability(f, name);
+    return a.status === 'taken' && a.owner && myAddresses().has(a.owner)
+      ? ('another-account' as const)
+      : ('other' as const);
+  };
+
   useEffect(() => {
     void refreshOwned();
     void refreshBalance();
     setBatch(loadBatch(identityAddress));
+    let live = true;
+    void sweep(true)
+      .then((sw) => {
+        if (!live || !sw.dead.length) return;
+        setBatch((b) => {
+          const next = b ? applySweep(b, sw, perChar) : b;
+          if (next && next !== b) saveBatch(identityAddress, next);
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiContext, identityAddress]);
   useEffect(() => () => abort.current?.abort(), []);
@@ -351,11 +396,19 @@ export const OpnsMintPage = () => {
     setRunning(true);
     setMsg('');
     try {
+      // Resume: first drop the mints the network never received, so their names are mined again, not waited on.
+      const begin = applySweep(start, await sweep(true).catch(() => ({ dead: [], seen: [], unknown: [] })), perChar);
+      if (begin !== start) {
+        saveBatch(identityAddress, begin);
+        setBatch(begin);
+      }
       const r = await runBatch(
         {
           fetch: f,
           mine: (name, signal) =>
             mineName({ ctx: apiContext, fetch: f, tree: opnsTreeFor(identityAddress) }, name, signal, () => undefined),
+          sweep: () => sweep(false),
+          takenBy,
           payFee,
           afterMint: autoList ? listAfterMint : undefined,
           // Read at listing time (and from storage), so names vaulted after approval are skipped too.
@@ -367,12 +420,15 @@ export const OpnsMintPage = () => {
           perCharSats: perChar,
           perNameSats: feePerNameSats,
         },
-        start,
+        begin,
         ctl.signal,
       );
       if (r.stopped === 'error' && r.error === ALLOWANCE_USED_UP) setMsg(`${ALLOWANCE_USED_UP}.`);
+      else if (r.stopped === 'error' && r.namesServer) setMsg(r.error ?? '');
       else if (r.stopped === 'error') setMsg(`Stopped: ${r.error}. Fix it, then Resume.`);
       else if (r.stopped === 'cancelled') setMsg('Paused. Characters already mined stay yours; Resume any time.');
+      else if (r.stopped === 'finished' && remaining(r.state) > 0)
+        setMsg('Some names are waiting for a mint to be indexed. Resume in about 10 minutes.');
       void refreshOwned();
       void refreshBalance();
     } finally {
