@@ -11,6 +11,9 @@ import './bmint.css';
  */
 const NotesPage = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesPage')) : null;
 
+// OpNS names (names/OpnsMintPage.tsx, its own chunk) renders inside the shell at /m/bmint/opns.
+const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
+
 const BASE = '/m/bmint';
 
 /** Gold rosette art for the Notes tile (drawn, so no picture loads on the landing page). */
@@ -89,7 +92,7 @@ export const BmintPage = () => (
     <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
       <Routes>
         {NotesPage && <Route path="notes" element={<NotesPage />} />}
-        {/* opns: the sibling OpNS page registers itself (feat/opns-mint-page). */}
+        <Route path="opns" element={<OpnsMintPage />} />
         <Route path="*" element={<Landing />} />
       </Routes>
     </Suspense>

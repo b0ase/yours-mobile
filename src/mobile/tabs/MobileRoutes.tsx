@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import {
@@ -47,10 +47,10 @@ const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ 
 const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
 // Desktop sidebar › Friends (/wallet/friends, docs/FRIENDS.md).
 const FriendsPage = lazy(() => import('../friends/FriendsPage'));
-// OpNS "Mint a list" (/opns-mint, names/OpnsMintPage.tsx).
-const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
-// bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx.
+// bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx; OpNS names renders inside it at /m/bmint/opns.
+// Old /opns-mint links redirect there, keeping ?mint=.
 const BmintPage = lazy(() => import('../bmint/BmintPage'));
+const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
 // No app-wide error boundary upstream: one throw blanked the whole page (owner, 6 Oct 2026).
@@ -80,8 +80,8 @@ const MobileRoutes = () => (
         {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
-        <Route path="opns-mint" element={<OpnsMintPage />} />
         <Route path="bmint/*" element={<BmintPage />} />
+        <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="lock" element={<LockScreen />} />
         <Route path="lock/locks" element={<LockScreen />} />

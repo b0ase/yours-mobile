@@ -271,7 +271,7 @@ export const IdentityMap = ({ onClose }: { onClose: () => void }) => {
           shown={names.handle || 'None'}
           what="An on-chain name you own as an ordinal. It points at your ordinals address."
         >
-          <Link to="/m/opns-mint" className="text-[11px]" style={{ color: GOLD }}>
+          <Link to="/m/bmint/opns" className="text-[11px]" style={{ color: GOLD }}>
             Mint a list of names
           </Link>
         </Node>
