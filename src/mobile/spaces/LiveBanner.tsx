@@ -56,6 +56,8 @@ export const LiveBanner = ({
   autoOpen?: boolean;
 }) => {
   const [state, setState] = useState<SpaceState | null>(null);
+  /** Live per the public route, when the member-gated read failed (see BchatClient.spaceLivePublic). */
+  const [publicLive, setPublicLive] = useState(false);
   const [issuer, setIssuer] = useState(false);
   const [open, setOpen] = useState<{ start?: string; always?: boolean } | null>(null);
   const [meta, setMeta] = useState<RoomSpaceMeta | null>(null);
@@ -77,8 +79,16 @@ export const LiveBanner = ({
           if (!live) return;
           setState(parseSpaceState(d, me));
           setMeta(parseRoomSpaceMeta(d, ticker));
+          setPublicLive(false);
         })
-        .catch(() => undefined);
+        // The member read failed (no bChat session yet, no member row, a blip): ask the public route
+        // so a live Space is never invisible in its own room (owner, 13 Oct 2026).
+        .catch(() =>
+          client
+            .spaceLivePublic(ticker)
+            .then((r) => live && r !== 'unknown' && setPublicLive(r === 'live'))
+            .catch(() => undefined),
+        );
     void load();
     const id = setInterval(load, POLL_MS);
     return () => {
@@ -147,7 +157,7 @@ export const LiveBanner = ({
             Join
           </span>
         </button>
-      ) : space ? (
+      ) : space || publicLive ? (
         <button
           onClick={() => setOpen({})}
           className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
@@ -161,14 +171,15 @@ export const LiveBanner = ({
           </span>
           <span className="flex-1 min-w-0">
             <span className="block text-[13px] font-semibold text-white truncate">
-              Live now{space.title ? `: ${space.title}` : ''}
+              Live now{space?.title ? `: ${space.title}` : ` in $${ticker}`}
             </span>
             <span className="block text-[11px]" style={{ color: MUTED }}>
-              {stageOf(state!)
-                .slice(0, 3)
-                .map((p) => `$${p.handle}`)
-                .join(', ')}{' '}
-              · {audienceLine(audienceCount(state!))}
+              {space
+                ? `${stageOf(state!)
+                    .slice(0, 3)
+                    .map((p) => `$${p.handle}`)
+                    .join(', ')} · ${audienceLine(audienceCount(state!))}`
+                : 'Tap to watch and listen'}
             </span>
           </span>
           <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: GOLD, color: '#010101' }}>
