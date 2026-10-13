@@ -586,7 +586,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/Settings.tsx': [
     [
       "import { ToggleSwitch } from '../components/ToggleSwitch';",
-      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';\nimport { IdentityVerification } from '../mobile/kyc/IdentityVerification';\nimport { FeedSettings } from '../mobile/settings/FeedSettings';\nimport { SettingsAccountHeader, SettingsGroup } from '../mobile/settings/SettingsAccountHeader';",
+      "import { ToggleSwitch } from '../components/ToggleSwitch';\nimport { GetYourName } from '../mobile/names/GetYourName';\nimport { IdentityVerification } from '../mobile/kyc/IdentityVerification';\nimport { FeedSettings } from '../mobile/settings/FeedSettings';\nimport { SettingsAccountHeader, SettingsGroup } from '../mobile/settings/SettingsAccountHeader';\nimport { BchatAccountSettings } from '../mobile/settings/BchatAccountSettings';",
     ],
     // One flow: profile name (upstream) → "Make your name payable" (paymail / OpNS, defaulting to the profile name).
     [
@@ -594,6 +594,12 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "          <GetYourName profileName={identity.isPublished ? identity.profile.name : ''} />\n          {identity.bapId && identity.isPublished && (",
     ],
     ['          {identityPubKey && (', '          <IdentityVerification />\n          {identityPubKey && ('],
+    // Settings › Permissions: how this account signs in to bChatX sits with the other connected apps, not at the top of
+    // Settings (owner, 11 Oct 2026: it looked "special" there).
+    [
+      "                <PermissionsManager onBack={() => setPage('main')} />",
+      '                <PermissionsManager onBack={() => setPage(\'main\')} />\n                <div className="mt-6">\n                  <p className="m-0 mb-1 px-1 text-xs" style={{ color: \'#98A2B3\' }}>\n                    How this account signs in to bChatX\n                  </p>\n                  <BchatAccountSettings />\n                </div>',
+    ],
     // Settings → General (one row each for Feed, Payments, Subscriptions, … opening its own page), Privacy, Connections, Help.
     [
       '      {/* Preferences section */}',
