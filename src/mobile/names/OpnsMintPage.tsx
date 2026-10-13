@@ -413,7 +413,7 @@ export const OpnsMintPage = () => {
       style={{ background: '#050506', paddingTop: '3.5rem', paddingBottom: 'calc(var(--dock-h, 3.75rem) + 96px)' }}
     >
       <TopNav />
-      <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 pt-5 flex flex-col gap-4">
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-5 flex flex-col gap-4">
         <div className="flex items-start gap-4">
           <GoldArt size={56} />
           <div className="flex flex-col gap-1 min-w-0">
