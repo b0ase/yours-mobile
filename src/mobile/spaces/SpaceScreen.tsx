@@ -46,7 +46,9 @@ import { useBackClose } from '../backStack';
 import { isAdminRefusal as adminRefusal } from '../chat/autoClaim';
 import { ChatApiError, type BchatClient } from '../chat/api';
 import { latestCursor, mergeMessages, type ChatMessage } from '../chat/messages';
-import { SpaceMedia, type Facing } from './media';
+import { canBroadcastScreen, SpaceMedia, type Facing } from './media';
+import { BroadcastSheet } from './BroadcastSheet';
+import { profileUrlOf } from './broadcast';
 import { rejoinWithBackoff, SpaceOverError } from './reconnect';
 import { useOnResume } from '../permissions/useOnResume';
 import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
@@ -139,7 +141,22 @@ const useLandscape = () => {
  * (the audio arrives on its own elements). Fullscreen is the zoom: native fullscreen allows
  * pinch-zoom, and iOS only fullscreens the <video> itself (`webkitEnterFullscreen`).
  */
-const ScreenTile = ({ owner, media }: { owner: string; media: SpaceMedia }) => {
+const ScreenTile = ({
+  owner,
+  media,
+  mine = false,
+  deaf,
+  onSound,
+  onStop,
+}: {
+  owner: string;
+  media: SpaceMedia;
+  /** My own broadcast: LIVE badge, Stop, and where it plays. */
+  mine?: boolean;
+  deaf: boolean;
+  onSound: () => void;
+  onStop?: () => void;
+}) => {
   const ref = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -167,9 +184,48 @@ const ScreenTile = ({ owner, media }: { owner: string; media: SpaceMedia }) => {
         className="block w-full object-contain"
         style={{ maxHeight: '70vh' }}
       />
-      <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
-        <Monitor size={12} /> ${owner}&rsquo;s screen
-      </span>
+      {mine ? (
+        <span
+          className="absolute left-2 top-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-white"
+          style={{ background: '#D92D20' }}
+          data-broadcast-live=""
+        >
+          <Radio size={12} /> LIVE broadcast
+        </span>
+      ) : (
+        <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
+          <Monitor size={12} /> ${owner}&rsquo;s broadcast
+        </span>
+      )}
+      {mine && onStop && (
+        <button
+          onClick={onStop}
+          className="absolute right-2 top-2 rounded-full px-3 py-1 text-[11px] font-bold text-white"
+          style={{ background: '#D92D20' }}
+        >
+          Stop
+        </button>
+      )}
+      {!mine && (
+        <button
+          onClick={onSound}
+          aria-label={deaf ? 'Sound on' : 'Sound off'}
+          aria-pressed={!deaf}
+          className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-[11px] text-white"
+        >
+          {deaf ? <VolumeX size={14} /> : <Volume2 size={14} />} {deaf ? 'Sound off' : 'Sound on'}
+        </button>
+      )}
+      {mine && (
+        <a
+          href={profileUrlOf(owner)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute bottom-2 left-2 rounded-full bg-black/70 px-2 py-1 text-[11px] text-white underline"
+        >
+          Plays on bchatx.com/u/{owner}
+        </a>
+      )}
       <button
         onClick={full}
         aria-label="Fullscreen"
@@ -511,6 +567,9 @@ const SpaceScreenInner = ({
   const prev = useRef<SpaceState | null>(null);
   const [videos, setVideos] = useState<string[]>([]);
   const [screenOwner, setScreenOwner] = useState<string | null>(null);
+  /** My own tab/screen broadcast is live (Broadcast button). */
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastSheet, setBroadcastSheet] = useState(false);
   const [speakers, setSpeakers] = useState<string[]>([]);
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
@@ -608,6 +667,7 @@ const SpaceScreenInner = ({
         await media.connect(tok.url, tok.token, {
           onVideos: (v) => mounted.current && setVideos(v),
           onScreen: (o) => mounted.current && setScreenOwner(o),
+          onBroadcast: (on) => mounted.current && setBroadcasting(on),
           onSpeakers: (s) => mounted.current && setSpeakers(s),
           onCanPublish: () => undefined,
           onDisconnected: () => mounted.current && !left.current && void recoverRef.current(),
@@ -646,6 +706,7 @@ const SpaceScreenInner = ({
       await media.connect(tok.url, tok.token, {
         onVideos: (v) => mounted.current && setVideos(v),
         onScreen: (o) => mounted.current && setScreenOwner(o),
+        onBroadcast: (on) => mounted.current && setBroadcasting(on),
         onSpeakers: (s) => mounted.current && setSpeakers(s),
         onCanPublish: (can) => {
           if (!mounted.current) return;
@@ -860,6 +921,24 @@ const SpaceScreenInner = ({
       refused('camera', e, 'Couldn’t start the camera.');
     }
   };
+  /** Broadcast › Share a tab or screen: the AV mixer tab, a game, slides (media.startBroadcast). */
+  const startBroadcast = async () => {
+    setBroadcastSheet(false);
+    try {
+      await media.startBroadcast();
+      setBroadcasting(true);
+      setNote('You are broadcasting. Everyone in the Space sees it.');
+    } catch (e) {
+      // Cancelling the browser picker is a choice, not an error.
+      const name = (e as { name?: string })?.name;
+      if (name === 'NotAllowedError' || name === 'AbortError') return;
+      setNote(errText(e));
+    }
+  };
+  const stopBroadcast = async () => {
+    await media.stopBroadcast();
+    setBroadcasting(false);
+  };
   const flip = async () => {
     const f: Facing = facing === 'user' ? 'environment' : 'user';
     setFacing(f);
@@ -1022,7 +1101,16 @@ const SpaceScreenInner = ({
       </Centered>
     ) : (
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
-        {screenOwner && <ScreenTile owner={screenOwner} media={media} />}
+        {screenOwner && (
+          <ScreenTile
+            owner={screenOwner}
+            media={media}
+            mine={broadcasting && screenOwner === media.me}
+            deaf={deaf}
+            onSound={() => setDeaf((d) => !d)}
+            onStop={() => void stopBroadcast()}
+          />
+        )}
         {stageView}
         {roomMeta.alwaysHere.map((a) => (
           <AlwaysHereTile key={a.handle} agent={a} />
@@ -1062,6 +1150,15 @@ const SpaceScreenInner = ({
             >
               Moderators
             </button>
+          ) : null}
+          {broadcastSheet ? (
+            <BroadcastSheet
+              canShare={canBroadcastScreen()}
+              ticker={ticker}
+              profileUrl={profileUrlOf(media.me)}
+              onShare={() => void startBroadcast()}
+              onClose={() => setBroadcastSheet(false)}
+            />
           ) : null}
           {modsOpen ? (
             <ModeratorsSheet
@@ -1174,12 +1271,20 @@ const SpaceScreenInner = ({
               <RefreshCw size={18} color="#fff" />
             </CtlButton>
           )}
+          <CtlButton
+            label={broadcasting ? 'Live' : 'Broadcast'}
+            onClick={() => (broadcasting ? void stopBroadcast() : setBroadcastSheet(true))}
+            active={broadcasting}
+          >
+            <Radio size={20} color={broadcasting ? '#010101' : '#fff'} />
+          </CtlButton>
           {myRole === 'speaker' && (
             <CtlButton
               label="Step down"
               onClick={() => {
                 void media.setMic(false).catch(() => undefined);
                 void media.setCamera(false, facing).catch(() => undefined);
+                void stopBroadcast();
                 setMicOn(false);
                 setCamOn(false);
                 void act({ action: 'step_down' });
