@@ -62,10 +62,18 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     setText(raw);
     const p = parseRecipient(raw);
     const n = ++seq.current;
-    if (p.kind === 'empty' || p.kind === 'address' || p.kind === 'invalid') {
+    if (p.kind === 'empty' || p.kind === 'address') {
       setState({ s: 'idle' });
-      emit(raw.trim());
-      status.current?.(p.kind === 'empty' ? 'empty' : p.kind === 'address' ? 'ready' : 'typing');
+      emit(p.kind === 'address' ? p.address : '');
+      status.current?.(p.kind === 'empty' ? 'empty' : 'ready');
+      return;
+    }
+    // Invalid input is never handed upstream as an address, and the message shown here is the same
+    // 'error' status that disables the Send button (sendLogic.sendButton).
+    if (p.kind === 'invalid') {
+      setState({ s: 'error', msg: p.reason });
+      emit('');
+      status.current?.('error');
       return;
     }
     emit('');

@@ -1,5 +1,5 @@
-import validate from 'bitcoin-address-validation';
 import { Utils } from '@bsv/sdk';
+import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
 import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
 
 /**
@@ -36,9 +36,11 @@ const OPNS_RE = /^[a-z0-9-]{1,64}$/i;
 export const HANDCASH_DOMAIN = 'handcash.io';
 
 export const parseRecipient = (raw: string): Parsed => {
-  const s = raw.trim();
+  const s = cleanRecipient(raw);
   if (!s) return { kind: 'empty' };
-  if (validate(s)) return { kind: 'address', address: s };
+  if (isMainnetAddress(s)) return { kind: 'address', address: s };
+  // "$0.01" / "5" / "£1": an amount in the wrong box, never a $handle or OpNS name.
+  if (looksLikeAmount(s)) return { kind: 'invalid', reason: AMOUNT_HINT };
   const h = s.match(HANDLE_RE);
   if (h) {
     const handle = h[1].toLowerCase();
