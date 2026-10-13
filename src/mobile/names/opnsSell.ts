@@ -2,6 +2,7 @@ import type { WalletOutput } from '@bsv/sdk';
 import { fmtSats, fmtUsd, satsToUsd, usdToSats } from '../money/money';
 import type { Fetch } from './names';
 import type { KV } from './opnsBatch';
+import { nameTierUsd } from './store/tiers';
 
 /**
  * Sell OpNS names (owner, 13 Oct 2026): list names from the wallet for $1 each, find listed names, buy them.
@@ -12,7 +13,7 @@ import type { KV } from './opnsBatch';
  * Listed names from anyone come from the 1Sat order book (market/listings?type=application/op-ns).
  */
 
-/** Default asking price per name, in USD. Converted to sats at the live rate when the batch is approved. */
+/** The lowest tier price, in USD (5+ characters). Names are priced by store/tiers.ts nameTierUsd. */
 export const OPNS_SELL_USD = 1;
 
 /** Rough network fee for one listing tx (the name input + funding + change), shown in the invoice. */
@@ -94,7 +95,7 @@ export type SellState = { v: 1; items: SellItem[]; rate: number; createdAt: numb
 
 /**
  * One queue for the approved names. Prices are fixed in sats here, at the rate shown on the approval sheet,
- * so a resume later lists at exactly what was approved. `prices` overrides the $1 default per name.
+ * so a resume later lists at exactly what was approved. `prices` overrides the tier price per name.
  */
 export const newSellBatch = (
   names: { name: string; id: string }[],
@@ -104,7 +105,9 @@ export const newSellBatch = (
 ): SellState | null => {
   const items: SellItem[] = [];
   for (const n of names) {
-    const usd = prices[n.name] ?? OPNS_SELL_USD;
+    // Tier price by length (store/tiers.ts); a premium name is only listed at a price the owner typed.
+    const usd = prices[n.name] ?? nameTierUsd(n.name);
+    if (usd === null) continue;
     const sats = listingSats(usd, rate);
     if (!sats) return null;
     items.push({ name: n.name, id: n.id, usd, sats, status: 'pending' });

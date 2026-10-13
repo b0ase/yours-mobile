@@ -101,12 +101,12 @@ describe('listing disabled for vaulted', () => {
   test('a queued sell batch never lists a vaulted name', async () => {
     const b = newSellBatch(
       [
-        { name: 'a', id: '1' },
-        { name: 'b', id: '2' },
+        { name: 'alpha', id: '1' },
+        { name: 'bravo', id: '2' },
       ],
       50,
     )!;
-    const vault = addToShelf(emptyVault(), 'keep', ['a']);
+    const vault = addToShelf(emptyVault(), 'keep', ['alpha']);
     const listed: string[] = [];
     const r = await runSellBatch(
       {
@@ -119,7 +119,7 @@ describe('listing disabled for vaulted', () => {
       b,
       new AbortController().signal,
     );
-    expect(listed).toEqual(['b']);
+    expect(listed).toEqual(['bravo']);
     expect(r.state.items[0].note).toBe('In your Vault');
   });
 });

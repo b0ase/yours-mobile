@@ -74,6 +74,8 @@ describe('batching + resume', () => {
     newSellBatch(
       ['a', 'b', 'c'].map((n) => ({ name: n, id: `id-${n}` })),
       50,
+      // One-letter names have no tier price (offers only): price them explicitly here.
+      { a: 1, b: 1, c: 1 },
     ) as SellState;
 
   test('lists in order, one at a time, saving after each step', async () => {
