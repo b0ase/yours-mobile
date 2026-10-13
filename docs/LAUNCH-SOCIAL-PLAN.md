@@ -52,6 +52,13 @@ Deliberately excluded: `company`, equity, shares, investors, dividends, yield. R
   - Anyone can verify a profile from the chain alone, and only the issuer can set it.
   - Any indexer can read it: 1sat-stack, GorillaPool, our overlay.
   - bit-sign keeps a cache that is indexed by token ID, served at `/api/token-profile/<id>`, and re-verified on read. This makes it fast without making it the source of truth.
+- **Profile reader: built** (`src/mobile/tokens/tokenProfile.ts`, tests in `tokenProfile.test.ts`, verified live against the $NPG profile `a2d8bae1…fc7f_0`). How it discovers and checks profiles:
+  1. Issuer = `owner` of the deploy output, from GorillaPool `GET /api/txos/<tokenId>`.
+  2. Candidates = GorillaPool `GET /api/txos/address/<issuer>/unspent?q=<base64 {"map":{"type":"bsv-21-profile"}}>` plus the same on `/history` (history skips unconfirmed outputs), 20 per list. Kept only when the indexed inscription is `application/json` with `p=bsv-21-profile` and `id=<tokenId>`.
+  3. Exact content bytes come from `https://ordfs.network/<outpoint>`, because the indexer re-serialises the JSON (key order changes) and would break the signature.
+  4. MAP `aip_sig` is checked as a base64 Bitcoin Signed Message over those bytes. The recovered address must equal `aip_address`, which must equal the issuer. The highest valid `v` wins. Company, equity, shares, investors, dividend, yield, returns and profit fields are dropped, and a `utility` or `description` with returns wording is dropped. Results are cached per token for 10 minutes.
+  - Merge order in `TokenLinks`: verified profile first, then the deploy inscription, then the launchpad's API (TokenBlaster coin data) fills gaps. Links and utility then go through the usual `linkData` checks (https only, X/Telegram domains, 160-char utility).
+  - Not yet handled: `transfer-issuer` rotation (only the deploy-output owner is accepted).
 - **Issuer key rotation**: the key can be handed over with a profile-signed `{"op":"transfer-issuer","to":<pubkey>}` entry, signed by the old key.
 - **Proposal for 1sat.market and others**: publish the schema as a short BRC-style note, offer the cache API with open CORS, and send it to the 1sat team.
 
