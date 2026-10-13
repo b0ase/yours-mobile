@@ -331,7 +331,8 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
         isolation: 'isolate',
       }}
     >
-      <ObsidianBackdrop />
+      {/* Keeps moving while the password field has focus: it autofocuses, so pausing would freeze it on open (owner, 13 Oct 2026). */}
+      <ObsidianBackdrop pauseWhileTyping={false} />
       {/* Logo */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
