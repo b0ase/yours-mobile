@@ -37,9 +37,37 @@ export const miningPath = (domain: string, name: string): { steps: number; alsoG
   return { steps: name.length - domain.length, alsoGet };
 };
 
+/**
+ * The names overlay (api.1sat.app opns/mine, opns/origin) is down, rate-limiting or unreachable. Before 13 Oct 2026 a
+ * 502 read as "not taken / no node" and the page blamed its own name tree ("still catching up"); now it says so.
+ */
+export class NamesServerError extends Error {
+  host: string;
+  status: number;
+  constructor(url: string, status: number) {
+    const host = url.replace(/^https?:\/\//, '').split('/')[0];
+    super(`The names server isn't answering (${host}${status ? ` ${status}` : ''}). Resume later.`);
+    this.name = 'NamesServerError';
+    this.host = host;
+    this.status = status;
+  }
+}
+
+/** GET from the overlay; a 5xx / 429 / network failure is a NamesServerError, never a quiet "nothing found". */
+const overlayGet = async (f: Fetch, url: string): Promise<Response> => {
+  let res: Response;
+  try {
+    res = await f(url);
+  } catch {
+    throw new NamesServerError(url, 0);
+  }
+  if (res.status === 429 || res.status >= 500) throw new NamesServerError(url, res.status);
+  return res;
+};
+
 /** GET /1sat/opns/mine/:name → nearest mined prefix (null when the name is taken or no prefix is found). */
 export const fetchMineNode = async (f: Fetch, name: string): Promise<MineNode | null> => {
-  const res = await f(`${SERVICES.opnsMine}/${encodeURIComponent(name)}`);
+  const res = await overlayGet(f, `${SERVICES.opnsMine}/${encodeURIComponent(name)}`);
   if (!res.ok) return null;
   const j = await res.json().catch(() => null);
   if (!j?.outpoint || typeof j.domain !== 'string') return null;
@@ -47,7 +75,7 @@ export const fetchMineNode = async (f: Fetch, name: string): Promise<MineNode | 
 };
 
 export const isTaken = async (f: Fetch, name: string): Promise<boolean> => {
-  const res = await f(`${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
+  const res = await overlayGet(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
   if (!res.ok) return false;
   const j = await res.json().catch(() => null);
   return !!j?.outpoint;

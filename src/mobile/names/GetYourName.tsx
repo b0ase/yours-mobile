@@ -30,6 +30,7 @@ import { alsoGetText, estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
 import { opnsTreeFor } from './opnsTree';
+import { sweepDeadMints } from './opnsTxStatus';
 import { moneyNow } from '../money/money';
 import { buyOpnsListing } from './opnsBuy';
 import { PAID_FEATURES_ENABLED } from '../storeBuild';
@@ -189,6 +190,8 @@ export const GetYourName = ({
     abort.current = ctl;
     setMining(name);
     try {
+      // A mint the network never received must not hold the tree (opnsTxStatus.ts): evict it before mining.
+      await sweepDeadMints(opnsTreeFor(identityAddress), f).catch(() => undefined);
       const steps = await mineName(
         { ctx: apiContext, fetch: f, tree: opnsTreeFor(identityAddress) },
         name,
