@@ -4,6 +4,7 @@ import { payNameFee } from './nameFee';
 import { askNotifyPermissionOnce } from '../notify/engine';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { useLegacyKeys } from './useLegacyKeys';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import {
@@ -74,6 +75,7 @@ export const HandleFlow = ({
 }) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
+  const legacy = useLegacyKeys();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const ordAddress = account?.addresses?.ordAddress ?? '';
@@ -153,13 +155,13 @@ export const HandleFlow = ({
   useEffect(() => {
     if (link || !claimed || !apiContext || !withToken) return;
     let live = true;
-    existingChoice(apiContext, claimed)
+    existingChoice(apiContext, claimed, undefined, legacy)
       .then((c) => live && setChoice(c))
       .catch(() => live && setChoice({ kind: 'mint' }));
     return () => {
       live = false;
     };
-  }, [apiContext, claimed, link, withToken]);
+  }, [apiContext, claimed, link, withToken, legacy]);
 
   const importToken = async () => {
     if (choice?.kind !== 'import') return;
@@ -167,7 +169,13 @@ export const HandleFlow = ({
     setBusy(true);
     setTokenMsg('');
     try {
-      const { link: l, roomTicker } = await importExistingToken(apiContext, identityAddress, claimed, choice.token);
+      const { link: l, roomTicker } = await importExistingToken(
+        apiContext,
+        identityAddress,
+        claimed,
+        choice.token,
+        legacy,
+      );
       void showOnWallet(chromeStorageService, l.tokenId);
       setTokenMsg(
         roomTicker

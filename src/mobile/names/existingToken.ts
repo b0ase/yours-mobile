@@ -11,12 +11,28 @@
  */
 import { bsv21FieldsFromOutput, type OneSatContext } from '@1sat/actions';
 import { BSV21_BASKET, MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
-import { Utils } from '@bsv/sdk';
+import { BSM, PrivateKey, Transaction, Utils } from '@bsv/sdk';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { BWALLET_PAYMAIL_DOMAIN } from './config';
 import { normId, personalKey, personalTicker, setPersonalLink, type PersonalLink } from './personalToken';
 
-export type TokenRef = { tokenId: string; sym: string; supply?: string; issued?: boolean };
+export type TokenRef = {
+  tokenId: string;
+  sym: string;
+  supply?: string;
+  issued?: boolean;
+  /** Issued from one of this account's imported legacy (pay / ord) key addresses: the proof is signed with it. */
+  legacyAddress?: string;
+};
+
+/**
+ * The account's imported legacy keys (Yours pay / ord): addresses for matching, and a signer that signs a
+ * message (Bitcoin Signed Message) with the key at one of them. The WIF never leaves the signer.
+ */
+export type LegacyKeys = {
+  addresses: string[];
+  sign: (address: string, message: string) => Promise<string>;
+};
 
 /** Brand tickers whose token sym differs from the handle ($npg ↔ NPG / NINJAPUNKGIRLS). */
 export const TICKER_ALIASES: Record<string, string[]> = { npg: ['NPG', 'NINJAPUNKGIRLS'] };
@@ -152,3 +168,68 @@ export function linkImported(identityAddress: string, handle: string, token: Tok
   setPersonalLink(identityAddress, link);
   return link;
 }
+
+/** The P2PKH address that owns output `vout` of a raw tx (an inscription's trailing P2PKH), else null. */
+export function outputOwner(rawHex: string, vout: number): string | null {
+  try {
+    const out = Transaction.fromHex(rawHex.trim()).outputs[vout];
+    const hex = out?.lockingScript.toHex() ?? '';
+    const all = [...hex.matchAll(/76a914([0-9a-f]{40})88ac/g)];
+    const h = all[all.length - 1]?.[1];
+    return h ? Utils.toBase58Check(Utils.toArray(h, 'hex'), [0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Who owned a token's deploy output (WhatsOnChain, read-only). null when it can't be told. */
+export async function deployOwner(tokenId: string, f: Fetch = fetch): Promise<string | null> {
+  const id = normId(tokenId);
+  if (!id) return null;
+  const [txid, vout] = id.split('_');
+  try {
+    const r = await f(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`);
+    return r.ok ? outputOwner(await r.text(), Number(vout)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tokens matching the handle that this wallet holds but did not deploy from its BRC-100 keys: if the deploy
+ * output belongs to one of the account's imported legacy key addresses, the account is the issuer.
+ */
+export async function withLegacyIssuers(
+  handle: string,
+  tokens: readonly TokenRef[],
+  legacy: Pick<LegacyKeys, 'addresses'> | undefined,
+  ownerOf: (tokenId: string) => Promise<string | null> = (t) => deployOwner(t),
+): Promise<TokenRef[]> {
+  const mine = new Set(legacy?.addresses.filter(Boolean) ?? []);
+  if (!mine.size) return [...tokens];
+  const want = new Set(tickersFor(handle));
+  return Promise.all(
+    tokens.map(async (t) => {
+      if (t.issued || !want.has(clean(t.sym))) return t;
+      const owner = await ownerOf(t.tokenId).catch(() => null);
+      return owner && mine.has(owner) ? { ...t, issued: true, legacyAddress: owner } : t;
+    }),
+  );
+}
+
+/** A legacy signer over the wallet's decrypted keys (only while unlocked). Keys stay inside this closure's call. */
+export const legacySigner = (
+  addresses: string[],
+  loadKeys: () => Promise<{ walletWif?: string; ordWif?: string }>,
+): LegacyKeys => ({
+  addresses: addresses.filter(Boolean),
+  sign: async (address, message) => {
+    const k = await loadKeys();
+    for (const wif of [k.walletWif, k.ordWif]) {
+      if (!wif) continue;
+      const pk = PrivateKey.fromWif(wif);
+      if (pk.toAddress() === address) return BSM.sign(Utils.toArray(message, 'utf8'), pk, 'base64') as string;
+    }
+    throw new Error('That key is not in this account');
+  },
+});

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { useLegacyKeys } from './useLegacyKeys';
 import { accountNamesFor } from './accountNames';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
@@ -26,6 +27,7 @@ import {
  */
 export const HandleOnboarding = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
+  const legacy = useLegacyKeys();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses?.identityAddress;
   const [hasName, setHasName] = useState(() => !!accountNamesFor(id).payable);
@@ -66,13 +68,13 @@ export const HandleOnboarding = () => {
   useEffect(() => {
     if (!apiContext || !id || !payable || hasRoom || !PAID_FEATURES_ENABLED) return setImportSym(null);
     let live = true;
-    existingChoice(apiContext, payable)
+    existingChoice(apiContext, payable, undefined, legacy)
       .then((c) => live && setImportSym(c.kind === 'import' ? c.token.sym : null))
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [apiContext, id, payable, hasRoom]);
+  }, [apiContext, id, payable, hasRoom, legacy]);
 
   // A restored wallet may already own a paymail / OpNS name: ask the chain first.
   useEffect(() => {

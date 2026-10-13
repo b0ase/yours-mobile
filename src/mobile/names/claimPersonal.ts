@@ -20,6 +20,8 @@ import {
   linkImported,
   signImport,
   type ExistingChoice,
+  type LegacyKeys,
+  withLegacyIssuers,
   type TokenRef,
 } from './existingToken';
 import {
@@ -151,10 +153,13 @@ export async function existingChoice(
   ctx: OneSatContext,
   handle: string,
   client?: BchatClient,
+  legacy?: Pick<LegacyKeys, 'addresses'>,
 ): Promise<ExistingChoice> {
   const ticker = personalTicker(handle);
   const [controlled, tick, bound] = await Promise.all([
-    controlledTokens(ctx).catch(() => [] as TokenRef[]),
+    controlledTokens(ctx)
+      .then((t) => withLegacyIssuers(handle, t, legacy))
+      .catch(() => [] as TokenRef[]),
     ticker ? bsv20TickExists(ticker) : Promise.resolve(false),
     (client ? Promise.resolve(client) : Promise.resolve(new BchatClient(defaultHttp(isNative), loadSession())))
       .then((c) => c.personalToken(personalKey(handle)))
@@ -176,9 +181,16 @@ export async function importExistingToken(
   identityAddress: string,
   handle: string,
   token: TokenRef,
+  legacy?: LegacyKeys,
 ): Promise<{ link: PersonalLink; roomTicker: string | null }> {
   if (!token.issued) throw new Error('Only the token’s issuer can import it as a personal token.');
   const signed = await signImport(ctx, token.tokenId, handle);
+  // Issued from an imported legacy key: that key signs the same challenge, proving control of the issuer.
+  let proof: { address: string; signature: string } | null = null;
+  if (token.legacyAddress) {
+    if (!legacy) throw new Error('Unlock the wallet to sign with the key that issued this token.');
+    proof = { address: token.legacyAddress, signature: await legacy.sign(token.legacyAddress, signed.message) };
+  }
   const client = await chatClient(ctx);
   // Server half pending (see BchatClient.importPersonalToken); the room open below still binds a matching handle.
   await client
@@ -188,6 +200,7 @@ export async function importExistingToken(
       message: signed.message,
       identity_key: signed.identityKey,
       signature: signed.signature,
+      proof,
     })
     .catch(() => undefined);
   const link = linkImported(identityAddress, handle, token);
