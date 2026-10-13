@@ -36,6 +36,8 @@ type Pending = {
   owner?: string;
   /** Just came back from the provider and not yet reopened in Connect (takeSocialReturn). */
   returned?: boolean;
+  /** Started from the card's "Your picture" sheet: the card takes it (takePictureReturn), not Settings › Connect. */
+  purpose?: 'picture';
 };
 
 /** Owner of a sign-in started on Create / Restore / Import, before the account (and its identity) exists. */
@@ -89,12 +91,28 @@ export const clearSocial = () => write(null);
  */
 export const socialReturnWaiting = (owner: string): boolean => {
   const p = read(owner);
-  return !!(p && owner !== NEW_ACCOUNT && p.returned && p.ticket && p.profile);
+  return !!(p && owner !== NEW_ACCOUNT && p.purpose !== 'picture' && p.returned && p.ticket && p.profile);
 };
 export const takeSocialReturn = (owner: string): boolean => {
   if (!socialReturnWaiting(owner)) return false;
   write({ ...read(owner)!, returned: false });
   return true;
+};
+
+/**
+ * Back from X / Google for the card's "Your picture" sheet: the verified profile, once (the pending sign-in is
+ * then cleared, so it never attaches twice or reopens Settings › Connect).
+ */
+export const takePictureReturn = (owner: string): SocialProfile | null => {
+  const p = read(owner);
+  if (!p || p.purpose !== 'picture' || !p.ticket || !p.profile) return null;
+  write(null);
+  return p.profile;
+};
+/** A picture sign-in is waiting for the provider (started from the card, not back yet). */
+export const pictureLinkPending = (owner: string) => {
+  const p = read(owner);
+  return p?.purpose === 'picture' && !p.profile ? p.provider : null;
 };
 
 /**
@@ -120,7 +138,11 @@ const post = async <T>(op: string, body: unknown): Promise<T> => {
 const hex = (b: ArrayBuffer | Uint8Array) =>
   Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 
-export async function startSocial(provider: SocialProvider, owner: string = NEW_ACCOUNT): Promise<void> {
+export async function startSocial(
+  provider: SocialProvider,
+  owner: string = NEW_ACCOUNT,
+  purpose?: 'picture',
+): Promise<void> {
   lastError = '';
   const secret = hex(crypto.getRandomValues(new Uint8Array(32)));
   const vh = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)));
@@ -132,7 +154,7 @@ export async function startSocial(provider: SocialProvider, owner: string = NEW_
     verifier_hash: vh,
     ...(web ? { return_to: webReturnKey() } : {}),
   });
-  write({ provider, secret, at: Date.now(), owner });
+  write({ provider, secret, at: Date.now(), owner, ...(purpose ? { purpose } : {}) });
   if (web) {
     window.location.assign(url);
     return;

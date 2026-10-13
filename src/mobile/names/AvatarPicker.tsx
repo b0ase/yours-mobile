@@ -9,6 +9,7 @@ import { txFeeSats } from '../mint/mint';
 import { AccountAvatar } from './AccountAvatar';
 import { useAvatar } from './useAvatar';
 import { removeAccountPhoto } from './socialAvatar';
+import { savePictureState } from './pictureSource';
 import { dataUrlBytes, getLocalAvatar, paymailAvatar, resizeAvatar, setLocalAvatar } from './avatar';
 import { claimPaymail, paymailEnabled } from './paymail';
 import { getPaymail } from './accountName';
@@ -44,6 +45,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
     try {
       const dataUrl = await resizeAvatar(file);
       setLocalAvatar(id, dataUrl);
+      savePictureState(id, { source: 'photo' });
       // Also the account icon, so the account list shows it.
       if (account) {
         const key: keyof ChromeStorageObject = 'accounts';
@@ -123,13 +125,14 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
         <button
           type="button"
           onClick={() =>
-            void removeAccountPhoto(chromeStorageService, id).then(() =>
+            void removeAccountPhoto(chromeStorageService, id).then(() => {
+              savePictureState(id, { source: 'bavatar' });
               setMsg(
                 identity.isPublished && identity.profile.image
                   ? 'Removed on this phone. A photo published to your public profile stays there until you publish a new one.'
                   : 'Photo removed.',
-              ),
-            )
+              );
+            })
           }
           className="text-[11px] bg-transparent border-0 p-0 cursor-pointer underline"
           style={{ color: '#F97066' }}
