@@ -1748,7 +1748,7 @@ button.bw-mail-card:active {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 0 8px 0 14px;
+  padding: 0 14px 0 8px;
   color: #d6d3c8;
 }
 .bw-wcard-stripe-text {
@@ -2233,7 +2233,7 @@ button.bw-mail-card:active {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 0 8px 0 14px;
+  padding: 0 14px 0 8px;
   color: #d6d3c8;
 }
 .bw-wcard-stripe-text {

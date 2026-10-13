@@ -594,14 +594,11 @@ const WalletCardInner = ({
 
         {/* ── Back ── */}
         <div className="bw-wcard-face bw-wcard-back" aria-hidden={!flipped}>
-          {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon. */}
+          {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon on its left. */}
           <div className="bw-wcard-stripe">
             {backKey && (
               <div className="bw-wcard-stripe-key">
-                <span className="bw-wcard-stripe-text">
-                  <span className="bw-wcard-stripe-label">IDENTITY KEY</span>
-                  <span className="bw-wcard-stripe-hex">{backKey}</span>
-                </span>
+                {/* Copy sits LEFT of the key (owner, 13 Oct 2026): the customise-front button is on the right. */}
                 <button
                   type="button"
                   className="bw-wcard-stripe-copy"
@@ -612,6 +609,10 @@ const WalletCardInner = ({
                 >
                   <Copy size={13} aria-hidden="true" />
                 </button>
+                <span className="bw-wcard-stripe-text">
+                  <span className="bw-wcard-stripe-label">IDENTITY KEY</span>
+                  <span className="bw-wcard-stripe-hex">{backKey}</span>
+                </span>
               </div>
             )}
             {frontArt && (
