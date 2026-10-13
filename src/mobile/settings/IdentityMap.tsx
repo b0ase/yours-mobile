@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, Copy } from 'lucide-react';
@@ -269,7 +270,11 @@ export const IdentityMap = ({ onClose }: { onClose: () => void }) => {
           title="OpNS name"
           shown={names.handle || 'None'}
           what="An on-chain name you own as an ordinal. It points at your ordinals address."
-        />
+        >
+          <Link to="/m/opns-mint" className="text-[11px]" style={{ color: GOLD }}>
+            Mint a list of names
+          </Link>
+        </Node>
 
         <Node
           {...p}
