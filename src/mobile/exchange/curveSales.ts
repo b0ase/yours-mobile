@@ -90,7 +90,7 @@ export const listingPriceSats = (centsEach: number, pack: number, usdPerBsv: num
  * What the seller's wallet should do now. `live` = the registered listings still unspent.
  *  - closed → cancel every live listing
  *  - open   → re-price everything when the holder count moved past what they were priced at
- *             (the curve has moved ≥ ~0.7%, i.e. ≥ 10 holders on the default step); else list the gap.
+ *             (the curve has moved ≥ ~0.7%, i.e. ≥ 100 holders on the default step of 10,000); else list the gap.
  */
 export type RefillPlan = { cancel: string[]; list: number };
 export const refillPlan = (
@@ -100,7 +100,7 @@ export const refillPlan = (
   mode: SalesMode,
 ): RefillPlan => {
   if (!sales.open || mode === 'off') return { cancel: [...live], list: 0 };
-  const stale = mode === 'curve' && holders - sales.priced_at_holders >= 10;
+  const stale = mode === 'curve' && holders - sales.priced_at_holders >= 100;
   if (stale) return { cancel: [...live], list: sales.tranche };
   return { cancel: [], list: Math.max(0, sales.tranche - live.length) };
 };

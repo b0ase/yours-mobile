@@ -80,9 +80,10 @@ describe('curve sales: seller', () => {
   test('open → list the gap', () => {
     expect(refillPlan(sales({ tranche: 10 }), ['x', 'y'], 3, 'curve')).toEqual({ cancel: [], list: 8 });
   });
-  test('holders moved ≥10 since pricing → re-price the whole tranche (curve only)', () => {
-    expect(refillPlan(sales({ priced_at_holders: 0 }), ['x'], 10, 'curve')).toEqual({ cancel: ['x'], list: 10 });
-    expect(refillPlan(sales({ priced_at_holders: 0 }), ['x'], 50, 'flat')).toEqual({ cancel: [], list: 9 });
+  test('holders moved ≥100 since pricing (≈0.7% on the curve) → re-price the whole tranche (curve only)', () => {
+    expect(refillPlan(sales({ priced_at_holders: 0 }), ['x'], 100, 'curve')).toEqual({ cancel: ['x'], list: 10 });
+    expect(refillPlan(sales({ priced_at_holders: 0 }), ['x'], 99, 'curve')).toEqual({ cancel: [], list: 9 });
+    expect(refillPlan(sales({ priced_at_holders: 0 }), ['x'], 500, 'flat')).toEqual({ cancel: [], list: 9 });
   });
   test('price in sats at the USD rate', () => {
     expect(listingPriceSats(1, 1, 50)).toBe(20000);

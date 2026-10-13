@@ -104,7 +104,8 @@ chip (`?people=1`): your Friends' tokens first, then everyone else's ("People");
 **Buy & chat**: buy the cheapest OrdLock v2 listing in one sheet, then open their room. No listings → "No one is
 selling yet" (+ "Open their room" when the room is open to non-holders). The Friends page shows a friend's token
 the same way (lazy chunk, MARKET_ENABLED only). Pricing rule per token (bit-sign `lib/people-tokens.ts`): gentle
-curve by default (1¢ × 2^(distinct holders / 1000), one curve buy per identity key, owner can't buy, Supporter
+curve by default (1¢ × 2^(distinct holders / 10,000): doubling every 10,000 supporters, decided 14 Oct 2026; one
+curve buy per identity key, owner can't buy, Supporter
 #1–100), flat opt-in, or off ("Ask to join").
 
 ### Curve sales (live 13 Oct 2026)
@@ -117,7 +118,8 @@ Design: **the person's own wallet pre-lists a tranche of their supply**; bit-sig
   tokens (default 1) in one tx (`sellActions.createTranche`) at the current price in sats, and register the
   outpoints with bit-sign (`POST /api/bitsign/people-tokens/settings`). The OrdLock pays the person directly, so
   they don't need to be online. When their wallet opens the Friends market it refills sold slots and re-prices
-  when ≥10 new holders have joined (`curveSales.refillPlan`); closing sales cancels the listings.
+  when ≥100 new holders have joined (≈0.7% on the curve; `curveSales.refillPlan`); closing sales cancels the
+  listings. The schedule in plain words, with a chart: https://bwalletx.com/token-curves.
 - Buyer (`BuyAndChat`): when `sales_open`, ask `GET .../quote` first (own/linked token → refused; already joined →
   opens the room), buy one of the person's registered listings with `buyBsv21` in one sheet
   ("Join $kim's room — 1¢ (Supporter #3)"), then `POST .../purchase { txid }` — bit-sign verifies the tx on

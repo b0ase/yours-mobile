@@ -159,7 +159,11 @@ export const SellMyToken = ({ token, rate }: { token: PersonToken; rate: number 
             <div className="flex flex-col gap-2">
               {(
                 [
-                  ['curve', 'Gentle price (default)', 'Starts at 1¢. One join per person, up to 100 tokens.'],
+                  [
+                    'curve',
+                    'Gentle price (default)',
+                    'Starts at 1¢ and doubles every 10,000 supporters. One join per person, up to 100 tokens.',
+                  ],
                   ['flat', 'Fixed price', 'You choose the price of one join.'],
                   ['off', 'Ask to join', 'No sales. People ask you instead.'],
                 ] as const
