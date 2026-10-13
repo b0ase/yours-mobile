@@ -183,7 +183,7 @@ describe('search states', () => {
       return new Response(JSON.stringify(body), { status: 200 });
     }) as Fetch;
     const listingOf = async (n: string) => (n === 'sold' ? { outpoint: `${TX}.5`, priceSats: 2_000_000 } : null);
-    const r = await checkNames(f, ['sold', 'held', 'fresh'], () => false, undefined, listingOf);
+    const r = await checkNames(f, ['sold', 'held', 'fresh'], () => false, undefined, { listingOf });
     expect(r).toEqual([
       { name: 'sold', state: 'taken', listing: { outpoint: `${TX}.5`, priceSats: 2_000_000 } },
       { name: 'held', state: 'taken' },

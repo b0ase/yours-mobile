@@ -96,6 +96,29 @@ describe('OpNS mint transaction (opnsMint)', () => {
     );
     expect(rebuilt.toBinary().length).toBeLessThanOrEqual(est);
   });
+  test('the reserved unlock length covers the wallet adding up to 8 change outputs (abiga: 6405 > 6337)', async () => {
+    // Live failure 13 Oct: the wallet added 6 change outputs; each is pushed raw into the unlock, so the unlock
+    // grew past a bound that assumed 4 (wallet-toolbox prints the HEX length: 12810 = 2 x 6405 bytes).
+    const tx = Transaction.fromHex(mintTx.toHex());
+    tx.inputs[0].sourceTransaction = parentTx;
+    const p2pkh = Script.fromHex(`76a914${'11'.repeat(20)}88ac`);
+    tx.outputs = tx.outputs.slice(0, 3);
+    for (let k = 0; k < 8; k++) tx.outputs.push({ satoshis: 5000 + k, lockingScript: p2pkh });
+    const parentLen = parentTx.outputs[1].lockingScript.toBinary().length;
+    const ownerLen = ownerScript.toBinary().length;
+    const sized = async (changeOutputs: number) => {
+      const t = Transaction.fromHex(tx.toHex());
+      t.inputs[0].sourceTransaction = parentTx;
+      t.outputs = t.outputs.slice(0, 3 + changeOutputs);
+      return (await OpNS.unlock(char, nonce, ownerScript).sign(t, 0)).toBinary().length;
+    };
+    const six = await sized(6);
+    const oldBound = estimateUnlockLength(parentLen, ownerLen, 4) - 64; // the bound before the fix (no slack)
+    expect(six).toBeGreaterThan(oldBound); // reproduces the rejection
+    expect(six - oldBound).toBe(2 * 34); // two P2PKH change outputs more than reserved
+    expect(await sized(8)).toBeLessThanOrEqual(estimateUnlockLength(parentLen, ownerLen));
+    expect(await sized(16)).toBeLessThanOrEqual(estimateUnlockLength(parentLen, ownerLen));
+  });
 });
 
 describe('mineName orchestration', () => {
