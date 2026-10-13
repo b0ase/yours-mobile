@@ -33,13 +33,29 @@ import {
 } from './opnsBatch';
 import { formatEta, mineName } from './opnsRegister';
 import { opnsTreeFor } from './opnsTree';
+import { MARKET_ENABLED } from '../storeBuild';
+import { checkOpnsAvailability } from './names';
+import { buyOpnsListing, listOpnsName } from './opnsBuy';
+import {
+  loadAutoList,
+  OPNS_LIST_FEE_ESTIMATE,
+  OPNS_SELL_USD,
+  ownedForSale,
+  saveAutoList,
+  searchLabel,
+  usdOrSats,
+  type OwnedForSale,
+} from './opnsSell';
+import { OpnsSellSection } from './OpnsSellSection';
+import { OpnsBuySheet } from './OpnsSheets';
 
 /**
  * bMint › OpNS names (Desktop / web: desktop.bwalletx.com/bmint/opns; old /opns-mint links redirect here).
  * Three steps: add names (drop a .txt, choose a file, or paste; ?mint=a,b,c pre-fills) → live check →
  * an itemised invoice with ONE gold button that opens the single approval sheet. Then the names are mined
  * one after another with the normal mint path; the queue is saved, so a closed window offers Resume.
- * See opnsBatch.ts.
+ * See opnsBatch.ts. Selling (bWalletX only, not the store edition): Owned names lists the wallet's names for
+ * $1 each (OpnsSellSection, opnsSell.ts), and a searched name that is taken but listed offers "Buy for $X".
  */
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -60,6 +76,14 @@ const STATUS_LABEL: Record<string, string> = {
   mine: 'Already yours',
   error: 'Error',
 };
+
+/** Is a taken name listed for sale? (the latest location is an unspent OrdLock; names.ts) */
+const listingOf = MARKET_ENABLED
+  ? async (name: string) => {
+      const a = await checkOpnsAvailability(f, name);
+      return a.status === 'taken' && a.listing ? { outpoint: a.listing.outpoint, priceSats: a.listing.price } : null;
+    }
+  : undefined;
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
@@ -129,6 +153,16 @@ export const OpnsMintPage = () => {
   const abort = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const ownedRef = useRef<Set<string>>(new Set());
+  const [owned, setOwned] = useState<OwnedForSale[]>([]);
+  const [buy, setBuy] = useState<{ name: string; outpoint: string; priceSats: number } | null>(null);
+  const [buying, setBuying] = useState('');
+  // Auto-list each minted name for $1 (bWalletX only; remembered, on by default).
+  const [autoList, setAutoListState] = useState(() => MARKET_ENABLED && loadAutoList());
+  const setAutoList = (v: boolean) => {
+    setAutoListState(v);
+    saveAutoList(v);
+  };
+  const [retrying, setRetrying] = useState('');
 
   const parsed = useMemo(() => parseNameList(text), [text]);
   const ordered = useMemo(() => orderForMinting(parsed.names), [parsed.names]);
@@ -141,7 +175,8 @@ export const OpnsMintPage = () => {
   const perChar = estimateMintFee(NODE_SCRIPT_ESTIMATE);
   const feePerNameSats = OPNS_FEE_ADDRESS ? (usdToSats(OPNS_FEE_USD_PER_NAME, rate) ?? 0) : 0;
   const serviceSats = summary ? summary.toMint * feePerNameSats : 0;
-  const totalSats = summary ? summary.feeSats + serviceSats : 0;
+  const listFeeSats = summary && autoList ? summary.toMint * OPNS_LIST_FEE_ESTIMATE : 0;
+  const totalSats = summary ? summary.feeSats + serviceSats + listFeeSats : 0;
   const usd = (sats: number) => {
     const v = satsToUsd(sats, rate);
     return v == null ? '' : `≈ ${fmtUsd(v)}`;
@@ -153,6 +188,7 @@ export const OpnsMintPage = () => {
     try {
       const r = await listOpns.execute(apiContext, { includeTags: true, limit: 1000 });
       ownedRef.current = new Set(ownedFromOutputs(r.outputs).map((o) => o.name));
+      setOwned(ownedForSale(r.outputs));
     } catch {
       /* keep the last known set */
     }
@@ -186,7 +222,7 @@ export const OpnsMintPage = () => {
         const mine = await refreshOwned();
         for (const n of todo) {
           if (!live) return;
-          const [c] = await checkNames(f, [n], (x) => mine.has(x), opnsTreeFor(identityAddress));
+          const [c] = await checkNames(f, [n], (x) => mine.has(x), opnsTreeFor(identityAddress), listingOf);
           if (live) setChecks((prev) => ({ ...prev, [n]: c }));
         }
       } catch {
@@ -201,6 +237,23 @@ export const OpnsMintPage = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, running]);
+
+  const buyNow = async (b: { name: string; outpoint: string }) => {
+    setBuy(null);
+    setBuying(b.name);
+    setMsg('');
+    try {
+      await buyOpnsListing(apiContext, b.outpoint, b.name);
+      setMsg(`You bought ${b.name}. It shows under Owned names once indexed.`);
+      setChecks((prev) => ({ ...prev, [b.name]: { name: b.name, state: 'mine' } }));
+      void refreshOwned();
+      void refreshBalance();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Purchase failed');
+    } finally {
+      setBuying('');
+    }
+  };
 
   const addText = (body: string) => setText((t) => (t.trim() ? `${t.trim()}\n${body}` : body));
   const addFiles = async (files: FileList | null | undefined) => {
@@ -228,6 +281,38 @@ export const OpnsMintPage = () => {
       }
     : undefined;
 
+  /** List a name we just minted: found in the wallet's own OPNS basket (its BEEF, no indexer), $1 at today's rate. */
+  const listAfterMint = async (name: string) => {
+    const r = await listOpns.execute(apiContext, { includeTags: true, limit: 1000 });
+    const o = ownedForSale(r.outputs).find((x) => x.name === name);
+    if (!o) throw new Error('not in the wallet yet');
+    if (o.listedSats !== null) return '';
+    const sats = usdToSats(OPNS_SELL_USD, await fetchExchangeRate('main'));
+    if (!sats) throw new Error("couldn't get the BSV price");
+    return listOpnsName(apiContext, o.id, sats);
+  };
+  const retryList = async (name: string) => {
+    if (!batch) return;
+    setRetrying(name);
+    const patch = (p: Partial<BatchState['items'][number]>) =>
+      setBatch((b) => {
+        if (!b) return b;
+        const next = { ...b, items: b.items.map((i) => (i.name === name ? { ...i, ...p } : i)) };
+        saveBatch(identityAddress, next);
+        return next;
+      });
+    try {
+      const txid = await listAfterMint(name);
+      const it = batch.items.find((i) => i.name === name);
+      patch({ listed: true, note: undefined, txids: txid && it ? [...it.txids, txid] : (it?.txids ?? []) });
+      void refreshOwned();
+    } catch (e) {
+      patch({ listed: false, note: `Not listed: ${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      setRetrying('');
+    }
+  };
+
   const run = async (start: BatchState) => {
     const ctl = new AbortController();
     abort.current = ctl;
@@ -240,6 +325,7 @@ export const OpnsMintPage = () => {
           mine: (name, signal) =>
             mineName({ ctx: apiContext, fetch: f, tree: opnsTreeFor(identityAddress) }, name, signal, () => undefined),
           payFee,
+          afterMint: autoList ? listAfterMint : undefined,
           isMine: (n) => ownedRef.current.has(n),
           tree: opnsTreeFor(identityAddress),
           save: (s) => saveBatch(identityAddress, s),
@@ -410,9 +496,24 @@ export const OpnsMintPage = () => {
                         color: it.status === 'done' ? GREEN : it.status === 'mining' ? GOLD : it.note ? RED : MUTED,
                       }}
                     >
-                      {STATUS_LABEL[it.status]}
+                      {it.status === 'done' && it.listed === true
+                        ? 'Minted · listed for $1'
+                        : it.status === 'done' && it.listed === false
+                          ? 'Minted · not listed'
+                          : STATUS_LABEL[it.status]}
                       {it.note ? ` · ${it.note}` : ''}
                     </span>
+                    {it.status === 'done' && it.listed === false && !running && (
+                      <button
+                        type="button"
+                        className={ghostBtn}
+                        style={{ color: GOLD, border: `1px solid ${HAIR}` }}
+                        disabled={!!retrying}
+                        onClick={() => void retryList(it.name)}
+                      >
+                        {retrying === it.name ? 'Listing…' : 'Retry listing'}
+                      </button>
+                    )}
                     {it.txids.map((t) => (
                       <a
                         key={t}
@@ -576,15 +677,21 @@ export const OpnsMintPage = () => {
                   {ordered.map((n) => {
                     const p = plan?.find((x) => x.name === n);
                     const c = checks[n];
-                    const [label, color] = !c
-                      ? ['Checking…', MUTED]
-                      : c.state === 'taken'
-                        ? ['Taken', RED]
-                        : c.state === 'mine'
-                          ? ['Already yours', GOLD]
-                          : c.domain === null
-                            ? ['Free · try again later', MUTED]
-                            : ['Free', GREEN];
+                    const st = c ? searchLabel(c, (sats) => usdOrSats(sats, rate), MARKET_ENABLED) : null;
+                    const label = !c
+                      ? 'Checking…'
+                      : c.state === 'free' && c.domain === null
+                        ? 'Free · try again later'
+                        : (st?.label ?? '');
+                    const color = !st
+                      ? MUTED
+                      : st.kind === 'taken'
+                        ? RED
+                        : st.kind === 'mine' || st.kind === 'buy'
+                          ? GOLD
+                          : c?.state === 'free' && c.domain === null
+                            ? MUTED
+                            : GREEN;
                     return (
                       <li
                         key={n}
@@ -600,9 +707,24 @@ export const OpnsMintPage = () => {
                               {plural(p.chars, 'char')} to mine
                             </span>
                           )}
-                          <span className="font-semibold text-xs" style={{ color }}>
-                            {label}
-                          </span>
+                          {st?.kind === 'buy' && c?.state === 'taken' && c.listing ? (
+                            <button
+                              type="button"
+                              className={`${goldBtn} px-3 py-1.5 text-xs`}
+                              style={{ background: GOLD, color: '#000' }}
+                              disabled={!apiContext || !!buying}
+                              onClick={() =>
+                                c.listing &&
+                                setBuy({ name: n, outpoint: c.listing.outpoint, priceSats: c.listing.priceSats })
+                              }
+                            >
+                              {buying === n ? 'Buying…' : label}
+                            </button>
+                          ) : (
+                            <span className="font-semibold text-xs" style={{ color }}>
+                              {label}
+                            </span>
+                          )}
                         </span>
                       </li>
                     );
@@ -644,6 +766,19 @@ export const OpnsMintPage = () => {
                             </td>
                           </tr>
                         ))}
+                        {listFeeSats > 0 && (
+                          <tr style={{ borderTop: `1px solid ${HAIR}` }}>
+                            <td className="py-2" style={{ color: TEXT }} colSpan={2}>
+                              Listing fee (est.) · {summary.toMint} × {fmtSats(OPNS_LIST_FEE_ESTIMATE)}
+                            </td>
+                            <td className="py-2 text-right tabular-nums" style={{ color: TEXT }}>
+                              {fmtSats(listFeeSats)}
+                              <span className="block text-[11px]" style={{ color: MUTED }}>
+                                {usd(listFeeSats)}
+                              </span>
+                            </td>
+                          </tr>
+                        )}
                         {OPNS_FEE_ADDRESS && (
                           <tr style={{ borderTop: `1px solid ${HAIR}` }}>
                             <td className="py-2" style={{ color: TEXT }} colSpan={2}>
@@ -706,6 +841,17 @@ export const OpnsMintPage = () => {
                         this wallet, or remove some names.
                       </div>
                     )}
+                    {MARKET_ENABLED && (
+                      <label className="flex items-center gap-2.5 text-[13px] cursor-pointer" style={{ color: TEXT }}>
+                        <input
+                          type="checkbox"
+                          checked={autoList}
+                          onChange={(e) => setAutoList(e.target.checked)}
+                          className="w-4 h-4 accent-[#FFD24D] cursor-pointer"
+                        />
+                        Auto-list each name for {fmtUsd(OPNS_SELL_USD)} after it&apos;s minted
+                      </label>
+                    )}
                     <button
                       type="button"
                       className={`${goldBtn} w-full py-3.5 text-[15px]`}
@@ -713,7 +859,8 @@ export const OpnsMintPage = () => {
                       disabled={!apiContext || shortfall > 0}
                       onClick={() => setSheet(true)}
                     >
-                      Mint {plural(summary.toMint, 'name')} · pay {fmtSats(totalSats)}
+                      Mint {plural(summary.toMint, 'name')}
+                      {autoList ? ` + list each for ${fmtUsd(OPNS_SELL_USD)}` : ''} · pay {fmtSats(totalSats)}
                       {usd(totalSats) ? ` ${usd(totalSats)}` : ''}
                     </button>
                   </>
@@ -728,7 +875,28 @@ export const OpnsMintPage = () => {
             {msg}
           </p>
         )}
+
+        {MARKET_ENABLED && (
+          <OpnsSellSection
+            ctx={apiContext}
+            identityAddress={identityAddress}
+            rate={rate}
+            owned={owned}
+            onChanged={() => void refreshOwned()}
+          />
+        )}
       </div>
+
+      {buy && (
+        <OpnsBuySheet
+          name={buy.name}
+          priceSats={buy.priceSats}
+          rate={rate}
+          site="bMint · OpNS names"
+          onAllow={() => void buyNow(buy)}
+          onClose={() => setBuy(null)}
+        />
+      )}
 
       {sheet &&
         summary &&
@@ -752,7 +920,8 @@ export const OpnsMintPage = () => {
               }
               title={
                 <>
-                  Own <span style={{ color: CARD.gold }}>{summary.toMint}</span> names on-chain
+                  {autoList ? 'Mint' : 'Own'} <span style={{ color: CARD.gold }}>{summary.toMint}</span>{' '}
+                  {autoList ? `names + list each for ${fmtUsd(OPNS_SELL_USD)}` : 'names on-chain'}
                 </>
               }
               primary={{ label: 'Allow', onClick: approve }}
@@ -766,7 +935,8 @@ export const OpnsMintPage = () => {
               <div className="flex flex-wrap gap-2">
                 <Chip>{plural(summary.chars, 'transaction')}</Chip>
                 <Chip>{formatEta(summary.seconds)}</Chip>
-                <Chip>Locked to your wallet</Chip>
+                <Chip>{autoList ? 'Listed as each one mints' : 'Locked to your wallet'}</Chip>
+                {autoList && <Chip>Fees {fmtSats(totalSats)} incl. listing</Chip>}
               </div>
             </ApprovalCard>
           </div>,

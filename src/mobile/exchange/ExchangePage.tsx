@@ -21,6 +21,7 @@ import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
 import { PeopleMarket } from './PeopleMarket';
+import { OpnsMarket } from './OpnsMarket';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
 import { useRegistry } from './registry/useRegistry';
 import { categoryLabel, filterSearch, matches, parseFilter, type Filter } from './registry/catalog';
@@ -415,8 +416,8 @@ const Orders = () => {
 };
 
 /**
- * The Exchange (bWalletX only; the route and chunk are behind MARKET_ENABLED): Markets · Swap · My orders ·
- * Collectibles, and /exchange/<token> to trade one token. Router paths live under /m/exchange (publicUrl.ts maps
+ * The Exchange (bWalletX only; the route and chunk are behind MARKET_ENABLED): Markets · Swap · OpNS names ·
+ * My orders · Collectibles, and /exchange/<token> to trade one token. Router paths live under /m/exchange (publicUrl.ts maps
  * them to /exchange…).
  */
 const ExchangePage = () => {
@@ -446,6 +447,7 @@ const ExchangePage = () => {
     { id: 'markets', label: 'Markets', to: EXCHANGE_ROUTE },
     ...(SwapFlow ? [{ id: 'swap', label: 'Swap', to: `${EXCHANGE_ROUTE}/swap` }] : []),
     { id: 'platforms', label: 'Platforms', to: platformRoute() },
+    { id: 'names', label: 'OpNS names', to: `${EXCHANGE_ROUTE}/names` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
   ];
@@ -463,14 +465,14 @@ const ExchangePage = () => {
             BSV {rate > 0 ? fiatLabel(1e8, rate) : '…'}
           </span>
         </div>
-        <nav className="flex gap-1 border-b border-[#2b2f36]" aria-label="Exchange">
+        <nav className="flex gap-1 border-b border-[#2b2f36] overflow-x-auto" aria-label="Exchange">
           {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => navigate(t.to)}
               aria-current={active === t.id ? 'page' : undefined}
-              className="px-3 py-2 text-sm font-bold bg-transparent border-0 cursor-pointer -mb-px"
+              className="shrink-0 whitespace-nowrap px-3 py-2 text-sm font-bold bg-transparent border-0 cursor-pointer -mb-px"
               style={{
                 color: active === t.id ? GOLD : MUTED,
                 borderBottom: `2px solid ${active === t.id ? GOLD : 'transparent'}`,
@@ -513,6 +515,7 @@ const ExchangePage = () => {
           </Suspense>
         )}
         {view.tab === 'orders' && <Orders />}
+        {view.tab === 'names' && <OpnsMarket rate={rate} />}
       </div>
       {view.tab === 'more' && (
         <div className="w-full flex-1 min-h-[70vh]">
