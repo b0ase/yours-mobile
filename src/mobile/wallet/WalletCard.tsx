@@ -615,7 +615,9 @@ const WalletCardInner = ({
                 </button>
                 <span className="bw-wcard-stripe-text">
                   <span className="bw-wcard-stripe-label">IDENTITY KEY</span>
-                  <span className="bw-wcard-stripe-hex">{backKey}</span>
+                  <span className="bw-wcard-stripe-hex" title={backKey}>
+                    {keyFingerprint(backKey) || backKey}
+                  </span>
                 </span>
               </div>
             )}
