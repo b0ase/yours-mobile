@@ -10,7 +10,14 @@ import { isPremiumName, nameTierUsd } from './tiers';
  */
 
 /** Wallets the house lists from (public addresses, never keys). A listing from one of these is "from us". */
-export const HOUSE_SELLERS: ReadonlySet<string> = new Set(['1A3SPh9TwVAwmBv9d8VTczwKq761s1byt7']);
+export const HOUSE_SELLERS: ReadonlySet<string> = new Set([
+  '1A3SPh9TwVAwmBv9d8VTczwKq761s1byt7',
+  // opns agent account (headless minter lists from here): ordinals + pay address.
+  '12EZT8mTDNsnCzW7XqvMwfLV44fcA2AWg4',
+  '14rHQU9DHjQhbtXMmnNc6M943XjZBF9oWs',
+  // bwalletx.x@bwalletx.com storefront: sale proceeds pay here.
+  '1F4J9KkMoqtznXPJuCgb98LRymssc8MFfd',
+]);
 
 /** Browse rails, in page order. `short` is by length; the rest come from the generated category map. */
 export const RAILS = [
