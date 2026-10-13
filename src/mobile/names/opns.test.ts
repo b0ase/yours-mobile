@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { OpNS } from '@1sat/templates';
 import { Hash, Script, Transaction } from '@bsv/sdk';
 import { lastWordMask, meetsDifficulty, mineRange, opnsHash, OPNS_DIFFICULTY } from './opnsPow';
-import { buildMintOutputs, estimateUnlockLength, miningPath } from './opnsMint';
+import { buildMintOutputs, estimateUnlockLength, isCharClaimed, miningPath, verifyCovenantSpend } from './opnsMint';
 import { mineName, NameTakenError, MiningCancelled, type MineChar } from './opnsRegister';
 import { opnsBinding, type Fetch } from './names';
 
@@ -121,6 +121,43 @@ describe('OpNS mint transaction (opnsMint)', () => {
   });
 });
 
+describe('local covenant check before broadcast', () => {
+  const p2pkh = Script.fromHex(`76a914${'22'.repeat(20)}88ac`);
+  const withChange = async (n: number, restated?: Script) => {
+    const t = Transaction.fromHex(mintTx.toHex());
+    t.inputs[0].sourceTransaction = parentTx;
+    t.outputs = t.outputs.slice(0, 3);
+    if (restated) t.outputs[0] = { ...t.outputs[0], lockingScript: restated };
+    for (let k = 0; k < n; k++) t.outputs.push({ satoshis: 5000 + k, lockingScript: p2pkh });
+    t.inputs[0].unlockingScript = await OpNS.unlock(char, nonce, ownerScript).sign(t, 0);
+    return t;
+  };
+  test('the on-chain golden mint passes the SDK interpreter', () => {
+    mintTx.inputs[0].sourceTransaction = parentTx;
+    expect(() => verifyCovenantSpend(mintTx, 0, parentTx, 1)).not.toThrow();
+  });
+  test('many trailing change outputs (0, 8, 16) are fine for the covenant', async () => {
+    for (const n of [0, 8, 16]) {
+      const t = await withChange(n);
+      expect(() => verifyCovenantSpend(t, 0, parentTx, 1)).not.toThrow();
+    }
+  });
+  test('a tx the covenant rejects (char not marked claimed) is caught locally with an OP_VERIFY error', async () => {
+    const hash = opnsHash(node.pow, char, nonce);
+    const bad = OpNS.lock(node.claimed, node.domain, hash); // restated without the claim bit
+    const t = await withChange(8, bad);
+    expect(() => verifyCovenantSpend(t, 0, parentTx, 1)).toThrow(/covenant check failed locally/);
+  });
+  test('isCharClaimed reads the node bitfield (dan node had "i" claimed: re-mining it failed at PC 2703)', () => {
+    const claimed = OpNS.claimBit(node.claimed, char);
+    expect(isCharClaimed(node.claimed, char)).toBe(false);
+    expect(isCharClaimed(claimed, char)).toBe(true);
+    const dan = OpNS.claimBit([0], 'i'.charCodeAt(0));
+    expect(isCharClaimed(dan, 'i'.charCodeAt(0))).toBe(true);
+    expect(isCharClaimed(dan, 'e'.charCodeAt(0))).toBe(false);
+  });
+});
+
 describe('mineName orchestration', () => {
   const fakeCtx = {} as never;
   const routes =
@@ -162,6 +199,44 @@ describe('mineName orchestration', () => {
     );
     expect(minted).toEqual(['ab', 'abc']);
     expect(steps.map((s) => s.newDomain)).toEqual(['ab', 'abc']);
+  });
+
+  test("a node whose next char is already claimed is never re-mined: it moves to that tx's child node", async () => {
+    // Live 13 Oct: the restated "dan" node (e03354a0…:0) already had "i" claimed by our own mint; mining "i"
+    // from it again failed the covenant (OP_VERIFY, PC 2703). The child "dani" is output 1 of the same tx.
+    const pow = new Array(32).fill(1);
+    const restatedTx = new Transaction();
+    restatedTx.addOutput({ satoshis: 1, lockingScript: OpNS.lock(OpNS.claimBit([0], 105), 'dan', pow) });
+    restatedTx.addOutput({ satoshis: 1, lockingScript: OpNS.lock([0], 'dani', pow) });
+    const txid = restatedTx.id('hex');
+    const minted: string[] = [];
+    const steps = await mineName(
+      {
+        ctx: fakeCtx,
+        fetch: routes({ '/origin/danie': undefined, '/mine/danie': { outpoint: `${txid}.0`, domain: 'dan' } }),
+        mineChar: instantMiner,
+        load: async (_c, op) =>
+          op === `${txid}.0`
+            ? {
+                outpoint: op,
+                beef: [],
+                tx: restatedTx,
+                vout: 0,
+                state: { claimed: OpNS.claimBit([0], 105), domain: 'dan', pow },
+              }
+            : { ...fakeNode(op, 'dani'), tx: restatedTx },
+        mint: async (_c, n, ch) => {
+          const d = n.state.domain + String.fromCharCode(ch);
+          minted.push(`${n.outpoint}->${d}`);
+          return { txid: 'e'.repeat(64), newDomain: d, childOutpoint: `${'e'.repeat(64)}.1` };
+        },
+      },
+      'danie',
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(minted).toEqual([`${txid}.1->danie`]);
+    expect(steps.length).toBe(1);
   });
 
   test('stops with NameTakenError when the name is taken mid-mining', async () => {
