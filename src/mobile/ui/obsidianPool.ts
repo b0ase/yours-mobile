@@ -30,8 +30,36 @@ col+=vec3(.96,.72,.0)*.10*exp(-d*d*5.)*(.6+.4*sheen);
 col*=smoothstep(1.25,.25,d);
 gl_FragColor=vec4(col,1.);}`;
 
+/**
+ * The gold pool (owner, 13 Oct 2026, for the Name Store: "our obsidian pool only golden"): the same height field and
+ * lighting as FRAG, but a molten-gold body, warm highlights and a dusting of sparkle. A separate shader so the
+ * original obsidian stays untouched.
+ */
+export const GOLD_FRAG = `precision mediump float;
+uniform vec2 r;uniform float t;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*n(p);p=p*2.03+vec2(1.7,9.2);a*=.5;}return v;}
+float H(vec2 p){vec2 q=vec2(fbm(p+t*.04),fbm(p+vec2(5.2,1.3)-t*.03));return fbm(p+2.2*q);}
+void main(){
+vec2 uv=(gl_FragCoord.xy-.5*r)/min(r.x,r.y);
+vec2 p=uv*1.6;float e=.004;
+float c=H(p);vec3 N=normalize(vec3(c-H(p+vec2(e,0)),c-H(p+vec2(0,e)),.012));
+vec3 L=normalize(vec3(-.4,.6,.7));
+float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),38.);
+float sheen=pow(max(dot(N,normalize(vec3(.3,.2,1.))),0.),6.);
+float d=length(uv);
+vec3 col=vec3(.13,.085,.02)+vec3(.78,.56,.12)*sheen*.55+vec3(1.,.93,.72)*spec*.8;
+float dust=pow(h(floor(p*110.)+floor(t*1.5)),90.)*smoothstep(.2,.6,c);
+col+=vec3(1.,.9,.6)*dust*.9;
+col+=vec3(.96,.72,.0)*.16*exp(-d*d*4.)*(.6+.4*sheen);
+col*=smoothstep(1.35,.2,d);
+gl_FragColor=vec4(col,1.);}`;
+
 /** The no-WebGL look, and what shows under the canvas before its first frame. */
 export const POOL_FALLBACK = 'radial-gradient(circle at 50% 50%, #15130c 0%, #050506 45%, #010101 80%)';
+export const GOLD_FALLBACK = 'radial-gradient(circle at 50% 40%, #3a2a08 0%, #170f04 45%, #050403 80%)';
 
 /** The canvas is drawn at this fraction of its CSS size (times DPR, capped at 1.5). */
 export const POOL_SCALE = 0.5;
@@ -63,12 +91,14 @@ export type PoolOptions = {
   fps?: number;
   /** Hold the current frame while an input or textarea has focus. */
   pauseWhileTyping?: boolean;
+  /** Fragment shader; the obsidian pool unless a variant (GOLD_FRAG) is given. */
+  frag?: string;
 };
 
 /** Runs the pool on a canvas. Returns true when WebGL is unavailable, so the caller shows the gradient. */
 export const usePool = (
   canvas: React.RefObject<HTMLCanvasElement | null>,
-  { still, fps = 0, pauseWhileTyping = false }: PoolOptions,
+  { still, fps = 0, pauseWhileTyping = false, frag = FRAG }: PoolOptions,
 ) => {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -94,7 +124,7 @@ export const usePool = (
     };
     const prog = gl.createProgram()!;
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, frag));
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return setFailed(true);
     gl.useProgram(prog);
@@ -145,6 +175,6 @@ export const usePool = (
       ro.disconnect();
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
-  }, [canvas, still, fps, pauseWhileTyping]);
+  }, [canvas, still, fps, pauseWhileTyping, frag]);
   return failed;
 };

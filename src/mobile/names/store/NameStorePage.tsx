@@ -8,6 +8,7 @@ import { ApprovalCard, Chip } from '../../../components/approval/ApprovalCard';
 import { CARD } from '../../../components/approval/cardTheme';
 import { PayHero } from '../../../components/approval/ApprovalHeroes';
 import { bavatarSvg } from '../../bavatar/bavatar';
+import { ObsidianBackdrop } from '../../ui/ObsidianBackdrop';
 import { fmtSats, fmtUsd, useBsvUsd } from '../../money/money';
 import { MARKET_ENABLED } from '../../storeBuild';
 import { GuestCtx } from '../../media/artists/guestCtx';
@@ -201,7 +202,12 @@ export const NameStorePage = () => {
   };
 
   return (
-    <div className="w-full h-full overflow-y-auto" style={{ background: BG, color: TEXT }}>
+    <div
+      className="relative w-full h-full overflow-y-auto"
+      style={{ background: BG, color: TEXT, isolation: 'isolate' }}
+    >
+      {/* The gold pool (owner, 13 Oct 2026): the obsidian pool's shader in molten gold, dimmed so the text reads. */}
+      <ObsidianBackdrop variant="gold" dim={0.5} />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"

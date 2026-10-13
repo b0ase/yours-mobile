@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties } from 'react';
-import { POOL_FALLBACK, poolMode, prefersReducedMotion, usePool } from './obsidianPool';
+import { GOLD_FALLBACK, GOLD_FRAG, POOL_FALLBACK, poolMode, prefersReducedMotion, usePool } from './obsidianPool';
 
 /**
  * Full-screen pool behind a screen's content. Put it first inside a container with `isolation: isolate` (it sits at
@@ -13,7 +13,10 @@ export const ObsidianBackdrop = ({
   pauseWhileTyping = true,
   className = '',
   style,
+  variant = 'obsidian',
 }: {
+  /** 'gold' = the molten-gold pool (Name Store); default the obsidian pool. */
+  variant?: 'obsidian' | 'gold';
   /** Dark overlay over the pool, 0 to 1, so text on it stays readable. */
   dim?: number;
   fixed?: boolean;
@@ -27,7 +30,8 @@ export const ObsidianBackdrop = ({
   const canvas = useRef<HTMLCanvasElement>(null);
   const [still] = useState(prefersReducedMotion);
   // A background, not the show: 30 fps and still while typing by default (phones, the extension popup).
-  const failed = usePool(canvas, { still, fps, pauseWhileTyping });
+  const gold = variant === 'gold';
+  const failed = usePool(canvas, { still, fps, pauseWhileTyping, frag: gold ? GOLD_FRAG : undefined });
   return (
     <div
       aria-hidden
@@ -36,7 +40,7 @@ export const ObsidianBackdrop = ({
       style={{ zIndex: -1, ...style }}
     >
       {/* The gradient on its own layer: wide-layout CSS clears backgrounds on the screens' wrappers (mobile.css). */}
-      <div className="absolute inset-0" style={{ background: POOL_FALLBACK }} />
+      <div className="absolute inset-0" style={{ background: gold ? GOLD_FALLBACK : POOL_FALLBACK }} />
       {!failed && <canvas ref={canvas} className="absolute inset-0 h-full w-full" />}
       {dim > 0 && <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${dim})` }} />}
     </div>
