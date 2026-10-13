@@ -161,7 +161,7 @@ export async function existingChoice(
       .then((r) => r.tokenId)
       .catch(() => null),
   ]);
-  const own = new Set(controlled.map((t) => t.tokenId));
+  const own = new Set(controlled.filter((t) => t.issued).map((t) => t.tokenId));
   const others = bound && !own.has(bound) ? 1 : 0;
   // A BSV-20 tick only blocks when this wallet doesn't hold that tick itself (BSV-20 isn't listed above).
   return decideExisting({ handle, controlled, othersBsv21: others, bsv20Tick: tick === true });
@@ -177,6 +177,7 @@ export async function importExistingToken(
   handle: string,
   token: TokenRef,
 ): Promise<{ link: PersonalLink; roomTicker: string | null }> {
+  if (!token.issued) throw new Error('Only the token’s issuer can import it as a personal token.');
   const signed = await signImport(ctx, token.tokenId, handle);
   const client = await chatClient(ctx);
   // Server half pending (see BchatClient.importPersonalToken); the room open below still binds a matching handle.

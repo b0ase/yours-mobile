@@ -18,6 +18,12 @@ describe('handle ↔ existing token', () => {
     expect(handleCardTitle(true, 'NPG')).toBe('We found the $NPG token — sign to import it');
     expect(handleCardTitle(true, null)).toBe('Open your $name room');
   });
+  test('a holder (not the issuer) is never offered the import; gets the labelled-mint note', () => {
+    const held = { tokenId: ID, sym: 'NPG' };
+    expect(decideExisting({ handle: 'npg', controlled: [held], othersBsv21: 0, bsv20Tick: false }).kind).toBe(
+      'mint-labelled',
+    );
+  });
   test("labelled mint allowed when someone else's token uses the ticker", () => {
     expect(decideExisting({ handle: 'john', controlled: [], othersBsv21: 1, bsv20Tick: false }).kind).toBe(
       'mint-labelled',

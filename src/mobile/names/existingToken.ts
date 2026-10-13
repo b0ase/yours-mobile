@@ -1,7 +1,7 @@
 /**
  * Handle ↔ existing token (owner, 13 Oct 2026). Before offering to mint a personal $NAME token, look for
  * tokens that already use that ticker:
- *  - this account controls one (issued it, or holds it) → "We found the $X token — sign to import it":
+ *  - this account issued one (controls its deploy key; holding some is not enough) → "We found the $X token — sign to import it":
  *    one signature, the token becomes the account's personal token, its room opens; nothing is minted;
  *  - a BSV-20 tick with that name exists and isn't ours → an error (BSV-20 ticks are unique by protocol);
  *  - someone else's BSV-21 token uses it → minting is still allowed, after a clear note, and the new token
@@ -53,11 +53,23 @@ export function decideExisting(input: {
   /** A BSV-20 tick with this name exists and this account doesn't control it. */
   bsv20Tick: boolean;
 }): ExistingChoice {
-  const mine = matchExistingToken(input.handle, input.controlled);
+  // Only the issuer (deploy key) may import: a holder must never claim someone else's token as theirs.
+  const mine = matchExistingToken(
+    input.handle,
+    input.controlled.filter((t) => t.issued),
+  );
   if (mine) return { kind: 'import', token: mine };
+  // Held but not issued here: someone else's token with this ticker.
+  const heldOthers = matchExistingToken(
+    input.handle,
+    input.controlled.filter((t) => !t.issued),
+  )
+    ? 1
+    : 0;
   const tick = personalTicker(input.handle) ?? input.handle;
   if (input.bsv20Tick) return { kind: 'bsv20-taken', tick };
-  if (input.othersBsv21 > 0) return { kind: 'mint-labelled', others: input.othersBsv21 };
+  const others = Math.max(input.othersBsv21, heldOthers);
+  if (others > 0) return { kind: 'mint-labelled', others };
   return { kind: 'mint' };
 }
 
