@@ -77,6 +77,8 @@ let resumeSub: { remove: () => Promise<void> } | null = null;
 let tapSub: { remove: () => Promise<void> } | null = null;
 
 const now = () => Date.now();
+/** Longer text for the Desktop Notifications page (wraps to 2 lines there); the phone list and OS notices keep body. */
+const FULL = 280;
 const item = (p: Omit<NotifyItem, 'read' | 'at'> & { at?: number }): NotifyItem => ({ read: false, at: now(), ...p });
 const postTarget = (p: FeedPost) => ({ type: 'post' as const, txid: p.txid, twetchId: p.twetchId });
 
@@ -136,6 +138,7 @@ async function bmapSocial(m: Me, st: PollState, out: NotifyItem[]) {
             kind: 'reply',
             title: `${r.author.name} replied`,
             body: excerpt(r.text || 'to your post') + (post.text ? ` — on “${excerpt(post.text, 40)}”` : ''),
+            full: excerpt(r.text || 'to your post', FULL),
             at: r.at || now(),
             target: postTarget(r),
           }),
@@ -204,6 +207,7 @@ async function bmapSocial(m: Me, st: PollState, out: NotifyItem[]) {
               kind: 'quote',
               title: `${q.author.name} quoted you`,
               body: excerpt(q.text),
+              full: excerpt(q.text, FULL),
               at: q.at || now(),
               target: postTarget(q),
             }),
@@ -231,6 +235,7 @@ async function bmapMentions(m: Me, st: PollState, out: NotifyItem[]) {
             kind: 'mention',
             title: `${p.author.name} mentioned you`,
             body: excerpt(p.text),
+            full: excerpt(p.text, FULL),
             at: p.at || now(),
             target: postTarget(p),
           }),
@@ -264,6 +269,7 @@ async function twetch(m: Me, st: PollState, out: NotifyItem[]) {
               kind: 'reply',
               title: `${r.author.name} replied on Twetch`,
               body: excerpt(r.text || 'to your post'),
+              full: excerpt(r.text || 'to your post', FULL),
               at: r.at || now(),
               target: postTarget(r),
             }),
@@ -307,6 +313,7 @@ async function twetch(m: Me, st: PollState, out: NotifyItem[]) {
           kind,
           title: `${p.author.name} ${kind === 'reply' ? 'replied' : kind === 'quote' ? 'quoted you' : 'mentioned you'} on Twetch`,
           body: excerpt(p.text),
+          full: excerpt(p.text, FULL),
           at: p.at || now(),
           target: postTarget(p),
         }),
@@ -341,6 +348,7 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
             ? `${last?.author_handle ? `$${last.author_handle}` : 'Someone'} mentioned you in ${r.name || r.ticker}`
             : `${n} new message${n === 1 ? '' : 's'} in ${r.name || r.ticker}`,
           body: excerpt(last?.body ?? ''),
+          full: excerpt(last?.body ?? '', FULL),
           at: Date.parse(last?.created_at ?? '') || now(),
           target: { type: 'room', ticker: r.ticker },
         }),

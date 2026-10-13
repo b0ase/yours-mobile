@@ -59,6 +59,8 @@ export type NotifyItem = {
   kind: NotifyKind;
   title: string;
   body: string;
+  /** Longer preview (up to 280 chars) for the Desktop Notifications page; falls back to body. */
+  full?: string;
   /** ms since epoch */
   at: number;
   read: boolean;

@@ -35,8 +35,11 @@ const useNotifications = () => useSyncExternalStore(subscribeItems, getItems, ge
 /** Feed header bell: unread badge; opens the notifications list. */
 export const NotificationsBell = ({
   onOpenPost,
+  onOpen,
 }: {
   onOpenPost: (t: Extract<NotifyTarget, { type: 'post' }>) => void;
+  /** Desktop: open the Notifications page (/m/notifications) instead of the phone's full-screen sheet. */
+  onOpen?: () => void;
 }) => {
   const items = useNotifications();
   const [open, setOpen] = useState(false);
@@ -45,7 +48,8 @@ export const NotificationsBell = ({
     <>
       <button
         onClick={() => {
-          setOpen(true);
+          if (onOpen) onOpen();
+          else setOpen(true);
           void askNotifyPermissionOnce();
           void pollNow();
         }}

@@ -1,0 +1,199 @@
+/* Desktop Notifications page (NotificationsPage.tsx). Scrolls itself; bottom padding clears the floating Ask b bar. */
+.nf-page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 24px 140px;
+  color: #fff;
+  --nf-gold: #f5b800;
+  --nf-line: rgba(255, 255, 255, 0.08);
+  --nf-muted: #98a2b3;
+}
+/* .ww-col sits 3.5rem above the pane (the old phone top bar): start below it. */
+.ww-col .nf-page {
+  padding-top: calc(3.5rem + 16px);
+}
+.nf-bar {
+  position: sticky;
+  top: -16px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  margin-bottom: 8px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.nf-chips,
+.nf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.nf-chips button,
+.nf-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--nf-line);
+  background: rgba(255, 255, 255, 0.03);
+  color: #d0d5dd;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background 0.14s ease-out,
+    border-color 0.14s ease-out,
+    color 0.14s ease-out;
+}
+.nf-chips button:hover,
+.nf-actions button:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+.nf-chips button.on {
+  background: rgba(245, 184, 0, 0.14);
+  border-color: rgba(245, 184, 0, 0.45);
+  color: var(--nf-gold);
+}
+.nf-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.nf-chips button:focus-visible,
+.nf-actions button:focus-visible,
+.nf-row:focus-visible {
+  outline: 2px solid var(--nf-gold);
+  outline-offset: 2px;
+}
+.nf-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+.nf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--nf-line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.nf-list li + li {
+  border-top: 1px solid var(--nf-line);
+}
+.nf-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 18px;
+  text-align: left;
+  background: transparent;
+  transition: background 0.14s ease-out;
+}
+.nf-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.nf-row.unread {
+  background: rgba(245, 184, 0, 0.05);
+}
+.nf-row.unread:hover {
+  background: rgba(245, 184, 0, 0.09);
+}
+.nf-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--nf-muted);
+}
+.nf-row.unread .nf-icon {
+  background: rgba(245, 184, 0, 0.14);
+  color: var(--nf-gold);
+}
+.nf-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nf-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.nf-text {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--nf-muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 110ch;
+}
+.nf-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+  font-size: 12px;
+  color: var(--nf-muted);
+  font-variant-numeric: tabular-nums;
+}
+.nf-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nf-gold);
+}
+.nf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 72px 24px;
+}
+.nf-empty img {
+  border-radius: 50%;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 40px rgba(245, 184, 0, 0.15);
+}
+.nf-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.nf-empty-sub {
+  margin-top: 6px;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--nf-muted);
+}
+@media (max-width: 640px) {
+  .nf-page {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .nf-row {
+    padding: 12px 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nf-chips button,
+  .nf-actions button,
+  .nf-row {
+    transition: none;
+  }
+}

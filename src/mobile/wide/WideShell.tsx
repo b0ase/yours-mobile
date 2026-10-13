@@ -525,7 +525,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
               <Icon d={I.qr} />
             </button>
             <span className="ww-bellwrap">
-              <NotificationsBell onOpenPost={() => navigate('/m/feed')} />
+              <NotificationsBell onOpenPost={() => navigate('/m/feed')} onOpen={() => navigate('/m/notifications')} />
             </span>
             <div className="ww-seg" role="group" aria-label="Display currency">
               {DISPLAY_CURRENCIES.map((c) => (
