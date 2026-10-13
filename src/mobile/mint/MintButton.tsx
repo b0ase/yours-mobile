@@ -135,19 +135,34 @@ export const MintButton = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
   );
 };
 
-const MintSheet = ({ exchangeRate, onClose }: { exchangeRate: number; onClose: () => void }) => {
+/**
+ * The Mint sheet. `start` = a MINT_TILES id (bMint hub, bmint/BmintPage.tsx): opens straight at that type's step,
+ * the same as tapping its tile here. Agent tiles are not startable (the hub routes those itself).
+ */
+export const MintSheet = ({
+  exchangeRate,
+  onClose,
+  start,
+}: {
+  exchangeRate: number;
+  onClose: () => void;
+  start?: string;
+}) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
-  const [step, setStep] = useState<Step>('choose');
+  const startTile = start ? MINT_TILES.find((t) => t.id === start && t.when() && (t.media || t.step)) : undefined;
+  const [step, setStep] = useState<Step>(startTile ? (startTile.media ? 'media' : startTile.step!) : 'choose');
   const navigate = useNavigate();
   // What the media step accepts and calls itself, set by the tile that opened it.
-  const [media, setMedia] = useState<{ accept: string; label: string }>({
-    accept: ACCEPT,
-    label: 'photo, video or audio',
-  });
+  const [media, setMedia] = useState<{ accept: string; label: string }>(
+    startTile?.media ?? {
+      accept: ACCEPT,
+      label: 'photo, video or audio',
+    },
+  );
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [kindSel, setKindSel] = useState<MintKind | null>(null);
+  const [kindSel, setKindSel] = useState<MintKind | null>(startTile?.kind ?? null);
   const [artist, setArtist] = useState('');
   const [album, setAlbum] = useState('');
   const [track, setTrack] = useState('');
@@ -882,6 +897,11 @@ const MINT_TILES: MintTile[] = [
       'Help me list my app as a bApp with its own token. Ask me for the app name, its website and what the token should do.',
   },
 ];
+
+/** The Mint sheet's types as the current edition shows them (store gating applied), for the bMint hub. */
+// eslint-disable-next-line react-refresh/only-export-components -- the hub reads the same list the sheet shows
+export const mintTilesShown = () =>
+  MINT_TILES.filter((t) => t.when()).map(({ id, icon, title, sub, agent }) => ({ id, icon, title, sub, agent }));
 
 const Tile = ({
   icon,

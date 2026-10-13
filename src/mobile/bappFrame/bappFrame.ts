@@ -15,7 +15,7 @@ export type BappSession = { name: string; url: string; origin: string; key: numb
 
 /** Exact origins of every bApp tile: the only pages we will frame or answer. */
 export const BAPP_FRAME_ALLOWLIST = frameAllowlist(
-  BAPPS.filter((a) => !a.noFrame && !(STORE_BUILD && a.privateOnly)).map((a) => a.url),
+  BAPPS.filter((a) => !a.noFrame && !(STORE_BUILD && a.privateOnly) && !a.url.startsWith('/')).map((a) => a.url),
 );
 
 /** Every curated app tile may run in-frame too (headers permitting); typed URLs stay full screen. */
