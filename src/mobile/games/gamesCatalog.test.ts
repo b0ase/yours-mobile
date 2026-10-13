@@ -12,8 +12,12 @@ describe('games catalogue', () => {
     }
     expect(new Set(GAMES.map((g) => g.name)).size).toBe(GAMES.length);
   });
-  test('all 17 TokenBlaster arcade games are listed', () => {
-    expect(TOKENBLASTER_GAMES).toHaveLength(17);
+  test('all 18 TokenBlaster arcade games are listed, each with its own cover and its own page', () => {
+    expect(TOKENBLASTER_GAMES).toHaveLength(18);
+    for (const g of TOKENBLASTER_GAMES)
+      expect(g.img).toMatch(/^https:\/\/www\.tokenblaster\.lol\/arcade\/[\w-]+\.jpg$/);
+    expect(new Set(TOKENBLASTER_GAMES.map((g) => g.img)).size).toBe(18);
+    expect(new Set(TOKENBLASTER_GAMES.map((g) => g.url)).size).toBe(18);
   });
   test('store build: no real-money or TokenBlaster games', () => {
     const all: Game[] = [...GAMES, ...TOKENBLASTER_GAMES];
