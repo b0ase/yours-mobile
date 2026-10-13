@@ -40,7 +40,6 @@ import { buyOpnsListing, listOpnsName } from './opnsBuy';
 import {
   loadAutoList,
   OPNS_LIST_FEE_ESTIMATE,
-  OPNS_SELL_USD,
   ownedForSale,
   saveAutoList,
   searchLabel,
@@ -50,6 +49,7 @@ import {
 import { OpnsSellSection } from './OpnsSellSection';
 import { OpnsGiftSection } from './OpnsGiftSection';
 import { OpnsBuySheet } from './OpnsSheets';
+import { nameTierUsd } from './store/tiers';
 
 /**
  * bMint › OpNS names (Desktop / web: desktop.bwalletx.com/bmint/opns; old /opns-mint links redirect here).
@@ -299,13 +299,16 @@ export const OpnsMintPage = () => {
       }
     : undefined;
 
-  /** List a name we just minted: found in the wallet's own OPNS basket (its BEEF, no indexer), $1 at today's rate. */
+  /** List a name we just minted: found in the wallet's own OPNS basket (its BEEF, no indexer), tier price at today's rate. */
   const listAfterMint = async (name: string) => {
     const r = await listOpns.execute(apiContext, { includeTags: true, limit: 1000 });
     const o = ownedForSale(r.outputs).find((x) => x.name === name);
     if (!o) throw new Error('not in the wallet yet');
     if (o.listedSats !== null) return '';
-    const sats = usdToSats(OPNS_SELL_USD, await fetchExchangeRate('main'));
+    // Tier price by length (store/tiers.ts); premium names are never auto-listed.
+    const usd = nameTierUsd(name);
+    if (usd === null) return '';
+    const sats = usdToSats(usd, await fetchExchangeRate('main'));
     if (!sats) throw new Error("couldn't get the BSV price");
     return listOpnsName(apiContext, o.id, sats);
   };
@@ -871,7 +874,8 @@ export const OpnsMintPage = () => {
                           onChange={(e) => setAutoList(e.target.checked)}
                           className="w-4 h-4 accent-[#FFD24D] cursor-pointer"
                         />
-                        Auto-list each name for {fmtUsd(OPNS_SELL_USD)} after it&apos;s minted
+                        Auto-list each name at its tier price after it&apos;s minted ($1 · $5 · $15 by length; special
+                        names never)
                       </label>
                     )}
                     <button
@@ -882,7 +886,7 @@ export const OpnsMintPage = () => {
                       onClick={() => setSheet(true)}
                     >
                       Mint {plural(summary.toMint, 'name')}
-                      {autoList ? ` + list each for ${fmtUsd(OPNS_SELL_USD)}` : ''} · pay {fmtSats(totalSats)}
+                      {autoList ? ' + list at tier prices' : ''} · pay {fmtSats(totalSats)}
                       {usd(totalSats) ? ` ${usd(totalSats)}` : ''}
                     </button>
                   </>
@@ -945,7 +949,7 @@ export const OpnsMintPage = () => {
               title={
                 <>
                   {autoList ? 'Mint' : 'Own'} <span style={{ color: CARD.gold }}>{summary.toMint}</span>{' '}
-                  {autoList ? `names + list each for ${fmtUsd(OPNS_SELL_USD)}` : 'names on-chain'}
+                  {autoList ? 'names + list at tier prices' : 'names on-chain'}
                 </>
               }
               primary={{ label: 'Allow', onClick: approve }}

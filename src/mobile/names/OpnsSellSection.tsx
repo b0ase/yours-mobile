@@ -18,6 +18,7 @@ import {
 import { OpnsSellSheet } from './OpnsSheets';
 import { OpnsGiftPanel } from './OpnsGiftPanel';
 import { withoutGifted } from './opnsGift';
+import { isPremiumName, nameTierUsd } from './store/tiers';
 
 /**
  * bMint › OpNS names › Owned names (bWalletX; the store edition shows OpnsGiftSection): Gift and Sell. Tick names, "List selected for $1", one approval, then each name is
@@ -67,9 +68,15 @@ export const OpnsSellSection = (p: {
   const unlisted = useMemo(() => owned.filter((o) => o.listedSats === null), [owned]);
   const chosen = unlisted.filter((o) => picked.has(o.name));
   const chosenAll = owned.filter((o) => picked.has(o.name));
-  const usdFor = (name: string) => parseUsdInput(prices[name] ?? '') ?? OPNS_SELL_USD;
-  const customPrices = Object.fromEntries(chosen.map((o) => [o.name, usdFor(o.name)]));
-  const totalUsd = chosen.reduce((a, o) => a + usdFor(o.name), 0);
+  // Tier price by length (store/tiers.ts) unless typed; a premium name needs a typed price (else it's skipped).
+  const usdFor = (name: string) => parseUsdInput(prices[name] ?? '') ?? nameTierUsd(name);
+  const customPrices = Object.fromEntries(
+    chosen.flatMap((o) => {
+      const u = usdFor(o.name);
+      return u === null ? [] : [[o.name, u]];
+    }),
+  );
+  const totalUsd = chosen.reduce((a, o) => a + (usdFor(o.name) ?? 0), 0);
   const allSame = chosen.every((o) => usdFor(o.name) === OPNS_SELL_USD);
   const selectable = owned;
   const allPicked = selectable.length > 0 && chosenAll.length === selectable.length;
@@ -296,7 +303,8 @@ export const OpnsSellSection = (p: {
                       $
                       <input
                         inputMode="decimal"
-                        value={prices[o.name] ?? String(OPNS_SELL_USD)}
+                        value={prices[o.name] ?? String(nameTierUsd(o.name) ?? '')}
+                        placeholder={isPremiumName(o.name) ? 'Offer' : undefined}
                         onChange={(e) => setPrices((x) => ({ ...x, [o.name]: e.target.value }))}
                         aria-label={`Price for ${o.name} in dollars`}
                         className="w-16 rounded-lg px-2 py-1 text-xs text-right outline-none focus-visible:ring-2 tabular-nums"
@@ -360,7 +368,7 @@ export const OpnsSellSection = (p: {
           onClick={() => void review()}
         >
           {!chosen.length
-            ? `List selected for ${fmtUsd(OPNS_SELL_USD)}`
+            ? 'List selected at tier prices'
             : allSame
               ? `List ${chosen.length} selected for ${fmtUsd(OPNS_SELL_USD)} each`
               : `List ${chosen.length} selected · ${fmtUsd(totalUsd)} total`}

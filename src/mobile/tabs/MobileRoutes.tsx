@@ -50,6 +50,8 @@ const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 // bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx; OpNS names renders inside it at /m/bmint/opns.
 // Old /opns-mint links redirect there, keeping ?mint=.
 const BmintPage = lazy(() => import('../bmint/BmintPage'));
+// The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
+const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
 // Desktop top bar bell: notifications as a page in the main column (notify/NotificationsPage.tsx).
 const NotificationsPage = lazy(() => import('../notify/NotificationsPage'));
@@ -84,6 +86,7 @@ const MobileRoutes = () => (
         <Route path="bmail" element={<BMailPage />} />
         <Route path="bmint/*" element={<BmintPage />} />
         <Route path="opns-mint" element={<ToOpnsMint />} />
+        <Route path="names" element={<NameStorePage />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="lock" element={<LockScreen />} />

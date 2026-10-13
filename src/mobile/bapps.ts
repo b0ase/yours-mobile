@@ -109,6 +109,15 @@ export const BAPPS: BApp[] = [
     icon: bmintIcon,
   },
   {
+    name: 'Names',
+    // The Name Store (names/store/NameStorePage.tsx): get your name on Bitcoin.
+    url: '/m/names',
+    verb: 'Get your name on Bitcoin. Yours forever',
+    group: 'featured',
+    status: 'live',
+    icon: bmintIcon,
+  },
+  {
     name: 'bWriter',
     url: 'https://bitcoin-writer.com/',
     verb: 'Write and save documents on-chain',

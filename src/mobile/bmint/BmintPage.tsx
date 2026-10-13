@@ -211,7 +211,8 @@ export const BmintPage = () => {
           </Tab>
           {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
           <Tab to={`${BASE}/opns`}>OpNS names</Tab>
-          {OpnsStorePage && <Tab to={`${BASE}/store`}>Name store</Tab>}
+          {/* The consumer Name Store lives at /names (names/store/); the old order-book list stays at /store. */}
+          <Tab to="/m/names">Get a name</Tab>
         </nav>
       </header>
       <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
