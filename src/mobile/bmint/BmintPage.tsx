@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { Link, NavLink, Route, Routes } from 'react-router-dom';
+import { useServiceContext } from '../../hooks/useServiceContext';
 import { BMINT_NOTES_ENABLED } from '../storeBuild';
+import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
 import './bmint.css';
 
@@ -8,8 +10,11 @@ import './bmint.css';
  * bMint (/m/bmint, Desktop and web): the design-and-mint tools ported from The Bitcoin Corporation
  * Mint (bcorp-mint). Phase 1 is Notes; OpNS names (/m/bmint/opns) is a sibling built separately.
  * See docs/BMINT-PORT-PLAN.md. Notes is never in a store build, not even as code (BMINT_NOTES_ENABLED).
+ * Notes are fixed designs issued only by The Bitcoin Corporation Mint (owner, 13 Oct 2026): the owner
+ * (lib/studioAccess.ts allow-list) gets the note studio; everyone else sees the designs as a showcase.
  */
 const NotesPage = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesPage')) : null;
+const NotesShowcase = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesShowcase')) : null;
 
 // OpNS names (names/OpnsMintPage.tsx, its own chunk) renders inside the shell at /m/bmint/opns.
 const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
@@ -39,22 +44,26 @@ const Tab = ({ to, children, end }: { to: string; children: string; end?: boolea
   </NavLink>
 );
 
-const Landing = () => (
+const Landing = ({ owner }: { owner: boolean }) => (
   <div className="bm-body">
     <div className="bm-hero">
       <span className="bm-chip">bMint</span>
       <h1>
-        Design it. <span>Mint it.</span>
+        The <span>Mint</span>
       </h1>
-      <p>Make notes, names and more in your browser, then mint them to your wallet with one approval.</p>
+      <p>Mint on-chain names to your wallet with one approval, and see the notes of The Bitcoin Corporation Mint.</p>
     </div>
     <div className="bm-tiles">
       {NotesPage && (
         <Link to={`${BASE}/notes`} className="bm-tile">
           <span className="bm-tile-art" style={{ backgroundImage: rosette, opacity: 1 }} />
           <span className="bm-chip">Notes</span>
-          <h2>Note designer</h2>
-          <p>Guilloche, rosettes, microprint and serials. Export PNG or SVG, or mint as an NFT.</p>
+          <h2>{owner ? 'Note studio' : "The Mint's notes"}</h2>
+          <p>
+            {owner
+              ? "Design the Mint's notes. Save drafts, export PNG or SVG."
+              : 'Designed and issued by The Bitcoin Corporation Mint.'}
+          </p>
         </Link>
       )}
       <Link to={`${BASE}/opns`} className="bm-tile">
@@ -75,28 +84,41 @@ const Landing = () => (
   </div>
 );
 
-export const BmintPage = () => (
-  <div className="bmint">
-    <header className="bm-head">
-      <Link to={BASE} className="bm-brand">
-        <img src={mintMark} alt="" />
-        <span>
-          b<b>Mint</b>
-        </span>
-      </Link>
-      <nav className="bm-tabs" aria-label="bMint">
-        {NotesPage && <Tab to={`${BASE}/notes`}>Notes</Tab>}
-        <Tab to={`${BASE}/opns`}>OpNS names</Tab>
-      </nav>
-    </header>
-    <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
-      <Routes>
-        {NotesPage && <Route path="notes" element={<NotesPage />} />}
-        <Route path="opns" element={<OpnsMintPage />} />
-        <Route path="*" element={<Landing />} />
-      </Routes>
-    </Suspense>
-  </div>
-);
+const useOwner = () => {
+  const { chromeStorageService } = useServiceContext();
+  const account = chromeStorageService.getCurrentAccountObject()?.account;
+  return isStudioOwner({
+    identityPubKey: account?.pubKeys?.identityPubKey,
+    identityAddress: account?.addresses?.identityAddress,
+  });
+};
+
+export const BmintPage = () => {
+  const owner = useOwner();
+  const Notes = owner ? NotesPage : NotesShowcase;
+  return (
+    <div className="bmint">
+      <header className="bm-head">
+        <Link to={BASE} className="bm-brand">
+          <img src={mintMark} alt="" />
+          <span>
+            b<b>Mint</b>
+          </span>
+        </Link>
+        <nav className="bm-tabs" aria-label="bMint">
+          {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
+          <Tab to={`${BASE}/opns`}>OpNS names</Tab>
+        </nav>
+      </header>
+      <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
+        <Routes>
+          {Notes && <Route path="notes" element={<Notes />} />}
+          <Route path="opns" element={<OpnsMintPage />} />
+          <Route path="*" element={<Landing owner={owner} />} />
+        </Routes>
+      </Suspense>
+    </div>
+  );
+};
 
 export default BmintPage;

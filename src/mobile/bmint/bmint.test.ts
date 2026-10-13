@@ -3,9 +3,9 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { defaultMintDocument, MINT_TEMPLATES, makeLayer } from './lib/mint-defaults';
 import { generators } from './lib/mint-patterns';
-import { fileBase, noteMap, noteTitle } from './lib/noteMint';
+import { fileBase } from './lib/noteFiles';
+import { isStudioOwner, parseStudioKeys } from './lib/studioAccess';
 import { composeSvg, withFonts } from './lib/svg';
-import type { MintDocument } from './lib/types';
 
 describe('pattern generators', () => {
   test('every layer type has a generator that returns an <svg>', () => {
@@ -47,27 +47,30 @@ describe('templates', () => {
   });
 });
 
-describe('Mint as NFT metadata', () => {
-  const doc: MintDocument = { ...defaultMintDocument(), name: 'Gold 100' };
-  test('bmint note fields with the serial', () => {
-    expect(noteMap({ doc, template: 'banknote' })).toEqual({
-      bmint: 'note',
-      template: 'banknote',
-      size: '1200x600',
-      serial: 'AA000001',
-    });
+describe('note studio access (owner only)', () => {
+  test('allow-list parsing', () => {
+    expect(parseStudioKeys(undefined)).toEqual([]);
+    expect(parseStudioKeys(' 02abc, 1Addr \n')).toEqual(['02abc', '1Addr']);
   });
-  test('no visible serial → no serial field; empty template → custom', () => {
-    const plain = { ...doc, layers: doc.layers.filter((l) => l.type !== 'serial-number') };
-    expect(noteMap({ doc: plain, template: '' })).toEqual({ bmint: 'note', template: 'custom', size: '1200x600' });
+  test('empty list: nobody', () => {
+    expect(isStudioOwner({ identityPubKey: '02abc', identityAddress: '1Addr' }, [])).toBe(false);
   });
-  test('all values are strings', () => {
-    for (const v of Object.values(noteMap({ doc, template: 'x' }))) expect(typeof v).toBe('string');
+  test('identity key or identity address on the list', () => {
+    expect(isStudioOwner({ identityPubKey: '02abc' }, ['02abc'])).toBe(true);
+    expect(isStudioOwner({ identityAddress: '1Addr' }, ['02abc', '1Addr'])).toBe(true);
+    expect(isStudioOwner({ identityPubKey: '02zzz', identityAddress: '' }, ['02abc'])).toBe(false);
+    expect(isStudioOwner({}, ['02abc'])).toBe(false);
   });
-  test('title and file name', () => {
-    expect(noteTitle(doc)).toBe('Gold 100');
-    expect(noteTitle({ ...doc, name: '  ' })).toBe('bMint note');
-    expect(fileBase({ ...doc, name: 'My note / v2!' })).toBe('My-note-v2');
+  test('the default list comes from the env only (empty in tests)', async () => {
+    const { BMINT_STUDIO_KEYS } = await import('./lib/studioAccess');
+    expect(BMINT_STUDIO_KEYS).toEqual(parseStudioKeys(process.env.VITE_BMINT_STUDIO_KEYS));
+  });
+  test('the studio has no mint path', () => {
+    const page = readFileSync(join(import.meta.dir, 'notes/NotesPage.tsx'), 'utf8');
+    expect(page).not.toMatch(/mintMedia|mint\/mint'|ApprovalCard/);
+  });
+  test('file name', () => {
+    expect(fileBase({ ...defaultMintDocument(), name: 'My note / v2!' })).toBe('My-note-v2');
   });
 });
 

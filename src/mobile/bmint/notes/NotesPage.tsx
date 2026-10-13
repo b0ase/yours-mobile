@@ -1,27 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { ApprovalCard, Chip } from '../../../components/approval/ApprovalCard';
-import { CARD } from '../../../components/approval/cardTheme';
-import { MintHero } from '../../../components/approval/ApprovalHeroes';
-import { useServiceContext } from '../../../hooks/useServiceContext';
-import { fetchExchangeRate } from '../../../utils/wallet';
-import { money } from '../../money/money';
-import {
-  BLOCKED_MESSAGE,
-  blockedText,
-  buildMap,
-  checkSize,
-  estimateCost,
-  fileToBase64,
-  notifyMinted,
-  wocTxUrl,
-} from '../../mint/mint';
-import { mintMedia } from '../../mint/mintMedia';
 import { ART_TEMPLATES } from '../lib/artTemplates';
 import { deleteDraft, listDrafts, newDraftId, saveDraft, type Draft } from '../lib/drafts';
 import { embeddedFonts, loadFonts } from '../lib/fonts';
 import { COLOR_SCHEMES, MINT_TEMPLATES, type ColorScheme } from '../lib/mint-defaults';
-import { fileBase, noteMap, noteTitle } from '../lib/noteMint';
+import { fileBase } from '../lib/noteFiles';
 import { composeSvg } from '../lib/svg';
 import type { MintBlendMode, MintLayerConfig } from '../lib/types';
 import LayerList from './LayerList';
@@ -30,10 +12,11 @@ import PatternControls from './PatternControls';
 import { useMintDesigner } from './useMintDesigner';
 
 /**
- * /m/bmint/notes: the Banknote designer (ported from bcorp-mint: useMintDesigner, patterns,
- * canvas, layers, pattern controls). Drafts stay on this device (IndexedDB). Export PNG / SVG as a
- * download. "Mint as NFT" renders the PNG and inscribes it through the wallet's own picture mint
- * (mint/mintMedia.ts) after ONE approval sheet. bMint holds no keys and broadcasts nothing itself.
+ * /m/bmint/notes for the owner: the Mint's note studio, the Banknote designer ported from bcorp-mint
+ * (useMintDesigner, patterns, canvas, layers, pattern controls). Banknote designs are fixed and issued
+ * only by The Bitcoin Corporation Mint (owner, 13 Oct 2026), so this page is owner only
+ * (lib/studioAccess.ts) and has no mint button: drafts stay on this device (IndexedDB) and designs
+ * export as PNG / SVG downloads.
  */
 
 const LAYER_TYPES: { type: MintLayerConfig['type']; label: string; group: string }[] = [
@@ -95,12 +78,9 @@ const thumbOf = (pngDataUrl: string): Promise<string> =>
     img.src = pngDataUrl;
   });
 
-type MintState = { file: File; url: string; sats: { network: number; fee: number; total: number } };
-
 export const NotesPage = () => {
   const d = useMintDesigner();
   const { doc, selectedLayer } = d;
-  const { apiContext, chromeStorageService } = useServiceContext();
   const [panel, setPanel] = useState<Panel>('templates');
   const [template, setTemplate] = useState('default');
   const [showGrid, setShowGrid] = useState(false);
@@ -109,11 +89,6 @@ export const NotesPage = () => {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok?: boolean } | null>(null);
-  const [rate, setRate] = useState(0);
-  const [mint, setMint] = useState<MintState | null>(null);
-  const [minting, setMinting] = useState(false);
-  const [mintError, setMintError] = useState('');
-  const [txid, setTxid] = useState('');
 
   const { refreshAll } = d;
   useEffect(() => {
@@ -128,12 +103,6 @@ export const NotesPage = () => {
       .catch(() => setDrafts([]));
   }, []);
   useEffect(refreshDrafts, [refreshDrafts]);
-
-  useEffect(() => {
-    fetchExchangeRate('main')
-      .then(setRate)
-      .catch(() => setRate(0));
-  }, []);
 
   const say = (text: string, ok?: boolean) => setMsg({ text, ok });
 
@@ -187,59 +156,6 @@ export const NotesPage = () => {
   const exportSvg = () =>
     download(new Blob([composeSvg(doc, embeddedFonts())], { type: 'image/svg+xml' }), `${fileBase(doc)}.svg`);
 
-  const startMint = async () => {
-    setMintError('');
-    setTxid('');
-    if (blockedText({ title: noteTitle(doc), description: doc.description, collection: { kind: 'none' } }))
-      return say(BLOCKED_MESSAGE);
-    const png = d.exportPng();
-    if (!png) return;
-    const blob = await dataUrlToBlob(png);
-    const size = checkSize(blob.size);
-    if (!size.ok) return say(size.message);
-    const file = new File([blob], `${fileBase(doc)}.png`, { type: 'image/png' });
-    const cost = estimateCost(blob.size, chromeStorageService.getCustomFeeRate(), rate);
-    setMint({
-      file,
-      url: URL.createObjectURL(blob),
-      sats: { network: cost.networkSats, fee: cost.feeSats, total: cost.totalSats },
-    });
-  };
-
-  const closeMint = () => {
-    if (minting) return;
-    if (mint) URL.revokeObjectURL(mint.url);
-    setMint(null);
-  };
-
-  const allow = async () => {
-    if (!mint || !apiContext) return;
-    setMinting(true);
-    setMintError('');
-    try {
-      const title = noteTitle(doc);
-      const form = { title, description: doc.description, collection: { kind: 'none' } as const };
-      const res = await mintMedia(apiContext, {
-        base64Content: fileToBase64(await mint.file.arrayBuffer()),
-        contentType: 'image/png',
-        title,
-        description: doc.description,
-        collection: form.collection,
-        feeSats: mint.sats.fee,
-        map: { ...buildMap(form), ...noteMap({ doc, template }) },
-      });
-      notifyMinted();
-      setTxid(res.txid);
-      URL.revokeObjectURL(mint.url);
-      setMint(null);
-      say('Minted. It shows in Wallet › NFTs once indexed.', true);
-    } catch (e) {
-      setMintError(e instanceof Error ? e.message : 'Mint failed. Nothing was sent.');
-    } finally {
-      setMinting(false);
-    }
-  };
-
   const t = selectedLayer?.transform ?? { x: 0, y: 0, rotation: 0, scale: 1 };
   const groups = useMemo(() => [...new Set(LAYER_TYPES.map((l) => l.group))], []);
 
@@ -288,18 +204,13 @@ export const NotesPage = () => {
             <button type="button" className="bm-btn" onClick={save}>
               Save draft
             </button>
-            <button type="button" className="bm-btn gold" onClick={startMint} disabled={!apiContext}>
-              Mint as NFT
+            <button type="button" className="bm-btn gold" onClick={exportPng}>
+              Download PNG
             </button>
           </div>
           {msg?.text && (
             <div className={`bm-msg${msg.ok ? ' ok' : ''}`} role="status">
-              {msg.text}{' '}
-              {txid && (
-                <a href={wocTxUrl(txid)} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
-                  View transaction
-                </a>
-              )}
+              {msg.text}
             </div>
           )}
         </section>
@@ -317,7 +228,7 @@ export const NotesPage = () => {
             <textarea
               rows={2}
               value={doc.description}
-              placeholder="Description (optional, inscribed with the NFT)"
+              placeholder="Notes for this design (optional)"
               aria-label="Description"
               onChange={(e) => d.setDocMeta({ description: e.target.value })}
             />
@@ -612,46 +523,6 @@ export const NotesPage = () => {
           </div>
         </aside>
       </div>
-
-      {mint &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[420] flex flex-col"
-            style={{
-              background: CARD.bg,
-              paddingTop: 'env(safe-area-inset-top)',
-              paddingBottom: 'env(safe-area-inset-bottom)',
-            }}
-          >
-            <ApprovalCard
-              ours
-              site="bWalletX"
-              siteSub="bMint"
-              onClose={closeMint}
-              closeDisabled={minting}
-              hero={<MintHero image={mint.url} alt={noteTitle(doc)} />}
-              title={
-                <>
-                  Mint <span style={{ color: CARD.gold }}>{noteTitle(doc)}</span>
-                </>
-              }
-              primary={{ label: 'Allow', onClick: () => void allow(), busy: minting, disabled: minting || !apiContext }}
-              secondary={{ label: 'Not now', onClick: closeMint, disabled: minting }}
-              error={mintError}
-              testId="bmint-mint-sheet"
-            >
-              <div className="flex flex-wrap gap-2">
-                <Chip>≈ {money(mint.sats.total, rate)}</Chip>
-                <Chip>1 NFT</Chip>
-                <Chip>
-                  {doc.width}×{doc.height} PNG
-                </Chip>
-                <Chip>Locked to your wallet</Chip>
-              </div>
-            </ApprovalCard>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 };

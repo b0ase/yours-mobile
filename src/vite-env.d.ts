@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   /** '1' = App Store / Google Play build (src/mobile/storeBuild.ts). */
   readonly VITE_STORE_BUILD?: string;
   readonly VITE_CHANNEL?: string;
+  /** bMint note studio allow-list: identity pubkeys or identity addresses, comma-separated (bmint/lib/studioAccess.ts). */
+  readonly VITE_BMINT_STUDIO_KEYS?: string;
   readonly VITE_OPNS_FEE_ADDRESS?: string;
   /** Live chat relay base URL (src/mobile/chat/live.ts); default https://rt.b0ase.com. */
   readonly VITE_RT_URL?: string;

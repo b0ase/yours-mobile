@@ -15,7 +15,7 @@ const thumbs = import.meta.glob<string>('../assets/templates/note-*-thumb.webp',
 
 const num = (p: string) => Number(/note-(\d+)/.exec(p)?.[1] ?? 0);
 
-export type ArtTemplate = { id: string; name: string; thumb: string; factory: () => MintDocument };
+export type ArtTemplate = { id: string; name: string; thumb: string; full: string; factory: () => MintDocument };
 
 export const ART_TEMPLATES: ArtTemplate[] = Object.keys(full)
   .sort((a, b) => num(a) - num(b))
@@ -24,8 +24,9 @@ export const ART_TEMPLATES: ArtTemplate[] = Object.keys(full)
     const thumb = Object.entries(thumbs).find(([k]) => num(k) === n)?.[1] ?? full[p];
     return {
       id: `bcorp-art-${n}`,
-      name: `bCorp art ${n}`,
+      name: `bCorp note ${n}`,
       thumb,
+      full: full[p],
       factory: () => ({
         name: `bCorp note ${n}`,
         description: '',
