@@ -53,8 +53,11 @@ export const orderForMinting = (names: string[]): string[] => [...names].sort();
 
 export type NameCheck =
   | { name: string; state: 'free'; domain: string | null }
-  | { name: string; state: 'taken' }
+  | { name: string; state: 'taken'; listing?: TakenListing }
   | { name: string; state: 'mine' };
+
+/** A taken name that its owner has listed for sale (OrdLock outpoint + price). */
+export type TakenListing = { outpoint: string; priceSats: number };
 
 export type PlannedName = NameCheck & {
   /** Characters this name still needs once the names before it in the list are mined. */
@@ -94,12 +97,16 @@ export const checkNames = async (
   names: string[],
   isMine: (name: string) => boolean,
   tree?: OpnsTree,
+  /** Taken names: is it listed for sale? (Optional; the search shows "Buy for $X" then.) */
+  listingOf?: (name: string) => Promise<TakenListing | null>,
 ): Promise<NameCheck[]> => {
   const out: NameCheck[] = [];
   for (const name of names) {
     if (isMine(name) || tree?.isOurs(name)) out.push({ name, state: 'mine' });
-    else if (await isTaken(f, name)) out.push({ name, state: 'taken' });
-    else {
+    else if (await isTaken(f, name)) {
+      const listing = listingOf ? await listingOf(name).catch(() => null) : null;
+      out.push(listing ? { name, state: 'taken', listing } : { name, state: 'taken' });
+    } else {
       const indexed = await fetchMineNode(f, name);
       const idxDomain = indexed && !tree?.isSpent(indexed.outpoint) ? indexed.domain : null;
       const local = tree?.best(name)?.domain ?? null;
@@ -125,7 +132,14 @@ export const summarise = (plan: PlannedName[], nodeScriptLen: number, hashRate: 
 // ---- the queue -----------------------------------------------------------------------------------------
 
 export type ItemStatus = 'pending' | 'mining' | 'done' | 'skipped' | 'mine' | 'error';
-export type BatchItem = { name: string; status: ItemStatus; txids: string[]; note?: string };
+export type BatchItem = {
+  name: string;
+  status: ItemStatus;
+  txids: string[];
+  note?: string;
+  /** Auto-list: true once listed for sale after minting, false when that listing failed (retry offered). */
+  listed?: boolean;
+};
 export type BatchState = { v: 1; items: BatchItem[]; approvedSats: number; createdAt: number };
 
 export const newBatch = (plan: PlannedName[], approvedSats: number, now = Date.now()): BatchState => ({
@@ -190,6 +204,12 @@ export type RunDeps = {
   mine: MineOne;
   /** Pays the per-name service fee after a name is mined (only when OPNS_FEE_ADDRESS is set). */
   payFee?: (name: string) => Promise<string | undefined>;
+  /**
+   * Auto-list (owner, 13 Oct 2026): list the name for sale right after it is minted. Spends the new name output
+   * from the wallet's own BEEF (no indexer wait). A failure here never stops the batch: the item is marked
+   * "Minted · not listed" and the next name is mined.
+   */
+  afterMint?: (name: string) => Promise<string>;
   isMine: (name: string) => boolean;
   /** Our local mine-tree cache: names minted this session/recently count as ours while unconfirmed. */
   tree?: OpnsTree;
@@ -228,7 +248,16 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
       const steps = await deps.mine(it.name, signal);
       const txids = [...it.txids, ...steps.map((s) => s.txid)];
       const feeTxid = deps.payFee ? await deps.payFee(it.name) : undefined;
-      set(i, { status: 'done', txids: feeTxid ? [...txids, feeTxid] : txids });
+      const minted = feeTxid ? [...txids, feeTxid] : txids;
+      set(i, { status: 'done', txids: minted });
+      if (deps.afterMint && steps.length) {
+        try {
+          const listTxid = await deps.afterMint(it.name);
+          set(i, { listed: true, note: undefined, txids: [...minted, listTxid] });
+        } catch (e) {
+          set(i, { listed: false, note: `Not listed: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
     } catch (e) {
       if (e instanceof MiningCancelled || signal.aborted) {
         set(i, { status: 'pending' });

@@ -5,7 +5,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { setAgentDraft } from '../agent/handoff';
 import { mintTilesShown, MintSheet } from '../mint/MintButton';
 import { HandleFlow } from '../names/HandleFlow';
-import { BMINT_NOTES_ENABLED, RELEASES_ENABLED, STORE_BUILD } from '../storeBuild';
+import { BMINT_NOTES_ENABLED, MARKET_ENABLED, RELEASES_ENABLED, STORE_BUILD } from '../storeBuild';
 import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
 import { HubArt } from './HubArt';
@@ -23,6 +23,8 @@ const NotesShowcase = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesShow
 
 // OpNS names (names/OpnsMintPage.tsx, its own chunk) renders inside the shell at /m/bmint/opns.
 const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
+// Name store (/m/bmint/store, public /bmint/store): every OpNS name for sale. bWalletX only (market rules).
+const OpnsStorePage = MARKET_ENABLED ? lazy(() => import('../names/OpnsStorePage')) : null;
 const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 
 const BASE = '/m/bmint';
@@ -209,12 +211,14 @@ export const BmintPage = () => {
           </Tab>
           {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
           <Tab to={`${BASE}/opns`}>OpNS names</Tab>
+          {OpnsStorePage && <Tab to={`${BASE}/store`}>Name store</Tab>}
         </nav>
       </header>
       <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
         <Routes>
           {Notes && <Route path="notes" element={<Notes />} />}
           <Route path="opns" element={<OpnsMintPage />} />
+          {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
           <Route path="mint/:type" element={<MintOpen owner={owner} />} />
           <Route path="*" element={<Landing owner={owner} />} />
         </Routes>

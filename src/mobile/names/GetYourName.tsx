@@ -1,8 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
-import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { askNotifyPermissionOnce } from '../notify/engine';
-import { buyOrdinal, listOpns, registerOpns } from '@1sat/actions';
+import { listOpns, registerOpns } from '@1sat/actions';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { Input } from '../../components/Input';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -32,7 +31,7 @@ import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
 import { opnsTreeFor } from './opnsTree';
 import { moneyNow } from '../money/money';
-import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { buyOpnsListing } from './opnsBuy';
 import { PAID_FEATURES_ENABLED } from '../storeBuild';
 
 /**
@@ -228,19 +227,7 @@ export const GetYourName = ({
       if (p.kind === 'bind') await bind(p);
       else if (p.kind === 'mint') await registerNew(p.name);
       else {
-        // buyOpns is buyOrdinal with OpNS defaults, but it drops usePermissionModule,
-        // which the module-wrapped wallet needs (see MODULE_FINISHES); call buyOrdinal directly.
-        const outpoint = walletOutpoint(p.outpoint);
-        await assertOrdLockV2(outpoint);
-        const res = await buyOrdinal.execute(purchaseContext(apiContext, outpoint), {
-          outpoint,
-          name: p.name.slice(0, 64),
-          contentType: 'application/op-ns',
-          basket: 'opns',
-          tags: ['opns'],
-          ...MODULE_FINISHES,
-        });
-        if (res.error) throw new Error(res.error);
+        await buyOpnsListing(apiContext, p.outpoint, p.name);
         setMsg(`You bought ${p.name}. Binding it to your identity…`);
         const mine = (await refreshOwned()).find((o) => o.name === p.name);
         if (mine) await bind({ name: p.name, id: mine.id });

@@ -143,7 +143,7 @@ export const ConnectHero = ({ site }: { site: string }) => {
   );
 };
 
-export const PayHero = ({ amount, sub }: { amount: string; sub?: string }) => (
+export const PayHero = ({ amount, sub, badge = 'PAY' }: { amount: string; sub?: string; badge?: string }) => (
   <Panel glow={0.26} column>
     <Contours lines="two" />
     <div
@@ -164,7 +164,7 @@ export const PayHero = ({ amount, sub }: { amount: string; sub?: string }) => (
         {sub}
       </div>
     )}
-    <Badge label="PAY" />
+    <Badge label={badge} />
   </Panel>
 );
 
