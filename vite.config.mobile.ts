@@ -151,6 +151,13 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '<ReceiveName identityAddress={identityAddress} />',
       '<ReceiveName identityAddress={identityAddress} />\n<ReceiveTabs />',
     ],
+    // Money tab: say what is safe here; NFTs, names and tokens have their own tab (owner, 13 Oct 2026). The old
+    // "Ordinals address" card at the bottom is that tab now.
+    [
+      "            BSV, MNEE, and Ordinals\n          </span>{' '}\n          to this address.",
+      "            BSV and MNEE\n          </span>{' '}\n          to this address. NFTs, names and tokens go to the NFTs &amp; names tab above.",
+    ],
+    ['      <OrdinalsAddress />\n    </motion.div>\n  );', '    </motion.div>\n  );'],
     // "Choose your handle" after create / restore, else a dismissible "Get your $name" card (src/mobile/names).
     [
       "import { CreditsRow } from '../mobile/credits/CreditsRow';",

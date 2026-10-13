@@ -18,11 +18,11 @@ from `isMined`, plus CORS errors for `push.bwalletx.com/config.json` (separate, 
 
 The console names 14 txids the wallet is waiting on. WhatsOnChain (`/v1/bsv/main/tx/hash/<txid>`) on 13 Oct:
 
-| status | txids |
-|---|---|
-| on chain (200) | 14467f50…c9217, 55fe86d1…c230a, 90c0b3dc…c41e1 |
-| never seen (404) | 0815e7c1…dfc896, 229814b3…792e2, 23878148…3fa9b, 29a9d9a4…63753, 77f3659f…95bde, a128ae0c…2cdbd63, afc97599…4e892, b1a18a16…30659a, bcf938b3…6c5b9 |
-| rate-limited, unknown (429) | 27b19b19…9605, 9aa42350…8ac59 |
+| status                      | txids                                                                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| on chain (200)              | 14467f50…c9217, 55fe86d1…c230a, 90c0b3dc…c41e1                                                                                                     |
+| never seen (404)            | 0815e7c1…dfc896, 229814b3…792e2, 23878148…3fa9b, 29a9d9a4…63753, 77f3659f…95bde, a128ae0c…2cdbd63, afc97599…4e892, b1a18a16…30659a, bcf938b3…6c5b9 |
+| rate-limited, unknown (429) | 27b19b19…9605, 9aa42350…8ac59                                                                                                                      |
 
 Full ids: `grep -oE "txid: [0-9a-f]{64}" delete-me-2 | sort -u`.
 
@@ -46,13 +46,13 @@ mine-tree cache still treats them as ours. `ordinals.1sat.app` (the names overla
    just rate-limited: treat 429 as "unknown, retry later", not "missing") is dead: remove its nodes from the local
    tree cache, forget the name as "ours", unlock any reserved UTXOs, and mark the name as `pending` again.
 2. **Say which it is.** Replace the single "still catching up" line with three honest states:
-   - *Confirming* (tx seen in mempool, not yet indexed): keep the wait wording, show the txid short form.
-   - *Never reached the network* (404 after the grace period): "Your last mint of X never reached the network. It has
+   - _Confirming_ (tx seen in mempool, not yet indexed): keep the wait wording, show the txid short form.
+   - _Never reached the network_ (404 after the grace period): "Your last mint of X never reached the network. It has
      been released; Resume mines it again." Then actually do that.
-   - *Names server down* (overlay 5xx / timeout): "The names server isn't answering (ordinals.1sat.app). Resume later."
+   - _Names server down_ (overlay 5xx / timeout): "The names server isn't answering (ordinals.1sat.app). Resume later."
      Don't blame the tree.
 3. **Names mined elsewhere since.** The owner's CLI (agent account `opns`) has now minted some of the same names
-   (e.g. danielwagner, davidcase, lukerohenaz, richardboase). The browser page must treat those as *taken* (or
+   (e.g. danielwagner, davidcase, lukerohenaz, richardboase). The browser page must treat those as _taken_ (or
    "yours, in another account" when the owner address matches) and move on, not retry forever.
 4. **Tests** in `src/mobile/names/*.test.ts` for the three states and for the dead-tx eviction.
 
