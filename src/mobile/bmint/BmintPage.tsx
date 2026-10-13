@@ -1,9 +1,10 @@
 import { lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { setAgentDraft } from '../agent/handoff';
 import { mintTilesShown, MintSheet } from '../mint/MintButton';
+import { canBulkMint } from '../names/bulkAccess';
 import { HandleFlow } from '../names/HandleFlow';
 import { BMINT_NOTES_ENABLED, MARKET_ENABLED, RELEASES_ENABLED, STORE_BUILD } from '../storeBuild';
 import { isStudioOwner } from './lib/studioAccess';
@@ -43,9 +44,10 @@ type HubTile = { id: string; title: string; sub: string; to?: string; agent?: st
  *     (the sheet over this page with that type preselected); its "with b" types open Ask b with the request typed.
  *   bAvatar (bavatar/BavatarMintSheet) and your $handle (names/HandleFlow; paid feature, !STORE_BUILD so the store bundle drops it)
  *     → /m/bmint/mint/bavatar | handle. bPics → /m/bpics. A music release (RELEASES_ENABLED) → /m/media/new.
- *   OpNS names → /m/bmint/opns. Notes (BMINT_NOTES_ENABLED) → /m/bmint/notes.
+ *   OpNS names → /m/bmint/opns (agents and the owner only, names/bulkAccess.ts). Notes (BMINT_NOTES_ENABLED) → /m/bmint/notes.
  */
 const useHub = (owner: boolean) => {
+  const bulk = useBulkMint(owner);
   const sheet = mintTilesShown();
   const make: HubTile[] = sheet.filter((t) => !t.agent).map((t) => ({ ...t, to: `${BASE}/mint/${t.id}` }));
   const withB: HubTile[] = sheet.filter((t) => t.agent);
@@ -66,12 +68,16 @@ const useHub = (owner: boolean) => {
           },
         ]
       : []),
-    {
-      id: 'opns',
-      title: 'Mint names in bulk',
-      sub: 'Drop a list; each name is mined into your wallet',
-      to: `${BASE}/opns`,
-    },
+    ...(bulk
+      ? [
+          {
+            id: 'opns',
+            title: 'Mint names in bulk',
+            sub: 'Drop a list; each name is mined into your wallet',
+            to: `${BASE}/opns`,
+          },
+        ]
+      : []),
     ...(NotesPage
       ? [
           {
@@ -200,8 +206,15 @@ const useOwner = () => {
   });
 };
 
+/** The bulk OpNS minter: agent accounts, the studio owner and the owner's handle (owner, 14 Oct 2026). */
+const useBulkMint = (owner: boolean) => {
+  const { chromeStorageService } = useServiceContext();
+  return canBulkMint(chromeStorageService.getCurrentAccountObject()?.account?.addresses?.identityAddress, owner);
+};
+
 export const BmintPage = () => {
   const owner = useOwner();
+  const bulk = useBulkMint(owner);
   const Notes = owner ? NotesPage : NotesShowcase;
   return (
     <div className="bmint">
@@ -219,13 +232,13 @@ export const BmintPage = () => {
           {/* The consumer Name Store lives at /names (names/store/); the old order-book list stays at /store. */}
           <Tab to="/m/names">Get a name</Tab>
           {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
-          <Tab to={`${BASE}/opns`}>Mint names</Tab>
+          {bulk && <Tab to={`${BASE}/opns`}>Mint names</Tab>}
         </nav>
       </header>
       <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
         <Routes>
           {Notes && <Route path="notes" element={<Notes />} />}
-          <Route path="opns" element={<OpnsMintPage />} />
+          <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
           {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
           <Route path="mint/:type" element={<MintOpen owner={owner} />} />
           <Route path="*" element={<Landing owner={owner} />} />

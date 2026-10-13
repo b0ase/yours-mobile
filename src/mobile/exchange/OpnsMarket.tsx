@@ -5,6 +5,7 @@ import { listOpns } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { fmtSats } from '../money/money';
 import { buyOpnsListing } from '../names/opnsBuy';
+import { canBulkMint } from '../names/bulkAccess';
 import { OPNS_MINT_ROUTE } from '../names/opnsBatch';
 import { fetchOpnsListings, filterListings, ownedForSale, type OpnsListing, usdOrSats } from '../names/opnsSell';
 import { OpnsBuySheet } from '../names/OpnsSheets';
@@ -19,7 +20,8 @@ const MUTED = '#98A2B3';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
 export const OpnsMarket = ({ rate }: { rate: number }) => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const bulk = canBulkMint(chromeStorageService.getCurrentAccountObject()?.account?.addresses?.identityAddress);
   const [list, setList] = useState<OpnsListing[] | null>(null);
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
@@ -86,13 +88,15 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
             className="flex-1 bg-transparent border-0 outline-none text-sm text-white"
           />
         </label>
-        <Link
-          to={OPNS_MINT_ROUTE}
-          className="rounded-xl px-3 py-2 text-xs font-bold border no-underline whitespace-nowrap hover:brightness-110 focus-visible:outline focus-visible:outline-2"
-          style={{ background: '#2a2100', borderColor: GOLD, color: GOLD }}
-        >
-          Sell your names
-        </Link>
+        {bulk && (
+          <Link
+            to={OPNS_MINT_ROUTE}
+            className="rounded-xl px-3 py-2 text-xs font-bold border no-underline whitespace-nowrap hover:brightness-110 focus-visible:outline focus-visible:outline-2"
+            style={{ background: '#2a2100', borderColor: GOLD, color: GOLD }}
+          >
+            Sell your names
+          </Link>
+        )}
       </div>
 
       {list === null ? (
@@ -118,9 +122,11 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
               Try again
             </button>
           ) : (
-            <Link to={OPNS_MINT_ROUTE} className="text-xs font-bold no-underline" style={{ color: GOLD }}>
-              Mint or list a name in bMint
-            </Link>
+            bulk && (
+              <Link to={OPNS_MINT_ROUTE} className="text-xs font-bold no-underline" style={{ color: GOLD }}>
+                Mint or list a name in bMint
+              </Link>
+            )
           )}
         </div>
       ) : (

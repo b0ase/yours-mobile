@@ -18,7 +18,6 @@ import { GuestCtx } from '../../media/artists/guestCtx';
 import { resumeAt } from '../../url/resume';
 import { checkOpnsAvailability, parseRecipient, resolveRecipient } from '../names';
 import { OPNS_PROFILE_DOMAIN } from '../config';
-import { OPNS_MINT_ROUTE } from '../opnsBatch';
 import { NamesServerError } from '../opnsMint';
 import { EXPECTED_HASHES } from '../opnsPow';
 import { formatEta, mineName, MiningCancelled, NameTakenError, type Progress } from '../opnsRegister';
@@ -589,8 +588,8 @@ const ResultCard = (p: {
           <p className="m-0 text-base inline-flex items-center gap-2" style={{ color: GOLD }}>
             <Check size={18} aria-hidden="true" /> Already yours.
           </p>
-          <Link to={OPNS_MINT_ROUTE} className={btn} style={{ ...ghostBtn, alignSelf: 'flex-start' }}>
-            Manage your names
+          <Link to="/m/settings" className={btn} style={{ ...ghostBtn, alignSelf: 'flex-start' }}>
+            Your names are in Settings
           </Link>
         </>,
       );
