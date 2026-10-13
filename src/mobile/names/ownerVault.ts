@@ -347,6 +347,7 @@ export const OWNER_KEEP: readonly string[] = [
   'wspro',
   'yhc',
   'yourcash',
+  'yourname',
   'zapier',
   'zelle',
   'zerodice',

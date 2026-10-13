@@ -44,7 +44,7 @@ describe('bulk import parsing', () => {
     expect(loadVault('id2', kv).keep).toEqual([]);
   });
   test('owner built-in lists merge in and protect', () => {
-    expect(OWNER_KEEP.length).toBe(347);
+    expect(OWNER_KEEP.length).toBe(348);
     const v = withBuiltIn(emptyVault(), { keep: OWNER_KEEP, gift: OWNER_GIFT });
     expect(v.keep.length + v.gift.length).toBe(new Set([...OWNER_KEEP, ...OWNER_GIFT]).size);
     expect(isProtected(v, OWNER_GIFT[0])).toBe(true);

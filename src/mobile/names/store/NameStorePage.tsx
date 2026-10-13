@@ -34,10 +34,11 @@ import { NAME_TIERS, offerHref } from './tiers';
 const BG = '#07080a';
 const GOLD = '#F5B800';
 const TEXT = '#f4f1e8';
-const MUTED = 'rgba(244,241,232,0.58)';
-const FAINT = 'rgba(244,241,232,0.38)';
-const HAIR = 'rgba(244,241,232,0.09)';
-const SURFACE = 'rgba(244,241,232,0.03)';
+const MUTED = 'rgba(244,241,232,0.82)';
+const FAINT = 'rgba(244,241,232,0.64)';
+const HAIR = 'rgba(244,241,232,0.14)';
+// Cards sit on the gold pool: a near-solid dark surface so their text reads (owner, 13 Oct 2026).
+const SURFACE = 'rgba(7,8,10,0.72)';
 const LISTINGS_URL = 'https://api.1sat.app/1sat/market/listings?status=active&type=application/op-ns&limit=1000';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -207,7 +208,7 @@ export const NameStorePage = () => {
       style={{ background: BG, color: TEXT, isolation: 'isolate' }}
     >
       {/* The gold pool (owner, 13 Oct 2026): the obsidian pool's shader in molten gold, dimmed so the text reads. */}
-      <ObsidianBackdrop variant="gold" dim={0.5} />
+      <ObsidianBackdrop variant="gold" dim={0.58} />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
@@ -552,7 +553,7 @@ const Preview = ({ name }: { name: string }) => (
   <div
     className="rounded-3xl p-6 sm:p-8 flex flex-col gap-5"
     style={{
-      background: 'linear-gradient(160deg, rgba(245,184,0,0.08), rgba(245,184,0,0.01) 55%)',
+      background: 'linear-gradient(160deg, rgba(245,184,0,0.10), rgba(245,184,0,0.02) 55%), rgba(7,8,10,0.74)',
       boxShadow: `inset 0 0 0 1px ${HAIR}`,
     }}
   >
