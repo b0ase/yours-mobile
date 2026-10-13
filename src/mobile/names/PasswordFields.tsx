@@ -31,10 +31,7 @@ export const PasswordFields = ({
   setPassword,
   setConfirm,
   askSaved = false,
-  confirmAlways = false,
 }: {
-  /** Ask twice also when adding an account to an existing wallet (owner, 6 Oct 2026). */
-  confirmAlways?: boolean;
   /** Create Account: a required "I've saved it" tick, so nobody moves on without a copy. */
   askSaved?: boolean;
   newWallet: boolean;
@@ -100,7 +97,7 @@ export const PasswordFields = ({
         )}
         <PasswordRevealButton shown={show} onToggle={() => setShow((s) => !s)} inputRef={passwordRef} />
       </div>
-      {(newWallet || confirmAlways) && (
+      {newWallet && (
         <div className="relative">
           <input
             ref={confirmRef}

@@ -182,8 +182,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { bindSocial } from '../../mobile/social/socialLogin';",
     ],
-    // Password asked twice for every new account (owner, 6 Oct 2026).
-    ['      if (newWallet && password !== passwordConfirm) {', '      if (password !== passwordConfirm) {'],
     // Restore offer from SocialSignIn needs the bottom menu's page switch.
     [
       '  const { hideMenu, showMenu } = useBottomMenu();',
@@ -222,7 +220,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        <Input\n          theme={theme}\n          placeholder="Password"\n          type="password"\n          value={password}\n          onChange={(e) => setPassword(e.target.value)}\n        />\n        <Show when={newWallet}>\n          <Input\n            theme={theme}\n            placeholder="Confirm password"\n            type="password"\n            value={passwordConfirm}\n            onChange={(e) => setPasswordConfirm(e.target.value)}\n          />\n        </Show>',
-      '        <PasswordFields askSaved confirmAlways newWallet={newWallet} username={accountName} password={password} confirm={passwordConfirm} setPassword={setPassword} setConfirm={setPasswordConfirm} />',
+      '        <PasswordFields askSaved newWallet={newWallet} username={accountName} password={password} confirm={passwordConfirm} setPassword={setPassword} setConfirm={setPasswordConfirm} />',
     ],
     [
       "      markHandlePrompt(keys.identityAddress, 'create');",
