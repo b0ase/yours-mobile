@@ -66,6 +66,12 @@ const useHub = (owner: boolean) => {
           },
         ]
       : []),
+    {
+      id: 'opns',
+      title: 'Mint names in bulk',
+      sub: 'Drop a list; each name is mined into your wallet',
+      to: `${BASE}/opns`,
+    },
     ...(NotesPage
       ? [
           {
@@ -77,12 +83,13 @@ const useHub = (owner: boolean) => {
         ]
       : []),
   ];
+  // Mass market first (owner, 13 Oct 2026): the Name Store is the front door; bulk minting is the maker's tool.
   const identity: HubTile[] = [
     {
-      id: 'opns',
-      title: 'OpNS names',
-      sub: 'On-chain names that point at you',
-      to: `${BASE}/opns`,
+      id: 'names',
+      title: 'Get your name',
+      sub: 'Search, buy or claim a name on Bitcoin. From $1',
+      to: '/m/names',
     },
     {
       id: 'bavatar',
@@ -102,9 +109,9 @@ const useHub = (owner: boolean) => {
       : []),
   ];
   return [
+    { title: 'Names & identity', tiles: identity },
     { title: 'Make', tiles: make },
     { title: 'Studio', tiles: studio },
-    { title: 'Names & identity', tiles: identity },
     { title: 'With b', tiles: withB },
   ].filter((g) => g.tiles.length);
 };
@@ -209,10 +216,10 @@ export const BmintPage = () => {
           <Tab to={BASE} end>
             Mint
           </Tab>
-          {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
-          <Tab to={`${BASE}/opns`}>OpNS names</Tab>
           {/* The consumer Name Store lives at /names (names/store/); the old order-book list stays at /store. */}
           <Tab to="/m/names">Get a name</Tab>
+          {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
+          <Tab to={`${BASE}/opns`}>Mint names</Tab>
         </nav>
       </header>
       <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
