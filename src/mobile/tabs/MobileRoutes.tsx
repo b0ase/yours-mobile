@@ -47,8 +47,9 @@ const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ 
 const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
 // Desktop sidebar › Friends (/wallet/friends, docs/FRIENDS.md).
 const FriendsPage = lazy(() => import('../friends/FriendsPage'));
-// bMint › OpNS names (/bmint/opns, names/OpnsMintPage.tsx). Old /opns-mint links redirect, keeping ?mint=.
-const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
+// bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx; OpNS names renders inside it at /m/bmint/opns.
+// Old /opns-mint links redirect there, keeping ?mint=.
+const BmintPage = lazy(() => import('../bmint/BmintPage'));
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
 
@@ -79,8 +80,7 @@ const MobileRoutes = () => (
         {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
-        <Route path="bmint/opns" element={<OpnsMintPage />} />
-        <Route path="bmint" element={<ToOpnsMint />} />
+        <Route path="bmint/*" element={<BmintPage />} />
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="lock" element={<LockScreen />} />

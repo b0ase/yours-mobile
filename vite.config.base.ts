@@ -34,6 +34,25 @@ export const dropDracoInStore = (): Plugin => ({
   },
 });
 
+// bMint Notes (src/mobile/bmint) is not in a store build (BMINT_NOTES_ENABLED drops its lazy chunks), but Vite
+// still emits the assets those chunks imported: the 11 note images and the designer's fonts. Drop them too,
+// unless some chunk that stayed still references the file.
+const BMINT_NOTE_ASSET =
+  /(^|\/)(note-\d+(-thumb)?|bangers-400|bebas-neue-400|ibm-plex-mono-(400|600)|oswald|permanent-marker-400|space-grotesk)-[\w-]{8}\.(webp|woff2)$/;
+export const dropBmintNotesInStore = (): Plugin => ({
+  name: 'bwallet-drop-bmint-notes-in-store',
+  apply: 'build',
+  generateBundle(_, bundle) {
+    if (!STORE_BUILD) return;
+    const code = Object.values(bundle)
+      .map((o) => (o.type === 'chunk' ? o.code : typeof o.source === 'string' ? o.source : ''))
+      .join('\n');
+    for (const k of Object.keys(bundle)) {
+      if (BMINT_NOTE_ASSET.test(k) && !code.includes(k.split('/').pop()!)) delete bundle[k];
+    }
+  },
+});
+
 // Main config for popup/extension pages
 export default defineConfig({
   base: './',
@@ -41,6 +60,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     dropDracoInStore(),
+    dropBmintNotesInStore(),
     nodePolyfills({
       include: ['buffer', 'process', 'util', 'stream', 'crypto', 'assert', 'url', 'path'],
       globals: {

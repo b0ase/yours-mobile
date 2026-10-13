@@ -1,0 +1,10 @@
+bMint (src/mobile/bmint)
+
+The note designer (patterns, defaults, designer hook, canvas, layer list and pattern controls) and
+the mint logo artwork and note template images are ported from The Bitcoin Corporation Mint
+(bcorp-mint, bitcoin-mint.com), copyright The Bitcoin Corporation Ltd, and relicensed by the owner
+under the MIT licence of this repository (LICENSE).
+
+Fonts in assets/fonts are licensed under the SIL Open Font License 1.1:
+Space Grotesk (Florian Karsten), IBM Plex Mono (IBM), Oswald (Vernon Adams et al.),
+Bebas Neue (Dharma Type), Permanent Marker (Font Diner), Bangers (Vernon Adams).
