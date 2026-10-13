@@ -1496,9 +1496,10 @@ html.ww-on.ww-onb body #root > div > div > div:not(.absolute) {
   padding: 28px 24px !important;
 }
 /* Errors and notices (components/Snackbar: absolute, bottom of a zero-height box, so they showed as a red sliver at
-   the panel's top): pin them to the panel's bottom edge, full text, readable size. #root is transformed, so fixed
-   is relative to the panel. */
-html.ww-on.ww-onb body #root .absolute.bottom-0.z-\[9999\] {
+   the panel's top, or below the fold of a scrolling page): pin them to the panel's bottom edge, full text, readable
+   size. #root is transformed, so fixed is relative to the panel. Every wide screen, not only onboarding (owner,
+   13 Oct 2026: Add account's "wrong password" never showed, so the form looked like it just refreshed). */
+html.ww-on body #root .absolute.bottom-0.z-\[9999\] {
   position: fixed !important;
   top: auto !important;
   bottom: 16px !important;

@@ -180,6 +180,16 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   ],
   // New wallet / new account: flag the "Choose your handle" step (shown on the Wallet tab after Enter reloads).
   'src/pages/onboarding/CreateAccount.tsx': [
+    // The error under the form itself (owner, 13 Oct 2026: on Desktop the snackbar never showed, so a wrong master
+    // password looked like the form just refreshing).
+    [
+      '  const [copied, setCopied] = useState(false);',
+      "  const [copied, setCopied] = useState(false);\n  const [formError, setFormError] = useState('');",
+    ],
+    [
+      '      event?.preventDefault();\n      setLoading(true);',
+      "      event?.preventDefault();\n      setFormError('');\n      setLoading(true);",
+    ],
     // A Continue with X / Google sign-in made on this screen now belongs to the new account (socialLogin.ts bindSocial).
     [
       '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);',
@@ -201,7 +211,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Say why it failed (src/mobile/onboardingError.ts) instead of always blaming the password.
     [
       "      console.log(error);\n      addSnackbar('An error occurred while creating the account! Make sure your password is correct.', 'error');",
-      "      console.log(error);\n      addSnackbar(onboardingError('create', error), 'error');",
+      "      console.log(error);\n      { const m = onboardingError('create', error); setFormError(m); addSnackbar(m, 'error'); }",
     ],
     // Avatar: "Add a photo" (or an NFT id / link) instead of upstream's Icon URL box (names/AccountIconField.tsx).
     [
@@ -261,7 +271,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Add account: the box itself says "your wallet password", and a short password says so (not "Invalid Password!").
     [
       "addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');",
-      "addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Wrong password: use your master password, the one you unlock the wallet with.', 'error');",
+      "{ const m = newWallet ? 'The password must be at least 8 characters!' : 'Wrong password: use your master password, the one you unlock the wallet with.'; setFormError(m); addSnackbar(m, 'error'); }",
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -274,7 +284,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       "        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",
-      "        {!newWallet && <AgentAccountToggle />}\n        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",
+      "        {formError && (\n          <p role=\"alert\" className=\"w-[85%] m-0 mt-1 text-sm rounded-xl px-3 py-2\" style={{ color: '#FDA29B', background: 'rgba(253,162,155,0.1)' }}>\n            {formError}\n          </p>\n        )}\n        {!newWallet && <AgentAccountToggle />}\n        <Button\n          theme={theme}\n          type=\"primary\"\n          label={newWallet ? 'Generate Seed' : 'Create New Account'}",
     ],
     [
       "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet)",
