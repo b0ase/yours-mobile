@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
-import { PAID_CALLS_ENABLED } from '../storeBuild';
+import { APP_NAME, PAID_CALLS_ENABLED } from '../storeBuild';
 import { asMenuItem } from '../tabs/tabs';
 import { bareName } from '../names/names';
 import { requestDm } from '../chat/segmentNav';
@@ -772,7 +772,7 @@ export const CallsList = ({
                       setProblem('');
                     }}
                     onKeyDown={(e) => e.key === 'Enter' && void callName()}
-                    placeholder="$name (bWalletX), paymail, name or @number"
+                    placeholder={`$name (${APP_NAME}), paymail, name or @number`}
                     aria-label="Who to call"
                     autoCapitalize="none"
                     autoCorrect="off"

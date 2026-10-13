@@ -15,6 +15,7 @@ import {
   type Resolved,
 } from './names';
 import { liveDomains, withDomain } from './paymailDomains';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Recipient box for the Send screens (build-time swap for upstream's address <Input>, see
@@ -145,7 +146,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     <div style={{ width: style?.width ?? '85%', margin: style?.margin ?? '0 auto' }} className="flex flex-col gap-2">
       <Input
         theme={theme}
-        placeholder={placeholder ?? '$name (bWalletX), paymail or address'}
+        placeholder={placeholder ?? `$name (${APP_NAME}), paymail or address`}
         type="text"
         autoCapitalize="none"
         autoCorrect="off"
