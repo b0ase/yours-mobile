@@ -16,6 +16,7 @@ import {
   type MintStepResult,
 } from './opnsMint';
 import type { OpnsTree } from './opnsTree';
+import { confirmingNote } from './opnsTxStatus';
 
 /**
  * Register a brand-new OpNS name: mine it character by character on-device, one mint
@@ -34,6 +35,21 @@ export class NameTakenError extends Error {
 export class MiningCancelled extends Error {
   constructor() {
     super('Mining cancelled');
+  }
+}
+/**
+ * The name can't be mined right now because the tree is ahead of the indexer: our own mint of it (txid, when we
+ * know it) is on the network but not indexed yet, or someone else extended the node we needed. Not a wallet error:
+ * the batch leaves the name pending and moves on (opnsBatch.ts). A mint the network never received is a different
+ * state and is evicted before mining starts (opnsTxStatus.ts), so it never surfaces here.
+ */
+export class TreeHoldError extends Error {
+  constructor(
+    public readonly held: string,
+    public readonly txid?: string,
+  ) {
+    super(confirmingNote(held, txid));
+    this.name = 'TreeHoldError';
   }
 }
 
@@ -125,8 +141,9 @@ const childOf = (node: LoadedNode, domain: string): string | null => {
   return st?.domain === domain ? `${node.tx.id('hex')}.1` : null;
 };
 
-const catchingUp = (name: string) =>
-  `The name tree for "${name}" is still catching up with your last mints. Wait for them to confirm (about 10 minutes), then try again.`;
+/** The hold for `name` when the node we needed (`outpoint`) is spent: by our own mint (named) or by someone else. */
+const hold = (tree: OpnsTree | undefined, name: string, outpoint?: string) =>
+  new TreeHoldError(name, (outpoint && tree?.spenderOf(outpoint)?.txid) || tree?.mintFor(name)?.txid);
 
 export const mineName = async (
   deps: RegisterDeps,
@@ -146,7 +163,10 @@ export const mineName = async (
   if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
   const indexed = await fetchMineNode(deps.fetch, name);
   const first = pickNode(tree, name, indexed);
-  if (!first) throw new Error(indexed ? catchingUp(name) : `No mine-tree node found for "${name}"`);
+  if (!first) {
+    if (!indexed) throw new Error(`No mine-tree node found for "${name}"`);
+    throw hold(tree, name, indexed.outpoint);
+  }
 
   const totalChars = name.length - first.domain.length;
   const steps: MintStepResult[] = [];
@@ -166,7 +186,7 @@ export const mineName = async (
       // This node already has our next char mined (e.g. it is the restated parent of our own unconfirmed mint
       // and the cache / indexer pointed back at it). Mining it again fails the covenant: go to the child.
       const child = childOf(node, domain + name[domain.length]);
-      if (!child || tree?.isSpent(child) || retries++ >= 3) throw new Error(catchingUp(name));
+      if (!child || tree?.isSpent(child) || retries++ >= 3) throw hold(tree, name, child ?? undefined);
       outpoint = child;
       beefHint = node.beef;
       fromIndexer = false;
@@ -218,7 +238,7 @@ export const mineName = async (
       tree?.markSpent(node.outpoint);
       if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
       const next = pickNode(tree, name, await fetchMineNode(deps.fetch, name));
-      if (retries++ >= 3 || !next || next.outpoint === node.outpoint) throw new Error(catchingUp(name));
+      if (retries++ >= 3 || !next || next.outpoint === node.outpoint) throw hold(tree, name, node.outpoint);
       outpoint = next.outpoint;
       beefHint = next.beefHint;
       fromIndexer = next.fromIndexer;

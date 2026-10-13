@@ -127,7 +127,7 @@ describe('OpNS local mine-tree (13 Oct double-spend bug)', () => {
         calls++;
         throw Object.assign(new Error('require review'), { name: 'WERR_REVIEW_ACTIONS' });
       }),
-    ).rejects.toThrow('Wait for them to confirm');
+    ).rejects.toThrow('catching up');
     expect(calls).toBe(1);
   });
 

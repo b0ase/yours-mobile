@@ -1,8 +1,9 @@
 import type { Fetch } from './names';
-import { estimateMintFee, fetchMineNode, isTaken, OPNS_CHARSET } from './opnsMint';
+import { estimateMintFee, fetchMineNode, isTaken, NamesServerError, OPNS_CHARSET } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
-import { MiningCancelled, NameTakenError } from './opnsRegister';
+import { MiningCancelled, NameTakenError, TreeHoldError } from './opnsRegister';
 import type { OpnsTree } from './opnsTree';
+import { releasedNote, type SweepResult } from './opnsTxStatus';
 
 /**
  * "Mint a list" (owner, 13 Oct 2026): mine several OpNS names in one go from the user's own wallet.
@@ -287,6 +288,16 @@ export type RunDeps = {
   isMine: (name: string) => boolean;
   /** Our local mine-tree cache: names minted this session/recently count as ours while unconfirmed. */
   tree?: OpnsTree;
+  /**
+   * Evict mints the network never received (opnsTxStatus.ts sweepDeadMints). Run before every name, so a name whose
+   * earlier mint died goes back to pending and is mined again in this run.
+   */
+  sweep?: () => Promise<SweepResult>;
+  /**
+   * Who has a taken name: one of this wallet's other accounts (the owner's CLI agent account mined the same list,
+   * 13 Oct 2026) or someone else. Without it every taken name is "Taken by someone else".
+   */
+  takenBy?: (name: string) => Promise<'another-account' | 'other'>;
   save: (s: BatchState) => void;
   onUpdate: (s: BatchState) => void;
   /** Network fee per mined character (estimateMintFee); with it the run keeps to the approved allowance. */
@@ -297,7 +308,37 @@ export type RunDeps = {
 
 export const ALLOWANCE_USED_UP = 'This batch has used its approved amount. Clear and approve the rest as a new batch';
 
-export type RunResult = { stopped: 'finished' | 'cancelled' | 'error'; error?: string; state: BatchState };
+export type RunResult = {
+  stopped: 'finished' | 'cancelled' | 'error';
+  error?: string;
+  state: BatchState;
+  /** Set when the run stopped because the names overlay (this host) isn't answering. */
+  namesServer?: string;
+};
+
+export const TAKEN_OTHER = 'Taken by someone else';
+export const YOURS_ELSEWHERE = 'Yours, in another account';
+/** A name released twice in one run keeps failing to reach the network: stop retrying it until the next Resume. */
+const MAX_REMINTS_PER_RUN = 2;
+
+/**
+ * Apply a dead-mint sweep to the queue: a name whose mint never reached the network is pending again, with its dead
+ * txid dropped and its fee credited back to the allowance (nothing was spent). Names the sweep didn't touch keep
+ * their state.
+ */
+export const applySweep = (state: BatchState, sweep: SweepResult, perCharSats = 0): BatchState => {
+  if (!sweep.dead.length) return state;
+  const deadTx = new Set(sweep.dead.map((d) => d.txid));
+  const released = new Set(sweep.dead.flatMap((d) => d.names));
+  let credit = 0;
+  const items = state.items.map((it) => {
+    if (!released.has(it.name) || it.status === 'skipped') return it;
+    const txids = it.txids.filter((t) => !deadTx.has(t));
+    credit += (it.txids.length - txids.length) * perCharSats;
+    return { ...it, status: 'pending' as const, txids, note: releasedNote(it.name), listed: undefined };
+  });
+  return { ...state, items, spentSats: Math.max(0, (state.spentSats ?? 0) - credit) };
+};
 
 /**
  * Work through the pending items in order. Each name is re-checked right before mining: taken by someone
@@ -320,17 +361,54 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
     deps.onUpdate(state);
   };
   deps.onUpdate(state);
-  for (let i = 0; i < state.items.length; i++) {
-    const it = state.items[i];
-    if (it.status !== 'pending') continue;
+  // Names left pending with a hold note this run (tree not indexed yet): not tried again until the next Resume.
+  const held = new Set<number>();
+  const reminted = new Map<string, number>();
+  const nextIndex = () => state.items.findIndex((it, j) => it.status === 'pending' && !held.has(j));
+  const taken = async (i: number, name: string) => {
+    const who = deps.takenBy ? await deps.takenBy(name).catch(() => 'other' as const) : 'other';
+    if (who === 'another-account') set(i, { status: 'mine', note: YOURS_ELSEWHERE });
+    else set(i, { status: 'skipped', note: TAKEN_OTHER });
+  };
+  for (let i = nextIndex(); i >= 0; i = nextIndex()) {
     if (signal.aborted) return { stopped: 'cancelled', state };
+    if (deps.sweep) {
+      const sw = await deps.sweep().catch(() => null);
+      if (sw?.dead.length) {
+        state = applySweep(state, sw, deps.perCharSats);
+        for (const n of sw.dead.flatMap((d) => d.names)) {
+          const k = state.items.findIndex((it) => it.name === n);
+          if (k < 0) continue;
+          held.delete(k);
+          const times = (reminted.get(n) ?? 0) + 1;
+          reminted.set(n, times);
+          // A released name whose mint keeps dying is not re-mined for ever in one run.
+          if (times > MAX_REMINTS_PER_RUN) {
+            held.add(k);
+            state = {
+              ...state,
+              items: state.items.map((it, j) =>
+                j === k
+                  ? { ...it, note: `${releasedNote(n)} Released ${times} times this run; Resume to try again.` }
+                  : it,
+              ),
+            };
+          }
+        }
+        deps.save(state);
+        deps.onUpdate(state);
+        i = nextIndex(); // a released name earlier in the list goes first
+        if (i < 0) break;
+      }
+    }
+    const it = state.items[i];
     try {
       if (deps.isMine(it.name) || deps.tree?.isOurs(it.name)) {
         set(i, { status: 'mine', note: deps.isMine(it.name) ? 'Already yours' : 'Yours, confirming' });
         continue;
       }
       if (await isTaken(deps.fetch, it.name)) {
-        set(i, { status: 'skipped', note: 'Taken by someone else' });
+        await taken(i, it.name);
         continue;
       }
       if (deps.perCharSats && it.chars !== undefined) {
@@ -366,12 +444,19 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
         return { stopped: 'cancelled', state };
       }
       if (e instanceof NameTakenError) {
-        set(i, { status: 'skipped', note: 'Taken by someone else' });
+        await taken(i, it.name);
+        continue;
+      }
+      if (e instanceof TreeHoldError) {
+        // Our mint of it (or someone's extension of the tree) isn't indexed yet: leave it, mine the next name.
+        set(i, { status: 'pending', note: e.message });
+        held.add(i);
         continue;
       }
       const msg = e instanceof Error ? e.message : String(e);
       set(i, { status: 'pending', note: msg });
-      return { stopped: 'error', error: msg, state };
+      // The overlay is down: every name would fail the same way, so stop here (the page shows the server, not the tree).
+      return { stopped: 'error', error: msg, state, ...(e instanceof NamesServerError && { namesServer: e.host }) };
     }
   }
   return { stopped: 'finished', state };
