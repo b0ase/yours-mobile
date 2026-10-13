@@ -9,10 +9,20 @@ describe('identity row', () => {
     expect(t.full).toBe('testy@bwallet.space');
     expect(t.copy).toBe('testy@bwallet.space');
   });
+  test('card front shows the full bWalletX paymail, not just the $handle', () => {
+    const t = identityRowText('b0asex', 'b0asex@bwalletx.com', '');
+    expect(t.front).toBe('b0asex@bwalletx.com');
+  });
   test('OpNS only; name equal to the handle is not repeated', () => {
-    expect(identityRowText('alice', '', 'alice')).toEqual({ name: '', tag: '$alice', full: '', copy: 'alice' });
+    expect(identityRowText('alice', '', 'alice')).toEqual({
+      name: '',
+      tag: '$alice',
+      full: '',
+      front: '$alice',
+      copy: 'alice',
+    });
   });
   test('no handle: name only, nothing to copy', () => {
-    expect(identityRowText('Account 1', '', '')).toEqual({ name: 'Account 1', tag: '', full: '', copy: '' });
+    expect(identityRowText('Account 1', '', '')).toEqual({ name: 'Account 1', tag: '', full: '', front: '', copy: '' });
   });
 });

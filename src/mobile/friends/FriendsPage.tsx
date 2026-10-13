@@ -38,7 +38,7 @@ import { useAccountNames } from '../names/accountNames';
 import { bavatarDataUri } from '../names/avatar';
 import { bavatarSvg } from '../bavatar/bavatar';
 import { getPersonalLink } from '../names/personalToken';
-import { BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
+import { APP_NAME, BSPACES_ENABLED, MARKET_ENABLED } from '../storeBuild';
 import { Scanner } from '../scan/Scanner';
 import { NftDetail } from '../media/NftDetail';
 import { useWalletMedia, type MediaItem } from '../media/useWalletMedia';
@@ -302,7 +302,7 @@ const AddFriend = ({
             setCand(null);
             setErr('');
           }}
-          placeholder="Add a friend: $handle, paymail, @handle or identity key"
+          placeholder={`Add a friend: $name (${APP_NAME}), paymail, @handle or identity key`}
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}

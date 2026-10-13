@@ -1,4 +1,3 @@
-import { validate } from 'bitcoin-address-validation';
 import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
 import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
 import { withoutQuarantined } from '../mobile/airdrops/quarantine';
@@ -91,6 +90,7 @@ import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
+import { isMainnetAddress } from '../mobile/names/address';
 import { rememberSent } from '../mobile/wallet/send/sendLogic';
 import {
   BALANCE_TIMEOUT_MS,
@@ -303,8 +303,9 @@ export const BsvWallet = () => {
               usdSendAmount: null,
             };
           }
-          // Otherwise just update the specified field
-          return { ...r, [field]: value };
+          // Otherwise just update the specified field. Editing the address or amount clears a
+          // stale submit-time error, so the message and the Send button never disagree.
+          return field === 'error' ? { ...r, error: value as string } : { ...r, [field]: value, error: undefined };
         }
         return r;
       }),
@@ -855,7 +856,7 @@ export const BsvWallet = () => {
         addSnackbar('All recipients must have an address and amount!', 'info');
         return;
       }
-      if (!isValidEmail(r.address) && !validate(r.address)) {
+      if (!isValidEmail(r.address) && !isMainnetAddress(r.address)) {
         addSnackbar('All recipients must have a valid BSV or Paymail address!', 'info');
         return;
       }
@@ -942,7 +943,7 @@ export const BsvWallet = () => {
 
     //? multi-send validate all recipients
     for (const recipient of recipients) {
-      if (!isValidEmail(recipient.address) && !validate(recipient.address)) {
+      if (!isValidEmail(recipient.address) && !isMainnetAddress(recipient.address)) {
         updateRecipient(recipient.id, 'error', 'Provide a valid BSV or Paymail address.');
         addSnackbar('All recipients must have valid BSV or Paymail addresses.', 'info');
         return;

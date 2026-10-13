@@ -43,7 +43,9 @@ describe('handle shown once, fingerprint everywhere (owner, 11 Oct 2026)', () =>
   const drawer = readFileSync(join(import.meta.dir, '..', 'names', 'DrawerHandle.tsx'), 'utf8');
   const sheet = readFileSync(join(import.meta.dir, '..', '..', 'pages', 'requests', 'BundleSheet.tsx'), 'utf8');
   const switcher = readFileSync(join(import.meta.dir, '..', 'account', 'AccountSwitcher.tsx'), 'utf8');
-  it('card front: under the handle only the fingerprint, never the paymail', () => {
+  // 13 Oct 2026: the handle slot now shows the FULL bWalletX paymail (t.front), once; under it, only the fingerprint.
+  it('card front: the paymail once in the handle slot, then only the fingerprint', () => {
+    expect(front).toContain('{t.front}');
     expect(front).toContain('bw-wcard-fingerprint');
     expect(front).not.toContain('t.full');
     expect(front).not.toContain('paymail}');

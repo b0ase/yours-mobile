@@ -73,6 +73,7 @@ import { useBMail } from './useBMail';
 import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 import { ErrorActions } from '../errors/ErrorActions';
+import { APP_NAME } from '../storeBuild';
 
 const MUTED = '#98A2B3';
 const GOLD = '#FFD24D';
@@ -621,7 +622,7 @@ const Compose = ({
     <div className="flex flex-col gap-2">
       <input
         className={input}
-        placeholder="To: $handle, paymail or name"
+        placeholder={`To: $name (${APP_NAME}), paymail or name`}
         value={to}
         disabled={!!draft.to}
         onChange={(e) => {

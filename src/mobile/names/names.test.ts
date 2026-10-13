@@ -6,7 +6,8 @@ import {
   parseRecipient,
   resolveRecipient,
   scriptToAddress,
-  HANDCASH_NO_TOKENS,
+  externalLabel,
+  TOKENS_UNSUPPORTED,
   UNBOUND_NAME,
   type Fetch,
 } from './names';
@@ -31,7 +32,7 @@ const mock = (routes: Record<string, unknown>): { f: Fetch; calls: string[] } =>
 describe('parseRecipient', () => {
   test('address', () => expect(parseRecipient(` ${ADDR} `)).toEqual({ kind: 'address', address: ADDR }));
   test('$handle → handcash paymail', () =>
-    expect(parseRecipient('$Boase')).toEqual({ kind: 'handle', handle: 'boase', paymail: 'boase@handcash.io' }));
+    expect(parseRecipient('$Boase')).toEqual({ kind: 'handle', handle: 'boase' }));
   test('paymail', () =>
     expect(parseRecipient('Alice@Moneybutton.com')).toEqual({ kind: 'paymail', paymail: 'alice@moneybutton.com' }));
   test('opns name', () => expect(parseRecipient('satchmo')).toEqual({ kind: 'opns', name: 'satchmo' }));
@@ -57,16 +58,17 @@ const HC_CAPS = {
 const SRV = { Answer: [{ type: 33, data: '10 100 443 cloud.handcash.io.' }] };
 
 describe('paymail resolution', () => {
-  test('$handle via SRV host, profile + P2P preferred', async () => {
+  test('explicit name@handcash.io via SRV host, profile + P2P preferred, flagged outside bWalletX', async () => {
     const { f, calls } = mock({
       'https://dns.google.com/resolve?name=_bsvalias._tcp.handcash.io': SRV,
       'https://cloud.handcash.io/.well-known/bsvalias': HC_CAPS,
       'https://cloud.handcash.io/api/bsvalias/public-profile/': { name: '$BOASE', avatar: 'https://x/a.png' },
       'https://cloud.handcash.io/api/bsvalias/id/': { pubkey: '02ab' },
     });
-    const r = await resolveRecipient(f, parseRecipient('$boase'));
+    const r = await resolveRecipient(f, parseRecipient('boase@handcash.io'));
     expect(r).toMatchObject({
-      input: '$boase',
+      input: 'boase@handcash.io',
+      external: 'handcash.io',
       target: 'boase@handcash.io',
       targetKind: 'paymail',
       via: 'p2p-paymail',
@@ -76,7 +78,8 @@ describe('paymail resolution', () => {
     });
     expect(r.ordAddress).toBeUndefined();
     expect(calls.some((c) => c.includes('handcash.io/.well-known') && !c.includes('cloud'))).toBe(false);
-    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: HANDCASH_NO_TOKENS });
+    expect(externalLabel(r)).toBe('boase@handcash.io — outside bWalletX');
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: TOKENS_UNSUPPORTED });
     expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: 'boase@handcash.io' });
   });
 
@@ -231,7 +234,7 @@ describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
   });
 });
 
-describe('$name: our paymail (bwalletx.com) first, then HandCash', () => {
+describe('$name: bWalletX handles only (bwalletx.com, legacy bwallet.space), never HandCash', () => {
   const OURS = {
     capabilities: {
       pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
@@ -252,8 +255,8 @@ describe('$name: our paymail (bwalletx.com) first, then HandCash', () => {
     expect(calls.some((c) => c.includes('handcash'))).toBe(false);
   });
 
-  test('a $name we do not know falls back to HandCash', async () => {
-    const { f } = mock({
+  test('a $name we do not know is "No bWalletX user", never HandCash', async () => {
+    const { f, calls } = mock({
       'https://dns.google.com/resolve?name=_bsvalias._tcp.bwalletx.com': { Status: 3 },
       'https://bwalletx.com/.well-known/bsvalias': OURS,
       'https://pay.bwallet.space/api/paymail/id/': 404,
@@ -261,8 +264,31 @@ describe('$name: our paymail (bwalletx.com) first, then HandCash', () => {
       'https://cloud.handcash.io/.well-known/bsvalias': HC_CAPS,
       'https://cloud.handcash.io/api/bsvalias/id/': { pubkey: '02ab' },
     });
-    const r = await resolveRecipient(f, parseRecipient('$boase'), 'bwalletx.com');
-    expect(r).toMatchObject({ target: 'boase@handcash.io', pubkey: '02ab' });
+    await expect(resolveRecipient(f, parseRecipient('$boase'), 'bwalletx.com')).rejects.toThrow(
+      'No bWalletX user called $boase',
+    );
+    expect(calls.some((c) => c.includes('handcash'))).toBe(false);
+  });
+
+  test('$boase never resolves to handcash.io, even with paymail unconfigured', async () => {
+    const { f, calls } = mock({
+      'https://dns.google.com/resolve?name=_bsvalias._tcp.handcash.io': SRV,
+      'https://cloud.handcash.io/.well-known/bsvalias': HC_CAPS,
+      'https://cloud.handcash.io/api/bsvalias/id/': { pubkey: '02ab' },
+    });
+    await expect(resolveRecipient(f, parseRecipient('$boase'), '')).rejects.toThrow('No bWalletX user called $boase');
+    expect(calls.some((c) => c.includes('handcash'))).toBe(false);
+  });
+
+  test('our own names are not flagged external', async () => {
+    const { f } = mock({
+      'https://dns.google.com/resolve?name=_bsvalias._tcp.bwalletx.com': { Status: 3 },
+      'https://bwalletx.com/.well-known/bsvalias': OURS,
+      'https://pay.bwallet.space/api/paymail/id/': { pubkey: KEY },
+    });
+    const r = await resolveRecipient(f, parseRecipient('$b0asex'), 'bwalletx.com');
+    expect(r.external).toBeUndefined();
+    expect(externalLabel(r)).toBeUndefined();
   });
 
   test('$name@domain is accepted as the paymail', () => {

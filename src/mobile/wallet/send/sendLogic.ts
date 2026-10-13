@@ -15,6 +15,8 @@ export type SendRow = {
   satSendAmount: number | null;
   usdSendAmount: number | null;
   amountType: 'bsv' | 'usd';
+  /** A message shown under the row (set by the submit-time check); while set, Send stays disabled. */
+  error?: string;
 };
 
 /** What the recipient box is doing (NameInput). */
@@ -85,7 +87,7 @@ export const sendButton = (p: {
     const who = multi ? ` for recipient ${i + 1}` : '';
     const st = p.status[r.id] ?? (r.address ? 'ready' : 'empty');
     if (st === 'loading') return { label: 'Looking up recipient…', disabled: true };
-    if (st === 'error') return { label: `Check the recipient${who}`, disabled: true };
+    if (st === 'error' || r.error) return { label: `Check the recipient${who}`, disabled: true };
     if (!r.address) return { label: multi ? `Choose recipient ${i + 1}` : 'Choose who to pay', disabled: true };
     if (rowSats(r, p.rate) <= 0) return { label: `Enter an amount${who}`, disabled: true };
   }

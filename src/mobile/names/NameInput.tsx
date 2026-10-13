@@ -4,7 +4,18 @@ import { Input } from '../../components/Input';
 import type { Theme } from '../../theme.types';
 import { loadPoisonData, poisonWarning } from '../airdrops/poison';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { destinationFor, opnsBinding, parseRecipient, resolveRecipient, VIA_LABEL, type Resolved } from './names';
+import {
+  destinationFor,
+  externalLabel,
+  isOurDomain,
+  opnsBinding,
+  parseRecipient,
+  resolveRecipient,
+  VIA_LABEL,
+  type Resolved,
+} from './names';
+import { liveDomains, withDomain } from './paymailDomains';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Recipient box for the Send screens (build-time swap for upstream's address <Input>, see
@@ -28,6 +39,12 @@ type Props = {
   onStatus?: (status: 'empty' | 'typing' | 'loading' | 'error' | 'ready', resolved?: Resolved) => void;
 };
 
+/** The domain of a typed name@domain that is NOT ours (the picker shows it), else '' (= bWalletX). */
+const pickedDomain = (typed: string) => {
+  const m = typed.trim().match(/@([a-z0-9.-]+\.[a-z]{2,})$/i);
+  return m && !isOurDomain(m[1]) ? m[1].toLowerCase() : '';
+};
+
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
 
 export const NameInput = ({ theme, value, onChange, asset, placeholder, style, autoConfirm, onStatus }: Props) => {
@@ -36,6 +53,15 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     { s: 'idle' } | { s: 'loading' } | { s: 'error'; msg: string } | { s: 'resolved'; r: Resolved; confirmed: boolean }
   >({ s: 'idle' });
   const seq = useRef(0);
+  // "Other wallet ▾" (owner, 13 Oct 2026): null until the picker is first opened, then the live domains.
+  const [domains, setDomains] = useState<string[] | null>(null);
+  const loadDomains = () => {
+    if (domains) return;
+    setDomains([]);
+    liveDomains((u, i) => fetch(u, i))
+      .then(setDomains)
+      .catch(() => setDomains([]));
+  };
   const lastOut = useRef(value);
   // Address-poisoning defence (airdrops/poison.ts): data saved by the last History / Airdrops scan.
   const { chromeStorageService } = useServiceContext();
@@ -62,10 +88,18 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     setText(raw);
     const p = parseRecipient(raw);
     const n = ++seq.current;
-    if (p.kind === 'empty' || p.kind === 'address' || p.kind === 'invalid') {
+    if (p.kind === 'empty' || p.kind === 'address') {
       setState({ s: 'idle' });
-      emit(raw.trim());
-      status.current?.(p.kind === 'empty' ? 'empty' : p.kind === 'address' ? 'ready' : 'typing');
+      emit(p.kind === 'address' ? p.address : '');
+      status.current?.(p.kind === 'empty' ? 'empty' : 'ready');
+      return;
+    }
+    // Invalid input is never handed upstream as an address, and the message shown here is the same
+    // 'error' status that disables the Send button (sendLogic.sendButton).
+    if (p.kind === 'invalid') {
+      setState({ s: 'error', msg: p.reason });
+      emit('');
+      status.current?.('error');
       return;
     }
     emit('');
@@ -112,7 +146,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     <div style={{ width: style?.width ?? '85%', margin: style?.margin ?? '0 auto' }} className="flex flex-col gap-2">
       <Input
         theme={theme}
-        placeholder={placeholder ?? 'Address, $handle, paymail or name'}
+        placeholder={placeholder ?? `$name (${APP_NAME}), paymail or address`}
         type="text"
         autoCapitalize="none"
         autoCorrect="off"
@@ -121,6 +155,32 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
         value={text}
         style={{ width: '100%', margin: 0 }}
       />
+      <div className="flex items-center justify-end gap-1 text-[11px]" style={{ color: gray }}>
+        <label htmlFor="bw-paymail-domain">Pay to</label>
+        <select
+          id="bw-paymail-domain"
+          aria-label="Paymail domain"
+          value={pickedDomain(text)}
+          onFocus={loadDomains}
+          onMouseDown={loadDomains}
+          onChange={(e) => {
+            const d = e.target.value;
+            const next = d ? withDomain(text, d) : text.trim() ? `$${withDomain(text, 'x').split('@')[0]}` : '';
+            onType(next);
+          }}
+          className="bg-transparent border-0 text-[11px] cursor-pointer"
+          style={{ color: fg }}
+        >
+          <option value="">bWalletX</option>
+          {[...new Set([...(domains ?? []), pickedDomain(text)].filter(Boolean))].map((d) => (
+            <option key={d} value={d}>
+              {d} (other wallet)
+            </option>
+          ))}
+          {domains === null && <option disabled>Other wallet ▾</option>}
+          {domains?.length === 0 && <option disabled>Checking other wallets…</option>}
+        </select>
+      </div>
       {state.s === 'loading' && (
         <div className="flex items-center gap-2 text-xs" style={{ color: gray }}>
           <Loader2 size={12} className="animate-spin" /> Looking up {text.trim()}…
@@ -161,6 +221,15 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                   <div className="text-[10px]" style={{ color: gray }}>
                     {asset === 'token' && d.ok && r.via !== 'opns-owner' ? 'Paymail ordinal address' : VIA_LABEL[r.via]}
                   </div>
+                  {r.external && (
+                    <div
+                      data-testid="external-paymail"
+                      className="text-[11px] font-semibold break-all"
+                      style={{ color: '#FEC84B' }}
+                    >
+                      {externalLabel(r)}
+                    </div>
+                  )}
                   {r.didYouMean && (
                     <button
                       type="button"
