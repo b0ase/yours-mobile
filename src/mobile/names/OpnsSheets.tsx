@@ -92,6 +92,49 @@ export const OpnsSellSheet = (p: {
   </Sheet>
 );
 
+/** The one approval for gifting names: any listings are cancelled first, then each name is sent. */
+export const OpnsGiftSheet = (p: {
+  names: string[];
+  listed: number;
+  to: string;
+  toAddress: string;
+  note?: string;
+  onAllow: () => void;
+  onClose: () => void;
+}) => (
+  <Sheet>
+    <ApprovalCard
+      ours
+      site="bWalletX"
+      siteSub="bMint · Gift OpNS names"
+      onClose={p.onClose}
+      hero={<PayHero amount="Free" sub="Network fee only" badge="GIFT" />}
+      title={
+        <>
+          Send {p.names.length === 1 ? p.names[0] : `${p.names.length} names`} to{' '}
+          <span style={{ color: CARD.gold }}>{p.to}</span>
+        </>
+      }
+      primary={{ label: 'Allow', onClick: p.onAllow }}
+      secondary={{ label: 'Not now', onClick: p.onClose }}
+    >
+      <div className="flex flex-wrap gap-2">
+        {p.names.slice(0, 24).map((n) => (
+          <Chip key={n}>{n}</Chip>
+        ))}
+        {p.names.length > 24 && <Chip>+{p.names.length - 24} more</Chip>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Chip>
+          To {p.toAddress.slice(0, 6)}…{p.toAddress.slice(-4)}
+        </Chip>
+        {p.listed > 0 && <Chip>Takes {p.listed === 1 ? 'it' : `${p.listed}`} off sale first</Chip>}
+        <Chip>Can&apos;t be undone</Chip>
+      </div>
+      {p.note && <Chip>“{p.note.slice(0, 80)}”</Chip>}
+    </ApprovalCard>
+  </Sheet>
+);
 /** Moving a listed name into the Vault: one approval to cancel its listing. */
 export const OpnsVaultCancelSheet = (p: {
   name: string;

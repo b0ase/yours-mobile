@@ -1,4 +1,4 @@
-import { buyOrdinal, cancelOpnsListing, sellOpns, type OneSatContext } from '@1sat/actions';
+import { buyOrdinal, cancelOpnsListing, listOpns, sellOpns, sendOpns, type OneSatContext } from '@1sat/actions';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 
@@ -34,4 +34,21 @@ export const unlistOpnsName = async (ctx: OneSatContext, id: string): Promise<st
   const res = await cancelOpnsListing.execute(ctx, { id });
   if (res.error || !res.txid) throw new Error(String(res.error ?? 'Cancel failed'));
   return res.txid;
+};
+
+/** Gift a name: send the name ordinal to an ordinals address (opnsGift.ts picks it). Free, network fee only. */
+export const giftOpnsName = async (ctx: OneSatContext, id: string, address: string): Promise<string> => {
+  const res = await sendOpns.execute(ctx, { id, address });
+  if (res.error || !res.txid) throw new Error(String(res.error ?? 'Gift failed'));
+  return res.txid;
+};
+
+/** The wallet's current basket id for a name (after a cancel the name is a new output). */
+export const opnsIdFor = async (ctx: OneSatContext, name: string): Promise<string | undefined> => {
+  const r = await listOpns.execute(ctx, { includeTags: true, limit: 1000 });
+  for (const o of r.outputs) {
+    if (!o.tags?.includes(`name:${name}`) || o.tags.some((t) => t.startsWith('ordlock'))) continue;
+    return o.tags.find((t) => t.startsWith('id:'))?.slice(3) ?? o.outpoint;
+  }
+  return undefined;
 };

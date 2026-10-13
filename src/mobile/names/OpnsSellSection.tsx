@@ -16,10 +16,12 @@ import {
   usdOrSats,
 } from './opnsSell';
 import { OpnsSellSheet, OpnsVaultCancelSheet } from './OpnsSheets';
+import { OpnsGiftPanel } from './OpnsGiftPanel';
+import { withoutGifted } from './opnsGift';
 import { addToShelf, isProtected, moveIntoVault, removeFromVault, shelfOf, type VaultState } from './opnsVault';
 
 /**
- * bMint › OpNS names › Owned names: tick names, "List selected for $1", one approval, then each name is
+ * bMint › OpNS names › Owned names (bWalletX; the store edition shows OpnsGiftSection): Gift and Sell. Tick names, "List selected for $1", one approval, then each name is
  * listed in turn (OrdLock v2, sellOpns) with progress; the queue is saved so a closed window can Resume.
  */
 const GOLD = '#FFD24D';
@@ -48,7 +50,10 @@ export const OpnsSellSection = (p: {
   vault?: VaultState;
   onVault?: (v: VaultState) => void;
 }) => {
-  const { ctx, identityAddress, rate, owned } = p;
+  const { ctx, identityAddress, rate } = p;
+  const [gifted, setGifted] = useState<Set<string>>(new Set());
+  const [gifting, setGifting] = useState<OwnedForSale[] | null>(null);
+  const owned = useMemo(() => withoutGifted(p.owned, gifted), [p.owned, gifted]);
   const vaultRef = useRef(p.vault);
   vaultRef.current = p.vault;
   const kept = (n: string) => !!vaultRef.current && isProtected(vaultRef.current, n);
@@ -72,11 +77,14 @@ export const OpnsSellSection = (p: {
     [owned, p.vault],
   );
   const chosen = unlisted.filter((o) => picked.has(o.name));
+  const toGift = owned.filter((o) => p.vault && shelfOf(p.vault, o.name) === 'gift');
+  const chosenAll = owned.filter((o) => picked.has(o.name));
   const usdFor = (name: string) => parseUsdInput(prices[name] ?? '') ?? OPNS_SELL_USD;
   const customPrices = Object.fromEntries(chosen.map((o) => [o.name, usdFor(o.name)]));
   const totalUsd = chosen.reduce((a, o) => a + usdFor(o.name), 0);
   const allSame = chosen.every((o) => usdFor(o.name) === OPNS_SELL_USD);
-  const allPicked = unlisted.length > 0 && chosen.length === unlisted.length;
+  const selectable = owned;
+  const allPicked = selectable.length > 0 && chosenAll.length === selectable.length;
 
   const toggle = (name: string) =>
     setPicked((s) => {
@@ -177,7 +185,7 @@ export const OpnsSellSection = (p: {
   const showProgress = !!batch && batch.items.length > 0;
   const done = showProgress ? batch.items.length - left : 0;
 
-  if (!owned.length && !showProgress) return null;
+  if (!owned.length && !showProgress && !gifting) return null;
 
   return (
     <section
@@ -194,15 +202,15 @@ export const OpnsSellSection = (p: {
             Owned names
           </h2>
           <span className="text-xs" style={{ color: MUTED }}>
-            Tick names to sell. Anyone can buy a listed name; cancel any time before it sells.
+            Tick names to sell or gift. Anyone can buy a listed name; cancel any time before it sells.
           </span>
         </div>
-        {unlisted.length > 1 && !showProgress && (
+        {selectable.length > 1 && !showProgress && !gifting && (
           <button
             type="button"
             className={`${ghostBtn} shrink-0 whitespace-nowrap`}
             style={{ color: GOLD }}
-            onClick={() => setPicked(allPicked ? new Set() : new Set(unlisted.map((o) => o.name)))}
+            onClick={() => setPicked(allPicked ? new Set() : new Set(selectable.map((o) => o.name)))}
           >
             {allPicked ? 'Select none' : 'Select all'}
           </button>
@@ -285,7 +293,7 @@ export const OpnsSellSection = (p: {
           {owned.map((o) => {
             const listed = o.listedSats !== null;
             const shelf = p.vault ? shelfOf(p.vault, o.name) : null;
-            const on = picked.has(o.name) && !shelf;
+            const on = picked.has(o.name);
             return (
               <li
                 key={o.name}
@@ -293,15 +301,15 @@ export const OpnsSellSection = (p: {
                 style={{ borderTop: `1px solid ${HAIR}` }}
               >
                 <label
-                  className={`flex items-center gap-3 min-w-0 flex-1 basis-32 ${listed || showProgress ? '' : 'cursor-pointer'}`}
+                  className={`flex items-center gap-3 min-w-0 flex-1 basis-32 ${running || gifting ? '' : 'cursor-pointer'}`}
                 >
                   <input
                     type="checkbox"
                     checked={on}
-                    disabled={listed || running || !!shelf}
+                    disabled={running || !!gifting}
                     onChange={() => toggle(o.name)}
                     className="w-4 h-4 shrink-0 accent-[#FFD24D] cursor-pointer disabled:cursor-not-allowed"
-                    aria-label={`Sell ${o.name}`}
+                    aria-label={`Select ${o.name}`}
                   />
                   <span className="font-medium break-all" style={{ color: listed ? MUTED : TEXT }}>
                     {o.name}
@@ -322,14 +330,6 @@ export const OpnsSellSection = (p: {
                     >
                       {shelf ? 'Move out' : 'Keep in Vault'}
                     </button>
-                  )}
-                  {shelf === 'gift' && (
-                    <span
-                      className="text-xs font-semibold px-2 py-1 rounded-full"
-                      style={{ background: GOLD_DIM, color: GOLD }}
-                    >
-                      Gift
-                    </span>
                   )}
                   {shelf === 'keep' && !listed ? (
                     <span className="text-xs font-semibold" style={{ color: GOLD }}>
@@ -367,6 +367,21 @@ export const OpnsSellSection = (p: {
                       Not listed
                     </span>
                   )}
+                  <button
+                    type="button"
+                    className={ghostBtn}
+                    style={
+                      shelf === 'gift'
+                        ? { color: '#000', background: GOLD, border: `1px solid ${GOLD}` }
+                        : { color: GOLD, border: `1px solid ${HAIR}` }
+                    }
+                    title={shelf === 'gift' ? 'On your To-gift shelf' : undefined}
+                    disabled={!ctx || running || !!gifting || busyId === o.id}
+                    onClick={() => setGifting([o])}
+                    aria-label={`Gift ${o.name}`}
+                  >
+                    Gift
+                  </button>
                 </span>
               </li>
             );
@@ -374,7 +389,47 @@ export const OpnsSellSection = (p: {
         </ul>
       )}
 
-      {unlisted.length > 0 && (
+      {!gifting && toGift.length > 0 && (
+        <button
+          type="button"
+          className={`${goldBtn} w-full py-3 text-[14px]`}
+          style={{ background: GOLD_DIM, color: GOLD }}
+          disabled={!ctx || running}
+          onClick={() => setGifting(toGift)}
+        >
+          Gift your To-gift names ({toGift.length})
+        </button>
+      )}
+
+      {gifting && (
+        <OpnsGiftPanel
+          key={gifting.map((g) => g.name).join(',')}
+          ctx={ctx}
+          names={gifting}
+          onGifted={(names) => {
+            setGifted((g) => new Set([...g, ...names]));
+            // Gifted names leave the Vault / To-gift shelves.
+            if (p.vault && p.onVault) p.onVault(names.reduce((v, n) => removeFromVault(v, n), p.vault));
+            setPicked(new Set());
+            p.onChanged();
+          }}
+          onClose={() => setGifting(null)}
+        />
+      )}
+
+      {!gifting && owned.length > 0 && (
+        <button
+          type="button"
+          className={`${goldBtn} w-full py-3 text-[14px]`}
+          style={{ background: 'transparent', color: GOLD, border: `1px solid rgba(255,210,77,0.45)` }}
+          disabled={!ctx || !chosenAll.length || running}
+          onClick={() => setGifting(chosenAll)}
+        >
+          {chosenAll.length > 1 ? `Gift ${chosenAll.length} selected` : 'Gift selected'}
+        </button>
+      )}
+
+      {!gifting && unlisted.length > 0 && (
         <button
           type="button"
           className={`${goldBtn} w-full py-3 text-[14px]`}
