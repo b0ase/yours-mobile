@@ -1,31 +1,51 @@
 import { useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, Check, Gift, Search } from 'lucide-react';
-import { listOpns } from '@1sat/actions';
+import { listOpns, sendBsv } from '@1sat/actions';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { ApprovalCard, Chip } from '../../../components/approval/ApprovalCard';
 import { CARD } from '../../../components/approval/cardTheme';
 import { PayHero } from '../../../components/approval/ApprovalHeroes';
 import { bavatarSvg } from '../../bavatar/bavatar';
 import { ObsidianBackdrop } from '../../ui/ObsidianBackdrop';
-import { fmtSats, fmtUsd, useBsvUsd } from '../../money/money';
+import { fmtSats, fmtUsd, usdToSats, useBsvUsd } from '../../money/money';
+import { fetchExchangeRate } from '../../../utils/wallet';
+import { AccountList, AccountRow } from '../../account/AccountSwitcher';
+import { useAccountSwitch } from '../../account/accountSwitch';
 import { MARKET_ENABLED } from '../../storeBuild';
 import { GuestCtx } from '../../media/artists/guestCtx';
 import { resumeAt } from '../../url/resume';
 import { checkOpnsAvailability, parseRecipient, resolveRecipient } from '../names';
 import { OPNS_PROFILE_DOMAIN } from '../config';
 import { OPNS_MINT_ROUTE } from '../opnsBatch';
+import { NamesServerError } from '../opnsMint';
+import { EXPECTED_HASHES } from '../opnsPow';
+import { formatEta, mineName, MiningCancelled, NameTakenError, type Progress } from '../opnsRegister';
+import { opnsTreeFor } from '../opnsTree';
+import { sweepDeadMints } from '../opnsTxStatus';
 import { buyOpnsListing, giftOpnsName, opnsIdFor } from '../opnsBuy';
 import { giftDestination, giftRecipientLabel } from '../opnsGift';
 import { fetchOpnsListings, ownedForSale, type OpnsListing } from '../opnsSell';
-import { buyThenGive, displayUsd, normaliseQuery, RAILS, railNames, resultFor, type StoreResult } from './inventory';
+import {
+  buyThenGive,
+  displayUsd,
+  normaliseQuery,
+  RAILS,
+  railNames,
+  resultFor,
+  STORE_PAY_ADDRESS,
+  type StoreResult,
+} from './inventory';
 import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
 
 /**
  * The Name Store (/names, owner-approved 13 Oct 2026): "Get your name on Bitcoin. Yours forever."
- * Search → one result card (buy from us, claim a free name, buy from someone else, or taken + suggestions),
+ * Search → one result card (buy from us, get a free name, buy from someone else, or taken + suggestions),
  * a live preview of what the name becomes, browse rails from our listed inventory, and "Give a name".
+ * A free name is got right here (owner, 14 Oct 2026, after landing in the bulk bMint tool for "kooky"): one
+ * sheet, then it is mined on this device and the tier price is paid to the storefront, with the account that
+ * pays shown above the result so the wrong one (an agent account with 0 sats) is never a surprise.
  * Works signed out (GuestNames.tsx): anything that needs the wallet asks to sign in first.
  * Plumbing words (OpNS, mining, ordinals) stay in "What is this?" only. Selling/buying needs MARKET_ENABLED;
  * a store build keeps search and claim only.
@@ -60,13 +80,17 @@ const btn =
 const goldBtn = { background: GOLD, color: '#0a0a0a', outlineColor: GOLD };
 const ghostBtn = { background: 'transparent', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}`, outlineColor: GOLD };
 
-type Pending = { listing: OpnsListing; giftTo?: { label: string; address: string } };
+type GiftTo = { label: string; address: string };
+type Pending = { listing: OpnsListing; giftTo?: GiftTo };
+type PendingGet = { name: string; sats: number; giftTo?: GiftTo };
+type Getting = { name: string; progress: Progress | null; stage: 'mining' | 'paying' | 'sending' };
 
 export const NameStorePage = () => {
-  const { apiContext, isLocked } = useServiceContext();
+  const { apiContext, isLocked, chromeStorageService } = useServiceContext();
   const onWallet = useContext(GuestCtx);
   const guest = !!onWallet || isLocked;
-  const navigate = useNavigate();
+  const account = guest ? undefined : chromeStorageService.getCurrentAccountObject().account;
+  const identityAddress = account?.addresses?.identityAddress ?? '';
   const { search } = useLocation();
   const rate = useBsvUsd();
   const initial = new URLSearchParams(search).get('q') ?? '';
@@ -78,6 +102,10 @@ export const NameStorePage = () => {
   const [giving, setGiving] = useState(false);
   const [giftTo, setGiftTo] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
+  const [pendingGet, setPendingGet] = useState<PendingGet | null>(null);
+  const [getting, setGetting] = useState<Getting | null>(null);
+  const [switcher, setSwitcher] = useState(false);
+  const { switchingTo, switchAccount } = useAccountSwitch(() => setSwitcher(false));
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
   const seq = useRef(0);
@@ -147,23 +175,98 @@ export const NameStorePage = () => {
     return true;
   };
 
-  const claim = (n: string) => {
-    if (needWallet(n)) return;
-    navigate(`${OPNS_MINT_ROUTE}?mint=${encodeURIComponent(n)}`);
+  /** Who gets it when "Give it to someone" is ticked (undefined = keep it). Throws with the words to show. */
+  const giftRecipient = async (): Promise<GiftTo | undefined> => {
+    if (!giving) return undefined;
+    const r = await resolveRecipient(f, parseRecipient(giftTo));
+    const d = giftDestination(r);
+    if (!d.ok) throw new Error(d.error);
+    return { label: giftRecipientLabel(r, d.to), address: d.to };
   };
 
   const startBuy = async (listing: OpnsListing) => {
     if (needWallet(listing.name)) return;
     setMsg('');
-    if (!giving) return setPending({ listing });
-    const parsed = parseRecipient(giftTo);
     try {
-      const r = await resolveRecipient(f, parsed);
-      const d = giftDestination(r);
-      if (!d.ok) return setMsg(d.error);
-      setPending({ listing, giftTo: { label: giftRecipientLabel(r, d.to), address: d.to } });
+      setPending({ listing, giftTo: await giftRecipient() });
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Enter their $handle or paymail');
+    }
+  };
+
+  /** A free name: one sheet with the tier price, then it is got right here (never the bulk bMint tool). */
+  const startGet = async (n: string) => {
+    if (needWallet(n)) return;
+    setMsg('');
+    try {
+      const to = await giftRecipient();
+      let sats = 0;
+      if (MARKET_ENABLED) {
+        sats = usdToSats(nameTierUsd(n) ?? 0, rate || (await fetchExchangeRate('main'))) ?? 0;
+        if (!sats) throw new Error("Couldn't get the BSV price. Try again in a minute.");
+      }
+      setPendingGet({ name: n, sats, giftTo: to });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Enter their $handle or paymail');
+    }
+  };
+
+  const approveGet = async () => {
+    if (!pendingGet || !apiContext) return;
+    const { name: n, sats, giftTo: to } = pendingGet;
+    setPendingGet(null);
+    setBusy(n);
+    setGetting({ name: n, progress: null, stage: 'mining' });
+    const ctl = new AbortController();
+    const tree = opnsTreeFor(identityAddress);
+    // Mine it (one transaction per new character), then pay the tier price to the storefront. Returns a txid
+    // for buyThenGive, which treats it like a purchase and sends the name on when it is a gift.
+    const get = async (): Promise<string> => {
+      await sweepDeadMints(tree, f).catch(() => undefined);
+      const steps = await mineName({ ctx: apiContext, fetch: f, tree }, n, ctl.signal, (progress) =>
+        setGetting((g) => (g ? { ...g, progress } : g)),
+      );
+      let txid = steps[steps.length - 1]?.txid ?? '';
+      if (sats > 0) {
+        setGetting((g) => (g ? { ...g, stage: 'paying' } : g));
+        const r = await sendBsv.execute(apiContext, { requests: [{ address: STORE_PAY_ADDRESS, satoshis: sats }] });
+        if (r.error || !r.txid)
+          throw new Error(`${n} is yours, but the payment didn't go through (${String(r.error ?? 'payment failed')}).`);
+        txid = r.txid;
+      }
+      return txid;
+    };
+    try {
+      if (!to) {
+        await get();
+        setMsg(`${n} is yours. It shows in your names within a minute.`);
+      } else {
+        const r = await buyThenGive(
+          {
+            buy: get,
+            idOf: (x) => opnsIdFor(apiContext, x),
+            send: (id, address) => giftOpnsName(apiContext, id, address),
+            onStep: (s) => s !== 'buying' && setGetting((g) => (g ? { ...g, stage: 'sending' } : g)),
+          },
+          n,
+          to.address,
+        );
+        if (r.ok) setMsg(`Sent. ${n} now belongs to ${to.label}.`);
+        else if (r.stage === 'buy') throw new Error(r.error);
+        else setMsg(`You got ${n}, but the gift didn't go through (${r.error}). It's safe in your wallet.`);
+      }
+      setMine((m) => new Set(m).add(n));
+      setResult(null);
+    } catch (e) {
+      if (e instanceof MiningCancelled) setMsg('Cancelled.');
+      else if (e instanceof NameTakenError) {
+        setMsg(`Someone got ${n} a moment ago. Try another name.`);
+        setResult(null);
+      } else if (e instanceof NamesServerError) setMsg('The names service is busy. Try again in a minute.');
+      else setMsg(e instanceof Error ? e.message : `Couldn't get ${n}`);
+    } finally {
+      setGetting(null);
+      setBusy('');
     }
   };
 
@@ -265,6 +368,34 @@ export const NameStorePage = () => {
           )}
         </form>
 
+        {/* Who pays (owner, 14 Oct 2026: Desktop opened in an agent account with 0 sats and nothing said so). */}
+        {!guest && account && (
+          <div
+            className="mt-4 mx-auto max-w-2xl rounded-2xl pl-3 pr-2 py-1 flex items-center gap-1"
+            style={{ background: SURFACE, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
+          >
+            <span className="text-xs shrink-0" style={{ color: FAINT }}>
+              Paying from
+            </span>
+            <AccountRow
+              account={account}
+              switchingTo={null}
+              compact
+              onSwitch={() => setSwitcher(true)}
+              trailing={
+                <button
+                  type="button"
+                  onClick={() => setSwitcher(true)}
+                  className="shrink-0 h-8 px-3 rounded-lg text-xs font-semibold cursor-pointer"
+                  style={ghostBtn}
+                >
+                  Switch
+                </button>
+              }
+            />
+          </div>
+        )}
+
         {/* Result + preview */}
         <section aria-live="polite" className="mt-10 grid gap-4 lg:grid-cols-[1.15fr_1fr] [&>*]:min-w-0">
           <ResultCard
@@ -277,7 +408,8 @@ export const NameStorePage = () => {
             giftTo={giftTo}
             setGiftTo={setGiftTo}
             onBuy={(l) => void startBuy(l)}
-            onClaim={claim}
+            onGet={(n) => void startGet(n)}
+            getting={getting}
             onPick={pick}
           />
           <Preview name={previewName} />
@@ -336,6 +468,41 @@ export const NameStorePage = () => {
           onClose={() => setPending(null)}
         />
       )}
+      {pendingGet && (
+        <BuySheet
+          verb="Get"
+          name={pendingGet.name}
+          amount={pendingGet.sats ? fmtUsd(nameTierUsd(pendingGet.name) ?? 0) : 'Network fee only'}
+          sats={pendingGet.sats}
+          giftTo={pendingGet.giftTo?.label}
+          onAllow={() => void approveGet()}
+          onClose={() => setPendingGet(null)}
+        />
+      )}
+      {switcher &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[420] flex items-end sm:items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setSwitcher(false)}
+          >
+            <div
+              role="listbox"
+              aria-label="Pay from which account?"
+              className="w-full max-w-md rounded-t-3xl sm:rounded-3xl p-3 flex flex-col gap-1"
+              style={{ background: '#0f1013', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="m-0 px-3 pt-2 pb-1 text-sm font-semibold">Pay from which account?</p>
+              <AccountList
+                current={identityAddress}
+                switchingTo={switchingTo}
+                onSwitch={(id) => void switchAccount(id)}
+              />
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -350,7 +517,8 @@ const ResultCard = (p: {
   giftTo: string;
   setGiftTo: (v: string) => void;
   onBuy: (l: OpnsListing) => void;
-  onClaim: (n: string) => void;
+  onGet: (n: string) => void;
+  getting: Getting | null;
   onPick: (n: string) => void;
 }) => {
   const r = p.result;
@@ -379,7 +547,7 @@ const ResultCard = (p: {
   );
   const busy = p.busy === r.name;
   const buyable = MARKET_ENABLED && (r.kind === 'house' || r.kind === 'listed');
-  const gift = buyable && (
+  const giftBox = (
     <div className="flex flex-col gap-2">
       <label className="inline-flex items-center gap-2 text-sm cursor-pointer select-none" style={{ color: MUTED }}>
         <input
@@ -473,7 +641,7 @@ const ResultCard = (p: {
             )}
           </p>
           <>
-            {gift}
+            {buyable && giftBox}
             <button
               type="button"
               disabled={!!p.busy}
@@ -490,27 +658,72 @@ const ResultCard = (p: {
         </>,
       );
     }
-    case 'free':
+    case 'free': {
+      const g = p.getting?.name === r.name ? p.getting : null;
+      const pr = g?.progress;
+      const frac =
+        pr && pr.phase === 'mining'
+          ? (pr.charIndex + Math.min(0.95, pr.tried / EXPECTED_HASHES)) / Math.max(1, pr.charsTotal)
+          : pr
+            ? 1
+            : 0;
+      const words =
+        g?.stage === 'paying'
+          ? 'Paying…'
+          : g?.stage === 'sending'
+            ? 'Sending it on…'
+            : pr?.phase === 'broadcasting'
+              ? 'Nearly there…'
+              : pr && pr.rate > 0 && Number.isFinite(pr.etaSeconds)
+                ? `Making ${r.name} yours · about ${formatEta(pr.etaSeconds)} left`
+                : `Making ${r.name} yours…`;
+      const price = MARKET_ENABLED ? fmtUsd(nameTierUsd(r.name) ?? 0) : '';
       return shell(
         <>
           {title}
           <p className="m-0 text-lg">
-            <span style={{ color: GOLD }}>{r.name}</span> is available: ${(nameTierUsd(r.name) ?? 0).toFixed(2)}.
+            <span style={{ color: GOLD }}>{r.name}</span> is available{price ? `: ${price}` : ''}.
           </p>
-          <p className="m-0 text-sm" style={{ color: MUTED }}>
-            Paid in BSV at today&apos;s price. Yours forever, or give it to someone. Keep the page open until it&apos;s
-            done.
-          </p>
-          <button
-            type="button"
-            onClick={() => p.onClaim(r.name)}
-            className={btn}
-            style={{ ...goldBtn, alignSelf: 'flex-start' }}
-          >
-            <span className="truncate">Get {r.name}</span>
-          </button>
+          {g ? (
+            <div className="flex flex-col gap-2" role="status">
+              <p className="m-0 text-sm" style={{ color: MUTED }}>
+                {words}
+              </p>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: HAIR }}>
+                <div
+                  className="h-full rounded-full transition-[width] duration-300"
+                  style={{ width: `${Math.round(frac * 100)}%`, background: GOLD }}
+                />
+              </div>
+              <p className="m-0 text-xs" style={{ color: FAINT }}>
+                Keep this page open until it&apos;s done.
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="m-0 text-sm" style={{ color: MUTED }}>
+                {price ? 'Paid in BSV at today&apos;s price. ' : ''}Yours forever, or give it to someone.
+              </p>
+              {giftBox}
+              <button
+                type="button"
+                disabled={!!p.busy}
+                onClick={() => p.onGet(r.name)}
+                className={btn}
+                style={{ ...goldBtn, alignSelf: 'flex-start' }}
+              >
+                <span className="truncate">
+                  {p.giving ? `Get and give${price ? ` · ${price}` : ''}` : `Get ${r.name}`}
+                </span>
+              </button>
+              <p className="m-0 text-xs" style={{ color: FAINT }}>
+                Usually under a minute. One payment, plus a tiny network fee. No renewals.
+              </p>
+            </>
+          )}
         </>,
       );
+    }
     case 'taken':
       return shell(
         <>
@@ -638,6 +851,8 @@ const WhatIsThis = () => (
 );
 
 const BuySheet = (p: {
+  /** "Buy" a listed name, or "Get" a free one (mined here, tier price to the storefront). */
+  verb?: 'Buy' | 'Get';
   name: string;
   amount: string;
   sats: number;
@@ -663,11 +878,11 @@ const BuySheet = (p: {
         title={
           p.giftTo ? (
             <>
-              Buy <span style={{ color: CARD.gold }}>{p.name}</span> for {p.giftTo}
+              {p.verb ?? 'Buy'} <span style={{ color: CARD.gold }}>{p.name}</span> for {p.giftTo}
             </>
           ) : (
             <>
-              Buy <span style={{ color: CARD.gold }}>{p.name}</span>
+              {p.verb ?? 'Buy'} <span style={{ color: CARD.gold }}>{p.name}</span>
             </>
           )
         }
@@ -676,6 +891,7 @@ const BuySheet = (p: {
       >
         <div className="flex flex-wrap gap-2">
           <Chip>Yours forever</Chip>
+          {p.verb === 'Get' && <Chip>Takes about a minute</Chip>}
           <Chip>Plus a small network fee</Chip>
           {p.giftTo ? <Chip>Sent to {p.giftTo} straight after</Chip> : <Chip>Kept in your wallet</Chip>}
           <Chip>No refunds</Chip>

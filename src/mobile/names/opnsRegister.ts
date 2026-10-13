@@ -122,6 +122,43 @@ const errText = (e: unknown) => {
 export const isDoubleSpend = (e: unknown) =>
   /double|spent|conflict|missing.?inputs|DOUBLE_SPEND|SEEN_IN_ORPHAN|REVIEW_ACTIONS|require review/i.test(errText(e));
 
+const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
+
+/**
+ * The 1Sat overlay (opns/mine) can be days behind: the node it returns for a prefix may have been spent long
+ * ago, so every mint from it double-spent and the page said "still catching up" (owner, 14 Oct 2026, "kooky" /
+ * "danielwagner"). Walk the node's spends forward on WhatsOnChain to the live head. Every spend restates the
+ * parent as output 0, so the domain never changes; 404 = unspent = the head. Same walk as bwalletx-cli.
+ */
+export const followForward = async (f: RegisterDeps['fetch'], outpoint: string, maxHops = 60): Promise<string> => {
+  const sep = outpoint.includes('_') ? '_' : '.';
+  const [first, v] = outpoint.split(/[._]/);
+  let txid = first;
+  let vout = Number(v);
+  let waits = 0;
+  for (let hop = 0; hop < maxHops; ) {
+    const res = await f(`${WOC}/tx/${txid}/${vout}/spent`).catch(() => null);
+    if (!res) break;
+    if (res.status === 429 && waits++ < 5) {
+      await new Promise((r) => setTimeout(r, 1500));
+      continue;
+    }
+    if (!res.ok) break;
+    const j = (await res.json().catch(() => null)) as { txid?: string } | null;
+    if (!j?.txid) break;
+    txid = j.txid;
+    vout = 0;
+    hop++;
+  }
+  return `${txid}${sep}${vout}`;
+};
+
+/** The overlay's nearest node for `name`, moved to its live head. */
+const liveMineNode = async (f: RegisterDeps['fetch'], name: string): Promise<MineNode | null> => {
+  const n = await fetchMineNode(f, name);
+  return n ? { ...n, outpoint: await followForward(f, n.outpoint) } : n;
+};
+
 type Start = { outpoint: string; domain: string; beefHint?: number[]; fromIndexer: boolean };
 
 /** Deepest unspent node for `name`: our own cached node when it is at least as deep as the indexer's. */
@@ -161,7 +198,7 @@ export const mineName = async (
   // Already minted by us (maybe unconfirmed, so the indexer doesn't know yet): nothing to do.
   if (tree?.isOurs(name)) return [];
   if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
-  const indexed = await fetchMineNode(deps.fetch, name);
+  const indexed = await liveMineNode(deps.fetch, name);
   const first = pickNode(tree, name, indexed);
   if (!first) {
     if (!indexed) throw new Error(`No mine-tree node found for "${name}"`);
@@ -212,7 +249,7 @@ export const mineName = async (
     // Re-check the tree right before broadcasting.
     if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
     if (fromIndexer) {
-      const live = await fetchMineNode(deps.fetch, name);
+      const live = await liveMineNode(deps.fetch, name);
       const usable = live && !tree?.isSpent(live.outpoint);
       if (usable && live.domain === domain && live.outpoint !== node.outpoint) {
         // Someone spent our node (mined another char from it). Seed changed: re-mine from the new node.
@@ -237,7 +274,7 @@ export const mineName = async (
       // That node is gone (spent by someone, maybe our own unconfirmed mint): never try it again.
       tree?.markSpent(node.outpoint);
       if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
-      const next = pickNode(tree, name, await fetchMineNode(deps.fetch, name));
+      const next = pickNode(tree, name, await liveMineNode(deps.fetch, name));
       if (retries++ >= 3 || !next || next.outpoint === node.outpoint) throw hold(tree, name, node.outpoint);
       outpoint = next.outpoint;
       beefHint = next.beefHint;
