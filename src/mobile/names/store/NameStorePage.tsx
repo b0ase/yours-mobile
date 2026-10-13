@@ -20,7 +20,7 @@ import { buyOpnsListing, giftOpnsName, opnsIdFor } from '../opnsBuy';
 import { giftDestination, giftRecipientLabel } from '../opnsGift';
 import { fetchOpnsListings, ownedForSale, type OpnsListing } from '../opnsSell';
 import { buyThenGive, displayUsd, normaliseQuery, RAILS, railNames, resultFor, type StoreResult } from './inventory';
-import { NAME_TIERS, offerHref } from './tiers';
+import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
 
 /**
  * The Name Store (/names, owner-approved 13 Oct 2026): "Get your name on Bitcoin. Yours forever."
@@ -495,11 +495,11 @@ const ResultCard = (p: {
         <>
           {title}
           <p className="m-0 text-lg">
-            <span style={{ color: GOLD }}>{r.name}</span> is available.
+            <span style={{ color: GOLD }}>{r.name}</span> is available: ${(nameTierUsd(r.name) ?? 0).toFixed(2)}.
           </p>
           <p className="m-0 text-sm" style={{ color: MUTED }}>
-            Claim it for a small network fee, usually a few cents. Your device does the work; keep the page open until
-            it&apos;s done.
+            Paid in BSV at today&apos;s price. Yours forever, or give it to someone. Keep the page open until it&apos;s
+            done.
           </p>
           <button
             type="button"
@@ -507,7 +507,7 @@ const ResultCard = (p: {
             className={btn}
             style={{ ...goldBtn, alignSelf: 'flex-start' }}
           >
-            <span className="truncate">Claim {r.name}</span>
+            <span className="truncate">Get {r.name}</span>
           </button>
         </>,
       );
@@ -624,8 +624,7 @@ const WhatIsThis = () => (
         an account we can take back. Once it&apos;s yours it stays yours: no renewals and no expiry.
       </p>
       <p className="m-0">
-        New names are first come, first served: claiming one mines it on your device and pays a small network fee. Names
-        already claimed can only be bought if their owner lists them.
+        New names are first come, first served. Names already claimed can only be bought if their owner lists them.
       </p>
       {MARKET_ENABLED && (
         <p className="m-0">

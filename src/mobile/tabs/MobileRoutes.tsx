@@ -52,6 +52,8 @@ const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 const BmintPage = lazy(() => import('../bmint/BmintPage'));
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
+// /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
+const StockPage = MARKET_ENABLED ? lazy(() => import('../names/store/StockPage')) : null;
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
 // Desktop top bar bell: notifications as a page in the main column (notify/NotificationsPage.tsx).
 const NotificationsPage = lazy(() => import('../notify/NotificationsPage'));
@@ -87,6 +89,7 @@ const MobileRoutes = () => (
         <Route path="bmint/*" element={<BmintPage />} />
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
+        {StockPage && <Route path="names/store" element={<StockPage />} />}
         <Route path="calls" element={<CallsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="lock" element={<LockScreen />} />

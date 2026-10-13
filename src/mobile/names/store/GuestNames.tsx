@@ -1,10 +1,13 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { GuestCtx } from '../../media/artists/guestCtx';
 import { toPublic } from '../../url/publicUrl';
 import { resumeAt } from '../../url/resume';
 import NameStorePage from './NameStorePage';
+import { MARKET_ENABLED } from '../../storeBuild';
+// Selling words stay out of the store edition: the stock page only exists with the market.
+const StockPage = MARKET_ENABLED ? lazy(() => import('./StockPage')) : null;
 
 /** Keeps the address bar on /names and remembers it (a Buy or Claim sets its own resume target). */
 const Sync = () => {
@@ -28,6 +31,16 @@ const GuestNames = ({ route, onWallet }: { route: string; onWallet: () => void }
         <MemoryRouter initialEntries={[route]}>
           <Sync />
           <Routes>
+            {StockPage && (
+              <Route
+                path="/m/names/store"
+                element={
+                  <Suspense fallback={null}>
+                    <StockPage />
+                  </Suspense>
+                }
+              />
+            )}
             <Route path="*" element={<NameStorePage />} />
           </Routes>
         </MemoryRouter>

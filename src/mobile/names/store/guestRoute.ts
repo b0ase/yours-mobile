@@ -6,6 +6,7 @@ import { toRouter } from '../../url/publicUrl';
  */
 export const guestNamesRoute = (pathname: string, search = ''): string | null => {
   const r = toRouter(pathname, '');
+  if (r === '/m/names/store') return r;
   if (r !== '/m/names') return null;
   const q = new URLSearchParams(search).get('q');
   return q ? `/m/names?q=${encodeURIComponent(q.slice(0, 64))}` : '/m/names';
