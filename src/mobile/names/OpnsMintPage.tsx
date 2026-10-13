@@ -32,6 +32,7 @@ import {
   type NameCheck,
 } from './opnsBatch';
 import { formatEta, mineName } from './opnsRegister';
+import { opnsTreeFor } from './opnsTree';
 
 /**
  * bMint › OpNS names (Desktop / web: desktop.bwalletx.com/bmint/opns; old /opns-mint links redirect here).
@@ -185,7 +186,7 @@ export const OpnsMintPage = () => {
         const mine = await refreshOwned();
         for (const n of todo) {
           if (!live) return;
-          const [c] = await checkNames(f, [n], (x) => mine.has(x));
+          const [c] = await checkNames(f, [n], (x) => mine.has(x), opnsTreeFor(identityAddress));
           if (live) setChecks((prev) => ({ ...prev, [n]: c }));
         }
       } catch {
@@ -236,9 +237,11 @@ export const OpnsMintPage = () => {
       const r = await runBatch(
         {
           fetch: f,
-          mine: (name, signal) => mineName({ ctx: apiContext, fetch: f }, name, signal, () => undefined),
+          mine: (name, signal) =>
+            mineName({ ctx: apiContext, fetch: f, tree: opnsTreeFor(identityAddress) }, name, signal, () => undefined),
           payFee,
           isMine: (n) => ownedRef.current.has(n),
+          tree: opnsTreeFor(identityAddress),
           save: (s) => saveBatch(identityAddress, s),
           onUpdate: setBatch,
         },

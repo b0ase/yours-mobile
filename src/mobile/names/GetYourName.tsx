@@ -30,6 +30,7 @@ import { BWALLET_PAYMAIL_DOMAIN, OPNS_PROFILE_DOMAIN } from './config';
 import { alsoGetText, estimateMintFee, fetchMineNode } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { formatEta, MiningCancelled, mineName, NameTakenError, waitForOrigin, type Progress } from './opnsRegister';
+import { opnsTreeFor } from './opnsTree';
 import { moneyNow } from '../money/money';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { PAID_FEATURES_ENABLED } from '../storeBuild';
@@ -189,7 +190,12 @@ export const GetYourName = ({
     abort.current = ctl;
     setMining(name);
     try {
-      const steps = await mineName({ ctx: apiContext, fetch: f }, name, ctl.signal, setProgress);
+      const steps = await mineName(
+        { ctx: apiContext, fetch: f, tree: opnsTreeFor(identityAddress) },
+        name,
+        ctl.signal,
+        setProgress,
+      );
       setProgress(null);
       setMsg(`Mined ${name} (${steps.length} transaction${steps.length === 1 ? '' : 's'}). Waiting for it to confirm…`);
       const seen = await waitForOrigin(f, name, ctl.signal);

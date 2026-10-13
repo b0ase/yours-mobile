@@ -9,8 +9,10 @@ import {
   mintStep,
   OPNS_CHARSET,
   randomPrefix,
+  type MineNode,
   type MintStepResult,
 } from './opnsMint';
+import type { OpnsTree } from './opnsTree';
 
 /**
  * Register a brand-new OpNS name: mine it character by character on-device, one mint
@@ -89,10 +91,32 @@ export type RegisterDeps = {
   /** Injected for tests; defaults to the real mintStep. */
   mint?: typeof mintStep;
   load?: typeof loadNode;
+  /** Local mine-tree cache: our own (maybe unconfirmed) nodes, preferred over the indexer. See opnsTree.ts. */
+  tree?: OpnsTree;
 };
 
-const isDoubleSpend = (e: unknown) =>
-  /double|spent|conflict|missing.?inputs|DOUBLE_SPEND|SEEN_IN_ORPHAN/i.test(String(e));
+const errText = (e: unknown) => {
+  const o = (e ?? {}) as { name?: unknown; code?: unknown };
+  return `${String(o.name ?? '')} ${String(o.code ?? '')} ${String(e)}`;
+};
+/** A rejected broadcast for a node that's already spent (incl. the wallet's WERR_REVIEW_ACTIONS on a double-spend). */
+export const isDoubleSpend = (e: unknown) =>
+  /double|spent|conflict|missing.?inputs|DOUBLE_SPEND|SEEN_IN_ORPHAN|REVIEW_ACTIONS|require review/i.test(errText(e));
+
+type Start = { outpoint: string; domain: string; beefHint?: number[]; fromIndexer: boolean };
+
+/** Deepest unspent node for `name`: our own cached node when it is at least as deep as the indexer's. */
+const pickNode = (tree: OpnsTree | undefined, name: string, indexed: MineNode | null): Start | null => {
+  const local = tree?.best(name) ?? null;
+  const idx = indexed && !tree?.isSpent(indexed.outpoint) ? indexed : null;
+  if (local && (!idx || local.domain.length >= idx.domain.length))
+    return { outpoint: local.outpoint, domain: local.domain, beefHint: tree?.beefFor(local), fromIndexer: false };
+  if (idx) return { outpoint: idx.outpoint, domain: idx.domain, fromIndexer: true };
+  return null;
+};
+
+const catchingUp = (name: string) =>
+  `The name tree for "${name}" is still catching up with your last mints. Wait for them to confirm (about 10 minutes), then try again.`;
 
 export const mineName = async (
   deps: RegisterDeps,
@@ -105,16 +129,20 @@ export const mineName = async (
   const mineChar = deps.mineChar ?? workerMineChar;
   const mint = deps.mint ?? mintStep;
   const load = deps.load ?? loadNode;
+  const tree = deps.tree;
 
+  // Already minted by us (maybe unconfirmed, so the indexer doesn't know yet): nothing to do.
+  if (tree?.isOurs(name)) return [];
   if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
-  const first = await fetchMineNode(deps.fetch, name);
-  if (!first) throw new Error(`No mine-tree node found for "${name}"`);
+  const indexed = await fetchMineNode(deps.fetch, name);
+  const first = pickNode(tree, name, indexed);
+  if (!first) throw new Error(indexed ? catchingUp(name) : `No mine-tree node found for "${name}"`);
 
   const totalChars = name.length - first.domain.length;
   const steps: MintStepResult[] = [];
   let outpoint = first.outpoint;
-  let beefHint: number[] | undefined;
-  let fromIndexer = true; // the node came from the overlay (vs our own fresh child)
+  let beefHint = first.beefHint;
+  let fromIndexer = first.fromIndexer; // the node came from the overlay (vs our own fresh/cached child)
   let retries = 0;
 
   while (true) {
@@ -124,7 +152,7 @@ export const mineName = async (
     if (!name.startsWith(domain)) throw new Error(`Tree node "${domain}" isn't a prefix of "${name}"`);
     if (domain === name) break;
     const char = name.charCodeAt(domain.length);
-    const charIndex = domain.length - first.domain.length;
+    const charIndex = Math.max(0, domain.length - first.domain.length);
     const remainingAfter = name.length - domain.length - 1;
 
     const { nonce, hash } = await mineChar(node.state.pow, char, signal, (tried, rate) =>
@@ -145,13 +173,14 @@ export const mineName = async (
     if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
     if (fromIndexer) {
       const live = await fetchMineNode(deps.fetch, name);
-      if (live && live.domain === domain && live.outpoint !== node.outpoint) {
+      const usable = live && !tree?.isSpent(live.outpoint);
+      if (usable && live.domain === domain && live.outpoint !== node.outpoint) {
         // Someone spent our node (mined another char from it). Seed changed: re-mine from the new node.
         outpoint = live.outpoint;
         beefHint = undefined;
         continue;
       }
-      if (live && live.domain.length > domain.length) {
+      if (usable && live.domain.length > domain.length) {
         // Someone extended the tree along our path; continue from their node.
         outpoint = live.outpoint;
         beefHint = undefined;
@@ -164,17 +193,18 @@ export const mineName = async (
     try {
       step = await mint(deps.ctx, node, char, nonce, hash);
     } catch (e) {
-      if (isDoubleSpend(e) && retries++ < 5) {
-        if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
-        const live = await fetchMineNode(deps.fetch, name);
-        if (!live) throw e;
-        outpoint = live.outpoint;
-        beefHint = undefined;
-        fromIndexer = true;
-        continue;
-      }
-      throw e;
+      if (!isDoubleSpend(e)) throw e;
+      // That node is gone (spent by someone, maybe our own unconfirmed mint): never try it again.
+      tree?.markSpent(node.outpoint);
+      if (await isTaken(deps.fetch, name)) throw new NameTakenError(name);
+      const next = pickNode(tree, name, await fetchMineNode(deps.fetch, name));
+      if (retries++ >= 3 || !next || next.outpoint === node.outpoint) throw new Error(catchingUp(name));
+      outpoint = next.outpoint;
+      beefHint = next.beefHint;
+      fromIndexer = next.fromIndexer;
+      continue;
     }
+    tree?.record(node.outpoint, domain, step);
     steps.push(step);
     if (step.newDomain === name) break;
     outpoint = step.childOutpoint;

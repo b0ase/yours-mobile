@@ -2,6 +2,7 @@ import type { Fetch } from './names';
 import { estimateMintFee, fetchMineNode, isTaken, OPNS_CHARSET } from './opnsMint';
 import { EXPECTED_HASHES } from './opnsPow';
 import { MiningCancelled, NameTakenError } from './opnsRegister';
+import type { OpnsTree } from './opnsTree';
 
 /**
  * "Mint a list" (owner, 13 Oct 2026): mine several OpNS names in one go from the user's own wallet.
@@ -83,17 +84,28 @@ export const planBatch = (checks: NameCheck[]): PlannedName[] => {
   });
 };
 
-/** Live check: taken / already mine / free (with the nearest mined prefix). */
+/**
+ * Live check: taken / already mine / free (with the nearest mined prefix). `tree` (our local mine-tree cache)
+ * makes names we just minted count as ours even before the indexer sees them, and lets a free name plan
+ * from our own deeper unconfirmed node (b0asex from b0ase, not from the indexer's confirmed "b0").
+ */
 export const checkNames = async (
   f: Fetch,
   names: string[],
   isMine: (name: string) => boolean,
+  tree?: OpnsTree,
 ): Promise<NameCheck[]> => {
   const out: NameCheck[] = [];
   for (const name of names) {
-    if (isMine(name)) out.push({ name, state: 'mine' });
+    if (isMine(name) || tree?.isOurs(name)) out.push({ name, state: 'mine' });
     else if (await isTaken(f, name)) out.push({ name, state: 'taken' });
-    else out.push({ name, state: 'free', domain: (await fetchMineNode(f, name))?.domain ?? null });
+    else {
+      const indexed = await fetchMineNode(f, name);
+      const idxDomain = indexed && !tree?.isSpent(indexed.outpoint) ? indexed.domain : null;
+      const local = tree?.best(name)?.domain ?? null;
+      const domain = local !== null && (idxDomain === null || local.length >= idxDomain.length) ? local : idxDomain;
+      out.push({ name, state: 'free', domain: domain ?? indexed?.domain ?? null });
+    }
   }
   return out;
 };
@@ -179,6 +191,8 @@ export type RunDeps = {
   /** Pays the per-name service fee after a name is mined (only when OPNS_FEE_ADDRESS is set). */
   payFee?: (name: string) => Promise<string | undefined>;
   isMine: (name: string) => boolean;
+  /** Our local mine-tree cache: names minted this session/recently count as ours while unconfirmed. */
+  tree?: OpnsTree;
   save: (s: BatchState) => void;
   onUpdate: (s: BatchState) => void;
 };
@@ -202,8 +216,8 @@ export const runBatch = async (deps: RunDeps, start: BatchState, signal: AbortSi
     if (it.status !== 'pending' && it.status !== 'mining') continue;
     if (signal.aborted) return { stopped: 'cancelled', state };
     try {
-      if (deps.isMine(it.name)) {
-        set(i, { status: 'mine', note: 'Already yours' });
+      if (deps.isMine(it.name) || deps.tree?.isOurs(it.name)) {
+        set(i, { status: 'mine', note: deps.isMine(it.name) ? 'Already yours' : 'Yours, confirming' });
         continue;
       }
       if (await isTaken(deps.fetch, it.name)) {
