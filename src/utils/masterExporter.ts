@@ -1,5 +1,6 @@
 import { ChromeStorageService } from '../services/ChromeStorage.service';
 import { accountNamesFor } from '../mobile/names/accountNames';
+import { sealBackup } from './backupEnvelope';
 
 /**
  * `vexvoid_02cbe7_bwalletx_backup_2026-10-11.zip`: the account's $handle (else its name) plus the start of
@@ -42,6 +43,8 @@ export const streamDataToZip = async (
   progress: MasterBackupProgress,
   /** Password-only key (PBKDF2 of the password). With USB unlock on, export needs it to re-encrypt. */
   passwordKey?: string,
+  /** Wallet password: seals the file in the v2 envelope (backupEnvelope.ts, PBKDF2-SHA256 600k + AES-GCM). */
+  password?: string,
 ) => {
   progress({ message: 'Starting backup...', stage: 'preparing' });
 
@@ -78,7 +81,10 @@ export const streamDataToZip = async (
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
-    const blob = new Blob([bytes], { type: 'application/zip' });
+    // One format going forward: the v2 envelope (still a .zip). Restore reads it and older plain files.
+    const out = password ? await sealBackup(bytes, password) : bytes;
+    if (password) bytes.fill(0);
+    const blob = new Blob([out as Uint8Array<ArrayBuffer>], { type: 'application/zip' });
 
     // Trigger download
     const url = URL.createObjectURL(blob);
