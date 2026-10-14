@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { RotateCw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { PenLine } from 'lucide-react';
 import { useCountUp } from './live/useCountUp';
 import './balanceCards.css';
 
@@ -34,6 +35,8 @@ export type MockBalance = {
   /** "View contract" sheet. */
   contractTitle?: string;
   contractTerms?: string[];
+  /** Balance is in dollars ($1 = $1 credit): shown as "$18.40", no unit switch. */
+  dollars?: boolean;
   /** Full one-page agreement (replaces the short terms sheet). */
   agreement?: Agreement;
 };
@@ -44,6 +47,54 @@ type Agreement = {
   parties: [string, string];
   clauses: [string, string][];
   primary: string;
+  /** NDS documentRef and the file name for "Save contract". */
+  ref: string;
+  file: string;
+};
+
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** The agreement as an NDS instrument (bit-sign's signable HTML): manifest + data-sig-anchor per signer. */
+const ndsHtml = (a: Agreement) => {
+  const manifest = {
+    nds: '1.0',
+    documentTitle: `${a.title} (MOCK)`,
+    documentRef: a.ref,
+    canonical: { algo: 'sha-256', over: 'rendered-pdf' },
+    resolution: 'dom-anchor',
+    signatureFields: [
+      { id: 'issuer', role: 'Issuer', name: a.parties[0], party: 'issuer', required: true, order: 1 },
+      { id: 'holder', role: 'Customer', name: 'You', party: 'customer', signerHandle: 'you', required: true, order: 2 },
+    ],
+  };
+  const sig = (d: string) =>
+    `<svg viewBox="0 0 160 50" width="200" height="56"><path d="${d}" fill="none" stroke="#1a1a8c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(a.title)} (MOCK)</title>
+<script type="application/npg-sig-manifest+json">
+${JSON.stringify(manifest, null, 2)}
+</script>
+<style>
+body{margin:0;background:#0b0b0d;font-family:'Times New Roman',serif;font-size:16px;line-height:1.5;color:#111}
+.sheet{background:#fff;margin:12px;padding:20px 18px;border-radius:6px;border-top:4px solid #ffd24d}
+.mock{font-family:system-ui,sans-serif;font-weight:800;font-size:12px;letter-spacing:.06em;color:#c0262c;border:1px solid #c0262c;border-radius:6px;padding:3px 8px;display:inline-block}
+h1{font-size:21px;margin:12px 0 4px}.ref{font-size:12px;color:#555;font-family:ui-monospace,Menlo,monospace}
+.parties{border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:8px 0;margin:10px 0}
+ol{padding-left:22px}li{margin-bottom:8px}
+.execution{display:flex;flex-direction:column;gap:18px;margin-top:18px}
+.sig-line{border-bottom:1px solid #000;min-height:56px}.sig-caption{font-size:13px;color:#333}
+.meta{font-size:12px;color:#555;font-family:ui-monospace,Menlo,monospace;margin-top:14px}
+</style></head><body><div class="sheet">
+<div class="mock">MOCK · not a real agreement</div>
+<h1>${esc(a.title)}</h1><div class="ref">${esc(a.ref)}</div>
+<div class="parties"><b>Between</b> ${esc(a.parties[0])}<br><b>and</b> ${esc(a.parties[1])}</div>
+<ol>${a.clauses.map(([h, t]) => `<li><b>${esc(h)}.</b> ${esc(t)}</li>`).join('')}</ol>
+<div class="execution">
+<div class="sig-block"><div class="sig-line" data-sig-anchor="issuer">${sig(SIG_A)}</div><div class="sig-caption">For ${esc(a.issuer)} (issuer)</div></div>
+<div class="sig-block"><div class="sig-line" data-sig-anchor="holder">${sig(SIG_B)}</div><div class="sig-caption">You · $you</div></div>
+</div>
+<div class="meta">Dated 14 October 2026<br>On chain: txid 7f3c…e21a (agreement hash, placeholder)</div>
+</div></body></html>`;
 };
 
 const SIG_A = 'M6 34 C18 8 26 44 38 22 S56 10 62 30 C68 44 80 14 92 26 S118 38 128 18 L152 22';
@@ -51,68 +102,108 @@ const SIG_B = 'M8 28 C14 12 22 12 24 30 C26 44 40 6 50 24 S70 40 84 20 C94 8 102
 const FlipBtn = ({ onFlip }: { onFlip: () => void }) => (
   <button
     type="button"
-    className="bw-flipbtn"
+    className="bw-wcard-penflip"
     aria-label="Flip card"
+    title="Flip card"
     onClick={(e) => {
       e.stopPropagation();
       onFlip();
     }}
   >
-    <span>
-      <RotateCw size={18} strokeWidth={2.4} />
-    </span>
+    <PenLine size={20} aria-hidden="true" />
   </button>
 );
 
-const Sig = ({ d, label }: { d: string; label: string }) => (
-  <span className="bw-ag-sig">
-    <svg viewBox="0 0 160 50" aria-label={`${label} signature`}>
-      <path d={d} />
-    </svg>
-    <small>{label}</small>
-  </span>
-);
+/**
+ * Top layer for every mock sheet: portalled to <body> above the TopNav, tab bar, bApp frame, Feed and the wallet
+ * overlay (2147483000–2147483500). Locks background scroll; Close, Escape, the back gesture and a swipe down dismiss.
+ */
+const Layer = ({ onClose, children, sheet = false }: { onClose: () => void; children: ReactNode; sheet?: boolean }) => {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const body = document.body;
+    const prev = body.style.overflow;
+    body.style.overflow = 'hidden';
+    let popped = false;
+    try {
+      window.history.pushState({ bwMockLayer: true }, '');
+    } catch {
+      /* ignore */
+    }
+    const onPop = () => {
+      popped = true;
+      closeRef.current();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      body.style.overflow = prev;
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('keydown', onKey);
+      if (!popped && (window.history.state as { bwMockLayer?: boolean } | null)?.bwMockLayer) window.history.back();
+    };
+  }, []);
+  const startY = useRef<number | null>(null);
+  return createPortal(
+    <div
+      className={`bw-layer${sheet ? ' is-sheet' : ''}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onTouchStart={(e) => {
+        const sc = (e.target as HTMLElement).closest('.bw-layer-scroll');
+        startY.current = !sc || sc.scrollTop <= 0 ? e.touches[0].clientY : null;
+      }}
+      onTouchEnd={(e) => {
+        if (startY.current !== null && e.changedTouches[0].clientY - startY.current > 120) onClose();
+        startY.current = null;
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+};
 
-const AgreementSheet = ({ a, onClose }: { a: Agreement; onClose: () => void }) => (
-  <div className="bw-ag" onClick={(e) => e.stopPropagation()}>
-    <div className="bw-ag-mock">MOCK · not a real agreement</div>
-    <h2>{a.title}</h2>
-    <div className="bw-ag-parties">
-      <span>
-        <b>Between</b> {a.parties[0]}
-      </span>
-      <span>
-        <b>and</b> {a.parties[1]}
-      </span>
-    </div>
-    <ol>
-      {a.clauses.map(([h, t]) => (
-        <li key={h}>
-          <b>{h}.</b> {t}
-        </li>
-      ))}
-    </ol>
-    <div className="bw-ag-sigs">
-      <Sig d={SIG_A} label={a.issuer} />
-      <Sig d={SIG_B} label="You" />
-    </div>
-    <div className="bw-ag-meta">
-      <span>Dated 14 October 2026</span>
-      <span>On chain: txid 7f3c…e21a (agreement hash, placeholder)</span>
-    </div>
-    <div className="bw-ag-btns">
-      <button type="button" className="is-primary" onClick={() => window.alert(`MOCK: ${a.primary} would run here.`)}>
-        {a.primary}
-      </button>
-      <button type="button" onClick={() => window.alert('MOCK: the signed PDF would download here.')}>
-        Download PDF
-      </button>
-      <button type="button" onClick={onClose}>
-        Close
-      </button>
-    </div>
-  </div>
-);
+const AgreementSheet = ({ a, onClose }: { a: Agreement; onClose: () => void }) => {
+  const html = ndsHtml(a);
+  const save = () => {
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = a.file;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5_000);
+  };
+  return (
+    <Layer onClose={onClose}>
+      <div className="bw-ag">
+        <div className="bw-ag-grab" />
+        <iframe className="bw-ag-doc" title={a.title} sandbox="" srcDoc={html} />
+        <div className="bw-ag-btns">
+          <button
+            type="button"
+            className="is-primary"
+            onClick={() => window.alert(`MOCK: ${a.primary} would run here.`)}
+          >
+            {a.primary}
+          </button>
+          <button type="button" onClick={save}>
+            Save contract (.nds.html)
+          </button>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </Layer>
+  );
+};
 
 export type MockContract = { what: string; rate: string; startedAt: number; spent: number };
 
@@ -145,19 +236,21 @@ const MOCK: MockBalance[] = [
   },
   {
     id: 'mandala',
-    name: '$mandala credits',
-    issuer: 'GorillaPool (Root) · accepts BSV',
-    unit: 'credits',
-    balance: 1240,
-    usdPer: 0.01,
+    name: 'Mandala credit',
+    issuer: 'GorillaPool (Root) · mandala.computer',
+    unit: 'Mandala credit',
+    dollars: true,
+    balance: 18.4,
+    usdPer: 1,
     colour: '#1f6f5c',
     ink: '#e8fff6',
     initial: 'M',
-    about: 'Prepaid credits for agents and compute on mandala.computer. Bought with BSV.',
+    about: 'Dollar credit for cloud computers for agents on mandala.computer. $1 paid = $1 credit.',
     backLines: [
       'Mandala: cloud computers for agents (mandala.computer).',
-      'You get: a hosted agent VM, billed per compute-hour. 1 credit = 1¢ · 100 credits ≈ 1 VM-hour.',
-      'Balance 1,240 credits (~12 VM-hours). Accepts BSV.',
+      'Runtime: $0.12/hour · billed per active second. Nothing is charged while your computer is stopped or suspended.',
+      'Storage: $0.10/GB-month for retained disks and snapshots.',
+      'Fund with a card, MNEE ($1 = $1) or BSV at the live rate. Limits are separate from your balance.',
     ],
     contact: 'Root',
     agreement: {
@@ -165,30 +258,39 @@ const MOCK: MockBalance[] = [
       issuer: 'GorillaPool',
       parties: ['GorillaPool (issuer, mandala.computer)', 'You (identity key 03ab…f9, paymail $you)'],
       primary: 'Sign & top up',
+      ref: 'MANDALA-SA-2026-10-14-MOCK',
+      file: 'Mandala_Credits_Agreement_MOCK_NDS.html',
       clauses: [
-        ['What you’re buying', 'Hosted agent computer time on mandala.computer.'],
-        ['Price', '1 Mandala credit = 1p, paid in BSV. 100 credits ≈ 1 VM-hour.'],
-        ['How you’re charged', 'Per minute while your machine runs, shown live on your card.'],
+        ['What you’re buying', 'Hosted agent computer time on mandala.computer, plus storage you choose to keep.'],
+        [
+          'Price',
+          'Credit is in dollars: $1 paid = $1 credit. Runtime example: $0.12/hour. No monthly fee to try the API.',
+        ],
+        [
+          'How you’re charged',
+          'Per active second of allocated runtime, shown live on your card. Nothing is charged while your computer is stopped or suspended.',
+        ],
+        [
+          'Storage',
+          'Retained disks and snapshots are charged separately at $0.10/GB-month, under the published storage policy.',
+        ],
+        [
+          'Limits',
+          'Resource limits are set separately from your balance: a positive balance doesn’t buy unlimited resources.',
+        ],
         [
           'Stopping',
-          'Tap Stop on the card: billing and the service stop at once, and unused credits stay yours to use later.',
+          'Tap Stop on the card: billing and the service stop at once, and unused credit stays yours to use later.',
         ],
         [
           'Support',
-          'Contact GorillaPool from the card. If the service isn’t delivered, credits for that time are returned.',
+          'Contact GorillaPool from the card. If the service isn’t delivered, credit for that time is returned.',
         ],
-        ['Refunds and expiry', 'Credits don’t expire. They are non-refundable except where the law requires.'],
-        ['Your keys', 'GorillaPool never holds your keys. Only the credits you top up sit with the issuer.'],
+        ['Funding', 'Top up by card first; MNEE at $1 = $1 and BSV at the live rate are also accepted.'],
+        ['Refunds and expiry', 'Credit doesn’t expire. It is non-refundable except where the law requires.'],
+        ['Your keys', 'GorillaPool never holds your keys. Only the credit you top up sits with the issuer.'],
       ],
     },
-    contractTitle: 'You and GorillaPool (Root)',
-    contractTerms: [
-      'Issuer: GorillaPool (Root), operator of Mandala.',
-      'Price: 1 credit = $0.01, bought with BSV.',
-      'What a credit buys: 1/100 of an hour on a hosted agent VM (compute, storage, network included).',
-      'Refunds: unused credits refundable on request to Root.',
-      'How to stop: tap Stop; the VM is paused and billing ends at once.',
-    ],
   },
   {
     id: 'pnee',
@@ -213,6 +315,8 @@ const MOCK: MockBalance[] = [
       issuer: 'The Bitcoin Corporation',
       parties: ['The Bitcoin Corporation Ltd (PNEE issuer)', 'You (identity key 03ab…f9, paymail $you)'],
       primary: 'Lock & mint',
+      ref: 'PNEE-LOCK-2026-10-14-MOCK',
+      file: 'PNEE_Lock_Agreement_MOCK_NDS.html',
       clauses: [
         ['What you lock', 'BSV into a time-lock under your own key. Example: 1,000,000 sats.'],
         [
@@ -266,11 +370,17 @@ const MockCard = ({
   chip,
   contract,
   onStop,
+  onTopUp,
+  running,
+  onRun,
 }: {
   c: MockBalance;
   chip: string | null;
   contract: MockContract | null;
   onStop: () => void;
+  onTopUp: () => void;
+  running?: boolean;
+  onRun?: () => void;
 }) => {
   const [unit, setUnit] = useState<'own' | 'usd'>('own');
   const [flipped, setFlipped] = useState(false);
@@ -286,7 +396,11 @@ const MockCard = ({
     window.alert(`MOCK: this would open a support chat with ${c.contact}.`);
   };
   const count = useCountUp(c.balance, !c.locked);
-  const big = unit === 'own' ? fmtNum(count.value) : fmtUsd(count.value * c.usdPer);
+  const big = c.dollars
+    ? `$${count.value.toFixed(running ? 4 : 2)}`
+    : unit === 'own'
+      ? fmtNum(count.value)
+      : fmtUsd(count.value * c.usdPer);
   const small = unit === 'own' ? fmtUsd(count.value * c.usdPer) : `${fmtNum(count.value)} ${c.unit}`;
   const toggle = () => setUnit((u) => (u === 'own' ? 'usd' : 'own'));
   const ownLabel = c.unit === 'PNEEs' ? 'PNEEs' : c.unit;
@@ -372,13 +486,13 @@ const MockCard = ({
               className="bw-bc-stop is-top"
               onClick={(e) => {
                 e.stopPropagation();
-                window.alert('MOCK: top-up would open here.');
+                onTopUp();
               }}
             >
               Top up
             </button>
           )}
-          {c.contractTerms && (
+          {(c.contractTerms || c.agreement) && (
             <button
               type="button"
               className="bw-bc-contact"
@@ -396,14 +510,8 @@ const MockCard = ({
         </div>
         {sheetOpen && c.agreement && <AgreementSheet a={c.agreement} onClose={() => setSheetOpen(false)} />}
         {sheetOpen && !c.agreement && (
-          <div
-            className="bw-bcar-sheet-bg"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSheetOpen(false);
-            }}
-          >
-            <div className="bw-bcar-sheet bw-bc-contract" onClick={(e) => e.stopPropagation()}>
+          <Layer sheet onClose={() => setSheetOpen(false)}>
+            <div className="bw-bcar-sheet bw-bc-contract bw-layer-scroll">
               <span className="bw-bc-mock">MOCK · placeholder terms</span>
               <h3>{c.contractTitle}</h3>
               <ul>
@@ -420,7 +528,7 @@ const MockCard = ({
                 Close
               </button>
             </div>
-          </div>
+          </Layer>
         )}
       </div>
     );
@@ -445,7 +553,7 @@ const MockCard = ({
         }}
       >
         {big}
-        {unit === 'own' && <span className="bw-bc-unitword"> {c.unit}</span>}
+        {(c.dollars || unit === 'own') && <span className="bw-bc-unitword"> {c.unit}</span>}
       </button>
       <div className="bw-bc-bottom">
         <span className="bw-bc-sub">
@@ -453,6 +561,17 @@ const MockCard = ({
             <span className="bw-bc-lock">🔒 Locked · shares</span>
           ) : chip ? (
             <span className="bw-bc-chip">{chip}</span>
+          ) : onRun ? (
+            <button
+              type="button"
+              className={`bw-bc-run${running ? ' is-on' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRun();
+              }}
+            >
+              {running ? '● Running · $0.12/hour · billed per second' : 'Suspended · not charging (tap to run)'}
+            </button>
           ) : (
             <>
               {small}
@@ -460,15 +579,143 @@ const MockCard = ({
             </>
           )}
         </span>
-        <span className="bw-wcard-unit" role="group" aria-label="Balance unit" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className={unit === 'usd' ? 'is-on' : undefined} onClick={() => setUnit('usd')}>
-            $
-          </button>
-          <button type="button" className={unit === 'own' ? 'is-on' : undefined} onClick={() => setUnit('own')}>
-            {ownLabel}
-          </button>
-        </span>
+        {!c.dollars && (
+          <span className="bw-wcard-unit" role="group" aria-label="Balance unit" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className={unit === 'usd' ? 'is-on' : undefined} onClick={() => setUnit('usd')}>
+              $
+            </button>
+            <button type="button" className={unit === 'own' ? 'is-on' : undefined} onClick={() => setUnit('own')}>
+              {ownLabel}
+            </button>
+          </span>
+        )}
       </div>
+    </div>
+  );
+};
+
+const GBP_PER_BSV = 327; // mock rate
+const USD_PER_GBP = 1.27; // mock rate
+type Chunk = { label: string; gbp: number; get: number; getText: string };
+const chunksFor = (id: string): Chunk[] => {
+  if (id === 'mandala')
+    return [5, 10, 20, 50].map((d) => ({
+      label: `$${d}`,
+      gbp: d / USD_PER_GBP,
+      get: d,
+      getText: `$${d} Mandala credit`,
+    }));
+  return [1, 5, 10, 20].map((p) => {
+    const get = id === 'pnee' ? Math.round(p * USD_PER_GBP * 100) : p * 100;
+    return { label: `£${p}`, gbp: p, get, getText: `${fmtNum(get)} ${id === 'pnee' ? 'PNEEs' : 'bCredits'}` };
+  });
+};
+const TOPUP_ISSUERS: [string, string, string][] = [
+  ['bcredits', 'bCredits', 'The Bitcoin Corporation'],
+  ['mandala', '$mandala', 'GorillaPool (Root)'],
+  ['pnee', 'PNEEs', 'The Bitcoin Corporation'],
+];
+
+const TopUpCard = ({
+  issuer,
+  setIssuer,
+  onPaid,
+}: {
+  issuer: string;
+  setIssuer: (id: string) => void;
+  onPaid: (id: string, amount: number) => void;
+}) => {
+  const [flipped, setFlipped] = useState(false);
+  const [turning, setTurning] = useState(false);
+  const [pick, setPick] = useState(1);
+  const [confirm, setConfirm] = useState(false);
+  const chunks = chunksFor(issuer);
+  const ch = chunks[Math.min(pick, chunks.length - 1)];
+  const bsv = (ch.gbp / GBP_PER_BSV).toFixed(4);
+  const payee = TOPUP_ISSUERS.find((t) => t[0] === issuer)![2];
+  const flip = () => {
+    setTurning(true);
+    window.setTimeout(() => setFlipped((f) => !f), 220);
+    window.setTimeout(() => setTurning(false), 440);
+  };
+  if (flipped)
+    return (
+      <div className={`bw-bc bw-bc-back bw-tu${turning ? ' is-turning' : ''}`} onClick={flip}>
+        <FlipBtn onFlip={flip} />
+        <div className="bw-tu-title">TOP-UP · terms</div>
+        <div className="bw-bc-terms">
+          <span>bCredits: 1p each. They don’t expire.</span>
+          <span>Non-refundable except where the law requires.</span>
+          <span>Maximum £20 per top-up.</span>
+          <span>$mandala chunks are an example; PNEEs are 1¢ each.</span>
+        </div>
+        <span className="bw-bc-mock">MOCK</span>
+      </div>
+    );
+  return (
+    <div className={`bw-bc bw-tu${turning ? ' is-turning' : ''}`} onClick={flip}>
+      <FlipBtn onFlip={flip} />
+      <div className="bw-tu-title">
+        <span className="bw-tu-plus">+</span> TOP-UP <span className="bw-bc-mock">MOCK</span>
+      </div>
+      <div className="bw-tu-chips" onClick={(e) => e.stopPropagation()}>
+        {TOPUP_ISSUERS.map(([id, label]) => (
+          <button
+            type="button"
+            key={id}
+            className={issuer === id ? 'is-on' : undefined}
+            onClick={() => {
+              setIssuer(id);
+              setPick(1);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="bw-tu-chunks" onClick={(e) => e.stopPropagation()}>
+        {chunks.map((k, i) => (
+          <button type="button" key={k.label} className={i === pick ? 'is-on' : undefined} onClick={() => setPick(i)}>
+            <b>{k.label}</b>
+            <small>→ {k.getText}</small>
+            <small>≈ {(k.gbp / GBP_PER_BSV).toFixed(4)} BSV</small>
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="bw-tu-go"
+        onClick={(e) => {
+          e.stopPropagation();
+          setConfirm(true);
+        }}
+      >
+        Top up {ch.label}
+      </button>
+      {confirm && (
+        <Layer sheet onClose={() => setConfirm(false)}>
+          <div className="bw-bcar-sheet bw-layer-scroll">
+            <span className="bw-bc-mock">MOCK · no payment is made</span>
+            <h3>Confirm top-up</h3>
+            <p className="bw-tu-confirm">
+              Pay ≈{bsv} BSV to {payee} for {ch.getText}.
+            </p>
+            <button
+              type="button"
+              className="bw-bcar-done"
+              onClick={() => {
+                setConfirm(false);
+                onPaid(issuer, ch.get);
+              }}
+            >
+              Confirm
+            </button>
+            <button type="button" className="bw-tu-cancel" onClick={() => setConfirm(false)}>
+              Cancel
+            </button>
+          </div>
+        </Layer>
+      )}
     </div>
   );
 };
@@ -480,7 +727,22 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const [slots, setSlots] = useState<Slot[]>(() => [
     { id: 'bsv', hidden: false },
     ...MOCK.map((m) => ({ id: m.id, hidden: false })),
+    { id: 'topup', hidden: false },
   ]);
+  const [topIssuer, setTopIssuer] = useState('bcredits');
+  const [running, setRunning] = useState(false);
+  // Mandala bills per active second while running (mock: $0.12/hour), nothing while suspended.
+  useEffect(() => {
+    if (!running) return;
+    const t = window.setInterval(
+      () =>
+        setCards((cs) =>
+          cs.map((c) => (c.id === 'mandala' ? { ...c, balance: Math.max(0, c.balance - 0.12 / 3600) } : c)),
+        ),
+      1000,
+    );
+    return () => window.clearInterval(t);
+  }, [running]);
   const [active, setActive] = useState(0);
   const [sheet, setSheet] = useState(false);
   const [spending, setSpending] = useState<string | null>(null);
@@ -564,7 +826,21 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       [n[i], n[j]] = [n[j], n[i]];
       return n;
     });
-  const nameOf = (id: string) => (id === 'bsv' ? 'BSV' : (cards.find((c) => c.id === id)?.name ?? id));
+  const nameOf = (id: string) =>
+    id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
+  const openTopUp = (id: string) => {
+    setTopIssuer(id);
+    const i = visible.findIndex((s) => s.id === 'topup');
+    if (i >= 0) goTo(i);
+  };
+  const paid = (id: string, amount: number) => {
+    const i = visible.findIndex((s) => s.id === id);
+    if (i >= 0) goTo(i);
+    window.setTimeout(
+      () => setCards((cs) => cs.map((c) => (c.id === id ? { ...c, balance: c.balance + amount } : c))),
+      600,
+    );
+  };
 
   return (
     <div className="bw-bcar">
@@ -583,9 +859,10 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         {visible.map((s) => (
           <div className="bw-bcar-slide" key={s.id}>
             {s.id === 'bsv' ? (
-              <div className="bw-bcar-bsv">
-                {bsvCard}
-                <FlipBtn onFlip={() => track.current?.querySelector<HTMLElement>('.bw-bcar-bsv .bw-wcard')?.click()} />
+              <div className="bw-bcar-bsv">{bsvCard}</div>
+            ) : s.id === 'topup' ? (
+              <div className="bw-bcar-mockwrap">
+                <TopUpCard issuer={topIssuer} setIssuer={setTopIssuer} onPaid={paid} />
               </div>
             ) : (
               <div className="bw-bcar-mockwrap">
@@ -594,6 +871,9 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
                   chip={spending === s.id ? chip : null}
                   contract={spending === s.id ? contract : null}
                   onStop={stopDemo}
+                  onTopUp={() => openTopUp(s.id)}
+                  running={s.id === 'mandala' ? running : undefined}
+                  onRun={s.id === 'mandala' ? () => setRunning((x) => !x) : undefined}
                 />
               </div>
             )}
@@ -617,8 +897,8 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         </button>
       </div>
       {sheet && (
-        <div className="bw-bcar-sheet-bg" onClick={() => setSheet(false)}>
-          <div className="bw-bcar-sheet" onClick={(e) => e.stopPropagation()}>
+        <Layer sheet onClose={() => setSheet(false)}>
+          <div className="bw-bcar-sheet bw-layer-scroll">
             <h3>Cards</h3>
             {slots.map((s, i) => (
               <div className="bw-bcar-row" key={s.id}>
@@ -642,7 +922,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
               Done
             </button>
           </div>
-        </div>
+        </Layer>
       )}
     </div>
   );
