@@ -7,6 +7,8 @@ import {
   Phone,
   PhoneOff,
   PictureInPicture2,
+  ScreenShare,
+  ScreenShareOff,
   SwitchCamera,
   UserPlus,
   Video,
@@ -35,6 +37,7 @@ import {
   stopCalls,
   toggleCamera,
   toggleMute,
+  toggleScreenShare,
   toggleSpeaker,
 } from './store';
 import { useCalls } from './useCalls';
@@ -42,6 +45,33 @@ import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
 import { addFriend, isFriend } from './friends';
 import { END_TEXT, formatDuration, videoLayout, type CallState } from './machine';
 import { amountLabel } from './rateCard';
+import { canShareScreen, shareLayout } from './screenShare';
+import { isNative } from '../native';
+
+const SHARE_SUPPORTED = canShareScreen({
+  native: isNative,
+  mediaDevices: typeof navigator !== 'undefined' ? navigator.mediaDevices : null,
+});
+
+const CORNER: React.CSSProperties = {
+  position: 'absolute',
+  right: 16,
+  top: 'calc(var(--wallet-inset-top, 0px) + 16px)',
+  width: 104,
+  height: 148,
+  borderRadius: 14,
+  objectFit: 'cover',
+  zIndex: 2,
+  border: '1px solid rgba(255,255,255,0.25)',
+};
+const FULL: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  zIndex: 0,
+};
 import { PaidThroughLine, QuoteSheet, SpendLine } from './QuoteSheet';
 
 /**
@@ -117,16 +147,17 @@ export const CallScreen = () => {
   // The label callees verify: our full paymail (unambiguous), else the OpNS name. Shown bare.
   const { paymail, handle } = useAccountNames(identityAddress, '', '', false);
   const myName = paymail || handle;
-  const { call, error, denied } = useCalls();
+  const { call, error, denied, sharing, remoteShare } = useCalls();
   const [note, setNote] = useState('');
   const localRef = useRef<HTMLVideoElement>(null);
   const remoteRef = useRef<HTMLVideoElement>(null);
+  const screenRef = useRef<HTMLVideoElement>(null);
   const inCall = call.phase !== 'idle';
   // The <video> elements always exist while a call screen is up (hidden when unused), so the
   // media layer can attach tracks the moment they arrive.
   useEffect(() => {
     if (!inCall) return;
-    bindVideo(localRef.current, remoteRef.current);
+    bindVideo(localRef.current, remoteRef.current, screenRef.current);
     return () => bindVideo(null, null);
   }, [inCall]);
 
@@ -145,23 +176,19 @@ export const CallScreen = () => {
 
   if (call.phase === 'idle') return null;
   const peer = call.peer;
-  const layout = videoLayout(call);
-  const videoOn = layout.remote === 'full' || layout.self === 'full';
+  const camLayout = videoLayout(call);
   const cam = 'camera' in call ? call : null;
-  const selfStyle: React.CSSProperties =
-    layout.self === 'corner'
-      ? {
-          position: 'absolute',
-          right: 16,
-          top: 'calc(var(--wallet-inset-top, 0px) + 16px)',
-          width: 104,
-          height: 148,
-          borderRadius: 14,
-          objectFit: 'cover',
-          zIndex: 2,
-          border: '1px solid rgba(255,255,255,0.25)',
-        }
-      : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 };
+  // The peer's shared screen takes over (letterboxed) with the speaker small; null restores.
+  const share =
+    call.phase === 'active'
+      ? shareLayout({ remoteShare, remoteCamera: camLayout.remote === 'full', selfCamera: !!cam?.camera })
+      : null;
+  const layout = share ?? { ...camLayout, screen: 'none' as const };
+  const videoOn = layout.screen === 'full' || layout.remote === 'full' || layout.self === 'full';
+  const slot = (v: 'full' | 'corner' | 'none'): React.CSSProperties => ({
+    ...(v === 'corner' ? CORNER : FULL),
+    display: v === 'none' ? 'none' : 'block',
+  });
 
   return (
     <div
@@ -175,19 +202,19 @@ export const CallScreen = () => {
       aria-label="Call"
     >
       <video
+        ref={screenRef}
+        autoPlay
+        playsInline
+        muted
+        aria-label="Screen shared by the other person"
+        style={{ ...slot(layout.screen), objectFit: 'contain', background: '#000' }}
+      />
+      <video
         ref={remoteRef}
         autoPlay
         playsInline
         aria-label="Video from the other person"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          zIndex: 0,
-          display: layout.remote === 'full' ? 'block' : 'none',
-        }}
+        style={slot(layout.remote)}
       />
       <video
         ref={localRef}
@@ -196,10 +223,9 @@ export const CallScreen = () => {
         muted
         aria-label="Your camera"
         style={{
-          ...selfStyle,
+          ...slot(layout.self),
           // The selfie camera is shown mirrored, as every phone does; the back camera is not.
           transform: cam?.facing === 'user' ? 'scaleX(-1)' : undefined,
-          display: layout.self === 'none' ? 'none' : 'block',
         }}
       />
       <div
@@ -229,7 +255,11 @@ export const CallScreen = () => {
             )}
           </div>
         )}
-        {(note || (cam && error && /camera/i.test(error) ? error : '')) && (
+        {sharing && <div className="text-xs text-[#F5B800]">You are sharing your screen</div>}
+        {remoteShare && call.phase === 'active' && (
+          <div className="text-xs text-[#c9ccd1]">{bareName(peer.label)} is sharing their screen</div>
+        )}
+        {(note || (error && ((cam && /camera/i.test(error)) || /screen sharing/i.test(error)) ? error : '')) && (
           <div className="text-xs text-[#F5B800]">{note || error}</div>
         )}
         {denied && (
@@ -286,7 +316,7 @@ export const CallScreen = () => {
         call.phase === 'connecting' ||
         call.phase === 'active') && (
         <div className="relative z-[1] flex flex-col items-center gap-10">
-          <div className="flex gap-6">
+          <div className="flex flex-wrap justify-center gap-6 px-4">
             {call.phase === 'active' && (
               <Round label={call.muted ? 'Unmute' : 'Mute'} on={call.muted} onClick={() => void toggleMute()}>
                 {call.muted ? <MicOff size={24} color="#111" /> : <Mic size={24} color="#fff" />}
@@ -305,6 +335,15 @@ export const CallScreen = () => {
             {call.phase === 'active' && (
               <Round label="Speaker" on={call.speaker} onClick={() => void toggleSpeaker()}>
                 <Volume2 size={24} color={call.speaker ? '#111' : '#fff'} />
+              </Round>
+            )}
+            {call.phase === 'active' && SHARE_SUPPORTED && (
+              <Round
+                label={sharing ? 'Stop sharing' : 'Share screen'}
+                on={sharing}
+                onClick={() => void toggleScreenShare()}
+              >
+                {sharing ? <ScreenShareOff size={24} color="#111" /> : <ScreenShare size={24} color="#fff" />}
               </Round>
             )}
             {call.phase === 'active' && layout.remote === 'full' && pipSupported(remoteRef.current) && (

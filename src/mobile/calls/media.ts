@@ -18,6 +18,10 @@ export interface MediaCallbacks {
   onRemoteVideo?: (on: boolean) => void;
   /** A JSON message from the peer over the call's data channel (bPhone payment receipts). */
   onData?: (msg: unknown) => void;
+  /** The peer's shared screen started or stopped showing. */
+  onRemoteShare?: (on: boolean) => void;
+  /** Our screen share ended outside the app (the browser's own "Stop sharing" bar). */
+  onLocalShareEnded?: () => void;
 }
 
 const DATA_TOPIC = 'bphone';
@@ -35,6 +39,8 @@ export class CallMedia {
   private remoteVideo: RemoteTrack | null = null;
   private remoteEl: HTMLVideoElement | null = null;
   private localEl: HTMLVideoElement | null = null;
+  private remoteScreen: RemoteTrack | null = null;
+  private screenEl: HTMLVideoElement | null = null;
   private cb: MediaCallbacks | null = null;
 
   async connect(
@@ -52,6 +58,10 @@ export class CallMedia {
         el.style.display = 'none';
         document.body.appendChild(el);
         this.els.push(el);
+      } else if (track.kind === Track.Kind.Video && track.source === Track.Source.ScreenShare) {
+        this.remoteScreen = track;
+        if (this.screenEl) track.attach(this.screenEl);
+        this.emitShare();
       } else if (track.kind === Track.Kind.Video) {
         this.remoteVideo = track;
         if (this.remoteEl) track.attach(this.remoteEl);
@@ -60,8 +70,12 @@ export class CallMedia {
     });
     room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
       track.detach().forEach((el) => {
-        if (el !== this.remoteEl) el.remove();
+        if (el !== this.remoteEl && el !== this.screenEl) el.remove();
       });
+      if (track === this.remoteScreen) {
+        this.remoteScreen = null;
+        this.emitShare();
+      }
       if (track === this.remoteVideo) {
         this.remoteVideo = null;
         this.emitRemote();
@@ -71,9 +85,13 @@ export class CallMedia {
     const onMute = (pub: TrackPublication) => {
       if (pub.kind === Track.Kind.Video && (pub as RemoteTrackPublication).track === this.remoteVideo)
         this.emitRemote();
+      if ((pub as RemoteTrackPublication).track === this.remoteScreen && this.remoteScreen) this.emitShare();
     };
     room.on(RoomEvent.TrackMuted, onMute);
     room.on(RoomEvent.TrackUnmuted, onMute);
+    room.on(RoomEvent.LocalTrackUnpublished, (pub: TrackPublication) => {
+      if (pub.source === Track.Source.ScreenShare) this.cb?.onLocalShareEnded?.();
+    });
     room.on(RoomEvent.Disconnected, cb.onDisconnected);
     room.on(RoomEvent.DataReceived, (payload: Uint8Array, _p, _k, topic?: string) => {
       if (topic !== DATA_TOPIC || !this.cb?.onData || payload.byteLength > 4096) return;
@@ -113,13 +131,21 @@ export class CallMedia {
     this.cb?.onRemoteVideo?.(!!t && !t.isMuted);
   }
 
+  private emitShare() {
+    const t = this.remoteScreen;
+    this.cb?.onRemoteShare?.(!!t && !t.isMuted);
+  }
+
   private localVideo(): LocalVideoTrack | null {
     const pub = this.room?.localParticipant.getTrackPublication(Track.Source.Camera);
     return (pub?.track as LocalVideoTrack | undefined) ?? null;
   }
 
   /** Point the screen's <video> elements at the call (null to unbind). */
-  bindVideo(local: HTMLVideoElement | null, remote: HTMLVideoElement | null) {
+  bindVideo(local: HTMLVideoElement | null, remote: HTMLVideoElement | null, screen: HTMLVideoElement | null = null) {
+    if (this.screenEl && this.screenEl !== screen) this.remoteScreen?.detach(this.screenEl);
+    this.screenEl = screen;
+    if (screen && this.remoteScreen) this.remoteScreen.attach(screen);
     if (this.remoteEl && this.remoteEl !== remote) this.remoteVideo?.detach(this.remoteEl);
     if (this.localEl && this.localEl !== local) this.localVideo()?.detach(this.localEl);
     this.remoteEl = remote;
@@ -135,6 +161,14 @@ export class CallMedia {
     if (on) await ensureMediaAccess('camera');
     await room.localParticipant.setCameraEnabled(on, on ? { facingMode: facing } : undefined);
     if (on && this.localEl) this.localVideo()?.attach(this.localEl);
+  }
+
+  /**
+   * Share our screen (getDisplayMedia via LiveKit; the browser shows its own picker) or stop.
+   * Desktop browsers / extension only: the button is hidden where canShareScreen() is false.
+   */
+  async setScreenShare(on: boolean) {
+    await this.room?.localParticipant.setScreenShareEnabled(on, on ? { audio: false } : undefined);
   }
 
   /** Switch between the front and back camera without unpublishing. */
@@ -173,6 +207,9 @@ export class CallMedia {
     this.remoteVideo = null;
     this.remoteEl = null;
     this.localEl = null;
+    if (this.screenEl) this.remoteScreen?.detach(this.screenEl);
+    this.remoteScreen = null;
+    this.screenEl = null;
     if (isNative) await YoursNative.audioSetSpeaker({ on: false }).catch(() => undefined);
     // Disconnecting stops local tracks, which releases the camera (and its indicator light).
     await room?.disconnect().catch(() => undefined);
