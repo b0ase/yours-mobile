@@ -1,0 +1,85 @@
+/* Wallet token rows: pin mark, reorder (jiggle) mode. src/mobile/wallet/TokenSwipe.tsx, JiggleList.tsx */
+.bw-pin-mark {
+  position: absolute;
+  top: 6px;
+  left: 18px;
+  z-index: 2;
+  color: var(--bw-accent-hi, #ffd24d);
+  pointer-events: none;
+  transform: rotate(35deg);
+}
+.bw-jiggle {
+  width: 100%;
+}
+.bw-jiggle-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  will-change: transform;
+}
+.bw-jiggle-body {
+  flex: 1;
+  min-width: 0;
+}
+.bw-jiggle.is-editing .bw-jiggle-body {
+  animation: bw-row-wiggle 0.26s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+.bw-jiggle-row.is-drag .bw-jiggle-body {
+  animation: none;
+  transform: scale(1.03);
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.5));
+}
+.bw-jiggle-handle {
+  flex: none;
+  width: 44px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin-right: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--bw-accent-hi, #ffd24d);
+  touch-action: none;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.bw-jiggle-bar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: calc(100% - 32px);
+  margin: 6px 16px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #17191e;
+  border: 1px solid rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.35);
+  color: #c9c9c4;
+  font-size: 12px;
+}
+.bw-jiggle-bar button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-weight: 800;
+  background: var(--bw-accent-hi, #ffd24d);
+  color: var(--bw-on-accent, #111);
+}
+@keyframes bw-row-wiggle {
+  from {
+    transform: rotate(-0.6deg);
+  }
+  to {
+    transform: rotate(0.6deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-jiggle.is-editing .bw-jiggle-body {
+    animation: none;
+  }
+}

@@ -93,6 +93,10 @@ import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
 import { isMainnetAddress } from '../mobile/names/address';
 import { rememberSent } from '../mobile/wallet/send/sendLogic';
+import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { useTokenRows } from '../mobile/wallet/tokenRows';
+import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
+import { asMenuItem } from '../mobile/tabs/tabs';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -122,6 +126,7 @@ export const BsvWallet = () => {
   const { updateBalance, isSyncing, restoreMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
+  const tokenRows = useTokenRows();
   const isReload = urlParams.get('reload') === 'true' || query === 'reload';
   urlParams.delete('reload');
   const [pageState, setPageState] = useState<PageState>('main');
@@ -395,6 +400,13 @@ export const BsvWallet = () => {
       const addresses = [...seen];
       setMneeAddresses(addresses.length ? addresses : [receiveAddress]);
       setMneeBalance(totalDecimal);
+      // Share the last MNEE balance with the wallet card (mock balance cards read it; nothing writes back).
+      try {
+        localStorage.setItem('bwallet:mnee-balance', String(totalDecimal));
+        window.dispatchEvent(new Event('bwallet:mnee-balance'));
+      } catch {
+        /* storage unavailable */
+      }
 
       // Update MNEE balance in Chrome storage
       const { account } = chromeStorageService.getCurrentAccountObject();
@@ -1511,6 +1523,16 @@ export const BsvWallet = () => {
             <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />
           </div>
 
+          <TokenSwipe
+            id="bsv"
+            noArchive
+            label="BSV"
+            pinned={tokenRows.pinned.includes('bsv')}
+            onSend={() => setPageState('send')}
+            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+            onChat={() => handleSelect(asMenuItem('chat'))}
+            onLock={() => handleSelect('tools', 'lock')}
+          >
           <AssetRow
             balance={bsvBalance}
             icon={bsvCoin}
@@ -1532,6 +1554,7 @@ export const BsvWallet = () => {
                 : undefined
             }
           />
+          </TokenSwipe>
           {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
@@ -1542,6 +1565,19 @@ export const BsvWallet = () => {
             />
           )}
           <Show when={services.mnee}>
+            <TokenSwipe
+              id="mnee"
+              noArchive
+              label="MNEE USD"
+              pinned={tokenRows.pinned.includes('mnee')}
+              onSend={() => {
+                setSendSource('main');
+                setPageState('sendMNEE');
+              }}
+              onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+              onChat={() => handleSelect(asMenuItem('chat'))}
+              onLock={() => addSnackbar('Locking MNEE isn’t available yet.', 'info', 2500)}
+            >
             <AssetRow
               balance={mneeBalance}
               icon={MNEE_ICON_URL}
@@ -1562,6 +1598,7 @@ export const BsvWallet = () => {
                 }
               }}
             />
+            </TokenSwipe>
           </Show>
           <DefaultTokenCards />
           {lockData && (
@@ -1598,6 +1635,11 @@ export const BsvWallet = () => {
                   setSendSource('main');
                   handleTokenClick(t);
                 }}
+                onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+                onChat={(t: Bsv21Balance) => openTicketRoomInChat(t.id, handleSelect)}
+                onLock={(t: Bsv21Balance) =>
+                  addSnackbar(`Locking ${t.sym || 'this token'} isn’t available yet.`, 'info', 2500)
+                }
               />
             )}
           </motion.div>

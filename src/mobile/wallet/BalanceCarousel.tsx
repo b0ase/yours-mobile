@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 import { PenLine } from 'lucide-react';
 import { useCountUp } from './live/useCountUp';
 import { STORE_BUILD } from '../storeBuild';
+import { MNEE_ICON_URL } from '../../utils/constants';
+import { setWalletKind } from './walletKind';
+import { rememberedTicketIds } from './walletTickets';
 import { TokenIcon } from '../exchange/TokenIcon';
 import { tokenDirectory } from '../market/indexer';
 import './balanceCards.css';
@@ -43,6 +46,10 @@ export type MockBalance = {
   contractTerms?: string[];
   /** BSV-21 icon outpoint (tokens): drawn with the Exchange's TokenIcon. */
   icon?: string | null;
+  /** A full image URL for the logo (MNEE). */
+  iconUrl?: string;
+  /** Extra back-of-card buttons (mock actions). */
+  backButtons?: string[];
   /** Balance is in dollars ($1 = $1 credit): shown as "$18.40", no unit switch. */
   dollars?: boolean;
   /** Full one-page agreement (replaces the short terms sheet). */
@@ -217,6 +224,27 @@ const AgreementSheet = ({ a, onClose }: { a: Agreement; onClose: () => void }) =
 export type MockContract = { what: string; rate: string; startedAt: number; spent: number };
 
 const MOCK: MockBalance[] = [
+  {
+    id: 'mnee',
+    name: 'MNEE',
+    issuer: 'MNEE · USD stablecoin on BSV',
+    unit: 'MNEE',
+    dollars: true,
+    balance: 0,
+    usdPer: 1,
+    colour: '#0b5d4b',
+    ink: '#eafff7',
+    initial: 'M',
+    iconUrl: MNEE_ICON_URL,
+    about: 'MNEE is a US dollar stablecoin on BSV: 1 MNEE = $1.',
+    backLines: [
+      'MNEE is a US dollar stablecoin on BSV: 1 MNEE = $1.',
+      'Send it like cash to a $handle or address; fees are paid in MNEE.',
+      'Balance shown from this wallet (read only).',
+    ],
+    backButtons: ['Send', 'Receive'],
+    contact: 'MNEE',
+  },
   {
     id: 'bcredits',
     name: 'bCredits',
@@ -545,6 +573,19 @@ const MockCard = ({
               View contract
             </button>
           )}
+          {c.backButtons?.map((b) => (
+            <button
+              type="button"
+              key={b}
+              className="bw-bc-contact"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.alert(`MOCK: ${b} ${c.name} opens the wallet’s ${b} screen here.`);
+              }}
+            >
+              {b}
+            </button>
+          ))}
           <button type="button" className="bw-bc-contact" onClick={contact}>
             Contact {c.contact}
           </button>
@@ -657,6 +698,8 @@ const chunksFor = (id: string): Chunk[] => {
       get: d,
       getText: `$${d} Mandala credit`,
     }));
+  if (id === 'mnee')
+    return [5, 10, 20, 50].map((d) => ({ label: `$${d}`, gbp: d / USD_PER_GBP, get: d, getText: `${d} MNEE ($${d})` }));
   if (id !== 'bcredits' && id !== 'pnee')
     return [1, 5, 10, 20].map((p) => ({ label: `£${p}`, gbp: p, get: p * 100, getText: `${p * 100} tokens` }));
   return [1, 5, 10, 20].map((p) => {
@@ -928,12 +971,14 @@ const readHeldTokens = (): MockBalance[] => {
 
 type Item = { kind: 'card'; id: string } | { kind: 'basket'; id: string; name: string; members: string[] };
 type Layout = { row: Item[]; hidden: string[] };
-const LAYOUT_KEY = 'bw-mock-balance-layout-v2';
+const LAYOUT_KEY = 'bw-mock-balance-layout-v3';
 const SEED: Layout = {
   row: [
     { kind: 'card', id: 'bsv' },
     { kind: 'basket', id: 'b-credits', name: 'Credits', members: ['bcredits', 'mandala'] },
+    { kind: 'card', id: 'mnee' },
     { kind: 'card', id: 'pnee' },
+    { kind: 'card', id: 'tickets' },
     { kind: 'basket', id: 'b-shares', name: 'Shares', members: ['bcorp', 'sh-acme', 'sh-teapot'] },
     { kind: 'basket', id: 'b-tokens', name: 'Tokens', members: [] },
     { kind: 'card', id: 'topup' },
@@ -961,7 +1006,11 @@ const defaultBasketName = (ids: string[]) =>
 
 /** A card's logo: real token icons via the Exchange's TokenIcon (gold initial only if the image fails). */
 const Logo = ({ c, size, className }: { c: MockBalance | undefined; size: number; className: string }) =>
-  c && c.icon !== undefined ? (
+  c?.iconUrl ? (
+    <span className={`${className} is-icon`}>
+      <img src={c.iconUrl} alt="" width={size} height={size} style={{ borderRadius: '50%' }} />
+    </span>
+  ) : c && c.icon !== undefined ? (
     <span className={`${className} is-icon`}>
       <TokenIcon icon={c.icon} sym={c.name} size={size} />
     </span>
@@ -1255,7 +1304,13 @@ const EditGrid = ({
     sy: number;
   } | null>(null);
   const nameOf = (id: string) =>
-    id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
+    id === 'bsv'
+      ? 'BSV'
+      : id === 'topup'
+        ? 'TOP-UP'
+        : id === 'tickets'
+          ? 'Tickets'
+          : (cards.find((c) => c.id === id)?.name ?? id);
   const card = (id: string) => cards.find((c) => c.id === id);
 
   const drop = (srcId: string, from: string | null, target: string | null) => {
@@ -1314,7 +1369,14 @@ const EditGrid = ({
       window.clearTimeout(p.t);
       pending.current = null;
     }
-    if (drag) setDrag({ ...drag, x: e.clientX, y: e.clientY });
+    if (drag) {
+      setDrag({ ...drag, x: e.clientX, y: e.clientY });
+      // Auto-scroll the grid when a held tile nears the top or bottom edge.
+      const sc = (e.currentTarget as HTMLElement).closest('.bw-eg');
+      const h = window.innerHeight;
+      if (sc && e.clientY < 90) sc.scrollTop -= (90 - e.clientY) / 3;
+      else if (sc && e.clientY > h - 90) sc.scrollTop += (e.clientY - (h - 90)) / 3;
+    }
   };
   // While a tile is held, stop the page scrolling under the finger.
   const dragging = !!drag;
@@ -1462,6 +1524,8 @@ const EditGrid = ({
                   nameOf(it.id),
                   it.id === 'topup' ? (
                     <span className="bw-eg-logo is-top">+</span>
+                  ) : it.id === 'tickets' ? (
+                    <span className="bw-eg-logo is-top">🎟</span>
                   ) : it.id === 'bsv' ? (
                     <span className="bw-eg-logo is-bsv">₿</span>
                   ) : (
@@ -1499,6 +1563,187 @@ const EditGrid = ({
         <button type="button" className="bw-tuf-sec" onClick={onResetKyc}>
           Reset verification (mock)
         </button>
+      </div>
+    </Layer>
+  );
+};
+
+/* ---------- Tickets card ---------- */
+type TicketRow = { id: string; name: string; opens: string; when: string };
+const MOCK_TICKETS: TicketRow[] = [
+  { id: 'm1', name: 'Lounge pass', opens: 'The Lounge (always-on Space)', when: 'Live now' },
+  { id: 'm2', name: 'VexVoid listening party', opens: 'VexVoid’s Space · Fri 8pm', when: 'Fri 17 Oct' },
+  { id: 'm3', name: 'Frogger room', opens: '$FROGGER holders’ room', when: 'Any time' },
+];
+/** Real tickets when this device knows them (wallet token cache ∩ remembered ticket ids), else the mock list. */
+const readTickets = (): { rows: TicketRow[]; real: boolean } => {
+  try {
+    const ids = new Set(rememberedTicketIds());
+    if (ids.size)
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k?.startsWith('bwallet:bsv21-cache:')) continue;
+        const list = JSON.parse(localStorage.getItem(k) ?? '[]') as { id?: string; sym?: string }[];
+        const rows = list
+          .filter((t) => t.id && ids.has(t.id))
+          .map((t) => ({
+            id: t.id!,
+            name: `$${t.sym ?? t.id!.slice(0, 6)}`,
+            opens: `$${t.sym ?? ''} room`,
+            when: 'Any time',
+          }));
+        if (rows.length) return { rows, real: true };
+      }
+  } catch {
+    /* no cache */
+  }
+  return { rows: MOCK_TICKETS, real: false };
+};
+
+const TicketsCard = () => {
+  const [{ rows, real }] = useState(readTickets);
+  const [flipped, setFlipped] = useState(false);
+  const [turning, setTurning] = useState(false);
+  const flip = () => {
+    setTurning(true);
+    window.setTimeout(() => setFlipped((f) => !f), 220);
+    window.setTimeout(() => setTurning(false), 440);
+  };
+  const openPage = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    setWalletKind('tickets');
+    window.setTimeout(() => window.scrollBy({ top: 420, behavior: 'smooth' }), 80);
+  };
+  const next = rows[0];
+  if (flipped)
+    return (
+      <div className={`bw-bc bw-bc-back bw-tk${turning ? ' is-turning' : ''}`} onClick={flip}>
+        <FlipBtn onFlip={flip} />
+        <div className="bw-tu-title">Your tickets</div>
+        <div className="bw-bk-list">
+          {rows.map((t) => (
+            <span key={t.id}>
+              🎟 {t.name}
+              <b>{t.opens}</b>
+            </span>
+          ))}
+        </div>
+        <button type="button" className="bw-bc-contact" onClick={openPage}>
+          Open Tickets
+        </button>
+      </div>
+    );
+  return (
+    <div className={`bw-bc bw-tk${turning ? ' is-turning' : ''}`} onClick={flip}>
+      <FlipBtn onFlip={flip} />
+      <div className="bw-bc-top">
+        <span className="bw-bc-logo">🎟</span>
+        <span className="bw-bc-head">
+          <b>Tickets</b>
+          <small>Space and room passes</small>
+        </span>
+        {!real && <span className="bw-bc-mock">MOCK</span>}
+      </div>
+      <div className="bw-bc-amt">
+        {rows.length}
+        <span className="bw-bc-unitword"> {rows.length === 1 ? 'ticket' : 'tickets'}</span>
+      </div>
+      <div className="bw-bc-sub">
+        {next ? (
+          <>
+            Next: <b>{next.name}</b> · {next.when}
+          </>
+        ) : (
+          'No tickets yet'
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ---------- Time Machine: every card in a 3D stack receding into space ---------- */
+type TmCard = { key: string; title: string; sub: string; colour: string; ink: string; logo: ReactNode };
+const reducedMotionTm = () => {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+};
+const TimeMachine = ({
+  cards,
+  start,
+  onPick,
+  onClose,
+  onEdit,
+}: {
+  cards: TmCard[];
+  start: number;
+  onPick: (i: number) => void;
+  onClose: () => void;
+  onEdit: () => void;
+}) => {
+  const [focus, setFocus] = useState(start);
+  const [reduced] = useState(reducedMotionTm);
+  const t0 = useRef<{ y: number; f: number } | null>(null);
+  const clamp = (f: number) => Math.max(0, Math.min(cards.length - 1, f));
+  return (
+    <Layer onClose={onClose}>
+      <div
+        className={`bw-tm${reduced ? ' is-flat' : ''}`}
+        onWheel={(e) => setFocus((f) => clamp(f + e.deltaY / 240))}
+        onTouchStart={(e) => (t0.current = { y: e.touches[0].clientY, f: focus })}
+        onTouchMove={(e) => {
+          if (!t0.current || reduced) return;
+          setFocus(clamp(t0.current.f + (t0.current.y - e.touches[0].clientY) / 120));
+        }}
+        onTouchEnd={() => {
+          t0.current = null;
+          if (!reduced) setFocus((f) => Math.round(f));
+        }}
+      >
+        <div className="bw-tm-stars" />
+        <div className="bw-tm-head">
+          <b>All cards</b>
+          <span>
+            <button type="button" onClick={onEdit}>
+              Edit
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </span>
+        </div>
+        <div className="bw-tm-stage">
+          {cards.map((c, i) => {
+            const o = i - focus;
+            const style = reduced
+              ? undefined
+              : {
+                  transform: `translate(-50%, -50%) translate3d(0, ${-o * 46}px, ${-o * 260}px) scale(${o < 0 ? 1 - o * 0.25 : 1})`,
+                  opacity: o < -0.9 ? 0 : Math.max(0, 1 - o * 0.16),
+                  zIndex: 1000 - Math.round(o * 10),
+                  pointerEvents: (o < -0.5 ? 'none' : 'auto') as 'none' | 'auto',
+                  filter: o > 0.5 ? `brightness(${Math.max(0.45, 1 - o * 0.1)})` : undefined,
+                };
+            return (
+              <button
+                type="button"
+                key={c.key}
+                className="bw-tm-card"
+                style={{ ...style, background: c.colour, color: c.ink }}
+                onClick={() => (reduced || Math.abs(o) < 0.5 ? onPick(i) : setFocus(i))}
+              >
+                <span className="bw-tm-logo">{c.logo}</span>
+                <span className="bw-tm-text">
+                  <b>{c.title}</b>
+                  <small>{c.sub}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="bw-tm-hint">Swipe up and down to fly through · tap a card to land on it</p>
       </div>
     </Layer>
   );
@@ -1580,6 +1825,21 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     };
   }, []);
 
+  // MNEE: the wallet's real balance (BsvWallet shares the last fetch), read only.
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = Number(localStorage.getItem('bwallet:mnee-balance') ?? 'NaN');
+        if (Number.isFinite(v)) setCards((cs) => cs.map((c) => (c.id === 'mnee' ? { ...c, balance: v } : c)));
+      } catch {
+        /* storage unavailable */
+      }
+    };
+    read();
+    window.addEventListener('bwallet:mnee-balance', read);
+    return () => window.removeEventListener('bwallet:mnee-balance', read);
+  }, []);
+
   // Mandala bills per active second while running (mock: $0.12/hour), nothing while suspended.
   useEffect(() => {
     if (!running) return;
@@ -1622,7 +1882,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   // Long-press anywhere on the carousel enters jiggle/edit mode.
   const press = useRef<number | null>(null);
   const startPress = () => {
-    press.current = window.setTimeout(() => setEditing(true), 600);
+    press.current = window.setTimeout(() => setTm(true), 600);
   };
   const endPress = () => {
     if (press.current !== null) window.clearTimeout(press.current);
@@ -1697,10 +1957,49 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     onRun: () => setRunning((x) => !x),
   };
   const nameOf = (id: string) =>
-    id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
+    id === 'bsv'
+      ? 'BSV'
+      : id === 'topup'
+        ? 'TOP-UP'
+        : id === 'tickets'
+          ? 'Tickets'
+          : (cards.find((c) => c.id === id)?.name ?? id);
   const bOpen = layout.row.find((i) => i.id === openBasket);
   const [gateFor, setGateFor] = useState<string | null>(null);
   const [, bump] = useState(0);
+  const [tm, setTm] = useState(false);
+  const tmCards: TmCard[] = slides.map(({ key, item }) => {
+    if (item.id === 'bsv')
+      return { key, title: 'BSV', sub: 'Your wallet', colour: '#16161a', ink: '#ffd24d', logo: '₿' };
+    if (item.id === 'topup')
+      return { key, title: 'TOP-UP', sub: 'Buy credits', colour: '#1a1608', ink: '#ffd24d', logo: '+' };
+    if (item.id === 'tickets')
+      return { key, title: 'Tickets', sub: 'Space and room passes', colour: '#2a1036', ink: '#ffd24d', logo: '🎟' };
+    if (item.kind === 'basket')
+      return {
+        key,
+        title: item.name,
+        sub: `${item.members.length} cards`,
+        colour: '#23200f',
+        ink: '#ffd24d',
+        logo: (
+          <span className="bw-bk-grid">
+            {item.members.slice(0, 9).map((m) => (
+              <MiniLogo key={m} c={cards.find((c) => c.id === m)} />
+            ))}
+          </span>
+        ),
+      };
+    const c = cards.find((x) => x.id === item.id);
+    return {
+      key,
+      title: c?.name ?? item.id,
+      sub: c ? (c.dollars ? `$${c.balance.toFixed(2)}` : `${fmtNum(c.balance)} ${c.unit}`) : '',
+      colour: c?.colour ?? '#16161a',
+      ink: c?.ink ?? '#ffd24d',
+      logo: <Logo c={c} size={34} className="bw-bc-logo" />,
+    };
+  });
   const openGuarded = (id: string) => (id === 'b-shares' && !kycOk() ? setGateFor(id) : setOpenBasket(id));
 
   return (
@@ -1714,13 +2013,17 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         onTouchMove={endPress}
         onContextMenu={(e) => {
           e.preventDefault();
-          setEditing(true);
+          setTm(true);
         }}
       >
         {slides.map(({ key, item, from }) => (
           <div className="bw-bcar-slide" key={key}>
             {item.id === 'bsv' ? (
               <div className="bw-bcar-bsv">{bsvCard}</div>
+            ) : item.id === 'tickets' ? (
+              <div className="bw-bcar-mockwrap">
+                <TicketsCard />
+              </div>
             ) : item.id === 'topup' ? (
               <div className="bw-bcar-mockwrap">
                 <TopUpCard issuer={topIssuer} setIssuer={setTopIssuer} onPaid={paid} />
@@ -1777,6 +2080,21 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
           onResetKyc={() => {
             setKyc(false);
             bump((n) => n + 1);
+          }}
+        />
+      )}
+      {tm && (
+        <TimeMachine
+          cards={tmCards}
+          start={active}
+          onClose={() => setTm(false)}
+          onEdit={() => {
+            setTm(false);
+            setEditing(true);
+          }}
+          onPick={(i) => {
+            setTm(false);
+            window.setTimeout(() => goTo(i), 60);
           }}
         />
       )}

@@ -178,7 +178,9 @@ export const AppsAndTools = () => {
   const { keysService, apiContext } = useServiceContext();
   const { bsvAddress, ordAddress, identityAddress } = keysService;
   const [isProcessing, setIsProcessing] = useState(false);
-  const [page, setPage] = useState<AppsPage>(query === 'pending-locks' ? 'unlock' : 'main');
+  const [page, setPage] = useState<AppsPage>(
+    query === 'pending-locks' ? 'unlock' : query === 'lock' ? 'lock-page' : 'main',
+  );
   const [otherIsSelected, setOtherIsSelected] = useState(false);
   const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
   const [pendingSupportAmount, setPendingSupportAmount] = useState<number | null>(null);
