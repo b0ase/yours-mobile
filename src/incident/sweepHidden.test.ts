@@ -350,6 +350,51 @@ describe('reproduced: mined but not visible, then recovered', () => {
   }, 30000);
 });
 
+describe('reproduced: dkg state after 5.2.20 (History shows the sweep, Balance 0, "Nothing to restore")', () => {
+  test('an older UnFail left it unproven with unspendable change; the hidden-change pass restores 586.14198569 BSV', async () => {
+    // Before 5.2.20: the sweep failed, mined, and "Find mined payments" ran with the shipped UTXO parser.
+    const { w, chain, services, inputs } = await sweep('invalid', { utxo: 'shipped' });
+    const txid = await sweepTxid(w);
+    mine(chain, txid, inputs);
+    await recover(w, services);
+    // dkg's state: History (listActions) lists the sweep, the balance doesn't count it, backup copies 0 coins.
+    expect(await statusOf(w, txid)).toBe('unproven');
+    const history = await w.wallet.listActions({ labels: [], includeOutputs: true });
+    expect(history.actions.map((a) => a.txid)).toContain(txid);
+    expect(await balance(w)).toBe(0);
+    expect(await w.wallet.balance()).toBe(0);
+    // 5.2.20 installs the fixed UTXO check. The old candidate list (failed/stuck only) would find nothing here.
+    expect(fixUtxoStatus(services)).toBe(true);
+    const rep = await recover(w, services);
+    console.log('[dkg 5.2.20 state] before 0, after', await balance(w), '|', recoverySummary(rep));
+    expect(rep.restored).toEqual([txid]);
+    expect(recoverySummary(rep)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
+    await expectRecovered(w, txid);
+    expect(await w.wallet.balance()).toBe(REAL_OUTPUT);
+    // Idempotent: a second run finds nothing and changes nothing.
+    const before = await snapshot(w);
+    const again = await recover(w, services);
+    expect(recoverySummary(again)).toBe('Nothing to restore');
+    expect(await snapshot(w)).toEqual(before);
+  }, 30000);
+
+  test('released change the chain says is SPENT is left alone (not a candidate, nothing changes)', async () => {
+    const { w, chain, services, inputs } = await sweep('success');
+    const txid = await sweepTxid(w);
+    mine(chain, txid, inputs);
+    chain.spent.set(`${txid}.0`, 'ab'.repeat(32)); // spent elsewhere
+    await w.storage.runAsStorageProvider(async (sp) => {
+      for (const o of await sp.findOutputs({ partial: { txid } }))
+        await sp.updateOutput(o.outputId, { spendable: false });
+    });
+    const before = await snapshot(w);
+    const rep = await recover(w, services);
+    expect(rep.failed).toBe(0);
+    expect(recoverySummary(rep)).toBe('Nothing to restore');
+    expect(await snapshot(w)).toEqual(before);
+  }, 30000);
+});
+
 describe('safety', () => {
   test('running recovery twice changes nothing the second time (no double counting)', async () => {
     const { w, chain, services, inputs } = await sweep('invalid');
