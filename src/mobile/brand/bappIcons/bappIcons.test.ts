@@ -1,8 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { FEED_COLORS } from '../../feed/feeds';
-import { BAPP_ICONS, bappIconContent, bappIconDef, bappIconSvg, bappIconUrl, GLYPHS, ICON_SIZES, layout } from '.';
+import {
+  BAPP_ICONS,
+  bappIconContent,
+  bappIconDef,
+  bappIconSvg,
+  bappIconUrl,
+  GLYPHS,
+  ICON_SIZES,
+  badgeColors,
+  layout,
+} from '.';
 
-const SIXTEEN = [
+const ALL_SLUGS = [
   'bmovies',
   'bmusic',
   'bnews',
@@ -18,6 +28,13 @@ const SIXTEEN = [
   'bchatx',
   'bexchange',
   'bcredits',
+  'bpaint',
+  'bjobs',
+  'bdrive',
+  'bsheets',
+  'bcal',
+  'bcode',
+  'bagents',
   'bshares',
 ];
 
@@ -34,9 +51,9 @@ const wellFormed = (svg: string) => {
 };
 
 describe('bApp icon set', () => {
-  test('the registry covers all 16, each with a glyph and a colour', () => {
-    expect(Object.keys(BAPP_ICONS).sort()).toEqual([...SIXTEEN].sort());
-    for (const s of SIXTEEN) {
+  test('the registry covers all 23, each with a glyph and a colour', () => {
+    expect(Object.keys(BAPP_ICONS).sort()).toEqual([...ALL_SLUGS].sort());
+    for (const s of ALL_SLUGS) {
       expect(GLYPHS[s as keyof typeof GLYPHS]).toBeTruthy();
       expect(BAPP_ICONS[s as keyof typeof BAPP_ICONS].color).toMatch(/^#[0-9A-F]{6}$/i);
     }
@@ -47,14 +64,15 @@ describe('bApp icon set', () => {
 
   test('a slug with no glyph gets the fallback initial in its colour', () => {
     expect(bappIconDef('bmaps')).toBeNull();
+    expect(bappIconDef('bitcoincode')?.slug).toBe('bcode');
     expect(bappIconContent('bmaps', { label: 'bMaps', color: '#5BB98B' })).toEqual({ letter: 'M', color: '#5BB98B' });
     const svg = bappIconSvg('bmaps', 28, { label: 'bMaps', color: '#5BB98B' });
     expect(svg).toContain('>M</text>');
-    expect(svg).toContain('stroke="#FFD24D"'); // the gold b badge ring
+    expect(svg).toContain('stroke="#5BB98B"'); // the badge ring in the app colour
   });
 
   test('every icon renders valid SVG at each size, with the badge', () => {
-    for (const s of [...SIXTEEN, 'bmaps']) {
+    for (const s of [...ALL_SLUGS, 'bmaps']) {
       for (const size of ICON_SIZES) {
         const svg = bappIconSvg(s, size);
         expect(wellFormed(svg)).toBe(true);
@@ -63,6 +81,19 @@ describe('bApp icon set', () => {
         expect(bappIconUrl(s, size)).toStartWith('data:image/svg+xml');
       }
     }
+  });
+
+  test('the badge (ring + b) takes each app colour; dark colours are lifted', () => {
+    for (const s of ALL_SLUGS) {
+      const c = BAPP_ICONS[s as keyof typeof BAPP_ICONS].color;
+      const k = badgeColors(c);
+      const svg = bappIconSvg(s, 28);
+      expect(svg).toContain(`stroke="${k.ring}"`);
+      expect(svg).toContain(`stop-color="${k.mid}"`);
+      expect(svg).not.toContain('#FFD24D"/><stop'); // no gold b unless the app is gold
+    }
+    expect(badgeColors(BAPP_ICONS.bmovies.color).ring).toBe(BAPP_ICONS.bmovies.color);
+    expect(badgeColors('#4A2E1A').ring).not.toBe('#4A2E1A');
   });
 
   test('the badge grows at small sizes (~40% of the tile at 28px)', () => {

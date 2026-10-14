@@ -12,6 +12,8 @@ import {
   loadPins,
   migrateFeedId,
   rowFeeds,
+  movePin,
+  bappRowOrder,
   savePins,
   stepFeed,
   swipeDir,
@@ -61,19 +63,37 @@ describe('feed list', () => {
 });
 
 describe('feed row', () => {
-  test('fixed row first, then pins; old saved rows with core feeds still load', () => {
-    expect(rowFeeds([])).toEqual([...FIXED_ROW]);
-    expect(rowFeeds(['bradio', 'bnews'])).toEqual([...FIXED_ROW, 'bradio']);
+  test('row: fixed four, then pins, then every other bApp in fixed order; ventures only when pinned', () => {
+    const bapps = FEEDS.filter((f) => f.group === 'bapps' && !FIXED_ROW.includes(f.id)).map((f) => f.id);
+    const row = rowFeeds([]);
+    expect(row.slice(0, FIXED_ROW.length)).toEqual(FIXED_ROW.filter((id) => FEEDS.some((f) => f.id === id)));
+    expect(row.slice(FIXED_ROW.length).sort()).toEqual([...bapps].sort());
+    expect(row.slice(FIXED_ROW.length, FIXED_ROW.length + 4)).toEqual(['bradio', 'bgame', 'b3d', 'bphotos']);
+    expect(row).not.toContain('vexvoid');
+    expect(row.slice(FIXED_ROW.length)).toEqual(bappRowOrder());
     expect(cleanPins(['following', 'bradio', 'bradio', 'nope', 'cherryx', 'bmail'])).toEqual(['bradio', 'bmail']);
     expect(cleanPins('junk')).toEqual([]);
   });
-  test('toggling pins: fixed feeds stay; a full row drops the oldest', () => {
+  test('pinning moves a bApp to the front without a duplicate; a venture joins the row', () => {
+    const row = rowFeeds(['bmail', 'vexvoid', 'bnews']);
+    expect(row.slice(0, 6)).toEqual([...FIXED_ROW, 'bmail', 'vexvoid']);
+    expect(row.filter((id) => id === 'bmail')).toHaveLength(1);
+    expect(new Set(row).size).toBe(row.length);
+    // Unpinned: bMail drops back to its place; the venture leaves.
+    const after = rowFeeds(togglePin(togglePin(['bmail', 'vexvoid'], 'bmail'), 'vexvoid'));
+    expect(after).toEqual(rowFeeds([]));
+  });
+  test('pin, unpin and reorder', () => {
     expect(togglePin([], 'bnews')).toEqual([]);
     expect(togglePin(['bradio'], 'bradio')).toEqual([]);
-    const full = FEEDS.filter((f) => !FIXED_ROW.includes(f.id))
-      .slice(0, MAX_PINNED)
-      .map((f) => f.id);
-    expect(togglePin(full, 'vexvoid')).toEqual([...full.slice(1), 'vexvoid']);
+    expect(togglePin(['bradio'], 'npg')).toEqual(['bradio', 'npg']);
+    expect(movePin(['a', 'b', 'c'], 'c', -1)).toEqual(['a', 'c', 'b']);
+    expect(movePin(['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c']);
+    expect(movePin(['a', 'b', 'c'], 'a', 1)).toEqual(['b', 'a', 'c']);
+    expect(movePin(['a'], 'z', 1)).toEqual(['a']);
+    expect(MAX_PINNED).toBeGreaterThanOrEqual(FEEDS.length);
+    const many = FEEDS.filter((f) => !FIXED_ROW.includes(f.id)).map((f) => f.id);
+    expect(cleanPins(many)).toEqual(many);
   });
   test('Following and For you are one Home chip; old ids migrate to it', () => {
     expect(FIXED_ROW[0]).toBe('home');
@@ -91,12 +111,18 @@ describe('feed row', () => {
     expect(store.getItem(PINS_KEY)).toBe('["bradio","bmail"]');
     expect(loadPins(store)).toEqual(['bradio', 'bmail']);
   });
-  test('swiping steps through the row, plus the open feed when it is not in it', () => {
+  test('swiping steps through the full row, plus the open feed when it is not in it', () => {
     expect(stepFeed([], 'home', 1)).toBe(rowFeeds([])[1]);
     expect(stepFeed([], 'home', -1)).toBeNull();
-    expect(stepFeed(['bradio'], 'bmusic', 1)).toBe('bradio');
-    expect(stepFeed(['bradio'], 'bradio', 1)).toBeNull();
-    expect(stepFeed([], 'bmail', -1)).toBe('bmusic');
+    expect(stepFeed(['bmail'], 'bmusic', 1)).toBe('bmail');
+    const row = rowFeeds([]);
+    expect(stepFeed([], row[row.length - 1], 1)).toBeNull();
+    // The swipe walks the full row.
+    let id: string | null = 'home';
+    let n = 1;
+    while ((id = stepFeed([], id, 1))) n++;
+    expect(n).toBe(row.length);
+    expect(stepFeed([], 'vexvoid', -1)).toBe(row[row.length - 1]);
   });
   test('a left swipe is next, a right swipe previous, a scroll is neither', () => {
     expect(swipeDir(-100, 10)).toBe(1);
