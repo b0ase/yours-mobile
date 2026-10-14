@@ -34,6 +34,7 @@ import {
   Clock,
   Trophy,
   EyeOff,
+  Newspaper,
 } from 'lucide-react';
 import { inscribe } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -149,6 +150,8 @@ import feedPoster from '../brand/bg/feed-waves.jpg';
 import { fmtSats, fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
 import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
+import { NewsList, NewsThread } from './NewsThread';
+import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -811,12 +814,15 @@ let attachSeq = 0;
 const Composer = ({
   replyTo,
   quote = null,
+  link = null,
   onClose,
   onPosted,
 }: {
   replyTo: FeedPost | null;
   /** Post being quoted: the new post names it (MAP quote) and links it. */
   quote?: FeedPost | null;
+  /** bNews story being discussed: the post links it, so it shows in the story's thread. */
+  link?: { url: string; title: string } | null;
   onClose: () => void;
   onPosted: (txid: string) => void;
 }) => {
@@ -833,7 +839,11 @@ const Composer = ({
   const inscribed = items.filter((i) => i.file);
   // Fee preview: the post itself, with placeholder outpoints for media still to be inscribed.
   const input = {
-    text: quote ? quoteText(text, sourceUrl(quote) ?? `https://whatsonchain.com/tx/${quote.txid}`) : text,
+    text: quote
+      ? quoteText(text, sourceUrl(quote) ?? `https://whatsonchain.com/tx/${quote.txid}`)
+      : link
+        ? quoteText(text, link.url)
+        : text,
     quote: quote?.txid ?? null,
     media: items.flatMap((i) => [...(i.part ? [i.part] : []), ...(i.poster ? [i.poster] : [])]),
     refs: inscribed.map((i) => ({ outpoint: `${'0'.repeat(64)}_0`, mime: i.mime })),
@@ -946,10 +956,17 @@ const Composer = ({
           ? `Reply to ${safeName(replyTo.author.name)}`
           : quote
             ? `Quote ${safeName(quote.author.name)}`
-            : 'New post'
+            : link
+              ? 'Discuss'
+              : 'New post'
       }
       onClose={onClose}
     >
+      {link && !replyTo && !quote && (
+        <p className="text-xs mb-2 line-clamp-2" style={{ color: MUTED }}>
+          {link.title}
+        </p>
+      )}
       {(replyTo ?? quote) && (
         <p className="text-xs mb-2 line-clamp-2" style={{ color: MUTED }}>
           {(replyTo ?? quote)!.text}
@@ -959,7 +976,7 @@ const Composer = ({
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={replyTo ? 'Post your reply' : quote ? 'Add a comment' : "What's happening on-chain?"}
+        placeholder={replyTo ? 'Post your reply' : quote || link ? 'Add a comment' : "What's happening on-chain?"}
         rows={5}
         className="w-full rounded-2xl p-3 text-[15px] text-white outline-none resize-none"
         style={{ background: PANEL, border: `1px solid ${LINE}` }}
@@ -1035,7 +1052,7 @@ const Composer = ({
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy || (replyTo ? 'Reply' : quote ? 'Quote' : 'Post')}
+        {busy || (replyTo ? 'Reply' : quote ? 'Quote' : link ? 'Post to thread' : 'Post')}
       </button>
     </Sheet>
   );
@@ -1468,7 +1485,14 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [error, setError] = useState('');
   const [source, setSource] = useState<Source | 'all'>(loadSource);
   const [safetyTick, setSafetyTick] = useState(0);
-  const [composing, setComposing] = useState<{ replyTo: FeedPost | null; quote?: FeedPost } | null>(null);
+  const [composing, setComposing] = useState<{
+    replyTo: FeedPost | null;
+    quote?: FeedPost;
+    link?: { url: string; title: string };
+  } | null>(null);
+  const [news, setNews] = useState<boolean>(loadNewsMode);
+  const [story, setStory] = useState<NewsItem | null>(null);
+  const [postedTick, setPostedTick] = useState(0);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
   // The inline identity step: publish() waits on this when the wallet has no posting identity.
   const [settingUp, setSettingUp] = useState<((ok: boolean) => void) | null>(null);
@@ -1575,6 +1599,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     if (height) for (const [txid, ls] of Object.entries(by)) out[txid] = summarizeLocks(ls, height);
     return out;
   }, [fetchedLocks, myLocks, height]);
+  const knownPosts = useMemo(() => [...(raw.foryou ?? []), ...(raw.following ?? [])], [raw]);
   const sorted = useMemo(
     () =>
       shown && tab === 'foryou' && sort === 'locked'
@@ -1792,10 +1817,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 onClick={() => {
                   setSource(s.id);
                   saveSource(s.id);
+                  setNews(false);
+                  saveNewsMode(false);
                 }}
                 className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
                 style={
-                  source === s.id
+                  !news && source === s.id
                     ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
                     : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
                 }
@@ -1803,6 +1830,20 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 {s.label}
               </button>
             ))}
+            <button
+              onClick={() => {
+                setNews(true);
+                saveNewsMode(true);
+              }}
+              className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold flex items-center gap-1"
+              style={
+                news
+                  ? { background: GOLD, color: textOn(GOLD) }
+                  : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
+              }
+            >
+              <Newspaper size={12} /> bNews
+            </button>
           </div>
         </div>
 
@@ -1823,20 +1864,24 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </div>
         )}
 
-        <PostList
-          posts={sorted}
-          a={actions}
-          empty={
-            <div className="px-8 pt-14 text-center">
-              <p className="text-sm text-white font-semibold">
-                {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
-              </p>
-              <p className="text-xs mt-1" style={{ color: MUTED }}>
-                {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
-              </p>
-            </div>
-          }
-        />
+        {news ? (
+          <NewsList posts={knownPosts} onOpen={setStory} />
+        ) : (
+          <PostList
+            posts={sorted}
+            a={actions}
+            empty={
+              <div className="px-8 pt-14 text-center">
+                <p className="text-sm text-white font-semibold">
+                  {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
+                </p>
+                <p className="text-xs mt-1" style={{ color: MUTED }}>
+                  {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
+                </p>
+              </div>
+            }
+          />
+        )}
       </div>
 
       <button
@@ -1852,9 +1897,11 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         <Composer
           replyTo={composing.replyTo}
           quote={composing.quote ?? null}
+          link={composing.link ?? null}
           onClose={() => setComposing(null)}
           onPosted={(txid) => {
             setComposing(null);
+            setPostedTick((t) => t + 1);
             addSnackbar(`Posted · ${txid.slice(0, 8)}…`, 'success');
             // First post: now there is something to be notified about (replies, likes).
             void askNotifyPermissionOnce();
@@ -1944,6 +1991,26 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
             </button>
           )}
         </Sheet>
+      )}
+      {story && (
+        <NewsThread
+          story={story}
+          known={knownPosts}
+          postedTick={postedTick}
+          onBack={() => setStory(null)}
+          onDiscuss={() => setComposing({ replyTo: null, link: { url: story.link, title: story.title } })}
+          renderPosts={(posts) => (
+            <PostList
+              posts={posts === null ? null : visiblePosts(posts, hidden)}
+              a={actions}
+              empty={
+                <p className="text-center text-xs pt-6 px-8" style={{ color: MUTED }}>
+                  No one has discussed this yet. Start the thread.
+                </p>
+              }
+            />
+          )}
+        />
       )}
       {showBookmarks && (
         <Layer title="Bookmarks" onBack={() => setShowBookmarks(false)}>
