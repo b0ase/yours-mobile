@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "pod_abc123",
+      "title": "Building bWalletX live",
+      "host": "@b0asex",
+      "hostIdKey": "02a1b2c3",
+      "audioUrl": "https://cdn.example.com/full.mp3",
+      "previewUrl": "https://cdn.example.com/preview.mp3",
+      "cover": "https://cdn.example.com/cover.jpg",
+      "duration": 3725,
+      "createdAt": "2026-10-15T10:00:00Z",
+      "space": "lounge",
+      "nft": {
+        "origin": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+        "outpoint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0",
+        "price": 50000,
+        "contentType": "application/json"
+      }
+    },
+    {
+      "id": "pod_nopreview",
+      "title": "Fresh recording",
+      "host": "vexvoid",
+      "hostIdKey": "",
+      "previewUrl": null,
+      "cover": null,
+      "duration": 0,
+      "createdAt": "2026-10-15T11:00:00Z",
+      "space": null,
+      "nft": null
+    },
+    { "id": "bad id with spaces", "title": "x" },
+    { "id": "pod_insecure", "title": "Insecure", "previewUrl": "http://evil.example/a.mp3" }
+  ],
+  "cursor": "next-1"
+}
