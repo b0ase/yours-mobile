@@ -64,6 +64,7 @@ import {
 } from './services/permissionBundle';
 import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
+import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -1206,8 +1207,17 @@ if (isInServiceWorker) {
     // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
     if (message?.action === 'bwxSessionSpend' || message?.action === 'bwxLiveSpend') return false;
 
-    // Check if message is from our own extension popup
-    const isFromExtension = sender.origin?.startsWith(`chrome-extension://${chrome.runtime.id}`);
+    // Check if message is from our own extension pages. Admin status follows from THIS, never from an
+    // originator string a page supplies (security review H1).
+    const isFromExtension = isExtensionSender(sender, chrome.runtime.id);
+
+    // A web page whose host is the bare extension id (http://<extid>/) would pass the host cross-check below
+    // and become the wallet itself. Refuse the admin originator from anything but our own pages.
+    const reserved = reservedOriginatorRefusal(isFromExtension, message?.originator, ADMIN_ORIGINATOR);
+    if (reserved) {
+      sendResponse({ type: message?.action, success: false, error: reserved });
+      return true;
+    }
 
     // Cross-validate originator against sender.origin for external messages
     if (!isFromExtension && message.originator && sender.origin) {
@@ -3415,6 +3425,7 @@ if (isInServiceWorker) {
         }),
       );
 
+      // Safe only because the onMessage router refuses ADMIN_ORIGINATOR from any non-extension sender (H1).
       const isAdmin = message.originator === ADMIN_ORIGINATOR;
       const usesSendAllSentinel = message.params.outputs?.some((o) => o.satoshis === 2099999999999999) === true;
       const signer = isAdmin && usesSendAllSentinel && accountContext?.baseWallet ? accountContext.baseWallet : w;

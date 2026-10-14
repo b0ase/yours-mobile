@@ -64,7 +64,9 @@ import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/token
 
 // Admin originator for the extension (bypasses all permission checks). The bare
 // extension ID, as ChromeCWI sends it: toolbox permission checks reject a URL
-// scheme, and no web page host can take this form.
+// scheme. ⚠ A web page CAN have this host (http://<extid>/ on a network that resolves
+// single-label names), so the background router grants admin only to the extension's own
+// pages and refuses this originator from any other sender (services/adminOriginator.ts).
 export const ADMIN_ORIGINATOR = chrome.runtime.id;
 
 /**
