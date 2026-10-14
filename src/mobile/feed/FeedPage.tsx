@@ -195,11 +195,13 @@ import {
   movePin,
   type FeedId,
 } from './feeds';
-import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+import { BMOVIES_FEED_ENABLED, STORE_BUILD } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
 const NewsVideos = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/NewsVideos')) : null;
+// MOCK (mock/balance-cards only): example bJobs cards; never in store builds.
+const BJobsMock = !STORE_BUILD ? lazy(() => import('./bjobs/BJobsMock')) : null;
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -2062,6 +2064,10 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 <BmoviesReel key={feed} brand={feed} />
               </Suspense>
             </>
+          ) : feed === 'bjobs' && BJobsMock ? (
+            <Suspense fallback={null}>
+              <BJobsMock />
+            </Suspense>
           ) : !hasCustomView(feed) ? (
             <BrandFeed slug={feed} />
           ) : news ? (
