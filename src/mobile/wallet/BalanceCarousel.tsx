@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { RotateCw } from 'lucide-react';
 import { useCountUp } from './live/useCountUp';
 import './balanceCards.css';
 
@@ -33,7 +34,85 @@ export type MockBalance = {
   /** "View contract" sheet. */
   contractTitle?: string;
   contractTerms?: string[];
+  /** Full one-page agreement (replaces the short terms sheet). */
+  agreement?: Agreement;
 };
+
+type Agreement = {
+  title: string;
+  issuer: string;
+  parties: [string, string];
+  clauses: [string, string][];
+  primary: string;
+};
+
+const SIG_A = 'M6 34 C18 8 26 44 38 22 S56 10 62 30 C68 44 80 14 92 26 S118 38 128 18 L152 22';
+const SIG_B = 'M8 28 C14 12 22 12 24 30 C26 44 40 6 50 24 S70 40 84 20 C94 8 102 36 116 28 S140 14 154 30';
+const FlipBtn = ({ onFlip }: { onFlip: () => void }) => (
+  <button
+    type="button"
+    className="bw-flipbtn"
+    aria-label="Flip card"
+    onClick={(e) => {
+      e.stopPropagation();
+      onFlip();
+    }}
+  >
+    <span>
+      <RotateCw size={18} strokeWidth={2.4} />
+    </span>
+  </button>
+);
+
+const Sig = ({ d, label }: { d: string; label: string }) => (
+  <span className="bw-ag-sig">
+    <svg viewBox="0 0 160 50" aria-label={`${label} signature`}>
+      <path d={d} />
+    </svg>
+    <small>{label}</small>
+  </span>
+);
+
+const AgreementSheet = ({ a, onClose }: { a: Agreement; onClose: () => void }) => (
+  <div className="bw-ag" onClick={(e) => e.stopPropagation()}>
+    <div className="bw-ag-mock">MOCK · not a real agreement</div>
+    <h2>{a.title}</h2>
+    <div className="bw-ag-parties">
+      <span>
+        <b>Between</b> {a.parties[0]}
+      </span>
+      <span>
+        <b>and</b> {a.parties[1]}
+      </span>
+    </div>
+    <ol>
+      {a.clauses.map(([h, t]) => (
+        <li key={h}>
+          <b>{h}.</b> {t}
+        </li>
+      ))}
+    </ol>
+    <div className="bw-ag-sigs">
+      <Sig d={SIG_A} label={a.issuer} />
+      <Sig d={SIG_B} label="You" />
+    </div>
+    <div className="bw-ag-meta">
+      <span>Dated 14 October 2026</span>
+      <span>On chain: txid 7f3c…e21a (agreement hash, placeholder)</span>
+    </div>
+    <div className="bw-ag-btns">
+      <button type="button" className="is-primary" onClick={() => window.alert(`MOCK: ${a.primary} would run here.`)}>
+        {a.primary}
+      </button>
+      <button type="button" onClick={() => window.alert('MOCK: the signed PDF would download here.')}>
+        Download PDF
+      </button>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  </div>
+);
 
 export type MockContract = { what: string; rate: string; startedAt: number; spent: number };
 
@@ -81,6 +160,27 @@ const MOCK: MockBalance[] = [
       'Balance 1,240 credits (~12 VM-hours). Accepts BSV.',
     ],
     contact: 'Root',
+    agreement: {
+      title: 'Mandala Credits: service agreement',
+      issuer: 'GorillaPool',
+      parties: ['GorillaPool (issuer, mandala.computer)', 'You (identity key 03ab…f9, paymail $you)'],
+      primary: 'Sign & top up',
+      clauses: [
+        ['What you’re buying', 'Hosted agent computer time on mandala.computer.'],
+        ['Price', '1 Mandala credit = 1p, paid in BSV. 100 credits ≈ 1 VM-hour.'],
+        ['How you’re charged', 'Per minute while your machine runs, shown live on your card.'],
+        [
+          'Stopping',
+          'Tap Stop on the card: billing and the service stop at once, and unused credits stay yours to use later.',
+        ],
+        [
+          'Support',
+          'Contact GorillaPool from the card. If the service isn’t delivered, credits for that time are returned.',
+        ],
+        ['Refunds and expiry', 'Credits don’t expire. They are non-refundable except where the law requires.'],
+        ['Your keys', 'GorillaPool never holds your keys. Only the credits you top up sit with the issuer.'],
+      ],
+    },
     contractTitle: 'You and GorillaPool (Root)',
     contractTerms: [
       'Issuer: GorillaPool (Root), operator of Mandala.',
@@ -108,6 +208,26 @@ const MOCK: MockBalance[] = [
       'Unlocks after block 997,000 (~6 months), or early by returning the 5,000 PNEEs. You can always recover your locked BSV with your own key, without our server.',
     ],
     contact: 'bWalletX',
+    agreement: {
+      title: 'PNEEs: stable pennies lock agreement',
+      issuer: 'The Bitcoin Corporation',
+      parties: ['The Bitcoin Corporation Ltd (PNEE issuer)', 'You (identity key 03ab…f9, paymail $you)'],
+      primary: 'Lock & mint',
+      clauses: [
+        ['What you lock', 'BSV into a time-lock under your own key. Example: 1,000,000 sats.'],
+        [
+          'What you get',
+          'PNEEs minted against it, with the locked BSV worth at least 10× the PNEEs minted. Example: 5,000 PNEEs; 1 PNEE = 1¢.',
+        ],
+        ['Unlock', 'After block ~997,000, or early by returning the PNEEs minted against the lock.'],
+        [
+          'Your keys',
+          'The lock key comes from your own 12 words. You can always recover your locked BSV yourself, without our server.',
+        ],
+        ['Risks', 'BSV’s price moves. Only lock what you can afford to lose.'],
+        ['Support', 'Contact bWalletX from the card.'],
+      ],
+    },
     contractTitle: 'Your PNEE lock (stable pennies)',
     contractTerms: [
       'Collateral: 1,000,000 sats locked on-chain in a script only your key can spend.',
@@ -174,6 +294,7 @@ const MockCard = ({
   if (flipped && c.locked)
     return (
       <div className={`bw-bc bw-bc-back${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
+        <FlipBtn onFlip={flip} />
         <div className="bw-bc-top">
           <span className="bw-bc-logo">🔒</span>
           <span className="bw-bc-head">
@@ -204,6 +325,7 @@ const MockCard = ({
   if (flipped)
     return (
       <div className={`bw-bc bw-bc-back${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
+        <FlipBtn onFlip={flip} />
         <div className="bw-bc-top">
           <span className="bw-bc-logo">{c.initial}</span>
           <span className="bw-bc-head">
@@ -272,7 +394,8 @@ const MockCard = ({
             Contact {c.contact}
           </button>
         </div>
-        {sheetOpen && (
+        {sheetOpen && c.agreement && <AgreementSheet a={c.agreement} onClose={() => setSheetOpen(false)} />}
+        {sheetOpen && !c.agreement && (
           <div
             className="bw-bcar-sheet-bg"
             onClick={(e) => {
@@ -303,6 +426,7 @@ const MockCard = ({
     );
   return (
     <div className={`bw-bc${turning ? ' is-turning' : ''}`} onClick={flip} style={style}>
+      <FlipBtn onFlip={flip} />
       <div className="bw-bc-top">
         <span className="bw-bc-logo">{c.initial}</span>
         <span className="bw-bc-head">
@@ -459,7 +583,10 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         {visible.map((s) => (
           <div className="bw-bcar-slide" key={s.id}>
             {s.id === 'bsv' ? (
-              bsvCard
+              <div className="bw-bcar-bsv">
+                {bsvCard}
+                <FlipBtn onFlip={() => track.current?.querySelector<HTMLElement>('.bw-bcar-bsv .bw-wcard')?.click()} />
+              </div>
             ) : (
               <div className="bw-bcar-mockwrap">
                 <MockCard
