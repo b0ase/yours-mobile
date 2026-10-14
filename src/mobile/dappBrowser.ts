@@ -3,6 +3,7 @@ import { isCWIEventName } from '@1sat/wallet-browser';
 import { YoursNative, isNative } from './native';
 import { MOBILE_EXTENSION_ID } from './protocol';
 import { isReservedHost } from '../services/adminOriginator';
+import { originatorForOrigin } from '../services/originKey';
 
 /**
  * In-app dApp browser. Each site is a hub endpoint whose sender origin is the
@@ -67,7 +68,9 @@ let contextFactory: ContextFactory | undefined;
 export const handleSiteCall = async (origin: string, url: string, type: string, params: unknown) => {
   if (!contextFactory) throw new Error('Wallet not ready');
   const o = new URL(origin);
-  if (o.protocol !== 'https:' && o.protocol !== 'http:') throw new Error('Unsupported origin');
+  // https only (plus loopback http for development): plain http must not share an https site's grants (M3).
+  const key = originatorForOrigin(o.origin);
+  if (!key.originator) throw new Error(key.error);
   // A site at http://yours-mobile/ would carry the wallet's own admin originator (security review H1).
   if (isReservedHost(o.host, MOBILE_EXTENSION_ID)) throw new Error('Reserved originator');
   if (!isCWIEventName(type)) throw new Error(`Unsupported request: ${type}`);
@@ -78,7 +81,7 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
     contexts.set(o.origin, chrome);
   }
   // originator is derived from the verified origin, as content.ts derives it from window.location.host.
-  return chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: o.host });
+  return chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: key.originator });
 };
 
 export const initDappBrowser = (createContext: ContextFactory) => {

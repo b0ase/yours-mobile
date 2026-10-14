@@ -1,5 +1,6 @@
 /* global chrome */
 import { isSessionExpired } from './utils/lockTimeout';
+import { originatorForOrigin } from './services/originKey';
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
@@ -1223,14 +1224,15 @@ if (isInServiceWorker) {
 
     // Cross-validate originator against sender.origin for external messages
     if (!isFromExtension && message.originator && sender.origin) {
-      try {
-        const senderHost = new URL(sender.origin).host;
-        if (message.originator !== senderHost) {
-          sendResponse({ type: message.action, success: false, error: 'Origin mismatch' });
-          return true;
-        }
-      } catch {
-        sendResponse({ type: message.action, success: false, error: 'Invalid origin' });
+      // The originator must be the one derived from the sender's origin; plain-http (non-loopback) senders are
+      // refused so they never share an https site's grants or allowances (security review M3).
+      const expected = originatorForOrigin(sender.origin);
+      if (!expected.originator) {
+        sendResponse({ type: message.action, success: false, error: expected.error });
+        return true;
+      }
+      if (message.originator !== expected.originator) {
+        sendResponse({ type: message.action, success: false, error: 'Origin mismatch' });
         return true;
       }
     }

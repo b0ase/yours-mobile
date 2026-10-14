@@ -2,6 +2,7 @@
 
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { CustomListenerName, RequestEventDetail, RequestParams, ResponseEventDetail } from './inject';
+import { originatorForOrigin } from './services/originKey';
 
 console.log('🌱 Yours Wallet Loaded');
 
@@ -21,8 +22,13 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
     params = { ...params, ...originalParams };
   }
 
-  // Use originator at message level (BRC-100 standard)
-  const originator = window.location.host;
+  // Use originator at message level (BRC-100 standard). Keyed by origin: plain-http pages (other than loopback)
+  // are refused so they never share an https site's grants or allowances (security review M3).
+  const { originator, error } = originatorForOrigin(window.location.origin);
+  if (!originator) {
+    self.dispatchEvent(new CustomEvent(messageId, { detail: { success: false, error } }));
+    return;
+  }
 
   chrome.runtime.sendMessage({ action: type, params, originator }, buildResponseCallback(messageId));
 });
