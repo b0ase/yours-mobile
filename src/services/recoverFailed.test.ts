@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { knownOnChain, recoverMinedFailedActions, type FailedAction } from './recoverFailed';
+import { knownOnChain, recoverMinedFailedActions, recoverySummary, type FailedAction } from './recoverFailed';
 import { healStrandedStreamActions } from './streamHeal';
 import { prepareFunding, resetRecoverThrottle } from './fundingPrep';
 
@@ -24,6 +24,10 @@ function fakeStore(failed: FailedAction[], mined: string[]) {
         list = list.filter((a) => !mined.includes(a.txid));
         return 'ok';
       },
+      spendableOf: async (txid: string) =>
+        mined.includes(txid)
+          ? { status: 'unproven', outputs: 2, spendable: 2, spendableSats: 25_432_286 }
+          : { status: 'failed', outputs: 2, spendable: 0, spendableSats: 0 },
       log: () => undefined,
     },
   };
@@ -67,6 +71,62 @@ describe('restore failed actions that are mined', () => {
       log: () => undefined,
     });
     expect(r.error).toBe('db');
+  });
+});
+
+describe('restored means spendable, read back (dkg, 14 Oct 2026)', () => {
+  test('status repaired but outputs still unspendable: reported NOT restored, with the true state', async () => {
+    const s = fakeStore([{ txid: T1 }], [T1]);
+    s.deps.spendableOf = async () => ({ status: 'unproven', outputs: 8, spendable: 0, spendableSats: 0 });
+    const r = await recoverMinedFailedActions(s.deps);
+    expect(r.restored).toEqual([]);
+    expect(r.notRestored?.[0].reason).toMatch(/0 of 8 outputs spendable/);
+    expect(recoverySummary(r)).toMatch(/on chain but not restored/);
+  });
+
+  test('without a read-back nothing is claimed restored', async () => {
+    const s = fakeStore([{ txid: T1 }], [T1]);
+    const { spendableOf: _drop, ...deps } = s.deps;
+    void _drop;
+    const r = await recoverMinedFailedActions(deps);
+    expect(r.restored).toEqual([]);
+    expect(r.notRestored?.[0].reason).toMatch(/not verified/);
+  });
+
+  test('stuck unprocessed / sending / unsigned are candidates; only mined ones are queued', async () => {
+    const s = fakeStore(
+      [
+        {
+          txid: T1,
+          status: 'unprocessed',
+          description: 'Sweep 9 legacy BSV UTXOs',
+          createdAt: Date.UTC(2026, 9, 14, 5, 56),
+        },
+        { txid: T2, status: 'sending' },
+      ],
+      [T1],
+    );
+    s.deps.spendableOf = async (t: string) =>
+      t === T1
+        ? { status: 'unproven', outputs: 1, spendable: 1, spendableSats: 58_614_198_569 }
+        : { status: 'sending', outputs: 1, spendable: 0, spendableSats: 0 };
+    const r = await recoverMinedFailedActions(s.deps);
+    expect(s.calls.queued).toEqual([T1]);
+    expect(r.restored).toEqual([T1]);
+    expect(r.restoredDetail?.[0]).toMatchObject({ fromStatus: 'unprocessed', sats: 58_614_198_569 });
+    expect(recoverySummary(r)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
+  });
+
+  test('nothing stuck: "Nothing to restore"', async () => {
+    const r = await recoverMinedFailedActions(fakeStore([], []).deps);
+    expect(recoverySummary(r)).toBe('Nothing to restore');
+  });
+
+  test('a mempool-only (unmined) action is left alone', async () => {
+    const s = fakeStore([{ txid: T1, status: 'sending' }], []);
+    const r = await recoverMinedFailedActions(s.deps);
+    expect(s.calls.unfail).toBe(0);
+    expect(r.restored).toEqual([]);
   });
 });
 

@@ -24,6 +24,7 @@ const ROUTES = {
   social: ['GET', 'social'],
   inbox: ['POST', 'inbox'],
   ack: ['POST', 'ack'],
+  history: ['POST', 'history'],
   delete: ['POST', 'delete'],
   unlink: ['POST', 'unlink'],
   'apps-get': ['POST', 'appsGet'],

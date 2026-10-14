@@ -18,11 +18,15 @@ export type Progress = { phase: string; done: number; total: number };
 export const wocFetch = async (url: string, init?: RequestInit, apiKey?: string): Promise<unknown> => {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (apiKey) headers['woc-api-key'] = apiKey;
+  let offline = false;
   for (let attempt = 0; attempt < 6; attempt++) {
     let r: Response;
     try {
       r = await fetch(url, { ...init, headers });
+      offline = false;
     } catch {
+      // A network error, or WhatsOnChain's rate-limit page (sent without CORS headers, so the browser hides it).
+      offline = true;
       await sleep(1000 * 2 ** attempt);
       continue;
     }
@@ -35,7 +39,11 @@ export const wocFetch = async (url: string, init?: RequestInit, apiKey?: string)
     if (!r.ok) throw new Error(`WhatsOnChain ${r.status}`);
     return r.json();
   }
-  throw new Error('WhatsOnChain is busy. Try again in a minute.');
+  throw new Error(
+    offline
+      ? "Couldn't reach WhatsOnChain (network error or rate limit). Check your connection and try again."
+      : 'WhatsOnChain is busy. Try again in a minute.',
+  );
 };
 
 type HistPage = { result?: { tx_hash: string; height?: number }[]; nextPageToken?: string };

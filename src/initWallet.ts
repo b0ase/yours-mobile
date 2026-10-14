@@ -1,9 +1,4 @@
-import {
-  knownOnChain,
-  recoverMinedFailedActions,
-  type FailedAction,
-  type RecoverReport,
-} from './services/recoverFailed';
+import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import { releaseStuckSends, type QueuedSend, type ReleaseReport } from './services/stuckSends';
@@ -59,6 +54,9 @@ import {
   setArriving,
 } from './services/receiveGuard';
 import { internalizeBackoff } from './services/internalizeBackoff';
+import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
+import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
+import { makeRecoverDeps, runRecoverOnce } from './services/recoverFailedWiring';
 import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -146,6 +144,8 @@ export interface AccountContext {
   creditArriving: () => Promise<void>;
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
+  /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
+  restorePaymails: () => Promise<PaymailRestoreReport>;
   /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
   releaseStuckSends: () => Promise<ReleaseReport>;
   /** Run the Monitor's SendWaiting task now (a big send was queued: services/bigDelayed.ts). */
@@ -320,6 +320,8 @@ export const initWallet = async (
 
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
+  // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
+  if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
 
   // 3. Build the IndexedDB-backed permission store used by
   //    LocalWalletPermissionsManager for basket/cert/spending grants.
@@ -842,28 +844,39 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     recoverFailed: () =>
-      recoverMinedFailedActions({
-        listFailed: async () =>
-          (await baseWallet.listFailedActions({ labels: [], includeOutputs: true, limit: 200 }, false))
-            .actions as unknown as FailedAction[],
-        queueUnfail: (txids) =>
-          storage.runAsStorageProvider(async (sp) => {
-            let n = 0;
-            for (const txid of txids)
-              for (const req of await sp.findProvenTxReqs({ partial: { txid } })) {
-                await sp.updateProvenTxReq(req.provenTxReqId, { status: 'unfail' });
-                n++;
-              }
-            return n;
+      runRecoverOnce(() =>
+        recoverMinedFailedActions(
+          makeRecoverDeps({
+            storage,
+            wallet: baseWallet,
+            services: toolboxServices,
+            monitor: walletMonitor,
           }),
-        isMined: async (txid) => !!(await toolboxServices.getMerklePath(txid))?.merklePath,
-        runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
-        available: () => storage.isActiveStorageProvider(),
-      }).then((r) => {
+        ),
+      ).then((r) => {
         // A restored action may now be internalizable (its status was 'failed'): let the receive guard retry it.
         for (const txid of r.restored) internalizeBackoff.clear(txid);
         return r;
       }),
+    restorePaymails: async () => {
+      const held = new Set<string>();
+      for (let offset = 0; ; offset += 1000) {
+        const page = await baseWallet.listOutputs({ basket: 'default', limit: 1000, offset });
+        for (const o of page.outputs) held.add(o.outpoint);
+        if (page.outputs.length < 1000) break;
+      }
+      const txo = (toolboxServices as unknown as { txo?: { get?: (o: string) => Promise<never> } }).txo;
+      return restorePaymailHistory((u, i) => fetch(u, i), baseWallet, {
+        hasOutput: async (txid, vout) => held.has(`${txid}.${vout}`),
+        isUnspent: async (txid, vout) => {
+          const get = txo?.get;
+          if (!get) return undefined;
+          const r = await utxoStatusFromTxo((o) => get.call(txo, o), `${txid}.${vout}`);
+          return r.status === 'success' ? r.isUtxo : undefined;
+        },
+        fetchBeef: async (txid) => (await toolboxServices.getBeefForTxid(txid)).toBinary(),
+      });
+    },
     knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
     sendWaitingNow: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
     referenceBytes: (reference) =>

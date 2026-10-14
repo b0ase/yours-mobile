@@ -14,8 +14,8 @@ describe('lock timeout', () => {
     expect(lockTimeoutMs({ lockTimeout: 0, lockTimeoutChosen: true })).toBe(NEVER_LOCK);
     expect(lockTimeoutMinutes({ lockTimeout: 0 })).toBe(0);
   });
-  test('the old default 10 becomes never; a chosen 10 is kept', () => {
-    expect(lockTimeoutMs({ lockTimeout: 10 })).toBe(NEVER_LOCK);
+  test("a stored 10 from before the Never default is the user's explicit choice and is kept (M2)", () => {
+    expect(lockTimeoutMs({ lockTimeout: 10 })).toBe(10 * MIN);
     expect(lockTimeoutMs({ lockTimeout: 10, lockTimeoutChosen: true })).toBe(10 * MIN);
   });
   test('other user-chosen minutes are kept and capped at 24 h', () => {

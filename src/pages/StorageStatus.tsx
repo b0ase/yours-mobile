@@ -762,7 +762,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
           onClick={syncing ? undefined : handleSync}
           disabled={syncing}
           className="flex items-center justify-center gap-2 w-full mt-3 py-2 rounded-lg text-xs font-medium border-0 outline-none cursor-pointer disabled:opacity-50"
-          style={{ color: gray, background: 'rgba(255,255,255,0.04)' }}
+          style={{ color: '#111', background: 'linear-gradient(180deg,#FFD84D,#E8A100)', fontWeight: 700 }}
         >
           <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Syncing...' : 'Sync Now'}

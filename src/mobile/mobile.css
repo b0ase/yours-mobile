@@ -1774,9 +1774,9 @@ button.bw-mail-card:active {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
   min-width: 0;
-  padding: 0 14px 0 8px;
+  padding: 0 14px 0 28px;
   color: #d6d3c8;
 }
 .bw-wcard-stripe-text {
@@ -2263,9 +2263,9 @@ button.bw-mail-card:active {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
   min-width: 0;
-  padding: 0 14px 0 8px;
+  padding: 0 14px 0 28px;
   color: #d6d3c8;
 }
 .bw-wcard-stripe-text {

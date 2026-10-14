@@ -134,6 +134,11 @@ function supabaseStore(env = process.env, f = fetch) {
       (await req(
         `bwallet_paymail_payments?identity_key=eq.${q(k)}&status=eq.received&order=received_at.asc&limit=50`,
       )) ?? [],
+    // Restore from seed: received and collected payments (newest 500), for re-internalizing on a new device.
+    listHistory: async (k) =>
+      (await req(
+        `bwallet_paymail_payments?identity_key=eq.${q(k)}&status=in.(received,collected)&order=received_at.asc&limit=500`,
+      )) ?? [],
     // Apps › Add app: the wallet's own app list (one row per identity key).
     getApps: async (k) => (await one(`bwallet_user_apps?identity_key=eq.${q(k)}&select=apps&limit=1`))?.apps ?? [],
     setApps: async (k, apps) =>

@@ -79,6 +79,7 @@ import { MAX_LOCK_TIMEOUT_MINUTES, lockTimeoutMinutes } from '../utils/lockTimeo
 const LOCK_TIMEOUT_CHOICES = [1, 5, 10, 15, 30, 60, 240, 1440];
 import { getDisplayCurrency, setDisplayCurrency, type DisplayCurrency } from '../utils/displayCurrency';
 import { usePrefs } from '../mobile/settings/usePrefs';
+import { sendMessageAsync } from '../utils/chromeHelpers';
 import {
   runUsbBackup,
   summariseUsbBackup,
@@ -1174,6 +1175,50 @@ export const Settings = () => {
     }
   };
 
+  const [recovering, setRecovering] = useState(false);
+  const [recoverResult, setRecoverResult] = useState('');
+  const handleRecoverMined = async () => {
+    if (recovering) return;
+    setRecovering(true);
+    setRecoverResult('');
+    try {
+      const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
+        action: 'STORAGE_RECOVER_MINED',
+      });
+      const text = r?.data?.summary ?? r?.error ?? 'Nothing to restore';
+      setRecoverResult(text);
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Check failed';
+      setRecoverResult(text);
+      addSnackbar(text, 'error');
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState('');
+  const handleRestoreBackup = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    setRestoreResult('');
+    try {
+      const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
+        action: 'STORAGE_RESTORE_BACKUP',
+      });
+      const text = r?.data?.summary ?? r?.error ?? 'Nothing to restore';
+      setRestoreResult(text);
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Restore failed';
+      setRestoreResult(text);
+      addSnackbar(text, 'error');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const handleCopyRepairLog = () => {
     if (!repairRecord) return;
     navigator.clipboard.writeText(JSON.stringify(repairRecord, null, 2));
@@ -1198,6 +1243,28 @@ export const Settings = () => {
             description="Check local and remote storage against each other and fix differences"
             onClick={repairOutcome === 'running' ? undefined : () => void handleRepairSync()}
             isFirst
+            isLast={false}
+          />
+          <Divider />
+          <SettingRow
+            icon={<Wrench size={16} />}
+            label={recovering ? 'Checking…' : 'Find mined payments'}
+            description={
+              recoverResult ||
+              'Money sent or swept that is on chain but not showing (an interrupted send or sweep): check and restore it'
+            }
+            onClick={recovering ? undefined : () => void handleRecoverMined()}
+            isLast={false}
+          />
+          <Divider />
+          <SettingRow
+            icon={<Wrench size={16} />}
+            label={restoring ? 'Loading your wallet from backup…' : 'Restore from backup'}
+            description={
+              restoreResult ||
+              'New device missing your balance or history? Copy everything from your backup and bring back paymail payments'
+            }
+            onClick={restoring ? undefined : () => void handleRestoreBackup()}
             isLast={false}
           />
           <Divider />

@@ -62,6 +62,8 @@ export const toRouter = (pathname: string, search: string): string | null => {
     const all = [extra, q].filter(Boolean).join('&');
     return all ? `${p}?${all}` : p;
   };
+  // Old in-app addresses (/m/market, /m/exchange…) already carry the router prefix: drop it, then map as public.
+  if (path === '/m' || path.startsWith('/m/')) return toRouter(path.slice(2) || '/', search) ?? '/m';
   const space = /^\/spaces\/([^/]+)$/.exec(path);
   if (space) return SLUG.test(space[1]) ? withQ('/m/spaces', `space=${encodeURIComponent(space[1])}`) : '/m/spaces';
   const album = /^\/bmusic\/artist\/([^/]+)\/album\/([^/]+)$/.exec(path);

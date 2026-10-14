@@ -8,7 +8,9 @@ export type SyncStatusMessage = {
     | { status: 'start'; addressCount: number }
     | { status: 'progress'; pending: number; done: number; failed: number; message?: string }
     | { status: 'complete' }
-    | { status: 'error'; message: string };
+    | { status: 'error'; message: string }
+    | { status: 'restoring'; message: string }
+    | { status: 'restored'; ok: boolean };
 };
 
 /** Safety net — if we see `start` but no `complete` arrives in this window,
@@ -23,6 +25,8 @@ export const useSyncTracker = () => {
   // a sync happening. Otherwise the UI can get stuck when the popup mounts
   // after the service worker already finished (or dropped) its `complete` event.
   const [isSyncing, setIsSyncing] = useState(false);
+  /** "Loading your wallet from backup…" while a new device copies the remote store (restore, 14 Oct 2026). */
+  const [restoreMessage, setRestoreMessage] = useState('');
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const completeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stuckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -82,6 +86,15 @@ export const useSyncTracker = () => {
           completeTimeoutRef.current = setTimeout(finishSync, 3000);
           break;
 
+        case 'restoring':
+          setRestoreMessage(data.message);
+          break;
+
+        case 'restored':
+          setRestoreMessage('');
+          setUpdateBalance((prev) => !prev);
+          break;
+
         case 'error':
           console.error('Sync error:', data.message);
           // Don't leave the spinner on forever if sync errors out
@@ -103,5 +116,6 @@ export const useSyncTracker = () => {
     updateBalance,
     theme,
     isSyncing,
+    restoreMessage,
   };
 };

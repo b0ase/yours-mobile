@@ -80,3 +80,26 @@ describe('wiring', () => {
     expect(dapp).toContain('isReservedHost(o.host, MOBILE_EXTENSION_ID)');
   });
 });
+
+describe('web/phone builds (hub-stamped sender)', () => {
+  test("accepts the app's own pages whose url is the real page address", () => {
+    for (const url of [
+      'https://web.bwalletx.com/wallet',
+      'https://desktop.bwalletx.com/ask-b',
+      'http://localhost:4781/wallet',
+      'capacitor://localhost/index.html',
+    ]) {
+      expect(
+        isExtensionSender({ id: 'yours-mobile', origin: 'chrome-extension://yours-mobile', url }, 'yours-mobile'),
+      ).toBe(true);
+    }
+  });
+  test('still refuses a web page origin claiming the mobile id', () => {
+    expect(
+      isExtensionSender(
+        { id: 'yours-mobile', origin: 'https://evil.example', url: 'https://evil.example/' },
+        'yours-mobile',
+      ),
+    ).toBe(false);
+  });
+});
