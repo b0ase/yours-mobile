@@ -3,6 +3,13 @@
  * top, unstamped mail in Requests; tokens and NFTs sent without asking (airdrops) in Quarantine, with a pointer to
  * them from Inbox and Requests and counted on the Quarantine tab, so the badge and the boxes agree. Postage is utility: a stamp to reach someone.
  */
+import {
+  Archive as TabArchive,
+  Inbox as TabInbox,
+  MailQuestion as TabRequests,
+  Send as TabSent,
+  ShieldAlert as TabQuarantine,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -1287,11 +1294,18 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   {inView?.ex ? ' · includes examples' : ''}
                 </span>
               </div>
-              <div className="flex flex-col items-end text-[11px]" style={{ color: MUTED }}>
+              {/* Tap to change it (owner, 14 Oct 2026: the price to reach you should be configurable from the banner). */}
+              <button
+                type="button"
+                onClick={() => setSettings(true)}
+                aria-label={`Price to reach you: ${money(m.priceSats, m.rate)}. Change it`}
+                className="flex flex-col items-end text-[11px] rounded-xl px-2 py-1 -mr-2 bg-transparent border-0 cursor-pointer"
+                style={{ color: MUTED }}
+              >
                 <span>Price to reach you</span>
                 <span className="text-sm font-semibold text-white">{money(m.priceSats, m.rate)}</span>
-                <span>Penny post</span>
-              </div>
+                <span style={{ color: GOLD }}>Change ›</span>
+              </button>
             </div>
             {tab === 'bin' ? (
               <div className="flex items-center gap-2">
@@ -1306,29 +1320,44 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 <span className="text-base font-bold text-white">Bin</span>
               </div>
             ) : (
-              <div className="flex gap-2 overflow-x-auto pb-0.5">
+              <div className="grid grid-cols-5 gap-1.5" role="tablist" aria-label="Mailboxes">
+                {/* Five fixed boxes with icons; nothing scrolls sideways (owner, 14 Oct 2026: a left-right filter
+                    row "smacks of trying to squeeze everything in"). The count sits on the icon. */}
                 {(
                   [
-                    ['inbox', `Inbox${m.unread ? ` (${m.unread})` : ''}`],
-                    ['requests', `Requests${m.boxes.requests.length ? ` (${m.boxes.requests.length})` : ''}`],
-                    ['sent', 'Sent'],
-                    ['archive', 'Archive'],
-                    ['quarantine', `Quarantine${quarantineCount ? ` (${quarantineCount})` : ''}`],
+                    ['inbox', 'Inbox', TabInbox, m.unread],
+                    ['requests', 'Requests', TabRequests, m.boxes.requests.length],
+                    ['sent', 'Sent', TabSent, 0],
+                    ['archive', 'Archive', TabArchive, 0],
+                    ['quarantine', 'Quarantine', TabQuarantine, quarantineCount],
                   ] as const
-                ).map(([id, label]) => (
+                ).map(([id, label, Icon, n]) => (
                   <button
                     key={id}
                     type="button"
-                    aria-pressed={tab === id}
+                    role="tab"
+                    aria-selected={tab === id}
+                    aria-label={n ? `${label}, ${n}` : label}
                     onClick={() => setTab(id)}
-                    className="min-h-[44px] flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold"
+                    className="relative min-h-[52px] flex flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-semibold"
                     style={
                       tab === id
                         ? { background: GOLD, color: '#1a1300' }
                         : { border: '1px solid #2b2f36', color: '#fff' }
                     }
                   >
-                    {label}
+                    <Icon size={18} aria-hidden="true" />
+                    <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
+                    {n > 0 && (
+                      <span
+                        className="absolute top-1 right-1 min-w-[16px] rounded-full px-1 text-[9px] font-bold leading-4 text-center"
+                        style={
+                          tab === id ? { background: '#1a1300', color: GOLD } : { background: GOLD, color: '#1a1300' }
+                        }
+                      >
+                        {n > 99 ? '99+' : n}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1356,7 +1385,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     </button>
                   ))}
                 </div>
-                <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                <div className="flex flex-wrap gap-1.5">
                   {FILTERS.map((x) => (
                     <button
                       key={x.id}

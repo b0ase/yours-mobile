@@ -3,8 +3,9 @@
  * Only categories and platforms that have tokens are shown.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, SlidersHorizontal, Users } from 'lucide-react';
 import { ONESAT, cached, roomMeta, type HotRoom } from '../market/indexer';
 import { TokenIcon } from './TokenIcon';
 import { platformRoute, tradeRoute } from './exchangeData';
@@ -36,37 +37,107 @@ const Chip = ({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   </button>
 );
 
-/** Category chips, platform multi-select and the active tag, each with counts. */
+/**
+ * The one filter button (owner, 14 Oct 2026: "4×4 filters… but only one large yellow button that stretches the whole
+ * width"): a full-width gold button naming the current filter, opening a 4×4 grid: All, People, and the 14
+ * categories (Games and Apps among them), each with its count. Platforms and the active tag stay below as before.
+ */
 export const FilterBar = ({
   labels,
   filter,
   registry,
   onChange,
+  people,
+  onPeople,
 }: {
   labels: readonly TokenLabels[];
   filter: Filter;
   registry: Registry;
   onChange: (f: Filter) => void;
+  /** The People (friends' tokens) view, when the page offers it. */
+  people?: boolean;
+  onPeople?: (on: boolean) => void;
 }) => {
   const { cats, plats } = useMemo(() => facetCounts(labels, filter), [labels, filter]);
   const total = [...cats.values()].reduce((a, b) => a + b, 0);
   const platforms = registry.platforms.filter((p) => (plats.get(p.slug) ?? 0) > 0 || filter.platforms.includes(p.slug));
+  const [grid, setGrid] = useState(false);
+  const current = people ? 'People' : filter.cat ? categoryLabel(filter.cat) : 'All markets';
+  const currentCount = people ? null : filter.cat ? (cats.get(filter.cat) ?? 0) : total;
+  const cell = (on: boolean, label: string, count: number | null, onClick: () => void, icon?: React.ReactNode) => (
+    <button
+      key={label}
+      type="button"
+      aria-pressed={on}
+      onClick={() => {
+        onClick();
+        setGrid(false);
+      }}
+      className="min-h-[64px] rounded-xl px-1.5 py-2 text-[12px] font-bold flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+      style={{
+        background: on ? GOLD : '#17191E',
+        color: on ? '#1a1300' : '#fff',
+        border: `1px solid ${on ? GOLD : '#2b2f36'}`,
+      }}
+    >
+      {icon}
+      <span className="leading-tight text-center">{label}</span>
+      {count !== null && (
+        <span className="text-[10px] font-semibold" style={{ color: on ? '#1a1300' : MUTED }}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Categories">
-        <Chip on={!filter.cat} onClick={() => onChange({ ...filter, cat: null })}>
-          All {total}
-        </Chip>
-        {CATEGORIES.filter((c) => (cats.get(c.slug) ?? 0) > 0 || filter.cat === c.slug).map((c) => (
-          <Chip
-            key={c.slug}
-            on={filter.cat === c.slug}
-            onClick={() => onChange({ ...filter, cat: filter.cat === c.slug ? null : c.slug })}
+      <button
+        type="button"
+        onClick={() => setGrid(true)}
+        aria-haspopup="dialog"
+        aria-expanded={grid}
+        className="w-full min-h-[48px] rounded-xl px-4 flex items-center justify-between gap-3 text-sm font-bold cursor-pointer border-0"
+        style={{ background: GOLD, color: '#1a1300' }}
+      >
+        <span className="inline-flex items-center gap-2">
+          <SlidersHorizontal size={16} aria-hidden="true" /> {current}
+          {currentCount !== null && <span className="font-semibold opacity-70">{currentCount}</span>}
+        </span>
+        <span className="text-xs font-semibold opacity-80">Change</span>
+      </button>
+      {grid &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-label="Show which markets?"
+            className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setGrid(false)}
           >
-            {c.label} {cats.get(c.slug) ?? 0}
-          </Chip>
-        ))}
-      </div>
+            <div
+              className="w-full max-w-md rounded-t-3xl sm:rounded-3xl p-3 flex flex-col gap-2"
+              style={{ background: '#0f1013', border: '1px solid #2b2f36' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="m-0 px-1 pt-1 text-sm font-bold text-white">Show which markets?</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {cell(!people && !filter.cat, 'All', total, () => {
+                  onPeople?.(false);
+                  onChange({ ...filter, cat: null });
+                })}
+                {onPeople &&
+                  cell(!!people, 'People', null, () => onPeople(true), <Users size={14} aria-hidden="true" />)}
+                {CATEGORIES.map((c) =>
+                  cell(!people && filter.cat === c.slug, c.label, cats.get(c.slug) ?? 0, () => {
+                    onPeople?.(false);
+                    onChange({ ...filter, cat: c.slug });
+                  }),
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
       {platforms.length > 1 && (
         <div className="flex gap-1.5 items-center overflow-x-auto pb-1" role="group" aria-label="Platforms">
           <span className="text-[11px] shrink-0" style={{ color: MUTED }}>

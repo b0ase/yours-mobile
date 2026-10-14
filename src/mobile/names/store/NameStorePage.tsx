@@ -23,7 +23,7 @@ import { EXPECTED_HASHES } from '../opnsPow';
 import { formatEta, mineName, MiningCancelled, NameTakenError, type Progress } from '../opnsRegister';
 import { opnsTreeFor } from '../opnsTree';
 import { sweepDeadMints } from '../opnsTxStatus';
-import { buyOpnsListing, giftOpnsName, opnsIdFor } from '../opnsBuy';
+import { buyOpnsListing, giftOpnsName, listOpnsName, opnsIdFor, unlistOpnsName } from '../opnsBuy';
 import { giftDestination, giftRecipientLabel } from '../opnsGift';
 import { fetchOpnsListings, ownedForSale, type OpnsListing } from '../opnsSell';
 import {
@@ -83,6 +83,9 @@ type GiftTo = { label: string; address: string };
 type Pending = { listing: OpnsListing; giftTo?: GiftTo };
 type PendingGet = { name: string; sats: number; giftTo?: GiftTo };
 type Getting = { name: string; progress: Progress | null; stage: 'mining' | 'paying' | 'sending' };
+/** A name this wallet holds: its ordinal id and, when on sale, the asking price. */
+type Owned = { id: string; listedSats: number | null };
+type PendingSell = { name: string; id: string; usd: number; sats: number };
 
 export const NameStorePage = () => {
   const { apiContext, isLocked, chromeStorageService } = useServiceContext();
@@ -98,6 +101,9 @@ export const NameStorePage = () => {
   const [checking, setChecking] = useState(false);
   const [listings, setListings] = useState<OpnsListing[] | null>(null);
   const [mine, setMine] = useState<Set<string>>(new Set());
+  const [owned, setOwned] = useState<Map<string, Owned>>(new Map());
+  const [sellUsd, setSellUsd] = useState('');
+  const [pendingSell, setPendingSell] = useState<PendingSell | null>(null);
   const [giving, setGiving] = useState(false);
   const [giftTo, setGiftTo] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
@@ -125,7 +131,11 @@ export const NameStorePage = () => {
     if (guest || !apiContext) return;
     listOpns
       .execute(apiContext, { includeTags: true, limit: 1000 })
-      .then((r) => setMine(new Set(ownedForSale(r.outputs).map((o) => o.name))))
+      .then((r) => {
+        const o = ownedForSale(r.outputs);
+        setMine(new Set(o.map((x) => x.name)));
+        setOwned(new Map(o.map((x) => [x.name, { id: x.id, listedSats: x.listedSats }])));
+      })
       .catch(() => undefined);
   }, [apiContext, guest]);
 
@@ -304,6 +314,77 @@ export const NameStorePage = () => {
     }
   };
 
+  /** Selling a name you hold (owner, 14 Oct 2026: users must be able to buy AND sell names; the bulk tool is hidden). */
+  const startSell = async (n: string) => {
+    if (needWallet(n)) return;
+    const o = owned.get(n);
+    if (!o) return;
+    setMsg('');
+    const usd = Number(sellUsd || nameTierUsd(n) || 15);
+    if (!(usd >= 0.01 && usd <= 100_000)) return setMsg('Choose a price between $0.01 and $100,000.');
+    const sats = usdToSats(usd, rate || (await fetchExchangeRate('main').catch(() => 0))) ?? 0;
+    if (!sats) return setMsg("Couldn't get the BSV price. Try again in a minute.");
+    setPendingSell({ name: n, id: o.id, usd, sats });
+  };
+  const approveSell = async () => {
+    if (!pendingSell || !apiContext) return;
+    const { name: n, id, usd, sats } = pendingSell;
+    setPendingSell(null);
+    setBusy(n);
+    try {
+      await listOpnsName(apiContext, id, sats);
+      setOwned((m) => new Map(m).set(n, { id, listedSats: sats }));
+      setMsg(`${n} is on sale for ${fmtUsd(usd)}. Buyers pay you directly; take it off sale any time.`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : `Couldn't list ${n}`);
+    } finally {
+      setBusy('');
+    }
+  };
+  const unlist = async (n: string) => {
+    const o = owned.get(n);
+    if (!o || !apiContext) return;
+    setBusy(n);
+    setMsg('');
+    try {
+      await unlistOpnsName(apiContext, o.id);
+      setOwned((m) => new Map(m).set(n, { id: o.id, listedSats: null }));
+      setMsg(`${n} is off sale and back in your wallet.`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : `Couldn't take ${n} off sale`);
+    } finally {
+      setBusy('');
+    }
+  };
+  const giveOwned = async (n: string) => {
+    const o = owned.get(n);
+    if (!o || !apiContext) return;
+    setMsg('');
+    try {
+      const to = await giftRecipient();
+      if (!to) return setMsg('Enter their $handle or paymail');
+      setBusy(n);
+      await giftOpnsName(apiContext, o.id, to.address);
+      setOwned((m) => {
+        const next = new Map(m);
+        next.delete(n);
+        return next;
+      });
+      setMine((m) => {
+        const next = new Set(m);
+        next.delete(n);
+        return next;
+      });
+      setMsg(`Sent. ${n} now belongs to ${to.label}.`);
+      setResult(null);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Enter their $handle or paymail');
+    } finally {
+      setBusy('');
+    }
+  };
+  const yourNames = useMemo(() => [...owned.keys()].sort((a, b) => a.localeCompare(b)), [owned]);
+
   return (
     <div
       className="relative w-full h-full overflow-y-auto"
@@ -409,6 +490,12 @@ export const NameStorePage = () => {
             onBuy={(l) => void startBuy(l)}
             onGet={(n) => void startGet(n)}
             getting={getting}
+            owned={owned}
+            sellUsd={sellUsd}
+            setSellUsd={setSellUsd}
+            onSell={(n) => void startSell(n)}
+            onUnlist={(n) => void unlist(n)}
+            onGive={(n) => void giveOwned(n)}
             onPick={pick}
           />
           <Preview name={previewName} />
@@ -417,6 +504,30 @@ export const NameStorePage = () => {
           <p role="status" className="mt-4 text-sm text-center m-0" style={{ color: MUTED }}>
             {msg}
           </p>
+        )}
+
+        {/* Your names: tap one to sell it, take it off sale or give it (owner, 14 Oct 2026). */}
+        {yourNames.length > 0 && (
+          <div className="mt-12">
+            <Rail title="Your names" sub="tap to sell or give" loading={false}>
+              {yourNames.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => pick(n)}
+                  className="group shrink-0 snap-start w-[150px] text-left rounded-2xl p-4 border-0 cursor-pointer transition-[background,transform] duration-150 ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2"
+                  style={{ background: SURFACE, boxShadow: `inset 0 0 0 1px ${HAIR}`, color: TEXT, outlineColor: GOLD }}
+                >
+                  <span className="block text-base font-semibold break-all">{n}</span>
+                  <span className="block mt-1 text-xs tabular-nums" style={{ color: MUTED }}>
+                    {owned.get(n)?.listedSats
+                      ? `On sale · ${rate ? fmtUsd(((owned.get(n)?.listedSats ?? 0) / 1e8) * rate) : fmtSats(owned.get(n)?.listedSats ?? 0)}`
+                      : 'Yours'}
+                  </span>
+                </button>
+              ))}
+            </Rail>
+          </div>
         )}
 
         {/* Browse */}
@@ -465,6 +576,16 @@ export const NameStorePage = () => {
           giftTo={pending.giftTo?.label}
           onAllow={() => void approve()}
           onClose={() => setPending(null)}
+        />
+      )}
+      {pendingSell && (
+        <BuySheet
+          verb="Sell"
+          name={pendingSell.name}
+          amount={fmtUsd(pendingSell.usd)}
+          sats={pendingSell.sats}
+          onAllow={() => void approveSell()}
+          onClose={() => setPendingSell(null)}
         />
       )}
       {pendingGet && (
@@ -518,6 +639,12 @@ const ResultCard = (p: {
   onBuy: (l: OpnsListing) => void;
   onGet: (n: string) => void;
   getting: Getting | null;
+  owned: Map<string, Owned>;
+  sellUsd: string;
+  setSellUsd: (v: string) => void;
+  onSell: (n: string) => void;
+  onUnlist: (n: string) => void;
+  onGive: (n: string) => void;
   onPick: (n: string) => void;
 }) => {
   const r = p.result;
@@ -581,18 +708,81 @@ const ResultCard = (p: {
           </p>
         </>,
       );
-    case 'mine':
+    case 'mine': {
+      const o = p.owned.get(r.name);
+      const listedUsd = o?.listedSats && p.rate ? (o.listedSats / 1e8) * p.rate : null;
+      const tier = nameTierUsd(r.name);
       return shell(
         <>
           {title}
           <p className="m-0 text-base inline-flex items-center gap-2" style={{ color: GOLD }}>
             <Check size={18} aria-hidden="true" /> Already yours.
           </p>
-          <Link to="/m/settings" className={btn} style={{ ...ghostBtn, alignSelf: 'flex-start' }}>
-            Your names are in Settings
-          </Link>
+          {!o ? (
+            <Link to="/m/settings" className={btn} style={{ ...ghostBtn, alignSelf: 'flex-start' }}>
+              Your names are in Settings
+            </Link>
+          ) : o.listedSats ? (
+            <>
+              <p className="m-0 text-sm" style={{ color: MUTED }}>
+                On sale for {listedUsd !== null ? fmtUsd(listedUsd) : fmtSats(o.listedSats)}. Buyers pay you directly.
+              </p>
+              <button
+                type="button"
+                disabled={!!p.busy}
+                onClick={() => p.onUnlist(r.name)}
+                className={btn}
+                style={{ ...ghostBtn, alignSelf: 'flex-start' }}
+              >
+                {busy ? 'Working…' : 'Take it off sale'}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-2 text-sm" style={{ color: MUTED }}>
+                  Sell for $
+                  <input
+                    value={p.sellUsd}
+                    onChange={(e) => p.setSellUsd(e.target.value.replace(/[^\d.]/g, ''))}
+                    placeholder={String(tier ?? 15)}
+                    inputMode="decimal"
+                    aria-label="Asking price in US dollars"
+                    className="h-11 w-24 rounded-xl px-3 text-sm outline-none focus-visible:shadow-[0_0_0_1px_#F5B800]"
+                    style={{ background: '#0b0c0f', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={!!p.busy}
+                  onClick={() => p.onSell(r.name)}
+                  className={btn}
+                  style={goldBtn}
+                >
+                  {busy ? 'Working…' : 'Put it on sale'}
+                </button>
+              </div>
+              <p className="m-0 text-xs" style={{ color: FAINT }}>
+                Listed on the Exchange until it sells or you take it off. The buyer pays you directly; the network fee
+                is a fraction of a cent.
+              </p>
+              {giftBox}
+              {p.giving && (
+                <button
+                  type="button"
+                  disabled={!!p.busy}
+                  onClick={() => p.onGive(r.name)}
+                  className={btn}
+                  style={{ ...ghostBtn, alignSelf: 'flex-start' }}
+                >
+                  {busy ? 'Sending…' : `Give ${r.name}`}
+                </button>
+              )}
+            </>
+          )}
         </>,
       );
+    }
     case 'premium':
       // A store build has no selling or buying (MARKET_ENABLED): premium and listed names just read "Taken".
       if (!MARKET_ENABLED)
@@ -851,7 +1041,7 @@ const WhatIsThis = () => (
 
 const BuySheet = (p: {
   /** "Buy" a listed name, or "Get" a free one (mined here, tier price to the storefront). */
-  verb?: 'Buy' | 'Get';
+  verb?: 'Buy' | 'Get' | 'Sell';
   name: string;
   amount: string;
   sats: number;
@@ -873,7 +1063,13 @@ const BuySheet = (p: {
         site="bWalletX"
         siteSub="Names"
         onClose={p.onClose}
-        hero={<PayHero amount={p.amount} sub={fmtSats(p.sats)} badge={p.giftTo ? 'GIFT' : 'PAY'} />}
+        hero={
+          <PayHero
+            amount={p.amount}
+            sub={fmtSats(p.sats)}
+            badge={p.giftTo ? 'GIFT' : p.verb === 'Sell' ? 'SELL' : 'PAY'}
+          />
+        }
         title={
           p.giftTo ? (
             <>
@@ -889,11 +1085,22 @@ const BuySheet = (p: {
         secondary={{ label: 'Not now', onClick: p.onClose }}
       >
         <div className="flex flex-wrap gap-2">
-          <Chip>Yours forever</Chip>
-          {p.verb === 'Get' && <Chip>Takes about a minute</Chip>}
-          <Chip>Plus a small network fee</Chip>
-          {p.giftTo ? <Chip>Sent to {p.giftTo} straight after</Chip> : <Chip>Kept in your wallet</Chip>}
-          <Chip>No refunds</Chip>
+          {p.verb === 'Sell' ? (
+            <>
+              <Chip>Asking price, paid to you</Chip>
+              <Chip>On the Exchange until it sells</Chip>
+              <Chip>Take it off sale any time</Chip>
+              <Chip>Plus a small network fee</Chip>
+            </>
+          ) : (
+            <>
+              <Chip>Yours forever</Chip>
+              {p.verb === 'Get' && <Chip>Takes about a minute</Chip>}
+              <Chip>Plus a small network fee</Chip>
+              {p.giftTo ? <Chip>Sent to {p.giftTo} straight after</Chip> : <Chip>Kept in your wallet</Chip>}
+              <Chip>No refunds</Chip>
+            </>
+          )}
         </div>
       </ApprovalCard>
     </div>,

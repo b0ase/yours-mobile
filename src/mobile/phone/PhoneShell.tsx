@@ -16,6 +16,7 @@ import { useDock } from './dockStore';
 import { APPS_PAGED, usePhoneLayout } from './flag';
 import { PHONE_ADD_TO_DOCK, PHONE_APPS_TOP, PHONE_GO, PHONE_TOAST } from './events';
 import { placeFirstFree, renameScreen, screenTitle } from './appScreens';
+import { nextPullHint, PULL_HINT_DELAY_MS, PULL_HINT_KEY, PULL_HINT_TEXT } from './pullHint';
 import { getAppScreens, setAppScreens, useAppScreens } from './appScreensStore';
 import {
   lockAxis,
@@ -330,6 +331,11 @@ const Shell = () => {
         const go = pullReached(s.pull);
         showPull(0);
         if (go) {
+          try {
+            localStorage.setItem(PULL_HINT_KEY, 'done'); // they found it: no more hints (pullHint.ts)
+          } catch {
+            /* no storage */
+          }
           navigate('/m/ask-b');
           // Focus the composer once it is there (iOS may only show the keyboard on a tap).
           window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus(), 350);
@@ -391,9 +397,36 @@ const Shell = () => {
   }, [dock, setDock]);
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 1800);
+    const t = window.setTimeout(() => setToast(null), toast === PULL_HINT_TEXT ? 3200 : 1800);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  // First few opens: say that pulling down asks b, and let the cue peek out once (pullHint.ts).
+  useEffect(() => {
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(PULL_HINT_KEY);
+    } catch {
+      return;
+    }
+    const h = nextPullHint(stored);
+    if (!h.show) return;
+    try {
+      localStorage.setItem(PULL_HINT_KEY, h.next);
+    } catch {
+      return;
+    }
+    const t1 = window.setTimeout(() => {
+      setToast(PULL_HINT_TEXT);
+      showPull(PULL_THRESHOLD);
+    }, PULL_HINT_DELAY_MS);
+    const t2 = window.setTimeout(() => showPull(0), PULL_HINT_DELAY_MS + 1100);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const walletAction = (a: WalletAction) => {
     setSendReceive(false);

@@ -22,6 +22,7 @@ import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
 import { PeopleMarket } from './PeopleMarket';
 import { OpnsMarket } from './OpnsMarket';
+import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
 import { useRegistry } from './registry/useRegistry';
 import { categoryLabel, filterSearch, matches, parseFilter, type Filter } from './registry/catalog';
@@ -245,14 +246,20 @@ const Markets = ({
         </button>
       </div>
 
+      {registry && labels.length > 0 && (
+        <FilterBar
+          labels={labels}
+          filter={filter}
+          registry={registry}
+          onChange={setFilter}
+          people={people}
+          onPeople={setPeople}
+        />
+      )}
       {people ? (
         <PeopleMarket rate={rate} q={q} />
       ) : (
         <>
-          {registry && labels.length > 0 && (
-            <FilterBar labels={labels} filter={filter} registry={registry} onChange={setFilter} />
-          )}
-
           {loading ? (
             <Loading text="Loading markets…" />
           ) : !list.length ? (
@@ -447,7 +454,8 @@ const ExchangePage = () => {
     { id: 'markets', label: 'Markets', to: EXCHANGE_ROUTE },
     ...(SwapFlow ? [{ id: 'swap', label: 'Swap', to: `${EXCHANGE_ROUTE}/swap` }] : []),
     { id: 'platforms', label: 'Platforms', to: platformRoute() },
-    { id: 'names', label: 'OpNS names', to: `${EXCHANGE_ROUTE}/names` },
+    { id: 'names', label: 'Names', to: `${EXCHANGE_ROUTE}/names` },
+    { id: 'launchpad', label: 'Launchpad', to: `${EXCHANGE_ROUTE}/launchpad` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
   ];
@@ -516,6 +524,8 @@ const ExchangePage = () => {
         )}
         {view.tab === 'orders' && <Orders />}
         {view.tab === 'names' && <OpnsMarket rate={rate} />}
+        {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
+        {view.tab === 'launchpad' && <LaunchpadPanel />}
       </div>
       {view.tab === 'more' && (
         <div className="w-full flex-1 min-h-[70vh]">

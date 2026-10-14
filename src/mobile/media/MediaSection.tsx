@@ -212,10 +212,35 @@ export const MediaSection = () => {
           </div>
         )}
         <KeptAirdrops pending={keptPending} />
-        {!loading && shown.length === 0 && !keptPending.length && (
-          <p className="text-sm text-[#98A2B3] text-center py-10">
-            {items.length === 0 ? 'No inscriptions in this wallet yet.' : 'Nothing in this filter.'}
-          </p>
+        {!loading && shown.length === 0 && !keptPending.length && items.length > 0 && (
+          <p className="text-sm text-[#98A2B3] text-center py-10">Nothing in this filter.</p>
+        )}
+        {/* Empty by default for most people (owner, 14 Oct 2026): point at the store, not at a blank grid. */}
+        {!loading && items.length === 0 && !keptPending.length && (
+          <div className="rounded-2xl p-5 flex flex-col gap-3 text-center" style={{ background: '#101114' }}>
+            <p className="text-sm text-white font-semibold m-0">Nothing here yet.</p>
+            <p className="text-xs text-[#98A2B3] m-0">
+              Music, video and pictures you buy or mint live here and play from here.
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => navigate('/m/media/browse')}
+                className="rounded-xl px-4 py-2 text-sm font-bold"
+                style={{ background: '#FFD24D', color: '#1a1300' }}
+              >
+                Browse the store
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/m/bmint')}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-white"
+                style={{ border: '1px solid #2b2f36' }}
+              >
+                Mint your own
+              </button>
+            </div>
+          </div>
         )}
         <div className="grid grid-cols-3 gap-2">{shown.map(tile)}</div>
         {hasMore && (

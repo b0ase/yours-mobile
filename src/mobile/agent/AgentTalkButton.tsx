@@ -1,4 +1,4 @@
-import bGlyph from '../brand/bwallet-glyph.svg';
+import { Mic } from 'lucide-react';
 import { HoldRing, TalkSheetView } from './TalkVisuals';
 import { useHoldToTalk } from './useHoldToTalk';
 import { voiceNote } from './voiceText';
@@ -6,7 +6,8 @@ import { voiceNote } from './voiceText';
 const GOLD = '#FFD24D';
 
 /**
- * Push-to-talk in Ask b's chat bar (owner, 12 Oct 2026): the Dock's round gold b, scaled to the bar.
+ * Push-to-talk in Ask b's chat bar (owner, 12 Oct 2026): the Dock's round gold ring, scaled to the bar, with a mic
+ * in it (owner, 14 Oct 2026: a b glyph here read as a second, pointless b button on the Ask b screen).
  * Hold = listen (bars + live transcript); release = the words land in the composer to edit and send (never sent
  * for you); slide away or Escape = cancel. Without voice on this device: a note, and the b just focuses the composer.
  */
@@ -65,7 +66,7 @@ export const AgentTalkButton = ({
         }}
       >
         <HoldRing phase={phase} inset={4} />
-        <img src={bGlyph} alt="" width={23} height={23} draggable={false} className="pointer-events-none" />
+        <Mic size={18} color={GOLD} aria-hidden="true" className="pointer-events-none" />
       </button>
     </>
   );

@@ -131,6 +131,7 @@ export type ExchangeView =
   | { tab: 'swap' }
   | { tab: 'orders' }
   | { tab: 'names' }
+  | { tab: 'launchpad' }
   | { tab: 'more' }
   | { tab: 'platforms' }
   | { tab: 'platform'; slug: string }
@@ -150,6 +151,7 @@ export const exchangeView = (rest: string): ExchangeView => {
   if (seg === 'swap') return { tab: 'swap' };
   if (seg === 'orders') return { tab: 'orders' };
   if (seg === 'names') return { tab: 'names' };
+  if (seg === 'launchpad') return { tab: 'launchpad' };
   if (seg === 'collectibles') return { tab: 'more' };
   const id = decodeURIComponent(seg).replace('.', '_');
   if (TOKEN_ID.test(id)) return { tab: 'trade', id: id.toLowerCase() };
