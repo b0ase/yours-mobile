@@ -14,6 +14,7 @@
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
  *   /m/nfts[/<outpoint>]  ↔ /wallet/nfts[/<outpoint>]   (NFT library, nfts/NftLibraryPage.tsx)
+ *   /m/bapp/<slug>?to=<path> ↔ /bapp/<slug>?to=<path>   (a bApp in the wallet frame, bappFrame/bappLink.ts)
  *   /m/tickets, /m/credits ↔ /wallet/tickets, /wallet/credits   (old /tickets, /credits 308 there, vercel.json)
  * Other top-level app routes (/settings, …) keep their own path.
  */
