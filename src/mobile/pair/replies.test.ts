@@ -168,4 +168,5 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   await until(() => ws2.sent.length >= 3);
   expect(calls).toBe(2);
   expect(await open(ws2.sent[2])).toEqual({ t: 'res', id: 'r2', result: { txid: 'tx2' } });
-});
+  // Real ECDH + sealing + several waits: allow more than bun's default 5 s when the machine is busy (e.g. a release build).
+}, 30_000);

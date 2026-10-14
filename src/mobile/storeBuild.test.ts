@@ -153,6 +153,9 @@ describe('TOKENBLASTER_ENABLED: tokenblaster.lol data and the 1Sat Ordnance 3D c
     const b = src('./BrowserPage.tsx');
     expect(b).toContain("...(TOKENBLASTER_ENABLED ? ['TokenBlaster'] : [])");
     expect(b).toMatch(/HOME_ADDITIONS[^=]*= TOKENBLASTER_ENABLED\s*\?/);
+    expect(src('./feed/feeds.ts')).toContain(
+      "...(TOKENBLASTER_ENABLED ? ([['tokenblaster', 'TokenBlaster']] as Entry[]) : [])",
+    );
   });
   test('no static import of the Ordnance catalogue outside three3d/', () => {
     for (const f of ['./market/MarketPage.tsx', './media/MediaSection.tsx']) {
