@@ -8,18 +8,71 @@ import type { FailedAction, RecoverDeps, RecoverReport } from './recoverFailed';
 export type RecoverWiring = {
   storage: Pick<WalletStorageManager, 'getAuth' | 'runAsStorageProvider' | 'isActiveStorageProvider'>;
   wallet: Pick<Wallet, 'listFailedActions'>;
-  services: { getMerklePath: (txid: string) => Promise<{ merklePath?: unknown } | undefined> };
+  services: {
+    getMerklePath: (txid: string) => Promise<{ merklePath?: unknown } | undefined>;
+    /** The toolbox UTXO check (utxoStatus.ts once initWallet has fixed it). Without it, hidden change isn't looked for. */
+    getUtxoStatus?: (
+      hash: string,
+      format: undefined,
+      outpoint: string,
+    ) => Promise<{ status?: string; isUtxo?: boolean }>;
+  };
   monitor?: { runTask: (name: string) => Promise<string> } | null;
 };
 
 const STUCK: sdk.TransactionStatus[] = ['unprocessed', 'unsigned', 'sending'];
+/** Statuses listActions (History) shows and the balance counts, when the outputs are spendable. */
+const SETTLED: sdk.TransactionStatus[] = ['completed', 'unproven', 'nosend'];
+
+/**
+ * dkg, 14 Oct 2026 (sweep 9f66943b, second look): an action History shows ('completed' / 'unproven') whose own
+ * change output is NOT spendable, while the chain says that output is unspent. An UnFail run before the utxoStatus
+ * fix (5.2.20) did exactly this: it moved the sweep from 'failed' to 'unproven' but left its change unspendable
+ * because every UTXO answer was "unknown". From then on the sweep was neither failed nor stuck, so
+ * "Find mined payments" never looked at it again: "Nothing to restore", balance 0, History +586 BSV.
+ *
+ * Candidates: wallet change outputs (basket 'default', change) with spendable false and no spending action of
+ * ours, whose outpoint the chain conclusively calls unspent. A released output that was really spent, or an
+ * inconclusive answer, is never a candidate, so settled actions are not churned on every run.
+ */
+async function hiddenChange(
+  sp: Parameters<Parameters<RecoverWiring['storage']['runAsStorageProvider']>[0]>[0],
+  userId: number | undefined,
+  isUnspent: (outpoint: string) => Promise<boolean>,
+): Promise<FailedAction[]> {
+  if (userId === undefined) return [];
+  const [basket] = await sp.findOutputBaskets({ partial: { userId, name: 'default' } });
+  if (!basket) return [];
+  const outs = (
+    await sp.findOutputs({ partial: { userId, basketId: basket.basketId, spendable: false, change: true } })
+  ).filter((o) => o.spentBy == null && o.txid);
+  const byTx = new Map<number, typeof outs>();
+  for (const o of outs) byTx.set(o.transactionId, [...(byTx.get(o.transactionId) ?? []), o]);
+  const found: FailedAction[] = [];
+  for (const [transactionId, list] of byTx) {
+    const [t] = await sp.findTransactions({ partial: { userId, transactionId }, noRawTx: true });
+    if (!t?.txid || !SETTLED.includes(t.status)) continue;
+    let unspent = false;
+    for (const o of list) if (!unspent) unspent = await isUnspent(`${o.txid}.${o.vout}`).catch(() => false);
+    if (!unspent) continue;
+    found.push({
+      txid: t.txid,
+      status: t.status,
+      description: t.description,
+      satoshis: list.reduce((n, o) => n + o.satoshis, 0),
+      createdAt: ms(t.created_at),
+    });
+  }
+  return found;
+}
 const ms = (d: Date | string) => new Date(d).getTime();
 
 export function makeRecoverDeps(w: RecoverWiring): RecoverDeps {
   const { storage } = w;
   const userIdOf = async () => (await storage.getAuth(true)).userId;
   return {
-    // Failed actions, plus mined actions a killed app left 'unprocessed' / 'unsigned' / 'sending' (dkg sweep).
+    // Failed actions, plus mined actions a killed app left 'unprocessed' / 'unsigned' / 'sending' (dkg sweep), plus
+    // settled actions whose unspent change storage holds as unspendable (hiddenChange).
     listFailed: async () => {
       const userId = await userIdOf();
       const failed = (
@@ -41,6 +94,14 @@ export function makeRecoverDeps(w: RecoverWiring): RecoverDeps {
               satoshis: t.satoshis,
               createdAt: ms(t.created_at),
             });
+        const check = w.services.getUtxoStatus;
+        if (check)
+          out.push(
+            ...(await hiddenChange(sp, userId, async (outpoint) => {
+              const r = await check('', undefined, outpoint);
+              return r?.status === 'success' && r.isUtxo === true;
+            })),
+          );
         return out;
       });
     },
