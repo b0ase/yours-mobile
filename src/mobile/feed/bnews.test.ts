@@ -12,6 +12,8 @@ import {
   swipeCloses,
   unhideStory,
   visibleNews,
+  NEWS_API,
+  parseNewsResponse,
   type NewsItem,
 } from './bnews';
 
@@ -165,18 +167,66 @@ describe('discussionFor', () => {
 });
 
 describe('fetchNews', () => {
-  test('web reads only CORS sources; failures are skipped', async () => {
+  const routeBody = {
+    items: [
+      {
+        title: 'A <b>story</b>',
+        link: 'https://a.com/1',
+        source: 'wired',
+        sourceLabel: 'WIRED',
+        at: 5,
+        image: 'http://x/i.png',
+      },
+      { title: 'Bad', link: 'javascript:alert(1)', source: 'hn', at: 1 },
+      {
+        title: 'Ext',
+        link: 'https://b.com/2?utm_source=x',
+        source: 'nope',
+        sourceLabel: 'Some Feed',
+        at: 3,
+        image: 'https://i/b.png',
+      },
+    ],
+  };
+
+  test('web uses the route only; route items re-checked', async () => {
     const asked: string[] = [];
-    const out = await fetchNews(false, async (u) => {
-      asked.push(u);
-      return RSS;
-    });
-    expect(asked).toEqual(['https://www.wired.com/feed/rss']);
-    expect(out.length).toBe(2);
-    const all = await fetchNews(true, async (u) => {
-      if (u.includes('hnrss')) throw new Error('down');
-      return u.includes('coingeek') ? RSS : null;
-    });
-    expect(all.length).toBe(2);
+    const out = await fetchNews(
+      false,
+      async () => {
+        throw new Error('web must not fetch feeds');
+      },
+      async (u) => {
+        asked.push(u);
+        return routeBody;
+      },
+    );
+    expect(asked).toEqual([NEWS_API]);
+    expect(out.map((i) => [i.id, i.title, i.sourceLabel, i.image])).toEqual([
+      ['https://a.com/1', 'A story', 'WIRED', null],
+      ['https://b.com/2', 'Ext', 'Some Feed', 'https://i/b.png'],
+    ]);
+  });
+
+  test('phones read feeds directly; failures skipped; route only when nothing came back', async () => {
+    let routed = 0;
+    const json = async () => {
+      routed++;
+      return routeBody;
+    };
+    const direct = await fetchNews(
+      true,
+      async (u) => {
+        if (u.includes('hnrss')) throw new Error('down');
+        return u.includes('coingeek') ? RSS : null;
+      },
+      json,
+    );
+    expect(direct.length).toBe(2);
+    expect(routed).toBe(0);
+    const fallback = await fetchNews(true, async () => null, json);
+    expect(fallback.length).toBe(2);
+    expect(routed).toBe(1);
+    expect(parseNewsResponse('junk')).toEqual([]);
   });
 });

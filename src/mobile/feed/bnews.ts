@@ -6,28 +6,26 @@
  * thread; the discussion is ordinary on-chain bChat posts that link the story ("the chain is the
  * feed"), so no new server or storage is needed. Swiping a story away hides it on this device.
  *
- * Fetching: the phone apps read the feeds through the native HTTP layer (no CORS). Browsers can
- * only read feeds that send CORS headers (`cors: true`); the rest are skipped on the web.
+ * Fetching: the phone apps read the feeds through the native HTTP layer (no CORS) and fall back
+ * to bit-sign's GET /api/bitsign/news; web and desktop use that route (same sources, same rules).
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
-export type NewsSourceId = 'coingeek' | 'hn' | 'ars' | 'bbc-tech' | 'wired';
+export type NewsSourceId = 'coingeek' | 'hn' | 'ars' | 'bbc-tech' | 'wired' | 'other';
 
 export type NewsSource = {
   id: NewsSourceId;
   label: string;
   url: string;
-  /** Sends `Access-Control-Allow-Origin: *`, so a browser can read it directly. */
-  cors: boolean;
 };
 
 /** Reputable BSV/bitcoin and general-tech feeds (checked 14 Oct 2026). */
 export const NEWS_SOURCES: NewsSource[] = [
-  { id: 'coingeek', label: 'CoinGeek', url: 'https://coingeek.com/feed/', cors: false },
-  { id: 'hn', label: 'Hacker News', url: 'https://hnrss.org/frontpage', cors: false },
-  { id: 'ars', label: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index', cors: false },
-  { id: 'bbc-tech', label: 'BBC Tech', url: 'https://feeds.bbci.co.uk/news/technology/rss.xml', cors: false },
-  { id: 'wired', label: 'WIRED', url: 'https://www.wired.com/feed/rss', cors: true },
+  { id: 'coingeek', label: 'CoinGeek', url: 'https://coingeek.com/feed/' },
+  { id: 'hn', label: 'Hacker News', url: 'https://hnrss.org/frontpage' },
+  { id: 'ars', label: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index' },
+  { id: 'bbc-tech', label: 'BBC Tech', url: 'https://feeds.bbci.co.uk/news/technology/rss.xml' },
+  { id: 'wired', label: 'WIRED', url: 'https://www.wired.com/feed/rss' },
 ];
 
 export type NewsItem = {
@@ -304,32 +302,78 @@ export function discussionFor<P extends { txid: string; text: string; at: number
 
 // ── fetching ──────────────────────────────────────────────────────────────────
 
+/** bit-sign's GET /api/bitsign/news: the same sources fetched and parsed server-side, CDN-cached. */
+export const NEWS_API = 'https://www.bitcoinchat.online/api/bitsign/news';
+
 export type FetchText = (url: string) => Promise<string | null>;
+export type FetchJson = (url: string) => Promise<unknown>;
 
 const nativeText: FetchText = async (url) => {
   const r = await CapacitorHttp.request({ method: 'GET', url, headers: {}, responseType: 'text' });
   return r.status === 200 && typeof r.data === 'string' ? r.data : null;
 };
 
-const webText: FetchText = async (url) => {
+const webJson: FetchJson = async (url) => {
   const r = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(12_000) });
-  return r.ok ? r.text() : null;
+  return r.ok ? r.json() : null;
+};
+
+const nativeJson: FetchJson = async (url) => {
+  const r = await CapacitorHttp.request({ method: 'GET', url, headers: {}, responseType: 'json' });
+  return r.status === 200 ? r.data : null;
 };
 
 const PER_SOURCE = 20;
 
-/** All readable sources, merged and deduped. A failing source is skipped. */
+/** The route's `{ items }`, re-checked here: titles, web links and https images only. */
+export function parseNewsResponse(data: unknown): NewsItem[] {
+  const list = (data as { items?: unknown })?.items;
+  if (!Array.isArray(list)) return [];
+  const out: NewsItem[] = [];
+  for (const r of list as Record<string, unknown>[]) {
+    if (!r || typeof r.title !== 'string' || typeof r.link !== 'string') continue;
+    const link = webLink(r.link);
+    const title = textOf(r.title).slice(0, 300);
+    if (!link || !title) continue;
+    const src = NEWS_SOURCES.find((s) => s.id === r.source);
+    out.push({
+      id: normalizeUrl(link),
+      title,
+      link,
+      source: src?.id ?? 'other',
+      sourceLabel: src?.label ?? (typeof r.sourceLabel === 'string' ? textOf(r.sourceLabel).slice(0, 40) : 'News'),
+      at: typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : 0,
+      image: typeof r.image === 'string' ? httpsOnly(r.image) : null,
+    });
+  }
+  return dedupeNews([out]);
+}
+
+async function fromRoute(json: FetchJson): Promise<NewsItem[]> {
+  try {
+    return parseNewsResponse(await json(NEWS_API));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Web and desktop: bit-sign's news route (browsers can't read most feeds: no CORS). Phones: the
+ * feeds directly through native HTTP, falling back to the route when that gives nothing.
+ */
 export async function fetchNews(
   native = Capacitor.isNativePlatform(),
-  get: FetchText = native ? nativeText : webText,
+  get: FetchText = nativeText,
+  json: FetchJson = native ? nativeJson : webJson,
 ): Promise<NewsItem[]> {
-  const sources = NEWS_SOURCES.filter((s) => native || s.cors);
+  if (!native) return fromRoute(json);
   const lists = await Promise.all(
-    sources.map((s) =>
+    NEWS_SOURCES.map((s) =>
       get(s.url)
         .then((xml) => (xml ? parseFeed(xml, s).slice(0, PER_SOURCE) : []))
         .catch(() => []),
     ),
   );
-  return dedupeNews(lists);
+  const direct = dedupeNews(lists);
+  return direct.length ? direct : fromRoute(json);
 }
