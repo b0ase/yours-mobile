@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom';
 import { PenLine } from 'lucide-react';
 import { useCountUp } from './live/useCountUp';
+import { TokenIcon } from '../exchange/TokenIcon';
+import { tokenDirectory } from '../market/indexer';
 import './balanceCards.css';
 
 /**
@@ -35,6 +37,8 @@ export type MockBalance = {
   /** "View contract" sheet. */
   contractTitle?: string;
   contractTerms?: string[];
+  /** BSV-21 icon outpoint (tokens): drawn with the Exchange's TokenIcon. */
+  icon?: string | null;
   /** Balance is in dollars ($1 = $1 credit): shown as "$18.40", no unit switch. */
   dollars?: boolean;
   /** Full one-page agreement (replaces the short terms sheet). */
@@ -155,7 +159,8 @@ const Layer = ({ onClose, children, sheet = false }: { onClose: () => void; chil
       }}
       onTouchStart={(e) => {
         const sc = (e.target as HTMLElement).closest('.bw-layer-scroll');
-        startY.current = !sc || sc.scrollTop <= 0 ? e.touches[0].clientY : null;
+        const onTile = (e.target as HTMLElement).closest('.bw-eg-tile');
+        startY.current = !onTile && (!sc || sc.scrollTop <= 0) ? e.touches[0].clientY : null;
       }}
       onTouchEnd={(e) => {
         if (startY.current !== null && e.changedTouches[0].clientY - startY.current > 120) onClose();
@@ -442,7 +447,7 @@ const MockCard = ({
       <div className={`bw-bc bw-bc-back${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
         <FlipBtn onFlip={flip} />
         <div className="bw-bc-top">
-          <span className="bw-bc-logo">{c.initial}</span>
+          <Logo c={c} size={34} className="bw-bc-logo" />
           <span className="bw-bc-head">
             <b>{contract ? contract.what : c.name}</b>
             <small>{c.issuer}</small>
@@ -548,7 +553,7 @@ const MockCard = ({
     <div className={`bw-bc${turning ? ' is-turning' : ''}`} onClick={flip} style={style}>
       <FlipBtn onFlip={flip} />
       <div className="bw-bc-top">
-        <span className="bw-bc-logo">{c.initial}</span>
+        <Logo c={c} size={34} className="bw-bc-logo" />
         <span className="bw-bc-head">
           <b>{c.name}</b>
           <small>{c.issuer}</small>
@@ -762,7 +767,7 @@ const TopUpForm = ({
       >
         <div className="bw-ag-grab" />
         <div className="bw-bc-top">
-          <span className="bw-bc-logo">{c.initial}</span>
+          <Logo c={c} size={34} className="bw-bc-logo" />
           <span className="bw-bc-head">
             <b>Top up {c.name}</b>
             <small>{c.issuer}</small>
@@ -839,7 +844,52 @@ const TOKENS: MockBalance[] = TOKEN_SEED.map(([t, colour, ink], i) => ({
   about: `$${t} tokens held in this wallet (mock).`,
   contact: `$${t.toLowerCase()}`,
 }));
-const ALL: MockBalance[] = [...MOCK, ...TOKENS];
+const tokenCard = (id: string, sym: string, icon: string | null, balance: number, mock: boolean): MockBalance => ({
+  id: `tok-${id}`,
+  name: `$${sym}`,
+  issuer: mock ? 'Exchange token · mock balance' : 'BSV-21 token · in your wallet',
+  unit: 'tokens',
+  balance,
+  usdPer: 0.0005,
+  colour: '#16161a',
+  ink: '#ffd24d',
+  initial: (sym[0] ?? '?').toUpperCase(),
+  icon,
+  about: mock ? `$${sym}: a live Exchange token, shown with a mock balance.` : `$${sym} held in this wallet.`,
+  contact: `$${sym.toLowerCase()}`,
+});
+
+/** The wallet's own BSV-21 balances, read-only from its per-account cache (wallet/tokenCache.ts). */
+const readHeldTokens = (): MockBalance[] => {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith('bwallet:bsv21-cache:')) continue;
+      const list = JSON.parse(localStorage.getItem(k) ?? '[]') as {
+        id?: string;
+        sym?: string;
+        icon?: string | null;
+        dec?: number;
+        all?: { confirmed?: string | number };
+      }[];
+      const held = list
+        .filter((t) => t.id && Number(t.all?.confirmed ?? 0) > 0)
+        .map((t) =>
+          tokenCard(
+            t.id!,
+            t.sym || t.id!.slice(0, 6),
+            t.icon ?? null,
+            Number(t.all!.confirmed) / 10 ** (t.dec ?? 0),
+            false,
+          ),
+        );
+      if (held.length) return held;
+    }
+  } catch {
+    /* no cache */
+  }
+  return [];
+};
 
 type Item = { kind: 'card'; id: string } | { kind: 'basket'; id: string; name: string; members: string[] };
 type Layout = { row: Item[]; hidden: string[] };
@@ -850,7 +900,7 @@ const SEED: Layout = {
     { kind: 'basket', id: 'b-credits', name: 'Credits', members: ['bcredits', 'mandala'] },
     { kind: 'card', id: 'pnee' },
     { kind: 'card', id: 'bcorp' },
-    { kind: 'basket', id: 'b-tokens', name: 'Tokens', members: TOKENS.map((t) => t.id) },
+    { kind: 'basket', id: 'b-tokens', name: 'Tokens', members: [] },
     { kind: 'card', id: 'topup' },
   ],
   hidden: [],
@@ -874,14 +924,20 @@ const saveLayout = (l: Layout) => {
 const defaultBasketName = (ids: string[]) =>
   ids.every((i) => i.startsWith('tok-')) ? 'Tokens' : ids.some((i) => i.startsWith('tok-')) ? 'Basket' : 'Credits';
 
-const MiniLogo = ({ c }: { c: MockBalance | undefined }) =>
-  c ? (
-    <span className="bw-mini" style={{ background: c.colour, color: c.ink }}>
-      {c.initial}
+/** A card's logo: real token icons via the Exchange's TokenIcon (gold initial only if the image fails). */
+const Logo = ({ c, size, className }: { c: MockBalance | undefined; size: number; className: string }) =>
+  c && c.icon !== undefined ? (
+    <span className={`${className} is-icon`}>
+      <TokenIcon icon={c.icon} sym={c.name} size={size} />
     </span>
   ) : (
-    <span className="bw-mini is-bsv">₿</span>
+    <span className={className} style={c ? { background: c.colour, color: c.ink } : undefined}>
+      {c?.initial ?? '₿'}
+    </span>
   );
+
+const MiniLogo = ({ c }: { c: MockBalance | undefined }) =>
+  c ? <Logo c={c} size={14} className="bw-mini" /> : <span className="bw-mini is-bsv">₿</span>;
 
 const BasketCard = ({
   b,
@@ -1004,9 +1060,7 @@ const BasketView = ({
           <div className="bw-bkv-grid">
             {members.map((c) => (
               <button type="button" key={c.id} onClick={() => setOpen(c.id)}>
-                <span className="bw-bkv-tile" style={{ background: c.colour, color: c.ink }}>
-                  {c.initial}
-                </span>
+                <Logo c={c} size={56} className="bw-bkv-tile" />
                 <small>{c.name}</small>
               </button>
             ))}
@@ -1085,12 +1139,32 @@ const EditGrid = ({
     onChange({ ...layout, row: clean });
   };
 
+  // Hold ~0.25 s to pick a tile up; a quick move first is a scroll (so long grids scroll freely).
+  const pending = useRef<{ id: string; from: string | null; sx: number; sy: number; t: number } | null>(null);
   const start = (id: string, from: string | null) => (e: React.PointerEvent) => {
-    if (id === 'bsv') return;
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    setDrag({ id, from, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const t = window.setTimeout(() => {
+      if (id !== 'bsv') setDrag({ id, from, x: sx, y: sy, sx, sy });
+    }, 250);
+    pending.current = { id, from, sx, sy, t };
   };
-  const moveP = (e: React.PointerEvent) => drag && setDrag({ ...drag, x: e.clientX, y: e.clientY });
+  const moveP = (e: React.PointerEvent) => {
+    const p = pending.current;
+    if (p && !drag && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 8) {
+      window.clearTimeout(p.t);
+      pending.current = null;
+    }
+    if (drag) setDrag({ ...drag, x: e.clientX, y: e.clientY });
+  };
+  // While a tile is held, stop the page scrolling under the finger.
+  const dragging = !!drag;
+  useEffect(() => {
+    if (!dragging) return;
+    const stop = (ev: TouchEvent) => ev.preventDefault();
+    document.addEventListener('touchmove', stop, { passive: false });
+    return () => document.removeEventListener('touchmove', stop);
+  }, [dragging]);
   // Reorder within the row, or within an open basket (iPhone style: drop in a gap or on a tile's edge).
   const reorder = (srcId: string, scope: string | null, targetId: string, after: boolean) => {
     const place = <T,>(list: T[], key: (t: T) => string) => {
@@ -1114,7 +1188,16 @@ const EditGrid = ({
     else onChange({ ...layout, row: place(layout.row, (it) => it.id) });
   };
   const end = (e: React.PointerEvent) => {
-    if (!drag) return;
+    const p = pending.current;
+    if (p) window.clearTimeout(p.t);
+    pending.current = null;
+    if (!drag) {
+      if (p && p.from === null && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 8) {
+        const it = layout.row.find((i) => i.id === p.id);
+        if (it?.kind === 'basket') setOpenB(it.id);
+      }
+      return;
+    }
     const d = drag;
     setDrag(null);
     const x = e.clientX;
@@ -1161,6 +1244,11 @@ const EditGrid = ({
       onPointerDown={start(id, from)}
       onPointerMove={moveP}
       onPointerUp={end}
+      onPointerCancel={() => {
+        if (pending.current) window.clearTimeout(pending.current.t);
+        pending.current = null;
+        setDrag(null);
+      }}
       style={drag?.id === id ? { transform: 'scale(1.1)', zIndex: 3 } : undefined}
     >
       {logo}
@@ -1218,9 +1306,7 @@ const EditGrid = ({
                   ) : it.id === 'bsv' ? (
                     <span className="bw-eg-logo is-bsv">₿</span>
                   ) : (
-                    <span className="bw-eg-logo" style={{ background: card(it.id)?.colour, color: card(it.id)?.ink }}>
-                      {card(it.id)?.initial}
-                    </span>
+                    <Logo c={card(it.id)} size={56} className="bw-eg-logo" />
                   ),
                 ),
           )}
@@ -1240,14 +1326,7 @@ const EditGrid = ({
             />
             <div className="bw-eg-grid">
               {basket.members.map((m) =>
-                tile(
-                  m,
-                  basket.id,
-                  nameOf(m),
-                  <span className="bw-eg-logo" style={{ background: card(m)?.colour, color: card(m)?.ink }}>
-                    {card(m)?.initial}
-                  </span>,
-                ),
+                tile(m, basket.id, nameOf(m), <Logo c={card(m)} size={56} className="bw-eg-logo" />),
               )}
             </div>
             <div className="bw-eg-out" data-drop="__out">
@@ -1264,7 +1343,7 @@ const EditGrid = ({
 };
 
 export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
-  const [cards, setCards] = useState(ALL);
+  const [cards, setCards] = useState<MockBalance[]>(MOCK);
   const [layout, setLayoutState] = useState<Layout>(loadLayout);
   const setLayout = (l: Layout) => {
     setLayoutState(l);
@@ -1284,6 +1363,60 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     back: 'bsv',
   });
   const track = useRef<HTMLDivElement>(null);
+
+  // Tokens basket: the wallet's real BSV-21 holdings (read-only, from its cache), topped up with live Exchange
+  // tokens (real icons, mock balances) to ~60 so the basket shows scale. The 12 fake tokens only if both fail.
+  useEffect(() => {
+    let live = true;
+    const held = readHeldTokens();
+    const fill = (extra: MockBalance[]) => {
+      if (!live) return;
+      const seen = new Set(held.map((t) => t.id));
+      const list = [...held, ...extra.filter((t) => !seen.has(t.id))].slice(0, Math.max(held.length, 60));
+      const tokens = list.length ? list : TOKENS;
+      setCards([...MOCK, ...tokens]);
+      setLayoutState((l) => {
+        const ids = new Set(tokens.map((t) => t.id));
+        const placed = new Set<string>();
+        const row = l.row
+          .map((it) => {
+            if (it.kind !== 'basket') return it;
+            const members = it.members.filter((m) => !m.startsWith('tok-') || ids.has(m));
+            members.forEach((m) => placed.add(m));
+            return { ...it, members };
+          })
+          .filter((it) => it.kind !== 'card' || !it.id.startsWith('tok-') || ids.has(it.id));
+        row.forEach((it) => it.kind === 'card' && placed.add(it.id));
+        const missing = tokens.map((t) => t.id).filter((id) => !placed.has(id));
+        const tb = row.find((it) => it.id === 'b-tokens');
+        const next: Layout = {
+          ...l,
+          row:
+            tb?.kind === 'basket'
+              ? row.map((it) =>
+                  it.id === 'b-tokens' && it.kind === 'basket' ? { ...it, members: [...it.members, ...missing] } : it,
+                )
+              : [...row, { kind: 'basket', id: 'b-tokens', name: 'Tokens', members: missing }],
+        };
+        saveLayout(next);
+        return next;
+      });
+    };
+    tokenDirectory()
+      .then((dir) =>
+        fill(
+          [...dir]
+            .filter((t) => t.icon && t.sym)
+            .sort((a, b) => b.outputs - a.outputs)
+            .slice(0, 80)
+            .map((t, i) => tokenCard(t.id, t.sym, t.icon, 1000 + ((i * 7919) % 50000), true)),
+        ),
+      )
+      .catch(() => fill([]));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Mandala bills per active second while running (mock: $0.12/hour), nothing while suspended.
   useEffect(() => {

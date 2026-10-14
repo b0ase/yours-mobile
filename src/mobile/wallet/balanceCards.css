@@ -874,3 +874,29 @@
     animation: none;
   }
 }
+/* Real token icons sit in the same slots as the initial discs. */
+.bw-bc-logo.is-icon,
+.bw-bkv-tile.is-icon,
+.bw-eg-logo.is-icon,
+.bw-mini.is-icon {
+  background: transparent;
+  overflow: hidden;
+  border-radius: 50%;
+  padding: 0;
+}
+.bw-mini.is-icon img,
+.bw-mini.is-icon span {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* Long grids scroll smoothly and stay clear of the home indicator. */
+.bw-bkv,
+.bw-eg {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  max-height: calc(100dvh - env(safe-area-inset-top) - 12px);
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+}
+.bw-eg-tile {
+  touch-action: pan-y;
+}
