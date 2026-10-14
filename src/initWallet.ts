@@ -1,9 +1,4 @@
-import {
-  knownOnChain,
-  recoverMinedFailedActions,
-  type FailedAction,
-  type RecoverReport,
-} from './services/recoverFailed';
+import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import { releaseStuckSends, type QueuedSend, type ReleaseReport } from './services/stuckSends';
@@ -59,6 +54,8 @@ import {
   setArriving,
 } from './services/receiveGuard';
 import { internalizeBackoff } from './services/internalizeBackoff';
+import { fixUtxoStatus } from './services/utxoStatus';
+import { makeRecoverDeps, runRecoverOnce } from './services/recoverFailedWiring';
 import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -320,6 +317,8 @@ export const initWallet = async (
 
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
+  // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
+  if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
 
   // 3. Build the IndexedDB-backed permission store used by
   //    LocalWalletPermissionsManager for basket/cert/spending grants.
@@ -842,24 +841,16 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     recoverFailed: () =>
-      recoverMinedFailedActions({
-        listFailed: async () =>
-          (await baseWallet.listFailedActions({ labels: [], includeOutputs: true, limit: 200 }, false))
-            .actions as unknown as FailedAction[],
-        queueUnfail: (txids) =>
-          storage.runAsStorageProvider(async (sp) => {
-            let n = 0;
-            for (const txid of txids)
-              for (const req of await sp.findProvenTxReqs({ partial: { txid } })) {
-                await sp.updateProvenTxReq(req.provenTxReqId, { status: 'unfail' });
-                n++;
-              }
-            return n;
+      runRecoverOnce(() =>
+        recoverMinedFailedActions(
+          makeRecoverDeps({
+            storage,
+            wallet: baseWallet,
+            services: toolboxServices,
+            monitor: walletMonitor,
           }),
-        isMined: async (txid) => !!(await toolboxServices.getMerklePath(txid))?.merklePath,
-        runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
-        available: () => storage.isActiveStorageProvider(),
-      }).then((r) => {
+        ),
+      ).then((r) => {
         // A restored action may now be internalizable (its status was 'failed'): let the receive guard retry it.
         for (const txid of r.restored) internalizeBackoff.clear(txid);
         return r;
