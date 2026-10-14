@@ -3,9 +3,9 @@
  * and pinned). No scrolling chips. The open feed is the solid gold icon. See feeds.ts.
  */
 import { createPortal } from 'react-dom';
-import { Clapperboard, LayoutGrid, Newspaper, Pin, Sparkles, Users, X, type LucideIcon } from 'lucide-react';
+import { LayoutGrid, Pin, Sparkles, Users, X, type LucideIcon } from 'lucide-react';
 import { useBackClose } from '../backStack';
-import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+import { ALL_FEEDS_ICON, feedIcon, type FeedGlyph, type FeedIcon } from './feedIcons';
 import { FEEDS, MAX_PINNED, feedDef, type FeedId } from './feeds';
 
 const GOLD = '#FFD24D';
@@ -13,32 +13,42 @@ const INK = '#1a1300';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 
-// bMovies' icon is bWalletX only, like its feed entry (BMOVIES_FEED_ENABLED).
-const ICONS: Partial<Record<FeedId, LucideIcon>> = {
-  following: Users,
-  foryou: Sparkles,
-  bnews: Newspaper,
-  ...(BMOVIES_FEED_ENABLED ? { bmovies: Clapperboard } : {}),
-};
-const iconOf = (id: FeedId): LucideIcon => ICONS[id] ?? Sparkles;
+const GLYPHS: Record<FeedGlyph, LucideIcon> = { following: Users, foryou: Sparkles, all: LayoutGrid };
 
-const Tile = ({ label, Icon, on, onClick }: { label: string; Icon: LucideIcon; on: boolean; onClick: () => void }) => (
+/**
+ * One feed icon on a black tile: a bApp's own art edge to edge, or a gold glyph. The open feed gets a
+ * gold ring and glow (the art is never tinted over).
+ */
+const IconTile = ({ icon, on, size }: { icon: FeedIcon; on: boolean; size: 44 | 40 }) => {
+  const Glyph = icon.kind === 'glyph' ? GLYPHS[icon.glyph] : null;
+  return (
+    <span
+      className="relative flex shrink-0 items-center justify-center overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size === 44 ? 14 : 12,
+        background: '#000',
+        boxShadow: on ? `0 0 0 2px ${GOLD}, 0 0 14px rgba(255,210,77,0.45)` : 'inset 0 0 0 1px rgba(255,210,77,0.35)',
+      }}
+    >
+      {icon.kind === 'app' ? (
+        <img src={icon.src} alt="" draggable={false} className="h-full w-full object-cover" />
+      ) : (
+        Glyph && <Glyph size={size === 44 ? 20 : 19} color={GOLD} strokeWidth={on ? 2.4 : 1.9} />
+      )}
+    </span>
+  );
+};
+
+const Tile = ({ label, icon, on, onClick }: { label: string; icon: FeedIcon; on: boolean; onClick: () => void }) => (
   <button
     onClick={onClick}
     aria-pressed={on}
     aria-label={label}
     className="flex flex-1 min-w-0 flex-col items-center gap-1 py-1 active:opacity-70"
   >
-    <span
-      className="flex h-11 w-11 items-center justify-center rounded-2xl"
-      style={
-        on
-          ? { background: GOLD, boxShadow: '0 0 14px rgba(255,210,77,0.45)' }
-          : { background: '#0d0b05', border: '1px solid rgba(255,210,77,0.35)' }
-      }
-    >
-      <Icon size={20} color={on ? INK : GOLD} strokeWidth={on ? 2.4 : 2} />
-    </span>
+    <IconTile icon={icon} on={on} size={44} />
     <span
       className="max-w-full truncate text-[11px]"
       style={{ color: on ? GOLD : 'rgba(255,210,77,0.7)', fontWeight: on ? 700 : 500 }}
@@ -63,9 +73,9 @@ export const FeedPicker = ({
 }) => (
   <div className="flex items-start gap-1 px-3 pb-2" role="tablist" aria-label="Feeds">
     {pins.map((id) => (
-      <Tile key={id} label={feedDef(id).label} Icon={iconOf(id)} on={id === current} onClick={() => onPick(id)} />
+      <Tile key={id} label={feedDef(id).label} icon={feedIcon(id)} on={id === current} onClick={() => onPick(id)} />
     ))}
-    <Tile label="All feeds" Icon={LayoutGrid} on={allOpen || !pins.includes(current)} onClick={onOpenAll} />
+    <Tile label="All feeds" icon={ALL_FEEDS_ICON} on={allOpen || !pins.includes(current)} onClick={onOpenAll} />
   </div>
 );
 
@@ -101,7 +111,6 @@ export const AllFeedsSheet = ({
         </p>
         <div className="grid grid-cols-2 gap-3">
           {FEEDS.map((f) => {
-            const Icon = iconOf(f.id);
             const pinned = pins.includes(f.id);
             const on = f.id === current;
             return (
@@ -114,12 +123,7 @@ export const AllFeedsSheet = ({
                 }}
               >
                 <button onClick={() => onPick(f.id)} className="flex w-full flex-col items-start gap-2 text-left">
-                  <span
-                    className="flex h-10 w-10 items-center justify-center rounded-xl"
-                    style={{ background: on ? GOLD : 'transparent', border: on ? 'none' : `1px solid ${GOLD}` }}
-                  >
-                    <Icon size={20} color={on ? INK : GOLD} />
-                  </span>
+                  <IconTile icon={feedIcon(f.id)} on={on} size={40} />
                   <span className="text-sm font-bold" style={{ color: GOLD }}>
                     {f.label}
                   </span>

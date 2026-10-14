@@ -2,9 +2,16 @@
  * Feed › bMovies: a full-screen vertical reel of bmovies.app clips (see bmovies.ts). One clip per
  * screen, snap scrolling. Only the clip on screen plays (muted until tapped); the next one preloads;
  * every other slide is just its poster, so there are never more than two players mounted.
+ *
+ * The overlay mirrors bmovies.app's own feed (SwipeFeedView): black top/bottom scrims, sound chip
+ * top-left, then bottom-up a white scrubber, a green Buy $TICKER button, the title and $TICKER in
+ * Bebas Neue (ticker in bMovies yellow), the blurb in grey, and the blue mono @handle with ↗ to the
+ * original post. Buy only opens the clip on bmovies.app (no payment flow here); Share shares its page.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ExternalLink, Volume2, VolumeX } from 'lucide-react';
+import { ExternalLink, Share2, Volume2, VolumeX } from 'lucide-react';
+import bebasUrl from '../../bmint/assets/fonts/bebas-neue-400.woff2?url';
+import { shareLink } from '../../chat/shareLink';
 import { openDappBrowser } from '../../dappBrowser';
 import {
   BMOVIES_ORIGIN,
@@ -20,6 +27,24 @@ import {
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
+// bmovies.app's feed palette (SwipeFeedView): X-blue handle, yellow ticker, green Buy.
+const BM_BLUE = '#1d9bf0';
+const BM_YELLOW = '#facc15';
+const BM_GREEN = '#6bff8a';
+const BM_GREEN_EDGE = 'rgba(47,175,90,0.8)';
+const BEBAS = "'Bebas Neue', 'Oswald', Impact, sans-serif";
+
+/** bMovies' display face, self-hosted (the same woff2 bMint ships), loaded once with the reel. */
+let bebasLoading: Promise<void> | null = null;
+const loadBebas = () =>
+  (bebasLoading ??= (async () => {
+    try {
+      if (typeof FontFace === 'undefined' || !document.fonts) return;
+      document.fonts.add(await new FontFace('Bebas Neue', `url(${bebasUrl})`).load());
+    } catch {
+      // offline: the fallback faces
+    }
+  })());
 
 /** Gold title card: what a slide shows before (or without) a poster. Never a grey box. */
 const TitleCard = ({ c }: { c: Clip }) => (
@@ -36,7 +61,7 @@ const TitleCard = ({ c }: { c: Clip }) => (
 /** Gold bAvatar-style disc: the creator's initial on gold (never a grey placeholder). */
 const GoldAvatar = ({ handle }: { handle: string }) => (
   <span
-    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] font-bold"
+    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
     style={{
       background: 'radial-gradient(circle at 35% 30%, #ffe48a 0%, #FFD24D 45%, #b8860b 100%)',
       color: '#1a1300',
@@ -47,17 +72,18 @@ const GoldAvatar = ({ handle }: { handle: string }) => (
 );
 
 /**
- * The creator as author (only when the original post is theirs, see creditedHandle): avatar,
- * @handle and "via bMovies"; otherwise "via bMovies" alone. The original post links out when valid.
- * The avatar is lazy (unavatar takes ~0.7–3.3s); the gold disc shows until it loads or if it fails.
+ * The creator as author (only when the original post is theirs, see creditedHandle): avatar and the
+ * blue mono @handle, as bmovies.app shows it, then "via bMovies"; otherwise "via bMovies" alone.
+ * "Original on X ↗" opens the post when it is valid. The avatar is lazy (unavatar takes ~0.7–3.3s);
+ * the gold disc shows until it loads or if it fails.
  */
 const Attribution = ({ c }: { c: Clip }) => {
   const handle = creditedHandle(c);
   const [state, setState] = useState<'loading' | 'ok' | 'broken'>('loading');
   return (
-    <div className="mb-2 flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       {handle && (
-        <span className="relative h-9 w-9 shrink-0">
+        <span className="relative h-7 w-7 shrink-0">
           {state !== 'ok' && <GoldAvatar handle={handle} />}
           {state !== 'broken' && (
             <img
@@ -65,7 +91,7 @@ const Attribution = ({ c }: { c: Clip }) => {
               alt=""
               loading="lazy"
               decoding="async"
-              className="absolute inset-0 h-9 w-9 rounded-full object-cover"
+              className="absolute inset-0 h-7 w-7 rounded-full object-cover"
               style={{ opacity: state === 'ok' ? 1 : 0 }}
               onLoad={() => setState('ok')}
               onError={() => setState('broken')}
@@ -73,19 +99,27 @@ const Attribution = ({ c }: { c: Clip }) => {
           )}
         </span>
       )}
-      <div className="min-w-0 flex-1">
-        {handle && <p className="truncate text-[14px] font-bold text-white">@{handle}</p>}
-        <p className="text-[11px]" style={{ color: MUTED }}>
-          via bMovies
-        </p>
-      </div>
+      {handle && (
+        <span
+          className="min-w-0 shrink overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] font-bold"
+          style={{ color: BM_BLUE }}
+        >
+          @{handle}
+        </span>
+      )}
+      <span className="shrink-0 text-[11px]" style={{ color: MUTED }}>
+        via bMovies
+      </span>
       {c.tweetUrl && (
         <button
-          onClick={() => void openDappBrowser(c.tweetUrl as string)}
-          className="flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-semibold"
-          style={{ background: 'rgba(0,0,0,0.55)', color: GOLD }}
+          onClick={(e) => {
+            e.stopPropagation();
+            void openDappBrowser(c.tweetUrl as string);
+          }}
+          className="ml-auto flex shrink-0 items-center gap-1 text-[11px] font-semibold"
+          style={{ color: '#9aa0a6' }}
         >
-          Original on X <ExternalLink size={12} />
+          Original on X <span aria-hidden>↗</span>
         </button>
       )}
     </div>
@@ -128,7 +162,20 @@ const Slide = ({
     else v.pause();
   }, [playing]);
 
+  // The white scrubber under the overlay (0..1), from the playing clip.
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    if (!playing) setProgress(0);
+  }, [playing]);
+
   const shownPoster = poster && !posterBroken ? poster : null;
+  const openOnBmovies = () => void openDappBrowser(clipPageUrl(c));
+  const share = () =>
+    void shareLink({
+      title: c.title,
+      text: c.ticker ? `${c.title} $${c.ticker} on bMovies` : c.title,
+      url: clipPageUrl(c),
+    });
 
   return (
     <div data-i={i} className="relative w-full overflow-hidden" style={{ height: '100%', scrollSnapAlign: 'start' }}>
@@ -164,30 +211,83 @@ const Slide = ({
           playsInline
           className="absolute inset-0 h-full w-full object-cover"
           onClick={onToggleSound}
+          onTimeUpdate={(e) => {
+            const v = e.currentTarget;
+            if (playing && v.duration > 0) setProgress(v.currentTime / v.duration);
+          }}
         />
       )}
+      {/* Scrims, as on bmovies.app: a short one at the top, the tall one carrying the overlay. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-28"
+        style={{ background: 'linear-gradient(rgba(0,0,0,0.7), transparent)' }}
+      />
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-72"
+        style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.6) 40%, #000)' }}
+      />
+      {/* Sound: top-left, like bmovies.app. */}
       <button
         onClick={onToggleSound}
         aria-label={muted ? 'Sound on' : 'Sound off'}
-        className="absolute right-4 top-4 rounded-full p-2"
-        style={{ background: 'rgba(0,0,0,0.55)' }}
+        className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-full"
+        style={{
+          background: 'rgba(0,0,0,0.4)',
+          border: '1px solid rgba(255,255,255,0.2)',
+          backdropFilter: 'blur(12px)',
+        }}
       >
-        {muted ? <VolumeX size={18} color={GOLD} /> : <Volume2 size={18} color={GOLD} />}
+        {muted ? <VolumeX size={17} color="#fff" /> : <Volume2 size={17} color="#fff" />}
       </button>
-      <div
-        className="absolute inset-x-0 bottom-0 px-4 pb-6 pt-16"
-        style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
-      >
+      <div className="absolute inset-x-0 bottom-0 px-4 pb-3 pt-4">
         <Attribution c={c} />
-        <button onClick={() => void openDappBrowser(clipPageUrl(c))} className="block w-full text-left">
-          <p className="text-[15px] font-bold text-white leading-snug line-clamp-2">{c.title}</p>
+        {c.blurb && (
+          <p className="mt-2 text-[13px] leading-snug line-clamp-3" style={{ color: '#bbb' }}>
+            {c.blurb}
+          </p>
+        )}
+        <button onClick={openOnBmovies} className="mt-2 block w-full text-left" style={{ fontFamily: BEBAS }}>
+          <span className="block text-[30px] uppercase leading-none tracking-[0.03em] text-white line-clamp-2">
+            {c.title}
+          </span>
           {c.ticker && (
-            <p className="mt-1 text-[13px] font-semibold" style={{ color: GOLD }}>
+            <span
+              className="mt-1 block text-[22px] uppercase leading-none tracking-[0.03em]"
+              style={{ color: BM_YELLOW }}
+            >
               ${c.ticker}
-            </p>
+            </span>
           )}
-          {c.blurb && <p className="mt-1 text-[12px] text-white/80 line-clamp-2">{c.blurb}</p>}
         </button>
+        <div className="mt-3 flex items-center gap-2">
+          {/* Buy opens the clip on bmovies.app, where the trade happens. */}
+          <button
+            onClick={openOnBmovies}
+            aria-label={c.ticker ? `Buy $${c.ticker} on bMovies` : 'Open on bMovies'}
+            className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+            style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${BM_GREEN_EDGE}`, color: BM_GREEN }}
+          >
+            {c.ticker ? (
+              <>
+                Buy <span style={{ opacity: 0.8 }}>${c.ticker}</span>
+              </>
+            ) : (
+              'Open on bMovies'
+            )}
+          </button>
+          <button
+            onClick={share}
+            aria-label="Share"
+            className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-md active:opacity-70"
+            style={{ background: '#0c0c0c', border: '1px solid rgba(255,255,255,0.2)' }}
+          >
+            <Share2 size={16} color="#fff" />
+          </button>
+        </div>
+        {/* Scrubber: fills left to right as the clip plays (white on white/25, 3px). */}
+        <div className="mb-1 mt-3 h-[3px] w-full rounded-full" style={{ background: 'rgba(255,255,255,0.25)' }}>
+          <div className="h-full rounded-full bg-white" style={{ width: `${Math.round(progress * 1000) / 10}%` }} />
+        </div>
       </div>
     </div>
   );
@@ -230,6 +330,7 @@ const BmoviesReel = () => {
   }, []);
 
   useEffect(() => {
+    void loadBebas();
     void load(null);
   }, [load]);
 
