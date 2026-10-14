@@ -618,7 +618,7 @@ describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () =>
   });
   test('the store audit lists the bMovies grep strings', () => {
     expect(readFileSync(new URL('../../docs/STORE-AUDIT.md', import.meta.url), 'utf8')).toContain(
-      'api/feed?cursor|tweet-video|tweet-result|Open bmovies.app',
+      'api/feed?cursor|tweet-video|tweet-result|Open bmovies.app|bitsign/bmovies',
     );
   });
 });
