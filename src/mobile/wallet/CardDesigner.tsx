@@ -18,7 +18,7 @@ const DESIGN_TABS: readonly { id: DesignTab; label: string }[] = [
     ? ([
         { id: 'art', label: 'Art' },
         { id: 'collections', label: 'Collections' },
-        { id: 'subscribe', label: 'Subscribe (demo)' },
+        // 'Subscribe (demo)' hidden for release (mock: nothing is paid).
       ] as const)
     : []),
 ];
