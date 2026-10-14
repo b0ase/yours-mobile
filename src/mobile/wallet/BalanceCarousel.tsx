@@ -26,15 +26,48 @@ export type MockBalance = {
   /** Shares locked in 2-of-2 multisig: never spendable, never ticks, never followed. */
   locked?: boolean;
   contact: string;
+  /** Back-of-card lines (the service, or the lock), shown when no contract is running. */
+  backLines?: string[];
+  /** Second line on the front, e.g. the locked collateral behind PNEEs. */
+  lockLine?: string;
+  /** "View contract" sheet. */
+  contractTitle?: string;
+  contractTerms?: string[];
 };
 
 export type MockContract = { what: string; rate: string; startedAt: number; spent: number };
 
 const MOCK: MockBalance[] = [
   {
+    id: 'bcredits',
+    name: 'bCredits',
+    issuer: 'b · The Bitcoin Corporation',
+    unit: 'bCredits',
+    balance: 820,
+    usdPer: 0.0127,
+    colour: '#0b0b0d',
+    ink: '#ffd24d',
+    initial: 'b',
+    about: 'Credits for Ask b. 1 bCredit = 1p.',
+    backLines: [
+      'Ask b: replies, fixes and builds in chat.',
+      '1 bCredit = 1p · b charges cost × 1.35 per reply.',
+      'Balance 820 bCredits (£8.20).',
+    ],
+    contact: 'b',
+    contractTitle: 'You and The Bitcoin Corporation (b)',
+    contractTerms: [
+      'Issuer: The Bitcoin Corporation Ltd, operating b.',
+      'Price: 1 bCredit = 1p (GBP), bought with BSV.',
+      'What a bCredit buys: b’s model cost for a reply × 1.35, rounded up to whole bCredits.',
+      'Refunds: unused bCredits refundable to your wallet in BSV at the day’s rate.',
+      'How to stop: tap Stop on this card; b stops at once and charges nothing further.',
+    ],
+  },
+  {
     id: 'mandala',
     name: '$mandala credits',
-    issuer: 'GorillaPool · Mandala · accepts BSV',
+    issuer: 'GorillaPool (Root) · accepts BSV',
     unit: 'credits',
     balance: 1240,
     usdPer: 0.01,
@@ -42,20 +75,47 @@ const MOCK: MockBalance[] = [
     ink: '#e8fff6',
     initial: 'M',
     about: 'Prepaid credits for agents and compute on mandala.computer. Bought with BSV.',
-    contact: 'mandala.computer',
+    backLines: [
+      'Mandala: cloud computers for agents (mandala.computer).',
+      'You get: a hosted agent VM, billed per compute-hour. 1 credit = 1¢ · 100 credits ≈ 1 VM-hour.',
+      'Balance 1,240 credits (~12 VM-hours). Accepts BSV.',
+    ],
+    contact: 'Root',
+    contractTitle: 'You and GorillaPool (Root)',
+    contractTerms: [
+      'Issuer: GorillaPool (Root), operator of Mandala.',
+      'Price: 1 credit = $0.01, bought with BSV.',
+      'What a credit buys: 1/100 of an hour on a hosted agent VM (compute, storage, network included).',
+      'Refunds: unused credits refundable on request to Root.',
+      'How to stop: tap Stop; the VM is paused and billing ends at once.',
+    ],
   },
   {
     id: 'pnee',
     name: 'PNEEs',
-    issuer: 'bWalletX · penny notes',
+    issuer: 'bWalletX · stable pennies',
     unit: 'PNEEs',
-    balance: 386,
+    balance: 5000,
     usdPer: 0.01,
     colour: '#ffd24d',
     ink: '#111',
     initial: 'P',
-    about: 'Penny notes: 1 PNEE = 1¢, spend anywhere bWalletX pays.',
-    contact: 'bwalletx.com',
+    about: 'Stable pennies: 1 PNEE = 1¢.',
+    lockLine: '🔒 1,000,000 sats locked backing 5,000 PNEEs',
+    backLines: [
+      'Locked: 1,000,000 sats (0.01 BSV) in your PNEE lock.',
+      'Minted against it: 5,000 PNEEs ($50), within the 10× collateral rule.',
+      'Unlocks after block 920,000 (~6 months), or early by returning the 5,000 PNEEs. You can always recover your locked BSV with your own key, without our server.',
+    ],
+    contact: 'bWalletX',
+    contractTitle: 'Your PNEE lock (stable pennies)',
+    contractTerms: [
+      'Collateral: 1,000,000 sats locked on-chain in a script only your key can spend.',
+      'Minted: 5,000 PNEEs; 1 PNEE = 1¢. Locked BSV is worth at least 10× the PNEEs minted against it.',
+      'Unlock: after block 920,000, or earlier by burning the PNEEs minted against the lock.',
+      'Recovery: your seed derives the lock key; you can always recover your locked BSV yourself, without our server.',
+      'Risk: lock only what you can afford to lose; test with small amounts.',
+    ],
   },
   {
     id: 'bcorp',
@@ -94,6 +154,7 @@ const MockCard = ({
 }) => {
   const [unit, setUnit] = useState<'own' | 'usd'>('own');
   const [flipped, setFlipped] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [turning, setTurning] = useState(false);
   const flip = () => {
     setTurning(true);
@@ -165,8 +226,9 @@ const MockCard = ({
           </div>
         ) : (
           <div className="bw-bc-terms">
-            <span>{c.about}</span>
-            <span>No live contract.</span>
+            {(c.backLines ?? [c.about]).map((l) => (
+              <span key={l}>{l}</span>
+            ))}
           </div>
         )}
         <div className="bw-bc-actions">
@@ -194,10 +256,49 @@ const MockCard = ({
               Top up
             </button>
           )}
+          {c.contractTerms && (
+            <button
+              type="button"
+              className="bw-bc-contact"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSheetOpen(true);
+              }}
+            >
+              View contract
+            </button>
+          )}
           <button type="button" className="bw-bc-contact" onClick={contact}>
             Contact {c.contact}
           </button>
         </div>
+        {sheetOpen && (
+          <div
+            className="bw-bcar-sheet-bg"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSheetOpen(false);
+            }}
+          >
+            <div className="bw-bcar-sheet bw-bc-contract" onClick={(e) => e.stopPropagation()}>
+              <span className="bw-bc-mock">MOCK · placeholder terms</span>
+              <h3>{c.contractTitle}</h3>
+              <ul>
+                {c.contractTerms?.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+              <div className="bw-bc-signlines">
+                <span>{c.issuer.split(' ·')[0]}: ____________</span>
+                <span>You: ____________</span>
+              </div>
+              <small>Dated 14 October 2026</small>
+              <button type="button" className="bw-bcar-done" onClick={() => setSheetOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   return (
@@ -229,7 +330,10 @@ const MockCard = ({
           ) : chip ? (
             <span className="bw-bc-chip">{chip}</span>
           ) : (
-            small
+            <>
+              {small}
+              {c.lockLine && <span className="bw-bc-lockline">{c.lockLine}</span>}
+            </>
           )}
         </span>
         <span className="bw-wcard-unit" role="group" aria-label="Balance unit" onClick={(e) => e.stopPropagation()}>
@@ -297,17 +401,17 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   };
   const demo = () => {
     if (spending) return;
-    const idx = visible.findIndex((s) => s.id === 'mandala');
+    const idx = visible.findIndex((s) => s.id === 'bcredits');
     if (idx < 0) return;
     demoRef.current.back = active;
-    setSpending('mandala');
-    setChip('b · 2 credits/reply');
-    setContract({ what: 'b on mandala.computer', rate: '2 credits per reply', startedAt: Date.now(), spent: 0 });
+    setSpending('bcredits');
+    setChip('b · 2 bCredits/reply');
+    setContract({ what: 'Ask b replies', rate: '2 bCredits per reply', startedAt: Date.now(), spent: 0 });
     goTo(idx);
     let n = 0;
     demoRef.current.tick = window.setInterval(() => {
       n += 1;
-      setCards((cs) => cs.map((c) => (c.id === 'mandala' ? { ...c, balance: Math.max(0, c.balance - 2) } : c)));
+      setCards((cs) => cs.map((c) => (c.id === 'bcredits' ? { ...c, balance: Math.max(0, c.balance - 2) } : c)));
       setContract((k) => (k ? { ...k, spent: k.spent + 2 } : k));
       if (n >= 7) {
         if (demoRef.current.tick !== null) window.clearInterval(demoRef.current.tick);

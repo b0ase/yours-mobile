@@ -288,3 +288,35 @@
   font-size: 9px;
   opacity: 0.7;
 }
+.bw-bc-back {
+  aspect-ratio: auto;
+  min-height: calc((min(100vw - 32px, 398px)) / 1.7);
+  gap: 8px;
+}
+.bw-bc-back .bw-bc-terms {
+  font-size: 11px;
+}
+.bw-bc-lockline {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.bw-bc-contract {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.bw-bc-contract ul {
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.bw-bc-signlines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 6px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: #ffd24d;
+}
