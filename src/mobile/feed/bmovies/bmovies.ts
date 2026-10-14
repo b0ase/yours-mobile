@@ -12,6 +12,7 @@
  * desktop try fetch and show a link out when the browser blocks it.
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { isBlocked } from './screen';
 
 export const BMOVIES_ORIGIN = 'https://www.bmovies.app';
 const FEED_URL = `${BMOVIES_ORIGIN}/api/feed`;
@@ -27,7 +28,10 @@ export type Clip = {
   title: string;
   blurb: string;
   ticker: string;
+  /** The creator's X handle (validated, no @), or '' when unknown. Shown as the author. */
   handle: string;
+  /** The original post on X (https x.com / twitter.com), or null. */
+  tweetUrl: string | null;
   /** Playable clip URL: bMovies' tweet-video proxy or a direct https .mp4. */
   src: string;
   /** https poster, or null until one is found. */
@@ -65,6 +69,26 @@ export const playableUrl = (v: unknown): string | null => {
   }
 };
 
+/** An X handle: 1–15 of [A-Za-z0-9_] (a leading @ is dropped), else ''. */
+export const xHandle = (v: unknown): string => {
+  const s = str(v).replace(/^@/, '');
+  return /^[A-Za-z0-9_]{1,15}$/.test(s) ? s : '';
+};
+
+/** The original post's URL when it is https on x.com / twitter.com, else null. */
+export const xPostUrl = (v: unknown): string | null => {
+  const s = str(v);
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' && /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/i.test(u.hostname) ? u.href : null;
+  } catch {
+    return null;
+  }
+};
+
+/** The creator's avatar (unavatar.io for the X handle). */
+export const avatarUrl = (handle: string) => `https://unavatar.io/x/${encodeURIComponent(handle)}`;
+
 /** One feed item → a clip, or null (no id, no playable video or no time). */
 export const toClip = (raw: unknown): Clip | null => {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
@@ -81,21 +105,22 @@ export const toClip = (raw: unknown): Clip | null => {
     ticker: str(r.ticker)
       .replace(/[^A-Za-z0-9]/g, '')
       .slice(0, 20),
-    handle: str(r.handle).replace(/^@/, '').slice(0, 40),
+    handle: xHandle(r.handle),
+    tweetUrl: xPostUrl(r.tweetUrl),
     src,
     poster: absUrl(r.art),
     at,
   };
 };
 
-/** The API's `{ items, nextCursor }` → unique clips, newest first. */
+/** The API's `{ items, nextCursor }` → unique, screened clips (see screen.ts), newest first. */
 export const parseFeed = (json: unknown): ClipPage => {
   const j = json && typeof json === 'object' ? (json as { items?: unknown; nextCursor?: unknown }) : {};
   const seen = new Set<string>();
   const clips: Clip[] = [];
   for (const it of Array.isArray(j.items) ? j.items : []) {
     const c = toClip(it);
-    if (c && !seen.has(c.id)) {
+    if (c && !seen.has(c.id) && !isBlocked({ ...c, tweetId: clipTweetId(c) })) {
       seen.add(c.id);
       clips.push(c);
     }
@@ -117,6 +142,10 @@ export const clipPageUrl = (c: Pick<Clip, 'offerId'>) =>
 /** The tweet id in a bMovies item id (`tweet-<id>` / `convert-<id>-…`), or null. */
 export const tweetIdOf = (itemId: string): string | null =>
   /^(?:tweet|convert)-(\d{10,20})(?:-|$)/.exec(itemId)?.[1] ?? null;
+
+/** The clip's tweet id: from its original post URL, else its bMovies item id. */
+export const clipTweetId = (c: Pick<Clip, 'id' | 'tweetUrl'>): string | null =>
+  (c.tweetUrl && /\/status(?:es)?\/(\d{5,25})/.exec(c.tweetUrl)?.[1]) || tweetIdOf(c.id);
 
 /**
  * X's poster for the tweet's video from its public embed JSON: mediaDetails[].media_url_https on

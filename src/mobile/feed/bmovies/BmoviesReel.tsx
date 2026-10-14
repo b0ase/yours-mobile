@@ -6,7 +6,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ExternalLink, Volume2, VolumeX } from 'lucide-react';
 import { openDappBrowser } from '../../dappBrowser';
-import { BMOVIES_ORIGIN, appendPage, clipPageUrl, fetchClips, findPoster, firstFrameUrl, type Clip } from './bmovies';
+import {
+  BMOVIES_ORIGIN,
+  appendPage,
+  avatarUrl,
+  clipPageUrl,
+  fetchClips,
+  findPoster,
+  firstFrameUrl,
+  type Clip,
+} from './bmovies';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -22,6 +31,55 @@ const TitleCard = ({ c }: { c: Clip }) => (
     </p>
   </div>
 );
+
+/** Gold bAvatar-style disc: the creator's initial on gold (never a grey placeholder). */
+const GoldAvatar = ({ handle }: { handle: string }) => (
+  <span
+    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] font-bold"
+    style={{
+      background: 'radial-gradient(circle at 35% 30%, #ffe48a 0%, #FFD24D 45%, #b8860b 100%)',
+      color: '#1a1300',
+    }}
+  >
+    {(handle[0] ?? 'b').toUpperCase()}
+  </span>
+);
+
+/** The creator as author: avatar, @handle, "via bMovies" and a link to the original post on X. */
+const Attribution = ({ c }: { c: Clip }) => {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      {c.handle &&
+        (broken ? (
+          <GoldAvatar handle={c.handle} />
+        ) : (
+          <img
+            src={avatarUrl(c.handle)}
+            alt=""
+            className="h-9 w-9 shrink-0 rounded-full object-cover"
+            style={{ background: GOLD }}
+            onError={() => setBroken(true)}
+          />
+        ))}
+      <div className="min-w-0 flex-1">
+        {c.handle && <p className="truncate text-[14px] font-bold text-white">@{c.handle}</p>}
+        <p className="text-[11px]" style={{ color: MUTED }}>
+          via bMovies
+        </p>
+      </div>
+      {c.tweetUrl && (
+        <button
+          onClick={() => void openDappBrowser(c.tweetUrl as string)}
+          className="flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-semibold"
+          style={{ background: 'rgba(0,0,0,0.55)', color: GOLD }}
+        >
+          Original on X <ExternalLink size={12} />
+        </button>
+      )}
+    </div>
+  );
+};
 
 const Slide = ({
   c,
@@ -109,12 +167,14 @@ const Slide = ({
         className="absolute inset-x-0 bottom-0 px-4 pb-6 pt-16"
         style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}
       >
+        <Attribution c={c} />
         <button onClick={() => void openDappBrowser(clipPageUrl(c))} className="block w-full text-left">
           <p className="text-[15px] font-bold text-white leading-snug line-clamp-2">{c.title}</p>
-          <p className="mt-1 text-[13px] font-semibold" style={{ color: GOLD }}>
-            {c.handle ? `@${c.handle}` : 'bMovies'}
-            {c.ticker && <span style={{ color: MUTED }}> · ${c.ticker}</span>}
-          </p>
+          {c.ticker && (
+            <p className="mt-1 text-[13px] font-semibold" style={{ color: GOLD }}>
+              ${c.ticker}
+            </p>
+          )}
           {c.blurb && <p className="mt-1 text-[12px] text-white/80 line-clamp-2">{c.blurb}</p>}
         </button>
       </div>

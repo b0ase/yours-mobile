@@ -126,3 +126,27 @@ describe('bMovies poster fallback', () => {
     expect(firstFrameUrl('https://a.example/v.mp4')).toBe('https://a.example/v.mp4#t=0.5');
   });
 });
+
+describe('attribution', () => {
+  test('parses a valid handle and original post URL', () => {
+    const c = toClip(
+      item({ handle: '@some_artist', tweetUrl: 'https://x.com/some_artist/status/2102001651062026668' }),
+    );
+    expect(c?.handle).toBe('some_artist');
+    expect(c?.tweetUrl).toBe('https://x.com/some_artist/status/2102001651062026668');
+  });
+  test('rejects bad handles and non-X URLs', () => {
+    const c = toClip(item({ handle: 'not a handle!', tweetUrl: 'http://x.com/a/status/1' }));
+    expect(c?.handle).toBe('');
+    expect(c?.tweetUrl).toBeNull();
+    expect(toClip(item({ tweetUrl: 'https://evil.com/x.com' }))?.tweetUrl).toBeNull();
+    expect(toClip(item({ tweetUrl: 'https://twitter.com/a/status/123' }))?.tweetUrl).toBe(
+      'https://twitter.com/a/status/123',
+    );
+    expect(toClip(item({ handle: 'a'.repeat(16) }))?.handle).toBe('');
+  });
+  test('parseFeed drops screened items', () => {
+    const page = parseFeed({ items: [item({ title: 'はだかつ' }), item({ id: 'tweet-2102001651062026669' })] });
+    expect(page.clips.map((c) => c.id)).toEqual(['tweet-2102001651062026669']);
+  });
+});
