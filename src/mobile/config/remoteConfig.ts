@@ -100,7 +100,8 @@ export const getRemoteConfig = async (
 ): Promise<RemoteConfig> => {
   const c = readCache();
   if (c && !c.failed && now - c.at < CONFIG_TTL) return parseConfig(c.raw);
-  if (now - Math.max(failedAt, c?.failed ? c.at : 0) < CONFIG_FAIL_TTL) return DEFAULT_CONFIG;
+  const lastFail = Math.max(failedAt <= now ? failedAt : 0, c?.failed && c.at <= now ? c.at : 0);
+  if (lastFail && now - lastFail < CONFIG_FAIL_TTL) return DEFAULT_CONFIG;
   try {
     const r = await f(CONFIG_URL);
     if (!r.ok) throw new Error(String(r.status));
