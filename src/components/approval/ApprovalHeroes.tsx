@@ -178,9 +178,9 @@ export const MintHero = ({ image, alt, number }: { image?: string; alt: string; 
           <g fill="none" strokeLinecap="round">
             <circle cx="88" cy="88" r="62" stroke={CARD.gold} strokeWidth="8" strokeDasharray="120 40" />
             <circle cx="88" cy="88" r="44" stroke="#C58B12" strokeWidth="8" strokeDasharray="90 50" />
-            <circle cx="88" cy="88" r="26" stroke="#FFD24D" strokeWidth="7" strokeDasharray="60 30" />
+            <circle cx="88" cy="88" r="26" stroke="var(--bw-accent-hi)" strokeWidth="7" strokeDasharray="60 30" />
           </g>
-          <circle cx="88" cy="88" r="9" fill="#FFD24D" />
+          <circle cx="88" cy="88" r="9" fill="var(--bw-accent-hi)" />
         </svg>
       )}
     </GoldRing>

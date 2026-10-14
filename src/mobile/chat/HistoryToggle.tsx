@@ -8,7 +8,7 @@ import type { BchatClient } from './api';
 import { HISTORY_OFF_NOTE, HISTORY_ON_NOTE, HISTORY_TOGGLE_LABEL, type HistoryVisibility } from './history';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 const RED = '#F97066';

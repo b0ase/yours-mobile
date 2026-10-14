@@ -17,7 +17,7 @@ import { formatSize, mediaPayload, messageVideo } from './roomMediaInfo';
  *  - AttachButton: pick a photo or video, see its size against the 25 MB limit and that rooms
  *    are free, then Send. Progress shows while it uploads. Browser builds only.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#1f2127';
 const PANEL = '#121316';
 const MUTED = '#8a8f98';
@@ -111,7 +111,7 @@ export const RoomMediaBubble = ({
     >
       <span
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-        style={{ background: '#000', border: `1px solid ${GOLD}66` }}
+        style={{ background: '#000', border: `1px solid color-mix(in srgb, ${GOLD} 40%, transparent)` }}
       >
         {kind === 'file' ? <FileText size={18} color={GOLD} /> : <Play size={18} color={GOLD} fill={GOLD} />}
       </span>

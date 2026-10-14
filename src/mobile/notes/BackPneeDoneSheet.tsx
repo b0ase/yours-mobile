@@ -3,7 +3,7 @@ import { Lock } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { BACK_PNEE_DONE_HINT, backPneeDoneTitle } from './backPnee';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
 /**
@@ -38,7 +38,10 @@ export const BackPneeDoneSheet = ({
           type="button"
           onClick={onWallet}
           className="rounded-xl py-3 text-sm font-bold border-0 cursor-pointer"
-          style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+          style={{
+            background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+            color: 'var(--bw-on-accent)',
+          }}
         >
           Back to Wallet
         </button>
@@ -46,7 +49,7 @@ export const BackPneeDoneSheet = ({
           type="button"
           onClick={onPots}
           className="rounded-xl py-3 text-sm font-bold border cursor-pointer bg-transparent"
-          style={{ borderColor: '#F5B80055', color: GOLD }}
+          style={{ borderColor: 'rgb(var(--bw-accent-rgb)/0.33)', color: GOLD }}
         >
           Open Pots &amp; Locks
         </button>

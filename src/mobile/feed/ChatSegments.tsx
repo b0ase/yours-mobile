@@ -16,7 +16,7 @@ const SEGMENTS: { id: ChatSegment; label: string }[] = [
   { id: 'dms', label: 'DMs' },
   { id: 'calls', label: 'Calls' },
 ];
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 export const SegmentSwitch = ({ value, onChange }: { value: ChatSegment; onChange: (s: ChatSegment) => void }) => (
   <div
@@ -84,7 +84,7 @@ export const SegmentTitle = ({ title, children }: { title: string; children?: Re
 const SegmentShell = ({ header, children }: { header: ReactNode; children: ReactNode }) => (
   <div
     className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto"
-    style={{ height: '100%', background: '#010101' }}
+    style={{ height: '100%', background: 'var(--bw-bg)' }}
   >
     <TopNav />
     <div className="w-full pt-16 flex flex-col">

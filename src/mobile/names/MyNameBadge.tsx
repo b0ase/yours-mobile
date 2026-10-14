@@ -24,13 +24,13 @@ export const ReceiveName = ({ identityAddress }: { identityAddress?: string }) =
     <div className="flex flex-col items-center gap-1 w-full text-xs text-center" style={{ color: '#9aa0a6' }}>
       <div className="flex items-center justify-center gap-1.5">
         {displayName && displayName.toLowerCase() !== bareName(payable).toLowerCase() ? `${displayName} · ` : ''}Or send
-        to <span style={{ color: '#FFD24D', fontWeight: 600 }}>{payable}</span>
+        to <span style={{ color: 'var(--bw-accent-hi)', fontWeight: 600 }}>{payable}</span>
         <button
           type="button"
           onClick={copy}
           aria-label={`Copy ${payable}`}
           className="p-1 bg-transparent border-0 cursor-pointer"
-          style={{ color: copied ? '#2ecc71' : '#FFD24D' }}
+          style={{ color: copied ? '#2ecc71' : 'var(--bw-accent-hi)' }}
         >
           <Copy size={13} />
         </button>

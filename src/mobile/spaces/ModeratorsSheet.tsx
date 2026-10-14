@@ -11,7 +11,7 @@ import { ErrorNotice } from '../errors/ErrorActions';
  * comes from the Space reply (`moderators`, only sent to people who may appoint).
  */
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');

@@ -450,8 +450,8 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false, onNewAccount
               fontFamily: "'Inter', Arial, Helvetica, sans-serif",
             }}
             onFocus={(e) => {
-              e.currentTarget.style.borderColor = accentLeft + '80';
-              e.currentTarget.style.boxShadow = `0 0 0 2px ${accentLeft}30`;
+              e.currentTarget.style.borderColor = `color-mix(in srgb, ${accentLeft} 50%, transparent)`;
+              e.currentTarget.style.boxShadow = `0 0 0 2px color-mix(in srgb, ${accentLeft} 19%, transparent)`;
             }}
             onBlur={(e) => {
               e.currentTarget.style.borderColor = gray + '40';

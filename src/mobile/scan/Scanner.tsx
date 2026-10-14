@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
 /** Rear camera + jsQR. Stops the camera as soon as it reads a code, or when it unmounts. */

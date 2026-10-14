@@ -54,7 +54,7 @@ const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 // NFTs, collections, tickets, strategies and contracts keep their screens (the old Market page).
 const MarketPage = lazy(() => import('../market/MarketPage'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const Loading = ({ text }: { text: string }) => (
   <p className="text-sm text-center py-8" style={{ color: '#98A2B3' }}>
     {text}
@@ -213,7 +213,7 @@ const Markets = ({
   return (
     <div className="flex flex-col gap-3 w-full">
       <div className="flex gap-2 items-center">
-        <label className="flex-1 flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2">
+        <label className="flex-1 flex items-center gap-2 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2">
           <Search size={16} color={MUTED} />
           <input
             value={q}
@@ -271,7 +271,7 @@ const Markets = ({
               {onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
             </p>
           ) : (
-            <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] overflow-x-auto">
+            <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs" style={{ color: MUTED }}>
@@ -393,7 +393,7 @@ const Orders = () => {
               type="button"
               key={b.txid}
               onClick={() => navigate(tradeRoute(b.tokenId))}
-              className="flex justify-between items-center rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5 text-left cursor-pointer"
+              className="flex justify-between items-center rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5 text-left cursor-pointer"
             >
               <span className="text-sm text-white">{b.amountLabel}</span>
               <span className="text-xs" style={{ color: MUTED }}>
@@ -414,7 +414,7 @@ const Orders = () => {
             swaps.slice(0, 30).map((s) => (
               <div
                 key={s.id}
-                className="flex justify-between items-center rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5"
+                className="flex justify-between items-center rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5"
               >
                 <span className="text-sm text-white">
                   {s.amount} {s.label} → BSV
@@ -480,7 +480,7 @@ const ExchangePage = () => {
   return (
     <div
       className="flex w-full flex-col items-center overflow-y-auto pb-36"
-      style={{ height: '100%', background: '#010101' }}
+      style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <div className="w-full max-w-[1100px] px-4 pt-4 flex flex-col gap-4">
         <div className="flex items-end justify-between gap-3 flex-wrap">

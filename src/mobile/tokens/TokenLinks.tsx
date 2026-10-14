@@ -77,7 +77,7 @@ export const TokenLinks = ({
           }}
           className="self-start text-left text-[11px] text-[#98A2B3]"
         >
-          Holders can enter the <span style={{ color: '#FFD24D', fontWeight: 600 }}>{ticker} room ›</span>
+          Holders can enter the <span style={{ color: 'var(--bw-accent-hi)', fontWeight: 600 }}>{ticker} room ›</span>
         </button>
       )}
       {utility && (
@@ -129,7 +129,7 @@ export const TokenLinks = ({
                 void openDappBrowser(url);
               }}
               className="flex-1 h-9 rounded-lg text-xs font-bold"
-              style={{ background: '#FFD24D', color: '#010101' }}
+              style={{ background: 'var(--bw-accent-hi)', color: '#010101' }}
             >
               Open
             </button>

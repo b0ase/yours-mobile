@@ -33,10 +33,13 @@ export const TokenIconHeader = ({
           src={icon.url}
           alt=""
           className="w-16 h-16 rounded-full object-cover"
-          style={{ border: '2px solid #F5B80055' }}
+          style={{ border: '2px solid rgb(var(--bw-accent-rgb)/0.33)' }}
         />
       ) : (
-        <div className="w-16 h-16 rounded-full" style={{ background: '#17191E', border: '2px dashed #F5B80055' }} />
+        <div
+          className="w-16 h-16 rounded-full"
+          style={{ background: 'var(--bw-surface)', border: '2px dashed rgb(var(--bw-accent-rgb)/0.33)' }}
+        />
       )}
       {icon.fromProfile && (
         <span className="text-[11px]" style={{ color: '#98A2B3' }}>
@@ -48,7 +51,7 @@ export const TokenIconHeader = ({
           type="button"
           onClick={() => setEditing(true)}
           className="text-xs font-semibold bg-transparent border-0 p-0 cursor-pointer"
-          style={{ color: '#F5B800' }}
+          style={{ color: 'var(--bw-accent)' }}
         >
           Change icon
         </button>
@@ -69,7 +72,7 @@ const ChangeIconSheet = ({ onClose }: { onClose: () => void }) => {
   const { chromeStorageService } = useServiceContext();
   const name = chromeStorageService.getCurrentAccountObject().account?.name ?? '';
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <button onClick={onClose} aria-label="Back" className="p-2 bg-transparent border-0">
           <ArrowLeft size={20} color="white" />

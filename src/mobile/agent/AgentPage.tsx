@@ -24,7 +24,7 @@ const AgentPage = () => {
     <div
       className="w-full h-full flex flex-col"
       style={{
-        background: '#010101',
+        background: 'var(--bw-bg)',
         paddingTop: '3.5rem',
         paddingBottom: keyboard ? `${keyboard}px` : 'var(--dock-h, 3.75rem)',
       }}

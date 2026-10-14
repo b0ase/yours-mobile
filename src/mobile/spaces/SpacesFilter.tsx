@@ -8,7 +8,7 @@ import type { BchatClient } from '../chat/api';
 import { audienceCount, audienceLine, roomsWithSpaces, stageOf } from './model';
 import { MAX_ROOMS, useRoomSpaces } from './roomSpaces';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 const PANEL = '#121316';

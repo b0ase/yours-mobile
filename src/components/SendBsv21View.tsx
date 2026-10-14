@@ -526,7 +526,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 onBack();
               }}
               className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 outline-none border-none cursor-pointer"
-              style={{ backgroundColor: '#17191E' }}
+              style={{ backgroundColor: 'var(--bw-surface)' }}
             >
               <ArrowLeft size={16} style={{ color: '#FFFFFF' }} />
             </motion.button>
@@ -696,7 +696,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                         whileTap={{ scale: 0.93 }}
                         onClick={() => handleSetMax(recipient.id)}
                         className="flex items-center gap-1 px-2.5 py-1.5 mr-1.5 rounded-lg border-0 outline-none cursor-pointer shrink-0"
-                        style={{ background: `${accent}18` }}
+                        style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)` }}
                         title="Fill with remaining available amount"
                       >
                         <span className="text-[11px] font-bold" style={{ color: accent }}>
@@ -726,8 +726,8 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
               onClick={addRecipient}
               className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl border-0 outline-none cursor-pointer"
               style={{
-                background: `${accent}10`,
-                border: `1px dashed ${accent}40`,
+                background: `color-mix(in srgb, ${accent} 6%, transparent)`,
+                border: `1px dashed color-mix(in srgb, ${accent} 25%, transparent)`,
               }}
             >
               <Plus size={14} style={{ color: accent }} />
@@ -748,7 +748,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                   type="button"
                   onClick={() => setSelling(true)}
                   className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
-                  style={{ backgroundColor: '#17191E', borderColor: '#3a2f0c', color: '#FFD24D' }}
+                  style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
                 >
                   <Tag size={14} />
                   Sell
@@ -777,7 +777,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 disabled={composing && submitDisabled}
                 className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 // Same look as Buy · Sell · Chat (owner, 4 Oct 2026).
-                style={{ backgroundColor: '#17191E', borderColor: '#3a2f0c', color: '#FFD24D' }}
+                style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
               >
                 <Send size={14} />
                 {isProcessing ? 'Sending...' : 'Send'}

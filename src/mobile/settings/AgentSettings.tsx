@@ -12,7 +12,7 @@ import { consentInfo, consentTarget, hasConsent, revokeConsent } from '../agent/
  * Settings › b agent: how the b agent is paid for. Pay per message (BSV, with a daily limit) or
  * the user's own provider key (kept in the device's secure storage, sent only to that provider).
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -141,7 +141,7 @@ export const KeyScreen = ({ onBack }: { onBack: () => void }) => {
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}

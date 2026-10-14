@@ -17,7 +17,7 @@ import {
   type Report,
 } from './ugc';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -95,7 +95,7 @@ export const TermsGate = ({ children, compact }: { children: ReactNode; compact?
       style={{
         paddingTop: 'calc(var(--wallet-inset-top, 0px) + 4.5rem)',
         paddingBottom: '7rem',
-        background: '#010101',
+        background: 'var(--bw-bg)',
       }}
     >
       <TermsCard />
@@ -108,7 +108,7 @@ export const TermsScreen = ({ onBack }: { onBack: () => void }) => {
   useBackClose(true, onBack);
   const ok = useTermsAccepted();
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center justify-between px-4 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}

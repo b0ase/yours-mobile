@@ -350,7 +350,7 @@ export const SweepMigration = () => {
                 background: isDone
                   ? `linear-gradient(90deg, #A1FF8B, #34D399)`
                   : isActive
-                    ? accent + '70'
+                    ? `color-mix(in srgb, ${accent} 44%, transparent)`
                     : contrast + '15',
               }}
             />
@@ -401,7 +401,7 @@ export const SweepMigration = () => {
             >
               <div
                 className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: `${accent}15` }}
+                style={{ background: `color-mix(in srgb, ${accent} 8%, transparent)` }}
               >
                 <Shield size={16} style={{ color: accent }} />
               </div>
@@ -474,7 +474,10 @@ export const SweepMigration = () => {
             <motion.div variants={fadeUp} className="mb-5">
               <div
                 className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                style={{ background: `${accent}15`, border: `1px solid ${accent}30` }}
+                style={{
+                  background: `color-mix(in srgb, ${accent} 8%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${accent} 19%, transparent)`,
+                }}
               >
                 <Lock size={28} style={{ color: accent }} />
               </div>
@@ -554,7 +557,11 @@ export const SweepMigration = () => {
                     variants={fadeUp}
                     className="flex items-center gap-3 rounded-xl px-4 py-3"
                     style={{
-                      background: isError ? `${errorColor}10` : isDone ? `${accent}10` : rowBg,
+                      background: isError
+                        ? `${errorColor}10`
+                        : isDone
+                          ? `color-mix(in srgb, ${accent} 6%, transparent)`
+                          : rowBg,
                       border: `1px solid ${isError ? errorColor : isDone ? accent : contrast}15`,
                     }}
                   >
@@ -562,7 +569,11 @@ export const SweepMigration = () => {
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
                       style={{
-                        background: isError ? `${errorColor}20` : isDone ? `${accent}20` : `${gray}15`,
+                        background: isError
+                          ? `${errorColor}20`
+                          : isDone
+                            ? `color-mix(in srgb, ${accent} 13%, transparent)`
+                            : `${gray}15`,
                       }}
                     >
                       {isDone && <Check size={13} style={{ color: accent }} />}
@@ -648,7 +659,10 @@ export const SweepMigration = () => {
               <motion.div variants={fadeUp} className="mb-5">
                 <div
                   className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                  style={{ background: `${accent}15`, border: `1px solid ${accent}30` }}
+                  style={{
+                    background: `color-mix(in srgb, ${accent} 8%, transparent)`,
+                    border: `1px solid color-mix(in srgb, ${accent} 19%, transparent)`,
+                  }}
                 >
                   <CheckCircle size={28} style={{ color: accent }} />
                 </div>
@@ -692,7 +706,7 @@ export const SweepMigration = () => {
                     <div className="flex items-center gap-2 mb-3">
                       <div
                         className="w-8 h-8 rounded-xl flex items-center justify-center"
-                        style={{ background: `${accent}15` }}
+                        style={{ background: `color-mix(in srgb, ${accent} 8%, transparent)` }}
                       >
                         <Coins size={14} style={{ color: accent }} />
                       </div>
@@ -701,7 +715,7 @@ export const SweepMigration = () => {
                       </span>
                       <span
                         className="ml-auto text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: `${accent}18`, color: accent }}
+                        style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)`, color: accent }}
                       >
                         {(assets.totalBsv / 1e8).toFixed(8)} BSV
                       </span>
@@ -728,7 +742,7 @@ export const SweepMigration = () => {
                     <div className="flex items-center gap-2 mb-2">
                       <div
                         className="w-8 h-8 rounded-xl flex items-center justify-center"
-                        style={{ background: `${accent}15` }}
+                        style={{ background: `color-mix(in srgb, ${accent} 8%, transparent)` }}
                       >
                         <Image size={14} style={{ color: accent }} />
                       </div>
@@ -737,7 +751,7 @@ export const SweepMigration = () => {
                       </span>
                       <span
                         className="ml-auto text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: `${accent}18`, color: accent }}
+                        style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)`, color: accent }}
                       >
                         {assets.ordinals.length}
                       </span>
@@ -783,7 +797,7 @@ export const SweepMigration = () => {
                         {o.contentType && (
                           <span
                             className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                            style={{ background: `${accent}18`, color: accent }}
+                            style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)`, color: accent }}
                           >
                             {o.contentType.split('/').pop()}
                           </span>
@@ -799,7 +813,7 @@ export const SweepMigration = () => {
                     <div className="flex items-center gap-2 mb-3">
                       <div
                         className="w-8 h-8 rounded-xl flex items-center justify-center"
-                        style={{ background: `${accent}15` }}
+                        style={{ background: `color-mix(in srgb, ${accent} 8%, transparent)` }}
                       >
                         <Image size={14} style={{ color: accent }} />
                       </div>
@@ -808,7 +822,7 @@ export const SweepMigration = () => {
                       </span>
                       <span
                         className="ml-auto text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: `${accent}18`, color: accent }}
+                        style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)`, color: accent }}
                       >
                         {assets.opnsNames.length}
                       </span>
@@ -839,7 +853,7 @@ export const SweepMigration = () => {
                     <div className="flex items-center gap-2 mb-3">
                       <div
                         className="w-8 h-8 rounded-xl flex items-center justify-center"
-                        style={{ background: `${accent}15` }}
+                        style={{ background: `color-mix(in srgb, ${accent} 8%, transparent)` }}
                       >
                         <Coins size={14} style={{ color: accent }} />
                       </div>
@@ -871,7 +885,7 @@ export const SweepMigration = () => {
                         </span>
                         <span
                           className="text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                          style={{ background: `${accent}18`, color: accent }}
+                          style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)`, color: accent }}
                         >
                           {t.totalAmount.toString()} ({t.outputs.length})
                         </span>
@@ -943,7 +957,10 @@ export const SweepMigration = () => {
                 {/* Preserved-keys notice */}
                 <div
                   className="rounded-2xl p-3 flex gap-2 items-start"
-                  style={{ background: `${accent}08`, borderLeft: `3px solid ${accent}40` }}
+                  style={{
+                    background: `color-mix(in srgb, ${accent} 3%, transparent)`,
+                    borderLeft: `3px solid color-mix(in srgb, ${accent} 25%, transparent)`,
+                  }}
                 >
                   <Shield size={13} style={{ color: accent, marginTop: 2, flexShrink: 0 }} />
                   <p className="text-xs leading-relaxed" style={{ color: contrast + 'aa' }}>
@@ -1015,13 +1032,13 @@ export const SweepMigration = () => {
                     variants={fadeUp}
                     className="flex items-center gap-3 rounded-xl px-4 py-3"
                     style={{
-                      background: ok ? `${accent}10` : `${errorColor}10`,
+                      background: ok ? `color-mix(in srgb, ${accent} 6%, transparent)` : `${errorColor}10`,
                       border: `1px solid ${ok ? accent : errorColor}20`,
                     }}
                   >
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-                      style={{ background: ok ? `${accent}20` : `${errorColor}20` }}
+                      style={{ background: ok ? `color-mix(in srgb, ${accent} 13%, transparent)` : `${errorColor}20` }}
                     >
                       {ok ? (
                         <Check size={13} style={{ color: accent }} />
@@ -1070,7 +1087,7 @@ export const SweepMigration = () => {
               <div
                 className="w-16 h-16 rounded-2xl flex items-center justify-center"
                 style={{
-                  background: allGood ? `${accent}15` : `${errorColor}15`,
+                  background: allGood ? `color-mix(in srgb, ${accent} 8%, transparent)` : `${errorColor}15`,
                   border: `1px solid ${allGood ? accent : errorColor}30`,
                 }}
               >
@@ -1103,13 +1120,13 @@ export const SweepMigration = () => {
                     variants={fadeUp}
                     className="flex items-start gap-3 rounded-2xl px-4 py-3"
                     style={{
-                      background: ok ? `${accent}08` : `${errorColor}08`,
+                      background: ok ? `color-mix(in srgb, ${accent} 3%, transparent)` : `${errorColor}08`,
                       borderLeft: `3px solid ${ok ? accent : errorColor}`,
                     }}
                   >
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                      style={{ background: ok ? `${accent}20` : `${errorColor}20` }}
+                      style={{ background: ok ? `color-mix(in srgb, ${accent} 13%, transparent)` : `${errorColor}20` }}
                     >
                       {ok ? (
                         <Check size={12} style={{ color: accent }} />
@@ -1146,7 +1163,10 @@ export const SweepMigration = () => {
               {/* Preserved-keys notice */}
               <div
                 className="rounded-2xl p-3 flex gap-2 items-start"
-                style={{ background: `${accent}08`, borderLeft: `3px solid ${accent}40` }}
+                style={{
+                  background: `color-mix(in srgb, ${accent} 3%, transparent)`,
+                  borderLeft: `3px solid color-mix(in srgb, ${accent} 25%, transparent)`,
+                }}
               >
                 <Shield size={13} style={{ color: accent, marginTop: 2, flexShrink: 0 }} />
                 <p className="text-xs leading-relaxed" style={{ color: contrast + 'aa' }}>

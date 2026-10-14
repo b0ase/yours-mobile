@@ -12,7 +12,7 @@ import { SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
 import { rememberStrategy, myStrategies } from './myStrategies';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const CARD = '#17191E';
 const LINE = '#2b2f36';

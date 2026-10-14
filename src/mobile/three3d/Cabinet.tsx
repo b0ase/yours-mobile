@@ -303,7 +303,10 @@ export const Cabinet = ({ weapon, owned, onClose }: { weapon: Weapon; owned?: bo
             type="button"
             onClick={() => void openBapp('TokenBlaster', storeUrl(weapon.id))}
             className="w-full rounded-xl py-3 text-sm font-bold border-0"
-            style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+            style={{
+              background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+              color: 'var(--bw-on-accent)',
+            }}
           >
             Get it · {usd(weapon.priceSats)}
           </button>

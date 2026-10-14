@@ -20,9 +20,9 @@ const CopyRow = ({ address, copied, onCopy }: { address: string; copied: boolean
     type="button"
     onClick={onCopy}
     className="flex items-center gap-2 px-4 py-3 rounded-xl w-full text-left"
-    style={{ background: '#17191E' }}
+    style={{ background: 'var(--bw-surface)' }}
   >
-    {copied ? <Check size={16} color="#FFD24D" /> : <Copy size={16} color="#98A2B3" />}
+    {copied ? <Check size={16} color="var(--bw-accent-hi)" /> : <Copy size={16} color="#98A2B3" />}
     <span className="text-xs font-mono flex-1 text-white overflow-hidden text-ellipsis whitespace-nowrap">
       {address}
     </span>
@@ -46,7 +46,7 @@ export const ReceiveTabs = () => {
   };
   return (
     <>
-      <div className="flex gap-1 rounded-xl p-1 bg-[#17191E] w-full mb-4" role="tablist">
+      <div className="flex gap-1 rounded-xl p-1 bg-[var(--bw-surface)] w-full mb-4" role="tablist">
         {(
           [
             ['pay', 'Money'],

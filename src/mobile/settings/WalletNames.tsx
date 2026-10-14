@@ -54,12 +54,16 @@ export const WalletNames = () => {
       </p>
       {names.map((n) => (
         <div key={n.paymail} className="flex items-center gap-2 py-1 text-sm text-white">
-          {n.kind === 'plain' ? <AtSign size={14} color="#98A2B3" /> : <BadgeCheck size={14} color="#F5B800" />}
+          {n.kind === 'plain' ? (
+            <AtSign size={14} color="#98A2B3" />
+          ) : (
+            <BadgeCheck size={14} color="var(--bw-accent)" />
+          )}
           <span className="truncate">{n.paymail}</span>
           {n.main && (
             <span
               className="text-[10px] font-bold rounded px-1.5 py-0.5"
-              style={{ background: '#F5B80022', color: '#F5B800' }}
+              style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
             >
               MAIN
             </span>

@@ -69,7 +69,7 @@ import {
   type RecentsFilter,
 } from './phone';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const GREEN = '#22c55e';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 // bPhone screens are bWalletX only: the store bundle carries neither (Rollup drops the dead branch).
@@ -193,7 +193,10 @@ const BPhoneCard = ({ profile, onOpen }: { profile: BPhoneProfile | null; onOpen
     >
       <span
         className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: 'rgba(255,210,77,0.12)', border: '1px solid rgba(255,210,77,0.35)' }}
+        style={{
+          background: 'rgb(var(--bw-accent-hi-rgb) / 0.12)',
+          border: '1px solid rgb(var(--bw-accent-hi-rgb) / 0.35)',
+        }}
       >
         <Phone size={17} color={GOLD} />
       </span>
@@ -596,7 +599,7 @@ export const CallsList = ({
                   {filterMenu && (
                     <div
                       role="menu"
-                      className="absolute left-0 top-full mt-1 z-20 w-36 rounded-xl border border-[#2b2f36] bg-[#17191E] py-1 shadow-xl"
+                      className="absolute left-0 top-full mt-1 z-20 w-36 rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] py-1 shadow-xl"
                     >
                       {RECENTS_FILTERS.map((x) => (
                         <button
@@ -776,7 +779,7 @@ export const CallsList = ({
                     aria-label="Who to call"
                     autoCapitalize="none"
                     autoCorrect="off"
-                    className="flex-1 min-w-0 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-3 text-sm text-white outline-none"
+                    className="flex-1 min-w-0 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-3 text-sm text-white outline-none"
                   />
                   <button
                     onClick={() => void callName()}

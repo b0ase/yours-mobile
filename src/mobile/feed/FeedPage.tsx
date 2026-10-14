@@ -162,7 +162,7 @@ import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
  * Every post and media ref passes the market safety filter; syndicated images, video posters
  * and previews stay blurred until tapped.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
@@ -415,7 +415,7 @@ const Layer = ({
 }) => {
   useBackClose(true, onBack);
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}
@@ -1770,7 +1770,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   return (
     <div
       className="isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: '100%', background: '#010101' }}
+      style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <PullToRefresh onRefresh={() => load(tab)} />
       <VideoBackground src={feedBg} poster={feedPoster} scrim="dark" position="fixed" />
@@ -2350,7 +2350,7 @@ const PostThread = ({
           <PostCard post={p} a={a} />
         </div>
       ))}
-      <div style={{ background: 'rgba(255,210,77,0.04)' }}>
+      <div style={{ background: 'rgb(var(--bw-accent-hi-rgb) / 0.04)' }}>
         <PostCard post={focus} a={{ ...a, onOpen: () => undefined }} />
       </div>
       <PostList
@@ -2440,7 +2440,7 @@ const Leaderboard = ({
     </div>
   );
   const rowStyle = (mine: boolean) => ({
-    background: mine ? 'rgba(255,210,77,0.08)' : BOARD_PANEL,
+    background: mine ? 'rgb(var(--bw-accent-hi-rgb) / 0.08)' : BOARD_PANEL,
     border: `1px solid ${mine ? GOLD : BOARD_LINE}`,
   });
   const rank = (n: number) => (

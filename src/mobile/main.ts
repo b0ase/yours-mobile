@@ -25,6 +25,10 @@ import { initPushTaps } from './push/register';
 import { initTesterCheckins } from './testers/checkin';
 import '@fontsource/space-grotesk/700.css';
 import './mobile.css';
+import { applyBootAccent } from './theme/accent';
+
+// App accent (Theme → App colours) before the first paint, so a non-gold accent never flashes gold.
+applyBootAccent();
 
 /**
  * Mobile entry point. Stands up the hub (the "browser"), the background

@@ -142,12 +142,12 @@ export const SocialSignIn = ({
   if (profile)
     return (
       <div className="w-[92%] mb-4">
-        <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: '#17191E' }}>
+        <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: 'var(--bw-surface)' }}>
           {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
           <div className="flex-1 min-w-0 text-left">
             <div className="text-sm font-semibold text-white flex items-center gap-1">
               {profile.provider === 'x' ? `@${profile.name}` : profile.name}
-              <BadgeCheck size={14} color="#F5B800" />
+              <BadgeCheck size={14} color="var(--bw-accent)" />
             </div>
             <div className="text-[11px]" style={{ color: '#98A2B3' }}>
               Verified · you choose your handle next
@@ -174,7 +174,7 @@ export const SocialSignIn = ({
               type="button"
               onClick={onRestore}
               className="block mt-2 h-9 w-full rounded-lg text-sm font-semibold border-0"
-              style={{ background: '#FFD24D', color: '#15202B' }}
+              style={{ background: 'var(--bw-accent-hi)', color: '#15202B' }}
             >
               Enter the 12 words for {taken}
             </button>
@@ -189,7 +189,7 @@ export const SocialSignIn = ({
       onClick={() => void go(p)}
       disabled={!!busy}
       className="flex flex-1 items-center justify-center gap-2 h-11 rounded-xl text-sm font-semibold border-0"
-      style={{ background: '#17191E', color: '#fff', opacity: busy && busy !== p ? 0.5 : 1 }}
+      style={{ background: 'var(--bw-surface)', color: '#fff', opacity: busy && busy !== p ? 0.5 : 1 }}
     >
       {busy === p ? <Loader2 size={16} className="animate-spin" /> : icon}
       {label}
