@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
 import { parseUsdInput } from '../money/money';
 import { POT_NAME_PLACEHOLDER, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
-import { OWN_SERVICE_PAYEES, addSubscription, subProblem, type NewSub, type Period } from './pots';
+import { ownServicePayees, addSubscription, subProblem, type NewSub, type Period } from './pots';
 import { reschedulePotReminders } from './notifyPots';
 import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -98,7 +98,8 @@ export const AddOrderSheet = ({
   const [max, setMax] = useState('');
   const [error, setError] = useState('');
 
-  const svc = OWN_SERVICE_PAYEES.find((p) => p.service === service);
+  const servicePayees = ownServicePayees();
+  const svc = servicePayees.find((p) => p.service === service);
   const recipient = to.trim();
   const payee = svc
     ? { name: svc.name, service: svc.service }
@@ -141,9 +142,9 @@ export const AddOrderSheet = ({
           {requestLabel(req)} asked for this subscription. Check the amount, then Set up. Nothing is paid until you do.
         </p>
       )}
-      {SUBSCRIPTIONS_ENABLED && OWN_SERVICE_PAYEES.length > 0 && (
+      {SUBSCRIPTIONS_ENABLED && servicePayees.length > 0 && (
         <div className="flex gap-2 flex-wrap">
-          {[{ service: '', name: 'A person' }, ...OWN_SERVICE_PAYEES].map((p) => (
+          {[{ service: '', name: 'A person' }, ...servicePayees].map((p) => (
             <button
               key={p.service || 'person'}
               type="button"

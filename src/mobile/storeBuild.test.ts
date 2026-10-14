@@ -196,7 +196,7 @@ describe('pots and subscriptions: pots + person standing orders everywhere, serv
     expect(cond(s, 'BILLING_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
   test('own-service payees are data only behind SUBSCRIPTIONS_ENABLED', () => {
-    expect(src('./pots/pots.ts')).toMatch(/OWN_SERVICE_PAYEES[^=]*= SUBSCRIPTIONS_ENABLED\s*\?/);
+    expect(src('./pots/pots.ts')).toMatch(/ownServicePayees[^=]*=[^=]*=>\s*SUBSCRIPTIONS_ENABLED\s*\?/);
   });
 });
 
