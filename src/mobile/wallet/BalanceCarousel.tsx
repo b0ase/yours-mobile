@@ -1033,7 +1033,14 @@ const EditGrid = ({
   onDone: () => void;
 }) => {
   const [openB, setOpenB] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; from: string | null; x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<{
+    id: string;
+    from: string | null;
+    x: number;
+    y: number;
+    sx: number;
+    sy: number;
+  } | null>(null);
   const nameOf = (id: string) =>
     id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
   const card = (id: string) => cards.find((c) => c.id === id);
@@ -1081,28 +1088,75 @@ const EditGrid = ({
   const start = (id: string, from: string | null) => (e: React.PointerEvent) => {
     if (id === 'bsv') return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    setDrag({ id, from, x: e.clientX, y: e.clientY });
+    setDrag({ id, from, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
   };
   const moveP = (e: React.PointerEvent) => drag && setDrag({ ...drag, x: e.clientX, y: e.clientY });
+  // Reorder within the row, or within an open basket (iPhone style: drop in a gap or on a tile's edge).
+  const reorder = (srcId: string, scope: string | null, targetId: string, after: boolean) => {
+    const place = <T,>(list: T[], key: (t: T) => string) => {
+      const i = list.findIndex((t) => key(t) === srcId);
+      if (i < 0) return list;
+      const n = [...list];
+      const [x] = n.splice(i, 1);
+      let j = n.findIndex((t) => key(t) === targetId);
+      if (j < 0) return list;
+      if (after) j += 1;
+      n.splice(j, 0, x);
+      return n;
+    };
+    if (scope)
+      onChange({
+        ...layout,
+        row: layout.row.map((it) =>
+          it.id === scope && it.kind === 'basket' ? { ...it, members: place(it.members, (m) => m) } : it,
+        ),
+      });
+    else onChange({ ...layout, row: place(layout.row, (it) => it.id) });
+  };
   const end = (e: React.PointerEvent) => {
     if (!drag) return;
-    const under = document
-      .elementsFromPoint(e.clientX, e.clientY)
-      .map((el) => (el as HTMLElement).closest?.('[data-drop]') as HTMLElement | null)
-      .find((el) => el && el.dataset.drop !== drag.id);
-    const target = under?.dataset.drop ?? null;
-    if (target) drop(drag.id, drag.from, target);
-    else if (drag.from === null && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) {
-      const it = layout.row.find((i) => i.id === drag.id);
-      if (it?.kind === 'basket') setOpenB(it.id);
-    }
+    const d = drag;
     setDrag(null);
+    const x = e.clientX;
+    const y = e.clientY;
+    if (Math.hypot(x - d.sx, y - d.sy) < 6) {
+      if (d.from === null) {
+        const it = layout.row.find((i) => i.id === d.id);
+        if (it?.kind === 'basket') setOpenB(it.id);
+      }
+      return;
+    }
+    const out = document.elementsFromPoint(x, y).some((el) => (el as HTMLElement).dataset?.drop === '__out');
+    if (out && d.from) return drop(d.id, d.from, '__out');
+    const scope = d.from ?? 'row';
+    const tiles = Array.from(document.querySelectorAll<HTMLElement>(`[data-tile][data-scope="${scope}"]`)).filter(
+      (el) => el.dataset.tile !== d.id,
+    );
+    if (!tiles.length) return;
+    let best = tiles[0];
+    let bestD = Infinity;
+    for (const el of tiles) {
+      const b = el.getBoundingClientRect();
+      const dist = Math.hypot(x - (b.left + b.width / 2), y - (b.top + b.height / 2));
+      if (dist < bestD) {
+        bestD = dist;
+        best = el;
+      }
+    }
+    const b = best.getBoundingClientRect();
+    const inside = x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
+    const middle = inside && Math.abs(x - (b.left + b.width / 2)) < b.width * 0.22;
+    const target = best.dataset.tile!;
+    // Onto the middle of another tile in the row: make or join a basket. Anywhere else: move into that gap.
+    if (middle && !d.from) drop(d.id, null, target);
+    else reorder(d.id, d.from, target, x > b.left + b.width / 2);
   };
   const basket = layout.row.find((i) => i.id === openB);
   const tile = (id: string, from: string | null, label: string, logo: ReactNode) => (
     <div
       key={id}
-      data-drop={from ? undefined : id}
+      data-tile={id}
+      data-scope={from ?? 'row'}
       className={`bw-eg-tile${drag?.id === id ? ' is-drag' : ''}${layout.hidden.includes(id) ? ' is-hidden' : ''}`}
       onPointerDown={start(id, from)}
       onPointerMove={moveP}
@@ -1139,8 +1193,8 @@ const EditGrid = ({
           </button>
         </div>
         <p className="bw-eg-hint">
-          Drag a card onto another to make a basket. Tap a basket to open it; drag a card out to take it out. – hides a
-          card.
+          Drag a card into a gap to move it; drop it onto another card to make a basket. Tap a basket to open it; drag a
+          card out to take it out. – hides a card.
         </p>
         <div className="bw-eg-grid">
           {layout.row.map((it) =>
