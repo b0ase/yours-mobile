@@ -28,6 +28,7 @@ import {
   findPoster,
   firstFrameUrl,
   type Clip,
+  registerUrl,
 } from './bmovies';
 import {
   BMOVIES_SWIPE_TRADE_MOCK,
@@ -69,8 +70,6 @@ type Theme = {
   onAccent: string;
   backdrop: string;
   ticker: string;
-  buy: string;
-  buyEdge: string;
   home: string;
   sources: readonly VideoSource[];
 };
@@ -84,8 +83,6 @@ const THEMES: Record<'bmovies' | 'bmusic', Theme> = {
     onAccent: '#1a1300',
     backdrop: 'radial-gradient(circle at 50% 35%, #3a2a00 0%, #120d00 55%, #010101 100%)',
     ticker: BM_YELLOW,
-    buy: BM_GREEN,
-    buyEdge: BM_GREEN_EDGE,
     home: `${BMOVIES_ORIGIN}/feed`,
     sources: [{ id: 'bmovies', label: 'bMovies', url: FEED_URL, enabled: true }],
   },
@@ -95,8 +92,6 @@ const THEMES: Record<'bmovies' | 'bmusic', Theme> = {
     onAccent: '#04122b',
     backdrop: 'radial-gradient(circle at 50% 35%, #0c2a5c 0%, #050f22 55%, #010101 100%)',
     ticker: BMUSIC_BLUE,
-    buy: BMUSIC_BLUE,
-    buyEdge: 'rgba(62,139,255,0.8)',
     home: `${BMOVIES_ORIGIN}/bmusic`,
     sources: BMUSIC_SOURCES,
   },
@@ -259,7 +254,7 @@ const Slide = ({
     const s0 = start.current;
     const p = e.changedTouches[0];
     start.current = null;
-    if (!BMOVIES_SWIPE_TRADE_ENABLED || !s0 || !p || !c.ticker) return;
+    if (!BMOVIES_SWIPE_TRADE_ENABLED || !s0 || !p || !c.ticker || !c.registered) return;
     const side = tradeSide(p.clientX - s0.x, p.clientY - s0.y);
     if (side) onTrade(c, side);
   };
@@ -366,7 +361,7 @@ const Slide = ({
           <span className="block text-[30px] uppercase leading-none tracking-[0.03em] text-white line-clamp-2">
             {c.title}
           </span>
-          {c.ticker && (
+          {c.ticker && c.registered && (
             <span
               className="mt-1 block text-[22px] uppercase leading-none tracking-[0.03em]"
               style={{ color: t.ticker }}
@@ -376,34 +371,39 @@ const Slide = ({
           )}
         </button>
         <div className="mt-3 flex items-center gap-2">
-          {/* Tap: the clip's trade page on bmovies.app. Long-press (or swipe →/←): a 1p quick trade. */}
-          <button
-            {...pressProps('buy')}
-            aria-label={c.ticker ? `Buy $${c.ticker} on ${t.name}` : `Open on ${t.name}`}
-            className="flex-1 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
-            style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${t.buyEdge}`, color: t.buy }}
-          >
-            {c.ticker ? (
-              <>
-                Buy <span style={{ opacity: 0.8 }}>${c.ticker}</span>
-              </>
-            ) : (
-              `Open on ${t.name}`
-            )}
-          </button>
-          {c.ticker && (
+          {c.registered && c.ticker ? (
+            <>
+              {/* Tap: the clip's trade page on bmovies.app. Long-press (or swipe →/←): a 1p quick trade. */}
+              <button
+                {...pressProps('buy')}
+                aria-label={`Buy $${c.ticker} on ${t.name}`}
+                className="min-w-0 flex-1 basis-0 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+                style={{
+                  fontFamily: BEBAS,
+                  background: '#0c0c0c',
+                  border: `1px solid ${BM_GREEN_EDGE}`,
+                  color: BM_GREEN,
+                }}
+              >
+                Buy
+              </button>
+              <button
+                {...pressProps('sell')}
+                aria-label={`Sell $${c.ticker} on ${t.name}`}
+                className="min-w-0 flex-1 basis-0 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+                style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${BM_RED_EDGE}`, color: BM_RED }}
+              >
+                Sell
+              </button>
+            </>
+          ) : (
             <button
-              {...pressProps('sell')}
-              aria-label={`Sell $${c.ticker} on ${t.name}`}
-              className="select-none rounded-md px-4 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
-              style={{
-                fontFamily: BEBAS,
-                background: 'transparent',
-                border: `1px solid ${BM_RED_EDGE}`,
-                color: BM_RED,
-              }}
+              onClick={() => void openDappBrowser(registerUrl(c))}
+              aria-label="Is this yours? Register it on chain"
+              className="min-w-0 flex-1 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+              style={{ fontFamily: BEBAS, background: BM_YELLOW, color: '#1a1300' }}
             >
-              Sell
+              Register
             </button>
           )}
           <button
@@ -415,9 +415,13 @@ const Slide = ({
             <Share2 size={16} color="#fff" />
           </button>
         </div>
-        {BMOVIES_SWIPE_TRADE_ENABLED && c.ticker && (
+        {BMOVIES_SWIPE_TRADE_ENABLED && c.registered && c.ticker ? (
           <p className="mt-2 text-center text-[10px]" style={{ color: MUTED }}>
             Swipe → buy 1p · ← sell 1p{BMOVIES_SWIPE_TRADE_MOCK ? ' · practice mode, no money moves' : ''}
+          </p>
+        ) : (
+          <p className="mt-2 text-center text-[11px]" style={{ color: MUTED }}>
+            Is this yours? Sign in with X to prove it, then register it on chain.
           </p>
         )}
         {/* Scrubber: fills left to right as the clip plays (white on white/25, 3px). */}
@@ -467,7 +471,7 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
   useEffect(() => () => void (toastTimer.current && clearTimeout(toastTimer.current)), []);
 
   const doTrade = async (c: Clip, side: Side, b: Budget) => {
-    if (!c.ticker) return;
+    if (!c.ticker || !c.registered) return;
     const now = Date.now();
     const trade = await executeTrade(c.ticker, side, now);
     setBudget(spend(b, now));

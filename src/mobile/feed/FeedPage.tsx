@@ -2121,14 +2121,17 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         />
       )}
 
-      <button
-        onClick={() => setComposing({ replyTo: null })}
-        aria-label="New post"
-        className="fixed right-5 z-40 h-14 w-14 rounded-full flex items-center justify-center shadow-lg"
-        style={{ bottom: 'calc(env(safe-area-inset-bottom) + 96px)', background: GOLD }}
-      >
-        <PenLine size={22} color="#1a1300" />
-      </button>
+      {/* No Post button over the bMovies / bMusic reel: it covered BUY / SELL / REGISTER. */}
+      {!(feed === 'bmovies' || feed === 'bmusic') && (
+        <button
+          onClick={() => setComposing({ replyTo: null })}
+          aria-label="New post"
+          className="fixed right-5 z-40 h-14 w-14 rounded-full flex items-center justify-center shadow-lg"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom) + 96px)', background: GOLD }}
+        >
+          <PenLine size={22} color="#1a1300" />
+        </button>
+      )}
 
       {composing && (
         <Composer
