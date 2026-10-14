@@ -28,7 +28,8 @@ const {
 } = await import('./pots');
 const { payDue } = await import('./payDue');
 const { getPending } = await import('./pots');
-const { parseConfig, DEFAULT_CONFIG, getRemoteConfig } = await import('../config/remoteConfig');
+const { parseConfig, DEFAULT_CONFIG, getRemoteConfig, resetRemoteConfigFailure, CONFIG_FAIL_TTL } =
+  await import('../config/remoteConfig');
 const { plannedReminders, reminderId } = await import('./notifyPots');
 const {
   getAgentAccount,
@@ -201,6 +202,22 @@ describe('remote config fails closed', () => {
     expect(down.billing.enabled).toBe(false);
     const signed = await getRemoteConfig(() => Promise.resolve(new Response(JSON.stringify({ body, sig }))), 2);
     expect(signed.billing.enabled).toBe(false);
+  });
+  test('a failed config fetch is not retried for an hour (no reconnect-loop spam)', async () => {
+    mem.clear();
+    resetRemoteConfigFailure();
+    let calls = 0;
+    const f = () => {
+      calls++;
+      return Promise.resolve(new Response('', { status: 404 }));
+    };
+    await getRemoteConfig(f, 1000);
+    await getRemoteConfig(f, 2000);
+    await getRemoteConfig(f, 1000 + CONFIG_FAIL_TTL - 1);
+    expect(calls).toBe(1);
+    await getRemoteConfig(f, 1000 + CONFIG_FAIL_TTL + 1);
+    expect(calls).toBe(2);
+    resetRemoteConfigFailure();
   });
 });
 

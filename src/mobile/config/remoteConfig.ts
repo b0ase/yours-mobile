@@ -80,7 +80,10 @@ export const parseConfig = (raw: unknown, pubkey = CONFIG_PUBKEY, billingBuild =
   }
 };
 
-type Cached = { at: number; raw: unknown };
+type Cached = { at: number; raw: unknown; failed?: boolean };
+/** A failed fetch (404, CORS, offline) is remembered this long, so reconnect loops don't refetch it every few seconds. */
+export const CONFIG_FAIL_TTL = 3600_000;
+let failedAt = 0;
 const readCache = (): Cached | null => {
   try {
     const v = localStorage.getItem(CACHE);
@@ -96,7 +99,8 @@ export const getRemoteConfig = async (
   now = Date.now(),
 ): Promise<RemoteConfig> => {
   const c = readCache();
-  if (c && now - c.at < CONFIG_TTL) return parseConfig(c.raw);
+  if (c && !c.failed && now - c.at < CONFIG_TTL) return parseConfig(c.raw);
+  if (now - Math.max(failedAt, c?.failed ? c.at : 0) < CONFIG_FAIL_TTL) return DEFAULT_CONFIG;
   try {
     const r = await f(CONFIG_URL);
     if (!r.ok) throw new Error(String(r.status));
@@ -108,6 +112,16 @@ export const getRemoteConfig = async (
     }
     return parseConfig(raw);
   } catch {
+    failedAt = now;
+    try {
+      localStorage.setItem(CACHE, JSON.stringify({ at: now, raw: null, failed: true }));
+    } catch {
+      /* storage unavailable */
+    }
     return DEFAULT_CONFIG;
   }
+};
+/** Test hook: forget the in-memory failure. */
+export const resetRemoteConfigFailure = () => {
+  failedAt = 0;
 };

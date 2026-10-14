@@ -9,6 +9,19 @@ global.Buffer = Buffer;
 global.process = process;
 window.Buffer = Buffer;
 
+// After a web deploy, an open tab asks for old chunk/CSS hashes that no longer exist ("Refused to apply style …
+// MIME type text/plain"). Reload once to pick up the new build; a session flag stops a reload loop.
+window.addEventListener('vite:preloadError', (e) => {
+  try {
+    if (sessionStorage.getItem('bwallet.reloadedForDeploy')) return;
+    sessionStorage.setItem('bwallet.reloadedForDeploy', '1');
+  } catch {
+    return;
+  }
+  e.preventDefault();
+  window.location.reload();
+});
+
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element');
 const rootDiv = ReactDOM.createRoot(root);
