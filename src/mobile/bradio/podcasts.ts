@@ -2,12 +2,15 @@
  * bRadio: live Spaces and podcasts (recorded Spaces, minted as 1Sat ordinal NFTs).
  *
  * Server contract (bit-sign; the endpoints may not be live yet, so every reader degrades to empty):
- *   GET  {BCHAT_ORIGIN}/api/bitsign/spaces/live?for=<handle>  → { spaces: LiveSpace[] }
- *   GET  {BCHATX_ORIGIN}/api/public/podcasts?cursor=          → { items: Podcast[], cursor? }
- *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio/challenge → { nonce, expiresAt }   (2 min, single use)
+ *   GET  {BCHAT_ORIGIN}/api/bitsign/spaces/live?for=<handle>  → { live: card[], generated_at }
+ *        card: ticker, room_name, title, host, host_avatar, gated, entry_line, speakers, listeners,
+ *        started_at, ended_at, page ('/s/<slug>' | null), reason ('following' | 'joined' | 'popular')
+ *   GET  {BCHATX_ORIGIN}/api/public/podcasts?cursor=          → { items: Podcast[], next }
+ *        (hostIdKey, previewUrl, nft may be null)
+ *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio/challenge → { nonce, expiresAt }   (not live yet: 404)
  *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio  with x-bwx-origin, x-bwx-pubkey, x-bwx-sig
- *        (signature over `bwx-podcast:<id>:<nonce>` by the key holding the NFT) → { url, expiresAt? }
- *        A signed audio URL valid ~10 min; 403 until ownership proof ships → play the preview instead.
+ *        (signature over `bwx-podcast:<id>:<nonce>` by the key holding the NFT) → { url }
+ *        Today 403 {error:'owner-only'} or 404 → play the preview instead, quietly.
  * A podcast NFT's inscription is a JSON manifest (MAP app=bwalletx, type=podcast), not the audio.
  * Pure parsers are tested against fixtures (podcasts.test.ts).
  */
@@ -20,7 +23,8 @@ export type Podcast = {
   id: string;
   title: string;
   host: string;
-  hostIdKey: string;
+  /** Null when the server doesn't know it; never relied on. */
+  hostIdKey: string | null;
   /** Up to 30 s, public. Null until the server has cut one. */
   previewUrl: string | null;
   cover: string | null;
@@ -31,7 +35,18 @@ export type Podcast = {
   nft: PodcastNft | null;
 };
 
-export type LiveSpace = { slug: string; title: string; host: string; listeners: number };
+export type LiveReason = 'following' | 'joined' | 'popular';
+export type LiveSpace = {
+  slug: string;
+  ticker: string;
+  title: string;
+  host: string;
+  hostAvatar: string | null;
+  listeners: number;
+  speakers: number;
+  gated: boolean;
+  reason: LiveReason | null;
+};
 
 export const PODCASTS_API = `${BCHATX_ORIGIN}/api/public/podcasts`;
 export const liveSpacesUrl = (handle: string) =>
@@ -75,7 +90,7 @@ export const parsePodcast = (v: unknown): Podcast | null => {
     id,
     title: title.slice(0, 200),
     host: str(p.host).replace(/^[@$]/, ''),
-    hostIdKey: str(p.hostIdKey),
+    hostIdKey: str(p.hostIdKey) || null,
     previewUrl: httpsUrl(p.previewUrl),
     cover: httpsUrl(p.cover),
     duration: typeof p.duration === 'number' && p.duration > 0 ? Math.round(p.duration) : 0,
@@ -91,18 +106,47 @@ export const parsePodcastPage = (data: unknown): { items: Podcast[]; cursor: str
     const p = parsePodcast(i);
     return p ? [p] : [];
   });
-  return { items, cursor: str(d.cursor) || str(d.nextCursor) || null };
+  return { items, cursor: str(d.next) || str(d.cursor) || null };
+};
+
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+const REASONS: readonly LiveReason[] = ['following', 'joined', 'popular'];
+
+/** Slug from the card's page path ('/s/<slug>'); null when the Space has no page. */
+export const slugFromPage = (page: unknown): string | null => {
+  const m = /^\/s\/([^/?#]+)\/?$/.exec(str(page));
+  if (!m) return null;
+  let slug = m[1];
+  try {
+    slug = decodeURIComponent(slug);
+  } catch {
+    return null;
+  }
+  return SLUG.test(slug) ? slug : null;
 };
 
 export const parseLiveSpaces = (data: unknown): LiveSpace[] => {
   const d = rec(data);
-  const list = Array.isArray(d.spaces) ? d.spaces : Array.isArray(data) ? (data as unknown[]) : [];
+  const list = Array.isArray(d.live) ? d.live : [];
   return list.flatMap((raw) => {
     const s = rec(raw);
-    const slug = str(s.slug);
-    if (!SLUG.test(slug)) return [];
-    const listeners = typeof s.listeners === 'number' ? s.listeners : 0;
-    return [{ slug, title: str(s.title).trim() || slug, host: str(s.host).replace(/^[@$]/, ''), listeners }];
+    // Live server sends page_url / listen_url; the spec says page.
+    const slug = slugFromPage(s.page ?? s.page_url ?? s.listen_url);
+    if (!slug || s.ended_at) return [];
+    const reason = REASONS.find((r) => r === s.reason) ?? null;
+    return [
+      {
+        slug,
+        ticker: str(s.ticker),
+        title: (str(s.title).trim() || str(s.room_name).trim() || slug).slice(0, 120),
+        host: str(s.host).replace(/^[@$]/, ''),
+        hostAvatar: httpsUrl(s.host_avatar),
+        listeners: num(s.listeners),
+        speakers: num(s.speakers),
+        gated: s.gated === true,
+        reason,
+      },
+    ];
   });
 };
 
@@ -159,6 +203,7 @@ export const fetchOwnedAudio = async (f: Fetch, p: Podcast, sign: OwnerSigner): 
   if (!p.nft) return null;
   try {
     const base = `${PODCASTS_API}/${encodeURIComponent(p.id)}/audio`;
+    // No challenge route yet (404) or any refusal → straight to the preview, no signing prompt.
     const ch = await getJson(f, `${base}/challenge`);
     const nonce = str(rec(ch.data).nonce);
     if (ch.status !== 200 || !nonce) return null;
@@ -170,7 +215,7 @@ export const fetchOwnedAudio = async (f: Fetch, p: Podcast, sign: OwnerSigner): 
     });
     if (r.status !== 200) return null;
     const d = rec(r.data);
-    return httpsUrl(d.url) ?? httpsUrl(d.audioUrl);
+    return httpsUrl(d.url);
   } catch {
     return null;
   }

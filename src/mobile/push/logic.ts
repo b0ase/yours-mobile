@@ -84,10 +84,12 @@ export const routeFromData = (data: Record<string, unknown> | null | undefined):
   if (!data || typeof data !== 'object') return null;
   if (data.kind === 'call') return null;
   if (data.kind === 'sign_in') return { segment: 'signins', ticker: '' };
-  if (data.kind === 'space_live')
-    return typeof data.slug === 'string' && SPACE_SLUG_RE.test(data.slug)
-      ? { segment: 'space', ticker: data.slug }
-      : null;
+  if (data.kind === 'space_live') {
+    // Prefer url (bwalletx://space/<slug>), fall back to slug.
+    const fromUrl = typeof data.url === 'string' ? /^bwalletx:\/\/space\/([^/?#]+)\/?$/.exec(data.url)?.[1] : undefined;
+    const slug = fromUrl ?? data.slug;
+    return typeof slug === 'string' && SPACE_SLUG_RE.test(slug) ? { segment: 'space', ticker: slug } : null;
+  }
   let ticker = normTicker(data.ticker) ?? normTicker(data.room);
   if (!ticker && typeof data.url === 'string') {
     const m = /\/room\/([^/?#]+)/.exec(data.url);

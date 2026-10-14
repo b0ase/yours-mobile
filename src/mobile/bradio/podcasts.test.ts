@@ -47,13 +47,68 @@ describe('podcast catalogue (fixtures)', () => {
 });
 
 describe('live spaces', () => {
-  test('parses and filters slugs', () => {
-    expect(
-      parseLiveSpaces({ spaces: [{ slug: 'lounge', title: 'Lounge', host: '@b', listeners: 4 }, { slug: 'no/pe' }] }),
-    ).toEqual([{ slug: 'lounge', title: 'Lounge', host: 'b', listeners: 4 }]);
+  const card = {
+    ticker: 'LOUNGE',
+    room_name: 'Lounge',
+    title: 'Lounge live',
+    host: '@b',
+    host_avatar: 'https://cdn.example.com/b.png',
+    gated: false,
+    entry_line: null,
+    speakers: 2,
+    listeners: 4,
+    started_at: '2026-10-15T10:00:00Z',
+    ended_at: null,
+    page: '/s/lounge',
+    reason: 'following',
+  };
+  test('parses {live:[card]}; slug from page; skips page null and bad slugs', () => {
+    const out = parseLiveSpaces({
+      live: [card, { ...card, page: null }, { ...card, page: '/s/no%2Fpe' }, { ...card, page: '/x/y' }],
+      generated_at: 'x',
+    });
+    expect(out).toEqual([
+      {
+        slug: 'lounge',
+        ticker: 'LOUNGE',
+        title: 'Lounge live',
+        host: 'b',
+        hostAvatar: 'https://cdn.example.com/b.png',
+        listeners: 4,
+        speakers: 2,
+        gated: false,
+        reason: 'following',
+      },
+    ]);
+  });
+  test('live server shape (page_url)', () => {
+    const { page: _p, ...rest } = card;
+    expect(parseLiveSpaces({ live: [{ ...rest, page_url: '/s/lounge', listen_url: '/s/lounge' }] })[0].slug).toBe(
+      'lounge',
+    );
+  });
+  test('falls back to room_name; unknown reason and http avatar dropped', () => {
+    const [s] = parseLiveSpaces({ live: [{ ...card, title: '', reason: 'x', host_avatar: 'http://a/b.png' }] });
+    expect(s.title).toBe('Lounge');
+    expect(s.reason).toBeNull();
+    expect(s.hostAvatar).toBeNull();
   });
   test('missing endpoint → none', async () => {
     expect(await fetchLiveSpaces(async () => res(404, null), 'b0asex')).toEqual([]);
+  });
+});
+
+describe('podcast nulls and paging', () => {
+  test('null hostIdKey/previewUrl/nft are fine; next is the cursor', () => {
+    const p = parsePodcastPage({
+      items: [{ id: 'p1', title: 'T', hostIdKey: null, previewUrl: null, nft: null }],
+      next: 'c2',
+    });
+    expect(p.items[0].hostIdKey).toBeNull();
+    expect(p.items[0].previewUrl).toBeNull();
+    expect(p.items[0].nft).toBeNull();
+    expect(p.cursor).toBe('c2');
+    expect(parsePodcastPage({ items: [], next: null }).cursor).toBeNull();
   });
 });
 
@@ -75,7 +130,13 @@ describe('owned audio (challenge + signature)', () => {
     expect(calls[1].headers['x-bwx-pubkey']).toBe('PK');
     expect(calls[1].headers['x-bwx-sig']).toBe('SIG');
   });
-  test('403 stub → null (preview fallback)', async () => {
+  test('challenge 404 → null without signing', async () => {
+    let signed = false;
+    const f = async () => res(404, null);
+    expect(await fetchOwnedAudio(f, pod, async () => ((signed = true), { pubKey: 'p', sig: 's' }))).toBeNull();
+    expect(signed).toBe(false);
+  });
+  test('403 owner-only → null (preview fallback)', async () => {
     const f = async (url: string) => (url.endsWith('/challenge') ? res(200, { nonce: 'n' }) : res(403, null));
     expect(await fetchOwnedAudio(f, pod, async () => ({ pubKey: 'p', sig: 's' }))).toBeNull();
   });
@@ -87,5 +148,15 @@ describe('space_live push', () => {
     expect(r).toEqual({ segment: 'space', ticker: 'lounge' });
     expect(routeFromQuery(`?${routeToQuery(r!)}`)).toEqual(r);
     expect(routeFromData({ kind: 'space_live', slug: '../x' })).toBeNull();
+  });
+  test('prefers url over slug', () => {
+    expect(routeFromData({ kind: 'space_live', slug: 'a', url: 'bwalletx://space/b' })).toEqual({
+      segment: 'space',
+      ticker: 'b',
+    });
+    expect(routeFromData({ kind: 'space_live', slug: 'a', url: 'https://x/y' })).toEqual({
+      segment: 'space',
+      ticker: 'a',
+    });
   });
 });

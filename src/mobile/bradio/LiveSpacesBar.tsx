@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Radio } from 'lucide-react';
 import { loadSession, SESSION_EVENT } from '../chat/api';
-import { fetchLiveSpaces, type LiveSpace } from './podcasts';
+import { fetchLiveSpaces, type LiveReason, type LiveSpace } from './podcasts';
 
 const POLL_MS = 60_000;
+const REASON_LABEL: Record<LiveReason, string> = { following: 'Following', joined: 'Joined', popular: 'Popular' };
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
 /**
@@ -50,10 +51,23 @@ export const LiveSpacesBar = () => {
             className="shrink-0 flex items-center gap-2 rounded-full px-3 py-2 border cursor-pointer max-w-[260px]"
             style={{ background: '#2a1708', borderColor: '#F76B15' }}
           >
-            <Radio size={14} color="#F76B15" className="shrink-0" />
-            <span className="text-xs font-bold text-white truncate">{s.title}</span>
-            {s.host && <span className="text-[11px] text-[#98A2B3] truncate">@{s.host}</span>}
-            {s.listeners > 0 && <span className="text-[11px] text-[#98A2B3]">· {s.listeners}</span>}
+            {s.hostAvatar ? (
+              <img src={s.hostAvatar} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+            ) : (
+              <Radio size={14} color="#F76B15" className="shrink-0" />
+            )}
+            <span className="flex flex-col items-start min-w-0">
+              <span className="text-xs font-bold text-white truncate max-w-full">{s.title}</span>
+              <span className="text-[10px] text-[#98A2B3] truncate max-w-full">
+                {[
+                  s.host && `@${s.host}`,
+                  s.listeners > 0 && `${s.listeners} listening`,
+                  s.reason && REASON_LABEL[s.reason],
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            </span>
           </button>
         ))}
       </div>

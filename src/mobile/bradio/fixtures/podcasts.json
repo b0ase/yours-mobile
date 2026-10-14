@@ -22,7 +22,7 @@
       "id": "pod_nopreview",
       "title": "Fresh recording",
       "host": "vexvoid",
-      "hostIdKey": "",
+      "hostIdKey": null,
       "previewUrl": null,
       "cover": null,
       "duration": 0,
@@ -33,5 +33,5 @@
     { "id": "bad id with spaces", "title": "x" },
     { "id": "pod_insecure", "title": "Insecure", "previewUrl": "http://evil.example/a.mp3" }
   ],
-  "cursor": "next-1"
+  "next": "next-1"
 }
