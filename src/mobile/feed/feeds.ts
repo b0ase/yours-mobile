@@ -12,7 +12,7 @@
  * bMovies is bWalletX only: its entry is behind BMOVIES_FEED_ENABLED so a store build has none of it.
  * Adult-leaning brands (cherryx, aigf) are left out of every build.
  */
-import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+import { BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 /** A feed id: the built-in 'home' (Following | For you inside) or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
 export type FeedId = string;
@@ -135,7 +135,8 @@ const OTHER_ENTRIES: Entry[] = [
   ['scrollpay', 'ScrollPay'],
   ['senseii', 'Senseii'],
   ['tinycapital', 'Tiny Capital'],
-  ['tokenblaster', 'TokenBlaster'],
+  // Not in store builds (TokenBlaster sells guns and runs a coin launchpad; docs/STORE-AUDIT.md).
+  ...(TOKENBLASTER_ENABLED ? ([['tokenblaster', 'TokenBlaster']] as Entry[]) : []),
   ['tribeswallet', 'Tribes Wallet'],
   ['tribify', 'Tribify'],
   ['vexvoid', 'VexVoid'],
