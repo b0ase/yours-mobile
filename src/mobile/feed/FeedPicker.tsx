@@ -1,5 +1,5 @@
 /**
- * The Feed picker: a left / right scrolling row of feeds (Following, For you, the red / green / blue
+ * The Feed picker: a left / right scrolling row of feeds (Home, the red / green / blue
  * suite, pinned feeds, then "All feeds"), and the All feeds sheet (bApps, then Other) where feeds are
  * opened and pinned. Each bApp's own colour rings its icon and marks it when open. See feeds.ts.
  * The scroll is made obvious: chips are sized so the last visible one is cut off, the right edge fades,
@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { LayoutGrid, Pin, Sparkles, Users, X, type LucideIcon } from 'lucide-react';
+import { House, LayoutGrid, Pin, Sparkles, X, type LucideIcon } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { ALL_FEEDS_ICON, feedIcon, type FeedGlyph, type FeedIcon } from './feedIcons';
 import { FIXED_ROW, GOLD, MAX_PINNED, feedColor, feedDef, feedGroups, rowFeeds, type FeedId } from './feeds';
@@ -16,7 +16,7 @@ const INK = '#1a1300';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 
-const GLYPHS: Record<FeedGlyph, LucideIcon> = { following: Users, foryou: Sparkles, all: LayoutGrid };
+const GLYPHS: Record<FeedGlyph, LucideIcon> = { home: House, foryou: Sparkles, all: LayoutGrid };
 
 /** `#rrggbb` + alpha (0–1) as rgba(). */
 const alpha = (hex: string, a: number) => {
