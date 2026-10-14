@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
-import { POPULAR_COINS, safeCoinImage, SwapApi, type SwapCoin, type SwapRecord } from './swapApi';
+import { POPULAR_COINS, safeCoinImage, type SwapCoin, type SwapRecord } from './swapApi';
 import { stageLabel } from './promo';
 
 /**
@@ -12,11 +12,27 @@ import { stageLabel } from './promo';
  */
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
-const PROMO: SwapCoin[] = [POPULAR_COINS[0], POPULAR_COINS[1], POPULAR_COINS[2]]; // BTC, ETH, USDT
-let imgCache: SwapCoin[] | null = null;
+// Drawn in-app so the three logos show at once, with no wait on (or failure of) the swap service's image list.
+const svg = (body: string) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${body}</svg>`)}`;
+const BUILT_IN_LOGOS: Record<string, string> = {
+  btc: svg(
+    '<circle cx="16" cy="16" r="16" fill="#F7931A"/><text x="16" y="22.5" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="700" fill="#fff">\u20bf</text>',
+  ),
+  eth: svg(
+    '<circle cx="16" cy="16" r="16" fill="#627EEA"/><path fill="#fff" fill-opacity=".6" d="M16 4v8.9l7.5 3.3z"/><path fill="#fff" d="M16 4 8.5 16.2l7.5-3.3z"/><path fill="#fff" fill-opacity=".6" d="M16 22v6l7.5-10.4z"/><path fill="#fff" d="M16 28v-6l-7.5-4.4z"/><path fill="#fff" fill-opacity=".2" d="m16 20.6 7.5-4.4L16 12.9z"/><path fill="#fff" fill-opacity=".6" d="m8.5 16.2 7.5 4.4v-7.7z"/>',
+  ),
+  usdt: svg(
+    '<circle cx="16" cy="16" r="16" fill="#26A17B"/><path fill="#fff" d="M17.9 17.4v0c-.1 0-.7.1-1.9.1-1 0-1.7 0-1.9-.1v0c-3.8-.2-6.6-.8-6.6-1.6s2.8-1.5 6.6-1.6v2.6c.3 0 1 .1 1.9.1 1.1 0 1.7-.1 1.9-.1v-2.6c3.8.2 6.6.8 6.6 1.6s-2.8 1.4-6.6 1.6m0-3.5V11.6h5.3V8H8.8v3.6h5.3v2.3c-4.3.2-7.5 1-7.5 2s3.2 1.8 7.5 2v7.3h3.8v-7.3c4.3-.2 7.5-1 7.5-2s-3.2-1.8-7.5-2"/>',
+  ),
+};
+const PROMO: SwapCoin[] = [POPULAR_COINS[0], POPULAR_COINS[1], POPULAR_COINS[2]].map((c) => ({
+  ...c,
+  image: BUILT_IN_LOGOS[c.ticker] ?? null,
+})); // BTC, ETH, USDT
 
 const Logo = ({ coin, i }: { coin: SwapCoin; i: number }) => {
-  const src = safeCoinImage(coin.image);
+  const src = coin.image?.startsWith('data:image/svg+xml,') ? coin.image : safeCoinImage(coin.image);
   const [bad, setBad] = useState(false);
   const t = coin.ticker.toUpperCase();
   const common = { width: 22, height: 22, marginLeft: i ? -7 : 0, zIndex: 3 - i, border: '2px solid #17191E' } as const;
@@ -26,7 +42,6 @@ const Logo = ({ coin, i }: { coin: SwapCoin; i: number }) => {
       alt=""
       width={22}
       height={22}
-      loading="lazy"
       referrerPolicy="no-referrer"
       onError={() => setBad(true)}
       className="rounded-full object-contain relative"
@@ -44,18 +59,7 @@ const Logo = ({ coin, i }: { coin: SwapCoin; i: number }) => {
 };
 
 export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpen: () => void }) => {
-  const [coins, setCoins] = useState<SwapCoin[]>(imgCache ?? PROMO);
-  useEffect(() => {
-    if (imgCache) return;
-    new SwapApi()
-      .currencies()
-      .then((r) => {
-        const img = new Map((r.currencies ?? []).map((c) => [`${c.ticker}:${c.network}`, c.image]));
-        imgCache = PROMO.map((c) => ({ ...c, image: img.get(`${c.ticker}:${c.network}`) ?? null }));
-        setCoins(imgCache);
-      })
-      .catch(() => undefined);
-  }, []);
+  const coins = PROMO;
 
   const title = active ? 'Swap in progress' : 'Swap into BSV';
   const sub = active ? stageLabel(active.stage) : 'From BTC, ETH, USDT and 1,000+ coins';
