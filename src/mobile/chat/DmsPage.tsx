@@ -441,7 +441,9 @@ export const DmsPage = ({
           </div>
         )}
 
-        <ul className="w-full">
+        {/* Always a touch taller than the frame: iOS only rubber-bands a list that overflows, and a short DM list
+            felt stuck next to Chatrooms and Calls (owner, 14 Oct 2026, iOS phone layout). */}
+        <ul className="w-full" style={{ minHeight: 'calc(100% + 1px)' }}>
           {arranged && (
             <ArchivedGroup
               identity={handle || ''}
