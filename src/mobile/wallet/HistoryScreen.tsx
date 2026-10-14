@@ -24,6 +24,7 @@ import { GainsView } from './GainsView';
 import { loadHistoryRows } from './historyLoad';
 import { historyCacheKey, readHistoryCache, writeHistoryCache, type LoadedHistory } from './historyCache';
 import { statementHtml } from './txStatement';
+import { hiddenByRange, updatedText } from './historyRefresh';
 
 const BG = '#0d0e11';
 const CARD = '#17191E';
@@ -76,29 +77,52 @@ export const HistoryScreen = ({
   const [category, setCategory] = useState<Category | 'all'>('all');
   const [view, setView] = useState<'tx' | 'connections' | 'gains'>('tx');
 
-  const load = useCallback(async () => {
-    setError('');
-    // With a cached copy on screen, refresh quietly: no progress bar over rows the user is already reading.
-    const quiet = !!readCache(key);
-    if (!quiet) setProgress({ phase: 'Starting', done: 0, total: 1 });
-    try {
-      const now = Date.now();
-      const rows = await loadHistoryRows({
-        addresses,
-        identityAddress: addrs?.identityAddress,
-        apiContext,
-        onProgress: quiet ? () => undefined : setProgress,
-        now,
-      });
-      const loaded = { rows, at: now };
-      writeCache(key, loaded);
-      setData(loaded);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setProgress(null);
-    }
-  }, [addresses, addrs?.identityAddress, apiContext, key]);
+  // Wide web (desktop.bwalletx.com): the dialog fills the page and transactions are a table. Phone layout unchanged.
+  const wide = !inline && typeof document !== 'undefined' && document.documentElement.classList.contains('ww-on');
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  /**
+   * `manual`: the person pressed Refresh, so always show the spinner and progress. Before, a refresh with a cached
+   * copy on screen was always quiet: no spinner, no message, and (with the rows outside the 30-day range) nothing
+   * visibly changed, so "Refresh history" looked dead.
+   */
+  const load = useCallback(
+    async (manual = false) => {
+      setError('');
+      // On open with a cached copy on screen, refresh quietly: no progress bar over rows the user is reading.
+      const quiet = !manual && !!readCache(key);
+      if (manual) setRefreshing(true);
+      if (!quiet) setProgress({ phase: 'Starting', done: 0, total: 1 });
+      try {
+        const now = Date.now();
+        const rows = await loadHistoryRows({
+          addresses,
+          identityAddress: addrs?.identityAddress,
+          apiContext,
+          onProgress: quiet ? () => undefined : setProgress,
+          now,
+        });
+        const loaded = { rows, at: now };
+        writeCache(key, loaded);
+        setData(loaded);
+        setNow(Date.now());
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(`Couldn't refresh history: ${msg}`);
+      } finally {
+        setProgress(null);
+        setRefreshing(false);
+      }
+    },
+    [addresses, addrs?.identityAddress, apiContext, key],
+  );
+  const refresh = () => void load(true);
+  const busy = !!progress || refreshing;
 
   useEffect(() => {
     void load();
@@ -121,6 +145,7 @@ export const HistoryScreen = ({
       category === 'all' ? loadLastBalance(addrs?.identityAddress) : null,
     );
   const stem = fileStem(accountName, range);
+  const hidden = data ? hiddenByRange(data.rows, range) : 0;
 
   const exportCsv = () => void saveTextFile(`${stem}.csv`, toCsv(rows, accountName), 'text/csv;charset=utf-8');
   const exportPdf = () => {
@@ -150,6 +175,7 @@ export const HistoryScreen = ({
     <div
       role={inline ? 'region' : 'dialog'}
       aria-label="Transaction history"
+      data-ww-fill={wide ? '' : undefined}
       className={inline ? 'flex h-full min-h-0 flex-col' : 'fixed inset-0 flex flex-col'}
       style={{
         background: BG,
@@ -161,19 +187,20 @@ export const HistoryScreen = ({
       <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${LINE}` }}>
         <div className="flex-1 min-w-0">
           <div className="font-semibold">History</div>
-          <div className="text-xs truncate" style={{ color: MUTED }}>
+          <div className="text-xs truncate" style={{ color: MUTED }} aria-live="polite">
             {accountName}
+            {busy ? ' · Refreshing…' : data ? ` · ${updatedText(data.at, now)}` : ''}
           </div>
         </div>
         <button
           type="button"
           aria-label="Reload history"
-          disabled={!!progress}
-          onClick={() => void load()}
+          disabled={busy}
+          onClick={refresh}
           className="p-2 bg-transparent border-0 cursor-pointer"
           style={{ color: MUTED }}
         >
-          <RefreshCw size={18} className={progress ? 'animate-spin' : ''} />
+          <RefreshCw size={18} className={busy ? 'animate-spin' : ''} />
         </button>
         {!inline && (
           <button
@@ -238,12 +265,17 @@ export const HistoryScreen = ({
               {error}{' '}
               <button
                 type="button"
-                onClick={() => void load()}
+                onClick={refresh}
                 className="underline bg-transparent border-0"
                 style={{ color: GOLD }}
               >
                 Retry
               </button>
+              {data && (
+                <div className="text-xs mt-1" style={{ color: MUTED }}>
+                  Showing the copy loaded {updatedText(data.at, now).replace(/^Updated /, '')}.
+                </div>
+              )}
             </div>
           )}
 
@@ -310,7 +342,7 @@ export const HistoryScreen = ({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2 mt-4">
+          <div className={`grid ${wide ? 'grid-cols-4' : 'grid-cols-2'} gap-2 mt-4`}>
             {[
               ['In', sum.inSats, GREEN],
               ['Out', -sum.outSats, RED],
@@ -340,13 +372,13 @@ export const HistoryScreen = ({
               {/* A visible button: pull-to-refresh doesn't exist in the Chrome extension (owner, 11 Oct 2026). */}
               <button
                 type="button"
-                disabled={!!progress}
-                onClick={() => void load()}
+                disabled={busy}
+                onClick={refresh}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 border-0 cursor-pointer font-semibold"
                 style={{ background: GOLD, color: '#000' }}
               >
-                <RefreshCw size={14} className={progress ? 'animate-spin' : ''} />
-                {progress ? 'Refreshing…' : 'Refresh history'}
+                <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+                {busy ? 'Refreshing…' : 'Refresh history'}
               </button>
             </div>
           )}
@@ -383,11 +415,29 @@ export const HistoryScreen = ({
             {data && rows.length === 0 && (
               <div className="text-sm mt-6 text-center" style={{ color: MUTED }}>
                 No transactions in this period.
+                {hidden > 0 && preset !== 'all' && (
+                  <div className="mt-2">
+                    {hidden} {hidden === 1 ? 'transaction is' : 'transactions are'} outside it.{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreset('all');
+                        setShown(100);
+                      }}
+                      className="underline bg-transparent border-0 cursor-pointer"
+                      style={{ color: GOLD }}
+                    >
+                      Show all time
+                    </button>
+                  </div>
+                )}
               </div>
             )}
-            {rows.slice(0, shown).map((r) => (
-              <Row key={r.txid} r={r} />
-            ))}
+            {wide && rows.length > 0 ? (
+              <TxTable rows={rows.slice(0, shown)} all={data?.rows ?? []} />
+            ) : (
+              rows.slice(0, shown).map((r) => <Row key={r.txid} r={r} />)
+            )}
             {rows.length > shown && (
               <button
                 type="button"
@@ -467,6 +517,90 @@ const Row = ({ r }: { r: HistoryRow }) => {
           {r.confirmations === 0 && <span style={{ color: MUTED }}> · unconfirmed</span>}
         </a>
       </div>
+    </div>
+  );
+};
+
+/** Wide layout: one row per tx with a running balance (balance after the tx, from the whole history). */
+const TxTable = ({ rows, all }: { rows: HistoryRow[]; all: HistoryRow[] }) => {
+  const after = useMemo(() => {
+    const m = new Map<string, number>();
+    let run = 0;
+    for (const r of [...all].sort((a, b) => a.time - b.time || a.txid.localeCompare(b.txid))) {
+      run += r.amountSats - r.feeSats;
+      m.set(r.txid, run);
+    }
+    return m;
+  }, [all]);
+  const th = 'text-left font-semibold px-3 py-2 whitespace-nowrap';
+  const td = 'px-3 py-2 align-top';
+  return (
+    <div className="rounded-xl overflow-x-auto" style={{ background: CARD }}>
+      <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+        <thead style={{ color: MUTED, borderBottom: `1px solid ${LINE}` }}>
+          <tr>
+            <th className={th}>Date</th>
+            <th className={th}>Type</th>
+            <th className={th}>Description</th>
+            <th className={`${th} text-right`}>Amount</th>
+            <th className={`${th} text-right`}>Fee</th>
+            <th className={`${th} text-right`}>Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const color = r.direction === 'in' ? GREEN : r.direction === 'out' ? RED : MUTED;
+            const usd = usdValue(r);
+            const desc = [
+              r.asset ? assetText(r.asset) : '',
+              r.app ? `via ${r.app}` : '',
+              r.appNote ? `“${r.appNote}”` : '',
+              r.counterparty ? `${r.direction === 'in' ? 'from' : 'to'} ${r.counterparty}` : '',
+              r.note,
+            ]
+              .filter(Boolean)
+              .join(' · ');
+            const bal = after.get(r.txid);
+            return (
+              <tr key={r.txid} style={{ borderTop: `1px solid ${LINE}` }}>
+                <td className={`${td} whitespace-nowrap`} style={{ color: MUTED }}>
+                  {new Date(r.time).toLocaleString()}
+                  {r.confirmations === 0 && <div className="text-xs">unconfirmed</div>}
+                </td>
+                <td className={`${td} capitalize whitespace-nowrap`}>{r.label}</td>
+                <td className={td} style={{ maxWidth: 420 }}>
+                  <div className="break-words">{desc || '—'}</div>
+                  <a
+                    href={`https://whatsonchain.com/tx/${r.txid}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs inline-flex items-center gap-1 font-mono"
+                    style={{ color: GOLD }}
+                  >
+                    {r.txid.slice(0, 12)}…{r.txid.slice(-6)} <ExternalLink size={11} />
+                  </a>
+                </td>
+                <td className={`${td} text-right whitespace-nowrap font-mono`} style={{ color }}>
+                  {r.amountSats > 0 ? '+' : ''}
+                  {fmtBsv(r.amountSats)}
+                  {usd && (
+                    <div className="text-xs" style={{ color: MUTED }}>
+                      ${usd}
+                      {r.usdRateIsCurrent ? ' (current rate)' : ''}
+                    </div>
+                  )}
+                </td>
+                <td className={`${td} text-right whitespace-nowrap font-mono`} style={{ color: MUTED }}>
+                  {r.feeSats > 0 ? fmtSats(r.feeSats) : '—'}
+                </td>
+                <td className={`${td} text-right whitespace-nowrap font-mono`}>
+                  {bal === undefined ? '—' : fmtBsv(bal)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 };
