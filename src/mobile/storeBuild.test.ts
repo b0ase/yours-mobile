@@ -598,13 +598,22 @@ describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () =>
     expect(feedIds({ VITE_CHANNEL: 'android-play' })).not.toContain('bmovies');
     expect(feedIds({})).toContain('bmovies');
   });
+  test('adult-leaning brands (cherryx, aigf) are in no build; the store keeps the other bApp feeds', () => {
+    for (const env of [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, {}]) {
+      const ids = feedIds(env);
+      expect(ids).not.toContain('cherryx');
+      expect(ids).not.toContain('aigf');
+      expect(ids).toContain('bnews');
+      expect(ids).toContain('bmusic');
+    }
+  });
   test('the reel is a lazy chunk behind the flag and the feed entry is data behind it', () => {
     const page = src('./feed/FeedPage.tsx');
     expect(page).toMatch(
       /const BmoviesReel = BMOVIES_FEED_ENABLED \? lazy\(\(\) => import\('\.\/bmovies\/BmoviesReel'\)\) : null;/,
     );
     expect(page).not.toMatch(/^import (?!type )[^;]*from '\.\/bmovies\//m);
-    expect(src('./feed/feeds.ts')).toContain('...(BMOVIES_FEED_ENABLED ? [BMOVIES_FEED] : [])');
+    expect(src('./feed/feeds.ts')).toContain("BMOVIES_FEED_ENABLED ? [['bmovies', 'bMovies'");
     expect(src('./feed/FeedPicker.tsx')).not.toMatch(/from '\.\/bmovies\//);
   });
   test('the store audit lists the bMovies grep strings', () => {

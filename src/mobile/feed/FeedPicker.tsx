@@ -1,25 +1,31 @@
 /**
- * The Feed picker: a fixed row of pinned feed icons plus "All feeds" (a grid where feeds are opened
- * and pinned). No scrolling chips. The open feed is the solid gold icon. See feeds.ts.
+ * The Feed picker: a left / right scrolling row of feeds (Following, For you, the red / green / blue
+ * suite, pinned feeds, then "All feeds"), and the All feeds sheet (bApps, then Other) where feeds are
+ * opened and pinned. Each bApp's own colour rings its icon and marks it when open. See feeds.ts.
+ * The scroll is made obvious: chips are sized so the last visible one is cut off, the right edge fades,
+ * and the open feed is kept scrolled into view.
  */
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { LayoutGrid, Pin, Sparkles, Users, X, type LucideIcon } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { ALL_FEEDS_ICON, feedIcon, type FeedGlyph, type FeedIcon } from './feedIcons';
-import { FEEDS, MAX_PINNED, feedDef, type FeedId } from './feeds';
+import { FIXED_ROW, GOLD, MAX_PINNED, feedColor, feedDef, feedGroups, rowFeeds, type FeedId } from './feeds';
 
-const GOLD = '#FFD24D';
 const INK = '#1a1300';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 
 const GLYPHS: Record<FeedGlyph, LucideIcon> = { following: Users, foryou: Sparkles, all: LayoutGrid };
 
-/**
- * One feed icon on a black tile: a bApp's own art edge to edge, or a gold glyph. The open feed gets a
- * gold ring and glow (the art is never tinted over).
- */
-const IconTile = ({ icon, on, size }: { icon: FeedIcon; on: boolean; size: 44 | 40 }) => {
+/** `#rrggbb` + alpha (0–1) as rgba(). */
+const alpha = (hex: string, a: number) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+};
+
+/** One feed icon on a black tile, ringed in its bApp's colour (solid ring + glow when open). */
+export const IconTile = ({ icon, color, on, size }: { icon: FeedIcon; color: string; on: boolean; size: number }) => {
   const Glyph = icon.kind === 'glyph' ? GLYPHS[icon.glyph] : null;
   return (
     <span
@@ -27,36 +33,58 @@ const IconTile = ({ icon, on, size }: { icon: FeedIcon; on: boolean; size: 44 | 
       style={{
         width: size,
         height: size,
-        borderRadius: size === 44 ? 14 : 12,
+        borderRadius: Math.round(size * 0.3),
         background: '#000',
-        boxShadow: on ? `0 0 0 2px ${GOLD}, 0 0 14px rgba(255,210,77,0.45)` : 'inset 0 0 0 1px rgba(255,210,77,0.35)',
+        boxShadow: on ? `0 0 0 2px ${color}, 0 0 14px ${alpha(color, 0.5)}` : `inset 0 0 0 1.5px ${alpha(color, 0.55)}`,
       }}
     >
       {icon.kind === 'app' ? (
         <img src={icon.src} alt="" draggable={false} className="h-full w-full object-cover" />
+      ) : icon.kind === 'letter' ? (
+        <span style={{ color, fontWeight: 800, fontSize: size * 0.46, lineHeight: 1 }}>{icon.letter}</span>
       ) : (
-        Glyph && <Glyph size={size === 44 ? 20 : 19} color={GOLD} strokeWidth={on ? 2.4 : 1.9} />
+        Glyph && <Glyph size={Math.round(size * 0.45)} color={color} strokeWidth={on ? 2.4 : 1.9} />
       )}
     </span>
   );
 };
 
-const Tile = ({ label, icon, on, onClick }: { label: string; icon: FeedIcon; on: boolean; onClick: () => void }) => (
-  <button
-    onClick={onClick}
-    aria-pressed={on}
-    aria-label={label}
-    className="flex flex-1 min-w-0 flex-col items-center gap-1 py-1 active:opacity-70"
-  >
-    <IconTile icon={icon} on={on} size={44} />
-    <span
-      className="max-w-full truncate text-[11px]"
-      style={{ color: on ? GOLD : 'rgba(255,210,77,0.7)', fontWeight: on ? 700 : 500 }}
+const Chip = ({
+  label,
+  icon,
+  color,
+  on,
+  onClick,
+}: {
+  label: string;
+  icon: FeedIcon;
+  color: string;
+  on: boolean;
+  onClick: () => void;
+}) => {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (on) ref.current?.scrollIntoView?.({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [on]);
+  return (
+    <button
+      ref={ref}
+      onClick={onClick}
+      role="tab"
+      aria-selected={on}
+      aria-label={label}
+      className="flex w-[62px] shrink-0 flex-col items-center gap-1 py-1 active:opacity-70"
     >
-      {label}
-    </span>
-  </button>
-);
+      <IconTile icon={icon} color={color} on={on} size={44} />
+      <span
+        className="max-w-full truncate text-[11px]"
+        style={{ color: on ? color : alpha(color, 0.75), fontWeight: on ? 700 : 500 }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+};
 
 export const FeedPicker = ({
   pins,
@@ -70,14 +98,41 @@ export const FeedPicker = ({
   allOpen: boolean;
   onPick: (id: FeedId) => void;
   onOpenAll: () => void;
-}) => (
-  <div className="flex items-start gap-1 px-3 pb-2" role="tablist" aria-label="Feeds">
-    {pins.map((id) => (
-      <Tile key={id} label={feedDef(id).label} icon={feedIcon(id)} on={id === current} onClick={() => onPick(id)} />
-    ))}
-    <Tile label="All feeds" icon={ALL_FEEDS_ICON} on={allOpen || !pins.includes(current)} onClick={onOpenAll} />
-  </div>
-);
+}) => {
+  const row = rowFeeds(pins);
+  return (
+    <div className="relative pb-2">
+      <div
+        className="flex items-start gap-2 overflow-x-auto px-3 pr-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        role="tablist"
+        aria-label="Feeds"
+      >
+        {row.map((id) => (
+          <Chip
+            key={id}
+            label={feedDef(id).label}
+            icon={feedIcon(id)}
+            color={feedColor(id)}
+            on={id === current}
+            onClick={() => onPick(id)}
+          />
+        ))}
+        <Chip
+          label="All feeds"
+          icon={ALL_FEEDS_ICON}
+          color={GOLD}
+          on={allOpen || !row.includes(current)}
+          onClick={onOpenAll}
+        />
+      </div>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-10"
+        style={{ background: 'linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.85))' }}
+      />
+    </div>
+  );
+};
 
 export const AllFeedsSheet = ({
   pins,
@@ -109,41 +164,51 @@ export const AllFeedsSheet = ({
         <p className="mb-3 text-xs" style={{ color: MUTED }}>
           Tap a feed to open it. Pin up to {MAX_PINNED} to the top row.
         </p>
-        <div className="grid grid-cols-2 gap-3">
-          {FEEDS.map((f) => {
-            const pinned = pins.includes(f.id);
-            const on = f.id === current;
-            return (
-              <div
-                key={f.id}
-                className="relative rounded-2xl p-3"
-                style={{
-                  background: on ? '#1a1408' : '#0d0b05',
-                  border: `1px solid ${on ? GOLD : 'rgba(255,210,77,0.25)'}`,
-                }}
-              >
-                <button onClick={() => onPick(f.id)} className="flex w-full flex-col items-start gap-2 text-left">
-                  <IconTile icon={feedIcon(f.id)} on={on} size={40} />
-                  <span className="text-sm font-bold" style={{ color: GOLD }}>
-                    {f.label}
-                  </span>
-                  <span className="text-[11px] leading-snug" style={{ color: MUTED }}>
-                    {f.hint}
-                  </span>
-                </button>
-                <button
-                  onClick={() => onTogglePin(f.id)}
-                  aria-label={pinned ? `Unpin ${f.label}` : `Pin ${f.label}`}
-                  aria-pressed={pinned}
-                  className="absolute right-2 top-2 rounded-full p-1.5"
-                  style={{ background: pinned ? GOLD : 'transparent' }}
-                >
-                  <Pin size={14} color={pinned ? INK : GOLD} fill={pinned ? INK : 'none'} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
+        {feedGroups().map((g) => (
+          <section key={g.id} className="mb-4">
+            <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: MUTED }}>
+              {g.label}
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              {g.feeds.map((f) => {
+                const fixed = FIXED_ROW.includes(f.id);
+                const pinned = fixed || pins.includes(f.id);
+                const on = f.id === current;
+                return (
+                  <div
+                    key={f.id}
+                    className="relative rounded-2xl p-3"
+                    style={{
+                      background: on ? alpha(f.color, 0.12) : '#0d0d0f',
+                      border: `1px solid ${on ? f.color : alpha(f.color, 0.3)}`,
+                    }}
+                  >
+                    <button onClick={() => onPick(f.id)} className="flex w-full flex-col items-start gap-2 text-left">
+                      <IconTile icon={feedIcon(f.id)} color={f.color} on={on} size={40} />
+                      <span className="text-sm font-bold" style={{ color: f.color }}>
+                        {f.label}
+                      </span>
+                      <span className="text-[11px] leading-snug" style={{ color: MUTED }}>
+                        {f.hint}
+                      </span>
+                    </button>
+                    {!fixed && (
+                      <button
+                        onClick={() => onTogglePin(f.id)}
+                        aria-label={pinned ? `Unpin ${f.label}` : `Pin ${f.label}`}
+                        aria-pressed={pinned}
+                        className="absolute right-2 top-2 rounded-full p-1.5"
+                        style={{ background: pinned ? f.color : 'transparent' }}
+                      >
+                        <Pin size={14} color={pinned ? INK : f.color} fill={pinned ? INK : 'none'} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </div>,
     document.body,

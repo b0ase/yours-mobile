@@ -164,7 +164,8 @@ import { ErrorActions } from '../errors/ErrorActions';
 import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 import { AllFeedsSheet, FeedPicker } from './FeedPicker';
-import { feedDef, loadPins, savePins, stepFeed, swipeDir, togglePin, type FeedId } from './feeds';
+import { BrandFeed } from './BrandFeed';
+import { feedDef, hasCustomView, loadPins, savePins, stepFeed, swipeDir, togglePin, type FeedId } from './feeds';
 import { BMOVIES_FEED_ENABLED } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
@@ -1891,6 +1892,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
             <Suspense fallback={null}>
               <BmoviesReel />
             </Suspense>
+          ) : !hasCustomView(feed) ? (
+            <BrandFeed slug={feed} />
           ) : news ? (
             <NewsList posts={knownPosts} onOpen={setStory} />
           ) : (
