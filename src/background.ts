@@ -409,15 +409,17 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // service-worker restart and could abort an action whose transaction had gone out. The toolbox's own
     // no-send expiry releases genuinely abandoned steps.
     // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
-    void accountContext.recoverFailed().then((r) => {
-      if (r.failed || r.error) console.log('[background] failed-action review:', r);
-    });
-    void preferLocalStorage(accountContext);
-    // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
-    // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
-    void reviewQueuedSends(accountContext).then((r) => {
-      if (r.queued > 0 || r.error) sendRetry.arm();
-    });
+    // Order matters (owner, 14 Oct 2026): both repairs need this device's storage active, so switch first.
+    const ctx = accountContext;
+    void (async () => {
+      await preferLocalStorage(ctx);
+      const r = await ctx.recoverFailed();
+      if (r.failed || r.error || r.skipped) console.log('[background] failed-action review:', r);
+      // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
+      // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
+      const q = await reviewQueuedSends(ctx);
+      if (q.queued > 0 || q.error) sendRetry.arm();
+    })().catch((err: unknown) => console.error('[background] startup storage repairs failed:', err));
   }
 
   return accountContext?.wallet ?? null;

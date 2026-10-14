@@ -1,0 +1,52 @@
+diff --git a/out/index.client.cjs b/out/index.client.cjs
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..dd29b5c8d3f24f88cf3b50d00099e4a2bf0fefeb 100644
+--- a/out/index.client.cjs
++++ b/out/index.client.cjs
+@@ -3593,6 +3593,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
+ 	static async mergeFind(storage, userId, ei, syncMap, trx) {
+ 		const outputId = syncMap.output.idMap[ei.outputId];
+ 		const outputTagId = syncMap.outputTag.idMap[ei.outputTagId];
++		if (outputId === void 0 || outputTagId === void 0) {
++			if (typeof console !== "undefined") console.warn("[wallet-toolbox] sync: skipped output_tags_map row with unmapped ids (%s -> %s, %s -> %s)", ei.outputId, outputId, ei.outputTagId, outputTagId);
++			return { found: true, eo: { mergeExisting: async () => false }, eiId: -1 };
++		}
+ 		const ef = verifyOneOrNone(await storage.findOutputTagMaps({
+ 			partial: {
+ 				outputId,
+@@ -5201,6 +5205,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
+ 	static async mergeFind(storage, userId, ei, syncMap, trx) {
+ 		const transactionId = syncMap.transaction.idMap[ei.transactionId];
+ 		const txLabelId = syncMap.txLabel.idMap[ei.txLabelId];
++		if (transactionId === void 0 || txLabelId === void 0) {
++			if (typeof console !== "undefined") console.warn("[wallet-toolbox] sync: skipped tx_labels_map row with unmapped ids (%s -> %s, %s -> %s)", ei.transactionId, transactionId, ei.txLabelId, txLabelId);
++			return { found: true, eo: { mergeExisting: async () => false }, eiId: -1 };
++		}
+ 		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
+ 			partial: {
+ 				transactionId,
+diff --git a/out/index.client.mjs b/out/index.client.mjs
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..d79238bec8e4734ff97f7779a0037c1751dbf9a2 100644
+--- a/out/index.client.mjs
++++ b/out/index.client.mjs
+@@ -3558,6 +3558,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
+ 	static async mergeFind(storage, userId, ei, syncMap, trx) {
+ 		const outputId = syncMap.output.idMap[ei.outputId];
+ 		const outputTagId = syncMap.outputTag.idMap[ei.outputTagId];
++		if (outputId === void 0 || outputTagId === void 0) {
++			if (typeof console !== "undefined") console.warn("[wallet-toolbox] sync: skipped output_tags_map row with unmapped ids (%s -> %s, %s -> %s)", ei.outputId, outputId, ei.outputTagId, outputTagId);
++			return { found: true, eo: { mergeExisting: async () => false }, eiId: -1 };
++		}
+ 		const ef = verifyOneOrNone(await storage.findOutputTagMaps({
+ 			partial: {
+ 				outputId,
+@@ -5166,6 +5170,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
+ 	static async mergeFind(storage, userId, ei, syncMap, trx) {
+ 		const transactionId = syncMap.transaction.idMap[ei.transactionId];
+ 		const txLabelId = syncMap.txLabel.idMap[ei.txLabelId];
++		if (transactionId === void 0 || txLabelId === void 0) {
++			if (typeof console !== "undefined") console.warn("[wallet-toolbox] sync: skipped tx_labels_map row with unmapped ids (%s -> %s, %s -> %s)", ei.transactionId, transactionId, ei.txLabelId, txLabelId);
++			return { found: true, eo: { mergeExisting: async () => false }, eiId: -1 };
++		}
+ 		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
+ 			partial: {
+ 				transactionId,

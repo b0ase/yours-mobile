@@ -45,16 +45,31 @@ export type ReleaseDeps = {
   knownOnChain: (txid: string) => Promise<boolean>;
   /** Stop retrying and release the inputs: request -> 'invalid', action -> 'failed'. */
   cancel: (s: QueuedSend) => Promise<void>;
+  /**
+   * False when the active store can't be read directly (a remote WalletStorageProvider, e.g. 1Sat storage while
+   * the switch to this device is pending). The review is skipped, not failed: the remote runs its own monitor.
+   */
+  available?: () => boolean;
   now?: () => number;
   log?: (msg: string) => void;
 };
 
-export type ReleaseReport = { queued: number; released: QueuedSend[]; kept: string[]; error?: string };
+export type ReleaseReport = {
+  queued: number;
+  released: QueuedSend[];
+  kept: string[];
+  error?: string;
+  skipped?: string;
+};
 
 export async function releaseStuckSends(deps: ReleaseDeps): Promise<ReleaseReport> {
   const now = (deps.now ?? Date.now)();
   const log = deps.log ?? ((m: string) => console.log(m));
   const report: ReleaseReport = { queued: 0, released: [], kept: [] };
+  if (deps.available && !deps.available()) {
+    report.skipped = 'active storage is remote';
+    return report;
+  }
   try {
     const queued = (await deps.listQueued()).filter((s) => /^[0-9a-f]{64}$/i.test(s.txid));
     report.queued = queued.length;

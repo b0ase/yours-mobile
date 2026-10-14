@@ -521,3 +521,6 @@ allowBuilds:
   sharp: true
   puppeteer: false
   '@1sat/vault': false
+
+patchedDependencies:
+  '@bopen-io/wallet-toolbox-client@2.14.5': patches/@bopen-io__wallet-toolbox-client@2.14.5.patch

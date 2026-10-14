@@ -137,3 +137,14 @@ describe('funding preparation restores when nothing is spendable', () => {
     expect(runs).toBe(1);
   });
 });
+
+describe('recoverMinedFailedActions with a remote active store', () => {
+  test('skips cleanly (no error, nothing queued) instead of throwing', async () => {
+    const s = fakeStore([{ txid: T1, outputs: [{ satoshis: 1 }] }], [T1]);
+    const r = await recoverMinedFailedActions({ ...s.deps, available: () => false, log: () => {} });
+    expect(r.error).toBeUndefined();
+    expect(r.skipped).toBeTruthy();
+    expect(r.restored).toEqual([]);
+    expect(s.calls.runs).toBe(0);
+  });
+});

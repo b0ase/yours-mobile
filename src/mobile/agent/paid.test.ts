@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  paymentFailedText,
   MAX_MESSAGE_SATS,
   bitsignPaidBackend,
   formatPrice,
@@ -109,5 +110,20 @@ describe('tell b without a key (14 Oct 2026)', () => {
     expect(parseReport({ ok: false, ack: "I couldn't log that just now." }).ok).toBe(false);
     expect(() => parseReport({ error: 'Unauthorized' })).toThrow('Unauthorized');
     expect(noKeyReply({ ok: true, ack: 'Logged.' }, 'Claude')).toContain('Settings › b agent');
+  });
+});
+
+describe('paymentFailedText', () => {
+  test('names the reason and says the message was not sent', () => {
+    const t = paymentFailedText(
+      new Error('WERR_REVIEW_ACTIONS: Undelayed createAction or signAction results require review.'),
+    );
+    expect(t).toStartWith("Payment didn't go through: ");
+    expect(t).toContain('earlier payment');
+    expect(t).toEndWith("Your message wasn't sent.");
+    expect(paymentFailedText('Insufficient funds in the available inputs')).toContain('not enough spendable BSV');
+    expect(paymentFailedText('An unknown error has occurred! Try again.')).toContain('gave no reason');
+    expect(paymentFailedText(new Error('Balance timed out after 15 s'))).toContain('took too long');
+    expect(paymentFailedText('Broadcast failed: mempool conflict!')).toContain('Broadcast failed: mempool conflict.');
   });
 });
