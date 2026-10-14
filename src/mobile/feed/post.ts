@@ -271,7 +271,16 @@ export function decodeScript(script: Script): Decoded | null {
 }
 
 // ── bmap API parsing ─────────────────────────────────────────────────────────
-export type Author = { address: string; bapId: string | null; name: string; avatar: string | null };
+export type Author = {
+  address: string;
+  bapId: string | null;
+  name: string;
+  avatar: string | null;
+  /** Where this author was read from (unset = bChat / bmap). Picks the profile's post source. */
+  source?: Source;
+  /** That source's own id: Twetch user id, Peck signer key, Treechat username, Fwetch address. */
+  sourceId?: string;
+};
 export type FeedImage = { src: string; mime: string };
 // Source registry (labels, logos, original-post links) lives in sources.ts; re-exported here.
 export { SOURCES, sourceLabel, sourceOf, sourceUrl, type Source } from './sources';
@@ -612,6 +621,7 @@ function parseTwetchItem(item: unknown, c: TwetchCtx): FeedPost | null {
       bapId: null,
       name: asStr(u.name).trim().slice(0, 60) || `Twetch user ${uid}`,
       avatar: icon ? twetchMediaUrl(icon) : null,
+      ...(uid ? { source: 'twetch' as const, sourceId: uid } : {}),
     },
     at: Number(p.postedAtMs) || Number(p.createdAtMs) || 0,
     likes: Number(p.numLikes) || 0,
