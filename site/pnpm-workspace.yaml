@@ -1,0 +1,3 @@
+# site/ is its own pnpm project: stops pnpm from using the root workspace config (patchedDependencies) on Vercel.
+packages:
+  - '.'
