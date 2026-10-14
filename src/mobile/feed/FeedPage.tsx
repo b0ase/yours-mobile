@@ -2067,9 +2067,10 @@ const ProfileView = ({
         className="flex flex-col items-center px-6 pt-6 pb-4 text-center"
         style={{ borderBottom: `1px solid ${LINE}` }}
       >
-        {/* Tap to turn it over: their pay code, a plain QR of their payable address (public data only). */}
+        {/* Tap to turn it over: their pay code, an Art QR of their payable address (public data only). */}
         <FlipBavatar
           front={<Avatar author={author} size={80} />}
+          artSeed={author.address}
           address={isPayAddress(author.address) ? author.address : ''}
           caption={safeName(author.name)}
           size={80}

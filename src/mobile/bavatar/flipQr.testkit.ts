@@ -26,28 +26,31 @@ export function zxing(img: { data: Uint8ClampedArray; width: number; height: num
   }
 }
 
-/**
- * jsQR must read it at `px`; ZXing, when it reads it at all (at `px` or a few pixels either side), must agree.
- * ZXing-js alone throws "Dimensions could be not found" on some matrices whatever the framing, stock `qrcode`
- * output included (~5% of random addresses; zbar and jsQR read those fine), so it is a cross-check here and
- * its overall hit rate is asserted separately in the tests.
- */
-export async function decodeSvg(svg: string, px: number): Promise<string | null> {
-  const img = await rasterise(svg, px);
-  const b = jsQR(img.data, img.width, img.height)?.data ?? null;
-  if (b === null) return null;
-  for (const d of [0, 3, -3, 7]) {
-    const a = zxing(d ? await rasterise(svg, px + d) : img);
-    if (a !== null) return a === b ? a : null;
-  }
-  return b;
-}
+export const jsqr = (img: { data: Uint8ClampedArray; width: number; height: number }) =>
+  jsQR(img.data, img.width, img.height)?.data ?? null;
 
-/** ZXing alone at `px` or a few pixels either side. */
-export async function zxingSvg(svg: string, px: number): Promise<string | null> {
-  for (const d of [0, 3, -3, 7]) {
-    const a = zxing(await rasterise(svg, px + d));
-    if (a !== null) return a;
+/** zbar (zbarimg) when installed, else undefined (CI without it skips that decoder). */
+export async function zbar(svg: string, px: number): Promise<string | null | undefined> {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  try {
+    execFileSync('zbarimg', ['--version'], { stdio: 'ignore' });
+  } catch {
+    return undefined;
   }
-  return null;
+  const dir = mkdtempSync(join(tmpdir(), 'bflip-'));
+  try {
+    const file = join(dir, 'q.png');
+    await sharp(Buffer.from(svg)).resize(px, px).flatten({ background: '#ffffff' }).png().toFile(file);
+    const out = execFileSync('zbarimg', ['-q', '--raw', file], { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+    return out || null;
+  } catch {
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

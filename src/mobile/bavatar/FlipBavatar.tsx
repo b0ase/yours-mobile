@@ -7,13 +7,14 @@ import { useAccountNames } from '../names/accountNames';
 import { AccountAvatar } from '../names/AccountAvatar';
 
 /**
- * A bAvatar that turns over (owner, 14 Oct 2026). Front: the avatar as it is. Back: a plain QR that pays this
- * person (`bitcoin:<address>` or their paymail; public data only, built on the device). Tap to flip, tap again
+ * A bAvatar that turns over (owner, 14 Oct 2026). Front: the avatar as it is. Back: the bAvatar Art QR (as on
+ * bwalletx.com/bavatars) on a rounded card, paying this person (`bitcoin:<address>` or their paymail; public data only, built on the device). Tap to flip, tap again
  * to flip back; reduced motion crossfades (mobile.css .bw-bflip). The back grows to `backSize` so the code is
  * big enough for a phone camera even when the avatar is small. No pay target → just the front, not a button.
  */
 export const FlipBavatar = ({
   front,
+  artSeed,
   address,
   paymail,
   caption,
@@ -22,6 +23,8 @@ export const FlipBavatar = ({
   label = 'bAvatar',
 }: {
   front: ReactNode;
+  /** Seeds the back's art: the identity key, else a handle or address (same art as their bAvatar). */
+  artSeed: string;
   address?: string | null;
   paymail?: string | null;
   caption?: string;
@@ -32,8 +35,8 @@ export const FlipBavatar = ({
   const [flipped, setFlipped] = useState(false);
   const payload = flipPayload(address, paymail);
   const back = useMemo(
-    () => (payload ? svgDataUri(flipBackSvg(payload, { size: 512, caption })) : ''),
-    [payload, caption],
+    () => (payload ? svgDataUri(flipBackSvg(artSeed, payload, { size: 512 })) : ''),
+    [artSeed, payload],
   );
   if (!back) return <>{front}</>;
   const px = flipped ? Math.max(size, backSize ?? 200) : size;
@@ -51,6 +54,7 @@ export const FlipBavatar = ({
         <span className="bw-bflip-face bw-bflip-front">{front}</span>
         <span className="bw-bflip-face bw-bflip-back">
           <img src={back} alt={`Pay code for ${caption || payload}`} draggable={false} />
+          {caption && <span className="bw-bflip-caption">{caption}</span>}
         </span>
       </span>
     </button>
@@ -77,6 +81,7 @@ export const MyFlipBavatar = ({
   return (
     <FlipBavatar
       front={<AccountAvatar src={avatar} size={size} id={id} />}
+      artSeed={account?.pubKeys?.identityPubKey || handle || id || ''}
       address={address || account?.primaryAddress || account?.addresses?.bsvAddress}
       paymail={names.paymail}
       caption={handle || names.paymail || undefined}

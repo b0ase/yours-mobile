@@ -3,9 +3,8 @@ import { BchatClient, defaultHttp, loadSession, saveSession, type BavatarMine } 
 import { walletSigner } from '../chat/signer';
 import { isNative } from '../native';
 import { MINT_APP } from '../mint/mint';
-import { bavatarSvg } from './bavatar';
 import { cardPaymail } from '../wallet/cardBackQr';
-import { flipBackSvg, paymailPayload } from './flipQr';
+import { artSymbol, compactArtBackGroup, paymailPayload } from './flipQr';
 
 /** Same test as names/claimPersonal.ts (not imported: that module pulls the token stack in). */
 const isFundsError = (e: string | undefined) => !!e && /insufficient|not enough|no (utxos|funds)|funds/i.test(e);
@@ -20,7 +19,7 @@ const isFundsError = (e: string | undefined) => !!e && /insufficient|not enough|
  */
 
 export const FOUNDING = 1000;
-/** Inscription size cap: the two-sided card (art + plain QR) is ~14 KB. */
+/** Inscription size cap: the two-sided card (art once + compact Art QR) is ~25 KB. */
 export const MAX_BAVATAR_BYTES = 40_000;
 
 /** #001 under 1,000, plain digits after: `bavatarNumber(7)` → `#007`, `bavatarNumber(1234)` → `#1234`. */
@@ -34,25 +33,19 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const INK = '#0b0a08';
 const KEY_RE = /^0[23][0-9a-f]{64}$/;
 
-/** The plain bAvatar art, unchanged, placed at (x, y) with size w (its own width/height dropped). */
-const placeArt = (key: string, x: number, y: number, w: number) =>
-  bavatarSvg(key, { size: 512 })
-    .replace(/^<\?xml[^>]*>\s*/, '')
-    .replace(/^<svg\b[^>]*?>/, (tag) => tag.replace(/\s(width|height)="[^"]*"/g, ''))
-    .replace(/^<svg\b/, `<svg x="${x}" y="${y}" width="${w}" height="${w}"`);
-
 /**
  * The inscription (flip bAvatar, owner 14 Oct 2026): a 512×640 card with two sides. The FRONT is the pure
- * bAvatar art and shows by default (also the only side a static renderer such as resvg draws). The BACK is a
- * plain, scannable QR of the account's paymail (public data only) in a black/gold round frame. Viewers that
- * run SVG animation turn the card over on a loop (front ~6 s, back ~4 s).
- * Under both: the handle, the number and, for #1–#1,000, FOUNDING 1,000. '' with no identity key or paymail.
+ * bAvatar art and shows by default (also the only side a static renderer such as resvg draws). The BACK is the
+ * bAvatar Art QR (as on bwalletx.com/bavatars) of the account's paymail, public data only, on a rounded pale
+ * card. Viewers that run SVG animation turn the card over on a loop (front ~6 s, back ~4 s). The art is held
+ * once as a symbol and used by both sides. Under both: the handle, the number and, for #1–#1,000,
+ * FOUNDING 1,000. '' with no identity key or paymail.
  */
 export function bavatarMintSvg(identityKey: string, handle: string, number: number): string {
   const key = String(identityKey).toLowerCase();
   const pm = paymailPayload(cardPaymail(handle));
   if (!KEY_RE.test(key) || !pm) return '';
-  const back = flipBackSvg(pm, { size: 512, caption: pm }).replace(/^<svg\b/, '<svg x="0" y="0"');
+  const back = compactArtBackGroup(pm, 'bva', 24, 24, 464);
   if (!back) return '';
   const founding = number <= FOUNDING;
   // Flip by squashing each side to its vertical centre line and back (scaleX), one side at a time.
@@ -63,13 +56,14 @@ export function bavatarMintSvg(identityKey: string, handle: string, number: numb
     `values="${frontSide ? '1 1;1 1;0 1;0 1;1 1' : '0 1;0 1;1 1;1 1;0 1'}" calcMode="linear"/>`;
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 640" width="512" height="640">' +
+    `<defs>${artSymbol(key, 'bva')}<clipPath id="bvr"><rect x="24" y="24" width="464" height="464" rx="40"/></clipPath></defs>` +
     `<rect width="512" height="640" fill="${INK}"/>` +
     '<g transform="translate(256 0)"><g class="bv-f"><g>' +
     flip(true) +
-    `<g transform="translate(-256 0)">${placeArt(key, 0, 0, 512)}</g></g></g>` +
+    '<g transform="translate(-256 0)"><use href="#bva" width="512" height="512" aria-label="bAvatar"/></g></g></g>' +
     '<g class="bv-b"><g transform="scale(0 1)">' +
     flip(false) +
-    `<g transform="translate(-256 0)">${back}</g></g></g></g>` +
+    `<g transform="translate(-256 0)" aria-label="Pay code"><g clip-path="url(#bvr)">${back}</g></g></g></g></g>` +
     '<g font-family="Helvetica,Arial,sans-serif" text-anchor="middle">' +
     `<text x="256" y="566" font-size="34" font-weight="700" fill="#ffd24d">$${esc(handle)}</text>` +
     `<text x="256" y="604" font-size="22" font-weight="600" fill="#f1ead9">bWalletX ${esc(bavatarNumber(number))}</text>` +

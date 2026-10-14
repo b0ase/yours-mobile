@@ -2459,6 +2459,28 @@ button.bw-mail-card:active {
 }
 .bw-bflip-back {
   transform: rotateY(180deg);
+  border-radius: 14%;
+  background: #fff3cf;
+  box-shadow: 0 0 0 2px #f5b800;
+  flex-direction: column;
+}
+.bw-bflip.is-flipped {
+  border-radius: 14%;
+}
+.bw-bflip-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1.5%;
+  width: auto !important;
+  height: auto !important;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0b0a08;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bw-bflip-back img {
   display: block;

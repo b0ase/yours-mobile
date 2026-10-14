@@ -1,4 +1,6 @@
 import * as qr from 'qrcode';
+import { bavatarArtQrSvg, bavatarSvg } from './bavatar';
+import { CARD_QR } from '../wallet/cardBackQr';
 
 /**
  * The back of the flip bAvatar (owner, 14 Oct 2026): the art stays pure art on the front, and the back is a
@@ -50,61 +52,113 @@ export function paymailPayload(paymail: string | null | undefined): string {
 export const flipPayload = (address?: string | null, paymail?: string | null) =>
   payUri(address) || paymailPayload(paymail);
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const INK = '#0b0a08',
-  GOLD = '#F5B800';
-export const QUIET = 3;
+const PALE = '#fff3cf',
+  INK = '#0b0a08';
+const KEY_RE = /^0[23][0-9a-f]{64}$/;
 
-/** One path of unit squares (merged per row run) for the dark modules, in module units. */
-export function qrModulesPath(payload: string): { n: number; d: string } {
-  const m = qr.create(payload, { errorCorrectionLevel: 'M' }).modules;
-  const n = m.size;
-  let d = '';
-  for (let y = 0; y < n; y++) {
-    let x = 0;
-    while (x < n) {
-      if (!m.get(y, x)) {
-        x++;
-        continue;
-      }
-      const start = x;
-      while (x < n && m.get(y, x)) x++;
-      d += `M${start} ${y}h${x - start}v1h${start - x}z`;
-    }
-  }
-  return { n, d };
+/**
+ * Scan tuning for the back (14 Oct 2026): the wallet card back's tuning (CARD_QR: bigger dots, paler wash, no
+ * gold pip) plus an extra pale margin. The site's exact look (dot .62, wash .18, gold pip) reads in zbar but
+ * not in ZXing or jsQR (the site's own b0asex PNG included); this reads 100% in zbar and ZXing over 24
+ * names/addresses at 512/240/160 px, and ~83% in jsQR (the weakest; it misses pixel-sharp renders at 512).
+ */
+export const BACK_QR = CARD_QR;
+/** Extra pale margin around the code, as a share of its side (the art QR's own quiet zone is 3 modules). */
+export const BACK_MARGIN = 30 / 512;
+
+const matrix = (payload: string) => qr.create(payload, { errorCorrectionLevel: 'H' }).modules;
+
+/**
+ * The live back: bavatarArtQrSvg (unchanged, shared with bit-sign) with the scan tuning, inside a pale
+ * margin. Square, shown as a rounded card when flipped. '' without an art seed or a public payload.
+ */
+export function flipBackSvg(artSeed: string, payload: string, opts: { size?: number } = {}): string {
+  // The art seed is the identity key (public) or, for someone without one here, a handle/address.
+  const raw = String(artSeed ?? '').trim();
+  const key = KEY_RE.test(raw.toLowerCase()) ? raw.toLowerCase() : raw;
+  if (!key || !isPublicPayload(payload)) return '';
+  const S = opts.size ?? 512,
+    W = +(S * BACK_MARGIN).toFixed(2),
+    inner = S - 2 * W;
+  const art = bavatarArtQrSvg(key, payload, matrix(payload), { size: 512, ...BACK_QR })
+    .replace(/^<\?xml[^>]*>\s*/, '')
+    .replace(/^<svg\b[^>]*?>/, (tag) => tag.replace(/\s(width|height)="[^"]*"/g, ''))
+    .replace(/^<svg\b/, `<svg x="${W}" y="${W}" width="${inner}" height="${inner}"`);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" role="img" aria-label="Pay code">` +
+    `<rect width="${S}" height="${S}" fill="${PALE}"/>` +
+    art +
+    '</svg>'
+  );
 }
 
 /**
- * The back as a round SVG (fits the avatar circle): black bezel, thin gold ring, a white disc, and the QR
- * with its quiet zone inscribed in the disc. Optional small caption under the code, inside the disc.
- * '' when the payload isn't public pay data.
+ * The same Art QR drawn compactly for the inscription (≤ 40 KB): the art is a `<use>` of a symbol the card
+ * already holds (`artId`), the modules are one path per colour of small squares with a round-joined stroke,
+ * which draws the same rounded squares (corner .3 of the dot) at a fraction of the bytes. Module units.
+ * Returns the group to place in a `size` square at (x, y). '' unless the payload is public.
  */
-export function flipBackSvg(payload: string, opts: { size?: number; caption?: string } = {}): string {
+export function compactArtBackGroup(payload: string, artId: string, x: number, y: number, size: number): string {
   if (!isPublicPayload(payload)) return '';
-  const S = opts.size ?? 512;
-  const { n, d } = qrModulesPath(payload);
-  const c = S / 2,
-    bezel = S * 0.035,
-    ring = S * 0.012;
-  const r = c - bezel - ring; // white disc radius
-  const caption = (opts.caption ?? '').slice(0, 40);
-  // Square (code + quiet zone) inscribed in the disc; shrink a little when there is a caption under it.
-  const side = r * Math.SQRT2 * (caption ? 0.9 : 1);
-  const unit = side / (n + QUIET * 2);
-  const ox = c - side / 2,
-    oy = c - side / 2 - (caption ? r * 0.06 : 0);
-  const f = (v: number) => +v.toFixed(2);
-  const fs = f(S * 0.04);
+  const m = matrix(payload),
+    n = m.size,
+    quiet = 3;
+  const W = size * BACK_MARGIN,
+    side = size - 2 * W,
+    cell = side / (n + quiet * 2),
+    off = quiet * cell;
+  const f = (v: number) => String(+v.toFixed(3)).replace(/^0\./, '.').replace(/^-0\./, '-.');
+  const finder = (cx: number, cy: number) => (cx < 8 && cy < 8) || (cx >= n - 8 && cy < 8) || (cx < 8 && cy >= n - 8);
+  const d = BACK_QR.dot,
+    w = d * 0.6, // stroke width = 2 × corner radius (.3 of the dot)
+    core = d - w,
+    i = (1 - core) / 2;
+  const dots = (dark: boolean) => {
+    let out = 'M0 0',
+      px = 0,
+      py = 0;
+    for (let yy = 0; yy < n; yy++)
+      for (let xx = 0; xx < n; xx++) {
+        if (finder(xx, yy) || !!m.get(yy, xx) !== dark) continue;
+        out += `m${f(xx + i - px)} ${f(yy + i - py)}h${f(core)}v${f(core)}h${f(-core)}z`;
+        px = xx + i;
+        py = yy + i;
+      }
+    return out;
+  };
+  let finders = '';
+  for (const [fx, fy] of [
+    [0, 0],
+    [n - 7, 0],
+    [0, n - 7],
+  ])
+    finders +=
+      `<rect x="${fx - 1}" y="${fy - 1}" width="9" height="9" fill="${PALE}"/>` +
+      `<rect x="${fx}" y="${fy}" width="7" height="7" rx="1.6" fill="${INK}"/>` +
+      `<rect x="${fx + 1}" y="${fy + 1}" width="5" height="5" rx="1.1" fill="${PALE}"/>` +
+      `<rect x="${fx + 2}" y="${fy + 2}" width="3" height="3" rx=".8" fill="${INK}"/>`;
+  const code = n * cell,
+    ox = x + W + off,
+    oy = y + W + off;
+  const clip = `${artId}c`;
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" role="img" aria-label="Pay code">` +
-    `<circle cx="${c}" cy="${c}" r="${c}" fill="${INK}"/>` +
-    `<circle cx="${c}" cy="${c}" r="${f(c - bezel)}" fill="${GOLD}"/>` +
-    `<circle cx="${c}" cy="${c}" r="${f(r)}" fill="#fff"/>` +
-    `<path transform="translate(${f(ox + QUIET * unit)} ${f(oy + QUIET * unit)}) scale(${+unit.toFixed(4)})" fill="${INK}" shape-rendering="crispEdges" d="${d}"/>` +
-    (caption
-      ? `<text x="${c}" y="${f(oy + side + fs * 1.1)}" font-family="Helvetica,Arial,sans-serif" font-size="${fs}" font-weight="700" text-anchor="middle" fill="${INK}">${esc(caption)}</text>`
-      : '') +
-    `</svg>`
+    `<g>` +
+    `<rect x="${f(x)}" y="${f(y)}" width="${f(size)}" height="${f(size)}" fill="${PALE}"/>` +
+    `<clipPath id="${clip}"><rect x="${f(ox)}" y="${f(oy)}" width="${f(code)}" height="${f(code)}"/></clipPath>` +
+    `<g clip-path="url(#${clip})"><use href="#${artId}" x="${f(ox)}" y="${f(oy)}" width="${f(code)}" height="${f(code)}"/></g>` +
+    `<g transform="translate(${f(ox)} ${f(oy)}) scale(${f(cell)})">` +
+    `<rect width="${n}" height="${n}" fill="${PALE}" fill-opacity="${BACK_QR.lift}"/>` +
+    `<path d="${dots(false)}" fill="${PALE}" stroke="${PALE}" stroke-width="${f(w)}" stroke-linejoin="round"/>` +
+    `<path d="${dots(true)}" fill="${INK}" stroke="${INK}" stroke-width="${f(w)}" stroke-linejoin="round"/>` +
+    finders +
+    '</g></g>'
   );
+}
+
+/** The plain bAvatar art as a `<symbol>` (for `<use>` on both sides of the minted card). */
+export function artSymbol(identityKey: string, id: string): string {
+  return bavatarSvg(String(identityKey).toLowerCase(), { size: 512 })
+    .replace(/^<\?xml[^>]*>\s*/, '')
+    .replace(/^<svg\b[^>]*?>/, `<symbol id="${id}" viewBox="0 0 512 512">`)
+    .replace(/<\/svg>\s*$/, '</symbol>');
 }
