@@ -22,7 +22,7 @@ const ICONS = resolve(__dirname, 'assets/bwalletx-ext');
 /** The wide build is bWalletX Desktop (owner, 9 Oct 2026: "web" is the classic wallet, the beta becomes "desktop"). */
 const DESKTOP = process.env.VITE_WIDE_WEB === '1';
 /** Root for links in the shell: absolute on Desktop (deep paths serve index.html), relative on the classic web. */
-const ROOT = DESKTOP ? '/' : './';
+const ROOT = '/';
 const APP_TITLE = DESKTOP ? 'bWalletX Desktop' : 'bWalletX';
 
 // desktop.bwalletx.com share card (owner, 9 Oct 2026). Source: bwalletx-site media-src/og/og-desktop-v1.html.
@@ -182,9 +182,9 @@ export default mergeConfig(
     plugins: [webShell(), webCss(), albumPages()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
-    // Desktop serves index.html for deep paths (/lock/subscriptions, /m/feed): relative ./assets/ would resolve to
-    // /lock/assets/… and 404 (blank page). Absolute paths there; the classic web build keeps its relative base.
-    ...(DESKTOP ? { base: '/' } : {}),
+    // Both web hosts serve index.html for deep paths (/lock/subscriptions, /m/market, /bapp/bchatx): relative ./assets/
+    // would resolve to /bapp/assets/… and 404, leaving only the static beta strip on black. Absolute paths everywhere.
+    base: '/',
     build: { outDir: 'build-web', sourcemap: false },
     define: { __BWALLET_WEB__: 'true' },
   }),
