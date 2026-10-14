@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
 import { useDisplayCurrency } from '../../../hooks/useDisplayCurrency';
 import { fiatCode, fiatSymbol, fiatToUsd, usdToFiat } from '../../../utils/displayCurrency';
@@ -26,6 +26,7 @@ import {
   type RowStatus,
   type SendRow,
 } from './sendLogic';
+import { scrollCentered, sendFocusField, shouldRevealButton } from './sendScroll';
 
 /**
  * Send BSV card (owner, 9 Oct 2026: "as easy as HandCash"). Recipient first with quick picks and an
@@ -54,6 +55,11 @@ type Props = {
   /** The amount was edited after Max: it is no longer a send-all. */
   onAmountEdited: () => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  /**
+   * Opened from a Send action (main screen Send › BSV, Contacts › Pay), not from tapping the BSV card: scroll the
+   * send section into view and focus the recipient (or the amount when the recipient is prefilled).
+   */
+  focusOnOpen?: boolean;
 };
 
 const GOLD = '#FFD24D';
@@ -102,6 +108,38 @@ export const SendCard = (p: Props) => {
   });
   const multi = p.rows.length > 1;
 
+  const formRef = useRef<HTMLFormElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  // Opened via Send: bring the send section (not the chart and Buy) into view, focus the next field.
+  useEffect(() => {
+    if (!p.focusOnOpen) return;
+    const form = formRef.current;
+    if (!form) return;
+    const field = sendFocusField(p.rows);
+    const input =
+      field === 'amount'
+        ? form.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
+        : form.querySelector<HTMLInputElement>('input');
+    try {
+      input?.focus({ preventScroll: true });
+    } catch {
+      /* focus is best effort */
+    }
+    return scrollCentered(input ?? form);
+    // Once per open: later row edits must not pull the view back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.focusOnOpen]);
+
+  // Amount entered (first time non-zero): bring the Send button above the keyboard.
+  const totalSats = p.rows.reduce((a, r) => a + rowSats(r, p.rate), 0);
+  const prevSats = useRef(totalSats);
+  useEffect(() => {
+    const before = prevSats.current;
+    prevSats.current = totalSats;
+    if (!shouldRevealButton(before, totalSats)) return;
+    return scrollCentered(submitRef.current);
+  }, [totalSats]);
+
   const setAddress = (id: string, v: string) => {
     setNames((n) => ({ ...n, [id]: '' }));
     p.onUpdate(id, 'address', v);
@@ -135,7 +173,7 @@ export const SendCard = (p: Props) => {
   };
 
   return (
-    <form noValidate onSubmit={p.onSubmit} className="flex flex-col w-full gap-3">
+    <form ref={formRef} noValidate onSubmit={p.onSubmit} className="flex flex-col w-full gap-3">
       {/* Balance: dollars first, BSV small, Max */}
       <div className="flex items-center justify-between w-full px-1">
         <span className="text-xs" style={{ color: gray }}>
@@ -369,6 +407,7 @@ export const SendCard = (p: Props) => {
       </div>
 
       <button
+        ref={submitRef}
         type="submit"
         disabled={btn.disabled}
         className="w-full h-12 rounded-2xl font-bold text-[15px] border-0 cursor-pointer disabled:cursor-not-allowed"

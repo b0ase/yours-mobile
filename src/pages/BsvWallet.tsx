@@ -126,6 +126,8 @@ export const BsvWallet = () => {
   urlParams.delete('reload');
   const [pageState, setPageState] = useState<PageState>('main');
   const [sendSource, setSendSource] = useState<PageState>('main');
+  // Send screen opened by a Send action (true) or by tapping the BSV card (false: chart + Buy on top, as before).
+  const [sendFocus, setSendFocus] = useState(false);
   const [satSendAmount, setSatSendAmount] = useState<number | null>(null);
   const { addSnackbar } = useSnackbar();
   const { chromeStorageService, apiContext, keysService } = useServiceContext();
@@ -257,6 +259,7 @@ export const BsvWallet = () => {
           ? { id: crypto.randomUUID(), address: to, satSendAmount: sats, usdSendAmount: null, amountType: 'bsv' }
           : { id: crypto.randomUUID(), address: to, satSendAmount: null, usdSendAmount: null, amountType: 'usd' },
       ]);
+      setSendFocus(true);
       setPageState('send');
     };
     take();
@@ -1338,6 +1341,7 @@ export const BsvWallet = () => {
 
   const openBsvView = () => {
     setSendSource('main');
+    setSendFocus(false);
     setPageState('send');
   };
 
@@ -1699,6 +1703,7 @@ export const BsvWallet = () => {
     setSendSource('asset-picker');
     switch (asset.kind) {
       case 'bsv':
+        setSendFocus(true);
         setPageState('send');
         return;
       case 'mnee':
@@ -2016,6 +2021,7 @@ export const BsvWallet = () => {
         onMax={fillInputWithAllBsv}
         onAmountEdited={() => setSatSendAmount(null)}
         onSubmit={(e) => handleSendBsv(e)}
+        focusOnOpen={sendFocus}
       />
 
       <div className="w-full px-4">

@@ -4,6 +4,9 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { getMyName } from './myName';
 import { isPlaceholderName } from './handlePrompt';
 import { getCachedProfileName, getPaymail, onAccountNamesChange, payableLabel, syncAccountNames } from './accountName';
+import { collectPaymailInbox } from './paymail';
+import { browserInboxPollEnv, startInboxPoll } from './inboxPoll';
+import { requestWalletRefresh } from '../wallet/walletRefresh';
 
 export type AccountNames = {
   /** BAP profile name, else the account's name. */
@@ -51,5 +54,19 @@ export const useAccountNames = (identityAddress?: string, accountName = '', prof
     const t = setInterval(run, 150_000);
     return () => clearInterval(t);
   }, [apiContext, identityAddress, sync]);
+  // Paymail payments arrive only through the inbox: collect it every few seconds while visible (inboxPoll.ts).
+  const hasPaymail = !!names.paymail;
+  useEffect(() => {
+    if (!sync || !apiContext || !identityAddress || !hasPaymail) return;
+    const f = (u: string, i?: RequestInit) => fetch(u, i);
+    return startInboxPoll(
+      () =>
+        collectPaymailInbox(f, apiContext.wallet, async (txid) =>
+          apiContext.services ? (await apiContext.services.getBeefForTxid(txid)).toBinary() : undefined,
+        ),
+      requestWalletRefresh,
+      browserInboxPollEnv(),
+    );
+  }, [apiContext, identityAddress, sync, hasPaymail]);
   return names;
 };
