@@ -437,7 +437,7 @@ const MarketPage = () => {
           aria-pressed={launchOn}
           onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
           className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
-          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px #F5B800' } : { opacity: 0.85 }}
+          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px var(--bw-accent)' } : { opacity: 0.85 }}
         >
           <Rocket size={16} /> {CURVE_LABEL}
           {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
@@ -457,7 +457,7 @@ const MarketPage = () => {
               }}
               className="flex min-h-[44px] items-center justify-center rounded-xl px-1 py-2 text-center text-[12px] font-semibold leading-tight"
               style={{
-                background: on ? '#F5B800' : '#17191E',
+                background: on ? 'var(--bw-accent)' : '#17191E',
                 color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
               }}
             >
@@ -471,7 +471,7 @@ const MarketPage = () => {
   );
 
   const segment = (
-    <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]">
+    <div className="flex gap-1 rounded-xl p-1 bg-[var(--bw-surface)]">
       {(
         [
           ['trending', 'Trending'],
@@ -552,7 +552,7 @@ const MarketPage = () => {
               <button
                 type="button"
                 onClick={() => setExpanded3d((prev) => new Set(prev).add(gk))}
-                className={`text-[11px] text-[#98A2B3] bg-[#17191E] border border-[#2b2f36] rounded-full px-2 py-1 ${ELLIPSIS}`}
+                className={`text-[11px] text-[#98A2B3] bg-[var(--bw-surface)] border border-[#2b2f36] rounded-full px-2 py-1 ${ELLIPSIS}`}
               >
                 {label} · show all
               </button>
@@ -646,7 +646,7 @@ const MarketPage = () => {
     <button
       key={r.ref.key}
       onClick={() => void openRoom(r as HotRoom)}
-      className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+      className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3 text-left"
     >
       <span className="w-6 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
       <Art outpoint={r.icon} kind="bsv21" collectionId={r.ref.id} />
@@ -658,7 +658,7 @@ const MarketPage = () => {
       </div>
       <span
         className="shrink-0 rounded-full px-2 py-[1px] text-[10px] font-bold"
-        style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+        style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
       >
         Personal token
       </span>
@@ -726,7 +726,7 @@ const MarketPage = () => {
               void loadBoard();
             }}
             className="rounded-full px-4 py-2 text-sm font-semibold"
-            style={{ background: '#F5B800', color: '#010101' }}
+            style={{ background: 'var(--bw-accent)', color: '#010101' }}
           >
             Retry
           </button>
@@ -755,7 +755,7 @@ const MarketPage = () => {
           <button
             key={r.ref.key}
             onClick={() => void openRoom(r)}
-            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+            className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3 text-left"
           >
             <span className="w-6 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
             <Art outpoint={r.icon} kind="bsv21" collectionId={r.ref.id} />
@@ -784,7 +784,7 @@ const MarketPage = () => {
           <button
             key={a.name}
             onClick={() => void openDappBrowser(a.url)}
-            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+            className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3 text-left"
           >
             {a.icon ? (
               <img src={a.icon} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
@@ -826,7 +826,7 @@ const MarketPage = () => {
             <button
               key={r.ref.key}
               onClick={() => void openRoom(r)}
-              className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+              className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3 text-left"
             >
               <span className="w-4 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
               <Art outpoint={r.icon} kind={r.ref.kind} collectionId={r.ref.id} />
@@ -876,7 +876,7 @@ const MarketPage = () => {
             <button
               onClick={() => openTicketRoomInChat(ticketPage.ticket.tokenId, handleSelect)}
               className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
-              style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+              style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
             >
               Open room
             </button>
@@ -886,20 +886,20 @@ const MarketPage = () => {
             kind={room.ref.kind}
             id={room.ref.id}
             className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
-            style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+            style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
           />
         )}
       </div>
       {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
       {ticketPage && (
-        <div className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
+        <div className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[var(--bw-surface)] px-3 py-2.5">
           {TICKET_COPY}
           {ticketPage.ticket.description && <div className="mt-1 text-white">{ticketPage.ticket.description}</div>}
           {eventLabel(ticketPage.ticket.eventDate) && (
             <div className="mt-1">Event: {eventLabel(ticketPage.ticket.eventDate)}</div>
           )}
           {ticketPage.holder && (
-            <div className="mt-1 text-[#FFD24D]">You hold a ticket: the room is yours to open.</div>
+            <div className="mt-1 text-[color:var(--bw-accent-hi)]">You hold a ticket: the room is yours to open.</div>
           )}
         </div>
       )}
@@ -923,7 +923,7 @@ const MarketPage = () => {
                 .blocked),
         )
         .map((l) => (
-          <div key={l.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
+          <div key={l.outpoint} className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-2.5">
             {room.ref.kind === 'coll' && (
               <Art
                 outpoint={categoryOf(l.contentType) === 'images' ? l.origin : room.icon}
@@ -968,7 +968,7 @@ const MarketPage = () => {
       {SELL_ENABLED && kind === 'tokens' ? (
         <MyTokenListings emptyText="No token listings. Sell from a token's page or Wallet › Tickets." />
       ) : (
-        <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
+        <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[var(--bw-surface)] px-3 py-2.5">
           <Tag size={11} className="inline mr-1" />
           {ORDLOCK_LISTING_DISABLED_MESSAGE}
         </p>
@@ -983,7 +983,7 @@ const MarketPage = () => {
       {mine
         ?.filter((o) => isTokenOutput(o) === (kind === 'tokens'))
         .map((o) => (
-          <div key={o.outpoint} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2.5">
+          <div key={o.outpoint} className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-2.5">
             <div className={`min-w-0 flex-1 text-sm text-white ${ELLIPSIS}`}>{getOutputName(o, 'Listing')}</div>
             <button
               onClick={() => void cancel(o)}
@@ -1004,7 +1004,7 @@ const MarketPage = () => {
   const confirm = pending && (
     <div className="fixed inset-0 z-[200] flex items-end bg-black/60" onClick={() => !busy && setPending(null)}>
       <div
-        className="w-full rounded-t-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+        className="w-full rounded-t-2xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -1049,7 +1049,7 @@ const MarketPage = () => {
   return (
     <div
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: '100%', background: '#010101' }}
+      style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <PullToRefresh
         onRefresh={() => {
@@ -1116,7 +1116,7 @@ const MarketPage = () => {
                   background: 'linear-gradient(transparent, #010101 35%)',
                 }}
               >
-                <label className="flex items-center gap-2 rounded-full bg-[#17191E] px-4 py-2.5 border border-[#2b2f36]">
+                <label className="flex items-center gap-2 rounded-full bg-[var(--bw-surface)] px-4 py-2.5 border border-[#2b2f36]">
                   <Search size={16} color="#98A2B3" />
                   <input
                     value={q}
@@ -1204,7 +1204,7 @@ const MarketPage = () => {
       {reporting && (
         <div className="fixed inset-0 z-[210] flex items-end bg-black/60" onClick={() => setReporting(null)}>
           <div
-            className="w-full rounded-t-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+            className="w-full rounded-t-2xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
             onClick={(e) => e.stopPropagation()}
           >

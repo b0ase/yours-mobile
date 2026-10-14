@@ -375,3 +375,15 @@ export const PLACEMENT_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * bMovies feed (Feed › bMovies: the vertical clip reel from bmovies.app): bWalletX only (web, desktop,
+ * direct APK). Clips are tokenised pitches ("Tokenise this"), so the store build leaves it out even
+ * as code. Literal env check so Vite inlines it and Rollup drops feed/bmovies/* and its registry
+ * entry. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const BMOVIES_FEED_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

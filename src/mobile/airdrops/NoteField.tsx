@@ -16,7 +16,7 @@ export const NoteField = ({ value, onChange }: { value: string; onChange: (v: st
         maxLength={NOTE_MAX * 2}
         placeholder="Say why you're sending this. Plain text, public, on chain."
         className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none"
-        style={{ background: '#17191E', color: '#fff', border: `1px solid ${bad ? '#F97066' : '#2b2f36'}` }}
+        style={{ background: 'var(--bw-surface)', color: '#fff', border: `1px solid ${bad ? '#F97066' : '#2b2f36'}` }}
       />
       <span className="text-[10px] self-end" style={{ color: left < 0 || bad ? '#F97066' : '#667085' }}>
         {bad && left >= 0 ? 'Plain text only' : `${left} left`}

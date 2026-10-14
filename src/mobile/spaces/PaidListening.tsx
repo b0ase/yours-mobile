@@ -23,7 +23,7 @@ import {
   type PaidState,
 } from './paidListen';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 const POLL_MS = 15_000;
@@ -201,7 +201,10 @@ function ApproveSheet(p: {
   const unit = p.currency.kind === 'bsv' ? '$' : `$${p.currency.sym || 'tokens'} `;
   return (
     <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 p-3">
-      <div className="w-full max-w-md rounded-2xl p-5" style={{ background: '#0b0a08', border: `1px solid ${GOLD}40` }}>
+      <div
+        className="w-full max-w-md rounded-2xl p-5"
+        style={{ background: '#0b0a08', border: `1px solid color-mix(in srgb, ${GOLD} 25%, transparent)` }}
+      >
         <p className="text-lg font-bold text-white">Paid listening</p>
         <p className="mt-1 text-sm" style={{ color: MUTED }}>
           {p.price}, {destText(p.dest)}.{p.free ? ' The first minute is free.' : ''} Your wallet pays each minute
@@ -292,7 +295,7 @@ function SettingsSheet({
     <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 p-3">
       <div
         className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl p-5"
-        style={{ background: '#0b0a08', border: `1px solid ${GOLD}40` }}
+        style={{ background: '#0b0a08', border: `1px solid color-mix(in srgb, ${GOLD} 25%, transparent)` }}
       >
         <p className="text-lg font-bold text-white">Paid listening</p>
         <label className="mt-3 flex items-center gap-2 text-sm text-white">

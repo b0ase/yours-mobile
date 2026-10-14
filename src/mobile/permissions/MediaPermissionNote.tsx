@@ -38,7 +38,7 @@ export const MediaPermissionNote = ({
           <button
             onClick={() => openPermissionTab(kind === 'camera' ? ['mic', 'camera'] : ['mic'])}
             className="rounded-lg px-3 py-1.5 text-sm font-semibold"
-            style={{ background: '#F5B800', color: '#000' }}
+            style={{ background: 'var(--bw-accent)', color: '#000' }}
           >
             Allow in a tab
           </button>
@@ -47,7 +47,7 @@ export const MediaPermissionNote = ({
           <button
             onClick={() => void YoursNative.openAppSettings().catch(() => undefined)}
             className="rounded-lg px-3 py-1.5 text-sm font-semibold"
-            style={{ background: '#F5B800', color: '#000' }}
+            style={{ background: 'var(--bw-accent)', color: '#000' }}
           >
             Open Settings
           </button>

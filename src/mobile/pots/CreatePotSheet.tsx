@@ -8,12 +8,12 @@ import { reschedulePotReminders } from './notifyPots';
 import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
 const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border w-full';
-const field = { background: '#010101', borderColor: LINE };
+const field = { background: 'var(--bw-bg)', borderColor: LINE };
 
 const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => {
   useBackClose(true, onClose);

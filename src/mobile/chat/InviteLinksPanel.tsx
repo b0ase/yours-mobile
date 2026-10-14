@@ -20,7 +20,7 @@ import {
 import { copyLink, shareText } from './shareLink';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 const PANEL = '#0b0b0d';

@@ -41,7 +41,7 @@ import {
  * merging bChat contacts, Calls friends and Feed follows. "New message" picks a contact or takes
  * a $handle / name@bwallet.space. The conversation view itself is ChatPage's, passed in.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const BG = '#010101';
 const PANEL = '#121316';
 const LINE = '#1f2127';

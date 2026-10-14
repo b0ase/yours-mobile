@@ -42,7 +42,7 @@ const C = {
   text: '#F1EAD9',
   muted: '#A39A85',
   gold: '#E9B52A',
-  cta: '#FFD24D',
+  cta: 'var(--bw-accent-hi)',
 };
 
 const api = new SwapApi();

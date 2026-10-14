@@ -37,7 +37,7 @@ const getTokenName = (b: Bsv21Balance): string => b.sym || 'Null';
 const YoursChip = () => (
   <span
     className="text-[9px] font-bold rounded px-1.5 py-0.5 mr-1.5"
-    style={{ background: '#F5B80022', color: '#F5B800', letterSpacing: '0.04em' }}
+    style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)', letterSpacing: '0.04em' }}
   >
     YOURS
   </span>

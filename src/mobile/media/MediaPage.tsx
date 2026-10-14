@@ -55,7 +55,7 @@ const readView = (): View => {
   }
 };
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#111216';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -119,7 +119,7 @@ const GoldArt = ({ seed, title }: { seed: string; title: string }) => {
     <div
       className="w-full h-full flex items-center justify-center"
       style={{
-        background: `radial-gradient(circle at ${20 + (h % 60)}% ${20 + ((h >> 3) % 60)}%, #FFE58A 0%, #D9A520 28%, #5a420a 62%, #0b0b0b 100%)`,
+        background: `radial-gradient(circle at ${20 + (h % 60)}% ${20 + ((h >> 3) % 60)}%, var(--bw-accent-hi) 0%, #D9A520 28%, #5a420a 62%, #0b0b0b 100%)`,
       }}
     >
       <span className="font-black" style={{ color: '#0b0b0b', fontSize: '42cqw', lineHeight: 1, opacity: 0.85 }}>
@@ -416,7 +416,10 @@ const MediaPage = () => {
         onClick={() => play(e)}
         onKeyDown={(k) => k.key === 'Enter' && play(e)}
         className="flex items-center gap-3 py-2 px-2 cursor-pointer"
-        style={{ borderBottom: `1px solid ${LINE}`, background: active ? 'rgba(255,210,77,0.06)' : undefined }}
+        style={{
+          borderBottom: `1px solid ${LINE}`,
+          background: active ? 'rgb(var(--bw-accent-hi-rgb) / 0.06)' : undefined,
+        }}
       >
         <span className="w-6 text-sm font-bold text-right shrink-0" style={{ color: active ? GOLD : MUTED }}>
           {n + 1}
@@ -511,14 +514,14 @@ const MediaPage = () => {
     );
 
   return (
-    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
+    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: 'var(--bw-bg)' }}>
       <PullToRefresh onRefresh={reload} />
       <TopNav />
       {/* Room for the top bar as its own block: Desktop hides the header below, and its margin went with it. */}
       <div className="h-14 shrink-0" aria-hidden />
       <div
         className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
-        style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+        style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
       >
         <nav className="flex items-center shrink-0" aria-label="Store navigation">
           <button aria-label="Back" title="Back" onClick={close} className="p-1.5">
@@ -812,7 +815,7 @@ function BrowseView(p: {
             onClick={() => on(it.id)}
             className={`px-2 py-1.5 text-left text-[13px] ${ELLIPSIS}`}
             style={{
-              background: sel === it.id ? 'rgba(255,210,77,0.14)' : 'transparent',
+              background: sel === it.id ? 'rgb(var(--bw-accent-hi-rgb) / 0.14)' : 'transparent',
               color: sel === it.id ? GOLD : '#fff',
             }}
           >

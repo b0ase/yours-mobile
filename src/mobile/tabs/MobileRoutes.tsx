@@ -39,6 +39,7 @@ const CallsPage = lazy(() => import('../calls/CallsPage'));
 const HomeScreen = lazy(() => import('../phone/HomeScreen'));
 const PeopleScreen = lazy(() => import('../phone/PeopleScreen'));
 const BrowserPage = lazy(() => import('../BrowserPage'));
+const BappLinkPage = lazy(() => import('../bappFrame/BappLinkPage'));
 // The phone top bar's Lock BSV button (locks/, docs/TIME-LOCK-PLAN.md).
 const LockScreen = lazy(() => import('../locks/LockScreen'));
 // Desktop sidebar › Tickets / Credits (wide/WalletKindPages.tsx).
@@ -108,6 +109,7 @@ const MobileRoutes = () => (
         <Route path="friends/:slug" element={<FriendsPage />} />
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
+        <Route path="bapp/:slug" element={<BappLinkPage />} />
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
         <Route path="screen/:n" element={<BrowserPage only="apps" />} />
         <Route path="games" element={<BrowserPage only="games" />} />

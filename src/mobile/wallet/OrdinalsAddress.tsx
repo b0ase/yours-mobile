@@ -18,7 +18,7 @@ export const OrdinalsAddress = () => {
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <div className="w-full mt-6 rounded-2xl p-4" style={{ background: '#17191E' }}>
+    <div className="w-full mt-6 rounded-2xl p-4" style={{ background: 'var(--bw-surface)' }}>
       <div className="text-xs font-semibold text-white">Ordinals address</div>
       <div className="text-[11px] mt-0.5 mb-2" style={{ color: '#98A2B3' }}>
         For NFTs, ordinals and tokens. Different from the BSV address above.

@@ -157,8 +157,8 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
   if (tile.screen) {
     const Icon = SCREEN_ICON[tile.screen];
     return (
-      <div className={`${ICON} flex items-center justify-center`} style={{ background: '#17191E' }}>
-        <Icon size={28} color="#FFD24D" />
+      <div className={`${ICON} flex items-center justify-center`} style={{ background: 'var(--bw-surface)' }}>
+        <Icon size={28} color="var(--bw-accent-hi)" />
       </div>
     );
   }
@@ -173,7 +173,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         loading="lazy"
         width={60}
         height={60}
-        className={`${ICON} object-cover bg-[#17191E]`}
+        className={`${ICON} object-cover bg-[var(--bw-surface)]`}
       />
     );
   }
@@ -181,15 +181,15 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
     return (
       <div
         className={`${ICON} flex items-center justify-center font-bold text-2xl`}
-        style={{ background: '#EAB300', color: '#010101' }}
+        style={{ background: 'var(--bw-accent-lo)', color: '#010101' }}
       >
         b
       </div>
     );
   }
   return (
-    <div className={`${ICON} bg-[#17191E] flex items-center justify-center`}>
-      <Globe size={26} style={{ color: '#FFD24D' }} />
+    <div className={`${ICON} bg-[var(--bw-surface)] flex items-center justify-center`}>
+      <Globe size={26} style={{ color: 'var(--bw-accent-hi)' }} />
     </div>
   );
 };
@@ -864,7 +864,7 @@ const BrowserPage = ({
               <button
                 onClick={() => setArranging(false)}
                 className="rounded-full px-4 py-1.5 text-[13px] font-bold"
-                style={{ background: '#FFD24D', color: '#010101' }}
+                style={{ background: 'var(--bw-accent-hi)', color: '#010101' }}
               >
                 Done
               </button>
@@ -897,12 +897,14 @@ const BrowserPage = ({
     <>
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Your apps</h2>
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">
+            Your apps
+          </h2>
           <button
             type="button"
             onClick={() => setAddingApp(true)}
             className="rounded-full px-3 py-1 text-[12px] font-bold border-0"
-            style={{ background: '#F5B800', color: '#010101' }}
+            style={{ background: 'var(--bw-accent)', color: '#010101' }}
           >
             + Add app
           </button>
@@ -914,14 +916,14 @@ const BrowserPage = ({
         )}
       </div>
       <div className="flex flex-col gap-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">Recents</h2>
         {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
         <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {recent.map((url) => (
             <button
               key={url}
               onClick={() => go(url)}
-              className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+              className="shrink-0 flex items-center gap-1 rounded-full bg-[var(--bw-surface)]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
             >
               <Clock size={11} /> {hostOf(url)}
             </button>
@@ -938,7 +940,9 @@ const BrowserPage = ({
         .filter((g) => g.tiles.length)
         .map((g) => (
           <div key={g.label} className="flex flex-col gap-3">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">
+              {g.label}
+            </h2>
             {grid(0, g.tiles)}
           </div>
         ))}
@@ -962,7 +966,7 @@ const BrowserPage = ({
             aria-label={`${screenTitle(x, i)}. Tap to rename`}
             // Solid background, no blur: cheap to keep stuck while scrolling on old iPhones.
             className="sticky top-0 z-[2] -mx-4 px-4 py-2 text-left text-[12px] font-bold uppercase tracking-wider border-0"
-            style={{ background: '#010101', color: '#FFD24D' }}
+            style={{ background: 'var(--bw-bg)', color: 'var(--bw-accent-hi)' }}
           >
             {screenTitle(x, i)}
           </button>
@@ -986,7 +990,7 @@ const BrowserPage = ({
                 <button
                   onClick={() => setArranging(false)}
                   className="rounded-full px-4 py-1.5 text-[13px] font-bold"
-                  style={{ background: '#FFD24D', color: '#010101' }}
+                  style={{ background: 'var(--bw-accent-hi)', color: '#010101' }}
                 >
                   Done
                 </button>
@@ -1002,12 +1006,14 @@ const BrowserPage = ({
           )}
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Your apps</h2>
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">
+                Your apps
+              </h2>
               <button
                 type="button"
                 onClick={() => setAddingApp(true)}
                 className="rounded-full px-3 py-1 text-[12px] font-bold border-0"
-                style={{ background: '#F5B800', color: '#010101' }}
+                style={{ background: 'var(--bw-accent)', color: '#010101' }}
               >
                 + Add app
               </button>
@@ -1020,14 +1026,16 @@ const BrowserPage = ({
           </div>
           {(recent.length > 0 || (phone && only === 'home')) && (
             <div className="flex flex-col gap-2">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">Recents</h2>
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">
+                Recents
+              </h2>
               {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
               <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                 {recent.map((url) => (
                   <button
                     key={url}
                     onClick={() => go(url)}
-                    className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+                    className="shrink-0 flex items-center gap-1 rounded-full bg-[var(--bw-surface)]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
                   >
                     <Clock size={11} /> {hostOf(url)}
                   </button>
@@ -1054,7 +1062,9 @@ const BrowserPage = ({
         <>
           {GAME_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
             <div key={g.label} className="flex flex-col gap-3">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">
+                {g.label}
+              </h2>
               {grid(3, notHome(g.tiles))}
             </div>
           ))}
@@ -1067,7 +1077,9 @@ const BrowserPage = ({
         {grid(2, notHome(OTHER_TILES))}
         {OTHER_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
           <div key={g.label} className="flex flex-col gap-3">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[#FFD24D]">{g.label}</h2>
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">
+              {g.label}
+            </h2>
             {grid(2, notHome(g.tiles))}
           </div>
         ))}
@@ -1135,7 +1147,7 @@ const BrowserPage = ({
             className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
             style={{ background: 'rgba(1,1,1,0.75)' }}
           >
-            <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+            <div className="flex gap-1 rounded-xl p-1 bg-[var(--bw-surface)]" role="tablist" aria-label="App pages">
               {PAGES.map((label, i) => (
                 <button
                   key={label}
@@ -1194,7 +1206,7 @@ const BrowserPage = ({
           }}
         >
           <form onSubmit={submit} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 rounded-full bg-[#17191E] pl-4 pr-1">
+            <div className="flex items-center gap-2 rounded-full bg-[var(--bw-surface)] pl-4 pr-1">
               <Search size={15} style={{ color: '#98A2B3' }} />
               <input
                 value={address}
@@ -1208,7 +1220,7 @@ const BrowserPage = ({
                 aria-label="Web address"
               />
               <button type="submit" aria-label="Go" className="p-2">
-                <ArrowRight size={17} style={{ color: '#FFD24D' }} />
+                <ArrowRight size={17} style={{ color: 'var(--bw-accent-hi)' }} />
               </button>
             </div>
             {error && (
@@ -1234,7 +1246,7 @@ const BrowserPage = ({
               onClick={() => setInfo(null)}
             >
               <motion.div
-                className="w-full rounded-t-3xl bg-[#17191E] px-5 pt-5 flex flex-col gap-4"
+                className="w-full rounded-t-3xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-4"
                 style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
                 initial={{ y: 40 }}
                 animate={{ y: 0 }}
@@ -1252,7 +1264,7 @@ const BrowserPage = ({
                           style={
                             info.demo
                               ? { background: '#2b2f36', color: '#98A2B3' }
-                              : { background: '#EAB30022', color: '#FFD24D' }
+                              : { background: 'rgb(var(--bw-accent-lo-rgb)/0.13)', color: 'var(--bw-accent-hi)' }
                           }
                         >
                           {info.restricted ? info.restricted : info.demo ? 'Demo' : 'Live'}
@@ -1281,7 +1293,7 @@ const BrowserPage = ({
                     else go(url);
                   }}
                   className="rounded-xl py-3 text-sm font-bold"
-                  style={{ background: '#FFD24D', color: '#010101' }}
+                  style={{ background: 'var(--bw-accent-hi)', color: '#010101' }}
                 >
                   Open
                 </button>
@@ -1302,7 +1314,7 @@ const BrowserPage = ({
                     }}
                     className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
                   >
-                    <Plus size={15} style={{ color: '#FFD24D' }} /> Add to Dock
+                    <Plus size={15} style={{ color: 'var(--bw-accent-hi)' }} /> Add to Dock
                   </button>
                 )}
                 {phone && screen !== undefined && (
@@ -1356,7 +1368,11 @@ const BrowserPage = ({
                     onClick={() => toggleFavourite(info)}
                     className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold bg-[#2b2f36] text-white"
                   >
-                    <Star size={15} style={{ color: '#FFD24D' }} fill={isFavourite(info) ? '#FFD24D' : 'none'} />
+                    <Star
+                      size={15}
+                      style={{ color: 'var(--bw-accent-hi)' }}
+                      fill={isFavourite(info) ? 'var(--bw-accent-hi)' : 'none'}
+                    />
                     {isFavourite(info) ? 'Remove from Home' : 'Add to Home'}
                   </button>
                 )}

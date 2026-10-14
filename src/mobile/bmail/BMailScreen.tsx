@@ -83,7 +83,7 @@ import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
 
 const MUTED = '#98A2B3';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 /** Pinned letters: orange-gold border + pin icon. */
 const PIN = '#F79009';
 const f = (u: string, i?: RequestInit) => fetch(u, i);

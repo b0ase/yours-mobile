@@ -271,7 +271,18 @@ export function decodeScript(script: Script): Decoded | null {
 }
 
 // ── bmap API parsing ─────────────────────────────────────────────────────────
-export type Author = { address: string; bapId: string | null; name: string; avatar: string | null };
+export type Author = {
+  address: string;
+  bapId: string | null;
+  name: string;
+  avatar: string | null;
+  /** The paymail the post declared (MAP `paymail`), when it looks like one. Unverified: resolve before use. */
+  paymail?: string;
+  /** Where this author was read from (unset = bChat / bmap). Picks the profile's post source. */
+  source?: Source;
+  /** That source's own id: Twetch user id, Peck signer key, Treechat username, Fwetch address. */
+  sourceId?: string;
+};
 export type FeedImage = { src: string; mime: string };
 // Source registry (labels, logos, original-post links) lives in sources.ts; re-exported here.
 export { SOURCES, sourceLabel, sourceOf, sourceUrl, type Source } from './sources';
@@ -438,7 +449,15 @@ export function parseBmapPost(
     source,
     threadId: isThreadId(threadId) ? threadId.toLowerCase() : null,
     replyTo: isTxid(parent) ? parent.toLowerCase() : null,
-    author: { address, bapId, name, avatar: signer?.avatar ?? null },
+    author: {
+      address,
+      bapId,
+      name,
+      avatar: signer?.avatar ?? null,
+      ...(/^[a-z0-9._+-]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(asStr(map.paymail).trim())
+        ? { paymail: asStr(map.paymail).trim().toLowerCase() }
+        : {}),
+    },
     at: ts > 1e12 ? ts : ts * 1000,
     likes: Number(m.likes) || 0,
     replies: Number(m.replies) || 0,
@@ -612,6 +631,7 @@ function parseTwetchItem(item: unknown, c: TwetchCtx): FeedPost | null {
       bapId: null,
       name: asStr(u.name).trim().slice(0, 60) || `Twetch user ${uid}`,
       avatar: icon ? twetchMediaUrl(icon) : null,
+      ...(uid ? { source: 'twetch' as const, sourceId: uid } : {}),
     },
     at: Number(p.postedAtMs) || Number(p.createdAtMs) || 0,
     likes: Number(p.numLikes) || 0,

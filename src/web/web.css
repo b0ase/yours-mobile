@@ -1,3 +1,4 @@
+@import '../accent.css';
 /*
  * Web wallet (vite.config.web.ts): the mobile UI hosted as a static site.
  * Phones get the mobile layout under a beta banner. Wider screens get one centred 720px column (tool bar,
@@ -23,7 +24,7 @@ html:root {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #f5b800;
+  background: var(--bw-accent);
   color: #010101;
   font:
     600 11px/1.2 Inter,
@@ -67,8 +68,8 @@ html body #root {
     flex-direction: column;
     align-items: center;
     background:
-      radial-gradient(ellipse at 50% 0%, rgba(245, 184, 0, 0.18), transparent 60%),
-      radial-gradient(ellipse at 50% 100%, rgba(245, 184, 0, 0.08), transparent 55%), #000;
+      radial-gradient(ellipse at 50% 0%, rgb(var(--bw-accent-rgb) / 0.18), transparent 60%),
+      radial-gradient(ellipse at 50% 100%, rgb(var(--bw-accent-rgb) / 0.08), transparent 55%), #000;
   }
 
   html:root {

@@ -251,10 +251,23 @@ export const bcorpText = (extra: Swaps = {}): Plugin => {
 /**
  * bCorp palette: upstream's greens become BSV gold in the bcorp build only.
  */
-const BCORP_COLOURS: [RegExp, string][] = [
+const a2 = (hh: string) => +(parseInt(hh, 16) / 255).toFixed(2);
+// Theme (owner, 14 Oct 2026): the greens become the app accent as CSS variables (src/accent.css, mobile/theme/accent.ts),
+// gold by default, so Settings → Theme → App colours can swap it at runtime. Tailwind arbitrary classes ([#A1FF8B]) stay
+// a fixed gold: Tailwind scans the source, not this transform, so a class rewritten here would have no CSS.
+const BCORP_COLOURS: [RegExp, string | ((...m: string[]) => string)][] = [
+  [
+    /(?<!\[)#(?:A1FF8B|9EFF8A)([0-9a-f]{2})?(?![0-9a-f])/gi,
+    (_m, hh) => (hh ? `rgb(var(--bw-accent-hi-rgb)/${a2(hh)})` : 'var(--bw-accent-hi)'),
+  ],
+  [
+    /(?<!\[)#34D399([0-9a-f]{2})?(?![0-9a-f])/gi,
+    (_m, hh) => (hh ? `rgb(var(--bw-accent-lo-rgb)/${a2(hh)})` : 'var(--bw-accent-lo)'),
+  ],
   [/#A1FF8B/gi, '#FFD24D'],
   [/#9EFF8A/gi, '#FFD24D'],
   [/#34D399/gi, '#EAB300'],
+  [/rgba\(52,\s*211,\s*153,\s*([\d.]+)\)/g, 'rgb(var(--bw-accent-lo-rgb) / $1)'],
   [/rgba\(52,\s*211,\s*153/g, 'rgba(234, 179, 0'],
   [/\btext-green-400\b/g, 'text-yellow-400'],
 ];
@@ -264,7 +277,7 @@ export const bcorpColours = (): Plugin => ({
   transform(code, id) {
     if (BRAND !== 'bcorp' || !/\/src\/.*\.(tsx?|css)$/.test(id.split('?')[0])) return null;
     let out = code;
-    for (const [re, to] of BCORP_COLOURS) out = out.replace(re, to);
+    for (const [re, to] of BCORP_COLOURS) out = out.replace(re, to as string);
     return out === code ? null : { code: out, map: null };
   },
 });

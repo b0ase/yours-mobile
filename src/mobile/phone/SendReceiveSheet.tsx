@@ -22,7 +22,7 @@ export const SendReceiveButtons = ({ onPick }: { onPick: (a: WalletAction) => vo
       type="button"
       onClick={() => onPick('receive')}
       className="flex flex-1 items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0"
-      style={{ background: 'linear-gradient(135deg, #FFD24D, #F5B800)', color: '#010101' }}
+      style={{ background: 'linear-gradient(135deg, var(--bw-accent-hi), var(--bw-accent))', color: '#010101' }}
     >
       <ArrowDownToLine size={16} strokeWidth={2.5} />
       Receive
@@ -31,7 +31,7 @@ export const SendReceiveButtons = ({ onPick }: { onPick: (a: WalletAction) => vo
       type="button"
       onClick={() => onPick('send')}
       className="flex flex-1 items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0"
-      style={{ background: 'linear-gradient(135deg, #FFD24D, #F5B800)', color: '#010101' }}
+      style={{ background: 'linear-gradient(135deg, var(--bw-accent-hi), var(--bw-accent))', color: '#010101' }}
     >
       <ArrowUpFromLine size={16} strokeWidth={2.5} />
       Send

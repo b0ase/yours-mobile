@@ -152,7 +152,7 @@ const SettingRow = ({ icon, label, description, right, onClick, isFirst, isLast,
       variants={rowVariant}
       whileTap={onClick ? { scale: 0.985 } : undefined}
       onClick={onClick}
-      className={`flex items-center justify-between px-4 py-3 bg-[#17191E] ${onClick ? 'cursor-pointer hover:bg-[#1f2128]' : ''} ${isFirst ? 'rounded-t-xl' : ''} ${isLast ? 'rounded-b-xl' : ''} transition-colors duration-150`}
+      className={`flex items-center justify-between px-4 py-3 bg-[var(--bw-surface)] ${onClick ? 'cursor-pointer hover:bg-[#1f2128]' : ''} ${isFirst ? 'rounded-t-xl' : ''} ${isLast ? 'rounded-b-xl' : ''} transition-colors duration-150`}
     >
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <div
@@ -1657,7 +1657,7 @@ export const Settings = () => {
               setEnteredAccountIcon(account.icon);
               setPage('edit-account');
             }}
-            className="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-colors duration-150 bg-[#17191E] hover:bg-[#1f2128]"
+            className="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
             style={{
               border: '1px solid rgba(152,162,179,0.12)',
             }}

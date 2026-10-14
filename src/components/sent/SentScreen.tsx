@@ -6,7 +6,7 @@ import { loadPrefs } from '../../mobile/settings/prefs';
 import { playChime, primeChime } from './chime';
 import { formatRecipients, formatSentAmount, getSent, onSent, setSent, txUrl, type SentInfo } from './sent';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const GOLD_DEEP = '#E0A800';
 const AUTO_DISMISS_MS = 4500;
 
@@ -52,7 +52,7 @@ export const SentScreen = ({
           width: 120,
           height: 120,
           background: `linear-gradient(145deg, ${GOLD} 0%, ${GOLD_DEEP} 100%)`,
-          boxShadow: `0 0 0 10px rgba(255,210,77,0.12), 0 0 60px rgba(255,210,77,0.35)`,
+          boxShadow: `0 0 0 10px rgb(var(--bw-accent-hi-rgb) / 0.12), 0 0 60px rgb(var(--bw-accent-hi-rgb) / 0.35)`,
         }}
       >
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true">

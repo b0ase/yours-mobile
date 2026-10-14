@@ -176,7 +176,7 @@ export const MasterRestore = () => {
                 className="flex flex-col items-center justify-center w-[87%] rounded-2xl border-2 border-dashed py-8 gap-3 cursor-pointer transition-colors duration-200"
                 style={{
                   borderColor: isDragOver ? accentLeft : gray + '40',
-                  backgroundColor: isDragOver ? accentLeft + '10' : row,
+                  backgroundColor: isDragOver ? `color-mix(in srgb, ${accentLeft} 6%, transparent)` : row,
                   color: contrast,
                 }}
                 aria-label="Select or drop backup ZIP file"
@@ -212,7 +212,7 @@ export const MasterRestore = () => {
               {/* Selected file chip */}
               <div
                 className="flex items-center gap-2 px-3 py-2 rounded-xl mb-3 w-[87%]"
-                style={{ backgroundColor: row, borderColor: accentLeft + '40', border: '1px solid' }}
+                style={{ backgroundColor: row, borderColor: `color-mix(in srgb, ${accentLeft} 25%, transparent)`, border: '1px solid' }}
               >
                 <UploadCloud size={14} style={{ color: accentLeft }} />
                 <span className="text-xs font-medium truncate flex-1" style={{ color: contrast }}>

@@ -66,7 +66,7 @@ import {
  * Masonry grid, lightbox with details, drag-and-drop mint with the price shown before confirming.
  * Only pictures are shown, always through <img>. Both editions: nothing here sells, funds or likes.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#14161A';
 const BORDER = '#3a2f0c';
 const MUTED = '#98A2B3';
@@ -183,7 +183,11 @@ const Empty = ({ title, text, action }: { title: string; text: string; action?: 
   <div className="flex flex-col items-center text-center py-16 px-4 gap-3">
     <div
       className="w-24 h-24 rounded-3xl flex items-center justify-center"
-      style={{ background: GOLD_BG, border: `1px solid ${BORDER}`, boxShadow: '0 0 40px rgba(255,210,77,0.12)' }}
+      style={{
+        background: GOLD_BG,
+        border: `1px solid ${BORDER}`,
+        boxShadow: '0 0 40px rgb(var(--bw-accent-hi-rgb) / 0.12)',
+      }}
     >
       <ImagePlus size={40} color={GOLD} />
     </div>
@@ -802,7 +806,7 @@ const Lightbox = ({
               prev();
             }}
             className={`${navBtn} left-3`}
-            style={{ background: 'rgba(255,210,77,0.15)' }}
+            style={{ background: 'rgb(var(--bw-accent-hi-rgb) / 0.15)' }}
           >
             <ChevronLeft size={24} color={GOLD} />
           </button>
@@ -816,7 +820,7 @@ const Lightbox = ({
               next();
             }}
             className={`${navBtn} right-3`}
-            style={{ background: 'rgba(255,210,77,0.15)' }}
+            style={{ background: 'rgb(var(--bw-accent-hi-rgb) / 0.15)' }}
           >
             <ChevronRight size={24} color={GOLD} />
           </button>
@@ -1091,7 +1095,7 @@ const MintPicSheet = ({ onClose, onMinted }: { onClose: () => void; onMinted: (m
                 className="relative rounded-2xl border-2 border-dashed overflow-hidden flex flex-col items-center justify-center text-center cursor-pointer min-h-[220px]"
                 style={{
                   borderColor: dragging ? '#FFE27A' : GOLD,
-                  background: dragging ? 'rgba(255,210,77,0.08)' : GOLD_BG,
+                  background: dragging ? 'rgb(var(--bw-accent-hi-rgb) / 0.08)' : GOLD_BG,
                 }}
               >
                 {preparing ? (

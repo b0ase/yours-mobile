@@ -34,7 +34,7 @@ import { ErrorActions } from '../errors/ErrorActions';
  * room. The room is the point: it is always created. Event date and price sit under
  * "More options". Nothing is broadcast until the user confirms SendConfirmation.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 

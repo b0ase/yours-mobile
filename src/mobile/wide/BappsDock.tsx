@@ -1,5 +1,4 @@
 import { BAPPS as WALLET_BAPPS } from '../bapps';
-import bmusicIcon from '../brand/bmusic-icon.png';
 import bvideoIcon from '../brand/bvideo-icon.png';
 import tokenblasterIcon from '../brand/apps/tokenblaster.png';
 import { TOKENBLASTER_ENABLED } from '../storeBuild';
@@ -25,7 +24,7 @@ export const BAPPS: Bapp[] = [
     id: 'music',
     name: 'Bitcoin Music',
     url: 'https://www.bmovies.app/bmusic',
-    icon: bmusicIcon,
+    icon: ico('bMusic'),
     mono: '♪',
     newTab: true,
   },

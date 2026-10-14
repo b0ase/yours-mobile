@@ -12,7 +12,7 @@ import { createGltfLoader } from './gltfLoader';
  * On iPhone/iPad a .usdz also offers AR Quick Look ("View in your room") where Safari supports it.
  */
 const MUTED = '#98A2B3';
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 const isUsdz = (t: string) => t.split(';')[0].trim().toLowerCase() === 'model/vnd.usdz+zip';
 

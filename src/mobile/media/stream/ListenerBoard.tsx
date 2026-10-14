@@ -16,7 +16,7 @@ import {
   type MyStats,
 } from './board';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#111216';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';

@@ -101,7 +101,10 @@ Object.assign(globalThis, {
   },
   document: doc,
 });
-const tick = () => new Promise((r) => setTimeout(r, 30));
+/** Wait until `ok()` holds (sealing and ECDH can take longer than a fixed tick on a busy machine). */
+const until = async (ok: () => boolean, ms = 5000) => {
+  for (const end = Date.now() + ms; !ok() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
+};
 
 test('sessions: never re-runs an answered call; holds a reply while the socket is closed and sends it on reconnect', async () => {
   const { beginPairing, initPairing } = await import('./sessions');
@@ -124,7 +127,7 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   const { key } = await deriveSession(site, hello.k, c);
   const siteSealer = new Sealer(key, 'site');
   p.confirm();
-  await tick();
+  await until(() => ws1.sent.length >= 2);
   const open = async (raw: string) => siteSealer.open(JSON.parse(raw));
   expect(await open(ws1.sent[1])).toEqual({ t: 'ready' });
 
@@ -132,28 +135,29 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   let release!: () => void;
   gate = new Promise((r) => (release = r));
   ws1.deliver(await siteSealer.seal({ t: 'req', id: 'r1', action: 'createAction', params: {} }));
-  await tick();
+  await until(() => calls === 1);
   expect(calls).toBe(1);
   doc.visibilityState = 'hidden';
   ws1.close();
   release();
-  await tick();
+  // The answer is sealed and held while the socket is closed; give that work time under a busy full-suite run.
+  await new Promise((r) => setTimeout(r, 300));
   expect(ws1.sent.length).toBe(2); // nothing sent into a closed socket
 
   // Back in the foreground: reconnect, the held reply goes out.
   doc.visibilityState = 'visible';
   initPairing();
   for (const fn of docListeners) fn();
-  await tick();
+  await until(() => FakeWS.all.at(-1) !== ws1);
   const ws2 = FakeWS.all.at(-1)!;
   expect(ws2).not.toBe(ws1);
   ws2.open();
-  await tick();
+  await until(() => ws2.sent.length >= 1);
   expect(await open(ws2.sent[0])).toEqual({ t: 'res', id: 'r1', result: { txid: 'tx1' } });
 
   // The site, unsure, re-sends the same request id: answered again (freshly sealed), not re-run.
   ws2.deliver(await siteSealer.seal({ t: 'req', id: 'r1', action: 'createAction', params: {} }));
-  await tick();
+  await until(() => ws2.sent.length >= 2);
   expect(calls).toBe(1);
   expect(await open(ws2.sent[1])).toEqual({ t: 'res', id: 'r1', result: { txid: 'tx1' } });
   // An old frame replayed verbatim is still refused by the site's Sealer.
@@ -161,7 +165,8 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
 
   // A new id runs.
   ws2.deliver(await siteSealer.seal({ t: 'req', id: 'r2', action: 'createAction', params: {} }));
-  await tick();
+  await until(() => ws2.sent.length >= 3);
   expect(calls).toBe(2);
   expect(await open(ws2.sent[2])).toEqual({ t: 'res', id: 'r2', result: { txid: 'tx2' } });
-});
+  // Real ECDH + sealing + several waits: allow more than bun's default 5 s when the machine is busy (e.g. a release build).
+}, 30_000);

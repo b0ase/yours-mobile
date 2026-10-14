@@ -17,7 +17,7 @@ import { parsePage } from './invite';
 import { parseSpaceState } from './model';
 import { doorPriceUsd, loadLedger, needsHandCheck, runDoor } from './door';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PASS_MS = 5000;
 
 type Door = { tokenId: string; amountRaw: string; usd: number };
