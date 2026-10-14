@@ -17,9 +17,8 @@ import { fetchExchangeRate } from '../utils/wallet';
 import { AssetRow } from './AssetRow';
 import { Show } from './Show';
 import { IS_EXTENSION } from '../mobile/extension';
-import { ArchivedTokens, JiggleDone, TokenSwipe } from '../mobile/wallet/TokenSwipe';
-import { JiggleList } from '../mobile/wallet/JiggleList';
-import { applyGroupOrder, arrange, readPinned, setPinned, useTokenRows } from '../mobile/wallet/tokenRows';
+import { ArchivedTokens, TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { arrange, useTokenRows } from '../mobile/wallet/tokenRows';
 
 const resolveIcon = (icon: string) => (isUri(icon) ? icon : `${ONESAT_MAINNET_CONTENT_URL}/${icon}`);
 
@@ -153,7 +152,6 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
   const confirmedTokens = tokens.filter((t) => t.all.confirmed > 0n);
   const pendingTokens = tokensProp.filter((d) => d.all.pending > 0n);
   const rowsState = useTokenRows();
-  const [editing, setEditing] = useState(false);
   const usdOf = (t: Bsv21Balance) =>
     (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
     (exchangeRate / BSV_DECIMAL_CONVERSION) *
@@ -167,8 +165,6 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
         id={t.id}
         label={getTokenName(t)}
         pinned={rowsState.pinned.includes(t.id)}
-        editing={editing}
-        onLongPress={() => setEditing(true)}
         onSend={() => onTokenClick(t)}
         onReceive={() => props.onReceive?.()}
         onChat={() => props.onChat?.(t)}
@@ -176,7 +172,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
       >
         <div
           style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
-          onClick={() => !editing && onTokenClick(t)}
+          onClick={() => onTokenClick(t)}
         >
           <TokenAssetRow t={t} usdBalance={usdOf(t)} />
         </div>
@@ -191,32 +187,22 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     );
     return (
       <div className="flex flex-col items-center w-full">
-        {editing && <JiggleDone onDone={() => setEditing(false)} />}
         {groups.pinned.length > 0 && (
           <>
             {label('Pinned')}
-            <JiggleList
-              editing={editing}
-              items={groups.pinned.map((t) => ({ id: t.id, node: row(t) }))}
-              onReorder={(ids) => {
-                const others = readPinned().filter((id) => !ids.includes(id));
-                setPinned([...ids, ...others]);
-              }}
-            />
+            {groups.pinned.map((t) => (
+              <div key={t.id} className="w-full">
+                {row(t)}
+              </div>
+            ))}
           </>
         )}
         {groups.pinned.length > 0 && groups.rest.length > 0 && label('Tokens')}
-        <JiggleList
-          editing={editing}
-          items={groups.rest.map((t) => ({ id: t.id, node: row(t) }))}
-          onReorder={(ids) => {
-            const order = applyGroupOrder(
-              tokens.map((t) => t.id),
-              ids,
-            );
-            void saveOrder(order.map((id) => tokens.find((t) => t.id === id)!).filter(Boolean));
-          }}
-        />
+        {groups.rest.map((t) => (
+          <div key={t.id} className="w-full">
+            {row(t)}
+          </div>
+        ))}
         {pendingTokens.length > 0 && label('Pending')}
         {pendingTokens.map((b) => (
           <div

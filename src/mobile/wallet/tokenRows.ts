@@ -1,5 +1,5 @@
 /**
- * Wallet token rows: pin, archive and order (owner, 15 Oct 2026). Per device (localStorage), shared by every
+ * Wallet token rows: pin and archive (owner, 15 Oct 2026). Per device (localStorage), shared by every
  * list through a window event. Row ids: 'bsv', 'mnee', or a BSV-21 token id.
  */
 import { useEffect, useState } from 'react';
@@ -57,25 +57,6 @@ export const arrange = <T>(
     rest: live.filter((t) => !pinned.includes(idOf(t))),
     archived: items.filter((t) => archived.includes(idOf(t))),
   };
-};
-
-/** Move one item from index `from` to index `to` (both within the same list). */
-export const moveItem = <T>(list: readonly T[], from: number, to: number): T[] => {
-  if (from === to || from < 0 || from >= list.length) return [...list];
-  const n = [...list];
-  const [x] = n.splice(from, 1);
-  n.splice(Math.max(0, Math.min(to, n.length)), 0, x);
-  return n;
-};
-
-/**
- * Apply a reordered group (e.g. the unpinned rows, after a drag) back onto the full order: the group's
- * positions in `full` are refilled in the group's new order; everything else stays put.
- */
-export const applyGroupOrder = (full: readonly string[], group: readonly string[]): string[] => {
-  const set = new Set(group);
-  let i = 0;
-  return full.map((id) => (set.has(id) ? group[i++] : id));
 };
 
 /** Pinned and archived ids, kept in sync across lists. */

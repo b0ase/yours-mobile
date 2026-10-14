@@ -809,10 +809,6 @@
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  animation: bw-jiggle 0.28s ease-in-out infinite alternate;
-}
-.bw-eg-tile:nth-child(2n) {
-  animation-delay: 0.12s;
 }
 .bw-eg-tile.is-drag {
   animation: none;
@@ -860,19 +856,6 @@
   text-align: center;
   font-size: 12px;
   color: var(--bw-accent-hi, #ffd24d);
-}
-@keyframes bw-jiggle {
-  from {
-    transform: rotate(-2deg);
-  }
-  to {
-    transform: rotate(2deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .bw-eg-tile {
-    animation: none;
-  }
 }
 /* Real token icons sit in the same slots as the initial discs. */
 .bw-bc-logo.is-icon,

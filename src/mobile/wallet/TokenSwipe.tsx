@@ -2,8 +2,8 @@
  * Wallet token rows with Telegram-style swipe actions (owner, 15 Oct 2026), on the shared SwipeRow.
  *  - Swipe LEFT: Send · Receive · Chat (full swipe = Send).
  *  - Swipe RIGHT: Pin · Lock · Archive (full swipe = Archive, with an Undo toast).
- *  - Long-press: reorder (jiggle) mode for the whole list.
- * Pins, archive and order are per device (tokenRows.ts). Not in the browser extension (no Chat tab there).
+ *  - Long-press: the same actions as a menu (SwipeRow's default).
+ * Pins and archive are per device (tokenRows.ts). Not in the browser extension (no Chat tab there).
  */
 import { useState, type ReactNode } from 'react';
 import { Archive, ArrowDownLeft, ArrowUpRight, Lock, MessageCircle, Pin, PinOff } from 'lucide-react';
@@ -20,10 +20,8 @@ export type TokenSwipeProps = {
   id: string;
   label: string;
   pinned: boolean;
-  editing?: boolean;
   /** BSV and MNEE stay listed: no Archive. */
   noArchive?: boolean;
-  onLongPress?: () => void;
   onSend: () => void;
   onReceive: () => void;
   onChat: () => void;
@@ -69,8 +67,6 @@ export const TokenSwipe = (p: TokenSwipeProps) => {
         rightActions={right}
         fullSwipeLeft="send"
         fullSwipeRight={p.noArchive ? undefined : 'archive'}
-        onLongPress={p.onLongPress}
-        disabled={p.editing}
       >
         {p.children}
       </SwipeRow>
@@ -82,16 +78,6 @@ export const TokenSwipe = (p: TokenSwipeProps) => {
     </div>
   );
 };
-
-/** Reorder-mode bar: "Done" exits. */
-export const JiggleDone = ({ onDone }: { onDone: () => void }) => (
-  <div className="bw-jiggle-bar">
-    <span>Drag the handles to move</span>
-    <button type="button" onClick={onDone}>
-      Done
-    </button>
-  </div>
-);
 
 /** "Archived (n)" at the end of the token list: tap to show, each row has Unarchive. */
 export const ArchivedTokens = ({ rows }: { rows: { id: string; node: ReactNode }[] }) => {

@@ -1,14 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import {
-  applyGroupOrder,
-  arrange,
-  moveItem,
-  readArchived,
-  readPinned,
-  setArchived,
-  setPinned,
-  togglePin,
-} from './tokenRows';
+import { arrange, readArchived, readPinned, setArchived, setPinned, togglePin } from './tokenRows';
 
 const mem = new Map<string, string>();
 beforeEach(() => {
@@ -40,16 +31,6 @@ describe('token row pins', () => {
   });
   test('a pin for a token no longer held is ignored', () => {
     expect(arrange(['a'], (x) => x, ['gone', 'a']).pinned).toEqual(['a']);
-  });
-});
-
-describe('reorder', () => {
-  test('moveItem moves within a list', () => {
-    expect(moveItem(['a', 'b', 'c', 'd'], 0, 2)).toEqual(['b', 'c', 'a', 'd']);
-    expect(moveItem(['a', 'b', 'c', 'd'], 3, 0)).toEqual(['d', 'a', 'b', 'c']);
-  });
-  test('a reordered group is written back without moving other rows', () => {
-    expect(applyGroupOrder(['p1', 'x', 'p2', 'y'], ['y', 'x'])).toEqual(['p1', 'y', 'p2', 'x']);
   });
 });
 
