@@ -6,10 +6,15 @@
  * The overlay mirrors bmovies.app's own feed (SwipeFeedView): black top/bottom scrims, sound chip
  * top-left, then bottom-up a white scrubber, a green Buy $TICKER button, the title and $TICKER in
  * Bebas Neue (ticker in bMovies yellow), the blurb in grey, and the blue mono @handle with ↗ to the
- * original post. Buy only opens the clip on bmovies.app (no payment flow here); Share shares its page.
+ * original post. Buy/Sell open the clip on bmovies.app (where real trades happen); Share shares its page.
+ *
+ * Swipe to trade: on a clip, swipe RIGHT = buy 1p of its token, LEFT = sell 1p (long-press Buy/Sell does
+ * the same). Vertical swipes still change clip; in this reel the Feed's own left/right feed-swipe is off
+ * (change feed with the chips). Trades are a MOCK for now (swipeTrade.ts, BMOVIES_SWIPE_TRADE_MOCK).
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ExternalLink, Share2, Volume2, VolumeX } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent } from 'react';
+import { ExternalLink, History, Share2, Volume2, VolumeX } from 'lucide-react';
+import { haptic } from '../../swipe/haptics';
 import bebasUrl from '../../bmint/assets/fonts/bebas-neue-400.woff2?url';
 import { shareLink } from '../../chat/shareLink';
 import { openDappBrowser } from '../../dappBrowser';
@@ -24,6 +29,24 @@ import {
   firstFrameUrl,
   type Clip,
 } from './bmovies';
+import {
+  BMOVIES_SWIPE_TRADE_MOCK,
+  DEFAULT_DAILY_BUDGET_PENCE,
+  UNDO_MS,
+  addTrade,
+  checkBudget,
+  executeTrade,
+  loadBudget,
+  loadTrades,
+  removeTrade,
+  saveBudget,
+  saveTrades,
+  spend,
+  tradeSide,
+  type Budget,
+  type Side,
+  type SwipeTrade,
+} from './swipeTrade';
 import { BMUSIC_SOURCES, fetchMerged, type Cursors, type VideoSource } from './videoSources';
 
 const GOLD = '#FFD24D';
@@ -33,6 +56,8 @@ const BM_BLUE = '#1d9bf0';
 const BM_YELLOW = '#facc15';
 const BM_GREEN = '#6bff8a';
 const BM_GREEN_EDGE = 'rgba(47,175,90,0.8)';
+const BM_RED = '#ff5c5c';
+const BM_RED_EDGE = 'rgba(220,60,60,0.8)';
 const BEBAS = "'Bebas Neue', 'Oswald', Impact, sans-serif";
 
 /** The reel's brand: bMovies (gold title cards, bMovies' yellow/green) or bMusic (its blue). */
@@ -174,6 +199,7 @@ const Slide = ({
   active,
   muted,
   onToggleSound,
+  onTrade,
   t,
 }: {
   t: Theme;
@@ -182,6 +208,7 @@ const Slide = ({
   active: number;
   muted: boolean;
   onToggleSound: () => void;
+  onTrade: (c: Clip, side: Side) => void;
 }) => {
   const [poster, setPoster] = useState<string | null>(c.poster);
   const [posterBroken, setPosterBroken] = useState(false);
@@ -221,8 +248,51 @@ const Slide = ({
       url: clipPageUrl(c),
     });
 
+  // Horizontal swipe on the clip = 1p trade (right buys, left sells). Vertical is the reel's scroll.
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: TouchEvent) => {
+    const p = e.touches[0];
+    start.current = p && e.touches.length === 1 ? { x: p.clientX, y: p.clientY } : null;
+  };
+  const onTouchEnd = (e: TouchEvent) => {
+    const s0 = start.current;
+    const p = e.changedTouches[0];
+    start.current = null;
+    if (!s0 || !p || !c.ticker) return;
+    const side = tradeSide(p.clientX - s0.x, p.clientY - s0.y);
+    if (side) onTrade(c, side);
+  };
+  // Long-press Buy/Sell = the same 1p quick trade; a tap opens bmovies.app's trade page.
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; fired: boolean } | null>(null);
+  const pressProps = (side: Side) => ({
+    onPointerDown: () => {
+      const st = {
+        fired: false,
+        timer: setTimeout(() => {
+          st.fired = true;
+          onTrade(c, side);
+        }, 500),
+      };
+      press.current = st;
+    },
+    onPointerUp: () => press.current && clearTimeout(press.current.timer),
+    onPointerLeave: () => press.current && clearTimeout(press.current.timer),
+    onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault(),
+    onClick: () => {
+      if (press.current?.fired) return;
+      openOnBmovies();
+    },
+  });
+
   return (
-    <div data-i={i} className="relative w-full overflow-hidden" style={{ height: '100%', scrollSnapAlign: 'start' }}>
+    <div
+      data-i={i}
+      data-trade-reel
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      className="relative w-full overflow-hidden"
+      style={{ height: '100%', scrollSnapAlign: 'start' }}
+    >
       <TitleCard c={c} t={t} />
       {shownPoster && (
         <img
@@ -304,11 +374,11 @@ const Slide = ({
           )}
         </button>
         <div className="mt-3 flex items-center gap-2">
-          {/* Buy opens the clip on bmovies.app, where the trade happens. */}
+          {/* Tap: the clip's trade page on bmovies.app. Long-press (or swipe →/←): a 1p quick trade. */}
           <button
-            onClick={openOnBmovies}
+            {...pressProps('buy')}
             aria-label={c.ticker ? `Buy $${c.ticker} on ${t.name}` : `Open on ${t.name}`}
-            className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+            className="flex-1 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
             style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${t.buyEdge}`, color: t.buy }}
           >
             {c.ticker ? (
@@ -319,6 +389,21 @@ const Slide = ({
               `Open on ${t.name}`
             )}
           </button>
+          {c.ticker && (
+            <button
+              {...pressProps('sell')}
+              aria-label={`Sell $${c.ticker} on ${t.name}`}
+              className="select-none rounded-md px-4 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+              style={{
+                fontFamily: BEBAS,
+                background: 'transparent',
+                border: `1px solid ${BM_RED_EDGE}`,
+                color: BM_RED,
+              }}
+            >
+              Sell
+            </button>
+          )}
           <button
             onClick={share}
             aria-label="Share"
@@ -328,6 +413,11 @@ const Slide = ({
             <Share2 size={16} color="#fff" />
           </button>
         </div>
+        {c.ticker && (
+          <p className="mt-2 text-center text-[10px]" style={{ color: MUTED }}>
+            Swipe → buy 1p · ← sell 1p{BMOVIES_SWIPE_TRADE_MOCK ? ' · practice mode, no money moves' : ''}
+          </p>
+        )}
         {/* Scrubber: fills left to right as the clip plays (white on white/25, 3px). */}
         <div className="mb-1 mt-3 h-[3px] w-full rounded-full" style={{ background: 'rgba(255,255,255,0.25)' }}>
           <div className="h-full rounded-full bg-white" style={{ width: `${Math.round(progress * 1000) / 10}%` }} />
@@ -348,11 +438,69 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
   const box = useRef<HTMLDivElement>(null);
   const loading = useRef(false);
 
-  // The reel fills the screen below the Feed header (and above the tab bar's safe area).
+  // Swipe trading: the daily budget, the (mock) trades, the toast with Undo, the one-time ask.
+  const [budget, setBudgetState] = useState<Budget>(() => loadBudget(Date.now()));
+  const [trades, setTradesState] = useState<SwipeTrade[]>(() => loadTrades());
+  const [toast, setToast] = useState<{ trade?: SwipeTrade; text: string; tone: 'buy' | 'sell' | 'info' } | null>(null);
+  const [asking, setAsking] = useState<{ c: Clip; side: Side } | null>(null);
+  const [showSwipes, setShowSwipes] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const budgetRef = useRef(budget);
+  const setBudget = (b: Budget) => {
+    budgetRef.current = b;
+    setBudgetState(b);
+    saveBudget(b);
+  };
+  const setTrades = (f: (t: SwipeTrade[]) => SwipeTrade[]) =>
+    setTradesState((have) => {
+      const next = f(have);
+      saveTrades(next);
+      return next;
+    });
+  const flash = (v: NonNullable<typeof toast>) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(v);
+    toastTimer.current = setTimeout(() => setToast(null), UNDO_MS);
+  };
+  useEffect(() => () => void (toastTimer.current && clearTimeout(toastTimer.current)), []);
+
+  const doTrade = async (c: Clip, side: Side, b: Budget) => {
+    if (!c.ticker) return;
+    const now = Date.now();
+    const trade = await executeTrade(c.ticker, side, now);
+    setBudget(spend(b, now));
+    setTrades((have) => addTrade(have, trade));
+    haptic(side === 'buy' ? 'medium' : 'light');
+    flash({ trade, text: `${side === 'buy' ? '+' : '−'}1p $${c.ticker}`, tone: side });
+  };
+  const onTrade = (c: Clip, side: Side) => {
+    const b = budgetRef.current;
+    const verdict = checkBudget(b, Date.now());
+    if (verdict === 'ask') return setAsking({ c, side });
+    if (verdict === 'denied') return flash({ text: 'Swipe trades are off', tone: 'info' });
+    if (verdict === 'over') return flash({ text: "Today's swipe budget is used", tone: 'info' });
+    void doTrade(c, side, b);
+  };
+  const undo = (trade: SwipeTrade) => {
+    setTrades((have) => removeTrade(have, trade.id));
+    setBudget(spend(budgetRef.current, Date.now(), -trade.pence));
+    haptic('light');
+    flash({ text: 'Undone', tone: 'info' });
+  };
+  const answer = (yes: boolean) => {
+    const pending = asking;
+    setAsking(null);
+    const b = { ...budgetRef.current, allowed: yes };
+    setBudget(b);
+    if (yes && pending) void doTrade(pending.c, pending.side, b);
+  };
+
+  // The reel fills the screen between the Feed header and the tab bar (--dock-h) + the home-indicator
+  // inset, so Buy/Sell and the scrubber always sit above the tab bar on every iPhone.
   useLayoutEffect(() => {
     const fit = () => {
       const top = box.current?.getBoundingClientRect().top ?? 0;
-      setHeight(Math.max(320, window.innerHeight - Math.max(0, top)));
+      setHeight(Math.max(0, top));
     };
     fit();
     window.addEventListener('resize', fit);
@@ -403,41 +551,158 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
   }, [active, clips, next, load]);
 
   return (
-    <div
-      ref={box}
-      className="w-full overflow-y-auto"
-      style={{
-        height: height ?? '70vh',
-        scrollSnapType: 'y mandatory',
-        overscrollBehavior: 'contain',
-        background: '#010101',
-      }}
-    >
-      {clips === null && !error && (
-        <div className="relative h-full w-full">
-          <div className="absolute inset-0 animate-pulse" style={{ background: t.backdrop }} />
+    <div className="relative w-full">
+      <div
+        ref={box}
+        className="w-full overflow-y-auto"
+        style={{
+          height:
+            height === null
+              ? '70vh'
+              : `max(320px, calc(100dvh - ${height}px - var(--dock-h, 3.75rem) - env(safe-area-inset-bottom, 0px)))`,
+          scrollSnapType: 'y mandatory',
+          overscrollBehavior: 'contain',
+          background: '#010101',
+        }}
+      >
+        {clips === null && !error && (
+          <div className="relative h-full w-full">
+            <div className="absolute inset-0 animate-pulse" style={{ background: t.backdrop }} />
+          </div>
+        )}
+        {error && (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+            <p className="text-sm font-semibold text-white">{error}</p>
+            <button
+              onClick={() => void openDappBrowser(t.home)}
+              className="flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-bold"
+              style={{ background: t.accent, color: t.onAccent }}
+            >
+              Open bmovies.app <ExternalLink size={14} />
+            </button>
+          </div>
+        )}
+        {clips?.length === 0 && (
+          <p className="pt-20 text-center text-sm" style={{ color: MUTED }}>
+            No clips yet.
+          </p>
+        )}
+        {clips?.map((c, i) => (
+          <Slide
+            key={c.id}
+            t={t}
+            c={c}
+            i={i}
+            active={active}
+            muted={muted}
+            onToggleSound={() => setMuted((m) => !m)}
+            onTrade={onTrade}
+          />
+        ))}
+      </div>
+      {/* My swipes: top-right. */}
+      <button
+        onClick={() => setShowSwipes(true)}
+        aria-label="My swipes"
+        className="absolute right-3 top-3 flex h-9 items-center gap-1 rounded-full px-3 text-[12px] font-semibold text-white"
+        style={{
+          background: 'rgba(0,0,0,0.4)',
+          border: '1px solid rgba(255,255,255,0.2)',
+          backdropFilter: 'blur(12px)',
+        }}
+      >
+        <History size={14} /> {trades.length}
+      </button>
+      {toast && (
+        <div
+          role="status"
+          className="absolute left-1/2 top-16 flex -translate-x-1/2 items-center gap-3 rounded-full px-4 py-2 text-[15px] font-bold"
+          style={{
+            background: toast.tone === 'buy' ? '#0f2e18' : toast.tone === 'sell' ? '#3a1010' : 'rgba(0,0,0,0.8)',
+            border: `1px solid ${toast.tone === 'buy' ? BM_GREEN_EDGE : toast.tone === 'sell' ? BM_RED_EDGE : '#333'}`,
+            color: toast.tone === 'buy' ? BM_GREEN : toast.tone === 'sell' ? BM_RED : '#fff',
+          }}
+        >
+          {toast.text}
+          {toast.trade && (
+            <button
+              onClick={() => undo(toast.trade as SwipeTrade)}
+              className="text-[13px] underline"
+              style={{ color: '#fff' }}
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
-      {error && (
-        <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-          <p className="text-sm font-semibold text-white">{error}</p>
-          <button
-            onClick={() => void openDappBrowser(t.home)}
-            className="flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-bold"
-            style={{ background: t.accent, color: t.onAccent }}
+      {asking && (
+        <div className="absolute inset-0 flex items-end bg-black/60" onClick={() => answer(false)}>
+          <div
+            className="w-full rounded-t-2xl p-5"
+            style={{ background: '#111', paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={(e) => e.stopPropagation()}
           >
-            Open bmovies.app <ExternalLink size={14} />
-          </button>
+            <p className="text-[17px] font-bold text-white">
+              Allow 1p trades from swipes, up to £{(DEFAULT_DAILY_BUDGET_PENCE / 100).toFixed(2)} a day?
+            </p>
+            <p className="mt-1 text-[13px]" style={{ color: MUTED }}>
+              Swipe right to buy 1p of a clip's token, left to sell 1p. Undo within 3 seconds.
+              {BMOVIES_SWIPE_TRADE_MOCK && ' Practice mode for now: trades are kept on this phone and no money moves.'}
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => answer(false)}
+                className="flex-1 rounded-lg py-3 font-semibold text-white"
+                style={{ border: '1px solid #333' }}
+              >
+                Not now
+              </button>
+              <button
+                onClick={() => answer(true)}
+                className="flex-1 rounded-lg py-3 font-bold"
+                style={{ background: t.accent, color: t.onAccent }}
+              >
+                Allow
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      {clips?.length === 0 && (
-        <p className="pt-20 text-center text-sm" style={{ color: MUTED }}>
-          No clips yet.
-        </p>
+      {showSwipes && (
+        <div className="absolute inset-0 flex items-end bg-black/60" onClick={() => setShowSwipes(false)}>
+          <div
+            className="max-h-[70%] w-full overflow-y-auto rounded-t-2xl p-5"
+            style={{ background: '#111', paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[17px] font-bold text-white">My swipes{BMOVIES_SWIPE_TRADE_MOCK ? ' (practice)' : ''}</p>
+            <p className="mt-1 text-[12px]" style={{ color: MUTED }}>
+              Today {budget.spentPence}p of £{(budget.dailyPence / 100).toFixed(2)}
+            </p>
+            {trades.length === 0 && (
+              <p className="mt-4 text-[13px]" style={{ color: MUTED }}>
+                No swipes yet. Swipe a clip right to buy 1p, left to sell 1p.
+              </p>
+            )}
+            <ul className="mt-3 divide-y divide-white/10">
+              {trades.map((tr) => (
+                <li key={tr.id} className="flex items-center gap-3 py-2 text-[14px]">
+                  <span className="w-10 font-bold" style={{ color: tr.side === 'buy' ? BM_GREEN : BM_RED }}>
+                    {tr.side === 'buy' ? 'BUY' : 'SELL'}
+                  </span>
+                  <span className="flex-1 font-semibold" style={{ color: t.ticker }}>
+                    ${tr.ticker}
+                  </span>
+                  <span className="text-white">{tr.pence}p</span>
+                  <span className="w-14 text-right text-[12px]" style={{ color: MUTED }}>
+                    {new Date(tr.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
-      {clips?.map((c, i) => (
-        <Slide key={c.id} t={t} c={c} i={i} active={active} muted={muted} onToggleSound={() => setMuted((m) => !m)} />
-      ))}
     </div>
   );
 };
