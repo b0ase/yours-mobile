@@ -41,4 +41,10 @@ describe('guide', () => {
     ])
       expect(BWALLET_GUIDE).toContain(w);
   });
+  test('walks people through making things instead of refusing (bWalletX)', () => {
+    for (const w of ['Launch your own coin', 'List an app as a bApp', "app's name", 'its website', 'BRC-100'])
+      expect(BWALLET_GUIDE).toContain(w);
+    expect(BWALLET_GUIDE).not.toMatch(/only help with bWallet/);
+    expect(BWALLET_GUIDE).toContain('never brush people off');
+  });
 });
