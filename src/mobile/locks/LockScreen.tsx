@@ -66,12 +66,14 @@ import { BackPneeSheet } from '../notes/BackPneeSheet';
 import { BackPneeDoneSheet } from '../notes/BackPneeDoneSheet';
 import { artistFromSearch, artistOfPot, artistPot, groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
-import { MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { MARKET_ENABLED, PLACEMENT_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { listSubs, monthlyUsd } from '../pots/pots';
 import { fundAvailable } from '../pots/fund';
 import { LOCK_TAB_PATH, lockTabFor, type LockTab } from '../pots/subsList';
 
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
+/** Vault (bShares securities): bWalletX only, dropped from the store bundle. */
+const VaultSection = PLACEMENT_ENABLED ? lazy(() => import('../placement/VaultSection')) : null;
 // Pots & Locks › Subscriptions (bWalletX only: absent from a store build even as code).
 const SubscriptionsTab = SUBSCRIPTIONS_ENABLED ? lazy(() => import('../pots/SubscriptionsTab')) : null;
 import { verifyLockTx, type VerifyResult } from './verify';
@@ -1328,6 +1330,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>
+      {VaultSection && view.kind === 'list' && (
+        <Suspense fallback={null}>
+          <VaultSection height={height} />
+        </Suspense>
+      )}
       {/* Portal: on desktop the wallet sits in a transformed column, which would trap a fixed full-screen view. */}
       {showSubs &&
         createPortal(

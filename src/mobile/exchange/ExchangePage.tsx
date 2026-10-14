@@ -16,7 +16,9 @@ import { safety, refreshSafety } from '../market/safety';
 import { requestMarketToken, takeMarketToken } from '../chat/nav';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { loadSwaps } from '../swap/swapApi';
-import { SWAP_ENABLED } from '../storeBuild';
+import { PLACEMENT_ENABLED, SWAP_ENABLED } from '../storeBuild';
+/** Exchange › Shares: restricted, no trading (bShares). bWalletX only; dropped from the store bundle. */
+const SharesMarket = PLACEMENT_ENABLED ? lazy(() => import('../placement/SharesMarket')) : null;
 import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
@@ -149,8 +151,18 @@ const Markets = ({
   const people = new URLSearchParams(search).get('people') === '1';
   const setPeople = (on: boolean) => {
     const sp = new URLSearchParams(search);
+    sp.delete('shares');
     if (on) sp.set('people', '1');
     else sp.delete('people');
+    const s = sp.toString();
+    navigate(`${pathname}${s ? `?${s}` : ''}`, { replace: true });
+  };
+  const shares = !!SharesMarket && new URLSearchParams(search).get('shares') === '1';
+  const setShares = (on: boolean) => {
+    const sp = new URLSearchParams(search);
+    sp.delete('people');
+    if (on) sp.set('shares', '1');
+    else sp.delete('shares');
     const s = sp.toString();
     navigate(`${pathname}${s ? `?${s}` : ''}`, { replace: true });
   };
@@ -255,9 +267,15 @@ const Markets = ({
           onChange={setFilter}
           people={people}
           onPeople={setPeople}
+          shares={shares}
+          onShares={SharesMarket ? setShares : undefined}
         />
       )}
-      {people ? (
+      {shares && SharesMarket ? (
+        <Suspense fallback={null}>
+          <SharesMarket />
+        </Suspense>
+      ) : people ? (
         <PeopleMarket rate={rate} q={q} />
       ) : (
         <>

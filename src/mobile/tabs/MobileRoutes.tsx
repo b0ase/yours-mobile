@@ -7,6 +7,7 @@ import {
   BSPACES_ENABLED,
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
+  PLACEMENT_ENABLED,
   RELEASES_ENABLED,
 } from '../storeBuild';
 
@@ -50,6 +51,8 @@ const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 // bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx; OpNS names renders inside it at /m/bmint/opns.
 // Old /opns-mint links redirect there, keeping ?mint=.
 const BmintPage = lazy(() => import('../bmint/BmintPage'));
+// bShares (/m/bshares, docs/BCORP-PLACEMENT.md): restricted share placement; bWalletX only, dropped from the store bundle.
+const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
 // /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
@@ -87,6 +90,7 @@ const MobileRoutes = () => (
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
         <Route path="bmint/*" element={<BmintPage />} />
+        {BsharesPage && <Route path="bshares" element={<BsharesPage />} />}
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
         {StockPage && <Route path="names/store" element={<StockPage />} />}

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, BadgeCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Lock, SlidersHorizontal, Users } from 'lucide-react';
 import { ONESAT, cached, roomMeta, type HotRoom } from '../market/indexer';
 import { TokenIcon } from './TokenIcon';
 import { platformRoute, tradeRoute } from './exchangeData';
@@ -49,6 +49,8 @@ export const FilterBar = ({
   onChange,
   people,
   onPeople,
+  shares,
+  onShares,
 }: {
   labels: readonly TokenLabels[];
   filter: Filter;
@@ -57,13 +59,16 @@ export const FilterBar = ({
   /** The People (friends' tokens) view, when the page offers it. */
   people?: boolean;
   onPeople?: (on: boolean) => void;
+  /** The restricted Shares view (bShares; never offered for sale), when the page offers it (not in a store build). */
+  shares?: boolean;
+  onShares?: (on: boolean) => void;
 }) => {
   const { cats, plats } = useMemo(() => facetCounts(labels, filter), [labels, filter]);
   const total = [...cats.values()].reduce((a, b) => a + b, 0);
   const platforms = registry.platforms.filter((p) => (plats.get(p.slug) ?? 0) > 0 || filter.platforms.includes(p.slug));
   const [grid, setGrid] = useState(false);
-  const current = people ? 'People' : filter.cat ? categoryLabel(filter.cat) : 'All markets';
-  const currentCount = people ? null : filter.cat ? (cats.get(filter.cat) ?? 0) : total;
+  const current = shares ? 'Shares' : people ? 'People' : filter.cat ? categoryLabel(filter.cat) : 'All markets';
+  const currentCount = people || shares ? null : filter.cat ? (cats.get(filter.cat) ?? 0) : total;
   const cell = (on: boolean, label: string, count: number | null, onClick: () => void, icon?: React.ReactNode) => (
     <button
       key={label}
@@ -121,15 +126,19 @@ export const FilterBar = ({
             >
               <p className="m-0 px-1 pt-1 text-sm font-bold text-white">Show which markets?</p>
               <div className="grid grid-cols-4 gap-1.5">
-                {cell(!people && !filter.cat, 'All', total, () => {
+                {cell(!people && !shares && !filter.cat, 'All', total, () => {
                   onPeople?.(false);
+                  onShares?.(false);
                   onChange({ ...filter, cat: null });
                 })}
                 {onPeople &&
                   cell(!!people, 'People', null, () => onPeople(true), <Users size={14} aria-hidden="true" />)}
+                {onShares &&
+                  cell(!!shares, 'Shares', null, () => onShares(true), <Lock size={14} aria-hidden="true" />)}
                 {CATEGORIES.map((c) =>
-                  cell(!people && filter.cat === c.slug, c.label, cats.get(c.slug) ?? 0, () => {
+                  cell(!people && !shares && filter.cat === c.slug, c.label, cats.get(c.slug) ?? 0, () => {
                     onPeople?.(false);
+                    onShares?.(false);
                     onChange({ ...filter, cat: c.slug });
                   }),
                 )}

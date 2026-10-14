@@ -59,6 +59,8 @@ export type BApp = {
   layout?: 'mobile' | 'desktop';
   /** bWalletX only: never listed in the store edition (bWallet). */
   privateOnly?: boolean;
+  /** Restricted bApp (bShares): the badge text, e.g. "Restricted · members only"; the app itself checks membership. */
+  restricted?: string;
 };
 
 const suite = (repo: string) => `https://github.com/bitcoin-apps-suite/${repo}`;
@@ -108,6 +110,27 @@ export const BAPPS: BApp[] = [
     status: 'live',
     icon: bmintIcon,
   },
+  // bShares (docs/BCORP-PLACEMENT.md): The Bitcoin Corporation share placement for registered members and the
+  // director. Restricted, never in the store edition (no route or tile there: PLACEMENT_ENABLED).
+  // Literal env check (not the imported flag) so Rollup drops the entry from the store bundle.
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'bShares',
+          url: '/m/bshares',
+          verb: 'Restricted: for registered bCorp shareholders',
+          group: 'featured' as const,
+          status: 'live' as const,
+          icon: bmintIcon,
+          privateOnly: true,
+          restricted: 'Restricted · members only',
+        },
+      ]
+    : []),
   {
     name: 'Names',
     // The Name Store (names/store/NameStorePage.tsx): get your name on Bitcoin.

@@ -567,3 +567,10 @@ describe('BMINT_NOTES_ENABLED: the bMint banknote designer is bWalletX only', ()
     );
   });
 });
+
+describe('PLACEMENT_ENABLED: bShares (securities) is bWalletX only', () => {
+  test('off exactly when the store flag is on', async () => {
+    const { PLACEMENT_ENABLED } = await import('./storeBuild');
+    expect(PLACEMENT_ENABLED).toBe(!STORE_BUILD);
+  });
+});
