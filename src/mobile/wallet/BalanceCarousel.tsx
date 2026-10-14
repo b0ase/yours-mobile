@@ -370,7 +370,7 @@ const MockCard = ({
   chip,
   contract,
   onStop,
-  onTopUp,
+  onPaid,
   running,
   onRun,
 }: {
@@ -378,13 +378,14 @@ const MockCard = ({
   chip: string | null;
   contract: MockContract | null;
   onStop: () => void;
-  onTopUp: () => void;
+  onPaid: (id: string, amount: number) => void;
   running?: boolean;
   onRun?: () => void;
 }) => {
   const [unit, setUnit] = useState<'own' | 'usd'>('own');
   const [flipped, setFlipped] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
   const [turning, setTurning] = useState(false);
   const flip = () => {
     setTurning(true);
@@ -486,7 +487,7 @@ const MockCard = ({
               className="bw-bc-stop is-top"
               onClick={(e) => {
                 e.stopPropagation();
-                onTopUp();
+                setTopUpOpen(true);
               }}
             >
               Top up
@@ -508,6 +509,17 @@ const MockCard = ({
             Contact {c.contact}
           </button>
         </div>
+        {topUpOpen && (
+          <TopUpForm
+            c={c}
+            onClose={() => setTopUpOpen(false)}
+            onPaid={(amount) => {
+              setTopUpOpen(false);
+              setFlipped(false);
+              onPaid(c.id, amount);
+            }}
+          />
+        )}
         {sheetOpen && c.agreement && <AgreementSheet a={c.agreement} onClose={() => setSheetOpen(false)} />}
         {sheetOpen && !c.agreement && (
           <Layer sheet onClose={() => setSheetOpen(false)}>
@@ -605,6 +617,8 @@ const chunksFor = (id: string): Chunk[] => {
       get: d,
       getText: `$${d} Mandala credit`,
     }));
+  if (id !== 'bcredits' && id !== 'pnee')
+    return [1, 5, 10, 20].map((p) => ({ label: `£${p}`, gbp: p, get: p * 100, getText: `${p * 100} tokens` }));
   return [1, 5, 10, 20].map((p) => {
     const get = id === 'pnee' ? Math.round(p * USD_PER_GBP * 100) : p * 100;
     return { label: `£${p}`, gbp: p, get, getText: `${fmtNum(get)} ${id === 'pnee' ? 'PNEEs' : 'bCredits'}` };
@@ -720,17 +734,503 @@ const TopUpCard = ({
   );
 };
 
-type Slot = { id: string; hidden: boolean };
+/** Per-card top-up: full screen in the issuer's colour, only that credit's chunks and terms. */
+const TopUpForm = ({
+  c,
+  onClose,
+  onPaid,
+}: {
+  c: MockBalance;
+  onClose: () => void;
+  onPaid: (amount: number) => void;
+}) => {
+  const chunks = chunksFor(c.id);
+  const [pick, setPick] = useState(1);
+  const [confirm, setConfirm] = useState(false);
+  const ch = chunks[pick];
+  const bsv = (ch.gbp / GBP_PER_BSV).toFixed(4);
+  const payee = c.issuer.split(' ·')[0];
+  const terms =
+    c.id === 'mandala'
+      ? ['$1 paid = $1 credit. Amounts are an example.', 'Credit doesn’t expire.', 'Billed per active second.']
+      : ['1p each. They don’t expire.', 'Non-refundable except where the law requires.', 'Maximum £20 per top-up.'];
+  return (
+    <Layer onClose={onClose}>
+      <div
+        className="bw-tuf bw-layer-scroll"
+        style={{ ['--bc-bg' as string]: c.colour, ['--bc-ink' as string]: c.ink }}
+      >
+        <div className="bw-ag-grab" />
+        <div className="bw-bc-top">
+          <span className="bw-bc-logo">{c.initial}</span>
+          <span className="bw-bc-head">
+            <b>Top up {c.name}</b>
+            <small>{c.issuer}</small>
+          </span>
+          <span className="bw-bc-mock">MOCK</span>
+        </div>
+        <div className="bw-tuf-chunks">
+          {chunks.map((k, i) => (
+            <button type="button" key={k.label} className={i === pick ? 'is-on' : undefined} onClick={() => setPick(i)}>
+              <b>{k.label}</b>
+              <span>→ {k.getText}</span>
+              <small>≈ {(k.gbp / GBP_PER_BSV).toFixed(4)} BSV</small>
+            </button>
+          ))}
+        </div>
+        <ul className="bw-tuf-terms">
+          {terms.map((t) => (
+            <li key={t}>{t}</li>
+          ))}
+        </ul>
+        {confirm ? (
+          <div className="bw-tuf-confirm">
+            <p>
+              Pay ≈{bsv} BSV to {payee} for {ch.getText}.
+            </p>
+            <button type="button" className="bw-tuf-go" onClick={() => onPaid(ch.get)}>
+              Confirm
+            </button>
+            <button type="button" className="bw-tuf-sec" onClick={() => setConfirm(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <>
+            <button type="button" className="bw-tuf-go" onClick={() => setConfirm(true)}>
+              Top up {ch.label}
+            </button>
+            <button type="button" className="bw-tuf-sec" onClick={onClose}>
+              Close
+            </button>
+          </>
+        )}
+      </div>
+    </Layer>
+  );
+};
+
+/* ---------- Baskets (iPhone-style folders) ---------- */
+
+const TOKEN_SEED: [string, string, string][] = [
+  ['DIVVY', '#3a7bd5', '#fff'],
+  ['MONEYBUTTON', '#e5484d', '#fff'],
+  ['KWEG', '#7c3aed', '#fff'],
+  ['NPG', '#e11d74', '#fff'],
+  ['CHERRY', '#b91c1c', '#fff'],
+  ['REPO', '#0f766e', '#fff'],
+  ['1SHOT', '#f97316', '#111'],
+  ['NERD', '#16a34a', '#fff'],
+  ['DNSDEX', '#0ea5e9', '#111'],
+  ['FLOOP', '#facc15', '#111'],
+  ['TRIBE', '#a16207', '#fff'],
+  ['KINTSUGI', '#1c1917', '#ffd24d'],
+];
+const TOKENS: MockBalance[] = TOKEN_SEED.map(([t, colour, ink], i) => ({
+  id: `tok-${t.toLowerCase()}`,
+  name: `$${t}`,
+  issuer: 'BSV-21 token',
+  unit: 'tokens',
+  balance: 1000 * (i + 3) + 250 * i,
+  usdPer: 0.0005 * (i + 1),
+  colour,
+  ink,
+  initial: t[0],
+  about: `$${t} tokens held in this wallet (mock).`,
+  contact: `$${t.toLowerCase()}`,
+}));
+const ALL: MockBalance[] = [...MOCK, ...TOKENS];
+
+type Item = { kind: 'card'; id: string } | { kind: 'basket'; id: string; name: string; members: string[] };
+type Layout = { row: Item[]; hidden: string[] };
+const LAYOUT_KEY = 'bw-mock-balance-layout-v1';
+const SEED: Layout = {
+  row: [
+    { kind: 'card', id: 'bsv' },
+    { kind: 'basket', id: 'b-credits', name: 'Credits', members: ['bcredits', 'mandala'] },
+    { kind: 'card', id: 'pnee' },
+    { kind: 'card', id: 'bcorp' },
+    { kind: 'basket', id: 'b-tokens', name: 'Tokens', members: TOKENS.map((t) => t.id) },
+    { kind: 'card', id: 'topup' },
+  ],
+  hidden: [],
+};
+const loadLayout = (): Layout => {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null') as Layout | null;
+    if (v && Array.isArray(v.row) && Array.isArray(v.hidden)) return v;
+  } catch {
+    /* private mode etc. */
+  }
+  return SEED;
+};
+const saveLayout = (l: Layout) => {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+  } catch {
+    /* ignore */
+  }
+};
+const defaultBasketName = (ids: string[]) =>
+  ids.every((i) => i.startsWith('tok-')) ? 'Tokens' : ids.some((i) => i.startsWith('tok-')) ? 'Basket' : 'Credits';
+
+const MiniLogo = ({ c }: { c: MockBalance | undefined }) =>
+  c ? (
+    <span className="bw-mini" style={{ background: c.colour, color: c.ink }}>
+      {c.initial}
+    </span>
+  ) : (
+    <span className="bw-mini is-bsv">₿</span>
+  );
+
+const BasketCard = ({
+  b,
+  cards,
+  onOpen,
+}: {
+  b: Extract<Item, { kind: 'basket' }>;
+  cards: MockBalance[];
+  onOpen: () => void;
+}) => {
+  const [flipped, setFlipped] = useState(false);
+  const [turning, setTurning] = useState(false);
+  const flip = () => {
+    setTurning(true);
+    window.setTimeout(() => setFlipped((f) => !f), 220);
+    window.setTimeout(() => setTurning(false), 440);
+  };
+  const members = b.members.map((m) => cards.find((c) => c.id === m)).filter((c): c is MockBalance => !!c);
+  const usd = members.reduce((t, c) => t + c.balance * c.usdPer, 0);
+  if (flipped)
+    return (
+      <div className={`bw-bc bw-bc-back bw-bk${turning ? ' is-turning' : ''}`} onClick={flip}>
+        <FlipBtn onFlip={flip} />
+        <div className="bw-tu-title">{b.name}</div>
+        <div className="bw-bk-list">
+          {members.map((c) => (
+            <span key={c.id}>
+              <MiniLogo c={c} /> {c.name}
+              <b>
+                {c.dollars ? `$${c.balance.toFixed(2)}` : fmtNum(c.balance)} {c.dollars ? '' : c.unit}
+              </b>
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  return (
+    <div
+      className={`bw-bc bw-bk${turning ? ' is-turning' : ''}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+    >
+      <FlipBtn onFlip={flip} />
+      <div className="bw-bc-top">
+        <span className="bw-bk-grid">
+          {members.slice(0, 9).map((c) => (
+            <MiniLogo key={c.id} c={c} />
+          ))}
+        </span>
+        <span className="bw-bc-head">
+          <b>{b.name}</b>
+          <small>
+            {members.length} cards · basket <span className="bw-bc-mock">MOCK</span>
+          </small>
+        </span>
+      </div>
+      <div className="bw-bc-amt">≈ {fmtUsd(usd)}</div>
+      <div className="bw-bc-sub">≈ combined at mock rates · tap to open</div>
+    </div>
+  );
+};
+
+type CardHooks = {
+  chipFor: (id: string) => string | null;
+  contractFor: (id: string) => MockContract | null;
+  onStop: () => void;
+  onPaid: (id: string, amount: number) => void;
+  running: boolean;
+  onRun: () => void;
+};
+
+const renderCard = (c: MockBalance, h: CardHooks) => (
+  <MockCard
+    c={c}
+    chip={h.chipFor(c.id)}
+    contract={h.contractFor(c.id)}
+    onStop={h.onStop}
+    onPaid={h.onPaid}
+    running={c.id === 'mandala' ? h.running : undefined}
+    onRun={c.id === 'mandala' ? h.onRun : undefined}
+  />
+);
+
+const BasketView = ({
+  b,
+  cards,
+  hooks,
+  onClose,
+  onRename,
+}: {
+  b: Extract<Item, { kind: 'basket' }>;
+  cards: MockBalance[];
+  hooks: CardHooks;
+  onClose: () => void;
+  onRename: (name: string) => void;
+}) => {
+  const [open, setOpen] = useState<string | null>(null);
+  const members = b.members.map((m) => cards.find((c) => c.id === m)).filter((c): c is MockBalance => !!c);
+  const card = open ? members.find((m) => m.id === open) : undefined;
+  return (
+    <Layer onClose={onClose}>
+      <div className="bw-bkv bw-layer-scroll">
+        <div className="bw-ag-grab" />
+        <input
+          className="bw-bkv-name"
+          value={b.name}
+          onChange={(e) => onRename(e.target.value)}
+          aria-label="Basket name"
+        />
+        {card ? (
+          <>
+            <div className="bw-bkv-card">{renderCard(card, hooks)}</div>
+            <button type="button" className="bw-tuf-sec" onClick={() => setOpen(null)}>
+              Back to {b.name}
+            </button>
+          </>
+        ) : (
+          <div className="bw-bkv-grid">
+            {members.map((c) => (
+              <button type="button" key={c.id} onClick={() => setOpen(c.id)}>
+                <span className="bw-bkv-tile" style={{ background: c.colour, color: c.ink }}>
+                  {c.initial}
+                </span>
+                <small>{c.name}</small>
+              </button>
+            ))}
+          </div>
+        )}
+        <button type="button" className="bw-tuf-sec" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Layer>
+  );
+};
+
+/** Jiggle mode: drag a card onto another to make a basket, onto a basket to add it, or out of a basket. */
+const EditGrid = ({
+  layout,
+  cards,
+  onChange,
+  onDone,
+}: {
+  layout: Layout;
+  cards: MockBalance[];
+  onChange: (l: Layout) => void;
+  onDone: () => void;
+}) => {
+  const [openB, setOpenB] = useState<string | null>(null);
+  const [drag, setDrag] = useState<{ id: string; from: string | null; x: number; y: number } | null>(null);
+  const nameOf = (id: string) =>
+    id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
+  const card = (id: string) => cards.find((c) => c.id === id);
+
+  const drop = (srcId: string, from: string | null, target: string | null) => {
+    if (target === srcId) return;
+    const row = layout.row.map((it) => (it.kind === 'basket' ? { ...it, members: [...it.members] } : it));
+    // take the source out
+    let src: Item | undefined;
+    if (from) {
+      const b = row.find((i) => i.id === from);
+      if (b?.kind === 'basket') b.members = b.members.filter((m) => m !== srcId);
+      src = { kind: 'card', id: srcId };
+    } else {
+      const i = row.findIndex((it) => it.id === srcId);
+      src = row[i];
+      row.splice(i, 1);
+    }
+    if (!src) return;
+    if (target === '__out' || target === null) {
+      row.push(src);
+    } else {
+      const ti = row.findIndex((it) => it.id === target);
+      const t = row[ti];
+      if (!t) row.push(src);
+      else if (t.kind === 'basket') {
+        if (src.kind === 'card') t.members.push(src.id);
+        else t.members.push(...src.members);
+      } else if (src.kind === 'card' && t.id !== 'bsv' && t.id !== 'topup' && src.id !== 'bsv' && src.id !== 'topup') {
+        const members = [t.id, src.id];
+        row[ti] = { kind: 'basket', id: `b-${Date.now()}`, name: defaultBasketName(members), members };
+      } else row.splice(ti, 0, src);
+    }
+    // a basket with fewer than 2 cards dissolves
+    const clean: Item[] = [];
+    for (const it of row) {
+      if (it.kind === 'basket' && it.members.length < 2) {
+        if (it.members.length === 1) clean.push({ kind: 'card', id: it.members[0] });
+        if (openB === it.id) setOpenB(null);
+      } else clean.push(it);
+    }
+    onChange({ ...layout, row: clean });
+  };
+
+  const start = (id: string, from: string | null) => (e: React.PointerEvent) => {
+    if (id === 'bsv') return;
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDrag({ id, from, x: e.clientX, y: e.clientY });
+  };
+  const moveP = (e: React.PointerEvent) => drag && setDrag({ ...drag, x: e.clientX, y: e.clientY });
+  const end = (e: React.PointerEvent) => {
+    if (!drag) return;
+    const under = document
+      .elementsFromPoint(e.clientX, e.clientY)
+      .map((el) => (el as HTMLElement).closest?.('[data-drop]') as HTMLElement | null)
+      .find((el) => el && el.dataset.drop !== drag.id);
+    const target = under?.dataset.drop ?? null;
+    if (target) drop(drag.id, drag.from, target);
+    else if (drag.from === null && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) {
+      const it = layout.row.find((i) => i.id === drag.id);
+      if (it?.kind === 'basket') setOpenB(it.id);
+    }
+    setDrag(null);
+  };
+  const basket = layout.row.find((i) => i.id === openB);
+  const tile = (id: string, from: string | null, label: string, logo: ReactNode) => (
+    <div
+      key={id}
+      data-drop={from ? undefined : id}
+      className={`bw-eg-tile${drag?.id === id ? ' is-drag' : ''}${layout.hidden.includes(id) ? ' is-hidden' : ''}`}
+      onPointerDown={start(id, from)}
+      onPointerMove={moveP}
+      onPointerUp={end}
+      style={drag?.id === id ? { transform: 'scale(1.1)', zIndex: 3 } : undefined}
+    >
+      {logo}
+      <small>{label}</small>
+      {!from && id !== 'bsv' && (
+        <button
+          type="button"
+          className="bw-eg-hide"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() =>
+            onChange({
+              ...layout,
+              hidden: layout.hidden.includes(id) ? layout.hidden.filter((h) => h !== id) : [...layout.hidden, id],
+            })
+          }
+        >
+          {layout.hidden.includes(id) ? '+' : '–'}
+        </button>
+      )}
+    </div>
+  );
+  return (
+    <Layer onClose={onDone}>
+      <div className="bw-eg bw-layer-scroll">
+        <div className="bw-eg-head">
+          <b>Edit cards</b>
+          <span className="bw-bc-mock">MOCK</span>
+          <button type="button" onClick={onDone}>
+            Done
+          </button>
+        </div>
+        <p className="bw-eg-hint">
+          Drag a card onto another to make a basket. Tap a basket to open it; drag a card out to take it out. – hides a
+          card.
+        </p>
+        <div className="bw-eg-grid">
+          {layout.row.map((it) =>
+            it.kind === 'basket'
+              ? tile(
+                  it.id,
+                  null,
+                  it.name,
+                  <span className="bw-eg-folder">
+                    {it.members.slice(0, 9).map((m) => (
+                      <MiniLogo key={m} c={card(m)} />
+                    ))}
+                  </span>,
+                )
+              : tile(
+                  it.id,
+                  null,
+                  nameOf(it.id),
+                  it.id === 'topup' ? (
+                    <span className="bw-eg-logo is-top">+</span>
+                  ) : it.id === 'bsv' ? (
+                    <span className="bw-eg-logo is-bsv">₿</span>
+                  ) : (
+                    <span className="bw-eg-logo" style={{ background: card(it.id)?.colour, color: card(it.id)?.ink }}>
+                      {card(it.id)?.initial}
+                    </span>
+                  ),
+                ),
+          )}
+        </div>
+        {basket?.kind === 'basket' && (
+          <div className="bw-eg-open">
+            <input
+              className="bw-bkv-name"
+              value={basket.name}
+              aria-label="Basket name"
+              onChange={(e) =>
+                onChange({
+                  ...layout,
+                  row: layout.row.map((i) => (i.id === basket.id ? { ...basket, name: e.target.value } : i)),
+                })
+              }
+            />
+            <div className="bw-eg-grid">
+              {basket.members.map((m) =>
+                tile(
+                  m,
+                  basket.id,
+                  nameOf(m),
+                  <span className="bw-eg-logo" style={{ background: card(m)?.colour, color: card(m)?.ink }}>
+                    {card(m)?.initial}
+                  </span>,
+                ),
+              )}
+            </div>
+            <div className="bw-eg-out" data-drop="__out">
+              Drag here to take a card out of {basket.name}
+            </div>
+          </div>
+        )}
+        <button type="button" className="bw-tuf-sec" onClick={() => onChange(SEED)}>
+          Reset to the example layout
+        </button>
+      </div>
+    </Layer>
+  );
+};
 
 export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
-  const [cards, setCards] = useState(MOCK);
-  const [slots, setSlots] = useState<Slot[]>(() => [
-    { id: 'bsv', hidden: false },
-    ...MOCK.map((m) => ({ id: m.id, hidden: false })),
-    { id: 'topup', hidden: false },
-  ]);
+  const [cards, setCards] = useState(ALL);
+  const [layout, setLayoutState] = useState<Layout>(loadLayout);
+  const setLayout = (l: Layout) => {
+    setLayoutState(l);
+    saveLayout(l);
+  };
   const [topIssuer, setTopIssuer] = useState('bcredits');
   const [running, setRunning] = useState(false);
+  const [active, setActive] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [openBasket, setOpenBasket] = useState<string | null>(null);
+  const [spending, setSpending] = useState<string | null>(null);
+  const [chip, setChip] = useState<string | null>(null);
+  const [contract, setContract] = useState<MockContract | null>(null);
+  const demoRef = useRef<{ tick: number | null; end: number | null; back: string }>({
+    tick: null,
+    end: null,
+    back: 'bsv',
+  });
+  const track = useRef<HTMLDivElement>(null);
+
   // Mandala bills per active second while running (mock: $0.12/hour), nothing while suspended.
   useEffect(() => {
     if (!running) return;
@@ -743,38 +1243,44 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     );
     return () => window.clearInterval(t);
   }, [running]);
-  const [active, setActive] = useState(0);
-  const [sheet, setSheet] = useState(false);
-  const [spending, setSpending] = useState<string | null>(null);
-  const [chip, setChip] = useState<string | null>(null);
-  const [contract, setContract] = useState<MockContract | null>(null);
-  const demoRef = useRef<{ tick: number | null; end: number | null; back: number }>({ tick: null, end: null, back: 0 });
-  const track = useRef<HTMLDivElement>(null);
-  const visible = slots.filter((s) => !s.hidden);
+
+  const basketOf = (id: string) =>
+    layout.row.find((i): i is Extract<Item, { kind: 'basket' }> => i.kind === 'basket' && i.members.includes(id));
+  // Slides: the layout minus hidden items; a card spending from inside a basket comes to the front.
+  type Slide = { key: string; item: Item; from?: string };
+  const slides: Slide[] = layout.row.filter((i) => !layout.hidden.includes(i.id)).map((i) => ({ key: i.id, item: i }));
+  const spendingBasket = spending ? basketOf(spending) : undefined;
+  if (spending && spendingBasket)
+    slides.unshift({ key: `live-${spending}`, item: { kind: 'card', id: spending }, from: spendingBasket.name });
+  const indexOf = (id: string) => {
+    const i = slides.findIndex((s) => s.item.id === id);
+    if (i >= 0) return i;
+    const b = basketOf(id);
+    return b ? slides.findIndex((s) => s.item.id === b.id) : -1;
+  };
 
   const goTo = useCallback((i: number) => {
     const el = track.current;
-    if (!el) return;
+    if (!el || i < 0) return;
     el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' });
   }, []);
-
   const onScroll = () => {
     const el = track.current;
     if (!el || !el.clientWidth) return;
     setActive(Math.round(el.scrollLeft / el.clientWidth));
   };
 
-  // Long-press anywhere on the carousel opens the reorder/hide sheet.
+  // Long-press anywhere on the carousel enters jiggle/edit mode.
   const press = useRef<number | null>(null);
   const startPress = () => {
-    press.current = window.setTimeout(() => setSheet(true), 600);
+    press.current = window.setTimeout(() => setEditing(true), 600);
   };
   const endPress = () => {
     if (press.current !== null) window.clearTimeout(press.current);
     press.current = null;
   };
 
-  // Demo: b spends 2 credits per reply every 3 s for ~20 s on $mandala; the card follows the money, then returns.
+  const backRef = useRef<string | null>(null);
   const stopDemo = () => {
     const d = demoRef.current;
     if (d.tick !== null) window.clearInterval(d.tick);
@@ -783,17 +1289,26 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     setSpending(null);
     setChip(null);
     setContract(null);
-    goTo(d.back);
+    backRef.current = d.back;
   };
+  // After the live slide is removed, return to the card we came from.
+  useEffect(() => {
+    if (spending || !backRef.current) return;
+    const id = backRef.current;
+    backRef.current = null;
+    window.setTimeout(() => goTo(indexOf(id)), 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spending]);
+
+  // Demo: b spends 2 bCredits per reply every 3 s for ~20 s; the card follows the money, then returns.
   const demo = () => {
     if (spending) return;
-    const idx = visible.findIndex((s) => s.id === 'bcredits');
-    if (idx < 0) return;
-    demoRef.current.back = active;
+    demoRef.current.back = slides[active]?.item.id ?? 'bsv';
+    setOpenBasket(null);
     setSpending('bcredits');
     setChip('b · 2 bCredits/reply');
     setContract({ what: 'Ask b replies', rate: '2 bCredits per reply', startedAt: Date.now(), spent: 0 });
-    goTo(idx);
+    window.setTimeout(() => goTo(indexOf('bcredits') >= 0 && basketOf('bcredits') ? 0 : indexOf('bcredits')), 50);
     let n = 0;
     demoRef.current.tick = window.setInterval(() => {
       n += 1;
@@ -817,30 +1332,24 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     [],
   );
 
-  const move = (id: string, d: -1 | 1) =>
-    setSlots((s) => {
-      const i = s.findIndex((x) => x.id === id);
-      const j = i + d;
-      if (j < 0 || j >= s.length) return s;
-      const n = [...s];
-      [n[i], n[j]] = [n[j], n[i]];
-      return n;
-    });
-  const nameOf = (id: string) =>
-    id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
-  const openTopUp = (id: string) => {
-    setTopIssuer(id);
-    const i = visible.findIndex((s) => s.id === 'topup');
-    if (i >= 0) goTo(i);
-  };
   const paid = (id: string, amount: number) => {
-    const i = visible.findIndex((s) => s.id === id);
-    if (i >= 0) goTo(i);
+    goTo(indexOf(id));
     window.setTimeout(
       () => setCards((cs) => cs.map((c) => (c.id === id ? { ...c, balance: c.balance + amount } : c))),
       600,
     );
   };
+  const hooks: CardHooks = {
+    chipFor: (id) => (spending === id ? chip : null),
+    contractFor: (id) => (spending === id ? contract : null),
+    onStop: stopDemo,
+    onPaid: paid,
+    running,
+    onRun: () => setRunning((x) => !x),
+  };
+  const nameOf = (id: string) =>
+    id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
+  const bOpen = layout.row.find((i) => i.id === openBasket);
 
   return (
     <div className="bw-bcar">
@@ -853,40 +1362,37 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         onTouchMove={endPress}
         onContextMenu={(e) => {
           e.preventDefault();
-          setSheet(true);
+          setEditing(true);
         }}
       >
-        {visible.map((s) => (
-          <div className="bw-bcar-slide" key={s.id}>
-            {s.id === 'bsv' ? (
+        {slides.map(({ key, item, from }) => (
+          <div className="bw-bcar-slide" key={key}>
+            {item.id === 'bsv' ? (
               <div className="bw-bcar-bsv">{bsvCard}</div>
-            ) : s.id === 'topup' ? (
+            ) : item.id === 'topup' ? (
               <div className="bw-bcar-mockwrap">
                 <TopUpCard issuer={topIssuer} setIssuer={setTopIssuer} onPaid={paid} />
               </div>
+            ) : item.kind === 'basket' ? (
+              <div className="bw-bcar-mockwrap">
+                <BasketCard b={item} cards={cards} onOpen={() => setOpenBasket(item.id)} />
+              </div>
             ) : (
               <div className="bw-bcar-mockwrap">
-                <MockCard
-                  c={cards.find((c) => c.id === s.id)!}
-                  chip={spending === s.id ? chip : null}
-                  contract={spending === s.id ? contract : null}
-                  onStop={stopDemo}
-                  onTopUp={() => openTopUp(s.id)}
-                  running={s.id === 'mandala' ? running : undefined}
-                  onRun={s.id === 'mandala' ? () => setRunning((x) => !x) : undefined}
-                />
+                {from && <span className="bw-bcar-from">from {from}</span>}
+                {renderCard(cards.find((c) => c.id === item.id)!, hooks)}
               </div>
             )}
           </div>
         ))}
       </div>
-      <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${visible.length}`}>
-        {visible.map((s, i) => (
+      <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${slides.length}`}>
+        {slides.map((s, i) => (
           <button
             type="button"
-            key={s.id}
-            aria-label={nameOf(s.id)}
-            className={i === active ? 'is-on' : undefined}
+            key={s.key}
+            aria-label={s.item.kind === 'basket' ? s.item.name : nameOf(s.item.id)}
+            className={`${i === active ? 'is-on' : ''}${s.item.kind === 'basket' ? ' is-basket' : ''}`}
             onClick={() => goTo(i)}
           />
         ))}
@@ -895,35 +1401,22 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         <button type="button" onClick={demo} disabled={!!spending}>
           {spending ? 'b is spending…' : 'Demo spend (mock)'}
         </button>
+        <button type="button" onClick={() => setEditing(true)}>
+          Edit cards
+        </button>
       </div>
-      {sheet && (
-        <Layer sheet onClose={() => setSheet(false)}>
-          <div className="bw-bcar-sheet bw-layer-scroll">
-            <h3>Cards</h3>
-            {slots.map((s, i) => (
-              <div className="bw-bcar-row" key={s.id}>
-                <span className={s.hidden ? 'is-hidden' : undefined}>{nameOf(s.id)}</span>
-                <button type="button" disabled={i === 0} onClick={() => move(s.id, -1)}>
-                  ↑
-                </button>
-                <button type="button" disabled={i === slots.length - 1} onClick={() => move(s.id, 1)}>
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  disabled={s.id === 'bsv'}
-                  onClick={() => setSlots((x) => x.map((y) => (y.id === s.id ? { ...y, hidden: !y.hidden } : y)))}
-                >
-                  {s.hidden ? 'Show' : 'Hide'}
-                </button>
-              </div>
-            ))}
-            <button type="button" className="bw-bcar-done" onClick={() => setSheet(false)}>
-              Done
-            </button>
-          </div>
-        </Layer>
+      {bOpen?.kind === 'basket' && (
+        <BasketView
+          b={bOpen}
+          cards={cards}
+          hooks={hooks}
+          onClose={() => setOpenBasket(null)}
+          onRename={(name) =>
+            setLayout({ ...layout, row: layout.row.map((i) => (i.id === bOpen.id ? { ...bOpen, name } : i)) })
+          }
+        />
       )}
+      {editing && <EditGrid layout={layout} cards={cards} onChange={setLayout} onDone={() => setEditing(false)} />}
     </div>
   );
 };
