@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom';
 import { PenLine } from 'lucide-react';
 import { useCountUp } from './live/useCountUp';
+import { STORE_BUILD } from '../storeBuild';
 import { TokenIcon } from '../exchange/TokenIcon';
 import { tokenDirectory } from '../market/indexer';
 import './balanceCards.css';
@@ -11,7 +12,8 @@ import './balanceCards.css';
  * one card per balance. The BSV card is the real WalletCard, untouched; every other card is MOCK DATA.
  * Nothing here signs, spends or fetches.
  */
-export const MOCK_BALANCE_CARDS = true;
+/** Mock only, and never in store builds. */
+export const MOCK_BALANCE_CARDS = !STORE_BUILD;
 
 export type MockBalance = {
   id: string;
@@ -27,6 +29,8 @@ export type MockBalance = {
   initial: string;
   /** What the balance is for (shown on the back when no contract runs). */
   about: string;
+  /** Board minute reference on a locked share card's back. */
+  boardRef?: string;
   /** Shares locked in 2-of-2 multisig: never spendable, never ticks, never followed. */
   locked?: boolean;
   contact: string;
@@ -359,6 +363,37 @@ const MOCK: MockBalance[] = [
     about: 'Shares in The Bitcoin Corporation Ltd.',
     locked: true,
     contact: 'bitcoin-corp.com',
+    boardRef: 'BCORP-BM-2026-014',
+  },
+  {
+    id: 'sh-acme',
+    name: 'Example Robotics Ltd shares',
+    issuer: 'Example Robotics Ltd (fake company)',
+    unit: 'shares',
+    balance: 1200,
+    usdPer: 0.5,
+    colour: '#2a2350',
+    ink: '#ffd24d',
+    initial: 'E',
+    about: 'Mock shares in a made-up company.',
+    locked: true,
+    contact: 'example-robotics.test',
+    boardRef: 'EXRB-BM-2026-003',
+  },
+  {
+    id: 'sh-teapot',
+    name: 'Sample Teapot plc shares',
+    issuer: 'Sample Teapot plc (fake company)',
+    unit: 'shares',
+    balance: 300,
+    usdPer: 1.2,
+    colour: '#3b2412',
+    ink: '#ffd24d',
+    initial: 'S',
+    about: 'Mock shares in a made-up company.',
+    locked: true,
+    contact: 'sample-teapot.test',
+    boardRef: 'STPT-BM-2026-011',
   },
 ];
 
@@ -438,7 +473,7 @@ const MockCard = ({
           </span>
         </div>
         <div className="bw-bc-terms">
-          <span>Board minute BCORP-BM-2026-014 · signed with bit-sign</span>
+          <span>Board minute {c.boardRef ?? 'BCORP-BM-2026-014'} · signed with bit-sign</span>
         </div>
       </div>
     );
@@ -893,13 +928,13 @@ const readHeldTokens = (): MockBalance[] => {
 
 type Item = { kind: 'card'; id: string } | { kind: 'basket'; id: string; name: string; members: string[] };
 type Layout = { row: Item[]; hidden: string[] };
-const LAYOUT_KEY = 'bw-mock-balance-layout-v1';
+const LAYOUT_KEY = 'bw-mock-balance-layout-v2';
 const SEED: Layout = {
   row: [
     { kind: 'card', id: 'bsv' },
     { kind: 'basket', id: 'b-credits', name: 'Credits', members: ['bcredits', 'mandala'] },
     { kind: 'card', id: 'pnee' },
-    { kind: 'card', id: 'bcorp' },
+    { kind: 'basket', id: 'b-shares', name: 'Shares', members: ['bcorp', 'sh-acme', 'sh-teapot'] },
     { kind: 'basket', id: 'b-tokens', name: 'Tokens', members: [] },
     { kind: 'card', id: 'topup' },
   ],
@@ -938,6 +973,125 @@ const Logo = ({ c, size, className }: { c: MockBalance | undefined; size: number
 
 const MiniLogo = ({ c }: { c: MockBalance | undefined }) =>
   c ? <Logo c={c} size={14} className="bw-mini" /> : <span className="bw-mini is-bsv">₿</span>;
+
+/* ---------- KYC gate for Shares (mirrors bit-sign: start → Veriff → approved → wallet KYC certificate) ---------- */
+const KYC_KEY = 'bw-mock-kyc-verified';
+const kycOk = () => {
+  try {
+    return localStorage.getItem(KYC_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+const setKyc = (v: boolean) => {
+  try {
+    if (v) localStorage.setItem(KYC_KEY, '1');
+    else localStorage.removeItem(KYC_KEY);
+  } catch {
+    /* ignore */
+  }
+};
+
+const KycGate = ({ onDone, onClose }: { onDone: () => void; onClose: () => void }) => {
+  const [step, setStep] = useState<'gate' | 'start' | 'check' | 'verified' | 'cert' | 'investor'>('gate');
+  const [ticks, setTicks] = useState({ soph: false, hnw: false });
+  useEffect(() => {
+    if (step === 'check') {
+      const t = window.setTimeout(() => setStep('verified'), 1800);
+      return () => window.clearTimeout(t);
+    }
+    if (step === 'verified') {
+      const t = window.setTimeout(() => setStep('cert'), 1200);
+      return () => window.clearTimeout(t);
+    }
+  }, [step]);
+  const finish = () => {
+    setKyc(true);
+    onDone();
+  };
+  return (
+    <Layer onClose={onClose}>
+      <div className="bw-kyc bw-layer-scroll">
+        <span className="bw-bc-mock">MOCK · demo only, no ID is checked</span>
+        {step === 'gate' && (
+          <>
+            <div className="bw-kyc-lock">🔒</div>
+            <h2>Shares are for verified holders.</h2>
+            <p>Verify who you are once to see and manage shares.</p>
+            <button type="button" className="bw-tuf-go" onClick={() => setStep('start')}>
+              Verify with Veriff
+            </button>
+            <button type="button" className="bw-tuf-sec" onClick={onClose}>
+              Not now
+            </button>
+          </>
+        )}
+        {step !== 'gate' && (
+          <ol className="bw-kyc-steps">
+            <li className={step === 'start' ? 'is-on' : 'is-done'}>Start</li>
+            <li className={step === 'check' ? 'is-on' : step === 'start' ? '' : 'is-done'}>Veriff check (demo)</li>
+            <li className={step === 'verified' || step === 'cert' || step === 'investor' ? 'is-done' : ''}>
+              Verified ✓
+            </li>
+          </ol>
+        )}
+        {step === 'start' && (
+          <>
+            <p>We’ll open Veriff to check a photo ID and a selfie. It takes about two minutes.</p>
+            <button type="button" className="bw-tuf-go" onClick={() => setStep('check')}>
+              Start the ID check
+            </button>
+          </>
+        )}
+        {step === 'check' && <p className="bw-kyc-wait">Veriff check (demo)… checking your ID</p>}
+        {(step === 'verified' || step === 'cert') && (
+          <>
+            <h2>Verified ✓</h2>
+            {step === 'cert' && (
+              <>
+                <p>
+                  Your wallet now holds a KYC certificate from bit-sign (mock). Apps can check it without seeing your
+                  documents.
+                </p>
+                <button type="button" className="bw-tuf-go" onClick={() => setStep('investor')}>
+                  Continue
+                </button>
+                <button type="button" className="bw-tuf-sec" onClick={finish}>
+                  Skip, open Shares
+                </button>
+              </>
+            )}
+          </>
+        )}
+        {step === 'investor' && (
+          <>
+            <h2>Self-certify as an investor (demo)</h2>
+            <p>Tick any statement that applies to you. This is a mock; nothing is recorded.</p>
+            <label className="bw-kyc-check">
+              <input
+                type="checkbox"
+                checked={ticks.soph}
+                onChange={(e) => setTicks({ ...ticks, soph: e.target.checked })}
+              />
+              I’m a self-certified sophisticated investor
+            </label>
+            <label className="bw-kyc-check">
+              <input
+                type="checkbox"
+                checked={ticks.hnw}
+                onChange={(e) => setTicks({ ...ticks, hnw: e.target.checked })}
+              />
+              I’m a high net worth individual
+            </label>
+            <button type="button" className="bw-tuf-go" onClick={finish}>
+              Open Shares
+            </button>
+          </>
+        )}
+      </div>
+    </Layer>
+  );
+};
 
 const BasketCard = ({
   b,
@@ -990,7 +1144,10 @@ const BasketCard = ({
           ))}
         </span>
         <span className="bw-bc-head">
-          <b>{b.name}</b>
+          <b>
+            {b.name}
+            {b.id === 'b-shares' && kycOk() && <span className="bw-kyc-tick"> ✓ Verified</span>}
+          </b>
           <small>
             {members.length} cards · basket <span className="bw-bc-mock">MOCK</span>
           </small>
@@ -1080,11 +1237,13 @@ const EditGrid = ({
   cards,
   onChange,
   onDone,
+  onResetKyc,
 }: {
   layout: Layout;
   cards: MockBalance[];
   onChange: (l: Layout) => void;
   onDone: () => void;
+  onResetKyc: () => void;
 }) => {
   const [openB, setOpenB] = useState<string | null>(null);
   const [drag, setDrag] = useState<{
@@ -1194,7 +1353,7 @@ const EditGrid = ({
     if (!drag) {
       if (p && p.from === null && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 8) {
         const it = layout.row.find((i) => i.id === p.id);
-        if (it?.kind === 'basket') setOpenB(it.id);
+        if (it?.kind === 'basket' && (it.id !== 'b-shares' || kycOk())) setOpenB(it.id);
       }
       return;
     }
@@ -1205,7 +1364,7 @@ const EditGrid = ({
     if (Math.hypot(x - d.sx, y - d.sy) < 6) {
       if (d.from === null) {
         const it = layout.row.find((i) => i.id === d.id);
-        if (it?.kind === 'basket') setOpenB(it.id);
+        if (it?.kind === 'basket' && (it.id !== 'b-shares' || kycOk())) setOpenB(it.id);
       }
       return;
     }
@@ -1336,6 +1495,9 @@ const EditGrid = ({
         )}
         <button type="button" className="bw-tuf-sec" onClick={() => onChange(SEED)}>
           Reset to the example layout
+        </button>
+        <button type="button" className="bw-tuf-sec" onClick={onResetKyc}>
+          Reset verification (mock)
         </button>
       </div>
     </Layer>
@@ -1537,6 +1699,9 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const nameOf = (id: string) =>
     id === 'bsv' ? 'BSV' : id === 'topup' ? 'TOP-UP' : (cards.find((c) => c.id === id)?.name ?? id);
   const bOpen = layout.row.find((i) => i.id === openBasket);
+  const [gateFor, setGateFor] = useState<string | null>(null);
+  const [, bump] = useState(0);
+  const openGuarded = (id: string) => (id === 'b-shares' && !kycOk() ? setGateFor(id) : setOpenBasket(id));
 
   return (
     <div className="bw-bcar">
@@ -1562,7 +1727,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
               </div>
             ) : item.kind === 'basket' ? (
               <div className="bw-bcar-mockwrap">
-                <BasketCard b={item} cards={cards} onOpen={() => setOpenBasket(item.id)} />
+                <BasketCard b={item} cards={cards} onOpen={() => openGuarded(item.id)} />
               </div>
             ) : (
               <div className="bw-bcar-mockwrap">
@@ -1603,7 +1768,29 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
           }
         />
       )}
-      {editing && <EditGrid layout={layout} cards={cards} onChange={setLayout} onDone={() => setEditing(false)} />}
+      {editing && (
+        <EditGrid
+          layout={layout}
+          cards={cards}
+          onChange={setLayout}
+          onDone={() => setEditing(false)}
+          onResetKyc={() => {
+            setKyc(false);
+            bump((n) => n + 1);
+          }}
+        />
+      )}
+      {gateFor && (
+        <KycGate
+          onClose={() => setGateFor(null)}
+          onDone={() => {
+            const id = gateFor;
+            setGateFor(null);
+            setEditing(false);
+            setOpenBasket(id);
+          }}
+        />
+      )}
     </div>
   );
 };

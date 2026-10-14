@@ -900,3 +900,80 @@
 .bw-eg-tile {
   touch-action: pan-y;
 }
+/* KYC gate (mock) */
+.bw-kyc {
+  margin: auto 0 0;
+  min-height: 70dvh;
+  max-height: calc(100dvh - env(safe-area-inset-top) - 12px);
+  overflow-y: auto;
+  background: #0b0b0d;
+  color: #f4f1e8;
+  border-top: 1px solid rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.4);
+  border-radius: 18px 18px 0 0;
+  padding: 18px 18px calc(28px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.bw-kyc h2 {
+  margin: 4px 0 0;
+  color: var(--bw-accent-hi, #ffd24d);
+  font-size: 22px;
+}
+.bw-kyc p {
+  margin: 0;
+}
+.bw-kyc-lock {
+  font-size: 44px;
+  text-align: center;
+}
+.bw-kyc .bw-tuf-go {
+  background: var(--bw-accent-hi, #ffd24d);
+  color: #111;
+}
+.bw-kyc-steps {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+}
+.bw-kyc-steps li {
+  flex: 1;
+  padding: 6px;
+  border-radius: 8px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 0.6;
+}
+.bw-kyc-steps li.is-on {
+  opacity: 1;
+  box-shadow: 0 0 0 1px var(--bw-accent-hi, #ffd24d);
+}
+.bw-kyc-steps li.is-done {
+  opacity: 1;
+  color: #2ecc71;
+}
+.bw-kyc-wait {
+  animation: bw-bc-pulse 1.2s ease-in-out infinite;
+}
+.bw-kyc-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.bw-kyc-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--bw-accent-hi, #ffd24d);
+}
+.bw-kyc-tick {
+  font-size: 11px;
+  color: #2ecc71;
+}
