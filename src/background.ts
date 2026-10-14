@@ -4,6 +4,7 @@ import { originatorForOrigin } from './services/originKey';
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
+import { recoverySummary } from './services/recoverFailed';
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
@@ -1284,6 +1285,7 @@ if (isInServiceWorker) {
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
       'STORAGE_REPAIR_SYNC',
+      'STORAGE_RECOVER_MINED',
       'BSV21_FIX_STALE',
       'STORAGE_SET_ACTIVE_STORAGE',
       'STORAGE_ADD_REMOTE',
@@ -1597,6 +1599,9 @@ if (isInServiceWorker) {
           return true;
         case 'STORAGE_REPAIR_SYNC':
           processStorageRepairSync(sendResponse, Array.isArray(message.tokenIds) ? message.tokenIds : undefined);
+          return true;
+        case 'STORAGE_RECOVER_MINED':
+          processRecoverMined(sendResponse);
           return true;
         case 'BSV21_FIX_STALE':
           processBsv21FixStale(typeof message.tokenId === 'string' ? message.tokenId : '', sendResponse);
@@ -1982,6 +1987,26 @@ if (isInServiceWorker) {
   };
 
   /** Reconcile local and remote storage to the union of both; see storageReconcileBackground. */
+  /**
+   * Settings › Troubleshooting › Find mined payments: the same mined-but-stuck repair the worker runs at startup
+   * (services/recoverFailed.ts), on demand, with a one-line result (dkg sweep, 14 Oct 2026).
+   */
+  const processRecoverMined = async (sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const report = await accountContext.recoverFailed();
+      console.log('[STORAGE_RECOVER_MINED]', report);
+      sendResponse({ type: 'STORAGE_RECOVER_MINED', success: !report.error, data: { report, summary: recoverySummary(report) } });
+    } catch (err) {
+      sendResponse({
+        type: 'STORAGE_RECOVER_MINED',
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   const processStorageRepairSync = async (sendResponse: CallbackResponse, tokenIds?: string[]) => {
     try {
       await ensureWallet(true);

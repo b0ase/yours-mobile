@@ -1,44 +1,102 @@
 /**
- * INCIDENT REPRODUCTION (14 Oct 2026, dkg sweep 9f66943b…): why can a full HD sweep be mined on chain and
- * still not show in the wallet? No network, no real keys, no real money: an in-memory toolbox wallet
- * (StorageIdb on fake-indexeddb), a mocked broadcaster/chain tracker, and the real @1sat/actions sweepBsv.
+ * INCIDENT (14 Oct 2026, dkg sweep 9f66943b…): a full HD sweep mined on chain but not showing in the wallet.
  *
- * Every key below is generated at random per run.
+ * Local only: no network, no real keys, no real money. An in-memory toolbox wallet (StorageIdb on fake-indexeddb),
+ * a mocked broadcaster and chain, the real @1sat/actions sweepBsv, and the PRODUCTION recovery wiring
+ * (services/recoverFailedWiring.ts + recoverFailed.ts + utxoStatus.ts).
+ *
+ * Fixture mirrors the real tx: 9 P2PKH inputs from one legacy address with the real values (read from WhatsOnChain,
+ * read-only), 1 change output, 586.14198569 BSV after a 139-sat fee. Keys are random per run.
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
 import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
-import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
+import {
+  Monitor,
+  StorageIdb,
+  StorageProvider,
+  Wallet,
+  WalletStorageManager,
+  defaultManagedChangePolicy,
+} from '@bsv/wallet-toolbox-client';
 import { sweepBsv } from '@1sat/actions';
 import { OneSatServices } from '@1sat/client';
-import { recoverMinedFailedActions, type FailedAction } from '../services/recoverFailed';
+import { recoverMinedFailedActions, recoverySummary } from '../services/recoverFailed';
+import { makeRecoverDeps, runRecoverOnce } from '../services/recoverFailedWiring';
+import { fixUtxoStatus } from '../services/utxoStatus';
+
+/** The 9 inputs of 9f66943b… (sats), and the real output. */
+const REAL_INPUTS = [
+  6_014_198_708, 5_200_000_000, 5_900_000_000, 8_100_000_000, 9_000_000_000, 9_300_000_000, 6_300_000_000,
+  8_700_000_000, 100_000_000,
+];
+const REAL_OUTPUT = 58_614_198_569;
+const HEIGHT = 971004;
 
 type PostMode = 'success' | 'doubleSpend' | 'successPlusDoubleSpend' | 'invalid' | 'serviceError' | 'hang';
 
-const HEIGHT = 971004;
+/** The network, as the mocks see it. */
+type Chain = {
+  post: PostMode;
+  /** txids with a merkle proof */
+  mined: Set<string>;
+  /** spent outpoints "txid.vout" -> spending txid */
+  spent: Map<string, string>;
+  /** the UTXO oracle: the shipped OneSatServices parser (bug B) or the fixed one */
+  utxo: 'fixed' | 'shipped';
+};
+
 let dbn = 0;
 
-/** A mined legacy P2PKH coin to sweep: source tx with a one-leaf merkle path (root = txid). */
-function legacyCoin(key: PrivateKey, sats: number) {
-  const parent = new Transaction();
-  parent.addOutput({ lockingScript: new P2PKH().lock(key.toAddress()), satoshis: sats });
-  parent.addInput({
-    sourceTXID: '00'.repeat(32),
-    sourceOutputIndex: 0,
-    unlockingScript: new P2PKH().lock(key.toAddress()),
-    sequence: 0xffffffff,
-  });
-  const txid = parent.id('hex');
-  parent.merklePath = new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]);
+const proofFor = (txid: string) => ({
+  name: 'mock',
+  merklePath: new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]),
+  header: {
+    version: 1,
+    previousHash: '00'.repeat(32),
+    merkleRoot: txid,
+    time: 1760421413,
+    bits: 0x1d00ffff,
+    nonce: 0,
+    height: HEIGHT,
+    hash: '00'.repeat(32),
+  },
+});
+
+/** 9 mined legacy coins at one address, like 12ECwr…: each its own parent tx with a one-leaf proof. */
+function legacyCoins(key: PrivateKey) {
+  const lockingScript = new P2PKH().lock(key.toAddress());
   const beef = new Beef();
-  beef.mergeTransaction(parent);
-  return { txid, beef, lockingScript: new P2PKH().lock(key.toAddress()).toHex() };
+  const inputs = REAL_INPUTS.map((sats, i) => {
+    const parent = new Transaction();
+    parent.addInput({
+      sourceTXID: i.toString(16).padStart(64, '0'),
+      sourceOutputIndex: 0,
+      unlockingScript: lockingScript,
+      sequence: 0xffffffff,
+    });
+    parent.addOutput({ lockingScript, satoshis: sats });
+    const txid = parent.id('hex');
+    parent.merklePath = new MerklePath(HEIGHT - 1 - i, [[{ offset: 0, hash: txid, txid: true }]]); // one block each: a one-leaf proof per height
+    beef.mergeTransaction(parent);
+    return { outpoint: `${txid}_0`, satoshis: sats, lockingScript: lockingScript.toHex() };
+  });
+  return { inputs, beef };
 }
 
-function makeServices(mode: { post: PostMode; mined: Set<string>; utxo?: 'conclusive' | 'real1sat' }) {
+/** api.1sat.app /1sat/txo/<outpoint> as it answered on 14 Oct 2026: dot outpoint, no satoshis, "spend" when spent. */
+const txoGet = (chain: Chain) => async (o: string) => {
+  const [txid, vout] = o.split(/[._]/);
+  if (!chain.mined.has(txid)) throw new Error('404 Not Found');
+  const spend = chain.spent.get(`${txid}.${vout}`);
+  return { outpoint: `${txid}.${vout}`, score: 0, ...(spend ? { spend } : {}) };
+};
+
+function makeServices(chain: Chain) {
   const chainTracker = { isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1 };
   const svc: Record<string, unknown> = {
     chain: 'main',
+    txo: { get: txoGet(chain) },
     getChainTracker: async () => chainTracker,
     getHeight: async () => HEIGHT + 1,
     getBsvExchangeRate: async () => 50,
@@ -46,83 +104,42 @@ function makeServices(mode: { post: PostMode; mined: Set<string>; utxo?: 'conclu
     nLockTimeIsFinal: async () => true,
     getHeaderForHeight: async () => new Array(80).fill(0),
     hashOutputScript: (s: string) => s,
-    isUtxo: async () => true,
-    getUtxoStatus: async (_h: string, _f: unknown, outpoint: string) => {
-      if (mode.utxo === 'real1sat') {
-        // The real OneSatServices.getUtxoStatus, fed what api.1sat.app/1sat/txo/<outpoint> returned on
-        // 14 Oct 2026 for 9f66943b….0 (read-only GET): {"outpoint":"<txid>.0","score":0}.
-        const real = new OneSatServices('main', 'https://example.invalid');
-        (real as unknown as { txo: { get: (o: string) => Promise<unknown> } }).txo = {
-          get: async (o: string) => ({ outpoint: o.replace('_', '.'), score: 0 }),
-        };
-        return real.getUtxoStatus(_h, _f as never, outpoint);
-      }
-      const [txid, vout] = outpoint.split('.');
-      return {
-        name: 'mock',
-        status: 'success',
-        isUtxo: true,
-        details: [{ txid, index: Number(vout), satoshis: 1, height: HEIGHT }],
-      };
-    },
     getStatusForTxids: async (txids: string[]) => ({
-      results: txids.map((txid) => ({ txid, status: mode.mined.has(txid) ? 'mined' : 'unknown', depth: 1 })),
+      results: txids.map((txid) => ({ txid, status: chain.mined.has(txid) ? 'mined' : 'unknown', depth: 1 })),
     }),
     getRawTx: async (txid: string) => ({ txid, name: 'mock', rawTx: undefined }),
-    getMerklePath: async (txid: string) =>
-      mode.mined.has(txid)
-        ? {
-            name: 'mock',
-            merklePath: new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]),
-            header: {
-              version: 1,
-              previousHash: '00'.repeat(32),
-              merkleRoot: txid,
-              time: 1760421413,
-              bits: 0x1d00ffff,
-              nonce: 0,
-              height: HEIGHT,
-              hash: '00'.repeat(32),
-            },
-          }
-        : { name: 'mock', notes: [] },
-    postBeef: async (beef: Beef, txids: string[]) => {
-      // The network gets the tx in every mode except 'invalid' / 'serviceError' (the chain fact: it mined).
-      if (mode.post === 'hang') return new Promise(() => undefined);
-      const ok = (name: string) => ({
+    getMerklePath: async (txid: string) => (chain.mined.has(txid) ? proofFor(txid) : { name: 'mock', notes: [] }),
+    postBeef: async (_beef: Beef, txids: string[]) => {
+      if (chain.post === 'hang') return new Promise(() => undefined);
+      const res = (name: string, r: Record<string, unknown>) => ({
         name,
-        status: 'success',
-        txidResults: txids.map((txid) => ({ txid, status: 'success' })),
+        status: r.status,
+        txidResults: txids.map((txid) => ({ txid, ...r })),
       });
-      const ds = (name: string) => ({
-        name,
-        status: 'error',
-        txidResults: txids.map((txid) => ({ txid, status: 'error', doubleSpend: true, competingTxs: [] })),
-      });
-      const bad = (name: string) => ({
-        name,
-        status: 'error',
-        txidResults: txids.map((txid) => ({ txid, status: 'error', data: { detail: 'rejected' } })),
-      });
-      const svcErr = (name: string) => ({
-        name,
-        status: 'error',
-        txidResults: txids.map((txid) => ({ txid, status: 'error', serviceError: true })),
-      });
-      switch (mode.post) {
+      switch (chain.post) {
         case 'success':
-          return [ok('arc')];
+          return [res('arc', { status: 'success' })];
         case 'doubleSpend':
-          return [ds('arc')];
+          return [res('arc', { status: 'error', doubleSpend: true, competingTxs: [] })];
         case 'successPlusDoubleSpend':
-          return [ok('arc'), ds('arc-2')];
+          return [
+            res('arc', { status: 'success' }),
+            res('arc2', { status: 'error', doubleSpend: true, competingTxs: [] }),
+          ];
         case 'invalid':
-          return [bad('arc')];
+          return [res('arc', { status: 'error', data: { detail: 'rejected' } })];
         case 'serviceError':
-          return [svcErr('arc')];
+          return [res('arc', { status: 'error', serviceError: true })];
       }
     },
   };
+  if (chain.utxo === 'fixed') {
+    expect(fixUtxoStatus(svc)).toBe(true); // what initWallet installs
+  } else {
+    const shipped = new OneSatServices('main', 'https://example.invalid');
+    (shipped as unknown as { txo: unknown }).txo = svc.txo;
+    svc.getUtxoStatus = (h: string, f: unknown, o: string) => shipped.getUtxoStatus(h, f as never, o);
+  }
   return new Proxy(svc, {
     get(t, p) {
       if (p in t || typeof p === 'symbol' || p === 'then') return (t as Record<string | symbol, unknown>)[p];
@@ -137,8 +154,10 @@ async function openWallet(rootKey: PrivateKey, dbName: string, services: unknown
   const kd = new KeyDeriver(rootKey);
   const mk = async (name: string) => {
     const o = StorageProvider.createStorageBaseOptions('main');
+    // wallet.1sat.app made the real sweep with a single change output; mirror that.
+    o.managedChangePolicy = { ...defaultManagedChangePolicy(), maxOutputsPerAction: 1 };
     const s = new StorageIdb(o);
-    (s as unknown as { dbName: string }).dbName = name; // StorageIdb names its DB per chain; one DB per "device" here
+    (s as unknown as { dbName: string }).dbName = name; // StorageIdb names its DB per chain; one DB per "device"
     await s.migrate(name, PrivateKey.fromRandom().toPublicKey().toString());
     await s.makeAvailable();
     s.setServices(services as never);
@@ -154,11 +173,7 @@ async function openWallet(rootKey: PrivateKey, dbName: string, services: unknown
     chain: 'main',
     services: services as never,
     storage,
-    chaintracks: {
-      isValidRootForHeight: async () => true,
-      currentHeight: async () => HEIGHT + 1,
-      findHeaderForHeight: async (h: number) => ({ height: h, merkleRoot: '' }),
-    } as never,
+    chaintracks: { isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1 } as never,
     msecsWaitPerMerkleProofServiceReq: 0,
     taskRunWaitMsecs: 0,
     abandonedMsecs: 300000,
@@ -170,166 +185,236 @@ async function openWallet(rootKey: PrivateKey, dbName: string, services: unknown
   const wallet = new Wallet({ chain: 'main', keyDeriver: kd, storage, services: services as never, monitor } as never);
   return { wallet, storage, monitor };
 }
+type W = Awaited<ReturnType<typeof openWallet>>;
 
-async function sweep(post: PostMode, opts: { backupDb?: string; utxo?: 'conclusive' | 'real1sat' } = {}) {
+/** Run the production recovery (initWallet.recoverFailed) on this wallet. */
+const recover = (w: W, services: unknown) =>
+  runRecoverOnce(() =>
+    recoverMinedFailedActions({
+      ...makeRecoverDeps({
+        storage: w.storage,
+        wallet: w.wallet,
+        services: services as never,
+        monitor: w.monitor as never,
+      }),
+      log: () => undefined,
+    }),
+  );
+
+async function sweep(post: PostMode, opts: { backupDb?: string; utxo?: Chain['utxo'] } = {}) {
   const root = PrivateKey.fromRandom();
-  const legacy = PrivateKey.fromRandom();
-  const mined = new Set<string>();
-  const mode = { post, mined, utxo: opts.utxo };
-  const services = makeServices(mode);
+  const chain: Chain = { post, mined: new Set(), spent: new Map(), utxo: opts.utxo ?? 'fixed' };
+  const services = makeServices(chain);
   const dbName = `incident-${++dbn}`;
   const w = await openWallet(root, dbName, services, opts.backupDb);
-  const coin = legacyCoin(legacy, 58_614_198_569);
-  const ctx = {
-    wallet: w.wallet,
-    services: { getBeefForTxid: async () => Beef.fromBinary(coin.beef.toBinary()) },
-  };
+  const legacy = PrivateKey.fromRandom();
+  const coins = legacyCoins(legacy);
+  for (const i of coins.inputs) chain.mined.add(i.outpoint.slice(0, 64));
+  const ctx = { wallet: w.wallet, services: { getBeefForTxid: async () => Beef.fromBinary(coins.beef.toBinary()) } };
   const run = sweepBsv.execute(
     ctx as never,
     {
-      inputs: [{ outpoint: `${coin.txid}_0`, satoshis: 58_614_198_569, lockingScript: coin.lockingScript }],
-      keys: [legacy],
+      inputs: coins.inputs,
+      keys: coins.inputs.map(() => legacy),
     } as never,
   );
-  const r =
+  const r = (
     post === 'hang'
       ? await Promise.race([run, new Promise<{ hung: true }>((ok) => setTimeout(() => ok({ hung: true }), 1500))])
-      : await run;
-  return { r: r as { txid?: string; error?: string; hung?: true }, w, root, dbName, services, mode };
+      : await run
+  ) as { txid?: string; error?: string; hung?: true };
+  return { r, w, root, dbName, services, chain, inputs: coins.inputs };
 }
 
-const balance = async (wallet: Wallet) =>
-  (await wallet.listOutputs({ basket: 'default', limit: 100 })).outputs.reduce((s, o) => s + o.satoshis, 0);
+/** Our tx's txid, whatever its status (listActions hides failed ones). */
+const sweepTxid = async (w: W) =>
+  w.storage.runAsStorageProvider(
+    async (sp) => (await sp.findTransactions({ partial: {}, noRawTx: true }))[0]?.txid ?? '',
+  );
 
-const actions = async (wallet: Wallet) =>
-  (await wallet.listActions({ labels: [], includeOutputs: true, limit: 100 })).actions.map((a) => ({
-    txid: a.txid,
-    status: a.status,
+/** The chain mines it: proof available, the 9 legacy inputs are spent by it. */
+const mine = (chain: Chain, txid: string, inputs: { outpoint: string }[]) => {
+  chain.mined.add(txid);
+  for (const i of inputs) chain.spent.set(i.outpoint.replace('_', '.'), txid);
+};
+
+const balance = async (w: W) =>
+  (await w.wallet.listOutputs({ basket: 'default', limit: 100 })).outputs.reduce((s, o) => s + o.satoshis, 0);
+const spendableOutputs = async (w: W) =>
+  (await w.wallet.listOutputs({ basket: 'default', limit: 100 })).outputs.filter((o) => o.spendable);
+const statusOf = async (w: W, txid: string) =>
+  w.storage.runAsStorageProvider(
+    async (sp) => (await sp.findTransactions({ partial: { txid }, noRawTx: true }))[0]?.status,
+  );
+/** Everything recovery could touch, for "nothing changed" checks. */
+const snapshot = async (w: W) =>
+  w.storage.runAsStorageProvider(async (sp) => ({
+    txs: (await sp.findTransactions({ partial: {}, noRawTx: true })).map((t) => [t.txid, t.status]),
+    outs: (await sp.findOutputs({ partial: {} })).map((o) => [o.txid, o.vout, o.satoshis, o.spendable]),
+    reqs: (await sp.findProvenTxReqs({ partial: {} })).map((r) => [r.txid, r.status]),
   }));
 
-type W = Awaited<ReturnType<typeof openWallet>>;
-const listFailedOf = (w: W) => async () =>
-  (await w.wallet.listFailedActions({ labels: [], includeOutputs: true, limit: 200 }, false))
-    .actions as unknown as FailedAction[];
+/** After recovery: exactly one spendable output of 586.14198569 BSV, balance equal to it, tx unproven. */
+async function expectRecovered(w: W, txid: string) {
+  const outs = await spendableOutputs(w);
+  expect(outs.length).toBe(1);
+  expect(outs[0].satoshis).toBe(REAL_OUTPUT);
+  expect(outs[0].outpoint).toBe(`${txid}.0`);
+  expect(await balance(w)).toBe(REAL_OUTPUT);
+  expect(await statusOf(w, txid)).toBe('unproven');
+}
 
-/** The production recoverFailed wiring from initWallet.ts, against this test wallet. */
-const recover = (w: W, mined: Set<string>) =>
-  recoverMinedFailedActions({
-    listFailed: listFailedOf(w),
-    isMined: async (t) => mined.has(t),
-    queueUnfail: (txids) =>
-      w.storage.runAsStorageProvider(async (sp) => {
-        let n = 0;
-        for (const txid of txids)
-          for (const req of await sp.findProvenTxReqs({ partial: { txid } })) {
-            await sp.updateProvenTxReq(req.provenTxReqId, { status: 'unfail' });
-            n++;
-          }
-        return n;
-      }),
-    runUnFail: () => w.monitor.runTask('UnFail'),
-    available: () => w.storage.isActiveStorageProvider(),
-    log: (m) => console.log(m),
-  });
-
-const FULL = 58_000_000_000;
-
-describe('dkg sweep 9f66943b: mined but not visible (local reproduction)', () => {
-  test('A. baseline: broadcast success → change counts', async () => {
+describe('dkg sweep 9f66943b: fixture mirrors the real tx', () => {
+  test('9 inputs, 1 change output of exactly 586.14198569 BSV (139-sat fee, as on chain)', async () => {
     const { r, w } = await sweep('success');
     expect(r.error).toBeUndefined();
-    expect(await balance(w.wallet)).toBeGreaterThan(FULL);
+    const txid = await sweepTxid(w);
+    const raw = await w.storage.runAsStorageProvider(
+      async (sp) => (await sp.findTransactions({ partial: { txid } }))[0].rawTx,
+    );
+    const tx = Transaction.fromBinary(raw!);
+    expect(tx.inputs.length).toBe(9);
+    expect(tx.outputs.length).toBe(1);
+    expect(tx.outputs[0].satoshis).toBe(REAL_OUTPUT);
+    expect(await balance(w)).toBe(REAL_OUTPUT);
   }, 30000);
+});
 
-  test('B. one broadcaster success + one "double spend" → toolbox confirms, unproven, visible (does NOT reproduce)', async () => {
-    const { r, w } = await sweep('successPlusDoubleSpend');
-    expect(r.error).toBeUndefined();
-    expect((await actions(w.wallet))[0].status).toBe('unproven');
-    expect(await balance(w.wallet)).toBeGreaterThan(FULL);
-  }, 30000);
-
-  test('C. broadcaster says "double spend" only, chain says unknown → sending, still visible (does NOT reproduce)', async () => {
-    const { r, w } = await sweep('doubleSpend');
-    expect(r.error).toMatch(/review/i); // the sweep screen shows an error…
-    expect((await actions(w.wallet))[0].status).toBe('sending');
-    expect(await balance(w.wallet)).toBeGreaterThan(FULL); // …but the money shows
-  }, 30000);
-
-  test('D. service error → sending, visible (does NOT reproduce)', async () => {
-    const { r, w } = await sweep('serviceError');
+describe('reproduced: mined but not visible, then recovered', () => {
+  test('1. broadcaster says "invalid", tx mines: failed, 0 → recovered 586.14198569 BSV', async () => {
+    const { r, w, chain, services, inputs } = await sweep('invalid');
     expect(r.error).toMatch(/review/i);
-    expect((await actions(w.wallet))[0].status).toBe('sending');
-    expect(await balance(w.wallet)).toBeGreaterThan(FULL);
+    const txid = await sweepTxid(w);
+    expect(await statusOf(w, txid)).toBe('failed');
+    expect(await balance(w)).toBe(0); // BEFORE
+    mine(chain, txid, inputs);
+    const rep = await recover(w, services);
+    console.log('[1 invalid] before 0, after', await balance(w), '|', recoverySummary(rep));
+    expect(rep.restored).toEqual([txid]);
+    expect(recoverySummary(rep)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
+    await expectRecovered(w, txid); // AFTER
   }, 30000);
 
-  test('E. broadcaster says "invalid" but tx mines → failed, balance 0 (REPRODUCES); local-active repair restores', async () => {
-    const { r, w, mode } = await sweep('invalid');
-    expect(r.error).toMatch(/review/i);
-    expect(await actions(w.wallet)).toEqual([]); // failed actions are hidden from history too
-    expect(await balance(w.wallet)).toBe(0);
-    const failed = await listFailedOf(w)();
-    expect(failed.length).toBe(1);
-    mode.mined.add(failed[0].txid);
-    const rep = await recover(w, mode.mined);
-    expect(rep.restored).toEqual([failed[0].txid]);
-    expect(await balance(w.wallet)).toBeGreaterThan(FULL);
+  test('2. PWA killed mid-broadcast: unprocessed, 0 → recovered on reopen (no FailAbandoned wait)', async () => {
+    const { r, root, dbName, chain, inputs } = await sweep('hang');
+    expect(r.hung).toBe(true);
+    chain.post = 'success';
+    const services = makeServices(chain);
+    const w = await openWallet(root, dbName, services); // the reopened PWA
+    const txid = await sweepTxid(w);
+    expect(await statusOf(w, txid)).toBe('unprocessed');
+    expect(await balance(w)).toBe(0); // BEFORE
+    mine(chain, txid, inputs);
+    const rep = await recover(w, services);
+    console.log('[2 unprocessed] before 0, after', await balance(w), '|', recoverySummary(rep));
+    expect(rep.restoredDetail?.[0]?.fromStatus).toBe('unprocessed');
+    await expectRecovered(w, txid);
   }, 30000);
 
-  test('E2. same, but UTXO verdicts from the real OneSatServices + live api.1sat.app answer shape → "restored" yet balance stays 0', async () => {
-    const { w, mode } = await sweep('invalid', { utxo: 'real1sat' });
-    const failed = await listFailedOf(w)();
-    mode.mined.add(failed[0].txid);
-    const rep = await recover(w, mode.mined);
-    expect(rep.restored).toEqual([failed[0].txid]); // the report says restored…
-    expect(await balance(w.wallet)).toBe(0); // …but every output verdict is "unknown", none made spendable
+  test('3. failed-but-mined after FailAbandoned (unprocessed → failed) → recovered', async () => {
+    const { root, dbName, chain, inputs } = await sweep('hang');
+    chain.post = 'success';
+    const services = makeServices(chain);
+    const w = await openWallet(root, dbName, services);
+    (w.monitor as unknown as { options: { abandonedMsecs: number } }).options.abandonedMsecs = 0;
+    await new Promise((ok) => setTimeout(ok, 20));
+    await w.monitor.runTask('FailAbandoned');
+    const txid = await sweepTxid(w);
+    expect(await statusOf(w, txid)).toBe('failed');
+    expect(await balance(w)).toBe(0);
+    mine(chain, txid, inputs);
+    const rep = await recover(w, services);
+    console.log('[3 failed] before 0, after', await balance(w), '|', recoverySummary(rep));
+    expect(rep.restored).toEqual([txid]);
+    await expectRecovered(w, txid);
   }, 30000);
 
-  test('F. remote-active (3049b0e): recoverFailed skips by design', async () => {
+  test('4. service error left it "sending", then it mined → recovered', async () => {
+    const { w, chain, services, inputs } = await sweep('serviceError');
+    const txid = await sweepTxid(w);
+    expect(await statusOf(w, txid)).toBe('sending');
+    mine(chain, txid, inputs);
+    expect((await recover(w, services)).restored).toEqual([txid]);
+    await expectRecovered(w, txid);
+  }, 30000);
+
+  test('bug B regression: with the SHIPPED OneSatServices parser the repair says NOT restored (true state)', async () => {
+    const { w, chain, services, inputs } = await sweep('invalid', { utxo: 'shipped' });
+    const txid = await sweepTxid(w);
+    mine(chain, txid, inputs);
+    const rep = await recover(w, services);
+    expect(rep.restored).toEqual([]); // before the fix this said "restored" with a 0 balance
+    expect(rep.notRestored?.[0].reason).toMatch(/0 of 1 outputs spendable/);
+    expect(await balance(w)).toBe(0);
+    expect(recoverySummary(rep)).toMatch(/on chain but not restored/);
+  }, 30000);
+});
+
+describe('safety', () => {
+  test('running recovery twice changes nothing the second time (no double counting)', async () => {
+    const { w, chain, services, inputs } = await sweep('invalid');
+    const txid = await sweepTxid(w);
+    mine(chain, txid, inputs);
+    await recover(w, services);
+    const once = await snapshot(w);
+    const rep2 = await recover(w, services);
+    expect(rep2.restored).toEqual([]);
+    expect(rep2.failed).toBe(0);
+    expect(recoverySummary(rep2)).toBe('Nothing to restore');
+    expect(await snapshot(w)).toEqual(once);
+    await expectRecovered(w, txid);
+  }, 30000);
+
+  test('concurrent runs (startup + Troubleshooting) share one pass', async () => {
+    const { w, chain, services, inputs } = await sweep('invalid');
+    const txid = await sweepTxid(w);
+    mine(chain, txid, inputs);
+    const [a, b] = await Promise.all([recover(w, services), recover(w, services)]);
+    expect(a).toBe(b);
+    await expectRecovered(w, txid);
+  }, 30000);
+
+  test('an unmined (mempool/unknown) stuck tx is untouched', async () => {
+    const { root, dbName, chain } = await sweep('hang');
+    chain.post = 'success';
+    const services = makeServices(chain);
+    const w = await openWallet(root, dbName, services);
+    const before = await snapshot(w);
+    const rep = await recover(w, services);
+    expect(rep.mined).toEqual([]);
+    expect(await snapshot(w)).toEqual(before);
+    expect(recoverySummary(rep)).toBe('Nothing to restore');
+  }, 30000);
+
+  test('a tx that really failed (not on chain) stays failed, nothing marked spent or spendable', async () => {
+    const { w, services } = await sweep('invalid');
+    const txid = await sweepTxid(w);
+    const before = await snapshot(w);
+    const rep = await recover(w, services);
+    expect(rep.restored).toEqual([]);
+    expect(await statusOf(w, txid)).toBe('failed');
+    expect(await snapshot(w)).toEqual(before);
+    expect(await balance(w)).toBe(0);
+  }, 30000);
+
+  test('remote-active store: skipped, not failed', async () => {
     const r = await recoverMinedFailedActions({
       listFailed: async () => [{ txid: 'ab'.repeat(32) }],
       isMined: async () => true,
       queueUnfail: async () => 1,
       runUnFail: async () => '',
-      available: () => false, // storage.isActiveStorageProvider() is false for a StorageClient
+      available: () => false,
       log: () => undefined,
     });
     expect(r.skipped).toBe('active storage is remote');
   });
 
-  test('G. PWA killed mid-broadcast (iOS backgrounding) → reopen: "unprocessed", balance 0 (REPRODUCES)', async () => {
-    const { r, root, dbName } = await sweep('hang');
-    expect(r.hung).toBe(true);
-    const mined = new Set<string>();
-    const w2 = await openWallet(root, dbName, makeServices({ post: 'success', mined }));
-    const [a] = await actions(w2.wallet);
-    expect(a.status).toBe('unprocessed');
-    expect(await balance(w2.wallet)).toBe(0);
-    // recoverFailed reads only 'failed' and stuckSends only 'sending': nothing in the app touches 'unprocessed'.
-    expect((await recover(w2, new Set([a.txid]))).failed).toBe(0);
-    // Only the toolbox FailAbandoned task (startup runOnce, local-active, >5 min old) moves it to 'failed'…
-    (w2.monitor as unknown as { options: { abandonedMsecs: number } }).options.abandonedMsecs = 0;
-    await new Promise((ok) => setTimeout(ok, 20));
-    await w2.monitor.runTask('FailAbandoned');
-    mined.add(a.txid);
-    // …after which the mined-failed repair can restore it (with conclusive UTXO answers).
-    const rep = await recover(w2, mined);
-    expect(rep.restored).toEqual([a.txid]);
-    expect(await balance(w2.wallet)).toBeGreaterThan(FULL);
-  }, 30000);
-
-  test('H. local-active, backup never pushed after the sweep → restore from the remote has nothing', async () => {
+  test('local-active, backup never pushed after the sweep: a restore from the remote has nothing until a push', async () => {
     const backupDb = `incident-backup-${++dbn}`;
-    const { r, w, root, services } = await sweep('success', { backupDb });
-    expect(r.error).toBeUndefined();
-    expect(await balance(w.wallet)).toBeGreaterThan(FULL);
-    // "New device": only the remote copy, which has had no updateBackups / BackupSync since the sweep.
-    const restored = await openWallet(root, backupDb, services);
-    expect(await balance(restored.wallet)).toBe(0);
-    expect(await actions(restored.wallet)).toEqual([]);
-    // After one backup push (BackupSync / Settings › Sync backups / next app open's runOnce) the restore has it:
-    // the BRC-29 prefix/suffix travel with the output row.
+    const { w, root, services } = await sweep('success', { backupDb });
+    expect(await balance(w)).toBe(REAL_OUTPUT);
+    expect(await balance(await openWallet(root, backupDb, services))).toBe(0);
     await w.storage.updateBackups();
-    const restored2 = await openWallet(root, backupDb, services);
-    expect(await balance(restored2.wallet)).toBeGreaterThan(FULL);
+    expect(await balance(await openWallet(root, backupDb, services))).toBe(REAL_OUTPUT);
   }, 30000);
 });
