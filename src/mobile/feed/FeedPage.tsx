@@ -170,6 +170,7 @@ import { BMOVIES_FEED_ENABLED } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
+const NewsVideos = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/NewsVideos')) : null;
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -1888,14 +1889,21 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         )}
 
         <div onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd} className="flex flex-col">
-          {feed === 'bmovies' && BmoviesReel ? (
+          {(feed === 'bmovies' || feed === 'bmusic') && BmoviesReel ? (
             <Suspense fallback={null}>
-              <BmoviesReel />
+              <BmoviesReel key={feed} brand={feed} />
             </Suspense>
           ) : !hasCustomView(feed) ? (
             <BrandFeed slug={feed} />
           ) : news ? (
-            <NewsList posts={knownPosts} onOpen={setStory} />
+            <>
+              {NewsVideos && (
+                <Suspense fallback={null}>
+                  <NewsVideos />
+                </Suspense>
+              )}
+              <NewsList posts={knownPosts} onOpen={setStory} />
+            </>
           ) : (
             <PostList
               posts={sorted}

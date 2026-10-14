@@ -1,6 +1,7 @@
 /**
  * A generic bApp feed: that bApp's bChatX brand-account posts (bchatxFeed.ts), in its own colour.
- * bMusic also leads with its shareable album releases (media/shareAlbums.ts).
+ * bMusic also leads with its shareable album releases (media/shareAlbums.ts); this view is bMusic only in
+ * store builds, bWalletX shows the bMusic reel from bmovies.app (feed/bmovies/videoSources.ts) instead.
  * Most brand accounts have no posts yet, so the empty state is the bApp's icon and colour with
  * "Open in bChatX" (in-frame on phones / the extension, a tab on web, via openBapp).
  */
