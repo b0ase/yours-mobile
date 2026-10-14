@@ -101,9 +101,8 @@ Object.assign(globalThis, {
   },
   document: doc,
 });
-const tick = () => new Promise((r) => setTimeout(r, 30));
 /** Wait until `ok()` holds (sealing and ECDH can take longer than a fixed tick on a busy machine). */
-const until = async (ok: () => boolean, ms = 2000) => {
+const until = async (ok: () => boolean, ms = 5000) => {
   for (const end = Date.now() + ms; !ok() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
 };
 
@@ -141,7 +140,8 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   doc.visibilityState = 'hidden';
   ws1.close();
   release();
-  await tick();
+  // The answer is sealed and held while the socket is closed; give that work time under a busy full-suite run.
+  await new Promise((r) => setTimeout(r, 300));
   expect(ws1.sent.length).toBe(2); // nothing sent into a closed socket
 
   // Back in the foreground: reconnect, the held reply goes out.
