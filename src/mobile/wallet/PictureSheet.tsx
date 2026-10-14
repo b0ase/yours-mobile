@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { MyFlipBavatar } from '../bavatar/FlipBavatar';
 import { Check, ChevronRight, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { socialLoginEnabled } from '../storeBuild';
-import { AccountAvatar } from '../names/AccountAvatar';
-import { useAvatar } from '../names/useAvatar';
 import { bavatarDataUri } from '../names/avatar';
 import { linkedSocial, pictureState, setPicture, type PictureState } from '../names/pictureSource';
 import { onSocialChange, socialError, startSocial, type SocialProvider } from '../social/socialLogin';
@@ -97,7 +96,6 @@ export default function PictureSheet({ onClose }: { onClose: () => void }) {
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses?.identityAddress ?? '';
-  const avatar = useAvatar(id);
   const bavatar = useMemo(() => bavatarDataUri(account?.pubKeys?.identityPubKey), [account?.pubKeys?.identityPubKey]);
   const [state, setState] = useState(() => pictureState(id));
   const [linked, setLinked] = useState(() => linkedSocial(id));
@@ -185,7 +183,7 @@ export default function PictureSheet({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className="flex flex-col items-center gap-2 px-5 pb-4 pt-3">
-          <AccountAvatar src={avatar} size={88} />
+          <MyFlipBavatar size={88} backSize={220} />
           <span className="text-[12px] text-[#98A2B3]">{sourceLine(state, linked?.handle)}</span>
         </div>
         <div className="flex flex-col gap-2 overflow-y-auto px-4">

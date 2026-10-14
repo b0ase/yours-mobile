@@ -2419,3 +2419,101 @@ button.bw-mail-card:active {
   color: #8e8e89;
   font-variant-numeric: tabular-nums;
 }
+
+/* Flip bAvatar (owner, 14 Oct 2026): tap your (or someone's profile) bAvatar to turn it over to its pay QR. */
+.bw-bflip {
+  position: relative;
+  display: inline-block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+  perspective: 900px;
+  transition:
+    width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    height 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+.bw-bflip:focus-visible {
+  outline: 2px solid #f5b800;
+  outline-offset: 3px;
+}
+.bw-bflip-inner {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.bw-bflip.is-flipped .bw-bflip-inner {
+  transform: rotateY(180deg);
+}
+.bw-bflip-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.bw-bflip-face > img,
+.bw-bflip-face > div,
+.bw-bflip-face > span {
+  width: 100% !important;
+  height: 100% !important;
+}
+.bw-bflip-back {
+  transform: rotateY(180deg);
+  border-radius: 14%;
+  background: #fff3cf;
+  box-shadow: 0 0 0 2px #f5b800;
+  flex-direction: column;
+}
+.bw-bflip.is-flipped {
+  border-radius: 14%;
+}
+.bw-bflip-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1.5%;
+  width: auto !important;
+  height: auto !important;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0b0a08;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bw-bflip-back img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-bflip,
+  .bw-bflip-inner {
+    transition: none;
+  }
+  .bw-bflip.is-flipped .bw-bflip-inner {
+    transform: none;
+  }
+  .bw-bflip-face {
+    transition: opacity 0.25s ease;
+  }
+  .bw-bflip-back {
+    transform: none;
+    opacity: 0;
+  }
+  .bw-bflip.is-flipped .bw-bflip-back {
+    opacity: 1;
+  }
+  .bw-bflip.is-flipped .bw-bflip-front {
+    opacity: 0;
+  }
+}
