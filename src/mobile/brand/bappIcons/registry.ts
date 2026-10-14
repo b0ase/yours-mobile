@@ -20,7 +20,14 @@ export const BAPP_ICONS: Record<GlyphSlug, BappIconDef> = {
   bnews: def('bnews', 'bNews', FEED_COLORS.bnews),
   bradio: def('bradio', 'bRadio', FEED_COLORS.bradio),
   bgames: def('bgames', 'bGames', FEED_COLORS.bgame),
-  bart: def('bart', 'bArt', FEED_COLORS.bpaint),
+  bart: def('bart', 'bArt', '#E93D82'),
+  bpaint: def('bpaint', 'bPaint', FEED_COLORS.bpaint),
+  bjobs: def('bjobs', 'bJobs', FEED_COLORS.bjobs),
+  bdrive: def('bdrive', 'bDrive', FEED_COLORS.bdrive),
+  bsheets: def('bsheets', 'bSheets', FEED_COLORS.bsheets),
+  bcal: def('bcal', 'bCal', FEED_COLORS.bcal),
+  bcode: def('bcode', 'bCode', FEED_COLORS.bitcoincode),
+  bagents: def('bagents', 'bAgents', FEED_COLORS.bidentity),
   b3d: def('b3d', 'b3D', FEED_COLORS.b3d),
   bphotos: def('bphotos', 'bPhotos', FEED_COLORS.bphotos),
   bbooks: def('bbooks', 'bBooks', FEED_COLORS.bbooks),
@@ -40,6 +47,7 @@ const ALIASES: Record<string, GlyphSlug> = {
   bchat: 'bchatx',
   credits: 'bcredits',
   shares: 'bshares',
+  bitcoincode: 'bcode',
 };
 
 export const hasGlyph = (slug: string): slug is GlyphSlug => Object.hasOwn(GLYPHS, slug);

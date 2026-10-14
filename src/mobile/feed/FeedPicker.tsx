@@ -7,11 +7,11 @@
  */
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { House, LayoutGrid, Pin, Sparkles, X, type LucideIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, House, LayoutGrid, Pin, Sparkles, X, type LucideIcon } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { BappIcon } from '../brand/bappIcons';
 import { ALL_FEEDS_ICON, feedIcon, type FeedGlyph, type FeedIcon } from './feedIcons';
-import { FIXED_ROW, GOLD, MAX_PINNED, feedColor, feedDef, feedGroups, rowFeeds, type FeedId } from './feeds';
+import { FIXED_ROW, GOLD, feedColor, feedDef, feedGroups, rowFeeds, type FeedId } from './feeds';
 
 const INK = '#1a1300';
 const LINE = '#1f2127';
@@ -142,12 +142,14 @@ export const AllFeedsSheet = ({
   current,
   onPick,
   onTogglePin,
+  onMovePin,
   onClose,
 }: {
   pins: FeedId[];
   current: FeedId;
   onPick: (id: FeedId) => void;
   onTogglePin: (id: FeedId) => void;
+  onMovePin: (id: FeedId, dir: 1 | -1) => void;
   onClose: () => void;
 }) => {
   useBackClose(true, onClose);
@@ -165,8 +167,50 @@ export const AllFeedsSheet = ({
           </button>
         </div>
         <p className="mb-3 text-xs" style={{ color: MUTED }}>
-          Tap a feed to open it. Pin up to {MAX_PINNED} to the top row.
+          Tap a feed to open it. Pin any feed to move it to the front of the top row.
         </p>
+        {pins.length > 0 && (
+          <section className="mb-4">
+            <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: MUTED }}>
+              Pinned
+            </h4>
+            <ol className="flex flex-col gap-1.5">
+              {pins.map((id, i) => {
+                const f = feedDef(id);
+                return (
+                  <li
+                    key={id}
+                    className="flex items-center gap-3 rounded-xl px-2 py-1.5"
+                    style={{ background: '#0d0d0f', border: `1px solid ${alpha(f.color, 0.3)}` }}
+                  >
+                    <button onClick={() => onPick(id)} className="flex flex-1 items-center gap-3 text-left">
+                      <IconTile icon={feedIcon(id)} color={f.color} on={id === current} size={28} />
+                      <span className="text-sm font-bold" style={{ color: f.color }}>
+                        {f.label}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => onMovePin(id, -1)}
+                      disabled={i === 0}
+                      aria-label={`Move ${f.label} up`}
+                      className="p-1.5 disabled:opacity-30"
+                    >
+                      <ChevronUp size={16} color={MUTED} />
+                    </button>
+                    <button
+                      onClick={() => onMovePin(id, 1)}
+                      disabled={i === pins.length - 1}
+                      aria-label={`Move ${f.label} down`}
+                      className="p-1.5 disabled:opacity-30"
+                    >
+                      <ChevronDown size={16} color={MUTED} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        )}
         {feedGroups().map((g) => (
           <section key={g.id} className="mb-4">
             <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: MUTED }}>
@@ -200,10 +244,15 @@ export const AllFeedsSheet = ({
                         onClick={() => onTogglePin(f.id)}
                         aria-label={pinned ? `Unpin ${f.label}` : `Pin ${f.label}`}
                         aria-pressed={pinned}
-                        className="absolute right-2 top-2 rounded-full p-1.5"
-                        style={{ background: pinned ? f.color : 'transparent' }}
+                        className="absolute right-2 top-2 flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold"
+                        style={{
+                          background: pinned ? GOLD : 'transparent',
+                          color: pinned ? INK : MUTED,
+                          border: `1px solid ${pinned ? GOLD : alpha(MUTED, 0.5)}`,
+                        }}
                       >
-                        <Pin size={14} color={pinned ? INK : f.color} fill={pinned ? INK : 'none'} />
+                        <Pin size={12} color={pinned ? INK : MUTED} fill={pinned ? INK : 'none'} />
+                        {pinned ? 'Pinned' : 'Pin'}
                       </button>
                     )}
                   </div>

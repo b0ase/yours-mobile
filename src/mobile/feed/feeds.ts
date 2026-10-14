@@ -2,8 +2,9 @@
  * The Feed picker: which feeds exist, their colours, the scrolling row and the swipe order.
  *
  * The row at the top of Feed scrolls left / right: Home (Following | For you), the basic suite (bMovies red,
- * bNews green, bMusic blue), then the user's pinned feeds, then "All feeds" (a sheet listing every bApp
- * feed, bApps first then Other, where favourites are pinned). Pins persist per device. Swiping the feed
+ * bNews green, bMusic blue), then the user's pins (any feed, in pin order), then every other $b* bApp in a
+ * fixed order, then "All feeds" (a sheet listing every feed, bApps then Other, where any feed is pinned,
+ * unpinned and reordered). Ventures are in the row only when pinned. Pins persist per device. Swiping the feed
  * left / right moves through the row (plus the open feed when it isn't in the row).
  *
  * Every bApp without a custom view shows its bChatX brand account's posts (bchatxFeed.ts). The list is
@@ -167,8 +168,30 @@ export const feedGroups = (feeds: readonly FeedDef[] = FEEDS) => [
 /** Always at the front of the row: Home, then the red / green / blue suite. */
 export const FIXED_ROW: readonly FeedId[] = ['home', 'bmovies', 'bnews', 'bmusic'];
 
-/** Pinned feeds the row holds after the fixed ones. */
-export const MAX_PINNED = 12;
+/** The fixed order of the other $b* bApps in the row, after the pins (any bApp not listed follows, in FEEDS order). */
+export const BAPP_ROW_ORDER: readonly FeedId[] = [
+  'bradio',
+  'bgame',
+  'bart',
+  'b3d',
+  'bphotos',
+  'bbooks',
+  'writer',
+  'bmail',
+  'bsocial',
+  'bchatx',
+  'bexchange',
+  'bjobs',
+  'bdrive',
+  'bsheets',
+  'bcal',
+  'bitcoincode',
+  'bagents',
+  'bpaint',
+];
+
+/** A generous cap on pins (any feed, bApp or venture, can be pinned). */
+export const MAX_PINNED = 200;
 
 export const isFeedId = (v: unknown, feeds: readonly FeedDef[] = FEEDS): v is FeedId =>
   typeof v === 'string' && feeds.some((f) => f.id === v);
@@ -185,18 +208,45 @@ export const cleanPins = (raw: unknown, feeds: readonly FeedDef[] = FEEDS): Feed
     .filter((v, i, a): v is FeedId => isFeedId(v, feeds) && !FIXED_ROW.includes(v) && a.indexOf(v) === i)
     .slice(0, MAX_PINNED);
 
-/** Pin or unpin a feed. Fixed feeds are always in the row; a full row drops its oldest pin. */
+/** Pin (to the end of the pins, in pin order) or unpin a feed. Fixed feeds are always in the row. */
 export const togglePin = (pins: FeedId[], id: FeedId): FeedId[] => {
   if (FIXED_ROW.includes(id)) return pins;
   if (pins.includes(id)) return pins.filter((p) => p !== id);
   return [...pins, id].slice(-MAX_PINNED);
 };
 
-/** The scrolling row (before "All feeds"): the fixed feeds this build has, then the pins. */
-export const rowFeeds = (pins: FeedId[], feeds: readonly FeedDef[] = FEEDS): FeedId[] => [
-  ...FIXED_ROW.filter((id) => isFeedId(id, feeds)),
-  ...pins.filter((id) => isFeedId(id, feeds) && !FIXED_ROW.includes(id)),
-];
+/** Move a pin one place earlier (dir -1) or later (dir 1); no-op at either end or when not pinned. */
+export const movePin = (pins: FeedId[], id: FeedId, dir: 1 | -1): FeedId[] => {
+  const i = pins.indexOf(id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= pins.length) return pins;
+  const next = [...pins];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+};
+
+/** Every $b* bApp this build has, in the row's fixed order. */
+export const bappRowOrder = (feeds: readonly FeedDef[] = FEEDS): FeedId[] => {
+  const bapps = feeds.filter((f) => f.group === 'bapps').map((f) => f.id);
+  const rank = (id: FeedId) => {
+    const i = BAPP_ROW_ORDER.indexOf(id);
+    return i < 0 ? BAPP_ROW_ORDER.length + bapps.indexOf(id) : i;
+  };
+  return bapps.filter((id) => !FIXED_ROW.includes(id)).sort((a, b) => rank(a) - rank(b));
+};
+
+/**
+ * The scrolling row (before "All feeds"): the fixed feeds this build has, then the pins (any feed, in pin
+ * order), then every other $b* bApp in its fixed order. Each feed appears once; ventures only when pinned.
+ */
+export const rowFeeds = (pins: FeedId[], feeds: readonly FeedDef[] = FEEDS): FeedId[] => {
+  const pinned = pins.filter((id, i) => isFeedId(id, feeds) && !FIXED_ROW.includes(id) && pins.indexOf(id) === i);
+  return [
+    ...FIXED_ROW.filter((id) => isFeedId(id, feeds)),
+    ...pinned,
+    ...bappRowOrder(feeds).filter((id) => !pinned.includes(id)),
+  ];
+};
 
 /** The swipe order: the row, then the open feed when it was opened from All feeds. */
 export const swipeOrder = (pins: FeedId[], current: FeedId): FeedId[] => {

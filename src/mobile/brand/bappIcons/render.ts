@@ -25,7 +25,7 @@ export const layout = (size: number) => {
   return {
     t,
     badge: { cx: 64 - inset - d / 2, cy: inset + d / 2, d, ring: Math.max(1.4, 0.8 * px) },
-    glyph: { scale: 1.25 - 0.2 * t, shift: 3.5 * t, stroke: 1.9 + 0.7 * t },
+    glyph: { scale: 1.25 - 0.2 * t, shift: 3.5 * t, stroke: 2 + 0.7 * t },
   };
 };
 
@@ -45,7 +45,7 @@ const luma = (hex: string) => {
 /** The badge colours for an app colour: ring + a light-to-deep gradient for the b. */
 export const badgeColors = (color: string) => {
   const c = /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#FFD24D';
-  const base = luma(c) < 0.45 ? mix(c, 0.25) : c; // dark colours (bBooks brown) get lifted
+  const base = luma(c) < 0.35 ? mix(c, 0.25) : c; // very dark colours get lifted
   return { ring: base, top: mix(base, 0.4), mid: base, bottom: mix(base, -0.15) };
 };
 

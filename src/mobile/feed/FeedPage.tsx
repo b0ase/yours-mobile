@@ -177,6 +177,7 @@ import {
   stepFeed,
   swipeDir,
   togglePin,
+  movePin,
   type FeedId,
 } from './feeds';
 import { BMOVIES_FEED_ENABLED } from '../storeBuild';
@@ -1983,6 +1984,13 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           onTogglePin={(id) =>
             setPins((p) => {
               const next = togglePin(p, id);
+              savePins(next);
+              return next;
+            })
+          }
+          onMovePin={(id, dir) =>
+            setPins((p) => {
+              const next = movePin(p, id, dir);
               savePins(next);
               return next;
             })
