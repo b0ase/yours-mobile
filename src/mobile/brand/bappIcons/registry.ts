@@ -4,6 +4,7 @@
  * initial in the app colour), so the set can grow without new art.
  */
 import { FEED_COLORS, GOLD } from '../../feed/feeds';
+import { PLACEMENT_ENABLED } from '../../storeBuild';
 import { GLYPHS, type GlyphSlug } from './glyphs';
 
 export type BappIconDef = { slug: GlyphSlug; label: string; color: string };
@@ -37,7 +38,8 @@ export const BAPP_ICONS: Record<GlyphSlug, BappIconDef> = {
   bchatx: def('bchatx', 'bChatX', FEED_COLORS.bbrowser),
   bexchange: def('bexchange', 'bExchange', FEED_COLORS.bexchange),
   bcredits: def('bcredits', 'bCredits', FEED_COLORS.bmarket),
-  bshares: def('bshares', 'bShares', FEED_COLORS.bdns),
+  // bShares is bWalletX only (PLACEMENT_ENABLED): the store bundle never carries its name.
+  bshares: def('bshares', PLACEMENT_ENABLED ? 'bShares' : '', FEED_COLORS.bdns),
 };
 
 /** Other names for the same bApp (feed ids, shelf ids) → glyph slug. */
