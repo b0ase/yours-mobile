@@ -1,5 +1,3 @@
-import bphotosIcon from './brand/bphotos-icon.png';
-import bradioIcon from './brand/bradio-icon.png';
 import bdnsIcon from './brand/bdns-icon.png';
 import bsearchIcon from './brand/bsearch-icon.png';
 import bidIcon from './brand/bid-icon.png';
@@ -10,27 +8,20 @@ import bvideoIcon from './brand/bvideo-icon.png';
 import bcalIcon from './brand/apps/bcal.png';
 import bsheetsIcon from './brand/apps/bsheets.png';
 import bmintIcon from './brand/bmint-icon.png';
-import bmusicIcon from './brand/bmusic-icon.png';
 import app_bchatIcon from './brand/apps/bchat.png';
-import app_bmoviesIcon from './brand/apps/bmovies.png';
-import app_bwriterIcon from './brand/apps/bwriter.png';
-import app_bmailIcon from './brand/apps/bmail.png';
-import app_bartIcon from './brand/apps/bart.png';
 import app_bpaintIcon from './brand/apps/bpaint.png';
-import app_b3dIcon from './brand/apps/b3d.png';
-import app_bbooksIcon from './brand/apps/bbooks.png';
-import app_bgamesIcon from './brand/apps/bgames.png';
 import app_beduIcon from './brand/apps/bedu.png';
-import app_bsocialIcon from './brand/apps/bsocial.png';
 import app_bmapsIcon from './brand/apps/bmaps.png';
 import app_bagentsIcon from './brand/apps/bagents.png';
+import { bappIconUrl } from './brand/bappIcons';
 import { STORE_BUILD } from './storeBuild';
 import { EXCHANGE_BAPPS } from './exchangeAppsX';
 /**
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
  * (2026-10-01); 'demo' = not yet live. Demo apps are shown, labelled Demo.
- * icon: the app's original icon where it has a distinctive one, else a bCorp flag-cut b
+ * icon: the bApp icon set (brand/bappIcons) for apps it covers; else the app's original icon where it
+ * has a distinctive one, else a bCorp flag-cut b
  * (src/mobile/brand: 1st app of a colour = coloured b on black, 2nd = black b on the
  * colour, 3rd = white b on the colour, 4th = coloured b on white).
  */
@@ -86,7 +77,7 @@ export const BAPPS: BApp[] = [
     verb: 'Chat rooms, Spaces and feeds for every token',
     group: 'featured',
     status: 'live',
-    icon: app_bchatIcon,
+    icon: bappIconUrl('bchatx'),
   },
   {
     name: 'bChat',
@@ -104,7 +95,7 @@ export const BAPPS: BApp[] = [
     verb: 'Watch and back tokenised films',
     group: 'featured',
     status: 'live',
-    icon: app_bmoviesIcon,
+    icon: bappIconUrl('bmovies'),
   },
   {
     name: 'bMusic',
@@ -113,7 +104,7 @@ export const BAPPS: BApp[] = [
     verb: 'Tokenise your music; fans who hold it make the video with you',
     group: 'featured',
     status: 'live',
-    icon: bmusicIcon,
+    icon: bappIconUrl('bmusic'),
   },
   {
     name: 'bMint',
@@ -139,7 +130,7 @@ export const BAPPS: BApp[] = [
     verb: 'Write and save documents on-chain',
     group: 'featured',
     status: 'live',
-    icon: app_bwriterIcon,
+    icon: bappIconUrl('bwriter'),
     source: 'https://github.com/b0ase/bitcoin-writer',
   },
   // Work
@@ -159,7 +150,7 @@ export const BAPPS: BApp[] = [
     verb: 'Send email that pays and gets paid',
     group: 'work',
     status: 'live',
-    icon: app_bmailIcon,
+    icon: bappIconUrl('bmail'),
     source: suite('bitcoin-email'),
   },
   {
@@ -242,7 +233,7 @@ export const BAPPS: BApp[] = [
     verb: 'Listen to and run Bitcoin radio',
     group: 'media',
     status: 'live',
-    icon: bradioIcon,
+    icon: bappIconUrl('bradio'),
     source: suite('bitcoin-radio'),
   },
   {
@@ -251,7 +242,7 @@ export const BAPPS: BApp[] = [
     verb: 'Turn photos into tradable NFTs',
     group: 'media',
     status: 'live',
-    icon: bphotosIcon,
+    icon: bappIconUrl('bphotos'),
     source: suite('bitcoin-photos'),
   },
   {
@@ -260,7 +251,7 @@ export const BAPPS: BApp[] = [
     verb: 'Collect and show on-chain art',
     group: 'media',
     status: 'live',
-    icon: app_bartIcon,
+    icon: bappIconUrl('bart'),
     source: suite('bitcoin-art'),
   },
   {
@@ -278,7 +269,7 @@ export const BAPPS: BApp[] = [
     verb: 'Model and own 3D designs',
     group: 'media',
     status: 'live',
-    icon: app_b3dIcon,
+    icon: bappIconUrl('b3d'),
     source: suite('bitcoin-3d'),
   },
   {
@@ -287,7 +278,7 @@ export const BAPPS: BApp[] = [
     verb: 'Read and publish books',
     group: 'media',
     status: 'live',
-    icon: app_bbooksIcon,
+    icon: bappIconUrl('bbooks'),
     source: suite('bitcoin-books'),
   },
   {
@@ -317,7 +308,7 @@ export const BAPPS: BApp[] = [
     verb: 'Post and follow on Bitcoin',
     group: 'social',
     status: 'live',
-    icon: app_bsocialIcon,
+    icon: bappIconUrl('bsocial'),
     source: suite('bitcoin-social'),
   },
   {
@@ -326,7 +317,7 @@ export const BAPPS: BApp[] = [
     verb: 'Play games with real stakes',
     group: 'social',
     status: 'live',
-    icon: app_bgamesIcon,
+    icon: bappIconUrl('bgames'),
     source: suite('bitcoin-gaming'),
   },
   // bWalletX only (exchangeAppsX.ts; a store build has an empty stand-in).

@@ -3,20 +3,21 @@ import { ALL_FEEDS_ICON, feedIcon } from './feedIcons';
 import { FEEDS } from './feeds';
 
 describe('feed icons', () => {
-  test('bApp feeds use their own bApp art', () => {
-    const bmovies = feedIcon('bmovies');
-    expect(bmovies.kind === 'app' && bmovies.src).toMatch(/bmovies\.png/);
-    const bnews = feedIcon('bnews');
-    expect(bnews.kind === 'app' && bnews.src).toMatch(/bnews\.svg/);
-    const writer = feedIcon('writer');
-    expect(writer.kind === 'app' && writer.src).toMatch(/bwriter\.png/);
+  test('$b* feeds use the bApp icon set', () => {
+    expect(feedIcon('bnews')).toEqual({ kind: 'bapp', slug: 'bnews', label: 'bNews' });
+    expect(feedIcon('writer')).toEqual({ kind: 'bapp', slug: 'writer', label: 'bWriter' });
+    expect(feedIcon('bradio')).toEqual({ kind: 'bapp', slug: 'bradio', label: 'bRadio' });
+    // No glyph yet: still a bApp icon (the set's initial fallback).
+    expect(feedIcon('bmaps')).toEqual({ kind: 'bapp', slug: 'bmaps', label: 'bMaps' });
   });
 
-  test('Following, For you and All feeds get glyphs; a bApp without art gets its initial', () => {
+  test('Home and All feeds get glyphs; ventures keep their art or initial', () => {
     expect(feedIcon('home')).toEqual({ kind: 'glyph', glyph: 'home' });
     expect(ALL_FEEDS_ICON).toEqual({ kind: 'glyph', glyph: 'all' });
-    expect(feedIcon('bradio')).toEqual({ kind: 'letter', letter: 'R' });
     expect(feedIcon('path402')).toEqual({ kind: 'letter', letter: '4' });
+    expect(feedIcon('vexvoid')).toEqual({ kind: 'letter', letter: 'V' });
+    const tb = feedIcon('tokenblaster');
+    expect(tb.kind === 'app' && tb.src).toMatch(/tokenblaster\.png/);
   });
 
   test('every feed has an icon; an unknown id falls back to a glyph', () => {
