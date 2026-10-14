@@ -90,7 +90,7 @@ const Bar = ({ title, slug }: { title?: string; slug?: boolean }) => {
   return (
     <div
       className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
-      style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+      style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
     >
       <button aria-label="Back" title="Back" onClick={() => navigate(slug ? ROOT : HOME)} className="p-1.5">
         <ChevronLeft size={20} color="#fff" />
@@ -298,7 +298,7 @@ const GuestTop = () => {
   return (
     <div
       className="fixed top-0 inset-x-0 z-20 h-14 flex items-center justify-between px-4"
-      style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+      style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
     >
       <span className="font-extrabold text-white tracking-tight">
         bWallet<span style={{ color: GOLD }}>X</span>
@@ -495,7 +495,7 @@ const ArtistsPage = ({ album }: { album?: boolean }) => {
   const { slug } = useParams();
   const albums = slug ? ARTISTS.find((x) => x[0].artistSlug === slug) : undefined;
   return (
-    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
+    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: 'var(--bw-bg)' }}>
       {guest ? <GuestTop /> : <TopNav />}
       <div className="h-14 shrink-0" aria-hidden />
       <Bar title={album ? 'Album' : albums?.[0].artist} slug={!!slug || !!album} />

@@ -31,7 +31,7 @@ export const PanelPrompt = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[1000] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #ffffff14' }}>
         <span className="text-sm font-bold text-white">Approval needed</span>
         <button type="button" aria-label="Deny and close" onClick={dismiss} className="p-1 border-0 bg-transparent">

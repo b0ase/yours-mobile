@@ -44,7 +44,7 @@ const GOLD = 'var(--bw-accent)';
 const GREEN = '#A1FF8B';
 const RED = '#FF6B6B';
 const MUTED = '#98A2B3';
-const CARD = 'rounded-2xl bg-[#17191E] border border-[#2b2f36]';
+const CARD = 'rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36]';
 const TRADING = marketTradingEnabled();
 
 /** Both units: "0.0012 BSV · $0.06". */
@@ -171,7 +171,7 @@ export const TradeView = ({
           type="button"
           onClick={onBack}
           aria-label="All markets"
-          className="w-9 h-9 grid place-items-center rounded-full bg-[#17191E] border-0 cursor-pointer"
+          className="w-9 h-9 grid place-items-center rounded-full bg-[var(--bw-surface)] border-0 cursor-pointer"
         >
           <ArrowLeft size={18} color="#fff" />
         </button>
@@ -189,7 +189,7 @@ export const TradeView = ({
           type="button"
           onClick={onFav}
           aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
-          className="w-9 h-9 grid place-items-center rounded-full bg-[#17191E] border-0 cursor-pointer"
+          className="w-9 h-9 grid place-items-center rounded-full bg-[var(--bw-surface)] border-0 cursor-pointer"
         >
           <Star size={18} color={GOLD} fill={fav ? GOLD : 'none'} />
         </button>
@@ -398,7 +398,7 @@ export const TradeView = ({
           onClick={() => !busy && setPending(null)}
         >
           <div
-            className="w-full md:max-w-[420px] rounded-t-2xl md:rounded-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+            className="w-full md:max-w-[420px] rounded-t-2xl md:rounded-2xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
             onClick={(e) => e.stopPropagation()}
           >

@@ -170,7 +170,7 @@ const Tile = ({
     <button
       onClick={onOpen}
       aria-label={`Open ${it.name}`}
-      className="relative overflow-hidden rounded-xl bg-[#17191E] border border-white/5 hover:border-[color:var(--bw-accent)]/60 transition-colors"
+      className="relative overflow-hidden rounded-xl bg-[var(--bw-surface)] border border-white/5 hover:border-[color:var(--bw-accent)]/60 transition-colors"
       style={{ width: size, height: size }}
     >
       <div className={`absolute inset-0 ${m.flagged ? 'blur-xl' : ''}`}>
@@ -403,11 +403,15 @@ const DetailPanel = ({
             <Send size={15} /> Send
           </button>
           {it.listed && (
-            <button disabled={off} onClick={() => void cancelListing()} className={`${btn} bg-[#17191E] text-white`}>
+            <button
+              disabled={off}
+              onClick={() => void cancelListing()}
+              className={`${btn} bg-[var(--bw-surface)] text-white`}
+            >
               Cancel listing
             </button>
           )}
-          <button disabled={off} onClick={() => void download()} className={`${btn} bg-[#17191E] text-white`}>
+          <button disabled={off} onClick={() => void download()} className={`${btn} bg-[var(--bw-surface)] text-white`}>
             <Download size={15} /> Download
           </button>
           <a
@@ -416,11 +420,14 @@ const DetailPanel = ({
             rel="noreferrer"
             aria-disabled={it.pending}
             onClick={(e) => it.pending && e.preventDefault()}
-            className={`${btn} bg-[#17191E] text-white ${it.pending ? 'opacity-40 cursor-not-allowed' : ''}`}
+            className={`${btn} bg-[var(--bw-surface)] text-white ${it.pending ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             <ExternalLink size={15} /> Open on chain
           </a>
-          <button onClick={() => void copy(shareLink, 'Link copied')} className={`${btn} bg-[#17191E] text-white`}>
+          <button
+            onClick={() => void copy(shareLink, 'Link copied')}
+            className={`${btn} bg-[var(--bw-surface)] text-white`}
+          >
             <Copy size={15} /> Copy link
           </button>
         </div>
@@ -562,7 +569,7 @@ const NftLibraryPage = () => {
         <WalletTabs active="nfts" />
         <div className="px-4 pt-3 pb-2 flex flex-col gap-2 border-b border-white/5">
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 flex-1 min-w-[220px] rounded-xl bg-[#17191E] px-3 py-2">
+            <label className="flex items-center gap-2 flex-1 min-w-[220px] rounded-xl bg-[var(--bw-surface)] px-3 py-2">
               <Search size={15} color="#98A2B3" />
               <input
                 value={filter.query}
@@ -576,7 +583,7 @@ const NftLibraryPage = () => {
               value={filter.collection}
               onChange={(e) => set({ collection: e.target.value })}
               aria-label="Collection"
-              className="rounded-xl bg-[#17191E] px-3 py-2 text-sm"
+              className="rounded-xl bg-[var(--bw-surface)] px-3 py-2 text-sm"
             >
               <option value="">All collections ({lib.length})</option>
               {groups.map((g) => (
@@ -589,7 +596,7 @@ const NftLibraryPage = () => {
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
               aria-label="Sort"
-              className="rounded-xl bg-[#17191E] px-3 py-2 text-sm"
+              className="rounded-xl bg-[var(--bw-surface)] px-3 py-2 text-sm"
             >
               <option value="newest">Newest</option>
               <option value="name">Name</option>
@@ -598,7 +605,7 @@ const NftLibraryPage = () => {
             <button
               onClick={() => void doRefresh()}
               aria-label="Refresh"
-              className="flex items-center gap-1.5 rounded-xl bg-[#17191E] px-3 py-2 text-sm"
+              className="flex items-center gap-1.5 rounded-xl bg-[var(--bw-surface)] px-3 py-2 text-sm"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
             </button>

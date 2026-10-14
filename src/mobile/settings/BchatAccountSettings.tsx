@@ -123,7 +123,11 @@ export const BchatAccountSettings = () => {
 
   const failed = status && !status.ok && pref.mode !== 'off';
   return (
-    <div className="mt-2 rounded-xl px-3 py-2.5" style={{ background: '#17191E' }} data-testid="bchatx-settings">
+    <div
+      className="mt-2 rounded-xl px-3 py-2.5"
+      style={{ background: 'var(--bw-surface)' }}
+      data-testid="bchatx-settings"
+    >
       <div className="flex items-center gap-2">
         <MessageCircle size={16} color={GOLD} aria-hidden="true" />
         <span className="text-sm font-bold text-white">bChatX</span>

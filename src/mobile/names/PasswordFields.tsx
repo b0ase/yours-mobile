@@ -22,7 +22,8 @@ const strongPassword = (len = 20): string => {
   return out.join('');
 };
 
-const field = 'w-full h-9 pl-4 pr-10 rounded-xl border text-sm outline-none bg-[#17191E] text-white border-[#98A2B340]';
+const field =
+  'w-full h-9 pl-4 pr-10 rounded-xl border text-sm outline-none bg-[var(--bw-surface)] text-white border-[#98A2B340]';
 
 export const PasswordFields = ({
   newWallet,

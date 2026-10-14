@@ -234,7 +234,10 @@ export const LaunchCoin = () => {
         {icon ? (
           <img src={icon.url} alt="" className="h-10 w-10 rounded-lg object-cover" />
         ) : (
-          <span className="h-10 w-10 rounded-lg flex items-center justify-center" style={{ background: '#17191E' }}>
+          <span
+            className="h-10 w-10 rounded-lg flex items-center justify-center"
+            style={{ background: 'var(--bw-surface)' }}
+          >
             <ImagePlus size={18} />
           </span>
         )}

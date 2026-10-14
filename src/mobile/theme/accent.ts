@@ -9,6 +9,18 @@ const BOOT_KEY = 'bwx.accent.boot';
 const keyFor = (account: string) => `bwx.accent.${account}`;
 export const ACCENT_EVENT = 'bwx-accent';
 
+let applied: AccentId = DEFAULT_ACCENT;
+/** The accent currently painted on <html> (for art drawn in JS, e.g. bAvatar tint). */
+export const currentAccentId = (): AccentId => applied;
+
+const announce = () => {
+  try {
+    window.dispatchEvent(new Event(ACCENT_EVENT));
+  } catch {
+    /* no window (tests) */
+  }
+};
+
 const read = (k: string): string | null => {
   try {
     return localStorage.getItem(k);
@@ -28,8 +40,12 @@ const write = (k: string, v: string | null) => {
 /** Sets the accent's CSS variables on <html>. Gold clears them, so src/accent.css's defaults apply. */
 export function applyAccent(id: string | null | undefined): AccentId {
   const a = accentById(id);
+  applied = a.id;
   if (typeof document === 'undefined') return a.id;
-  const s = document.documentElement.style;
+  const root = document.documentElement;
+  if (a.id === DEFAULT_ACCENT) delete root.dataset.bwTheme;
+  else root.dataset.bwTheme = a.id;
+  const s = root.style;
   for (const [k, v] of Object.entries(accentVars(a))) {
     if (a.id === DEFAULT_ACCENT) s.removeProperty(k);
     else s.setProperty(k, v);
@@ -44,8 +60,10 @@ export const loadAccent = (account: string): AccentId => accentById(read(keyFor(
 
 /** Applies an account's accent and remembers it for the next startup. */
 export function switchToAccountAccent(account: string): AccentId {
+  const before = applied;
   const id = applyAccent(account ? read(keyFor(account)) : read(BOOT_KEY));
   write(BOOT_KEY, id === DEFAULT_ACCENT ? null : id);
+  if (id !== before) announce();
   return id;
 }
 
@@ -54,9 +72,5 @@ export function saveAccent(account: string, id: AccentId): void {
   if (account) write(keyFor(account), id === DEFAULT_ACCENT ? null : id);
   write(BOOT_KEY, id === DEFAULT_ACCENT ? null : id);
   applyAccent(id);
-  try {
-    window.dispatchEvent(new Event(ACCENT_EVENT));
-  } catch {
-    /* no window (tests) */
-  }
+  announce();
 }

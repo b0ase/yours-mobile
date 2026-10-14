@@ -1,4 +1,6 @@
 import { bavatarSvg } from '../bavatar/bavatar';
+import { currentAccentId } from '../theme/accent';
+import { tintSvg } from '../theme/tint';
 
 /**
  * The front of the wallet card (owner, 11 Oct 2026): the account's bAvatar art, the same blend bChatX
@@ -19,10 +21,15 @@ export function cardFrontArtUri(identityPubKey: string | null | undefined, yello
     .trim()
     .toLowerCase();
   if (!KEY_RE.test(key)) return '';
-  let uri = cache.get(key);
+  // Default art follows the app accent (Theme → App colours); a user picture/NFT never comes through here.
+  const accent = currentAccentId();
+  const ck = accent + ':' + key;
+  let uri = cache.get(ck);
   if (!uri) {
-    uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(bavatarSvg(key, { size: 512, label: '' }));
-    cache.set(key, uri);
+    uri =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent(tintSvg(bavatarSvg(key, { size: 512, label: '' }), accent));
+    cache.set(ck, uri);
   }
   return uri;
 }

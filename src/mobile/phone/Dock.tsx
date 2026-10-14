@@ -109,7 +109,7 @@ const Tile = ({
           style={
             isApp
               ? // Apps look like their Apps-page tile: the icon fills the rounded square (BrowserPage TileIcon).
-                { background: '#17191E', boxShadow: picked ? `0 0 0 2px ${GOLD}` : undefined }
+                { background: 'var(--bw-surface)', boxShadow: picked ? `0 0 0 2px ${GOLD}` : undefined }
               : {
                   background: picked ? `color-mix(in srgb, ${GOLD} 20%, transparent)` : active ? '#2b2f36' : '#17191E',
                   border: `1px solid ${picked ? GOLD : '#2b2f36'}`,
@@ -212,7 +212,7 @@ export const HomeButton = ({
         // Snug in the bar, centred, ring fully inside (owner, 8 Oct 2026; bChatX copies it).
         className="relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
-          background: '#010101',
+          background: 'var(--bw-bg)',
           boxShadow: `0 0 0 2px ${GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
           transform: phase === 'pressing' ? 'scale(0.94)' : listening ? 'scale(1.04)' : undefined,
           WebkitTouchCallout: 'none',

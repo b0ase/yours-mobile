@@ -627,7 +627,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
     <div
       className="fixed inset-x-0 bottom-0 z-[450] flex flex-col overflow-y-auto"
       // Below the web app's beta banner (src/web/web.css); 0 in the apps.
-      style={{ top: 'var(--web-banner-height, 0px)', background: '#010101' }}
+      style={{ top: 'var(--web-banner-height, 0px)', background: 'var(--bw-bg)' }}
       role="dialog"
       aria-modal="true"
     >

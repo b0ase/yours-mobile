@@ -5,6 +5,7 @@ import { Check, ChevronRight, Image as ImageIcon, Loader2, X } from 'lucide-reac
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { socialLoginEnabled } from '../storeBuild';
+import { useAccentId } from '../theme/useAccent';
 import { bavatarDataUri } from '../names/avatar';
 import { linkedSocial, pictureState, setPicture, type PictureState } from '../names/pictureSource';
 import { onSocialChange, socialError, startSocial, type SocialProvider } from '../social/socialLogin';
@@ -96,7 +97,12 @@ export default function PictureSheet({ onClose }: { onClose: () => void }) {
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses?.identityAddress ?? '';
-  const bavatar = useMemo(() => bavatarDataUri(account?.pubKeys?.identityPubKey), [account?.pubKeys?.identityPubKey]);
+  const accentId = useAccentId();
+  const bavatar = useMemo(
+    () => bavatarDataUri(account?.pubKeys?.identityPubKey),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tinted to the current accent
+    [account?.pubKeys?.identityPubKey, accentId],
+  );
   const [state, setState] = useState(() => pictureState(id));
   const [linked, setLinked] = useState(() => linkedSocial(id));
   const [busy, setBusy] = useState<string | null>(null);

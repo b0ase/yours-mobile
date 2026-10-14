@@ -10,7 +10,8 @@ export const AddAppSheet = ({ store, onClose }: { store: ReturnType<typeof useUs
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [msg, setMsg] = useState('');
-  const field = 'w-full rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5 text-sm text-white outline-none';
+  const field =
+    'w-full rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5 text-sm text-white outline-none';
 
   const submit = () => {
     const err = store.add(url, name);
@@ -21,7 +22,7 @@ export const AddAppSheet = ({ store, onClose }: { store: ReturnType<typeof useUs
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <button type="button" onClick={onClose} aria-label="Back" className="p-2 bg-transparent border-0">
           <ArrowLeft size={20} color="white" />
@@ -75,7 +76,7 @@ export const AddAppSheet = ({ store, onClose }: { store: ReturnType<typeof useUs
               <li
                 key={a.url}
                 className="flex items-center gap-3 rounded-xl px-3 py-2"
-                style={{ background: '#17191E' }}
+                style={{ background: 'var(--bw-surface)' }}
               >
                 <img src={appIconFor(a.url)} alt="" width={28} height={28} className="rounded-md bg-black" />
                 <span className="flex-1 min-w-0">

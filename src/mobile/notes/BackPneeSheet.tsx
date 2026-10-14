@@ -74,7 +74,10 @@ export const BackPneeSheet = ({
             type="button"
             onClick={onLock}
             className="rounded-xl py-3 text-sm font-bold border-0 cursor-pointer flex items-center justify-center gap-2"
-            style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+            style={{
+              background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+              color: 'var(--bw-on-accent)',
+            }}
           >
             <Lock size={16} /> {BACK_PNEE_LABEL}
           </button>

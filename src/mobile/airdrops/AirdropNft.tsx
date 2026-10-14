@@ -192,7 +192,7 @@ const TextBody = ({ url }: { url: string }) => {
   }, [url]);
   if (failed) return <p className="text-sm text-[#F97066] m-0">Couldn&apos;t load the text. Check your connection.</p>;
   return (
-    <pre className="w-full max-h-full overflow-auto whitespace-pre-wrap break-words text-[13px] text-white bg-[#17191E] rounded-xl p-3 m-0">
+    <pre className="w-full max-h-full overflow-auto whitespace-pre-wrap break-words text-[13px] text-white bg-[var(--bw-surface)] rounded-xl p-3 m-0">
       {text ?? 'Loading…'}
     </pre>
   );
@@ -284,7 +284,7 @@ export const KeptAirdrops = ({ pending }: { pending: AirdropItem[] }) => {
   const [open, setOpen] = useState<AirdropItem | null>(null);
   if (!pending.length) return null;
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-[#17191E] px-3 py-3">
+    <div className="flex flex-col gap-2 rounded-xl bg-[var(--bw-surface)] px-3 py-3">
       <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: MUTED }}>
         Kept airdrops
       </span>

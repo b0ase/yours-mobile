@@ -323,7 +323,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
 
         {/* Header card */}
         <div
-          className="w-full rounded-xl p-4 bg-[#17191E]"
+          className="w-full rounded-xl p-4 bg-[var(--bw-surface)]"
           style={{ border: isActive ? '1px solid rgba(52,211,153,0.15)' : `1px solid ${gray}15` }}
         >
           <div className="flex items-center gap-2.5 mb-3">
@@ -463,7 +463,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
 
         {/* Pricing (remote only) */}
         {!isLocal && usage && (
-          <div className="w-full rounded-xl p-4 bg-[#17191E]" style={{ border: `1px solid ${gray}15` }}>
+          <div className="w-full rounded-xl p-4 bg-[var(--bw-surface)]" style={{ border: `1px solid ${gray}15` }}>
             <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: gray }}>
               Storage & Pricing
             </span>
@@ -608,7 +608,10 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
       )}
 
       {/* Active storage summary */}
-      <div className="w-full rounded-xl p-4 bg-[#17191E]" style={{ border: '1px solid rgba(52,211,153,0.15)' }}>
+      <div
+        className="w-full rounded-xl p-4 bg-[var(--bw-surface)]"
+        style={{ border: '1px solid rgba(52,211,153,0.15)' }}
+      >
         <div className="flex items-center justify-between mb-3">
           <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: '#34D399' }}>
             Active Storage
@@ -777,7 +780,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
         const hasBackups = showLocalBackup || backupRemotes.length > 0;
 
         return (
-          <div className="w-full rounded-xl p-4 bg-[#17191E]" style={{ border: `1px solid ${gray}15` }}>
+          <div className="w-full rounded-xl p-4 bg-[var(--bw-surface)]" style={{ border: `1px solid ${gray}15` }}>
             <div className="flex items-center justify-between mb-2">
               <div>
                 <div className="flex items-center gap-2">
@@ -941,7 +944,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
             transition={{ duration: 0.2 }}
             className="w-full overflow-hidden"
           >
-            <div className="w-full rounded-xl p-4 bg-[#17191E]" style={{ border: `1px solid ${gray}15` }}>
+            <div className="w-full rounded-xl p-4 bg-[var(--bw-surface)]" style={{ border: `1px solid ${gray}15` }}>
               <p className="text-[9px] uppercase tracking-wider font-semibold mb-1" style={{ color: gray }}>
                 Storage Identity Key
               </p>

@@ -106,7 +106,7 @@ export const AgentsScreen = ({ onClose }: { onClose: () => void }) => {
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <Header title="Agents" onBack={onClose} />
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <p className="text-sm m-0" style={{ color: MUTED }}>
@@ -190,7 +190,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
   // or its agent record isn't loaded yet, say so and offer a reload.
   if (!agent || !acct)
     return createPortal(
-      <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: '#010101' }}>
+      <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
         <Header title="Agent account" onBack={onClose} />
         <div className="flex flex-col items-center gap-3 px-4 pt-10 text-center">
           <p className="text-sm m-0" style={{ color: MUTED }}>
@@ -248,7 +248,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
   const section = 'rounded-2xl p-3 flex flex-col gap-2';
   const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border';
   return createPortal(
-    <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <Header title={acct.name || 'Agent account'} onBack={onClose} />
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <div className="flex items-center gap-2">
@@ -286,7 +286,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
               setTimeout(() => setCopied(false), 1500);
             }}
             className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-mono border-0 text-left"
-            style={{ background: '#010101', color: '#D0D5DD' }}
+            style={{ background: 'var(--bw-bg)', color: '#D0D5DD' }}
           >
             {copied ? <Check size={13} color="#2ecc71" /> : <Copy size={13} color={MUTED} />} {address}
           </button>
@@ -318,7 +318,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
                 value={sweepTo}
                 onChange={(e) => setSweepTo(e.target.value)}
                 className={input}
-                style={{ background: '#010101', borderColor: LINE }}
+                style={{ background: 'var(--bw-bg)', borderColor: LINE }}
               >
                 {others.map((o) => (
                   <option key={o.addresses.identityAddress} value={o.addresses.identityAddress}>
@@ -404,7 +404,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
             onBlur={() => setAgentLabels(id, labels.split(','))}
             placeholder="e.g. long-term, $B0ASEX fund"
             className={input}
-            style={{ background: '#010101', borderColor: LINE }}
+            style={{ background: 'var(--bw-bg)', borderColor: LINE }}
           />
           <div className="text-sm font-bold text-white mt-1">Daily spending cap</div>
           <div className="flex items-center gap-2">
@@ -418,7 +418,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
               onBlur={() => setAgentDailyCap(id, cap ? Number(cap) : null)}
               placeholder="no cap"
               className={`${input} w-28`}
-              style={{ background: '#010101', borderColor: LINE }}
+              style={{ background: 'var(--bw-bg)', borderColor: LINE }}
             />
             <span className="text-xs" style={{ color: MUTED }}>
               per day (optional; the balance is already the limit)

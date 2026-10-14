@@ -54,7 +54,10 @@ export const BuyBsvCard = ({
     type="button"
     onClick={onClick}
     className={`flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer ${className}`}
-    style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+    style={{
+      background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+      color: 'var(--bw-on-accent)',
+    }}
   >
     <span className="text-base font-extrabold">Buy BSV</span>
     <span className="text-sm font-bold">
@@ -124,7 +127,7 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
     onClick={onOpen}
     aria-label="BSV price"
     className={`${CELL} flex-col leading-tight`}
-    style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
+    style={{ background: 'var(--bw-surface)', borderColor: '#2b2f36', color: '#fff' }}
   >
     <span className="text-[15px] font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
     {change == null ? (
@@ -193,9 +196,9 @@ export const BsvPriceBar = ({
           onClick={BUY_CRYPTO_ENABLED ? () => setOpen(true) : onReceive}
           className={`${CELL} text-sm font-extrabold`}
           style={{
-            background: 'linear-gradient(135deg, #de973f, #f9dd63)',
+            background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
             borderColor: 'rgb(var(--bw-accent-rgb)/0.4)',
-            color: '#1a1300',
+            color: 'var(--bw-on-accent)',
           }}
         >
           {BUY_CRYPTO_ENABLED ? 'Buy BSV' : 'Receive'}
@@ -279,7 +282,7 @@ const Row = ({
     type="button"
     onClick={onClick}
     className="flex items-center gap-3 w-full p-3 rounded-xl text-left border-0 cursor-pointer"
-    style={{ background: '#17191E', color: '#fff' }}
+    style={{ background: 'var(--bw-surface)', color: '#fff' }}
   >
     <span style={{ color: GOLD }}>{icon}</span>
     <span className="flex-1 min-w-0">

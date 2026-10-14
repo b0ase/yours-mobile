@@ -514,14 +514,14 @@ const MediaPage = () => {
     );
 
   return (
-    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: '#010101' }}>
+    <div className="w-full h-full flex flex-col overflow-y-auto pb-44" style={{ background: 'var(--bw-bg)' }}>
       <PullToRefresh onRefresh={reload} />
       <TopNav />
       {/* Room for the top bar as its own block: Desktop hides the header below, and its margin went with it. */}
       <div className="h-14 shrink-0" aria-hidden />
       <div
         className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
-        style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+        style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
       >
         <nav className="flex items-center shrink-0" aria-label="Store navigation">
           <button aria-label="Back" title="Back" onClick={close} className="p-1.5">

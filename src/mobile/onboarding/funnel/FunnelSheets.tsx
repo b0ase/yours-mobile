@@ -60,7 +60,11 @@ const Gold = ({
     disabled={disabled}
     onClick={onClick}
     className="w-full py-3 rounded-full text-base font-extrabold"
-    style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300', opacity: disabled ? 0.6 : 1 }}
+    style={{
+      background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+      color: 'var(--bw-on-accent)',
+      opacity: disabled ? 0.6 : 1,
+    }}
   >
     {children}
   </button>

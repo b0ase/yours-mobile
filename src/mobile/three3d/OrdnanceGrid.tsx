@@ -17,7 +17,7 @@ export const WeaponTile = ({ weapon, onOpen, sub }: { weapon: Weapon; onOpen: ()
   <button
     type="button"
     onClick={onOpen}
-    className="relative rounded-xl overflow-hidden bg-[#17191E] text-left p-0"
+    className="relative rounded-xl overflow-hidden bg-[var(--bw-surface)] text-left p-0"
     style={{ aspectRatio: '1/1', border: `1px solid ${RARITY_COLOR[weapon.rarity]}55` }}
   >
     {weapon.image ? (

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { useAccentId } from '../theme/useAccent';
 import { bavatarDataUri, onAvatarChange } from '../names/avatar';
 import { pictureState, setPicture } from '../names/pictureSource';
 
@@ -14,7 +15,12 @@ export function BavatarKeep({ mintedOutpoint, onOpen }: { mintedOutpoint?: strin
   const { chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses?.identityAddress ?? '';
-  const art = useMemo(() => bavatarDataUri(account?.pubKeys?.identityPubKey), [account?.pubKeys?.identityPubKey]);
+  const accentId = useAccentId();
+  const art = useMemo(
+    () => bavatarDataUri(account?.pubKeys?.identityPubKey),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tinted to the current accent
+    [account?.pubKeys?.identityPubKey, accentId],
+  );
   const [source, setSource] = useState(() => pictureState(id).source);
   useEffect(() => {
     setSource(pictureState(id).source);
@@ -43,7 +49,7 @@ export function BavatarKeep({ mintedOutpoint, onOpen }: { mintedOutpoint?: strin
           <button
             type="button"
             disabled={busy}
-            className={`${btn} bg-[#17191E] text-white hover:bg-[#22252c]`}
+            className={`${btn} bg-[var(--bw-surface)] text-white hover:bg-[#22252c]`}
             onClick={() => {
               setBusy(true);
               void setPicture(chromeStorageService, id, { source: 'bavatar' }).finally(() => setBusy(false));
@@ -55,7 +61,7 @@ export function BavatarKeep({ mintedOutpoint, onOpen }: { mintedOutpoint?: strin
         {mintedOutpoint ? (
           <button
             type="button"
-            className={`${btn} bg-[#17191E] text-white hover:bg-[#22252c]`}
+            className={`${btn} bg-[var(--bw-surface)] text-white hover:bg-[#22252c]`}
             onClick={() => onOpen(mintedOutpoint)}
           >
             Open

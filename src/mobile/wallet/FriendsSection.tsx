@@ -65,7 +65,7 @@ export const FriendsSection = () => {
       {me && (
         <div
           className="flex items-center gap-3 rounded-xl px-3 py-3"
-          style={{ background: '#17191E', border: '1px solid rgb(var(--bw-accent-rgb)/0.27)' }}
+          style={{ background: 'var(--bw-surface)', border: '1px solid rgb(var(--bw-accent-rgb)/0.27)' }}
         >
           <div className="flex-1 min-w-0">
             <div className="text-sm font-bold text-white">${me.ticker.replace(/^\$/, '')}</div>
@@ -98,7 +98,7 @@ export const FriendsSection = () => {
           value={adding}
           onChange={(e) => setAdding(e.target.value)}
           placeholder="Add a friend: name or paymail"
-          className="flex-1 min-w-0 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
+          className="flex-1 min-w-0 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
           autoCapitalize="none"
           autoCorrect="off"
         />
@@ -122,7 +122,7 @@ export const FriendsSection = () => {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search friends"
-          className="rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
+          className="rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
         />
       )}
       {contacts.length === 0 ? (

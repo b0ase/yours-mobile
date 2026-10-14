@@ -155,7 +155,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
   if (tile.screen) {
     const Icon = SCREEN_ICON[tile.screen];
     return (
-      <div className={`${ICON} flex items-center justify-center`} style={{ background: '#17191E' }}>
+      <div className={`${ICON} flex items-center justify-center`} style={{ background: 'var(--bw-surface)' }}>
         <Icon size={28} color="var(--bw-accent-hi)" />
       </div>
     );
@@ -171,7 +171,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         loading="lazy"
         width={60}
         height={60}
-        className={`${ICON} object-cover bg-[#17191E]`}
+        className={`${ICON} object-cover bg-[var(--bw-surface)]`}
       />
     );
   }
@@ -186,7 +186,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
     );
   }
   return (
-    <div className={`${ICON} bg-[#17191E] flex items-center justify-center`}>
+    <div className={`${ICON} bg-[var(--bw-surface)] flex items-center justify-center`}>
       <Globe size={26} style={{ color: 'var(--bw-accent-hi)' }} />
     </div>
   );
@@ -910,7 +910,7 @@ const BrowserPage = ({
             <button
               key={url}
               onClick={() => go(url)}
-              className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+              className="shrink-0 flex items-center gap-1 rounded-full bg-[var(--bw-surface)]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
             >
               <Clock size={11} /> {hostOf(url)}
             </button>
@@ -953,7 +953,7 @@ const BrowserPage = ({
             aria-label={`${screenTitle(x, i)}. Tap to rename`}
             // Solid background, no blur: cheap to keep stuck while scrolling on old iPhones.
             className="sticky top-0 z-[2] -mx-4 px-4 py-2 text-left text-[12px] font-bold uppercase tracking-wider border-0"
-            style={{ background: '#010101', color: 'var(--bw-accent-hi)' }}
+            style={{ background: 'var(--bw-bg)', color: 'var(--bw-accent-hi)' }}
           >
             {screenTitle(x, i)}
           </button>
@@ -1022,7 +1022,7 @@ const BrowserPage = ({
                   <button
                     key={url}
                     onClick={() => go(url)}
-                    className="shrink-0 flex items-center gap-1 rounded-full bg-[#17191E]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
+                    className="shrink-0 flex items-center gap-1 rounded-full bg-[var(--bw-surface)]/80 px-3 py-1.5 text-[11px] text-[#98A2B3]"
                   >
                     <Clock size={11} /> {hostOf(url)}
                   </button>
@@ -1134,7 +1134,7 @@ const BrowserPage = ({
             className="w-full px-4 pt-3 pb-2 flex flex-col gap-2 backdrop-blur-md"
             style={{ background: 'rgba(1,1,1,0.75)' }}
           >
-            <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]" role="tablist" aria-label="App pages">
+            <div className="flex gap-1 rounded-xl p-1 bg-[var(--bw-surface)]" role="tablist" aria-label="App pages">
               {PAGES.map((label, i) => (
                 <button
                   key={label}
@@ -1193,7 +1193,7 @@ const BrowserPage = ({
           }}
         >
           <form onSubmit={submit} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 rounded-full bg-[#17191E] pl-4 pr-1">
+            <div className="flex items-center gap-2 rounded-full bg-[var(--bw-surface)] pl-4 pr-1">
               <Search size={15} style={{ color: '#98A2B3' }} />
               <input
                 value={address}
@@ -1233,7 +1233,7 @@ const BrowserPage = ({
               onClick={() => setInfo(null)}
             >
               <motion.div
-                className="w-full rounded-t-3xl bg-[#17191E] px-5 pt-5 flex flex-col gap-4"
+                className="w-full rounded-t-3xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-4"
                 style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
                 initial={{ y: 40 }}
                 animate={{ y: 0 }}

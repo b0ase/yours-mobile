@@ -29,7 +29,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
         </p>
       )}
       {sites.map((s) => (
-        <div key={s.c} className="mb-2 rounded-xl p-3" style={{ background: '#17191E' }}>
+        <div key={s.c} className="mb-2 rounded-xl p-3" style={{ background: 'var(--bw-surface)' }}>
           <div className="flex items-center gap-3">
             {s.agent ? <Terminal size={18} color="#BDB4FE" /> : <Globe size={18} color={MUTED} />}
             <div className="min-w-0 flex-1">

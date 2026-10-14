@@ -537,7 +537,7 @@ const TopNavBar = () => {
                   type="button"
                   onClick={() => go()}
                   className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left border-0 active:bg-white/10"
-                  style={{ background: '#17191E' }}
+                  style={{ background: 'var(--bw-surface)' }}
                 >
                   <span
                     className="flex h-8 w-8 items-center justify-center rounded-full"

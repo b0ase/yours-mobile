@@ -176,7 +176,7 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
           onClick={() => state !== 'buying' && setState('idle')}
         >
           <div
-            className="w-full md:max-w-[420px] rounded-t-2xl md:rounded-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+            className="w-full md:max-w-[420px] rounded-t-2xl md:rounded-2xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -246,7 +246,7 @@ const PersonRow = ({ t, rate }: { t: PersonToken; rate: number }) => (
 
 const Section = ({ title, list, rate }: { title: string; list: PersonToken[]; rate: number }) =>
   list.length ? (
-    <section className="rounded-2xl bg-[#17191E] border border-[#2b2f36] overflow-hidden">
+    <section className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
       <h2 className="text-xs font-bold m-0 px-3 py-2" style={{ color: MUTED }}>
         {title}
       </h2>

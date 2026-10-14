@@ -128,7 +128,7 @@ export const SellMyToken = ({ token, rate }: { token: PersonToken; rate: number 
   const price = s?.price_usd_cents ?? token.priceUsdCents;
   return (
     <>
-      <section className="flex items-center gap-3 rounded-2xl bg-[#17191E] border border-[#3a2f0c] px-3 py-2.5">
+      <section className="flex items-center gap-3 rounded-2xl bg-[var(--bw-surface)] border border-[#3a2f0c] px-3 py-2.5">
         <div className="flex-1 min-w-0">
           <div className="font-bold text-white truncate">Your token ${token.ticker}</div>
           <div className="text-[11px] truncate" style={{ color: MUTED }}>
@@ -151,7 +151,7 @@ export const SellMyToken = ({ token, rate }: { token: PersonToken; rate: number 
           onClick={() => !busy && setOpen(false)}
         >
           <div
-            className="w-full md:max-w-[440px] max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3 text-sm"
+            className="w-full md:max-w-[440px] max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3 text-sm"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
             onClick={(e) => e.stopPropagation()}
           >

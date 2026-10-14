@@ -599,7 +599,7 @@ export const CallsList = ({
                   {filterMenu && (
                     <div
                       role="menu"
-                      className="absolute left-0 top-full mt-1 z-20 w-36 rounded-xl border border-[#2b2f36] bg-[#17191E] py-1 shadow-xl"
+                      className="absolute left-0 top-full mt-1 z-20 w-36 rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] py-1 shadow-xl"
                     >
                       {RECENTS_FILTERS.map((x) => (
                         <button
@@ -779,7 +779,7 @@ export const CallsList = ({
                     aria-label="Who to call"
                     autoCapitalize="none"
                     autoCorrect="off"
-                    className="flex-1 min-w-0 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-3 text-sm text-white outline-none"
+                    className="flex-1 min-w-0 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-3 text-sm text-white outline-none"
                   />
                   <button
                     onClick={() => void callName()}

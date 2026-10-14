@@ -157,7 +157,7 @@ export const PotsScreen = ({ onClose, openFund = false }: { onClose: () => void;
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <Header title="Subscriptions" onBack={onClose} />
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <p className="text-sm m-0" style={{ color: MUTED }}>
@@ -304,7 +304,7 @@ const PotScreen = ({
 
   if (!pot || !agent || !acct)
     return createPortal(
-      <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: '#010101' }}>
+      <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
         <Header title="Pot" onBack={onClose} />
         <p className="text-sm text-center px-4 pt-10 m-0" style={{ color: MUTED }}>
           This pot isn’t loaded on this device.
@@ -316,7 +316,7 @@ const PotScreen = ({
   const section = 'rounded-2xl p-3 flex flex-col gap-2';
 
   return createPortal(
-    <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <Header title={pot.name} onBack={onClose} />
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <div className={section} style={{ background: CARD }}>
@@ -397,7 +397,7 @@ const PotScreen = ({
               setTimeout(() => setCopied(false), 1500);
             }}
             className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-mono border-0 text-left"
-            style={{ background: '#010101', color: '#D0D5DD' }}
+            style={{ background: 'var(--bw-bg)', color: '#D0D5DD' }}
           >
             {copied ? <Check size={13} color="#2ecc71" /> : <Copy size={13} color={MUTED} />} {address}
           </button>

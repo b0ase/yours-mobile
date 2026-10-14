@@ -98,7 +98,7 @@ export const TicketsPanel = ({
 
   return (
     <section className="flex flex-col gap-2">
-      <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[#17191E] px-3 py-2.5">
+      <p className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[var(--bw-surface)] px-3 py-2.5">
         <TicketIcon size={11} className="inline mr-1" />
         {TICKET_COPY} Start your own from Wallet → Mint → Mint a chatroom.
       </p>
@@ -115,7 +115,7 @@ export const TicketsPanel = ({
           s?.members != null ? `${s.members} ${s.members === 1 ? 'member' : 'members'}` : null,
         ].filter(Boolean);
         return (
-          <div key={t.tokenId} className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3">
+          <div key={t.tokenId} className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3">
             <button onClick={() => onBuy(t, holder)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
               {art(t.icon, t.tokenId)}
               <div className="min-w-0 flex-1">

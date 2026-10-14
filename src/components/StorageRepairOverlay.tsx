@@ -166,7 +166,7 @@ export const StorageRepairOverlay = () => {
 
             {/* Steps */}
             <div
-              className="w-full rounded-xl px-4 py-1 bg-[#17191E]"
+              className="w-full rounded-xl px-4 py-1 bg-[var(--bw-surface)]"
               style={{ border: `1px solid ${running ? 'rgba(152,162,179,0.12)' : `${color}33`}` }}
             >
               {STEPS.map((step, i) => {

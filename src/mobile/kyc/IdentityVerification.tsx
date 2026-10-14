@@ -193,7 +193,7 @@ export const IdentityVerification = () => {
                 <>
                   <div
                     className="text-[11px] whitespace-pre-wrap rounded-lg p-2 max-h-48 overflow-y-auto"
-                    style={{ background: '#010101', color: fg }}
+                    style={{ background: 'var(--bw-bg)', color: fg }}
                   >
                     {choice.statement}
                   </div>

@@ -14,7 +14,7 @@ const MiniPlayer = () => {
   const btn = 'p-2 rounded-full active:bg-[#2b2f36]';
   return (
     <div
-      className="absolute left-2 right-2 z-[101] rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 pt-2 pb-1"
+      className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 pt-2 pb-1"
       style={{ bottom: '4rem' }}
     >
       <div className="flex items-center gap-2">

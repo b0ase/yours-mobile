@@ -1328,7 +1328,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   return (
     <div
       className="w-full h-full flex flex-col overflow-y-auto overflow-x-hidden overscroll-x-none pb-44"
-      style={{ background: '#010101' }}
+      style={{ background: 'var(--bw-bg)' }}
     >
       <TopNav />
       <div className="mt-14 flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]">{body}</div>

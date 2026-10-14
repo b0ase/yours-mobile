@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { resolveImageUrl } from '../../hooks/useIdentity';
+import { useAccentId } from '../theme/useAccent';
 import { bavatarDataUri, getLocalAvatar, onAvatarChange, pickAvatar, resolveAvatarUrl } from './avatar';
 
 /** The current (or given) account's avatar URL; with no picture, its bAvatar ('' = gold b). Re-renders on change. */
@@ -25,10 +26,12 @@ export const useAvatar = (identityAddress?: string) => {
     }
   };
   const [url, setUrl] = useState(read);
+  // The generated bAvatar is shown in the app accent, so a theme change redraws it.
+  const accentId = useAccentId();
   useEffect(() => {
     setUrl(read());
     return onAvatarChange(() => setUrl(read()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityAddress]);
+  }, [identityAddress, accentId]);
   return url;
 };

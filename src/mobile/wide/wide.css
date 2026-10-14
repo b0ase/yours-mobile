@@ -767,7 +767,7 @@ kbd {
 /* Live wallet pane, b button, command bar */
 .ww-live-pane {
   border-left: 1px solid var(--ww-line);
-  background: #010101;
+  background: var(--bw-bg);
 }
 .ww-live-pane iframe {
   width: 100%;
@@ -933,7 +933,7 @@ kbd {
 .ww-content.view-chat .ww-colwrap {
   border-radius: 16px;
   border: 1px solid var(--ww-line);
-  background: #010101;
+  background: var(--bw-bg);
 }
 .ww-content.view-wallet .ww-colwrap {
   flex: 0 0 460px;

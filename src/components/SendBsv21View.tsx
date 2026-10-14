@@ -526,7 +526,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 onBack();
               }}
               className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 outline-none border-none cursor-pointer"
-              style={{ backgroundColor: '#17191E' }}
+              style={{ backgroundColor: 'var(--bw-surface)' }}
             >
               <ArrowLeft size={16} style={{ color: '#FFFFFF' }} />
             </motion.button>
@@ -748,7 +748,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                   type="button"
                   onClick={() => setSelling(true)}
                   className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
-                  style={{ backgroundColor: '#17191E', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
+                  style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
                 >
                   <Tag size={14} />
                   Sell
@@ -777,7 +777,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 disabled={composing && submitDisabled}
                 className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 // Same look as Buy · Sell · Chat (owner, 4 Oct 2026).
-                style={{ backgroundColor: '#17191E', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
+                style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
               >
                 <Send size={14} />
                 {isProcessing ? 'Sending...' : 'Send'}

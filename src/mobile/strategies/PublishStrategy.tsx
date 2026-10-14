@@ -54,7 +54,7 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
   };
 
   const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border w-full';
-  const style = { background: '#010101', borderColor: LINE };
+  const style = { background: 'var(--bw-bg)', borderColor: LINE };
   if (done)
     return (
       <div className="flex flex-col gap-2">

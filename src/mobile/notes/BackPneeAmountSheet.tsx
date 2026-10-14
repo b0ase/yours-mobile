@@ -89,7 +89,10 @@ export const BackPneeAmountSheet = ({
           disabled={!bsv}
           onClick={() => bsv && onContinue(bsv)}
           className="rounded-xl py-3 text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-          style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+          style={{
+            background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+            color: 'var(--bw-on-accent)',
+          }}
         >
           Continue
         </button>

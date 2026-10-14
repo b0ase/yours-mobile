@@ -49,7 +49,7 @@ export const MyTokenListings = ({ emptyText, tokenId }: { emptyText?: string; to
         return (
           <div
             key={l.outpoint}
-            className="flex items-center gap-3 rounded-xl border border-[#2b2f36] bg-[#17191E] px-3 py-2.5"
+            className="flex items-center gap-3 rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] px-3 py-2.5"
           >
             <div className="min-w-0 flex-1">
               <div className="text-sm font-bold text-white overflow-hidden text-ellipsis whitespace-nowrap">
@@ -71,7 +71,7 @@ export const MyTokenListings = ({ emptyText, tokenId }: { emptyText?: string; to
                 disabled={!!busy}
                 onClick={() => void cancel(l)}
                 className="rounded-lg px-3 py-1.5 text-xs font-bold border disabled:opacity-40"
-                style={{ background: '#17191E', borderColor: '#3a2f0c', color: GOLD }}
+                style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
               >
                 {busy === l.outpoint ? 'Cancelling…' : 'Cancel listing'}
               </button>
