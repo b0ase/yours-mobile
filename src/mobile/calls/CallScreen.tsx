@@ -85,7 +85,7 @@ import { PaidThroughLine, QuoteSheet, SpendLine } from './QuoteSheet';
  * data message + ConnectionService / a full-screen-intent notification — with bit-sign sending
  * the push when it inserts the `wallet_calls` row.
  */
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 const Round = ({
   label,
@@ -255,12 +255,12 @@ export const CallScreen = () => {
             )}
           </div>
         )}
-        {sharing && <div className="text-xs text-[#F5B800]">You are sharing your screen</div>}
+        {sharing && <div className="text-xs text-[color:var(--bw-accent)]">You are sharing your screen</div>}
         {remoteShare && call.phase === 'active' && (
           <div className="text-xs text-[#c9ccd1]">{bareName(peer.label)} is sharing their screen</div>
         )}
         {(note || (error && ((cam && /camera/i.test(error)) || /screen sharing/i.test(error)) ? error : '')) && (
-          <div className="text-xs text-[#F5B800]">{note || error}</div>
+          <div className="text-xs text-[color:var(--bw-accent)]">{note || error}</div>
         )}
         {denied && (
           <MediaPermissionNote

@@ -8,7 +8,7 @@ import { reschedulePotReminders } from './notifyPots';
 import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';

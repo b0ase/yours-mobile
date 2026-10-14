@@ -147,7 +147,7 @@ export const MediaSection = () => {
           <Play size={14} className="absolute top-1.5 right-1.5" color="#fff" fill="#fff" />
         )}
         {item.pending && (
-          <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold text-[#F5B800]">
+          <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold text-[color:var(--bw-accent)]">
             Pending
           </span>
         )}
@@ -206,7 +206,7 @@ export const MediaSection = () => {
         {error && (
           <div className="flex items-center justify-between gap-3 rounded-xl bg-[#17191E] px-3 py-2">
             <p className="text-xs text-[#98A2B3]">{error}</p>
-            <button onClick={reload} className="shrink-0 text-xs font-semibold text-[#FFD24D]">
+            <button onClick={reload} className="shrink-0 text-xs font-semibold text-[color:var(--bw-accent-hi)]">
               Try again
             </button>
           </div>
@@ -227,7 +227,7 @@ export const MediaSection = () => {
                 type="button"
                 onClick={() => navigate('/m/media/browse')}
                 className="rounded-xl px-4 py-2 text-sm font-bold"
-                style={{ background: '#FFD24D', color: '#1a1300' }}
+                style={{ background: 'var(--bw-accent-hi)', color: '#1a1300' }}
               >
                 Browse the store
               </button>

@@ -69,7 +69,7 @@ import {
   type RecentsFilter,
 } from './phone';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const GREEN = '#22c55e';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 // bPhone screens are bWalletX only: the store bundle carries neither (Rollup drops the dead branch).
@@ -193,7 +193,10 @@ const BPhoneCard = ({ profile, onOpen }: { profile: BPhoneProfile | null; onOpen
     >
       <span
         className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: 'rgba(255,210,77,0.12)', border: '1px solid rgba(255,210,77,0.35)' }}
+        style={{
+          background: 'rgb(var(--bw-accent-hi-rgb) / 0.12)',
+          border: '1px solid rgb(var(--bw-accent-hi-rgb) / 0.35)',
+        }}
       >
         <Phone size={17} color={GOLD} />
       </span>

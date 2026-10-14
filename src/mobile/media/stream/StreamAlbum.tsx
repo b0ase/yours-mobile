@@ -35,7 +35,7 @@ export type Headline = { playing: boolean; duration?: number; onPlay: () => void
  * session key; after that each 1-second segment is its own transaction (Teranode throughput demo), with no
  * popups. Stop, leaving, or 60 s hidden returns what's left to the wallet.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#111216';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -512,7 +512,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           <button
             onClick={playHeadline}
             className="flex items-center gap-3 py-2 text-left"
-            style={{ borderBottom: `1px solid ${LINE}`, background: 'rgba(255,210,77,0.06)' }}
+            style={{ borderBottom: `1px solid ${LINE}`, background: 'rgb(var(--bw-accent-hi-rgb) / 0.06)' }}
           >
             <span className="w-6 text-xs text-right" style={{ color: GOLD }}>
               {headline.playing ? '▶' : 1}

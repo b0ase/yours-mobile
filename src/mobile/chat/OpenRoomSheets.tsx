@@ -24,7 +24,7 @@ import {
 } from './openRooms';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';

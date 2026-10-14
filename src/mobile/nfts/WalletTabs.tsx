@@ -31,7 +31,7 @@ export const WalletTabs = ({ active }: { active: WalletKind }) => {
             navigate(t.to);
           }}
           className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-            t.id === active ? 'bg-[#F5B800] text-[#010101]' : 'text-[#D0D5DD] hover:bg-white/10'
+            t.id === active ? 'bg-[color:var(--bw-accent)] text-[#010101]' : 'text-[#D0D5DD] hover:bg-white/10'
           }`}
         >
           {t.label}

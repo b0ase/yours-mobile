@@ -18,7 +18,7 @@ import { APP_NAME } from '../storeBuild';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 const SATS = 100_000_000;

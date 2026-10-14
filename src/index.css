@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './accent.css';
 
 /* Wallet frame size. The extension popup is fixed; embedders (e.g. a mobile
    shell) can override these to fill the screen and clear system bars. */

@@ -3,7 +3,7 @@ import { Video } from 'lucide-react';
 import { contentUrls } from '../market/indexer';
 import { useVideoPoster } from './videoCover';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 /** Gold video tile: icon, "Video" and the title (when there's room). Never a blank square. */
 export const VideoFallback = ({ title, compact }: { title?: string; compact?: boolean }) => (

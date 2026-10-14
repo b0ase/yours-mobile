@@ -17,7 +17,7 @@ import { myStrategies } from '../strategies/myStrategies';
 import { MARKET_ENABLED } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
@@ -75,7 +75,7 @@ export const StrategySection = ({ id }: { id: string }) => {
           <span
             className="text-[9px] font-bold rounded px-1.5 py-0.5"
             style={{
-              background: live ? '#12B76A22' : '#F5B80022',
+              background: live ? '#12B76A22' : 'rgb(var(--bw-accent-rgb)/0.13)',
               color: live ? '#6CE9A6' : GOLD,
               letterSpacing: '0.05em',
             }}
@@ -109,7 +109,7 @@ export const StrategySection = ({ id }: { id: string }) => {
             type="button"
             onClick={() => setStrategyMode(id, 'paper')}
             className={btn}
-            style={{ background: '#F5B80022', color: GOLD }}
+            style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
           >
             Back to paper
           </button>
@@ -145,7 +145,7 @@ export const StrategySection = ({ id }: { id: string }) => {
               type="button"
               onClick={() => setPublishing(true)}
               className={`${btn} flex-1`}
-              style={{ background: '#F5B80022', color: GOLD }}
+              style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
             >
               Sell
             </button>
@@ -194,7 +194,7 @@ export const StrategySection = ({ id }: { id: string }) => {
           type="button"
           onClick={() => setText(JSON.stringify(exampleStrategy(), null, 2))}
           className={`${btn} flex-1`}
-          style={{ background: '#F5B80022', color: GOLD }}
+          style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
         >
           Start from example
         </button>

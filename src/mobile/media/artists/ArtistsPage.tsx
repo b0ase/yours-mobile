@@ -20,7 +20,7 @@ import { BMUSIC_HOST, SHARE_ALBUMS, type ShareAlbum } from '../../../web/shareAl
  * cover, bio, tracks with live original prices, the sponsor pot and top listeners from the bMusic server.
  * bWalletX only: MobileRoutes mounts it behind PAY_STREAM_ENABLED, so a store build has no prices in it.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 const HOME_ROUTE = '/m/media';
@@ -144,7 +144,7 @@ const Index = () => {
                 src={coverOf(a)}
                 alt=""
                 className="w-[220px] aspect-square object-cover rounded-xl"
-                style={{ boxShadow: `0 0 0 1px ${GOLD}80` }}
+                style={{ boxShadow: `0 0 0 1px color-mix(in srgb, ${GOLD} 50%, transparent)` }}
               />
               <div className="mt-2 font-bold text-white">{a.artist}</div>
               <div className="text-[13px]" style={{ color: MUTED }}>
@@ -180,7 +180,9 @@ const Artist = ({ albums }: { albums: ShareAlbum[] }) => {
         src={coverOf(a)}
         alt={a.artist}
         className="w-full max-w-[360px] aspect-square object-cover rounded-xl self-start"
-        style={{ boxShadow: `0 0 0 1px ${GOLD}80, 0 0 60px ${GOLD}26` }}
+        style={{
+          boxShadow: `0 0 0 1px color-mix(in srgb, ${GOLD} 50%, transparent), 0 0 60px color-mix(in srgb, ${GOLD} 15%, transparent)`,
+        }}
       />
       <div className="flex-1 min-w-[260px] text-white">
         <div className="text-[12px] font-bold tracking-[.18em] uppercase" style={{ color: GOLD }}>
@@ -380,7 +382,9 @@ export const GuestAlbum = () => {
         src={coverOf(al)}
         alt={al.title}
         className="w-full max-w-[360px] aspect-square object-cover rounded-xl self-start"
-        style={{ boxShadow: `0 0 0 1px ${GOLD}80, 0 0 60px ${GOLD}26` }}
+        style={{
+          boxShadow: `0 0 0 1px color-mix(in srgb, ${GOLD} 50%, transparent), 0 0 60px color-mix(in srgb, ${GOLD} 15%, transparent)`,
+        }}
       />
       <div className="flex-1 min-w-[260px] text-white">
         <div className="text-[12px] font-bold tracking-[.18em] uppercase" style={{ color: GOLD }}>

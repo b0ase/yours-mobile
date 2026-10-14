@@ -12,7 +12,7 @@ import type { MediaItem } from '../media/useWalletMedia';
 import { CardNftGrid } from './CardNftGrid';
 import { publishPaymailAvatar } from './pictureReturn';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 const XLogo = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -58,8 +58,8 @@ const Option = ({
     onClick={onClick}
     disabled={busy}
     aria-pressed={on}
-    className="group flex w-full items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-left transition-colors duration-150 ease-out hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#F5B800] disabled:opacity-60"
-    style={on ? { borderColor: 'rgba(245,184,0,0.55)' } : undefined}
+    className="group flex w-full items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-left transition-colors duration-150 ease-out hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--bw-accent)] disabled:opacity-60"
+    style={on ? { borderColor: 'rgb(var(--bw-accent-rgb) / 0.55)' } : undefined}
   >
     <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111216] text-white">
       {pic ? <img src={pic} alt="" className="h-full w-full object-cover" draggable={false} /> : icon}
@@ -177,7 +177,7 @@ export default function PictureSheet({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-2 rounded-full border-0 bg-transparent p-2 text-[#98A2B3] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#F5B800]"
+            className="-mr-2 rounded-full border-0 bg-transparent p-2 text-[#98A2B3] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--bw-accent)]"
           >
             <X size={18} />
           </button>

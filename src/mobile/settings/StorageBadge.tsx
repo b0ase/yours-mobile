@@ -5,7 +5,7 @@ import { useStorageRepair } from '../../hooks/useStorageRepair';
 import { ErrorActions } from '../errors/ErrorActions';
 import { SYNC_HEALTH_KEY, storageLabel, syncHealthLabel, type SyncHealth } from '../../services/storageHealth';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const RED = '#F97066';
 const oneLine = 'block overflow-hidden text-ellipsis whitespace-nowrap';

@@ -40,7 +40,7 @@ type Props = {
 
 type Page = 'choose' | 'file-password' | 'weak' | 'file-ready' | 'phrase-password' | 'phrase-show' | 'quiz' | 'done';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const RED = '#FDA29B';
 
@@ -465,7 +465,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
                   <button
                     onClick={() => go('phrase-password')}
                     className="w-full rounded-xl py-3 font-bold border-0"
-                    style={{ background: 'transparent', color: GOLD, border: `1px solid ${GOLD}88` }}
+                    style={{
+                      background: 'transparent',
+                      color: GOLD,
+                      border: `1px solid color-mix(in srgb, ${GOLD} 53%, transparent)`,
+                    }}
                   >
                     Write down the recovery phrase instead
                   </button>

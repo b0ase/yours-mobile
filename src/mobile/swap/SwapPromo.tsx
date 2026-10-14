@@ -10,7 +10,7 @@ import { stageLabel } from './promo';
  * gold pulse dot. Permanent (owner, 10 Oct 2026: no close button; people who hid it couldn't get it back, so an
  * old 'bwx.swapPromoDismissed' flag is ignored). bWalletX only (lazy chunk, SWAP_ENABLED in BuyBsv.tsx).
  */
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PROMO: SwapCoin[] = [POPULAR_COINS[0], POPULAR_COINS[1], POPULAR_COINS[2]]; // BTC, ETH, USDT
 let imgCache: SwapCoin[] | null = null;
@@ -66,7 +66,7 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
         onClick={onOpen}
         aria-label={active ? `${title}, ${sub}. Open to track it` : `${title}. ${sub}`}
         className="w-full min-h-[52px] pl-3 pr-3 py-2 rounded-xl border flex items-center gap-3 text-left cursor-pointer"
-        style={{ background: '#17191E', borderColor: active ? '#f5b80099' : '#2b2f36' }}
+        style={{ background: '#17191E', borderColor: active ? 'rgb(var(--bw-accent-rgb)/0.6)' : '#2b2f36' }}
       >
         {active ? (
           <span className="relative w-[22px] h-[22px] grid place-items-center shrink-0" aria-hidden="true">

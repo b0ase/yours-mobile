@@ -17,7 +17,7 @@ const usd = (dollars: number) => {
   return v >= 1 ? `${s}${v.toFixed(2)}` : v >= 0.01 ? `${s}${v.toFixed(4)}` : `${s}${v.toPrecision(2)}`;
 };
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const UP = '#2ecc71';
 const DOWN = '#F04438';
 const MUTED = '#98A2B3';
@@ -89,7 +89,10 @@ const Ranges = <T extends string>({
         type="button"
         onClick={() => onChange(o)}
         className="flex-1 py-1 rounded-lg text-[11px] font-bold border-0 cursor-pointer"
-        style={{ background: o === value ? `${GOLD}22` : 'transparent', color: o === value ? GOLD : MUTED }}
+        style={{
+          background: o === value ? `color-mix(in srgb, ${GOLD} 13%, transparent)` : 'transparent',
+          color: o === value ? GOLD : MUTED,
+        }}
       >
         {o}
       </button>

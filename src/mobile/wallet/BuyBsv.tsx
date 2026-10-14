@@ -18,7 +18,7 @@ import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { HistoryButton } from './HistoryButton';
 import { formatUSD } from '../../utils/format';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
 /** Live BSV price for the bar (re-read every minute while shown). */
@@ -194,7 +194,7 @@ export const BsvPriceBar = ({
           className={`${CELL} text-sm font-extrabold`}
           style={{
             background: 'linear-gradient(135deg, #de973f, #f9dd63)',
-            borderColor: '#f5b80066',
+            borderColor: 'rgb(var(--bw-accent-rgb)/0.4)',
             color: '#1a1300',
           }}
         >

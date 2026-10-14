@@ -4,7 +4,7 @@
   overflow-y: auto;
   padding: 16px 24px 140px;
   color: #fff;
-  --nf-gold: #f5b800;
+  --nf-gold: var(--bw-accent);
   --nf-line: rgba(255, 255, 255, 0.08);
   --nf-muted: #98a2b3;
 }
@@ -56,8 +56,8 @@
   color: #fff;
 }
 .nf-chips button.on {
-  background: rgba(245, 184, 0, 0.14);
-  border-color: rgba(245, 184, 0, 0.45);
+  background: rgb(var(--bw-accent-rgb) / 0.14);
+  border-color: rgb(var(--bw-accent-rgb) / 0.45);
   color: var(--nf-gold);
 }
 .nf-actions button:disabled {
@@ -100,10 +100,10 @@
   background: rgba(255, 255, 255, 0.04);
 }
 .nf-row.unread {
-  background: rgba(245, 184, 0, 0.05);
+  background: rgb(var(--bw-accent-rgb) / 0.05);
 }
 .nf-row.unread:hover {
-  background: rgba(245, 184, 0, 0.09);
+  background: rgb(var(--bw-accent-rgb) / 0.09);
 }
 .nf-icon {
   flex: none;
@@ -116,7 +116,7 @@
   color: var(--nf-muted);
 }
 .nf-row.unread .nf-icon {
-  background: rgba(245, 184, 0, 0.14);
+  background: rgb(var(--bw-accent-rgb) / 0.14);
   color: var(--nf-gold);
 }
 .nf-main {
@@ -168,7 +168,7 @@
 .nf-empty img {
   border-radius: 50%;
   margin-bottom: 20px;
-  box-shadow: 0 10px 40px rgba(245, 184, 0, 0.15);
+  box-shadow: 0 10px 40px rgb(var(--bw-accent-rgb) / 0.15);
 }
 .nf-empty-title {
   font-size: 16px;

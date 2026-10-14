@@ -38,7 +38,7 @@ import {
   type Trade,
 } from './exchangeData';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const GREEN = '#A1FF8B';
 const RED = '#FF6B6B';
 const MUTED = '#98A2B3';

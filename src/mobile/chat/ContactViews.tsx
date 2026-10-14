@@ -8,7 +8,7 @@ import { avatarHue, roomInitial } from './messages';
 import { canCall, canMessage, contactLine, payTarget, SOURCE_LABEL, type Contact } from './contacts';
 
 /** Shared contact UI for Chat › DMs › Contacts and Chat › Calls › Contacts / Favourites. */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';

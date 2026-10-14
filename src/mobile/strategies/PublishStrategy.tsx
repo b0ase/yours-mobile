@@ -7,7 +7,7 @@ import { publishStrategy } from './market';
 import { rememberStrategy } from './myStrategies';
 import { publishProblems, sealStrategy, SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const RISKS = ['Low', 'Medium', 'High', 'Experimental'] as const;

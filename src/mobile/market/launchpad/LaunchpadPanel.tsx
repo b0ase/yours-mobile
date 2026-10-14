@@ -37,7 +37,7 @@ import { localLaunches, mergeLaunches, type Launch } from '../../exchange/launch
 import { registryLaunches } from '../../exchange/launch/launchNet';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#2b2f36';
 const FEE_PCT = `${(Number(HOUSE_BPS + ROUTE_BPS) / 100).toFixed(1)}%`;
 
@@ -108,7 +108,7 @@ export const LaunchpadPanel = () => {
           <button
             onClick={load}
             className="rounded-full px-4 py-2 text-sm font-semibold"
-            style={{ background: '#F5B800', color: '#010101' }}
+            style={{ background: 'var(--bw-accent)', color: '#010101' }}
           >
             Retry
           </button>
@@ -333,7 +333,7 @@ const CoinSheet = ({
     </div>
   );
   const input =
-    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[#FFD24D]';
+    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[color:var(--bw-accent-hi)]';
   const picks =
     side === 'buy' ? BUY_PICKS : held && held > 0n ? [25n, 50n, 100n].map((p) => ((held * p) / 100n).toString()) : [];
 

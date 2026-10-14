@@ -5,7 +5,7 @@ import { cancelListing, myListings, type MyListing } from './sellActions';
 import { fromRaw, onListingsChanged, removeRecord } from './sell';
 import { moneyNow } from '../money/money';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const STATUS: Record<MyListing['status'], { label: string; color: string }> = {
   live: { label: 'On sale', color: '#A1FF8B' },
   indexing: { label: 'Indexing…', color: GOLD },

@@ -124,7 +124,7 @@ export const IdentityVerification = () => {
             <button
               type="button"
               className={`${btn} flex items-center gap-1`}
-              style={{ background: '#FFD24D', color: '#000' }}
+              style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
               onClick={() => void openDappBrowser(KYC_PAGE_URL)}
             >
               Get verified <ExternalLink size={12} />
@@ -156,7 +156,7 @@ export const IdentityVerification = () => {
               <button
                 type="button"
                 className={btn}
-                style={{ background: '#FFD24D', color: '#000' }}
+                style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
                 onClick={() => setQualifying((q) => !q)}
               >
                 Qualify as an investor
@@ -165,7 +165,7 @@ export const IdentityVerification = () => {
           </div>
           {qualifying && !qualified && (
             <div className="flex flex-col gap-2">
-              <p className="text-[11px] font-semibold" style={{ color: '#FFD24D' }}>
+              <p className="text-[11px] font-semibold" style={{ color: 'var(--bw-accent-hi)' }}>
                 [LEGAL REVIEW] Statement wording is pending legal review.
               </p>
               <p className="text-[11px]" style={{ color: gray }}>
@@ -211,7 +211,7 @@ export const IdentityVerification = () => {
                     type="button"
                     disabled={!ticked || busy || choice.placeholder}
                     className={btn}
-                    style={{ background: '#FFD24D', color: '#000' }}
+                    style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
                     onClick={() => void sign()}
                   >
                     {busy ? 'Signing…' : 'Sign with my identity key'}

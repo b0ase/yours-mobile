@@ -103,7 +103,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
         <AccountAvatar src={avatar} size={64} />
         <span
           className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full"
-          style={{ background: '#FFD24D' }}
+          style={{ background: 'var(--bw-accent-hi)' }}
         >
           <Camera size={13} color="#000" />
         </span>
@@ -146,7 +146,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
           disabled={busy}
           onClick={() => setConfirming(true)}
           className="text-[11px] font-semibold bg-transparent border-0 p-0 cursor-pointer underline disabled:opacity-40"
-          style={{ color: '#FFD24D' }}
+          style={{ color: 'var(--bw-accent-hi)' }}
         >
           Publish photo to my public profile (~{moneyNow(cost)})
         </button>

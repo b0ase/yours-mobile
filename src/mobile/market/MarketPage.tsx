@@ -437,7 +437,7 @@ const MarketPage = () => {
           aria-pressed={launchOn}
           onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
           className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
-          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px #F5B800' } : { opacity: 0.85 }}
+          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px var(--bw-accent)' } : { opacity: 0.85 }}
         >
           <Rocket size={16} /> {CURVE_LABEL}
           {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
@@ -457,7 +457,7 @@ const MarketPage = () => {
               }}
               className="flex min-h-[44px] items-center justify-center rounded-xl px-1 py-2 text-center text-[12px] font-semibold leading-tight"
               style={{
-                background: on ? '#F5B800' : '#17191E',
+                background: on ? 'var(--bw-accent)' : '#17191E',
                 color: c.soon ? '#667085' : on ? '#010101' : '#98A2B3',
               }}
             >
@@ -658,7 +658,7 @@ const MarketPage = () => {
       </div>
       <span
         className="shrink-0 rounded-full px-2 py-[1px] text-[10px] font-bold"
-        style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+        style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
       >
         Personal token
       </span>
@@ -726,7 +726,7 @@ const MarketPage = () => {
               void loadBoard();
             }}
             className="rounded-full px-4 py-2 text-sm font-semibold"
-            style={{ background: '#F5B800', color: '#010101' }}
+            style={{ background: 'var(--bw-accent)', color: '#010101' }}
           >
             Retry
           </button>
@@ -876,7 +876,7 @@ const MarketPage = () => {
             <button
               onClick={() => openTicketRoomInChat(ticketPage.ticket.tokenId, handleSelect)}
               className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
-              style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+              style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
             >
               Open room
             </button>
@@ -886,7 +886,7 @@ const MarketPage = () => {
             kind={room.ref.kind}
             id={room.ref.id}
             className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
-            style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+            style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
           />
         )}
       </div>
@@ -899,7 +899,7 @@ const MarketPage = () => {
             <div className="mt-1">Event: {eventLabel(ticketPage.ticket.eventDate)}</div>
           )}
           {ticketPage.holder && (
-            <div className="mt-1 text-[#FFD24D]">You hold a ticket: the room is yours to open.</div>
+            <div className="mt-1 text-[color:var(--bw-accent-hi)]">You hold a ticket: the room is yours to open.</div>
           )}
         </div>
       )}

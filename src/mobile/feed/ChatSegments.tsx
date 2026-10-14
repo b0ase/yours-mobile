@@ -16,7 +16,7 @@ const SEGMENTS: { id: ChatSegment; label: string }[] = [
   { id: 'dms', label: 'DMs' },
   { id: 'calls', label: 'Calls' },
 ];
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 export const SegmentSwitch = ({ value, onChange }: { value: ChatSegment; onChange: (s: ChatSegment) => void }) => (
   <div

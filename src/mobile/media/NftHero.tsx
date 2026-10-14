@@ -28,7 +28,7 @@ import { isShortClip, localInscription, typeChip, viewerFor } from './nftViewer'
 // three.js only loads when a 3D NFT opens (keeps it out of the popup's first bundle).
 const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
-export const GOLD = '#F5B800';
+export const GOLD = 'var(--bw-accent)';
 const AMBER = '#FFB020';
 
 /** Content URL: ORDFS when on chain; for a pending NFT, a blob from the wallet's own copy (or null = not extractable). */
@@ -211,7 +211,10 @@ const AudioView = ({ src, name }: { src: string; name: string }) => {
           <span
             key={i}
             className="flex-1 rounded-full"
-            style={{ height: `${h * 100}%`, background: i / BARS.length <= p ? GOLD : 'rgba(245,184,0,0.25)' }}
+            style={{
+              height: `${h * 100}%`,
+              background: i / BARS.length <= p ? GOLD : 'rgb(var(--bw-accent-rgb) / 0.25)',
+            }}
           />
         ))}
       </div>
@@ -332,8 +335,8 @@ export const StatusPill = ({ status }: { status: NftStatus }) => {
   const s = {
     pending: { label: 'Pending', color: AMBER, bg: 'rgba(255,176,32,0.12)' },
     listed: { label: 'Listed', color: '#A1FF8B', bg: 'rgba(161,255,139,0.12)' },
-    onchain: { label: 'On chain', color: GOLD, bg: 'rgba(245,184,0,0.12)' },
-    checking: { label: 'Checking…', color: '#e6d08a', bg: 'rgba(245,184,0,0.08)' },
+    onchain: { label: 'On chain', color: GOLD, bg: 'rgb(var(--bw-accent-rgb) / 0.12)' },
+    checking: { label: 'Checking…', color: '#e6d08a', bg: 'rgb(var(--bw-accent-rgb) / 0.08)' },
   }[status];
   return (
     <span
@@ -381,7 +384,7 @@ export const NftHeader = ({
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="rounded-md px-2 py-0.5 text-[11px] font-bold tracking-wide"
-          style={{ color: GOLD, background: 'rgba(245,184,0,0.12)' }}
+          style={{ color: GOLD, background: 'rgb(var(--bw-accent-rgb) / 0.12)' }}
         >
           {typeChip(contentType)}
           {size ? ` · ${size}` : ''}

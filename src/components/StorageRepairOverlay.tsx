@@ -38,7 +38,7 @@ const stepStates = (record: ReconcileRecord, outcome: ReconcileOutcome): StepSta
 const Spinner = () => (
   <motion.div
     className="w-3.5 h-3.5 rounded-full"
-    style={{ border: `2px solid ${ACCENT}33`, borderTopColor: ACCENT }}
+    style={{ border: `2px solid color-mix(in srgb, ${ACCENT} 20%, transparent)`, borderTopColor: ACCENT }}
     animate={{ rotate: 360 }}
     transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }}
   />
@@ -125,13 +125,16 @@ export const StorageRepairOverlay = () => {
                 <>
                   <motion.div
                     className="absolute inset-0 rounded-full"
-                    style={{ border: `2px solid ${ACCENT}1F`, borderTopColor: ACCENT }}
+                    style={{
+                      border: `2px solid color-mix(in srgb, ${ACCENT} 12%, transparent)`,
+                      borderTopColor: ACCENT,
+                    }}
                     animate={{ rotate: 360 }}
                     transition={{ repeat: Infinity, duration: 1.4, ease: 'linear' }}
                   />
                   <div
                     className="absolute inset-2 rounded-full flex items-center justify-center"
-                    style={{ background: `${ACCENT}14` }}
+                    style={{ background: `color-mix(in srgb, ${ACCENT} 8%, transparent)` }}
                   >
                     <Database size={20} color={ACCENT} />
                   </div>

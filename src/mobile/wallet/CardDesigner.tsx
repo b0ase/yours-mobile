@@ -1,5 +1,5 @@
 import { hueTurnFor, shownHueFor } from './cardHue';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, X } from 'lucide-react';
 import { CardNftGrid } from './CardNftGrid';
@@ -50,6 +50,8 @@ export function CardDesigner({
   onImage,
   libraryKey,
   currentImage,
+  title = 'Design your card',
+  tabs,
 }: {
   art: string;
   look: CardArtLook;
@@ -68,6 +70,10 @@ export function CardDesigner({
   libraryKey: string;
   /** The picture now on the card (data URI), for outlining it in My pictures. */
   currentImage: string | null;
+  /** Heading: "Theme" when opened as the Theme page's Design your card tab (theme/ThemeSheet.tsx). */
+  title?: string;
+  /** The Theme page's tab bar, shown under the heading. */
+  tabs?: ReactNode;
 }) {
   const [tab, setTab] = useState<'pictures' | 'nfts'>('pictures');
   const [library, setLibrary] = useState<CardPicture[]>(() => loadCardLibrary(libraryKey));
@@ -160,11 +166,12 @@ export function CardDesigner({
   return createPortal(
     <div className="bw-cdes" role="dialog" aria-modal="true" aria-label="Card designer">
       <div className="bw-cdes-top">
-        <b>Design your card</b>
+        <b>{title}</b>
         <button ref={closeRef} type="button" className="bw-cdes-x" aria-label="Close card designer" onClick={onClose}>
           <X size={20} aria-hidden="true" />
         </button>
       </div>
+      {tabs}
       <div
         className="bw-cdes-card"
         role="img"

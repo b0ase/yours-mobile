@@ -133,7 +133,7 @@ export const TicketsPanel = ({
               <button
                 onClick={() => openTicketRoomInChat(t.tokenId, handleSelect)}
                 className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
-                style={{ background: '#2a2208', color: '#FFD24D', border: '1px solid #3a2f0c' }}
+                style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', border: '1px solid #3a2f0c' }}
               >
                 <MessageCircle size={12} /> Open room
               </button>

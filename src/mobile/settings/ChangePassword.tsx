@@ -58,7 +58,7 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
             <button
               onClick={onClose}
               className="mt-8 w-full rounded-xl py-3 font-bold border-0"
-              style={{ background: '#F5B800', color: '#000' }}
+              style={{ background: 'var(--bw-accent)', color: '#000' }}
             >
               Done
             </button>
@@ -104,7 +104,7 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
               type="submit"
               disabled={!ok || !saved || busy}
               className="mt-6 w-[85%] rounded-xl py-3 font-bold border-0"
-              style={{ background: '#F5B800', color: '#000', opacity: ok && saved && !busy ? 1 : 0.4 }}
+              style={{ background: 'var(--bw-accent)', color: '#000', opacity: ok && saved && !busy ? 1 : 0.4 }}
             >
               {busy ? 'Changing…' : 'Change password'}
             </button>

@@ -66,7 +66,7 @@ import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
 const X_MARK = isBWalletX();
 const BAR_BG: string | undefined = undefined;
 const ICON = '#F2F2F0';
-const ACCENT = '#F5B800';
+const ACCENT = 'var(--bw-accent)';
 const RING = '1px solid #2A2A2C';
 const PAIR_LABEL = IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website';
 
@@ -346,7 +346,7 @@ const TopNavBar = () => {
               className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
               style={{
                 border: onCalls ? `1px solid ${ACCENT}` : RING,
-                background: onCalls ? `${ACCENT}33` : 'transparent',
+                background: onCalls ? `color-mix(in srgb, ${ACCENT} 20%, transparent)` : 'transparent',
               }}
             >
               <Phone size={16} color={ACCENT} />
@@ -399,7 +399,7 @@ const TopNavBar = () => {
             className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
             style={{
               border: onCalls ? `1px solid ${ACCENT}` : RING,
-              background: onCalls ? `${ACCENT}33` : 'transparent',
+              background: onCalls ? `color-mix(in srgb, ${ACCENT} 20%, transparent)` : 'transparent',
             }}
           >
             <Phone size={16} color={ACCENT} />
@@ -541,7 +541,7 @@ const TopNavBar = () => {
                 >
                   <span
                     className="flex h-8 w-8 items-center justify-center rounded-full"
-                    style={{ background: '#F5B800' }}
+                    style={{ background: 'var(--bw-accent)' }}
                   >
                     <Settings size={16} color="#010101" />
                   </span>

@@ -68,7 +68,7 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
           <button
             onClick={() => setChoosing(true)}
             className="mt-2 w-[92%] flex items-center justify-center gap-2 rounded-xl py-3 font-bold border-0"
-            style={{ background: '#F5B800', color: '#000' }}
+            style={{ background: 'var(--bw-accent)', color: '#000' }}
           >
             <AtSign size={16} />
             {state === 'has' ? 'Change handle' : 'Choose your handle'}

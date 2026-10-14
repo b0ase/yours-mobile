@@ -27,7 +27,7 @@ import {
   type WalletTicket,
 } from './walletTickets';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const iconUrl = (icon: string | null) => (!icon ? null : isUri(icon) ? icon : `${ONESAT_MAINNET_CONTENT_URL}/${icon}`);
 

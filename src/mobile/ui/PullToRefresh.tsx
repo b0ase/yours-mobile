@@ -20,7 +20,7 @@ const MIN_SPIN_MS = 500;
 // Longest the indicator holds the screen down (owner, 6 Oct 2026: a stuck wallet sync kept the content shifted
 // over the cards until it gave up). The refresh itself carries on and its result still lands.
 const MAX_HOLD_MS = 6_000;
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 const atBottom = (el: HTMLElement) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
 
@@ -202,7 +202,7 @@ export const PullToRefresh = ({ onRefresh, disabled }: Props) => {
             style={{
               background: 'rgba(12,12,12,0.92)',
               boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-              border: '1px solid rgba(255,210,77,0.25)',
+              border: '1px solid rgb(var(--bw-accent-hi-rgb) / 0.25)',
             }}
           >
             <svg

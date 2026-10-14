@@ -178,7 +178,7 @@ const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesR
  * Every post and media ref passes the market safety filter; syndicated images, video posters
  * and previews stay blurred until tapped.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
@@ -2395,7 +2395,7 @@ const PostThread = ({
           <PostCard post={p} a={a} />
         </div>
       ))}
-      <div style={{ background: 'rgba(255,210,77,0.04)' }}>
+      <div style={{ background: 'rgb(var(--bw-accent-hi-rgb) / 0.04)' }}>
         <PostCard post={focus} a={{ ...a, onOpen: () => undefined }} />
       </div>
       <PostList
@@ -2485,7 +2485,7 @@ const Leaderboard = ({
     </div>
   );
   const rowStyle = (mine: boolean) => ({
-    background: mine ? 'rgba(255,210,77,0.08)' : BOARD_PANEL,
+    background: mine ? 'rgb(var(--bw-accent-hi-rgb) / 0.08)' : BOARD_PANEL,
     border: `1px solid ${mine ? GOLD : BOARD_LINE}`,
   });
   const rank = (n: number) => (

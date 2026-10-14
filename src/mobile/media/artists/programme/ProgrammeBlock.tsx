@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import { GuestCtx } from '../guestCtx';
 import { getArtistPublic, type ArtistPublic } from './api';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
 
 /**

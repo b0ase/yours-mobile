@@ -35,7 +35,7 @@ import {
  * through the normal mint path (mintMedia) inside RepeatGuard, so a slow broadcast is never paid twice.
  * Price: Free only — there is no sale path for releases yet.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#111216';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -220,7 +220,7 @@ const AddReleasePage = () => {
                 border: `1px dashed ${cover ? 'transparent' : GOLD}`,
                 background: cover
                   ? '#000'
-                  : 'radial-gradient(circle at 30% 30%, #FFE58A, #D9A520 30%, #3a2a05 70%, #000)',
+                  : 'radial-gradient(circle at 30% 30%, var(--bw-accent-hi), #D9A520 30%, #3a2a05 70%, #000)',
               }}
             >
               {cover ? (

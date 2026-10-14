@@ -127,10 +127,10 @@ export const HandleOnboarding = () => {
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
         style={{ background: '#2a2410' }}
       >
-        <Sparkles size={16} color="#FFD24D" />
+        <Sparkles size={16} color="var(--bw-accent-hi)" />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold" style={{ color: '#FFD24D' }}>
+        <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
           {handleCardTitle(hasName, importSym)}
         </div>
         <div className="text-[11px]" style={{ color: '#98A2B3' }}>

@@ -16,7 +16,7 @@ import {
 } from '../wallet/bchatFollow';
 import { followBchat } from '../wallet/useBchatFollow';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const RED = '#F97066';
 
@@ -102,7 +102,7 @@ export const BchatAccountSettings = () => {
         title={note}
         className="flex flex-1 items-center justify-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-semibold cursor-pointer"
         style={{
-          background: on ? `${GOLD}22` : 'transparent',
+          background: on ? `color-mix(in srgb, ${GOLD} 13%, transparent)` : 'transparent',
           border: `1px solid ${on ? GOLD : '#ffffff22'}`,
           color: on ? GOLD : '#fff',
         }}

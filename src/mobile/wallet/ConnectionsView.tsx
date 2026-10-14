@@ -14,7 +14,7 @@ import { ErrorActions } from '../errors/ErrorActions';
 const CARD = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const RED = '#F97066';
 
 type Msg = { action: string; [k: string]: unknown };

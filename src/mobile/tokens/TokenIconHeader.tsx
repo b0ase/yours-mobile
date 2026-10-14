@@ -33,10 +33,13 @@ export const TokenIconHeader = ({
           src={icon.url}
           alt=""
           className="w-16 h-16 rounded-full object-cover"
-          style={{ border: '2px solid #F5B80055' }}
+          style={{ border: '2px solid rgb(var(--bw-accent-rgb)/0.33)' }}
         />
       ) : (
-        <div className="w-16 h-16 rounded-full" style={{ background: '#17191E', border: '2px dashed #F5B80055' }} />
+        <div
+          className="w-16 h-16 rounded-full"
+          style={{ background: '#17191E', border: '2px dashed rgb(var(--bw-accent-rgb)/0.33)' }}
+        />
       )}
       {icon.fromProfile && (
         <span className="text-[11px]" style={{ color: '#98A2B3' }}>
@@ -48,7 +51,7 @@ export const TokenIconHeader = ({
           type="button"
           onClick={() => setEditing(true)}
           className="text-xs font-semibold bg-transparent border-0 p-0 cursor-pointer"
-          style={{ color: '#F5B800' }}
+          style={{ color: 'var(--bw-accent)' }}
         >
           Change icon
         </button>

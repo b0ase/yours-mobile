@@ -10,7 +10,7 @@
   padding: 4px 4px 4px 4px;
   border-radius: 999px;
   background: #050505;
-  border: 1px solid rgba(255, 210, 77, 0.35);
+  border: 1px solid rgb(var(--bw-accent-hi-rgb) / 0.35);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
 }
 .askb-bar.place-inline,
@@ -39,7 +39,7 @@
   height: 34px;
   border-radius: 999px;
   border: 0;
-  background: #ffd24d;
+  background: var(--bw-accent-hi);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -106,7 +106,7 @@ html.ww-on .askb-chips {
 }
 .askb-bubble.user {
   align-self: flex-end;
-  background: #ffd24d;
+  background: var(--bw-accent-hi);
   color: #1a1300;
 }
 .askb-bubble.b {
@@ -149,7 +149,7 @@ html.ww-on .askb-chips {
 .askb-tools button {
   border: 0;
   background: rgba(5, 5, 5, 0.85);
-  color: #ffd24d;
+  color: var(--bw-accent-hi);
   border-radius: 999px;
   padding: 3px 10px;
   cursor: pointer;

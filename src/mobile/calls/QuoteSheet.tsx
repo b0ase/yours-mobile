@@ -16,7 +16,7 @@ import {
 } from './rateCard';
 import { formatDuration, type CallState } from './machine';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 /**
  * bPhone, caller side, before anything rings: "They charge $2.00 / min. Max spend?" One tap on a
@@ -112,7 +112,7 @@ export const SpendLine = ({ meter, since }: { meter: Meter; since: number }) => 
   const warn = Number.isFinite(left) && left <= WARN_BEFORE_S;
   return (
     <div className="flex flex-col items-center gap-1 text-xs" aria-live="polite">
-      <div className="text-[#F5B800] font-semibold">
+      <div className="text-[color:var(--bw-accent)] font-semibold">
         {meter.card.per === 'call' ? 'Paid ' : 'Spent '}
         {amountLabel(meter.card.asset, meter.paidUnits)}
         {meter.card.per !== 'call' && (
@@ -152,7 +152,7 @@ export const PaidThroughLine = ({
   const flat = card.per === 'call';
   return (
     <div className="text-xs" aria-live="polite">
-      <span className="text-[#F5B800] font-semibold">Received {amountLabel(card.asset, paidUnits)}</span>
+      <span className="text-[color:var(--bw-accent)] font-semibold">Received {amountLabel(card.asset, paidUnits)}</span>
       {!flat && paidThroughS > 0 && (
         <span className="text-[#98A2B3]"> · paid {ahead >= 0 ? `${Math.ceil(ahead)} s ahead` : 'late'}</span>
       )}

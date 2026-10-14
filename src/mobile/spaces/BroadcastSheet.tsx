@@ -9,7 +9,7 @@ import { studioRoomParam } from './broadcast';
  * sells viewing minutes on its own site, which the store editions do not link to.
  */
 const MUTED = '#8a8f98';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 export const BroadcastSheet = ({
   canShare,

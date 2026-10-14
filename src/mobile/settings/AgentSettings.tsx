@@ -12,7 +12,7 @@ import { consentInfo, consentTarget, hasConsent, revokeConsent } from '../agent/
  * Settings › b agent: how the b agent is paid for. Pay per message (BSV, with a daily limit) or
  * the user's own provider key (kept in the device's secure storage, sent only to that provider).
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';

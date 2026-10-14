@@ -79,7 +79,7 @@ export const UserSafetyButton = ({
                 if (!blocked) onBlocked?.();
               }}
               className="rounded-xl py-2.5 text-sm font-semibold"
-              style={{ background: LINE, color: blocked ? '#FFD24D' : '#ff6b6b' }}
+              style={{ background: LINE, color: blocked ? 'var(--bw-accent-hi)' : '#ff6b6b' }}
             >
               {blocked ? `Unblock $${h}` : `Block $${h}`}
             </button>
