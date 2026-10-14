@@ -1,3 +1,4 @@
+import { fetchSeries } from '../portfolio/market';
 import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -95,17 +96,14 @@ const useDayChange = (rate: number): number | null => {
   useEffect(() => {
     if (dayAgoCache) return;
     let live = true;
-    const now = Math.floor(Date.now() / 1000);
-    fetch(`https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical?from=${now - 3 * 86400}&to=${now}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: { rate: number; time: number }[]) => {
-        const target = now - 86400;
-        const best = rows
-          .filter((r) => r.rate > 0)
-          .sort((a, b) => Math.abs(a.time - target) - Math.abs(b.time - target))[0];
+    // Cached CoinGecko/WhatsOnChain series (portfolio/market.ts), not a direct WoC call (CORS-blocked on errors).
+    fetchSeries('bsv', '1W', Date.now() - 7 * 86400_000)
+      .then((pts) => {
+        const target = Date.now() - 86400_000;
+        const best = [...pts].sort((x, y) => Math.abs(x.t - target) - Math.abs(y.t - target))[0];
         if (best && live) {
-          dayAgoCache = best.rate;
-          setDayAgo(best.rate);
+          dayAgoCache = best.p;
+          setDayAgo(best.p);
         }
       })
       .catch(() => undefined);

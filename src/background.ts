@@ -1,4 +1,5 @@
 /* global chrome */
+import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
@@ -1120,7 +1121,10 @@ if (isInServiceWorker) {
     console.log('[background] showPromptUi called', kind, requestID);
 
     // Side panel open: show the prompt inside it (the panel's own unlock screen covers 'unlock').
-    if (activePopupPorts.size > 0 && kind !== 'unlock') {
+    // Extension only: the phone and web wallet also connect an 'extension-popup' port, but their UI has no
+    // PanelPrompt, so a prompt sent there was never drawn and the site waited forever (bChatX in the bApp
+    // frame stuck on "Connecting", 14 Oct 2026). They show prompts as overlays (windows.create below).
+    if (promptsShowInPanel(activePopupPorts.size, chrome) && kind !== 'unlock') {
       promptInPanel = true;
       postToPanels({ action: 'SHOW_PROMPT_PANEL', kind, requestID });
       notifyPromptWindow(kind, requestID); // an overlay that is already up loads the next prompt
