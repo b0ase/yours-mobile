@@ -10,6 +10,7 @@ import {
   feedGroups,
   hasCustomView,
   loadPins,
+  migrateFeedId,
   rowFeeds,
   savePins,
   stepFeed,
@@ -39,7 +40,7 @@ describe('feed colours', () => {
 
 describe('feed list', () => {
   test('bWalletX build: core, then bApps led by bMovies, bNews, bMusic, then Other', () => {
-    expect(FEEDS.slice(0, 5).map((f) => f.id)).toEqual(['following', 'foryou', 'bmovies', 'bnews', 'bmusic']);
+    expect(FEEDS.slice(0, 4).map((f) => f.id)).toEqual(['home', 'bmovies', 'bnews', 'bmusic']);
     const groups = feedGroups();
     expect(groups.map((g) => g.label)).toEqual(['bApps', 'Other']);
     for (const id of ['bradio', 'bgame', 'b3d', 'bphotos', 'bbooks', 'writer', 'bmail', 'bsocial'])
@@ -74,6 +75,15 @@ describe('feed row', () => {
       .map((f) => f.id);
     expect(togglePin(full, 'vexvoid')).toEqual([...full.slice(1), 'vexvoid']);
   });
+  test('Following and For you are one Home chip; old ids migrate to it', () => {
+    expect(FIXED_ROW[0]).toBe('home');
+    expect(FEEDS.some((f) => f.id === 'following' || f.id === 'foryou')).toBe(false);
+    expect(migrateFeedId('following')).toBe('home');
+    expect(migrateFeedId('foryou')).toBe('home');
+    expect(migrateFeedId('bnews')).toBe('bnews');
+    expect(cleanPins(['foryou', 'bradio'])).toEqual(['bradio']);
+    expect(hasCustomView('home')).toBe(true);
+  });
   test('pins persist per device', () => {
     const store = memory();
     expect(loadPins(store)).toEqual([]);
@@ -82,8 +92,8 @@ describe('feed row', () => {
     expect(loadPins(store)).toEqual(['bradio', 'bmail']);
   });
   test('swiping steps through the row, plus the open feed when it is not in it', () => {
-    expect(stepFeed([], 'following', 1)).toBe('foryou');
-    expect(stepFeed([], 'following', -1)).toBeNull();
+    expect(stepFeed([], 'home', 1)).toBe(rowFeeds([])[1]);
+    expect(stepFeed([], 'home', -1)).toBeNull();
     expect(stepFeed(['bradio'], 'bmusic', 1)).toBe('bradio');
     expect(stepFeed(['bradio'], 'bradio', 1)).toBeNull();
     expect(stepFeed([], 'bmail', -1)).toBe('bmusic');

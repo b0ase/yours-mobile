@@ -187,6 +187,7 @@ import {
   feedDef,
   hasCustomView,
   loadPins,
+  migrateFeedId,
   savePins,
   stepFeed,
   swipeDir,
@@ -215,6 +216,10 @@ const RED = '#F97066';
 const AIP_BYTES = 140;
 
 type Tab = 'following' | 'foryou';
+const HOME_FILTERS: { id: Tab; label: string }[] = [
+  { id: 'following', label: 'Following' },
+  { id: 'foryou', label: 'For you' },
+];
 const SOURCE_KEY = 'bwallet.feed.source';
 const loadSource = (): Source | 'all' => {
   try {
@@ -1637,15 +1642,22 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     quote?: FeedPost;
     link?: { url: string; title: string };
   } | null>(null);
-  const [feed, setFeed] = useState<FeedId>(() => (loadNewsMode() ? 'bnews' : start.tab));
+  const [feed, setFeed] = useState<FeedId>(() => (loadNewsMode() ? 'bnews' : 'home'));
   const [pins, setPins] = useState<FeedId[]>(loadPins);
   const [allFeeds, setAllFeeds] = useState(false);
   const news = feed === 'bnews';
-  const pickFeed = (id: FeedId) => {
+  const pickFeed = (picked: FeedId) => {
+    const id = migrateFeedId(picked);
     setFeed(id);
     setAllFeeds(false);
     saveNewsMode(id === 'bnews');
-    if (id === 'following' || id === 'foryou') setTab(id);
+  };
+  // Home's two filters (Following | For you), remembered per device as the Feed setting's default
+  // (For you keeps "Latest" when that was the setting).
+  const pickHomeFilter = (f: Tab) => {
+    setTab(f);
+    const was = loadPrefs().defaultFeed;
+    if (f === 'following' ? was !== 'following' : was === 'following') savePrefs({ defaultFeed: f });
   };
   // Swipe the feed left / right for the next / previous feed (a vertical scroll never switches).
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
@@ -1950,7 +1962,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}
-        <SegmentTitle title={feed === 'following' || feed === 'foryou' ? 'Feed' : feedDef(feed).label}>
+        <SegmentTitle title={feed === 'home' ? 'Feed' : feedDef(feed).label}>
           <NotificationsBell onOpenPost={(t) => void openTarget(t)} />
           <button onClick={() => setShowBookmarks(true)} aria-label="Bookmarks" className="p-2 active:opacity-60">
             <Bookmark size={18} color={MUTED} />
@@ -1976,7 +1988,30 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         />
         <div style={{ borderBottom: `1px solid ${LINE}` }} />
 
-        {(feed === 'following' || feed === 'foryou') && (
+        {feed === 'home' && (
+          <div className="px-4 pt-3">
+            <div
+              role="tablist"
+              aria-label="Home filter"
+              className="flex rounded-full p-0.5"
+              style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            >
+              {HOME_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  role="tab"
+                  aria-selected={tab === f.id}
+                  onClick={() => pickHomeFilter(f.id)}
+                  className="flex-1 rounded-full py-1.5 text-[13px] font-semibold"
+                  style={tab === f.id ? { background: GOLD, color: '#1a1300' } : { color: MUTED }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {feed === 'home' && (
           <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
             {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
             <div className="flex gap-2" role="tablist" aria-label="Source">

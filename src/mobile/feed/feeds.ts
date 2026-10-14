@@ -1,7 +1,7 @@
 /**
  * The Feed picker: which feeds exist, their colours, the scrolling row and the swipe order.
  *
- * The row at the top of Feed scrolls left / right: Following and For you, the basic suite (bMovies red,
+ * The row at the top of Feed scrolls left / right: Home (Following | For you), the basic suite (bMovies red,
  * bNews green, bMusic blue), then the user's pinned feeds, then "All feeds" (a sheet listing every bApp
  * feed, bApps first then Other, where favourites are pinned). Pins persist per device. Swiping the feed
  * left / right moves through the row (plus the open feed when it isn't in the row).
@@ -13,7 +13,7 @@
  */
 import { BMOVIES_FEED_ENABLED } from '../storeBuild';
 
-/** A feed id: a built-in ('following', 'foryou') or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
+/** A feed id: the built-in 'home' (Following | For you inside) or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
 export type FeedId = string;
 
 export type FeedGroup = 'core' | 'bapps' | 'other';
@@ -21,7 +21,11 @@ export type FeedGroup = 'core' | 'bapps' | 'other';
 export type FeedDef = { id: FeedId; label: string; hint: string; group: FeedGroup; color: string };
 
 /** Feeds with their own view in FeedPage; everything else is a generic bChatX brand-account feed. */
-export const CUSTOM_VIEWS: readonly FeedId[] = ['following', 'foryou', 'bnews', 'bmovies'];
+export const CUSTOM_VIEWS: readonly FeedId[] = ['home', 'bnews', 'bmovies'];
+
+/** Old saved ids for Home's filters (before Following and For you were one chip) → 'home'. */
+export const LEGACY_HOME_IDS: readonly string[] = ['following', 'foryou'];
+export const migrateFeedId = (id: FeedId): FeedId => (LEGACY_HOME_IDS.includes(id) ? 'home' : id);
 
 /** TODO: when live, load the list from here ([{slug, name, url, avatar, banner, bio, hasPosts}]). */
 export const BAPPS_API = 'https://www.bchatx.com/api/public/bapps';
@@ -30,8 +34,7 @@ export const GOLD = '#FFD24D';
 
 /** Each bApp's colour: chip / icon ring and the selected state. One map, here. */
 export const FEED_COLORS: Record<FeedId, string> = {
-  following: GOLD,
-  foryou: GOLD,
+  home: GOLD,
   // The basic suite: red, green, blue.
   bmovies: '#E5484D',
   bnews: '#30A46C',
@@ -150,8 +153,7 @@ const def =
 
 /** Every feed this build has: core, then bApps, then Other. */
 export const FEEDS: readonly FeedDef[] = [
-  { id: 'following', label: 'Following', hint: 'People you follow', group: 'core' as const, color: GOLD },
-  { id: 'foryou', label: 'For you', hint: 'Everything on the feed', group: 'core' as const, color: GOLD },
+  { id: 'home', label: 'Home', hint: 'Following and For you', group: 'core' as const, color: GOLD },
   ...BAPP_ENTRIES.map(def('bapps')),
   ...OTHER_ENTRIES.map(def('other')),
 ];
@@ -162,8 +164,8 @@ export const feedGroups = (feeds: readonly FeedDef[] = FEEDS) => [
   { id: 'other' as const, label: 'Other', feeds: feeds.filter((f) => f.group === 'other') },
 ];
 
-/** Always at the front of the row: Following, For you, then the red / green / blue suite. */
-export const FIXED_ROW: readonly FeedId[] = ['following', 'foryou', 'bmovies', 'bnews', 'bmusic'];
+/** Always at the front of the row: Home, then the red / green / blue suite. */
+export const FIXED_ROW: readonly FeedId[] = ['home', 'bmovies', 'bnews', 'bmusic'];
 
 /** Pinned feeds the row holds after the fixed ones. */
 export const MAX_PINNED = 12;
@@ -179,6 +181,7 @@ export const hasCustomView = (id: FeedId) => CUSTOM_VIEWS.includes(id);
 /** Known, unique, non-fixed ids only, at most MAX_PINNED (old saved rows with core feeds still load). */
 export const cleanPins = (raw: unknown, feeds: readonly FeedDef[] = FEEDS): FeedId[] =>
   (Array.isArray(raw) ? (raw as unknown[]) : [])
+    .map((v) => (typeof v === 'string' ? migrateFeedId(v) : v))
     .filter((v, i, a): v is FeedId => isFeedId(v, feeds) && !FIXED_ROW.includes(v) && a.indexOf(v) === i)
     .slice(0, MAX_PINNED);
 

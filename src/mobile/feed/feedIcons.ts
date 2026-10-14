@@ -25,7 +25,7 @@ import tokenblasterIcon from '../brand/apps/tokenblaster.png';
 import { BMOVIES_FEED_ENABLED } from '../storeBuild';
 import { feedDef, isFeedId, type FeedId } from './feeds';
 
-export type FeedGlyph = 'following' | 'foryou' | 'all';
+export type FeedGlyph = 'home' | 'foryou' | 'all';
 export type FeedIcon =
   | { kind: 'app'; src: string }
   | { kind: 'glyph'; glyph: FeedGlyph }
@@ -52,7 +52,7 @@ const APP_ICONS: Partial<Record<FeedId, string>> = {
   ...(BMOVIES_FEED_ENABLED ? { bmovies: bmoviesIcon } : {}),
 };
 
-const GLYPHS: Partial<Record<FeedId, FeedGlyph>> = { following: 'following', foryou: 'foryou' };
+const GLYPHS: Partial<Record<FeedId, FeedGlyph>> = { home: 'home' };
 
 /** The first letter after a leading b / $ ("bRadio" → "R", "$402" → "4"), upper-cased. */
 const initial = (label: string) => (label.replace(/^\$|^b(?=[A-Z0-9])/, '')[0] ?? '?').toUpperCase();
