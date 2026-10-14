@@ -20,6 +20,8 @@ import { SWAP_ENABLED } from '../storeBuild';
 import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
+import { Sparkline } from './PriceChart';
+import { chartSeries } from './chartSeries';
 import { PeopleMarket } from './PeopleMarket';
 import { OpnsMarket } from './OpnsMarket';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
@@ -44,6 +46,7 @@ import {
   tradeRoute,
   unitPriceLabel,
   type DayStats,
+  type Trade,
 } from './exchangeData';
 
 // Swap into BSV: its chunk is dropped from a store build (SWAP_ENABLED), like the wallet's Swap card.
@@ -61,7 +64,7 @@ const GREEN = '#A1FF8B';
 const RED = '#FF6B6B';
 const MUTED = '#98A2B3';
 
-type RowStats = { floor: number | null; live: number; stats: DayStats };
+type RowStats = { floor: number | null; live: number; stats: DayStats; trades: Trade[] };
 
 /** Live BSV price (USD per BSV), re-read every minute while the Exchange is open. */
 const useRate = () => {
@@ -194,7 +197,7 @@ const Markets = ({
           if (!live) return;
           setExtra((e) => ({
             ...e,
-            [ref.id]: { floor: m?.floorSats ?? null, live: m?.live ?? 0, stats: dayStats(trades, tip) },
+            [ref.id]: { floor: m?.floorSats ?? null, live: m?.live ?? 0, stats: dayStats(trades, tip), trades },
           }));
         }
       };
@@ -309,6 +312,11 @@ const Markets = ({
                           <div className="flex items-center gap-2 min-w-0">
                             <TokenIcon icon={r.icon} sym={r.title} size={28} />
                             <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                            {x && (
+                              <span className="ml-auto hidden sm:inline-flex">
+                                <Sparkline series={chartSeries(x.trades.slice(-30), { lowestAsk: x.floor })} />
+                              </span>
+                            )}
                             {registry && (
                               <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
                                 {categoryLabel(registry.labels(r.ref.id).category)}

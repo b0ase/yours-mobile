@@ -24,6 +24,8 @@ import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
 import { TokenIcon } from './TokenIcon';
+import { PriceChart } from './PriceChart';
+import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
 import {
   addHistory,
@@ -53,38 +55,6 @@ const Money = ({ sats, rate }: { sats: number; rate: number }) => {
       {bsvLabel(sats)}
       {f && <span style={{ color: MUTED }}> · {f}</span>}
     </>
-  );
-};
-
-/** Whole-token price line of past trades (oldest → newest). */
-const PriceChart = ({ trades }: { trades: Trade[] }) => {
-  if (trades.length < 2)
-    return (
-      <div className="h-40 grid place-items-center text-xs" style={{ color: MUTED }}>
-        {trades.length ? 'One trade so far: the chart starts with the next one.' : 'No trades yet.'}
-      </div>
-    );
-  const W = 600;
-  const H = 160;
-  const ys = trades.map((t) => t.satsPerToken);
-  const min = Math.min(...ys);
-  const max = Math.max(...ys);
-  const span = max - min || max || 1;
-  const pts = trades.map((t, i) => [(i / (trades.length - 1)) * W, H - 8 - ((t.satsPerToken - min) / span) * (H - 16)]);
-  const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  const up = ys[ys.length - 1] >= ys[0];
-  const color = up ? GREEN : RED;
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      className="w-full h-40"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label="Price chart"
-    >
-      <polygon points={`0,${H} ${line} ${W},${H}`} fill={color} opacity={0.08} />
-      <polyline points={line} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-    </svg>
   );
 };
 
@@ -252,9 +222,9 @@ export const TradeView = ({
         <div className="flex flex-col gap-4 min-w-0">
           <div className={`${CARD} p-3`}>
             <div className="text-xs font-bold mb-1" style={{ color: MUTED }}>
-              Price per token, last {trades.length} trades
+              {trades.length >= 2 ? `Price per token, last ${trades.length} trades` : 'Price per token'}
             </div>
-            <PriceChart trades={trades} />
+            <PriceChart series={chartSeries(trades, { lowestAsk: market?.floorSats })} priceLabel={unitPriceLabel} />
           </div>
 
           {/* Order book: sell orders (live listings), cheapest first */}
