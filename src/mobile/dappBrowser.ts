@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { YoursNative, isNative } from './native';
+import { MOBILE_EXTENSION_ID } from './protocol';
+import { isReservedHost } from '../services/adminOriginator';
 
 /**
  * In-app dApp browser. Each site is a hub endpoint whose sender origin is the
@@ -66,6 +68,8 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
   if (!contextFactory) throw new Error('Wallet not ready');
   const o = new URL(origin);
   if (o.protocol !== 'https:' && o.protocol !== 'http:') throw new Error('Unsupported origin');
+  // A site at http://yours-mobile/ would carry the wallet's own admin originator (security review H1).
+  if (isReservedHost(o.host, MOBILE_EXTENSION_ID)) throw new Error('Reserved originator');
   if (!isCWIEventName(type)) throw new Error(`Unsupported request: ${type}`);
   if (url.startsWith(o.origin)) lastUrls.set(o.origin, url);
   let chrome = contexts.get(o.origin);
