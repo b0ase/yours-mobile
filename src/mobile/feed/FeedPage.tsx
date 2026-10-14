@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type TouchEvent,
+} from 'react';
 import { readListCache, writeListCache } from '../ui/listCache';
 import { FlipBavatar } from '../bavatar/FlipBavatar';
 import { isPayAddress } from '../bavatar/flipQr';
@@ -36,7 +46,6 @@ import {
   Clock,
   Trophy,
   EyeOff,
-  Newspaper,
 } from 'lucide-react';
 import { inscribe } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -154,6 +163,12 @@ import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
 import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
+import { AllFeedsSheet, FeedPicker } from './FeedPicker';
+import { feedDef, loadPins, savePins, stepFeed, swipeDir, togglePin, type FeedId } from './feeds';
+import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+
+// bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
+const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -1492,7 +1507,33 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     quote?: FeedPost;
     link?: { url: string; title: string };
   } | null>(null);
-  const [news, setNews] = useState<boolean>(loadNewsMode);
+  const [feed, setFeed] = useState<FeedId>(() => (loadNewsMode() ? 'bnews' : start.tab));
+  const [pins, setPins] = useState<FeedId[]>(loadPins);
+  const [allFeeds, setAllFeeds] = useState(false);
+  const news = feed === 'bnews';
+  const pickFeed = (id: FeedId) => {
+    setFeed(id);
+    setAllFeeds(false);
+    saveNewsMode(id === 'bnews');
+    if (id === 'following' || id === 'foryou') setTab(id);
+  };
+  // Swipe the feed left / right for the next / previous feed (a vertical scroll never switches).
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onSwipeStart = (e: TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onSwipeEnd = (e: TouchEvent) => {
+    const s0 = swipeStart.current;
+    const t = e.changedTouches[0];
+    swipeStart.current = null;
+    if (!s0 || !t) return;
+    const dir = swipeDir(t.clientX - s0.x, t.clientY - s0.y);
+    // bNews cards close on a left swipe, so there only a right swipe changes feed.
+    if (!dir || (news && dir === 1 && (e.target as HTMLElement).closest?.('[data-news-card]'))) return;
+    const to = stepFeed(pins, feed, dir);
+    if (to) pickFeed(to);
+  };
   const [story, setStory] = useState<NewsItem | null>(null);
   const [postedTick, setPostedTick] = useState(0);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
@@ -1777,7 +1818,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}
-        <SegmentTitle title="Feed">
+        <SegmentTitle title={feed === 'following' || feed === 'foryou' ? 'Feed' : feedDef(feed).label}>
           <NotificationsBell onOpenPost={(t) => void openTarget(t)} />
           <button onClick={() => setShowBookmarks(true)} aria-label="Bookmarks" className="p-2 active:opacity-60">
             <Bookmark size={18} color={MUTED} />
@@ -1794,60 +1835,39 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </button>
         </SegmentTitle>
 
-        <div className="flex px-4" style={{ borderBottom: `1px solid ${LINE}` }}>
-          {(['following', 'foryou'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className="flex-1 py-2 text-[14px] font-bold"
-              style={{
-                color: tab === t ? 'white' : MUTED,
-                borderBottom: `2px solid ${tab === t ? GOLD : 'transparent'}`,
-              }}
-            >
-              {t === 'following' ? 'Following' : 'For you'}
-            </button>
-          ))}
-        </div>
+        <FeedPicker
+          pins={pins}
+          current={feed}
+          allOpen={allFeeds}
+          onPick={pickFeed}
+          onOpenAll={() => setAllFeeds(true)}
+        />
+        <div style={{ borderBottom: `1px solid ${LINE}` }} />
 
-        <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
-          {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
-          <div className="flex gap-2" role="tablist" aria-label="Source">
-            {SOURCES.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  setSource(s.id);
-                  saveSource(s.id);
-                  setNews(false);
-                  saveNewsMode(false);
-                }}
-                className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
-                style={
-                  !news && source === s.id
-                    ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
-                    : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
-                }
-              >
-                {s.label}
-              </button>
-            ))}
-            <button
-              onClick={() => {
-                setNews(true);
-                saveNewsMode(true);
-              }}
-              className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold flex items-center gap-1"
-              style={
-                news
-                  ? { background: GOLD, color: textOn(GOLD) }
-                  : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
-              }
-            >
-              <Newspaper size={12} /> bNews
-            </button>
+        {(feed === 'following' || feed === 'foryou') && (
+          <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
+            {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
+            <div className="flex gap-2" role="tablist" aria-label="Source">
+              {SOURCES.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSource(s.id);
+                    saveSource(s.id);
+                  }}
+                  className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+                  style={
+                    source === s.id
+                      ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
+                      : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
+                  }
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {!online && (
           <div
@@ -1866,25 +1886,47 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </div>
         )}
 
-        {news ? (
-          <NewsList posts={knownPosts} onOpen={setStory} />
-        ) : (
-          <PostList
-            posts={sorted}
-            a={actions}
-            empty={
-              <div className="px-8 pt-14 text-center">
-                <p className="text-sm text-white font-semibold">
-                  {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
-                </p>
-                <p className="text-xs mt-1" style={{ color: MUTED }}>
-                  {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
-                </p>
-              </div>
-            }
-          />
-        )}
+        <div onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd} className="flex flex-col">
+          {feed === 'bmovies' && BmoviesReel ? (
+            <Suspense fallback={null}>
+              <BmoviesReel />
+            </Suspense>
+          ) : news ? (
+            <NewsList posts={knownPosts} onOpen={setStory} />
+          ) : (
+            <PostList
+              posts={sorted}
+              a={actions}
+              empty={
+                <div className="px-8 pt-14 text-center">
+                  <p className="text-sm text-white font-semibold">
+                    {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: MUTED }}>
+                    {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
+                  </p>
+                </div>
+              }
+            />
+          )}
+        </div>
       </div>
+
+      {allFeeds && (
+        <AllFeedsSheet
+          pins={pins}
+          current={feed}
+          onPick={pickFeed}
+          onTogglePin={(id) =>
+            setPins((p) => {
+              const next = togglePin(p, id);
+              savePins(next);
+              return next;
+            })
+          }
+          onClose={() => setAllFeeds(false)}
+        />
+      )}
 
       <button
         onClick={() => setComposing({ replyTo: null })}
