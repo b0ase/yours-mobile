@@ -7,7 +7,7 @@ const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletK
 
 // Tokens | NFTs | Friends (address book, owner 4 Oct 2026). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
 // (owner, 3 Oct 2026); the Tickets view (WalletKindGate kind="tickets") is kept but nothing opens it.
-// Credits ($BCREDIT) are shelved the same way (2 Oct 2026).
+// Credits (bCredits) are shelved the same way (2 Oct 2026).
 const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],

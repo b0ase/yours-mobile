@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom';
 import { PenLine } from 'lucide-react';
 import { useCountUp } from './live/useCountUp';
-import { STORE_BUILD } from '../storeBuild';
+import { useNavigate } from 'react-router-dom';
+import { PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
 import { MNEE_ICON_URL } from '../../utils/constants';
 import { setWalletKind } from './walletKind';
 import { rememberedTicketIds } from './walletTickets';
@@ -1750,6 +1751,7 @@ const TimeMachine = ({
 };
 
 export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
+  const navigate = useNavigate();
   const [cards, setCards] = useState<MockBalance[]>(MOCK);
   const [layout, setLayoutState] = useState<Layout>(loadLayout);
   const setLayout = (l: Layout) => {
@@ -2000,7 +2002,10 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       logo: <Logo c={c} size={34} className="bw-bc-logo" />,
     };
   });
-  const openGuarded = (id: string) => (id === 'b-shares' && !kycOk() ? setGateFor(id) : setOpenBasket(id));
+  // Shares: the mock Veriff KYC gate first, then the real bShares bApp (/m/bshares) instead of the mock basket.
+  const openShares = () => (PLACEMENT_ENABLED ? navigate('/m/bshares') : setOpenBasket('b-shares'));
+  const openGuarded = (id: string) =>
+    id === 'b-shares' ? (kycOk() ? openShares() : setGateFor(id)) : setOpenBasket(id);
 
   return (
     <div className="bw-bcar">
@@ -2105,7 +2110,8 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
             const id = gateFor;
             setGateFor(null);
             setEditing(false);
-            setOpenBasket(id);
+            if (id === 'b-shares') openShares();
+            else setOpenBasket(id);
           }}
         />
       )}

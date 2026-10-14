@@ -846,9 +846,9 @@ export class BchatClient {
     await this.call('POST', `${BchatClient.path(ticker)}/bounty/${no}/payout`, { txid });
   }
 
-  // ── bCredits (bit-sign feat/credits; src/mobile/credits) ──
+  // ── bCredits (bit-sign lib/credits.ts; src/mobile/credits) ──
 
-  /** Balance + public $BCREDIT config (token id, treasury, price). */
+  /** Balance + public config (treasury, price, cap, terms, this account's deposit reference). */
   async credits(): Promise<unknown> {
     return this.call('GET', '/api/bitsign/credits');
   }
@@ -857,7 +857,7 @@ export class BchatClient {
     return this.call('GET', `/api/bitsign/credits/ledger?limit=${limit}`);
   }
 
-  /** After the wallet sent $BCREDIT to the treasury: bit-sign verifies the tx and credits once. */
+  /** After the wallet sent BSV + the reference output to the treasury: bit-sign verifies the tx and credits once. */
   async depositCredits(txid: string): Promise<unknown> {
     return this.call('POST', '/api/bitsign/credits/deposit', { txid });
   }

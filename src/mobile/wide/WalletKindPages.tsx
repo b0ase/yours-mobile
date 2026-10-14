@@ -5,7 +5,7 @@
  */
 import { TicketsSection } from '../wallet/TicketsSection';
 import { CreditsRow } from '../credits/CreditsRow';
-import { paidFeaturesEnabled } from '../storeBuild';
+import { BCREDITS_ENABLED } from '../storeBuild';
 import { WideEmpty } from './WidePage';
 import { WalletTabs } from '../nfts/WalletTabs';
 
@@ -27,12 +27,12 @@ export const TicketsPage = () => (
 );
 
 export const CreditsPage = () =>
-  paidFeaturesEnabled() ? (
+  BCREDITS_ENABLED ? (
     <div className="bs-spaces min-h-full flex flex-col overflow-y-auto pb-10" style={{ color: '#fff' }}>
       <WalletTabs active="credits" />
       <Intro>
-        Credits ($BCREDIT) are prepaid credits for bCorp apps. Top up sends $BCREDIT from this wallet to the bApp
-        treasury with the usual approval; your balance and history show here.
+        bCredits pay for b, the bWalletX agent. Top up sends a little BSV from this wallet with one approval; your
+        balance, history and terms show here. Top-ups pay for b. Keep it small.
       </Intro>
       <CreditsRow />
     </div>
