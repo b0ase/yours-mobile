@@ -6,6 +6,7 @@ import { BUY_CRYPTO_ENABLED } from '../mobile/storeBuild';
 import { phoneLayoutOn } from '../mobile/phone/flag';
 import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
+import { MyFlipBavatar } from '../mobile/bavatar/FlipBavatar';
 import { notifyMinted } from '../mobile/mint/mint';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1153,6 +1154,14 @@ export const BsvWallet = () => {
         <h2 className="text-base font-bold tracking-tight flex-1" style={{ color: theme.color.global.contrast }}>
           Receive Assets
         </h2>
+      </div>
+
+      {/* Your bAvatar: tap to turn it over to the same address as a pay code (flip bAvatar, 14 Oct 2026). */}
+      <div className="mb-4 flex flex-col items-center gap-1">
+        <MyFlipBavatar address={receiveAddress} size={72} backSize={180} />
+        <span className="text-[11px]" style={{ color: theme.color.global.gray }}>
+          Tap your bAvatar to flip it
+        </span>
       </div>
 
       {/* QR code */}

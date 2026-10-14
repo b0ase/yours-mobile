@@ -30,10 +30,11 @@ describe('bAvatar mint', () => {
     expect(bavatarLabel('alice', 7)).toBe('$alice · bWalletX #007');
   });
 
-  test('svg carries the art QR, handle, number and the founding line', () => {
+  test('svg carries the art, the pay QR, handle, number and the founding line', () => {
     const svg = bavatarMintSvg(KEY, 'alice', 7);
     expect(svg.startsWith('<svg')).toBe(true);
     expect(svg).toContain('$alice');
+    expect(svg).toContain('alice@bwalletx.com');
     expect(svg).toContain('bWalletX #007');
     expect(svg).toContain('FOUNDING 1,000');
     expect(new TextEncoder().encode(svg).length).toBeLessThan(MAX_BAVATAR_BYTES);
@@ -61,45 +62,24 @@ describe('bAvatar mint', () => {
   });
 });
 
-// It must scan like the card back: ZXing (most Android scanners) over several names and sizes.
+// The minted card is two-sided: a static render shows the pure art front; the back QR is inside and decodes.
 import { createHash } from 'node:crypto';
-import sharp from 'sharp';
-import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library';
-import { compactArtQrSvg } from './mintBavatar';
+import { decodeSvg } from './flipQr.testkit';
+import { flipBackSvg } from './flipQr';
 
-async function decode(svg: string, px: number): Promise<string | null> {
-  const { data, info } = await sharp(Buffer.from(svg))
-    .resize(px, px)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const lum = new Uint8ClampedArray(info.width * info.height);
-  for (let i = 0; i < lum.length; i++)
-    lum[i] = (data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114) | 0;
-  try {
-    return new QRCodeReader()
-      .decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(lum, info.width, info.height))))
-      .getText();
-  } catch {
-    return null;
-  }
-}
-
-describe('compact art QR scans', () => {
-  test('ZXing reads every name at 512, 320 and 220 px; under the size cap', async () => {
-    const names = ['b0asex', 'vexvoid', 'a-longer_name.x', 'nova', 'sam', 'mira'];
-    let ok = 0,
-      total = 0;
-    for (const name of names) {
+describe('two-sided mint', () => {
+  test('front art by default, back QR of the paymail, public data only, under the cap', async () => {
+    for (const name of ['b0asex', 'vexvoid', 'a-longer_name.x', 'nova']) {
       const key = '02' + createHash('sha256').update(name).digest('hex');
-      const pm = `${name}@bwalletx.com`;
-      const svg = compactArtQrSvg(key, pm);
+      const svg = bavatarMintSvg(key, name, 12);
       expect(new TextEncoder().encode(svg).length).toBeLessThan(MAX_BAVATAR_BYTES);
-      for (const px of [512, 320, 220]) {
-        total++;
-        if ((await decode(svg, px)) === pm) ok++;
-      }
+      expect(svg).toContain('aria-label="bAvatar"');
+      expect(svg).toContain('aria-label="Pay code"');
+      expect(svg).toContain('animateTransform');
+      // The identity key is public, but the art never embeds it verbatim; no other hex/secret either.
+      expect(svg).not.toContain(key);
+      const pm = `${name}@bwalletx.com`;
+      expect(await decodeSvg(flipBackSvg(pm, { size: 512, caption: pm }), 320)).toBe(pm);
     }
-    expect(ok).toBe(total);
   });
 });

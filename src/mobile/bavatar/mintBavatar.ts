@@ -3,16 +3,16 @@ import { BchatClient, defaultHttp, loadSession, saveSession, type BavatarMine } 
 import { walletSigner } from '../chat/signer';
 import { isNative } from '../native';
 import { MINT_APP } from '../mint/mint';
-import * as qr from 'qrcode';
 import { bavatarSvg } from './bavatar';
-import { CARD_QR, cardPaymail } from '../wallet/cardBackQr';
+import { cardPaymail } from '../wallet/cardBackQr';
+import { flipBackSvg, paymailPayload } from './flipQr';
 
 /** Same test as names/claimPersonal.ts (not imported: that module pulls the token stack in). */
 const isFundsError = (e: string | undefined) => !!e && /insufficient|not enough|no (utxos|funds)|funds/i.test(e);
 
 /**
- * Minting a bAvatar (owner, 11 Oct 2026): the account's art QR (its paymail, scannable by any phone
- * camera) with "$handle · bWalletX #001" inscribed as a 1-sat ordinal in the account's own wallet.
+ * Minting a bAvatar (owner, 11 Oct 2026; two-sided since 14 Oct): the account's bAvatar with its pay
+ * QR on the back (its paymail, scannable by any phone camera) with "$handle · bWalletX #001" inscribed as a 1-sat ordinal in the account's own wallet.
  * The number is signup order (bChatX /api/bitsign/bavatar/mine). Accounts #1–#1,000 are the Founding
  * 1,000: bCorp pays their network fee (/api/bitsign/bavatar/sponsor, once per account), the same
  * gift-then-mint pattern as the personal token (names/claimPersonal.ts). One mint per account: the
@@ -20,7 +20,7 @@ const isFundsError = (e: string | undefined) => !!e && /insufficient|not enough|
  */
 
 export const FOUNDING = 1000;
-/** The card-back art QR is ~158 KB of SVG (one rounded path per module); this compact one is ~25 KB. */
+/** Inscription size cap: the two-sided card (art + plain QR) is ~14 KB. */
 export const MAX_BAVATAR_BYTES = 40_000;
 
 /** #001 under 1,000, plain digits after: `bavatarNumber(7)` → `#007`, `bavatarNumber(1234)` → `#1234`. */
@@ -31,85 +31,45 @@ export const bavatarLabel = (handle: string, n: number) => `$${handle} · bWalle
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const PALE = '#fff3cf',
-  INK = '#0b0a08';
+const INK = '#0b0a08';
 const KEY_RE = /^0[23][0-9a-f]{64}$/;
 
-/**
- * A compact art QR for the inscription: the same blend and the same code as the card back (CARD_QR
- * dot size and wash), drawn in module units so it stays small. The plain bAvatar underneath, a pale
- * wash, light and dark modules as dots (one relative path per colour), solid finders.
- * Square dots instead of rounded ones: that is the only visual difference from the card back.
- */
-export function compactArtQrSvg(identityKey: string, paymail: string, S = 512): string {
-  const m = qr.create(paymail, { errorCorrectionLevel: 'H' }).modules;
-  const n = m.size,
-    quiet = 3,
-    cell = S / (n + quiet * 2),
-    off = quiet * cell;
-  const art = bavatarSvg(identityKey, { size: 512 })
+/** The plain bAvatar art, unchanged, placed at (x, y) with size w (its own width/height dropped). */
+const placeArt = (key: string, x: number, y: number, w: number) =>
+  bavatarSvg(key, { size: 512 })
     .replace(/^<\?xml[^>]*>\s*/, '')
     .replace(/^<svg\b[^>]*?>/, (tag) => tag.replace(/\s(width|height)="[^"]*"/g, ''))
-    .replace(
-      /^<svg\b/,
-      `<svg x="${off.toFixed(2)}" y="${off.toFixed(2)}" width="${(n * cell).toFixed(2)}" height="${(n * cell).toFixed(2)}"`,
-    );
-  const finder = (x: number, y: number) => (x < 8 && y < 8) || (x >= n - 8 && y < 8) || (x < 8 && y >= n - 8);
-  const d = CARD_QR.dot,
-    i = (1 - d) / 2;
-  const f = (v: number) => String(+v.toFixed(3)).replace(/^0\./, '.').replace(/^-0\./, '-.');
-  // Both colours as dots, one relative path each, so the art shows in the gaps (as on the card back).
-  const dots = (dark: boolean) => {
-    let out = 'M0 0',
-      px = 0,
-      py = 0;
-    for (let y = 0; y < n; y++)
-      for (let x = 0; x < n; x++) {
-        if (finder(x, y) || !!m.get(y, x) !== dark) continue;
-        out += `m${f(x + i - px)} ${f(y + i - py)}h${f(d)}v${f(d)}h${f(-d)}z`;
-        px = x + i;
-        py = y + i;
-      }
-    return out;
-  };
-  let finders = '';
-  for (const [fx, fy] of [
-    [0, 0],
-    [n - 7, 0],
-    [0, n - 7],
-  ])
-    finders +=
-      `<rect x="${fx - 1}" y="${fy - 1}" width="9" height="9" fill="${PALE}"/>` +
-      `<rect x="${fx}" y="${fy}" width="7" height="7" rx="1.6" fill="${INK}"/>` +
-      `<rect x="${fx + 1}" y="${fy + 1}" width="5" height="5" rx="1.1" fill="${PALE}"/>` +
-      `<rect x="${fx + 2}" y="${fy + 2}" width="3" height="3" rx=".8" fill="${INK}"/>`;
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">` +
-    `<rect width="${S}" height="${S}" fill="${PALE}"/>` +
-    art +
-    `<g transform="translate(${f(off)} ${f(off)}) scale(${f(cell)})">` +
-    `<rect width="${n}" height="${n}" fill="${PALE}" fill-opacity="${CARD_QR.lift}"/>` +
-    `<path d="${dots(false)}" fill="${PALE}"/>` +
-    `<path d="${dots(true)}" fill="${INK}"/>` +
-    finders +
-    '</g></svg>'
-  );
-}
+    .replace(/^<svg\b/, `<svg x="${x}" y="${y}" width="${w}" height="${w}"`);
 
 /**
- * The inscription: a 512×640 card. The art QR on top (encodes name@bwalletx.com), then the handle,
- * the number and, for #1–#1,000, FOUNDING 1,000. '' when the account has no identity key or paymail.
+ * The inscription (flip bAvatar, owner 14 Oct 2026): a 512×640 card with two sides. The FRONT is the pure
+ * bAvatar art and shows by default (also the only side a static renderer such as resvg draws). The BACK is a
+ * plain, scannable QR of the account's paymail (public data only) in a black/gold round frame. Viewers that
+ * run SVG animation turn the card over on a loop (front ~6 s, back ~4 s).
+ * Under both: the handle, the number and, for #1–#1,000, FOUNDING 1,000. '' with no identity key or paymail.
  */
 export function bavatarMintSvg(identityKey: string, handle: string, number: number): string {
   const key = String(identityKey).toLowerCase();
-  const pm = cardPaymail(handle);
+  const pm = paymailPayload(cardPaymail(handle));
   if (!KEY_RE.test(key) || !pm) return '';
-  const inner = compactArtQrSvg(key, pm, 512).replace(/^<svg\b/, '<svg x="0" y="0"');
+  const back = flipBackSvg(pm, { size: 512, caption: pm }).replace(/^<svg\b/, '<svg x="0" y="0"');
+  if (!back) return '';
   const founding = number <= FOUNDING;
+  // Flip by squashing each side to its vertical centre line and back (scaleX), one side at a time.
+  const T = 10;
+  const kt = '0;0.57;0.6;0.97;1';
+  const flip = (frontSide: boolean) =>
+    `<animateTransform attributeName="transform" type="scale" dur="${T}s" repeatCount="indefinite" keyTimes="${kt}" ` +
+    `values="${frontSide ? '1 1;1 1;0 1;0 1;1 1' : '0 1;0 1;1 1;1 1;0 1'}" calcMode="linear"/>`;
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 640" width="512" height="640">' +
     `<rect width="512" height="640" fill="${INK}"/>` +
-    inner +
+    '<g transform="translate(256 0)"><g class="bv-f"><g>' +
+    flip(true) +
+    `<g transform="translate(-256 0)">${placeArt(key, 0, 0, 512)}</g></g></g>` +
+    '<g class="bv-b"><g transform="scale(0 1)">' +
+    flip(false) +
+    `<g transform="translate(-256 0)">${back}</g></g></g></g>` +
     '<g font-family="Helvetica,Arial,sans-serif" text-anchor="middle">' +
     `<text x="256" y="566" font-size="34" font-weight="700" fill="#ffd24d">$${esc(handle)}</text>` +
     `<text x="256" y="604" font-size="22" font-weight="600" fill="#f1ead9">bWalletX ${esc(bavatarNumber(number))}</text>` +

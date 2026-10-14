@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { readListCache, writeListCache } from '../ui/listCache';
+import { FlipBavatar } from '../bavatar/FlipBavatar';
+import { isPayAddress } from '../bavatar/flipQr';
 import { useBackClose } from '../backStack';
 import { NotificationsBell } from '../notify/NotificationsPanel';
 import { askNotifyPermissionOnce } from '../notify/engine';
@@ -2065,7 +2067,15 @@ const ProfileView = ({
         className="flex flex-col items-center px-6 pt-6 pb-4 text-center"
         style={{ borderBottom: `1px solid ${LINE}` }}
       >
-        <Avatar author={author} size={80} />
+        {/* Tap to turn it over: their pay code, a plain QR of their payable address (public data only). */}
+        <FlipBavatar
+          front={<Avatar author={author} size={80} />}
+          address={isPayAddress(author.address) ? author.address : ''}
+          caption={safeName(author.name)}
+          size={80}
+          backSize={200}
+          label={isMe ? 'Your bAvatar' : `${safeName(author.name)}'s bAvatar`}
+        />
         <AuthorName name={author.name} className="mt-3 block text-lg font-bold text-white" />
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
           {author.bapId ? `BAP ${author.bapId}` : author.address ? shortAddress(author.address) : ''}
