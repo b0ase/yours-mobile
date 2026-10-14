@@ -23,6 +23,8 @@ import {
   type BackupMethod,
 } from './backupState';
 import { ErrorActions } from '../errors/ErrorActions';
+import { ChangePassword } from '../settings/ChangePassword';
+import { passwordStrength, strongEnoughForBackup } from './passwordStrength';
 
 type Props = {
   /** How the user may leave without backing up (backupState.backupExit). */
@@ -32,9 +34,11 @@ type Props = {
   onComplete: (method: BackupMethod) => void;
   /** Remind me later / Skip / Cancel / Close. */
   onExit: () => void;
+  /** 'file': open straight on the encrypted-backup password (the 12-words screen's Download button). */
+  start?: 'file';
 };
 
-type Page = 'choose' | 'file-password' | 'file-ready' | 'phrase-password' | 'phrase-show' | 'quiz' | 'done';
+type Page = 'choose' | 'file-password' | 'weak' | 'file-ready' | 'phrase-password' | 'phrase-show' | 'quiz' | 'done';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -48,9 +52,12 @@ const primary = (enabled = true) => ({ background: GOLD, color: '#000', opacity:
  * to Files / Mail / AirDrop where the browser can) or the recovery phrase written down and checked
  * with a 3-word quiz. The phrase lives only in this component's state while it is open.
  */
-export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
+export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
   const { chromeStorageService, keysService } = useServiceContext();
-  const [page, setPage] = useState<Page>('choose');
+  const [page, setPage] = useState<Page>(start === 'file' ? 'file-password' : 'choose');
+  const [changing, setChanging] = useState(false);
+  // Opened from the 12-words screen: Back leaves instead of showing the choice page.
+  const home = () => (start === 'file' ? onExit() : go('choose'));
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   // Share sheet failed: offer a plain download link (web only) and the recovery phrase.
@@ -116,6 +123,13 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     setBusy(true);
     setError('');
     try {
+      if (!(await chromeStorageService.verifyPassword(password))) throw new WrongPasswordError();
+      // The file is only as strong as the password: a weak one is changed first (no separate backup password).
+      if (!strongEnoughForBackup(password)) {
+        setPassword('');
+        setPage('weak');
+        return;
+      }
       const f = await createBackupFile(chromeStorageService, password);
       setPassword('');
       setFile(f);
@@ -361,7 +375,7 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
   } else if (page === 'file-password') {
     body = (
       <>
-        {header('Encrypted backup', () => go('choose'))}
+        {header('Encrypted backup', home)}
         {accountChip}
         <div className="flex flex-col px-5 pb-10">
           <p className="text-sm mt-2 mb-2" style={{ color: MUTED }}>
@@ -370,13 +384,40 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
           </p>
           {passwordNote}
           {passwordForm('Make backup file', () => void makeFile())}
+          {password && <StrengthMeter password={password} />}
+        </div>
+      </>
+    );
+  } else if (page === 'weak') {
+    body = (
+      <>
+        {header('Stronger password first', () => go('file-password'))}
+        <div className="flex flex-col px-5 pb-10">
+          <p className="text-sm mt-2" style={{ color: MUTED }}>
+            The backup file is locked with your wallet password, and yours is easy to guess. Anyone who finds the file
+            could try passwords until one works. Set a stronger wallet password, then make the file.
+          </p>
+          <button
+            onClick={() => setChanging(true)}
+            className="mt-5 w-full rounded-xl py-3 font-bold border-0"
+            style={primary()}
+          >
+            Change wallet password
+          </button>
+          <button
+            onClick={home}
+            className="mt-3 w-full rounded-xl py-3 font-bold border-0"
+            style={{ background: '#2A2E36', color: 'white' }}
+          >
+            Not now
+          </button>
         </div>
       </>
     );
   } else if (page === 'file-ready') {
     body = (
       <>
-        {header('Save your backup', () => go('choose'))}
+        {header('Save your backup', home)}
         <div className="flex flex-col px-5 pb-10">
           <div className="flex items-center gap-3 rounded-xl p-3 mt-2" style={{ background: '#16181D' }}>
             <FileLock2 size={22} color={GOLD} />
@@ -568,6 +609,16 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
     );
   }
 
+  if (changing)
+    return (
+      <ChangePassword
+        onClose={() => {
+          setChanging(false);
+          go('file-password');
+        }}
+      />
+    );
+
   return createPortal(
     <div
       className="fixed inset-x-0 bottom-0 z-[450] flex flex-col overflow-y-auto"
@@ -579,5 +630,28 @@ export const BackupStep = ({ exit, web, onComplete, onExit }: Props) => {
       {body}
     </div>,
     document.body,
+  );
+};
+
+const METER = ['#F04438', '#F04438', '#F79009', '#84CC16', '#2ecc71'];
+
+/** Small strength bar under the password (encrypted backup only). */
+const StrengthMeter = ({ password }: { password: string }) => {
+  const s = passwordStrength(password);
+  return (
+    <div className="mt-3" data-testid="backup-strength" data-score={s.score}>
+      <div className="flex gap-1">
+        {[0, 1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className="h-1 flex-1 rounded-full"
+            style={{ background: i < Math.max(s.score, 1) ? METER[s.score] : '#2A2E36' }}
+          />
+        ))}
+      </div>
+      <p className="text-xs mt-1 m-0" style={{ color: METER[s.score] }}>
+        Password strength: {s.label}
+      </p>
+    </div>
   );
 };

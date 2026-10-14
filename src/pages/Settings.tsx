@@ -881,6 +881,7 @@ export const Settings = () => {
           }
         },
         passwordKey,
+        password,
       );
       // USB key security enrolment requires a fresh backup this session.
       await chrome.storage.session.set({ usbBackupConfirmedAt: Date.now() });
