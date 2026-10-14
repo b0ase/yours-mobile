@@ -140,9 +140,7 @@ export const LaunchCoin = () => {
           {done.roomError
             ? "Its holders' room opens once the token is indexed: open it from Chat or Settings › My tokens."
             : `The holders' room "${l.name}" is open.`}
-          {done.indexError
-            ? ` Indexing wasn't paid (${done.indexError}); you can pay it later from the room setup.`
-            : ''}
+          {done.indexError ? ` Indexing wasn't paid (${done.indexError}); pay it any time from the room setup.` : ''}
         </p>
         <button
           type="button"
@@ -344,13 +342,12 @@ export const LaunchCoin = () => {
               onChange={(e) => setOpt('indexNow', e.target.checked)}
             />
             <span>
-              Pay indexing now ({fmtIndex}) so every wallet shows the coin from the start. You can also do this later
-              from the room setup.
+              Pay indexing now ({fmtIndex}) so every wallet shows the coin from the start. You can also do this from the
+              room setup.
             </span>
           </label>
           <p className="text-[11px] m-0" style={{ color: MUTED }}>
-            Links and category are written on-chain with the coin. Fee routes, bonding-curve trading and graduation come
-            with partner launchpads later.
+            Links and category are written on-chain with the coin.
           </p>
         </div>
       )}
