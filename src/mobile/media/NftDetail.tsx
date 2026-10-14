@@ -246,7 +246,7 @@ export const NftDetail = ({
         ) : onChain === false && pending ? (
           <PendingCard />
         ) : onChain === false ? (
-          <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
+          <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[color:var(--bw-accent)]">
             Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent or
             burned. Nothing on chain needs burning.
           </div>
@@ -254,7 +254,7 @@ export const NftDetail = ({
           <button
             onClick={() => setSending(true)}
             className={`${btn} text-[#010101]`}
-            style={{ background: '#F5B800' }}
+            style={{ background: 'var(--bw-accent)' }}
           >
             <Send size={16} /> Send
           </button>
@@ -281,7 +281,7 @@ export const NftDetail = ({
               disabled={!button.enabled}
               onClick={() => void send()}
               className={`${btn} w-full text-[#010101] disabled:opacity-40`}
-              style={{ background: '#FFD24D' }}
+              style={{ background: 'var(--bw-accent-hi)' }}
             >
               <Send size={16} /> {button.label}
             </button>

@@ -103,7 +103,7 @@ import type { OwnToken } from '../tokens/indexFund';
  * Settings → Feed / Payments / Privacy (mobile). Rendered inside upstream Settings' main page via the
  * vite.config.mobile.ts text patch, reusing its Section / SettingRow / Divider so it looks native.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';

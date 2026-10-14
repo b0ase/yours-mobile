@@ -43,7 +43,7 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
         sent as verified. Paying {money(s.total.totalSats, s.rate)} funds it for every holder.
       </p>
       {s.needs && s.freeNote && (
-        <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>
+        <p className="text-[11px] font-semibold m-0" style={{ color: 'var(--bw-accent-hi)' }}>
           {s.freeNote}
         </p>
       )}
@@ -53,7 +53,7 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
           disabled={s.busy}
           onClick={s.start}
           className="h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
-          style={{ background: '#FFD24D', color: '#000' }}
+          style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
         >
           <Sparkles size={15} />
           {`Index $${ticker} · ${money(s.total.totalSats, s.rate)} (${s.total.totalSats.toLocaleString()} sats${s.total.feeSats > 0 ? ' incl. bCorp setup' : ''})`}

@@ -67,8 +67,8 @@ import { nameTierUsd } from './store/tiers';
  */
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
-const GOLD = '#FFD24D';
-const GOLD_DIM = 'rgba(255,210,77,0.14)';
+const GOLD = 'var(--bw-accent-hi)';
+const GOLD_DIM = 'rgb(var(--bw-accent-hi-rgb) / 0.14)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.58)';
 const HAIR = 'rgba(255,255,255,0.08)';
@@ -100,8 +100,8 @@ const GoldArt = ({ size = 96 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 96 96" aria-hidden="true" className="shrink-0">
     <defs>
       <linearGradient id="opns-g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stopColor="#FFE58A" />
-        <stop offset="0.55" stopColor="#FFD24D" />
+        <stop offset="0" stopColor="var(--bw-accent-hi)" />
+        <stop offset="0.55" stopColor="var(--bw-accent-hi)" />
         <stop offset="1" stopColor="#B8860B" />
       </linearGradient>
     </defs>
@@ -115,7 +115,7 @@ const GoldArt = ({ size = 96 }: { size?: number }) => (
 const Step = (p: { n: number; title: string; sub?: string; on: boolean; children: ReactNode }) => (
   <section
     className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
-    style={{ background: CARD_BG, border: `1px solid ${p.on ? 'rgba(255,210,77,0.28)' : HAIR}` }}
+    style={{ background: CARD_BG, border: `1px solid ${p.on ? 'rgb(var(--bw-accent-hi-rgb) / 0.28)' : HAIR}` }}
   >
     <header className="flex items-center gap-3">
       <span
@@ -490,7 +490,7 @@ export const OpnsMintPage = () => {
         {showProgress && (
           <section
             className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
-            style={{ background: CARD_BG, border: '1px solid rgba(255,210,77,0.28)' }}
+            style={{ background: CARD_BG, border: '1px solid rgb(var(--bw-accent-hi-rgb) / 0.28)' }}
           >
             {finished ? (
               <div className="flex flex-col items-center text-center gap-2 py-2">
@@ -650,8 +650,8 @@ export const OpnsMintPage = () => {
                 style={{
                   minHeight: empty ? 200 : 112,
                   padding: 20,
-                  border: `1.5px dashed ${drag ? GOLD : 'rgba(255,210,77,0.35)'}`,
-                  background: drag ? 'rgba(255,210,77,0.08)' : 'rgba(255,210,77,0.03)',
+                  border: `1.5px dashed ${drag ? GOLD : 'rgb(var(--bw-accent-hi-rgb) / 0.35)'}`,
+                  background: drag ? 'rgb(var(--bw-accent-hi-rgb) / 0.08)' : 'rgb(var(--bw-accent-hi-rgb) / 0.03)',
                 }}
               >
                 {empty && <GoldArt size={64} />}
@@ -890,7 +890,7 @@ export const OpnsMintPage = () => {
                         )}
                       </tbody>
                       <tfoot>
-                        <tr style={{ borderTop: '1px solid rgba(255,210,77,0.35)' }}>
+                        <tr style={{ borderTop: '1px solid rgb(var(--bw-accent-hi-rgb) / 0.35)' }}>
                           <td className="pt-3 font-semibold" style={{ color: TEXT }}>
                             Total · {plural(summary.toMint, 'name')}
                           </td>
@@ -949,7 +949,7 @@ export const OpnsMintPage = () => {
                           type="checkbox"
                           checked={autoList}
                           onChange={(e) => setAutoList(e.target.checked)}
-                          className="w-4 h-4 accent-[#FFD24D] cursor-pointer"
+                          className="w-4 h-4 accent-[color:var(--bw-accent-hi)] cursor-pointer"
                         />
                         Auto-list each name at its tier price after it&apos;s minted ($1 · $5 · $15 by length; special
                         names never)
@@ -958,7 +958,11 @@ export const OpnsMintPage = () => {
                     <button
                       type="button"
                       className={`${goldBtn} w-full py-3.5 text-[15px]`}
-                      style={{ background: GOLD, color: '#000', boxShadow: '0 8px 28px rgba(255,210,77,0.18)' }}
+                      style={{
+                        background: GOLD,
+                        color: '#000',
+                        boxShadow: '0 8px 28px rgb(var(--bw-accent-hi-rgb) / 0.18)',
+                      }}
                       disabled={!apiContext || shortfall > 0}
                       onClick={() => setSheet(true)}
                     >

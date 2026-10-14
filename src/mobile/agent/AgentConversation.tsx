@@ -53,7 +53,7 @@ import { money } from '../money/money';
  * Not free: either the user's own provider key (direct from the device) or pay per message in
  * BSV (paid.ts). See agent.ts.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -755,7 +755,11 @@ export const AgentConversation = ({
               type="button"
               onClick={() => setInput(q.prompt)}
               className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
-              style={{ border: `1px solid ${GOLD}66`, color: GOLD, background: 'rgba(0,0,0,0.35)' }}
+              style={{
+                border: `1px solid color-mix(in srgb, ${GOLD} 40%, transparent)`,
+                color: GOLD,
+                background: 'rgba(0,0,0,0.35)',
+              }}
             >
               {q.label}
             </button>

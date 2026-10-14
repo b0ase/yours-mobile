@@ -17,7 +17,7 @@ import { artistPageUrl, claimArtist, getDashboard, saveTracks, type ArtistDashbo
  * music through Add Release, set a price per track and which tracks are free to listeners, share the page, see the
  * dashboard. Mounted only when ARTIST_PROGRAMME_ENABLED (off by default; never in a store build).
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 const SLUG_KEY = 'bwx.artist.slug';

@@ -96,7 +96,7 @@ export const GroupSendBar = ({
           type="button"
           onClick={() => setPicking(true)}
           className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold border-0 cursor-pointer"
-          style={{ background: '#F5B80022', color: '#F5B800' }}
+          style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
         >
           <Users size={13} /> Add friends
         </button>
@@ -142,7 +142,7 @@ const FriendPicker = ({ onClose, onAdd }: { onClose: () => void; onAdd: (c: Cont
           disabled={!chosen.size}
           onClick={() => onAdd(contacts.filter((c) => chosen.has(c.id)))}
           className="mr-2 rounded-lg px-3 py-1.5 text-sm font-bold border-0"
-          style={{ background: '#F5B800', color: '#000', opacity: chosen.size ? 1 : 0.4 }}
+          style={{ background: 'var(--bw-accent)', color: '#000', opacity: chosen.size ? 1 : 0.4 }}
         >
           Add {chosen.size || ''}
         </button>
@@ -179,8 +179,8 @@ const FriendPicker = ({ onClose, onAdd }: { onClose: () => void; onAdd: (c: Cont
                   <span
                     className="w-6 h-6 rounded-full flex items-center justify-center"
                     style={{
-                      background: on ? '#F5B800' : 'transparent',
-                      border: `1px solid ${on ? '#F5B800' : '#475467'}`,
+                      background: on ? 'var(--bw-accent)' : 'transparent',
+                      border: `1px solid ${on ? 'var(--bw-accent)' : '#475467'}`,
                     }}
                   >
                     {on && <Check size={14} color="#000" />}

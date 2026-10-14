@@ -65,7 +65,7 @@ export const FriendsSection = () => {
       {me && (
         <div
           className="flex items-center gap-3 rounded-xl px-3 py-3"
-          style={{ background: '#17191E', border: '1px solid #F5B80044' }}
+          style={{ background: '#17191E', border: '1px solid rgb(var(--bw-accent-rgb)/0.27)' }}
         >
           <div className="flex-1 min-w-0">
             <div className="text-sm font-bold text-white">${me.ticker.replace(/^\$/, '')}</div>
@@ -81,7 +81,7 @@ export const FriendsSection = () => {
               handleSelect(asMenuItem('chat'));
             }}
             className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold border-0"
-            style={{ background: '#F5B80022', color: '#F5B800' }}
+            style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
           >
             Your room
           </button>
@@ -107,7 +107,7 @@ export const FriendsSection = () => {
           disabled={busy || !adding.trim()}
           aria-label="Add friend"
           className="shrink-0 w-10 rounded-xl border-0 flex items-center justify-center"
-          style={{ background: '#F5B800', color: '#000', opacity: busy || !adding.trim() ? 0.4 : 1 }}
+          style={{ background: 'var(--bw-accent)', color: '#000', opacity: busy || !adding.trim() ? 0.4 : 1 }}
         >
           <UserPlus size={16} />
         </button>

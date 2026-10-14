@@ -59,7 +59,7 @@ export const AddAppSheet = ({ store, onClose }: { store: ReturnType<typeof useUs
             type="submit"
             disabled={!url.trim()}
             className="rounded-xl py-2.5 text-sm font-bold border-0"
-            style={{ background: '#F5B800', color: '#000', opacity: url.trim() ? 1 : 0.4 }}
+            style={{ background: 'var(--bw-accent)', color: '#000', opacity: url.trim() ? 1 : 0.4 }}
           >
             Add app
           </button>

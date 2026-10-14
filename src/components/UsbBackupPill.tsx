@@ -148,7 +148,7 @@ export const UsbBackupPill = () => {
             className="pointer-events-auto flex items-center gap-2 h-8 max-w-full rounded-full pl-3 pr-1.5 overflow-hidden"
             style={{
               backgroundColor: theme.color.global.row,
-              border: `1px solid ${accent}40`,
+              border: `1px solid color-mix(in srgb, ${accent} 25%, transparent)`,
               color: state.kind === 'error' ? AMBER : contrast,
               fontFamily: "'Inter', Arial, Helvetica, sans-serif",
               boxShadow: '0 4px 12px rgba(0,0,0,0.35)',

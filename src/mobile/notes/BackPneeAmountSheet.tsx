@@ -11,7 +11,7 @@ import {
   parseBsvAmount,
 } from './backPnee';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const CARD = '#17191E';
 
@@ -78,7 +78,7 @@ export const BackPneeAmountSheet = ({
               type="button"
               onClick={() => setRaw(String(p))}
               className="rounded-full border py-2 text-xs font-bold bg-transparent cursor-pointer"
-              style={{ borderColor: bsv === p ? GOLD : '#F5B80055', color: GOLD }}
+              style={{ borderColor: bsv === p ? GOLD : 'rgb(var(--bw-accent-rgb)/0.33)', color: GOLD }}
             >
               {p} BSV
             </button>

@@ -5,7 +5,7 @@ import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 
 const MUTED = '#98A2B3';
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 const MCP_CONFIG = `{
   "mcpServers": {

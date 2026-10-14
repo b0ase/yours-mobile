@@ -18,7 +18,7 @@ import { itemIcon, itemLabel } from './icons';
  * The big b in the centre: tap = HOME (the app grid), press and hold = talk to b (HomeButton).
  * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
 
 type Props = {
@@ -111,7 +111,7 @@ const Tile = ({
               ? // Apps look like their Apps-page tile: the icon fills the rounded square (BrowserPage TileIcon).
                 { background: '#17191E', boxShadow: picked ? `0 0 0 2px ${GOLD}` : undefined }
               : {
-                  background: picked ? `${GOLD}33` : active ? '#2b2f36' : '#17191E',
+                  background: picked ? `color-mix(in srgb, ${GOLD} 20%, transparent)` : active ? '#2b2f36' : '#17191E',
                   border: `1px solid ${picked ? GOLD : '#2b2f36'}`,
                 }
           }

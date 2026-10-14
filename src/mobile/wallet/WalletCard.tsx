@@ -32,6 +32,8 @@ import {
   type CardArtLook,
 } from './cardFrontArt';
 import { CardDesigner } from './CardDesigner';
+import { ThemeSheet } from '../theme/ThemeSheet';
+import { switchToAccountAccent } from '../theme/accent';
 
 // Edition colour (owner, 10 Oct 2026): bWallet's card is yellow with black text, like its app icon; bWalletX keeps
 // the black card that turns gold with the balance. One card, two palettes (.bw-wcard.is-yellow in mobile.css).
@@ -232,6 +234,10 @@ const WalletCardInner = ({
   );
   // How the art sits: the account's own adjustment, else bright art dimmed and its core moved top-right.
   const artKey = account?.pubKeys?.identityPubKey ?? '';
+  // App accent (Theme → App colours) follows the open account; the boot key already painted the last one.
+  useEffect(() => {
+    if (artKey) switchToAccountAccent(artKey);
+  }, [artKey]);
   // The account's own picture, when it chose one in the card designer (owner, 12 Oct 2026); bWalletX only.
   const [cardImage, setCardImage] = useState<string | null>(() => (bavatarArt ? loadCardImage(artKey) : null));
   useEffect(() => {
@@ -642,21 +648,20 @@ const WalletCardInner = ({
                 </span>
               </div>
             )}
-            {frontArt && (
-              <button
-                type="button"
-                className="bw-wcard-design"
-                aria-label="Design your card"
-                title="Design your card"
-                tabIndex={flipped ? 0 : -1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAdjusting(true);
-                }}
-              >
-                <SlidersHorizontal size={16} aria-hidden="true" />
-              </button>
-            )}
+            {/* Theme (owner, 14 Oct 2026): App colours + Design your card. Shown on every card, store builds too. */}
+            <button
+              type="button"
+              className="bw-wcard-design"
+              aria-label="Theme"
+              title="Theme"
+              tabIndex={flipped ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAdjusting(true);
+              }}
+            >
+              <SlidersHorizontal size={16} aria-hidden="true" />
+            </button>
           </div>
           <div className="bw-wcard-backbody">
             <div className={`bw-wcard-qr${artQr ? ' is-art' : ''}`}>
@@ -729,24 +734,36 @@ const WalletCardInner = ({
       </div>
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
-      {adjusting && frontArt && (
-        <CardDesigner
-          art={frontArt}
-          look={look}
-          isDefault={!savedLook && !cardImage}
-          handle={t.tag || cardPaymail(names.paymail)}
-          balance={unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
-          sub={unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
-          onChange={setLook}
-          onReset={() => {
-            setLook(null);
-            setImage(null);
-          }}
+      {adjusting && (
+        <ThemeSheet
+          account={artKey}
           onClose={() => setAdjusting(false)}
-          customImage={!!cardImage}
-          onImage={setImage}
-          libraryKey={artKey}
-          currentImage={cardImage}
+          card={
+            frontArt
+              ? (tabs) => (
+                  <CardDesigner
+                    title="Theme"
+                    tabs={tabs}
+                    art={frontArt}
+                    look={look}
+                    isDefault={!savedLook && !cardImage}
+                    handle={t.tag || cardPaymail(names.paymail)}
+                    balance={unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
+                    sub={unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
+                    onChange={setLook}
+                    onReset={() => {
+                      setLook(null);
+                      setImage(null);
+                    }}
+                    onClose={() => setAdjusting(false)}
+                    customImage={!!cardImage}
+                    onImage={setImage}
+                    libraryKey={artKey}
+                    currentImage={cardImage}
+                  />
+                )
+              : undefined
+          }
         />
       )}
       {sig.ui}

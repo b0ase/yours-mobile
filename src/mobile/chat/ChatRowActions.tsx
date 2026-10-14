@@ -42,7 +42,7 @@ import {
   type ListPrefs,
 } from './listPrefs';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 
 export type ChatRowInfo = {

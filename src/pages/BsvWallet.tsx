@@ -1380,7 +1380,7 @@ export const BsvWallet = () => {
               whileHover={{ scale: 1.06 }}
               src={avatarUrl}
               className="w-12 h-12 rounded-full object-cover"
-              style={{ outline: `2px solid ${theme.color.component.primaryButtonLeftGradient}40` }}
+              style={{ outline: `2px solid color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 25%, transparent)` }}
               alt="Profile"
             />
           </motion.div>
@@ -1845,7 +1845,7 @@ export const BsvWallet = () => {
                     type="button"
                     onClick={() => handleFillMaxMnee(recipient.id)}
                     className="flex items-center gap-1 px-2.5 py-1.5 mr-1.5 rounded-lg border-0 outline-none cursor-pointer shrink-0"
-                    style={{ background: `${theme.color.component.primaryButtonLeftGradient}18` }}
+                    style={{ background: `color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 9%, transparent)` }}
                     title="Fill with available MNEE (minus fee)"
                   >
                     <span
@@ -1869,8 +1869,8 @@ export const BsvWallet = () => {
           onClick={addMneeRecipient}
           className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl border-0 outline-none cursor-pointer"
           style={{
-            background: `${theme.color.component.primaryButtonLeftGradient}10`,
-            border: `1px dashed ${theme.color.component.primaryButtonLeftGradient}40`,
+            background: `color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 6%, transparent)`,
+            border: `1px dashed color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 25%, transparent)`,
           }}
         >
           <Plus size={14} style={{ color: theme.color.component.primaryButtonLeftGradient }} />

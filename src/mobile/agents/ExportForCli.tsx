@@ -7,7 +7,7 @@ import { saveTextFile } from './saveText';
 import { ErrorActions } from '../errors/ErrorActions';
 import { copySecret } from '../secretClipboard';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
@@ -78,7 +78,7 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
           type="button"
           onClick={() => setOpen(true)}
           className="rounded-lg px-3 py-2 text-sm font-bold border-0"
-          style={{ background: '#F5B80022', color: GOLD }}
+          style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
         >
           Export for CLI
         </button>

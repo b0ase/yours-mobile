@@ -51,7 +51,7 @@ const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 // NFTs, collections, tickets, strategies and contracts keep their screens (the old Market page).
 const MarketPage = lazy(() => import('../market/MarketPage'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const Loading = ({ text }: { text: string }) => (
   <p className="text-sm text-center py-8" style={{ color: '#98A2B3' }}>
     {text}

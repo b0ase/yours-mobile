@@ -55,7 +55,7 @@ export const AccountStrip = () => {
           <span className="truncate text-[13px] font-bold text-white">{name}</span>
           <AgentMark id={current} />
           {showTag && (
-            <span className="shrink-0 text-xs font-extrabold" style={{ color: '#FFD24D' }}>
+            <span className="shrink-0 text-xs font-extrabold" style={{ color: 'var(--bw-accent-hi)' }}>
               {tag}
             </span>
           )}

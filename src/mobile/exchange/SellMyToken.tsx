@@ -20,7 +20,7 @@ import {
 } from './curveSales';
 import type { PersonToken } from './people';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
 /**

@@ -147,7 +147,7 @@ export const SocialSignIn = ({
           <div className="flex-1 min-w-0 text-left">
             <div className="text-sm font-semibold text-white flex items-center gap-1">
               {profile.provider === 'x' ? `@${profile.name}` : profile.name}
-              <BadgeCheck size={14} color="#F5B800" />
+              <BadgeCheck size={14} color="var(--bw-accent)" />
             </div>
             <div className="text-[11px]" style={{ color: '#98A2B3' }}>
               Verified · you choose your handle next
@@ -174,7 +174,7 @@ export const SocialSignIn = ({
               type="button"
               onClick={onRestore}
               className="block mt-2 h-9 w-full rounded-lg text-sm font-semibold border-0"
-              style={{ background: '#FFD24D', color: '#15202B' }}
+              style={{ background: 'var(--bw-accent-hi)', color: '#15202B' }}
             >
               Enter the 12 words for {taken}
             </button>

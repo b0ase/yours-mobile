@@ -15,7 +15,7 @@ import { OpnsBuySheet } from '../names/OpnsSheets';
  * first. Buy goes through the same buyOrdinal OpNS path as Get your name (opnsBuy.ts). The Exchange itself is
  * bWalletX only (MARKET_ENABLED), so this tab never ships in the store edition.
  */
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -78,7 +78,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
   return (
     <div className="flex flex-col gap-3 w-full">
       <div className="flex gap-2 items-center flex-wrap">
-        <label className="flex-1 min-w-[200px] flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 focus-within:border-[#F5B800]">
+        <label className="flex-1 min-w-[200px] flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 focus-within:border-[color:var(--bw-accent)]">
           <Search size={16} color={MUTED} aria-hidden="true" />
           <input
             value={q}

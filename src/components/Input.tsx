@@ -50,8 +50,8 @@ export const Input = (props: InputProps) => {
             ...style,
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = theme.color.component.primaryButtonLeftGradient + '80';
-            e.currentTarget.style.boxShadow = `0 0 0 2px ${theme.color.component.primaryButtonLeftGradient}30`;
+            e.currentTarget.style.borderColor = `color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 50%, transparent)`;
+            e.currentTarget.style.boxShadow = `0 0 0 2px color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 19%, transparent)`;
             allProps.onFocus?.(e);
           }}
           onBlur={(e) => {

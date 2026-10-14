@@ -21,7 +21,7 @@ import {
 import type { Registry } from './registry/registry';
 import { useRegistry } from './registry/useRegistry';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PAGE = 50;
 

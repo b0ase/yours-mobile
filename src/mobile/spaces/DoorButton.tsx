@@ -20,7 +20,7 @@ import {
 } from './door';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 const POLL_MS = 4000;

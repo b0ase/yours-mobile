@@ -3,7 +3,7 @@ import { ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { NOT_SENT_TEXT, PAID_EXTRA_TEXT, SENT_TEXT, consentInfo, type ConsentTarget } from './consent';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';

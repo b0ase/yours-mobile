@@ -14,7 +14,7 @@ import { parsePage, parseSpaceInvite, type SpacePage } from './invite';
 import { DoorButton } from './DoorButton';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 

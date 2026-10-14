@@ -1,0 +1,11 @@
+/* App accent (Theme → App colours, owner 14 Oct 2026). Gold by default; src/mobile/theme/accent.ts sets these on
+   <html> at startup for an account that chose another accent. Only the accent changes: the black base stays. */
+:root {
+  --bw-accent: #f5b800;
+  --bw-accent-hi: #ffd24d;
+  --bw-accent-lo: #eab300;
+  --bw-accent-rgb: 245 184 0;
+  --bw-accent-hi-rgb: 255 210 77;
+  --bw-accent-lo-rgb: 234 179 0;
+  --bw-on-accent: #010101;
+}

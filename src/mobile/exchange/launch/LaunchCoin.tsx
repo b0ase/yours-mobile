@@ -41,7 +41,7 @@ type Done = { launch: Launch; supply: string; roomError: boolean; indexError: st
  * the coin's Exchange page. Signing is the active account's own wallet (apiContext); nothing is
  * broadcast before Allow.
  */
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 

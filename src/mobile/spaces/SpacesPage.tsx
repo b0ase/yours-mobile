@@ -32,7 +32,7 @@ import { ErrorActions } from '../errors/ErrorActions';
 import { RegularSpaces } from './RegularSpaces';
 import { roomPageUrl } from './schedule';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 type Row = { room: ChatRoom; state: SpaceState };

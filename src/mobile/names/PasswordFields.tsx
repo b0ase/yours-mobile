@@ -88,7 +88,7 @@ export const PasswordFields = ({
             className="absolute left-0 right-0 top-full mt-1 z-10 flex flex-col items-start gap-0.5 rounded-xl px-3 py-2 text-left border-0"
             style={{ background: '#22252B', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
           >
-            <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#F5B800' }}>
+            <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--bw-accent)' }}>
               <Wand2 size={13} /> Use a strong password
             </span>
             <span className="text-[11px] font-mono" style={{ color: '#D0D5DD' }}>
@@ -119,7 +119,7 @@ export const PasswordFields = ({
             type="button"
             onClick={() => generate()}
             className="flex items-center gap-1 bg-transparent border-0 p-0 font-semibold"
-            style={{ color: '#F5B800' }}
+            style={{ color: 'var(--bw-accent)' }}
           >
             <Wand2 size={13} /> Generate a strong password
           </button>

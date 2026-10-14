@@ -15,7 +15,7 @@ import { DELETE_ACCOUNT_URL, SUPPORT_EMAIL } from '../ugc/ugc';
 import { confirmMatches, deleteAccount, type DeleteStep } from './deleteAccount';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -160,7 +160,7 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
             </div>
             <div
               className="rounded-2xl p-4 flex flex-col gap-2"
-              style={{ background: PANEL, border: `1px solid ${GOLD}55` }}
+              style={{ background: PANEL, border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)` }}
             >
               <div className="text-sm font-bold" style={{ color: GOLD }}>
                 Back up first

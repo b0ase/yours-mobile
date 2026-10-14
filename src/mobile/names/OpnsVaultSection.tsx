@@ -14,8 +14,8 @@ import {
  * bMint › OpNS names › Vault: names the owner keeps (never listed, never auto-listed after a mint) and a
  * "To gift" shelf. Each has a drop-pad for a .txt list (e.g. opns-KEEP.txt / opns-GIFT.txt); export/import JSON.
  */
-const GOLD = '#FFD24D';
-const GOLD_DIM = 'rgba(255,210,77,0.14)';
+const GOLD = 'var(--bw-accent-hi)';
+const GOLD_DIM = 'rgb(var(--bw-accent-hi-rgb) / 0.14)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.58)';
 const HAIR = 'rgba(255,255,255,0.08)';
@@ -113,8 +113,8 @@ const Pad = (p: { shelf: Shelf; names: string[]; owned: Set<string>; onAdd: (nam
         style={{
           minHeight: 84,
           padding: 14,
-          border: `1.5px dashed ${drag ? GOLD : 'rgba(255,210,77,0.35)'}`,
-          background: drag ? 'rgba(255,210,77,0.08)' : 'rgba(255,210,77,0.03)',
+          border: `1.5px dashed ${drag ? GOLD : 'rgb(var(--bw-accent-hi-rgb) / 0.35)'}`,
+          background: drag ? 'rgb(var(--bw-accent-hi-rgb) / 0.08)' : 'rgb(var(--bw-accent-hi-rgb) / 0.03)',
         }}
       >
         <span className="text-[13px] font-semibold" style={{ color: TEXT }}>
@@ -149,7 +149,7 @@ const Pad = (p: { shelf: Shelf; names: string[]; owned: Set<string>; onAdd: (nam
               style={{
                 background: p.owned.has(n) ? GOLD_DIM : 'transparent',
                 color: GOLD,
-                border: p.owned.has(n) ? '1px solid transparent' : '1px dashed rgba(255,210,77,0.35)',
+                border: p.owned.has(n) ? '1px solid transparent' : '1px dashed rgb(var(--bw-accent-hi-rgb) / 0.35)',
               }}
               title={p.owned.has(n) ? 'Owned' : 'Not minted yet: protected from listing once it mints'}
             >

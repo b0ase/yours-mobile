@@ -22,7 +22,7 @@ const CopyRow = ({ address, copied, onCopy }: { address: string; copied: boolean
     className="flex items-center gap-2 px-4 py-3 rounded-xl w-full text-left"
     style={{ background: '#17191E' }}
   >
-    {copied ? <Check size={16} color="#FFD24D" /> : <Copy size={16} color="#98A2B3" />}
+    {copied ? <Check size={16} color="var(--bw-accent-hi)" /> : <Copy size={16} color="#98A2B3" />}
     <span className="text-xs font-mono flex-1 text-white overflow-hidden text-ellipsis whitespace-nowrap">
       {address}
     </span>

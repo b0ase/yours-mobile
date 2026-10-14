@@ -44,7 +44,7 @@ import {
 import { mapLimit, rateLimiter, withBeefCache } from './speed';
 import { requestWalletRefresh, useGoToWallet } from '../wallet/walletRefresh';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';

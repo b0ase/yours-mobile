@@ -21,7 +21,7 @@ import {
 } from './sell';
 import { fmtSats, hasRate, money, satsNote } from '../money/money';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const BG = '#17191E';
 const LINE = '#2b2f36';
 // Any valid addresses: only used to size the listing script for the fee estimate.
@@ -110,7 +110,7 @@ export const SellSheet = ({
   );
 
   const input =
-    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[#FFD24D]';
+    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[color:var(--bw-accent-hi)]';
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-end bg-black/60" onClick={() => !busy && onClose()}>

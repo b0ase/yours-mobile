@@ -8,7 +8,7 @@ import { CLI_ORIGIN } from './agentPairing';
 import { IS_EXTENSION } from '../extension';
 import { Scanner } from '../scan/Scanner';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 
@@ -128,7 +128,7 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
           <div className="mt-8 flex flex-col items-center text-center">
             <span
               className="grid h-14 w-14 place-items-center rounded-2xl"
-              style={{ background: 'rgba(245,184,0,0.12)' }}
+              style={{ background: 'rgb(var(--bw-accent-rgb) / 0.12)' }}
             >
               <ShieldCheck size={28} color={GOLD} />
             </span>

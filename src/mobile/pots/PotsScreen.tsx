@@ -44,7 +44,7 @@ const useSubscribeRequest = (): SubscribeRequest | null => {
   return r;
 };
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
@@ -166,7 +166,10 @@ export const PotsScreen = ({ onClose, openFund = false }: { onClose: () => void;
         {SUBSCRIPTIONS_ENABLED && request && (
           <div
             className="rounded-2xl p-3 flex flex-col gap-1"
-            style={{ background: '#F5B80018', border: `1px solid ${GOLD}55` }}
+            style={{
+              background: 'rgb(var(--bw-accent-rgb)/0.09)',
+              border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
+            }}
           >
             <div className="text-sm font-bold text-white">{requestLabel(request)}</div>
             <div className="text-xs" style={{ color: MUTED }}>
@@ -206,7 +209,10 @@ export const PotsScreen = ({ onClose, openFund = false }: { onClose: () => void;
             {allSubs.map((sub) => (
               <SubscriptionCard key={sub.id} sub={sub} rate={rate} pots={pots} />
             ))}
-            <div className="rounded-xl p-2.5 text-xs" style={{ border: `1px dashed ${GOLD}55`, color: MUTED }}>
+            <div
+              className="rounded-xl p-2.5 text-xs"
+              style={{ border: `1px dashed color-mix(in srgb, ${GOLD} 33%, transparent)`, color: MUTED }}
+            >
               Coming later: pay in PNEEs, so $1 is always exactly $1 with no price swings.
             </div>
             <p className="text-[11px] m-0 text-center" style={{ color: MUTED }}>
@@ -220,7 +226,10 @@ export const PotsScreen = ({ onClose, openFund = false }: { onClose: () => void;
             type="button"
             onClick={() => setFunding(true)}
             className="rounded-2xl p-3 flex flex-col gap-1 text-left"
-            style={{ background: '#F5B80018', border: `1px solid ${GOLD}55` }}
+            style={{
+              background: 'rgb(var(--bw-accent-rgb)/0.09)',
+              border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
+            }}
           >
             <span className="text-sm font-bold text-white">Back bWalletX</span>
             <span className="text-xs" style={{ color: MUTED }}>
@@ -402,7 +411,7 @@ const PotScreen = ({
                 window.location.reload();
               }}
               className="rounded-lg px-3 py-2 text-xs font-bold border-0 text-left"
-              style={{ background: '#F5B80022', color: GOLD }}
+              style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
             >
               Pay from {o.name || short(o.addresses.bsvAddress)} →
             </button>

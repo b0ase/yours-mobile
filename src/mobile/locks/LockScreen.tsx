@@ -93,7 +93,7 @@ import {
  * Locks list (many independent locks), claim of matured pieces, the schedule builder with a full
  * preview, the irreversible confirmation (type LOCK), and the verifier for any lock transaction.
  */
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -114,7 +114,7 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
   </label>
 );
 const inputCls =
-  'w-full min-w-0 rounded-xl px-3 py-2 text-sm text-white bg-[#0d0e11] border border-[#2b2f36] outline-none focus:border-[#F5B800]';
+  'w-full min-w-0 rounded-xl px-3 py-2 text-sm text-white bg-[#0d0e11] border border-[#2b2f36] outline-none focus:border-[color:var(--bw-accent)]';
 const Seg = <T extends string>({
   value,
   options,
@@ -810,7 +810,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                     setShowSubs(true);
                   }}
                   className={`${card} text-left`}
-                  style={{ ...cardStyle, border: `1px solid ${GOLD}55`, background: '#F5B80014' }}
+                  style={{
+                    ...cardStyle,
+                    border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
+                    background: 'rgb(var(--bw-accent-rgb)/0.08)',
+                  }}
                 >
                   <span className="text-sm font-bold text-white">Back bWalletX</span>
                   <div className="text-xs" style={{ color: MUTED }}>

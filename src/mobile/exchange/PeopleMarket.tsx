@@ -32,7 +32,7 @@ import {
 import { SellMyToken } from './SellMyToken';
 import { SELL_ENABLED } from '../sell/sell';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const GREEN = '#A1FF8B';
 const MUTED = '#98A2B3';
 const TRADING = marketTradingEnabled();

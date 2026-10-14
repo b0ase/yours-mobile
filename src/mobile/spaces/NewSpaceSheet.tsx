@@ -13,7 +13,7 @@ import { NameSpaceSheet } from './LiveBanner';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 
 /** Rooms this wallet may start a Space in, from the chat list it already has. */

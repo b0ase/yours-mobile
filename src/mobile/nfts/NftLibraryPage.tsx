@@ -52,7 +52,7 @@ import { isBavatarItem } from '../names/pictureSource';
 
 const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const ROUTE = '/m/nfts';
 const MIN_TILE = 170;
 const GAP = 12;
@@ -170,7 +170,7 @@ const Tile = ({
     <button
       onClick={onOpen}
       aria-label={`Open ${it.name}`}
-      className="relative overflow-hidden rounded-xl bg-[#17191E] border border-white/5 hover:border-[#F5B800]/60 transition-colors"
+      className="relative overflow-hidden rounded-xl bg-[#17191E] border border-white/5 hover:border-[color:var(--bw-accent)]/60 transition-colors"
       style={{ width: size, height: size }}
     >
       <div className={`absolute inset-0 ${m.flagged ? 'blur-xl' : ''}`}>
@@ -192,7 +192,7 @@ const Tile = ({
         </span>
       )}
       {it.pending && (
-        <span className="absolute top-2 left-2 rounded-md bg-black/80 px-2 py-0.5 text-[10px] font-semibold text-[#F5B800]">
+        <span className="absolute top-2 left-2 rounded-md bg-black/80 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--bw-accent)]">
           Pending
         </span>
       )}
@@ -425,7 +425,7 @@ const DetailPanel = ({
           </button>
         </div>
         {it.legacyListing && (
-          <p className="text-[11px] text-[#F5B800]">
+          <p className="text-[11px] text-[color:var(--bw-accent)]">
             This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it isn’t for sale and can’t be
             sent from here.
           </p>
@@ -457,8 +457,9 @@ const Empty = ({ onMint }: { onMint: () => void }) => (
     <div
       className="h-40 w-40 rounded-3xl flex items-center justify-center"
       style={{
-        background: 'conic-gradient(from 210deg, #F5B800, #7a5a00, #FFD24D, #3a2c05, #F5B800)',
-        boxShadow: '0 0 60px rgba(245,184,0,0.25)',
+        background:
+          'conic-gradient(from 210deg, var(--bw-accent), #7a5a00, var(--bw-accent-hi), #3a2c05, var(--bw-accent))',
+        boxShadow: '0 0 60px rgb(var(--bw-accent-rgb) / 0.25)',
       }}
     >
       <div className="h-32 w-32 rounded-2xl bg-[#0b0c0f] flex items-center justify-center">
@@ -536,7 +537,9 @@ const NftLibraryPage = () => {
     set({ types: filter.types.includes(t) ? filter.types.filter((x) => x !== t) : [...filter.types, t] });
   const chip = (on: boolean) =>
     `rounded-full px-3 py-1 text-xs font-semibold border transition-colors ${
-      on ? 'border-[#F5B800] bg-[#F5B800]/15 text-[#F5B800]' : 'border-white/10 text-[#D0D5DD] hover:border-white/30'
+      on
+        ? 'border-[color:var(--bw-accent)] bg-[color:var(--bw-accent)]/15 text-[color:var(--bw-accent)]'
+        : 'border-white/10 text-[#D0D5DD] hover:border-white/30'
     }`;
   const filtered = filter !== EMPTY_FILTER;
 

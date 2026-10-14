@@ -7,7 +7,7 @@ import { AccountRow } from './AccountSwitcher';
 import { getPinned, getRecent, orderAccounts, togglePinned } from './accountMenu';
 
 const MUTED = '#98A2B3';
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 /** Full-height sheet over the drawer. */
 const FullSheet = ({

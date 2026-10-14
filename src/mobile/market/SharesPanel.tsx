@@ -33,7 +33,7 @@ const SECTIONS: [ShareSection, string][] = [
   ...(SHOW_OTHER_COMPANIES ? ([['other', 'Other companies']] as [ShareSection, string][]) : []),
 ];
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 const Step = ({ n, label, done, current }: { n: number; label: string; done: boolean; current: boolean }) => (
   <div className="flex items-center gap-2 text-xs" style={{ color: done ? '#2ecc71' : current ? '#fff' : '#667085' }}>

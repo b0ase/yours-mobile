@@ -28,7 +28,7 @@ import { IS_EXTENSION } from '../extension';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
@@ -300,7 +300,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
                 void switchTo(o.addresses.identityAddress);
               }}
               className="rounded-lg px-3 py-2 text-xs font-bold border-0 text-left"
-              style={{ background: '#F5B80022', color: GOLD }}
+              style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
             >
               Pay from {o.name || short(o.addresses.bsvAddress)} →
             </button>
@@ -342,7 +342,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
               disabled={!!busy}
               onClick={() => void switchTo(id)}
               className="rounded-lg px-3 py-2 text-sm font-bold border-0"
-              style={{ background: '#F5B80022', color: GOLD }}
+              style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
             >
               {busy || 'Switch to this account to sweep back'}
             </button>
@@ -381,7 +381,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
                 disabled={!!busy}
                 onClick={() => void switchTo(id)}
                 className="rounded-lg px-3 py-2 text-sm font-bold border-0"
-                style={{ background: '#F5B80022', color: GOLD }}
+                style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
               >
                 {busy || 'Switch to this account to connect'}
               </button>
