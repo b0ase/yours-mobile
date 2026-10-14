@@ -891,7 +891,7 @@ const ResultCard = (p: {
           ) : (
             <>
               <p className="m-0 text-sm" style={{ color: MUTED }}>
-                {price ? 'Paid in BSV at today&apos;s price. ' : ''}Yours forever, or give it to someone.
+                {price ? 'Paid in BSV at today’s price. ' : ''}Yours forever, or give it to someone.
               </p>
               {giftBox}
               <button
