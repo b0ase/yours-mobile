@@ -14,7 +14,7 @@
 import { parseHistorySetting, type HistorySetting, type HistoryVisibility } from './history';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { getChatAccount, getChatReceiveAddress, LEGACY_SESSION_KEY, setChatAccount } from './chatAccount';
-import { REPORTED_STORAGE_PREFIX, reportedKey } from './walletAddress';
+import { REPORTED_STORAGE_PREFIX, refusedMark, refusedRecently, reportedKey } from './walletAddress';
 import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
@@ -205,9 +205,17 @@ export class BchatClient {
       if (!handle || !address || !this.signer?.proveAddress) return;
       const storageKey = `${REPORTED_STORAGE_PREFIX}${getChatAccount() ?? 'default'}`;
       const key = reportedKey(handle, address);
-      if (localStorage.getItem(storageKey) === key) return;
+      const stored = localStorage.getItem(storageKey);
+      if (stored === key || refusedRecently(stored, key, Date.now())) return;
       const signature = await this.signer.proveAddress(address, handle);
-      await this.call('POST', '/api/bitsign/me/wallet-address', { address, signature });
+      try {
+        await this.call('POST', '/api/bitsign/me/wallet-address', { address, signature });
+      } catch (e) {
+        // 403: this bChatX account has no bWalletX sign-in yet. Don't ask again on every open; retry after a day.
+        if (e instanceof ChatApiError && e.status === 403)
+          localStorage.setItem(storageKey, refusedMark(key, Date.now()));
+        return;
+      }
       localStorage.setItem(storageKey, key);
     } catch {
       /* best-effort: the profile shows "Open bWalletX" until a later sign-in reports it */
