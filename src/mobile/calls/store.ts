@@ -10,6 +10,7 @@ import { CallsClient, walletCallSigner, type BlockEntry } from './api';
 import { fetchPeerBPhone, myRateCard } from './bphone';
 import { CallMedia } from './media';
 import { verifyCaller } from './peer';
+import { isShareCancelled } from './screenShare';
 import {
   calleeShouldHangUp,
   decideMeterPayment,
@@ -49,9 +50,21 @@ export interface Snapshot {
   error: string | null;
   /** Mic/camera refused by the OS or browser: the call screen offers Settings and retries on resume. */
   denied: MediaKind | null;
+  /** We are sharing our screen. */
+  sharing: boolean;
+  /** The peer is sharing their screen to us. */
+  remoteShare: boolean;
 }
 
-let snap: Snapshot = { call: IDLE, recent: [], ready: false, error: null, denied: null };
+let snap: Snapshot = {
+  call: IDLE,
+  recent: [],
+  ready: false,
+  error: null,
+  denied: null,
+  sharing: false,
+  remoteShare: false,
+};
 const listeners = new Set<Listener>();
 let client: CallsClient | null = null;
 let ctxRef: OneSatContext | null = null;
@@ -172,7 +185,7 @@ async function joinMedia(callId: string) {
   const camera = 'camera' in s ? s.camera : false;
   const facing = 'facing' in s ? s.facing : 'user';
   media = new CallMedia();
-  if (videoEls) media.bindVideo(videoEls.local, videoEls.remote);
+  if (videoEls) media.bindVideo(videoEls.local, videoEls.remote, videoEls.screen);
   const { cameraFailed, micDenied, cameraDenied, micError } = await media.connect(
     t.url,
     t.token,
@@ -181,6 +194,8 @@ async function joinMedia(callId: string) {
         if (busy(snap.call)) dispatch({ type: 'FAIL', message: 'Connection lost' });
       },
       onRemoteVideo: (on) => dispatch({ type: 'REMOTE_VIDEO', on }),
+      onRemoteShare: (on) => set({ remoteShare: on }),
+      onLocalShareEnded: () => set({ sharing: false }),
       onData: (msg) => {
         const n = parsePayNotice(msg);
         if (n) dispatch({ type: 'RECEIPT', notice: n });
@@ -196,18 +211,26 @@ async function joinMedia(callId: string) {
   if (micError) set({ error: `Microphone unavailable: ${micError}` });
 }
 
-let videoEls: { local: HTMLVideoElement | null; remote: HTMLVideoElement | null } | null = null;
+let videoEls: {
+  local: HTMLVideoElement | null;
+  remote: HTMLVideoElement | null;
+  screen: HTMLVideoElement | null;
+} | null = null;
 /** The CallScreen hands in its <video> elements (or nulls on unmount). */
-export function bindVideo(local: HTMLVideoElement | null, remote: HTMLVideoElement | null) {
-  videoEls = local || remote ? { local, remote } : null;
-  media?.bindVideo(local, remote);
+export function bindVideo(
+  local: HTMLVideoElement | null,
+  remote: HTMLVideoElement | null,
+  screen: HTMLVideoElement | null = null,
+) {
+  videoEls = local || remote || screen ? { local, remote, screen } : null;
+  media?.bindVideo(local, remote, screen);
 }
 
 async function teardown() {
   const m = media;
   media = null;
   await m?.close();
-  set({ denied: null });
+  set({ denied: null, sharing: false, remoteShare: false });
   schedule(0);
 }
 
@@ -423,6 +446,19 @@ export async function retryDenied() {
     set({ denied: null });
   } catch {
     /* still refused: keep the note */
+  }
+}
+
+/** Start or stop sharing our screen (desktop browsers / extension; see screenShare.ts). */
+export async function toggleScreenShare() {
+  if (!media || snap.call.phase !== 'active') return;
+  const on = !snap.sharing;
+  try {
+    await media.setScreenShare(on);
+    set({ sharing: on });
+  } catch (e) {
+    set({ sharing: false });
+    if (!isShareCancelled(e)) set({ error: `Screen sharing failed: ${e instanceof Error ? e.message : String(e)}` });
   }
 }
 
