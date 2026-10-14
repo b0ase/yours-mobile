@@ -86,8 +86,22 @@ export const xPostUrl = (v: unknown): string | null => {
   }
 };
 
-/** The creator's avatar (unavatar.io for the X handle). */
-export const avatarUrl = (handle: string) => `https://unavatar.io/x/${encodeURIComponent(handle)}`;
+/**
+ * The handle to credit as the clip's creator: only when its original post is an x.com / twitter.com
+ * status by that same handle (/<handle>/status/<id>, case-insensitive), as bChatX decides it
+ * (bit-sign `src/lib/feed/bmovies.ts` creditFor). Otherwise '' and the card says "via bMovies" only.
+ */
+export const creditedHandle = (c: Pick<Clip, 'handle' | 'tweetUrl'>): string => {
+  if (!c.handle || !c.tweetUrl) return '';
+  const m =
+    /^https:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})(?:[/?#]|$)/i.exec(
+      c.tweetUrl,
+    );
+  return m && m[1].toLowerCase() === c.handle.toLowerCase() ? c.handle : '';
+};
+
+/** The creator's avatar (unavatar.io for the X handle; 404 rather than a stock fallback). */
+export const avatarUrl = (handle: string) => `https://unavatar.io/x/${encodeURIComponent(handle)}?fallback=false`;
 
 /** One feed item → a clip, or null (no id, no playable video or no time). */
 export const toClip = (raw: unknown): Clip | null => {

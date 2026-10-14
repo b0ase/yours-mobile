@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   appendPage,
+  avatarUrl,
+  creditedHandle,
   clipPageUrl,
   fetchClips,
   findPoster,
@@ -148,5 +150,18 @@ describe('attribution', () => {
   test('parseFeed drops screened items', () => {
     const page = parseFeed({ items: [item({ title: 'はだかつ' }), item({ id: 'tweet-2102001651062026669' })] });
     expect(page.clips.map((c) => c.id)).toEqual(['tweet-2102001651062026669']);
+  });
+  test('credits the creator only for a post by that same handle', () => {
+    const at = (handle: string, tweetUrl: string | null) => creditedHandle({ handle, tweetUrl });
+    expect(at('Some_Artist', 'https://x.com/some_artist/status/2102001651062026668')).toBe('Some_Artist');
+    expect(at('a', 'https://mobile.twitter.com/A/status/12345?s=20')).toBe('a');
+    expect(at('a', 'https://x.com/someone_else/status/12345')).toBe('');
+    expect(at('a', 'https://x.com/a/likes')).toBe('');
+    expect(at('a', 'https://x.com/ab/status/12345')).toBe('');
+    expect(at('a', null)).toBe('');
+    expect(at('', 'https://x.com/a/status/12345')).toBe('');
+  });
+  test('avatar asks unavatar for no fallback', () => {
+    expect(avatarUrl('some_artist')).toBe('https://unavatar.io/x/some_artist?fallback=false');
   });
 });

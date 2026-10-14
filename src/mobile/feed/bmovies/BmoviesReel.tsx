@@ -11,6 +11,7 @@ import {
   appendPage,
   avatarUrl,
   clipPageUrl,
+  creditedHandle,
   fetchClips,
   findPoster,
   firstFrameUrl,
@@ -45,25 +46,35 @@ const GoldAvatar = ({ handle }: { handle: string }) => (
   </span>
 );
 
-/** The creator as author: avatar, @handle, "via bMovies" and a link to the original post on X. */
+/**
+ * The creator as author (only when the original post is theirs, see creditedHandle): avatar,
+ * @handle and "via bMovies"; otherwise "via bMovies" alone. The original post links out when valid.
+ * The avatar is lazy (unavatar takes ~0.7–3.3s); the gold disc shows until it loads or if it fails.
+ */
 const Attribution = ({ c }: { c: Clip }) => {
-  const [broken, setBroken] = useState(false);
+  const handle = creditedHandle(c);
+  const [state, setState] = useState<'loading' | 'ok' | 'broken'>('loading');
   return (
     <div className="mb-2 flex items-center gap-2">
-      {c.handle &&
-        (broken ? (
-          <GoldAvatar handle={c.handle} />
-        ) : (
-          <img
-            src={avatarUrl(c.handle)}
-            alt=""
-            className="h-9 w-9 shrink-0 rounded-full object-cover"
-            style={{ background: GOLD }}
-            onError={() => setBroken(true)}
-          />
-        ))}
+      {handle && (
+        <span className="relative h-9 w-9 shrink-0">
+          {state !== 'ok' && <GoldAvatar handle={handle} />}
+          {state !== 'broken' && (
+            <img
+              src={avatarUrl(handle)}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 h-9 w-9 rounded-full object-cover"
+              style={{ opacity: state === 'ok' ? 1 : 0 }}
+              onLoad={() => setState('ok')}
+              onError={() => setState('broken')}
+            />
+          )}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
-        {c.handle && <p className="truncate text-[14px] font-bold text-white">@{c.handle}</p>}
+        {handle && <p className="truncate text-[14px] font-bold text-white">@{handle}</p>}
         <p className="text-[11px]" style={{ color: MUTED }}>
           via bMovies
         </p>
