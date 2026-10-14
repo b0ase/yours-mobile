@@ -15,15 +15,16 @@ import { shareLink } from '../../chat/shareLink';
 import { openDappBrowser } from '../../dappBrowser';
 import {
   BMOVIES_ORIGIN,
+  FEED_URL,
   appendPage,
   avatarUrl,
   clipPageUrl,
   creditedHandle,
-  fetchClips,
   findPoster,
   firstFrameUrl,
   type Clip,
 } from './bmovies';
+import { BMUSIC_SOURCES, fetchMerged, type Cursors, type VideoSource } from './videoSources';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -33,6 +34,47 @@ const BM_YELLOW = '#facc15';
 const BM_GREEN = '#6bff8a';
 const BM_GREEN_EDGE = 'rgba(47,175,90,0.8)';
 const BEBAS = "'Bebas Neue', 'Oswald', Impact, sans-serif";
+
+/** The reel's brand: bMovies (gold title cards, bMovies' yellow/green) or bMusic (its blue). */
+type Theme = {
+  name: string;
+  accent: string;
+  /** Text on the accent. */
+  onAccent: string;
+  backdrop: string;
+  ticker: string;
+  buy: string;
+  buyEdge: string;
+  home: string;
+  sources: readonly VideoSource[];
+};
+
+const BMUSIC_BLUE = '#3E8BFF';
+
+const THEMES: Record<'bmovies' | 'bmusic', Theme> = {
+  bmovies: {
+    name: 'bMovies',
+    accent: GOLD,
+    onAccent: '#1a1300',
+    backdrop: 'radial-gradient(circle at 50% 35%, #3a2a00 0%, #120d00 55%, #010101 100%)',
+    ticker: BM_YELLOW,
+    buy: BM_GREEN,
+    buyEdge: BM_GREEN_EDGE,
+    home: `${BMOVIES_ORIGIN}/feed`,
+    sources: [{ id: 'bmovies', label: 'bMovies', url: FEED_URL, enabled: true }],
+  },
+  bmusic: {
+    name: 'bMusic',
+    accent: BMUSIC_BLUE,
+    onAccent: '#04122b',
+    backdrop: 'radial-gradient(circle at 50% 35%, #0c2a5c 0%, #050f22 55%, #010101 100%)',
+    ticker: BMUSIC_BLUE,
+    buy: BMUSIC_BLUE,
+    buyEdge: 'rgba(62,139,255,0.8)',
+    home: `${BMOVIES_ORIGIN}/bmusic`,
+    sources: BMUSIC_SOURCES,
+  },
+};
 
 /** bMovies' display face, self-hosted (the same woff2 bMint ships), loaded once with the reel. */
 let bebasLoading: Promise<void> | null = null;
@@ -47,12 +89,12 @@ const loadBebas = () =>
   })());
 
 /** Gold title card: what a slide shows before (or without) a poster. Never a grey box. */
-const TitleCard = ({ c }: { c: Clip }) => (
+const TitleCard = ({ c, t }: { c: Clip; t: Theme }) => (
   <div
     className="absolute inset-0 flex items-center justify-center px-8 text-center"
-    style={{ background: 'radial-gradient(circle at 50% 35%, #3a2a00 0%, #120d00 55%, #010101 100%)' }}
+    style={{ background: t.backdrop }}
   >
-    <p className="text-[22px] font-bold leading-snug" style={{ color: GOLD }}>
+    <p className="text-[22px] font-bold leading-snug" style={{ color: t.accent }}>
       {c.title}
     </p>
   </div>
@@ -77,7 +119,7 @@ const GoldAvatar = ({ handle }: { handle: string }) => (
  * "Original on X ↗" opens the post when it is valid. The avatar is lazy (unavatar takes ~0.7–3.3s);
  * the gold disc shows until it loads or if it fails.
  */
-const Attribution = ({ c }: { c: Clip }) => {
+const Attribution = ({ c, t }: { c: Clip; t: Theme }) => {
   const handle = creditedHandle(c);
   const [state, setState] = useState<'loading' | 'ok' | 'broken'>('loading');
   return (
@@ -108,7 +150,7 @@ const Attribution = ({ c }: { c: Clip }) => {
         </span>
       )}
       <span className="shrink-0 text-[11px]" style={{ color: MUTED }}>
-        via bMovies
+        via {c.via ?? t.name}
       </span>
       {c.tweetUrl && (
         <button
@@ -132,7 +174,9 @@ const Slide = ({
   active,
   muted,
   onToggleSound,
+  t,
 }: {
+  t: Theme;
   c: Clip;
   i: number;
   active: number;
@@ -173,13 +217,13 @@ const Slide = ({
   const share = () =>
     void shareLink({
       title: c.title,
-      text: c.ticker ? `${c.title} $${c.ticker} on bMovies` : c.title,
+      text: c.ticker ? `${c.title} $${c.ticker} on ${t.name}` : c.title,
       url: clipPageUrl(c),
     });
 
   return (
     <div data-i={i} className="relative w-full overflow-hidden" style={{ height: '100%', scrollSnapAlign: 'start' }}>
-      <TitleCard c={c} />
+      <TitleCard c={c} t={t} />
       {shownPoster && (
         <img
           src={shownPoster}
@@ -240,7 +284,7 @@ const Slide = ({
         {muted ? <VolumeX size={17} color="#fff" /> : <Volume2 size={17} color="#fff" />}
       </button>
       <div className="absolute inset-x-0 bottom-0 px-4 pb-3 pt-4">
-        <Attribution c={c} />
+        <Attribution c={c} t={t} />
         {c.blurb && (
           <p className="mt-2 text-[13px] leading-snug line-clamp-3" style={{ color: '#bbb' }}>
             {c.blurb}
@@ -253,7 +297,7 @@ const Slide = ({
           {c.ticker && (
             <span
               className="mt-1 block text-[22px] uppercase leading-none tracking-[0.03em]"
-              style={{ color: BM_YELLOW }}
+              style={{ color: t.ticker }}
             >
               ${c.ticker}
             </span>
@@ -263,16 +307,16 @@ const Slide = ({
           {/* Buy opens the clip on bmovies.app, where the trade happens. */}
           <button
             onClick={openOnBmovies}
-            aria-label={c.ticker ? `Buy $${c.ticker} on bMovies` : 'Open on bMovies'}
+            aria-label={c.ticker ? `Buy $${c.ticker} on ${t.name}` : `Open on ${t.name}`}
             className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
-            style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${BM_GREEN_EDGE}`, color: BM_GREEN }}
+            style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${t.buyEdge}`, color: t.buy }}
           >
             {c.ticker ? (
               <>
                 Buy <span style={{ opacity: 0.8 }}>${c.ticker}</span>
               </>
             ) : (
-              'Open on bMovies'
+              `Open on ${t.name}`
             )}
           </button>
           <button
@@ -293,9 +337,10 @@ const Slide = ({
   );
 };
 
-const BmoviesReel = () => {
+const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => {
+  const t = THEMES[brand];
   const [clips, setClips] = useState<Clip[] | null>(null);
-  const [next, setNext] = useState<string | null>(null);
+  const [next, setNext] = useState<Cursors | null>(null);
   const [error, setError] = useState('');
   const [active, setActive] = useState(0);
   const [muted, setMuted] = useState(true);
@@ -314,20 +359,24 @@ const BmoviesReel = () => {
     return () => window.removeEventListener('resize', fit);
   }, []);
 
-  const load = useCallback(async (cursor: string | null) => {
-    if (loading.current) return;
-    loading.current = true;
-    try {
-      const page = await fetchClips(cursor);
-      setClips((have) => (cursor && have ? appendPage(have, page.clips) : page.clips));
-      setNext(page.next);
-      setError('');
-    } catch {
-      if (!cursor) setError("Couldn't reach bMovies just now.");
-    } finally {
-      loading.current = false;
-    }
-  }, []);
+  // Every source in the theme (plain bMovies is one), merged and deduped, newest first per page.
+  const load = useCallback(
+    async (cursors: Cursors | null) => {
+      if (loading.current) return;
+      loading.current = true;
+      try {
+        const page = await fetchMerged(t.sources, cursors ?? {});
+        setClips((have) => (cursors && have ? appendPage(have, page.clips) : page.clips));
+        setNext(page.more ? page.cursors : null);
+        setError('');
+      } catch {
+        if (!cursors) setError(`Couldn't reach ${t.name} just now.`);
+      } finally {
+        loading.current = false;
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     void loadBebas();
@@ -366,19 +415,16 @@ const BmoviesReel = () => {
     >
       {clips === null && !error && (
         <div className="relative h-full w-full">
-          <div
-            className="absolute inset-0 animate-pulse"
-            style={{ background: 'radial-gradient(circle at 50% 35%, #3a2a00 0%, #120d00 55%, #010101 100%)' }}
-          />
+          <div className="absolute inset-0 animate-pulse" style={{ background: t.backdrop }} />
         </div>
       )}
       {error && (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="text-sm font-semibold text-white">{error}</p>
           <button
-            onClick={() => void openDappBrowser(`${BMOVIES_ORIGIN}/feed`)}
+            onClick={() => void openDappBrowser(t.home)}
             className="flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-bold"
-            style={{ background: GOLD, color: '#1a1300' }}
+            style={{ background: t.accent, color: t.onAccent }}
           >
             Open bmovies.app <ExternalLink size={14} />
           </button>
@@ -390,7 +436,7 @@ const BmoviesReel = () => {
         </p>
       )}
       {clips?.map((c, i) => (
-        <Slide key={c.id} c={c} i={i} active={active} muted={muted} onToggleSound={() => setMuted((m) => !m)} />
+        <Slide key={c.id} t={t} c={c} i={i} active={active} muted={muted} onToggleSound={() => setMuted((m) => !m)} />
       ))}
     </div>
   );

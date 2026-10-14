@@ -15,7 +15,7 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { isBlocked } from './screen';
 
 export const BMOVIES_ORIGIN = 'https://www.bmovies.app';
-const FEED_URL = `${BMOVIES_ORIGIN}/api/feed`;
+export const FEED_URL = `${BMOVIES_ORIGIN}/api/feed`;
 const SYNDICATION = 'https://cdn.syndication.twimg.com/tweet-result';
 const TITLE_MAX = 140;
 const BLURB_MAX = 200;
@@ -37,6 +37,10 @@ export type Clip = {
   /** https poster, or null until one is found. */
   poster: string | null;
   at: number;
+  /** The source it came from, for the "via …" credit and its share page (default: bMovies). */
+  via?: string;
+  /** The bmovies.app skin its share page opens in (e.g. 'bmusic'), or undefined for plain bMovies. */
+  skin?: string;
 };
 
 export type ClipPage = { clips: Clip[]; next: string | null };
@@ -150,8 +154,8 @@ export const appendPage = (have: Clip[], page: Clip[]): Clip[] => {
 };
 
 /** The clip's page on bmovies.app (its own Share link). */
-export const clipPageUrl = (c: Pick<Clip, 'offerId'>) =>
-  `${BMOVIES_ORIGIN}/feed?focus=${encodeURIComponent(c.offerId)}`;
+export const clipPageUrl = (c: Pick<Clip, 'offerId' | 'skin'>) =>
+  `${BMOVIES_ORIGIN}/feed?focus=${encodeURIComponent(c.offerId)}${c.skin ? `&skin=${encodeURIComponent(c.skin)}` : ''}`;
 
 /** The tweet id in a bMovies item id (`tweet-<id>` / `convert-<id>-…`), or null. */
 export const tweetIdOf = (itemId: string): string | null =>
@@ -202,10 +206,22 @@ const webJson: FetchJson = async (url) => {
 
 export const defaultJson: FetchJson = Capacitor.isNativePlatform() ? nativeJson : webJson;
 
-/** One page of clips (`cursor` = the previous page's next). Throws when the feed can't be read. */
-export async function fetchClips(cursor: string | null = null, json: FetchJson = defaultJson): Promise<ClipPage> {
-  const url = cursor ? `${FEED_URL}?cursor=${encodeURIComponent(cursor)}&limit=20` : `${FEED_URL}?limit=20`;
-  const data = await json(url);
+/** A feed page URL: `base` (bMovies' /api/feed, optionally with ?skin=…) plus cursor and limit. */
+export const feedPageUrl = (cursor: string | null, base: string = FEED_URL) => {
+  const sep = base.includes('?') ? '&' : '?';
+  return cursor ? `${base}${sep}cursor=${encodeURIComponent(cursor)}&limit=20` : `${base}${sep}limit=20`;
+};
+
+/**
+ * One page of clips (`cursor` = the previous page's next). Throws when the feed can't be read.
+ * `base` picks a bmovies.app skin's feed (e.g. `…/api/feed?skin=bmusic`); default plain bMovies.
+ */
+export async function fetchClips(
+  cursor: string | null = null,
+  json: FetchJson = defaultJson,
+  base: string = FEED_URL,
+): Promise<ClipPage> {
+  const data = await json(feedPageUrl(cursor, base));
   if (!data) throw new Error('bMovies is not answering');
   return parseFeed(data);
 }
