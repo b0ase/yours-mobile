@@ -69,6 +69,7 @@ import { LiveTicker } from './live/LiveTicker';
 import { noteBalance, useLive } from './live/liveBus';
 import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
+import { BalanceCarousel, MOCK_BALANCE_CARDS } from './BalanceCarousel';
 import { cardSats, memberSince, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 
 export type WalletCardProps = {
@@ -806,8 +807,12 @@ class WalletCardBoundary extends Component<
   }
 }
 
-export const WalletCard = (p: WalletCardProps) => (
+const RealWalletCard = (p: WalletCardProps) => (
   <WalletCardBoundary usd={p.usd} sats={p.sats} onRetry={p.onRetry}>
     <WalletCardInner {...p} />
   </WalletCardBoundary>
 );
+
+// MOCKUP (mock/balance-cards only): the real card becomes the first slide of a multi-balance carousel.
+export const WalletCard = (p: WalletCardProps) =>
+  MOCK_BALANCE_CARDS ? <BalanceCarousel bsvCard={<RealWalletCard {...p} />} /> : <RealWalletCard {...p} />;

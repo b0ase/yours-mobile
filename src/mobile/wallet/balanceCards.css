@@ -1,0 +1,219 @@
+/* MOCKUP (mock/balance-cards): multi-balance card carousel. See BalanceCarousel.tsx. */
+.bw-bcar {
+  width: calc(100vw - 32px);
+  max-width: 398px;
+  margin: 0 auto;
+}
+.bw-bcar-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.bw-bcar-track::-webkit-scrollbar {
+  display: none;
+}
+.bw-bcar-slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  min-width: 0;
+}
+.bw-bcar-slide > .bw-wcard-wrap {
+  width: 100%;
+}
+.bw-bcar-mockwrap {
+  margin-top: 12px;
+}
+.bw-bc {
+  aspect-ratio: 1.7 / 1;
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(255, 210, 77, 0.28), transparent 60%),
+    linear-gradient(145deg, var(--bc-bg), #0b0b0d 140%);
+  color: var(--bc-ink);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 210, 77, 0.35);
+}
+.bw-bc-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bw-bc-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 17px;
+  background: #ffd24d;
+  color: #111;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
+}
+.bw-bc-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.bw-bc-head b {
+  font-size: 15px;
+}
+.bw-bc-head small {
+  font-size: 10.5px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bw-bc-mock {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  opacity: 0.7;
+}
+.bw-bc-amt {
+  all: unset;
+  cursor: pointer;
+  font-family: 'Space Grotesk', Inter, system-ui, sans-serif;
+  font-size: clamp(30px, 10vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.bw-bc-amt.bw-live-flash-down {
+  animation: bw-live-down 900ms ease-out;
+}
+.bw-bc-amt.bw-live-flash-up {
+  animation: bw-live-up 900ms ease-out;
+}
+.bw-bc-unitword {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+.bw-bc-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bw-bc-sub {
+  font-size: 12px;
+  opacity: 0.85;
+}
+.bw-bc-chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #ffd24d;
+  color: #111;
+  font-weight: 700;
+  font-size: 11px;
+  animation: bw-bc-pulse 1.5s ease-in-out infinite;
+}
+@keyframes bw-bc-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+.bw-bcar-dots {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 10px;
+}
+.bw-bcar-dots button {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 210, 77, 0.3);
+}
+.bw-bcar-dots button.is-on {
+  background: #ffd24d;
+  width: 18px;
+  border-radius: 4px;
+}
+.bw-bcar-demo {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+.bw-bcar-demo button {
+  border: 1px solid rgba(255, 210, 77, 0.4);
+  background: transparent;
+  color: #ffd24d;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+.bw-bcar-sheet-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-end;
+}
+.bw-bcar-sheet {
+  width: 100%;
+  background: #111;
+  color: #f4f1e8;
+  border-top: 1px solid rgba(255, 210, 77, 0.4);
+  border-radius: 18px 18px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+}
+.bw-bcar-sheet h3 {
+  margin: 0 0 10px;
+  color: #ffd24d;
+}
+.bw-bcar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.bw-bcar-row span {
+  flex: 1;
+}
+.bw-bcar-row span.is-hidden {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+.bw-bcar-row button,
+.bw-bcar-done {
+  border: 1px solid rgba(255, 210, 77, 0.4);
+  background: transparent;
+  color: #ffd24d;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-weight: 700;
+}
+.bw-bcar-row button:disabled {
+  opacity: 0.3;
+}
+.bw-bcar-done {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  background: #ffd24d;
+  color: #111;
+}
+/* The real card pans vertically only; inside the carousel it must also let horizontal swipes through. */
+.bw-bcar .bw-wcard {
+  touch-action: pan-x pan-y;
+}
