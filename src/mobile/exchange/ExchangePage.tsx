@@ -23,6 +23,7 @@ import { TokenIcon } from './TokenIcon';
 import { PeopleMarket } from './PeopleMarket';
 import { OpnsMarket } from './OpnsMarket';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
+import { LaunchCoin } from './launch/LaunchCoin';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
 import { useRegistry } from './registry/useRegistry';
 import { categoryLabel, filterSearch, matches, parseFilter, type Filter } from './registry/catalog';
@@ -459,7 +460,14 @@ const ExchangePage = () => {
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
   ];
-  const active = view.tab === 'trade' ? 'markets' : view.tab === 'platform' ? 'platforms' : view.tab;
+  const active =
+    view.tab === 'trade'
+      ? 'markets'
+      : view.tab === 'platform'
+        ? 'platforms'
+        : view.tab === 'launch'
+          ? 'launchpad'
+          : view.tab;
 
   return (
     <div
@@ -526,6 +534,7 @@ const ExchangePage = () => {
         {view.tab === 'names' && <OpnsMarket rate={rate} />}
         {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
         {view.tab === 'launchpad' && <LaunchpadPanel />}
+        {view.tab === 'launch' && <LaunchCoin />}
       </div>
       {view.tab === 'more' && (
         <div className="w-full flex-1 min-h-[70vh]">

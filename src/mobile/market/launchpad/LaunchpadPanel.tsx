@@ -3,6 +3,7 @@
  * bought and sold on each coin's curve from the active account's own wallet (client.ts trade()).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { getBsv21Balances } from '@1sat/actions';
 import { Coins, Rocket, X } from 'lucide-react';
@@ -11,18 +12,7 @@ import { useBackClose } from '../../backStack';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { money, useBsvUsd } from '../../money/money';
 import { openDappBrowser } from '../../dappBrowser';
-import {
-  big,
-  change24,
-  coinImage,
-  coinPage,
-  launchPage,
-  fetchCoin,
-  fetchCoins,
-  sortBoard,
-  wocTx,
-  type BoardCoin,
-} from './api';
+import { big, change24, coinImage, fetchCoin, fetchCoins, sortBoard, wocTx, type BoardCoin } from './api';
 import {
   HOUSE_BPS,
   MAX_BUY,
@@ -42,6 +32,9 @@ import {
 import { cancelTrade, executeTrade, prepareTrade, type PreparedTrade } from './client';
 import { describeRow } from './validate';
 import { ErrorActions } from '../../errors/ErrorActions';
+import { LAUNCH_ROUTE, tradeRoute } from '../../exchange/exchangeData';
+import { localLaunches, mergeLaunches, type Launch } from '../../exchange/launch/launch';
+import { registryLaunches } from '../../exchange/launch/launchNet';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const GOLD = '#FFD24D';
@@ -82,6 +75,7 @@ const GradBadge = () => (
 );
 
 export const LaunchpadPanel = () => {
+  const navigate = useNavigate();
   const rate = useBsvUsd();
   const [coins, setCoins] = useState<BoardCoin[] | null>(null);
   const [error, setError] = useState('');
@@ -96,16 +90,18 @@ export const LaunchpadPanel = () => {
 
   return (
     <section className="flex flex-col gap-2">
-      {/* "Launch your own coin is the point" (owner, 8 Oct 2026): TokenBlaster's launch form, in the in-app
-          browser where the wallet is connected (dappBrowser.ts). */}
+      {/* "Launch your own coin is the point" (owner, 8 Oct 2026): our own in-app launch flow (exchange/launch/),
+          never a redirect to tokenblaster.lol (owner, 14 Oct 2026). */}
       <button
         type="button"
-        onClick={() => void openDappBrowser(launchPage)}
+        onClick={() => navigate(LAUNCH_ROUTE)}
         className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
       >
         <Rocket size={16} /> Launch your own coin
       </button>
-      {coins === null && !error && <p className="text-xs text-[#98A2B3] text-center py-8">Loading BlastPad coins…</p>}
+      <OurLaunches onOpen={(id) => navigate(tradeRoute(id))} />
+      <h3 className="text-xs font-bold uppercase tracking-wide text-[#98A2B3] m-0 mt-2">On BlastPad</h3>
+      {coins === null && !error && <p className="text-xs text-[#98A2B3] text-center py-8">Loading launched coins…</p>}
       {error && (
         <div className="flex flex-col items-center gap-3 py-8">
           <p className="text-xs text-[#F97066] text-center m-0">{error}</p>
@@ -165,6 +161,50 @@ export const LaunchpadPanel = () => {
 const BUY_PICKS = ['0.001', '0.01', '0.05', '0.1'];
 const SLIPS = [100, 300, 500];
 
+/** "Launched in bWalletX": this device's launches plus the shared registry (empty until it is deployed). */
+const OurLaunches = ({ onOpen }: { onOpen: (id: string) => void }) => {
+  const [list, setList] = useState<Launch[]>(() => mergeLaunches([], localLaunches()));
+  useEffect(() => {
+    let live = true;
+    void registryLaunches().then((r) => live && setList(mergeLaunches(r, localLaunches())));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <>
+      <h3 className="text-xs font-bold uppercase tracking-wide text-[#98A2B3] m-0 mt-2">Launched in bWalletX</h3>
+      {list.length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-3 m-0">No coins launched here yet. Be the first.</p>
+      )}
+      {list.map((l) => (
+        <button
+          key={l.tokenId}
+          onClick={() => onOpen(l.tokenId)}
+          className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+        >
+          {l.icon ? (
+            <img
+              src={`https://ordfs.network/${l.icon}`}
+              alt=""
+              loading="lazy"
+              className="h-10 w-10 rounded-lg object-cover shrink-0 bg-[#2b2f36]"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-lg bg-[#2b2f36] flex items-center justify-center shrink-0">
+              <Coins size={16} color="#98A2B3" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>${l.ticker}</div>
+            <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{l.name}</div>
+          </div>
+        </button>
+      ))}
+    </>
+  );
+};
+
 const CoinSheet = ({
   coin: initial,
   rate,
@@ -198,6 +238,7 @@ const CoinSheet = ({
   }, []);
   useEffect(dropPlan, [amount, side, slip, dropPlan]);
   useBackClose(!busy, onClose);
+  const navigate = useNavigate();
 
   const id = coin.token_id;
   const refresh = useCallback(() => {
@@ -505,9 +546,12 @@ const CoinSheet = ({
         <button
           className="text-xs font-semibold self-center"
           style={{ color: GOLD }}
-          onClick={() => void openDappBrowser(coinPage(id))}
+          onClick={() => {
+            onClose();
+            navigate(tradeRoute(id));
+          }}
         >
-          Open on BlastPad ›
+          Open on the Exchange ›
         </button>
       </div>
     </div>,

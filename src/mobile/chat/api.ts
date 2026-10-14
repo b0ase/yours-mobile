@@ -218,7 +218,7 @@ export class BchatClient {
     return this.session;
   }
 
-  private async call<T>(
+  protected async call<T>(
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
