@@ -1533,6 +1533,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     const dir = swipeDir(t.clientX - s0.x, t.clientY - s0.y);
     // bNews cards close on a left swipe, so there only a right swipe changes feed.
     if (!dir || (news && dir === 1 && (e.target as HTMLElement).closest?.('[data-news-card]'))) return;
+    // In the bMovies / bMusic reel a horizontal swipe is a 1p buy/sell; feeds change via the chips there.
+    if (feed === 'bmovies' || feed === 'bmusic') return;
     const to = stepFeed(pins, feed, dir);
     if (to) pickFeed(to);
   };
