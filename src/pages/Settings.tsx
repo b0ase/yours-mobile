@@ -1197,6 +1197,28 @@ export const Settings = () => {
     }
   };
 
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState('');
+  const handleRestoreBackup = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    setRestoreResult('');
+    try {
+      const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
+        action: 'STORAGE_RESTORE_BACKUP',
+      });
+      const text = r?.data?.summary ?? r?.error ?? 'Nothing to restore';
+      setRestoreResult(text);
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Restore failed';
+      setRestoreResult(text);
+      addSnackbar(text, 'error');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const handleCopyRepairLog = () => {
     if (!repairRecord) return;
     navigator.clipboard.writeText(JSON.stringify(repairRecord, null, 2));
@@ -1232,6 +1254,17 @@ export const Settings = () => {
               'Money sent or swept that is on chain but not showing (an interrupted send or sweep): check and restore it'
             }
             onClick={recovering ? undefined : () => void handleRecoverMined()}
+            isLast={false}
+          />
+          <Divider />
+          <SettingRow
+            icon={<Wrench size={16} />}
+            label={restoring ? 'Loading your wallet from backup…' : 'Restore from backup'}
+            description={
+              restoreResult ||
+              'New device missing your balance or history? Copy everything from your backup and bring back paymail payments'
+            }
+            onClick={restoring ? undefined : () => void handleRestoreBackup()}
             isLast={false}
           />
           <Divider />

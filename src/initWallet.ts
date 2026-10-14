@@ -54,7 +54,8 @@ import {
   setArriving,
 } from './services/receiveGuard';
 import { internalizeBackoff } from './services/internalizeBackoff';
-import { fixUtxoStatus } from './services/utxoStatus';
+import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
+import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
 import { makeRecoverDeps, runRecoverOnce } from './services/recoverFailedWiring';
 import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
@@ -143,6 +144,8 @@ export interface AccountContext {
   creditArriving: () => Promise<void>;
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
+  /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
+  restorePaymails: () => Promise<PaymailRestoreReport>;
   /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
   releaseStuckSends: () => Promise<ReleaseReport>;
   /** Run the Monitor's SendWaiting task now (a big send was queued: services/bigDelayed.ts). */
@@ -855,6 +858,25 @@ export const initWallet = async (
         for (const txid of r.restored) internalizeBackoff.clear(txid);
         return r;
       }),
+    restorePaymails: async () => {
+      const held = new Set<string>();
+      for (let offset = 0; ; offset += 1000) {
+        const page = await baseWallet.listOutputs({ basket: 'default', limit: 1000, offset });
+        for (const o of page.outputs) held.add(o.outpoint);
+        if (page.outputs.length < 1000) break;
+      }
+      const txo = (toolboxServices as unknown as { txo?: { get?: (o: string) => Promise<never> } }).txo;
+      return restorePaymailHistory((u, i) => fetch(u, i), baseWallet, {
+        hasOutput: async (txid, vout) => held.has(`${txid}.${vout}`),
+        isUnspent: async (txid, vout) => {
+          const get = txo?.get;
+          if (!get) return undefined;
+          const r = await utxoStatusFromTxo((o) => get.call(txo, o), `${txid}.${vout}`);
+          return r.status === 'success' ? r.isUtxo : undefined;
+        },
+        fetchBeef: async (txid) => (await toolboxServices.getBeefForTxid(txid)).toBinary(),
+      });
+    },
     knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
     sendWaitingNow: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
     referenceBytes: (reference) =>

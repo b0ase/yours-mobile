@@ -17,6 +17,23 @@ const BRC29 = [2, '3241645161d8'];
 const SIGN_PROTOCOL = [2, 'bwallet paymail'];
 const SIGN_KEY_ID = '1';
 const ANYONE_PUB = new PrivateKey(1).toPublicKey().toString();
+
+/** One payment row as the wallet sees it (inbox and history). */
+const paymentOut = (r) => ({
+  reference: r.reference,
+  txid: r.txid,
+  beef: r.beef,
+  rawTx: r.raw_tx,
+  sender: r.sender_handle,
+  note: r.note,
+  status: r.status,
+  outputs: r.outputs.map((o) => ({
+    vout: o.vout,
+    satoshis: o.satoshis,
+    derivationPrefix: o.derivationPrefix,
+    derivationSuffix: o.derivationSuffix,
+  })),
+});
 const SIG_WINDOW_MS = 5 * 60 * 1000;
 const MAX_SATS = 21e14;
 const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
@@ -651,26 +668,17 @@ function makeHandlers({
       const sigErr = await verifySigned(body || {}, 'inbox', now());
       if (sigErr) return [401, { error: sigErr }];
       const rows = await store.listInbox(String(body.identityKey).toLowerCase());
-      return [
-        200,
-        {
-          senderIdentityKey: ANYONE_PUB,
-          payments: rows.map((r) => ({
-            reference: r.reference,
-            txid: r.txid,
-            beef: r.beef,
-            rawTx: r.raw_tx,
-            sender: r.sender_handle,
-            note: r.note,
-            outputs: r.outputs.map((o) => ({
-              vout: o.vout,
-              satoshis: o.satoshis,
-              derivationPrefix: o.derivationPrefix,
-              derivationSuffix: o.derivationSuffix,
-            })),
-          })),
-        },
-      ];
+      return [200, { senderIdentityKey: ANYONE_PUB, payments: rows.map(paymentOut) }];
+    },
+
+    // Restore from seed (incident 14 Oct 2026): every payment ever received for this key, collected ones too,
+    // so a new device can re-internalize receipts whose derivation lives only here. Read-only; no ack.
+    history: async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'history', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!store.listHistory) return [501, { error: 'history not available' }];
+      const rows = await store.listHistory(String(body.identityKey).toLowerCase());
+      return [200, { senderIdentityKey: ANYONE_PUB, payments: rows.map(paymentOut) }];
     },
 
     ack: async (_q, body) => {

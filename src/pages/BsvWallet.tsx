@@ -119,7 +119,7 @@ export const BsvWallet = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { updateBalance, isSyncing } = useSyncTracker();
+  const { updateBalance, isSyncing, restoreMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
   const isReload = urlParams.get('reload') === 'true' || query === 'reload';
@@ -1450,6 +1450,11 @@ export const BsvWallet = () => {
             >
               Still syncing. Tap to retry.
             </button>
+          )}
+          {restoreMessage && (
+            <p role="status" className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray }}>
+              {restoreMessage}
+            </p>
           )}
         </motion.div>
 
