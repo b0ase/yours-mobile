@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, it, test } from 'bun:test';
 import {
+  mapModelUrl,
   EMPTY_FILTER,
   NO_COLLECTION,
   filterAndSort,
@@ -131,5 +132,20 @@ describe('helpers', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1536)).toBe('1.5 KB');
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
+});
+
+describe('mapModelUrl', () => {
+  it('takes an https glTF link from MAP', () => {
+    expect(mapModelUrl('https://www.tokenblaster.lol/arena/models/guns/minigun.glb')).toBe(
+      'https://www.tokenblaster.lol/arena/models/guns/minigun.glb',
+    );
+    expect(mapModelUrl('https://x.test/a.gltf?v=2')).toBe('https://x.test/a.gltf?v=2');
+  });
+  it('ignores anything else', () => {
+    expect(mapModelUrl('http://x.test/a.glb')).toBeUndefined();
+    expect(mapModelUrl('https://x.test/a.png')).toBeUndefined();
+    expect(mapModelUrl('javascript:alert(1)//a.glb')).toBeUndefined();
+    expect(mapModelUrl(42)).toBeUndefined();
   });
 });

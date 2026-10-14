@@ -38,6 +38,7 @@ import {
   formatBytes,
   groupByCollection,
   toLibraryItem,
+  mapModelUrl,
   typeCounts,
   visibleRows,
   type LibraryFilter,
@@ -212,7 +213,7 @@ const Tile = ({
 
 /* ---------- Detail panel ---------- */
 
-type Facts = { mintDate?: string; size?: string; description?: string };
+type Facts = { mintDate?: string; size?: string; description?: string; model?: string };
 
 const useFacts = (m: MediaItem | undefined): Facts => {
   const [facts, setFacts] = useState<Facts>({});
@@ -236,6 +237,8 @@ const useFacts = (m: MediaItem | undefined): Facts => {
     void itemInfo(m.origin.replace('.', '_')).then((info) => {
       const d = info?.map?.description;
       if (live && typeof d === 'string' && d) setFacts((f) => ({ ...f, description: d }));
+      const model = mapModelUrl(info?.map?.model);
+      if (live && model) setFacts((f) => ({ ...f, model }));
     });
     return () => {
       live = false;
@@ -269,6 +272,7 @@ const DetailPanel = ({
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [picture, setPicture] = useState(false);
   const txid = it.outpoint.split('_')[0];
   const originTx = it.origin.split('_')[0];
   const shareLink = `${window.location.origin}/wallet/nfts/${it.outpoint}`;
@@ -324,7 +328,24 @@ const DetailPanel = ({
       aria-label={`${it.name} details`}
     >
       <div className="relative">
-        <NftHero m={m} pending={!!it.pending} />
+        {facts.model && !picture ? (
+          <div className="relative w-full aspect-square bg-black">
+            <Suspense fallback={<GoldCard icon={<Box size={40} color={GOLD} />} label="3D" title={m.name} />}>
+              <ModelViewer src={facts.model} contentType="model/gltf-binary" />
+            </Suspense>
+          </div>
+        ) : (
+          <NftHero m={m} pending={!!it.pending} />
+        )}
+        {facts.model && (
+          <button
+            onClick={() => setPicture((v) => !v)}
+            className="absolute top-3 left-3 z-10 h-9 px-3 flex items-center gap-1.5 rounded-full bg-black/60 backdrop-blur text-xs font-semibold text-white hover:bg-black/80"
+          >
+            <Box size={14} color={GOLD} />
+            {picture ? 'View in 3D' : 'Picture'}
+          </button>
+        )}
         <button
           aria-label="Close"
           onClick={onClose}

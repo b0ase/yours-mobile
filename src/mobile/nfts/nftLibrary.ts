@@ -180,3 +180,7 @@ export const formatBytes = (n: number | null | undefined): string => {
 /** Short collection label for chips and headers. */
 export const collectionLabel = (id: string, names: Record<string, string> = {}) =>
   id === NO_COLLECTION ? 'No collection' : names[id] || (id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id);
+
+/** A MAP `model` field pointing at a glTF file (1Sat Ordnance puts the 3D gun there; the inscription is its picture). */
+export const mapModelUrl = (v: unknown): string | undefined =>
+  typeof v === 'string' && /^https:\/\/\S+\.(glb|gltf)(\?\S*)?$/i.test(v) ? v : undefined;
