@@ -5,6 +5,7 @@ import { isAgentAccount } from './agentAccounts';
 import { APP_NAME } from '../storeBuild';
 import { saveTextFile } from './saveText';
 import { ErrorActions } from '../errors/ErrorActions';
+import { copySecret } from '../secretClipboard';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -89,7 +90,7 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => void navigator.clipboard?.writeText(done)}
+              onClick={() => void copySecret(done).catch(() => undefined)}
               className="flex-1 rounded-lg px-3 py-2 text-sm font-bold border-0"
               style={{ background: LINE, color: '#fff' }}
             >

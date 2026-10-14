@@ -3,9 +3,12 @@
  * background MASTER_BACKUP), whose keys stay encrypted with a key derived from the wallet password.
  * Unlike masterExporter it returns the file instead of forcing a download, so iOS can offer the
  * share sheet (Save to Files, Mail, AirDrop). Nothing is sent anywhere by this module.
+ * The ZIP is then sealed in a v2 envelope (utils/backupEnvelope.ts: PBKDF2-SHA256 600k + AES-GCM) under the same
+ * wallet password; restore (masterImporter) reads both these and older plain files.
  */
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { derivePasswordKey } from '../../services/passKey';
+import { sealBackup } from '../../utils/backupEnvelope';
 import { backupFileName } from './backupState';
 
 export class WrongPasswordError extends Error {
@@ -27,7 +30,9 @@ export const createBackupFile = async (cs: ChromeStorageService, password: strin
   const bin = atob(res.data);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new File([bytes], backupFileName(), { type: 'application/zip' });
+  const sealed = await sealBackup(bytes, password);
+  bytes.fill(0);
+  return new File([sealed as Uint8Array<ArrayBuffer>], backupFileName(), { type: 'application/zip' });
 };
 
 export type SaveRoute = 'share' | 'download' | 'none';

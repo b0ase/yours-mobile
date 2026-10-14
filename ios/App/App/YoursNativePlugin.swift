@@ -51,6 +51,8 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "authSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pushEnv", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "secretCopy", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "secretClear", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "mediaAccess", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speechAvailable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speechStart", returnType: CAPPluginReturnPromise),
@@ -154,6 +156,34 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         #else
         call.resolve(["env": "production"])
         #endif
+    }
+
+    // MARK: - Secret clipboard (src/mobile/secretClipboard.ts)
+
+    /// Recovery phrase / key copies: local-only (no Universal Clipboard) and expiring. The token is the
+    /// pasteboard changeCount after our write, so secretClear never has to read the text (no paste banner).
+    @objc func secretCopy(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        let seconds = max(5, min(600, call.getDouble("seconds") ?? 60))
+        DispatchQueue.main.async {
+            let board = UIPasteboard.general
+            board.setItems([["public.utf8-plain-text": text]], options: [
+                .localOnly: true,
+                .expirationDate: Date().addingTimeInterval(seconds),
+            ])
+            call.resolve(["token": String(board.changeCount)])
+        }
+    }
+
+    @objc func secretClear(_ call: CAPPluginCall) {
+        let token = call.getString("token") ?? ""
+        DispatchQueue.main.async {
+            let board = UIPasteboard.general
+            if !token.isEmpty && String(board.changeCount) == token {
+                board.items = []
+            }
+            call.resolve()
+        }
     }
 
     /// Open this app's page in iPhone Settings (microphone / camera switches live there).

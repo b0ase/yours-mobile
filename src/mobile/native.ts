@@ -65,6 +65,14 @@ export interface YoursNativePlugin {
   /** A short haptic tick. */
   haptic(): Promise<void>;
 
+  /**
+   * Copy a secret (secretClipboard.ts): Android marks the clip sensitive; iOS writes a local-only item that
+   * expires after `seconds`. Resolves a token identifying this clip for secretClear.
+   */
+  secretCopy(opts: { text: string; seconds: number }): Promise<{ token: string }>;
+  /** Clears the clipboard only if it still holds the clip `token` names (never reads its text on iOS). */
+  secretClear(opts: { token: string }): Promise<void>;
+
   addListener(event: 'speechPartial', fn: (e: { text: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'speechLevel', fn: (e: { level: number }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'browserRequest', fn: (req: BrowserRequest) => void): Promise<PluginListenerHandle>;
@@ -110,6 +118,11 @@ const web: Partial<YoursNativePlugin> = {
   async haptic() {
     navigator.vibrate?.(15);
   },
+  async secretCopy({ text }) {
+    await navigator.clipboard.writeText(text);
+    return { token: '' };
+  },
+  async secretClear() {},
 };
 
 export const YoursNative = registerPlugin<YoursNativePlugin>('YoursNative', {

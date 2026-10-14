@@ -2,6 +2,7 @@ import { APP_NAME } from '../storeBuild';
 import { useRef, useState } from 'react';
 import { PasswordRevealButton } from '../../components/PasswordRevealButton';
 import { Check, Copy, Wand2 } from 'lucide-react';
+import { copySecret } from '../secretClipboard';
 
 /**
  * Create Account password (owner, 4 Oct 2026): a strong generated password, an eye to show it, and
@@ -54,7 +55,7 @@ export const PasswordFields = ({
     setSuggestion(null);
   };
   const copy = async () => {
-    await navigator.clipboard?.writeText(password).catch(() => undefined);
+    await copySecret(password).catch(() => undefined);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

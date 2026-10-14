@@ -903,6 +903,51 @@ public class YoursNativePlugin extends Plugin {
         }
     }
 
+    /**
+     * Recovery phrase / key copies (src/mobile/secretClipboard.ts): the clip is marked sensitive
+     * (ClipDescription.EXTRA_IS_SENSITIVE, honoured from Android 13) so the system preview hides it.
+     * The token is a random clip label; secretClear wipes only a clip that still carries it.
+     */
+    @PluginMethod
+    public void secretCopy(PluginCall call) {
+        String text = call.getString("text", "");
+        String token = "bwallet-secret-" + java.util.UUID.randomUUID().toString();
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                android.content.ClipData clip = android.content.ClipData.newPlainText(token, text);
+                android.os.PersistableBundle extras = new android.os.PersistableBundle();
+                extras.putBoolean("android.content.extra.IS_SENSITIVE", true);
+                clip.getDescription().setExtras(extras);
+                cm.setPrimaryClip(clip);
+                JSObject ret = new JSObject();
+                ret.put("token", token);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("Could not copy");
+            }
+        });
+    }
+
+    @PluginMethod
+    public void secretClear(PluginCall call) {
+        String token = call.getString("token", "");
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                android.content.ClipDescription d = cm.getPrimaryClipDescription();
+                // Null when another app copied since, or when Android hides the clipboard from a backgrounded app.
+                if (token != null && !token.isEmpty() && d != null && d.getLabel() != null && token.contentEquals(d.getLabel())) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) cm.clearPrimaryClip();
+                    else cm.setPrimaryClip(android.content.ClipData.newPlainText("", ""));
+                }
+            } catch (Exception ignored) {
+                // Best effort: nothing to report.
+            }
+            call.resolve();
+        });
+    }
+
     /** bWallet calls: loudspeaker on/off for WebRTC audio (src/mobile/calls/media.ts). */
     @PluginMethod
     public void audioSetSpeaker(PluginCall call) {

@@ -1,6 +1,7 @@
 import { unzip, type Unzipped } from 'fflate';
 import { ChromeStorageService } from '../services/ChromeStorage.service';
 import { derivePasswordKey } from '../services/passKey';
+import { openBackup } from './backupEnvelope';
 
 export type MasterBackupProgressEvent = {
   message: string;
@@ -46,7 +47,8 @@ export const restoreMasterFromZip = async (
     const zipData = new Uint8Array(arrayBuffer);
 
     progress({ message: 'Decompressing backup...' });
-    const unzipped = await unzipAsync(zipData);
+    // New files (v2) are wrapped in a stronger password lock (backupEnvelope.ts); old ones open as before.
+    const { files: unzipped } = await openBackup(zipData, password, unzipAsync);
 
     const chromeStorageRaw = unzipped['chromeStorage.json'];
     if (!chromeStorageRaw) {

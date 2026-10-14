@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Copy, Check, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Copy, Check, CheckCircle, FileLock2 } from 'lucide-react';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { PageLoader } from '../../components/PageLoader';
@@ -14,6 +14,9 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useNavigate } from 'react-router-dom';
 import { YoursIcon } from '../../components/YoursIcon';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
+import { copySecret } from '../../mobile/secretClipboard';
+import { BackupStep } from '../../mobile/backup/BackupStep';
+import { isWebApp } from '../../mobile/webApp';
 
 export type CreateAccountProps = {
   onNavigateBack: () => void;
@@ -43,6 +46,8 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const [accountName, setAccountName] = useState('');
   const [iconURL, setIconURL] = useState('');
   const [copied, setCopied] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backupSaved, setBackupSaved] = useState(false);
 
   useEffect(() => {
     if (newWallet) hideMenu();
@@ -90,12 +95,27 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
     }
   };
 
+  // Sensitive / local-only copy, wiped after 60 s if still on the clipboard (src/mobile/secretClipboard.ts).
   const handleCopyToClipboard = () => {
-    navigator.clipboard.writeText(seedWords.join(' ').trim()).then(() => {
-      setCopied(true);
-      addSnackbar('Copied!', 'success');
-      setTimeout(() => setCopied(false), 2000);
-    });
+    copySecret(seedWords.join(' ').trim()).then(
+      () => {
+        setCopied(true);
+        addSnackbar('Copied!', 'success');
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => addSnackbar("Couldn't copy. Write the words down instead.", 'error'),
+    );
+  };
+
+  // "Download encrypted backup" next to Copy (owner, 14 Oct 2026). The backup covers the open account, so the
+  // new account is switched to first (as Next does); saving it marks the wallet backed up, so the Wallet tab's
+  // backup step after onboarding doesn't ask again.
+  const openBackup = async () => {
+    await Promise.race([
+      chromeStorageService.switchAccount(identityAddress).catch(() => undefined),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+    setBackupOpen(true);
   };
 
   const accentLeft = theme.color.component.primaryButtonLeftGradient;
@@ -239,6 +259,35 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
             {copied ? 'Copied!' : 'Copy to clipboard'}
           </span>
         </motion.button>
+        <button
+          type="button"
+          onClick={() => void openBackup()}
+          disabled={backupSaved}
+          className="flex items-center gap-2 mt-3 mx-auto"
+          style={{ background: 'none', border: 'none', cursor: backupSaved ? 'default' : 'pointer' }}
+          data-testid="create-download-backup"
+        >
+          {backupSaved ? (
+            <Check size={14} style={{ color: accentLeft }} />
+          ) : (
+            <FileLock2 size={14} style={{ color: accentLeft }} />
+          )}
+          <span className="text-xs font-medium underline underline-offset-2" style={{ color: accentLeft }}>
+            {backupSaved ? 'Encrypted backup saved' : 'Download encrypted backup'}
+          </span>
+        </button>
+        {backupOpen && (
+          <BackupStep
+            start="file"
+            web={isWebApp()}
+            exit="close"
+            onComplete={() => {
+              setBackupOpen(false);
+              setBackupSaved(true);
+            }}
+            onExit={() => setBackupOpen(false)}
+          />
+        )}
       </div>
 
       <p className="text-[10px] mt-2 mb-4 text-center px-6" style={{ color: gray + 'bb' }}>
