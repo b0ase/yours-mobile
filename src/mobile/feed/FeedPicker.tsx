@@ -9,6 +9,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { House, LayoutGrid, Pin, Sparkles, X, type LucideIcon } from 'lucide-react';
 import { useBackClose } from '../backStack';
+import { BappIcon } from '../brand/bappIcons';
 import { ALL_FEEDS_ICON, feedIcon, type FeedGlyph, type FeedIcon } from './feedIcons';
 import { FIXED_ROW, GOLD, MAX_PINNED, feedColor, feedDef, feedGroups, rowFeeds, type FeedId } from './feeds';
 
@@ -38,7 +39,9 @@ export const IconTile = ({ icon, color, on, size }: { icon: FeedIcon; color: str
         boxShadow: on ? `0 0 0 2px ${color}, 0 0 14px ${alpha(color, 0.5)}` : `inset 0 0 0 1.5px ${alpha(color, 0.55)}`,
       }}
     >
-      {icon.kind === 'app' ? (
+      {icon.kind === 'bapp' ? (
+        <BappIcon slug={icon.slug} label={icon.label} color={color} size={size} className="h-full w-full" />
+      ) : icon.kind === 'app' ? (
         <img src={icon.src} alt="" draggable={false} className="h-full w-full object-cover" />
       ) : icon.kind === 'letter' ? (
         <span style={{ color, fontWeight: 800, fontSize: size * 0.46, lineHeight: 1 }}>{icon.letter}</span>
