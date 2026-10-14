@@ -73,7 +73,10 @@ try {
     await call(
       'PUT',
       `${API}/edits/${edit}/tracks/${TRACK}`,
-      JSON.stringify({ track: TRACK, releases: [{ name: `${VERSION} (${PROMOTE})`, versionCodes: [PROMOTE], status: 'completed' }] }),
+      JSON.stringify({
+        track: TRACK,
+        releases: [{ name: `${VERSION} (${PROMOTE})`, versionCodes: [PROMOTE], status: 'completed' }],
+      }),
       { 'content-type': 'application/json' },
     );
     try {
@@ -82,7 +85,9 @@ try {
     } catch (e) {
       if (!/sent for review automatically|changesNotSentForReview/i.test(String(e))) throw e;
       await call('POST', `${API}/edits/${edit}:commit?changesNotSentForReview=true`);
-      console.log(`! ${VERSION} (${PROMOTE}) on ${TRACK} but NOT sent for review (another change is in review): send it in Play Console › Publishing overview`);
+      console.log(
+        `! ${VERSION} (${PROMOTE}) on ${TRACK} but NOT sent for review (another change is in review): send it in Play Console › Publishing overview`,
+      );
     }
   } else {
     const files = readdirSync('dist');
