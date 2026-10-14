@@ -58,6 +58,7 @@ import {
   restoreMoved,
   setArriving,
 } from './services/receiveGuard';
+import { internalizeBackoff } from './services/internalizeBackoff';
 import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -641,6 +642,8 @@ export const initWallet = async (
       });
     }
     for (const txid of first.txids) {
+      // A txid that storage can't take (e.g. its action is marked failed) is not retried on every sync.
+      if (!internalizeBackoff.due(txid)) continue;
       try {
         const beef = await syncContext.services.beef.getBeef(txid);
         const r = await internalizeBeef({
@@ -651,10 +654,16 @@ export const initWallet = async (
           chain,
         });
         // internalizeBeef resolves with internalized: 0 when no output matched a derivation: not a success.
-        if (r.internalized) console.log(`[receiveGuard] internalized ${txid} (${r.internalized} output(s))`);
-        else console.warn(`[receiveGuard] ${txid}: no output matched our derivations`);
+        if (r.internalized) {
+          internalizeBackoff.clear(txid);
+          console.log(`[receiveGuard] internalized ${txid} (${r.internalized} output(s))`);
+        } else {
+          internalizeBackoff.fail(txid, 'no output matched');
+          console.warn(`[receiveGuard] ${txid}: no output matched our derivations`);
+        }
       } catch (err) {
-        console.error(`[receiveGuard] internalize ${txid} failed:`, err);
+        const wait = internalizeBackoff.fail(txid, err);
+        console.error(`[receiveGuard] internalize ${txid} failed (next try in ${Math.round(wait / 60000)} min):`, err);
         sendSyncStatus({ status: 'receive-failed', txid, error: err instanceof Error ? err.message : String(err) });
       }
     }
@@ -847,6 +856,11 @@ export const initWallet = async (
           }),
         isMined: async (txid) => !!(await toolboxServices.getMerklePath(txid))?.merklePath,
         runUnFail: async () => (walletMonitor ? await walletMonitor.runTask('UnFail') : ''),
+        available: () => storage.isActiveStorageProvider(),
+      }).then((r) => {
+        // A restored action may now be internalizable (its status was 'failed'): let the receive guard retry it.
+        for (const txid of r.restored) internalizeBackoff.clear(txid);
+        return r;
       }),
     knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
     sendWaitingNow: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
@@ -884,6 +898,7 @@ export const initWallet = async (
               await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
             await sp.updateTransactionStatus('failed', q.transactionId);
           }),
+        available: () => storage.isActiveStorageProvider(),
       }),
     close,
   };

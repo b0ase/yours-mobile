@@ -101,3 +101,25 @@ test('releasedMessage is plain', () => {
   expect(releasedMessage([{ description: 'Mint clip' }])).toContain('"Mint clip" never reached the network');
   expect(releasedMessage([{}, {}])).toContain('2 payments');
 });
+
+describe('releaseStuckSends with a remote active store', () => {
+  test('skips without reading, cancelling or reporting an error', async () => {
+    let read = false;
+    const r = await releaseStuckSends({
+      listQueued: async () => {
+        read = true;
+        return [q()];
+      },
+      knownOnChain: async () => false,
+      cancel: async () => {
+        throw new Error('must not cancel');
+      },
+      available: () => false,
+      now: () => NOW,
+    });
+    expect(read).toBe(false);
+    expect(r.error).toBeUndefined();
+    expect(r.skipped).toBeTruthy();
+    expect(r.released).toEqual([]);
+  });
+});

@@ -27,16 +27,31 @@ export type RecoverDeps = {
   isMined: (txid: string) => Promise<boolean>;
   /** Run the Monitor's UnFail task now. */
   runUnFail: () => Promise<string>;
+  /**
+   * False when the active store can't be repaired directly (a remote WalletStorageProvider). The repair is
+   * skipped, not failed, and runs again once this device's storage is active.
+   */
+  available?: () => boolean;
   log?: (msg: string) => void;
 };
 
-export type RecoverReport = { failed: number; mined: string[]; restored: string[]; error?: string };
+export type RecoverReport = {
+  failed: number;
+  mined: string[];
+  restored: string[];
+  error?: string;
+  skipped?: string;
+};
 
 const outSats = (a: FailedAction) => (a.outputs ?? []).reduce((s, o) => s + (o.satoshis ?? 0), 0);
 
 export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<RecoverReport> {
   const log = deps.log ?? ((m: string) => console.log(m));
   const report: RecoverReport = { failed: 0, mined: [], restored: [] };
+  if (deps.available && !deps.available()) {
+    report.skipped = 'active storage is remote';
+    return report;
+  }
   try {
     const failed = (await deps.listFailed()).filter((a) => /^[0-9a-f]{64}$/i.test(a.txid ?? ''));
     report.failed = failed.length;

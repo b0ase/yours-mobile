@@ -26,6 +26,7 @@ import {
   type PaidBackend,
   type PriceInfo,
   noKeyReply,
+  paymentFailedText,
   reportToB,
 } from './paid';
 import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
@@ -338,11 +339,12 @@ export const AgentConversation = ({
       res = await sendBsv.execute(apiContext, { requests: [{ address: quote.payTo, satoshis: quote.sats }] });
     } catch (e) {
       clearPending();
-      throw e;
+      throw new Error(paymentFailedText(e));
     }
     if (!res.txid || res.error) {
       clearPending();
-      throw new Error(getErrorMessage(res.error));
+      const friendly = getErrorMessage(res.error);
+      throw new Error(paymentFailedText(/unknown error/i.test(friendly) ? res.error : friendly));
     }
     recordSpend(quote.sats);
     const beef = res.tx?.length ? res.tx.map((b) => b.toString(16).padStart(2, '0')).join('') : undefined;

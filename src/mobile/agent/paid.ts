@@ -140,6 +140,27 @@ const clientInfo = (): { platform: string; version?: string } => {
   return { platform: 'web' };
 };
 
+/**
+ * What the person sees when the payment for a paid message fails (owner, 14 Oct 2026: Desktop showed only
+ * "An unknown error has occurred! Try again."). Names the reason in plain words and says the message wasn't sent.
+ */
+export const paymentFailedText = (err: unknown): string => {
+  const raw = (err instanceof Error ? err.message : typeof err === 'string' ? err : '').trim();
+  let reason: string;
+  if (/WERR_REVIEW_ACTIONS|require review/i.test(raw))
+    reason = 'the network refused it because an earlier payment from this wallet is still being settled';
+  else if (/insufficient/i.test(raw)) reason = 'not enough spendable BSV in this wallet';
+  else if (/timed? ?out/i.test(raw)) reason = 'the wallet took too long to respond';
+  else if (/refused|cancel|denied|reject/i.test(raw)) reason = 'it was cancelled';
+  else if (raw && !/unknown error/i.test(raw))
+    reason = raw
+      .replace(/\s+/g, ' ')
+      .replace(/[.!]+$/, '')
+      .slice(0, 160);
+  else reason = 'the wallet gave no reason';
+  return `Payment didn't go through: ${reason}. Your message wasn't sent.`;
+};
+
 /** Waits before re-asking when the server has not seen the payment yet (it also polls ~12 s itself). */
 export const NOT_YET_RETRY_MS = [3000, 6000] as const;
 
