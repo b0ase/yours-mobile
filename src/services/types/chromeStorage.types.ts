@@ -1,3 +1,4 @@
+import type { TwetchLink } from '../../mobile/twetch/twetch';
 import {
   Addresses,
   Balance,
@@ -87,6 +88,11 @@ export interface Account {
   storageConfig?: StorageConfig;
   /** Wallet-data migrations completed for this account; see ACCOUNT_DATA_VERSION. Absent = 0. */
   dataVersion?: number;
+  /**
+   * Linked Twetch account (src/mobile/twetch): user id + signing public key + where the key derives from.
+   * No key material: the key is re-derived from encryptedKeys when posting. null = unlinked.
+   */
+  twetch?: TwetchLink | null;
 }
 
 /** One registered USB drive. The matching secret lives only in the file on the drive. */

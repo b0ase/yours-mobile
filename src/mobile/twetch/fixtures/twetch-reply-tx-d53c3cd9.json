@@ -1,0 +1,27 @@
+{
+  "_note": "Output 0 of a reply made in Twetch's own app (tx d53c3cd9…756e, 14 Oct 2026), decoded pushes. Text and signature trimmed; public chain data.",
+  "pushes": [
+    "OP_FALSE",
+    "OP_RETURN",
+    "19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut",
+    "<text>",
+    "text/markdown",
+    "UTF-8",
+    "|",
+    "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5",
+    "SET",
+    "app",
+    "twetch",
+    "type",
+    "post",
+    "reply",
+    "fb99ac003431cfdb6fe143d6bc9d22190c91c5319b3459f2299535a30bba05c3",
+    "ts",
+    "1792009409351",
+    "|",
+    "15PciHG22SNLQJXMoSUaWVi7WSqc7hCfva",
+    "BITCOIN_ECDSA",
+    "1CdETknnWodMWKfUqXYAyhgqWpsbgpvqVS",
+    "<base64 sig>"
+  ]
+}

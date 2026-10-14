@@ -146,6 +146,7 @@ import { PullToRefresh } from '../ui/PullToRefresh';
 import { FILTER_NOTE, HIDDEN_NAME, isSlur, languageOf, languageView, nameView, safeName } from './language';
 import { usePrefs } from '../settings/usePrefs';
 import { languageOptsFor } from '../storeBuild';
+import { postToTwetch, twetchCrosspostEnabled, twetchLinkOf } from '../twetch/twetchPost';
 import { VideoBackground } from '../ui/VideoBackground';
 import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
@@ -826,10 +827,17 @@ const Composer = ({
   /** bNews story being discussed: the post links it, so it shows in the story's thread. */
   link?: { url: string; title: string } | null;
   onClose: () => void;
-  onPosted: (txid: string) => void;
+  /** `note`: what happened on Twetch when the post was also sent there. */
+  onPosted: (txid: string, note?: { text: string; ok: boolean }) => void;
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const [text, setText] = useState('');
+  // "Also on Twetch": only for an account linked to Twetch (Settings › Identity), new posts or replies to Twetch posts.
+  const accountId = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  const twetchLink = twetchCrosspostEnabled() && accountId ? twetchLinkOf(chromeStorageService, accountId) : null;
+  const twetchReply = replyTo?.source === 'twetch' ? { txid: replyTo.txid, twetchId: replyTo.twetchId ?? null } : null;
+  const canTwetch = !!twetchLink && (!replyTo || !!twetchReply);
+  const [alsoTwetch, setAlsoTwetch] = useState(true);
   const [items, setItems] = useState<Attachment[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -942,6 +950,20 @@ const Composer = ({
         replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
         tags,
       );
+      // 3. Also on Twetch: its own tx, signed with the linked Twetch key on this device, then registered.
+      if (canTwetch && alsoTwetch && input.text.trim()) {
+        setBusy('Posting to Twetch…');
+        const img = items.find((i) => i.kind === 'image' && i.part)?.part;
+        const r = await postToTwetch(chromeStorageService, accountId, {
+          text: input.text,
+          image: img ? { bytes: img.bytes, mime: img.mime } : null,
+          reply: twetchReply,
+        });
+        return onPosted(
+          txid,
+          r.status === 'posted' ? { text: 'Also posted on Twetch', ok: true } : { text: r.note, ok: false },
+        );
+      }
       onPosted(txid);
     } catch (e) {
       if (e instanceof PostCancelledError) return;
@@ -1035,6 +1057,13 @@ const Composer = ({
           {fee != null ? ` · fee ≈ ${moneyNow(fee)}` : ''}
         </span>
       </div>
+      {canTwetch && twetchLink && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-white" data-testid="also-twetch">
+          <input type="checkbox" checked={alsoTwetch} onChange={(e) => setAlsoTwetch(e.target.checked)} />
+          Also on Twetch as @{twetchLink.name}
+          <span style={{ color: MUTED }}>· signed on this device, paid from your Twetch address</span>
+        </label>
+      )}
       <p className="text-[11px] mt-1" style={{ color: MUTED }}>
         Posts are permanent and public on the BSV chain, signed by your posting profile.
         {inscribed.length > 0 &&
@@ -1901,10 +1930,11 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           quote={composing.quote ?? null}
           link={composing.link ?? null}
           onClose={() => setComposing(null)}
-          onPosted={(txid) => {
+          onPosted={(txid, note) => {
             setComposing(null);
             setPostedTick((t) => t + 1);
-            addSnackbar(`Posted · ${txid.slice(0, 8)}…`, 'success');
+            if (note) addSnackbar(note.ok ? `Posted · ${note.text}` : note.text, note.ok ? 'success' : 'info');
+            else addSnackbar(`Posted · ${txid.slice(0, 8)}…`, 'success');
             // First post: now there is something to be notified about (replies, likes).
             void askNotifyPermissionOnce();
             setTimeout(() => void load(tab), 2500);

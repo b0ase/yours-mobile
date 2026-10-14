@@ -42,6 +42,7 @@ import { isNative } from '../native';
 import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
+import { TwetchLinkRow } from './TwetchLinkRow';
 import { IdentityMap } from './IdentityMap';
 import {
   B_AGENT_DESC,
@@ -569,6 +570,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {acct && socialLoginEnabled() && (
         <Section title="Identity">
           <WalletNames />
+          <TwetchLinkRow />
           <Row
             icon={<Network size={16} />}
             label="Identity map"
