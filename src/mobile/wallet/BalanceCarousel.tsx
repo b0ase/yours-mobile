@@ -105,14 +105,14 @@ const MOCK: MockBalance[] = [
     backLines: [
       'Locked: 1,000,000 sats (0.01 BSV) in your PNEE lock.',
       'Minted against it: 5,000 PNEEs ($50), within the 10× collateral rule.',
-      'Unlocks after block 920,000 (~6 months), or early by returning the 5,000 PNEEs. You can always recover your locked BSV with your own key, without our server.',
+      'Unlocks after block 997,000 (~6 months), or early by returning the 5,000 PNEEs. You can always recover your locked BSV with your own key, without our server.',
     ],
     contact: 'bWalletX',
     contractTitle: 'Your PNEE lock (stable pennies)',
     contractTerms: [
       'Collateral: 1,000,000 sats locked on-chain in a script only your key can spend.',
       'Minted: 5,000 PNEEs; 1 PNEE = 1¢. Locked BSV is worth at least 10× the PNEEs minted against it.',
-      'Unlock: after block 920,000, or earlier by burning the PNEEs minted against the lock.',
+      'Unlock: after block 997,000, or earlier by burning the PNEEs minted against the lock.',
       'Recovery: your seed derives the lock key; you can always recover your locked BSV yourself, without our server.',
       'Risk: lock only what you can afford to lose; test with small amounts.',
     ],
@@ -178,7 +178,7 @@ const MockCard = ({
           <span className="bw-bc-logo">🔒</span>
           <span className="bw-bc-head">
             <b>{fmtNum(c.balance)} shares · Restricted, not for sale</b>
-            <small>2-of-2 multisig: director + you · or you alone after block 968,400 (~12 months)</small>
+            <small>2-of-2 multisig: director + you · or you alone after block 1,023,000 (~12 months)</small>
           </span>
           <span className="bw-bc-mock">MOCK</span>
         </div>
