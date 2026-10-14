@@ -197,6 +197,8 @@ describe('Twetch API feed', () => {
       bapId: null,
       name: 'Randy',
       avatar: `https://api.twetch.com/v1/media/${tx(6)}.jpg?v=4`,
+      source: 'twetch',
+      sourceId: '3',
     });
     expect(gm.source).toBe('twetch');
     expect(gm.likes).toBe(2);

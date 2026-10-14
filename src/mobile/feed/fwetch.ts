@@ -71,6 +71,7 @@ export function parseFwetchItem(item: unknown, verified: VerifiedAuthors = new M
       bapId: null,
       name: anon ? 'Anonymous' : name || (claimed ? shortAddress(claimed) : 'Fwetch user'),
       avatar: !anon && pfp ? mediaUrl(pfp) : null,
+      ...(!anon && claimed ? { source: 'fwetch' as const, sourceId: claimed.slice(0, 80) } : {}),
     },
     at: (Number(p.ts) || 0) * 1000,
     likes: Number(p.likes) || 0,

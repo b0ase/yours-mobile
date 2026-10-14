@@ -77,6 +77,7 @@ import {
   filterFeed,
   MAX_INLINE_IMAGE_BYTES,
   MAX_POST_CHARS,
+  mergePosts,
   shortAddress,
   sourceLabel,
   sourceUrl,
@@ -89,8 +90,7 @@ import {
   type Source,
 } from './post';
 import {
-  fetchByAddress,
-  fetchByBap,
+  authorDeps,
   fetchFollowing,
   fetchForYou,
   fetchLeaderboard,
@@ -180,6 +180,7 @@ import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 import { AllFeedsSheet, FeedPicker } from './FeedPicker';
 import { BrandFeed } from './BrandFeed';
+import { authorProfileUrl, authorRef, fetchAuthorPage, fetchAuthorProfile, type AuthorProfile } from './authorFeed';
 import { FeaturedAlbum } from './FeaturedAlbum';
 import {
   feedColor,
@@ -2294,18 +2295,53 @@ const ProfileView = ({
   const [reporting, setReporting] = useState(false);
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
   const [error, setError] = useState('');
+  // Read the author's posts from the source they came from (Twetch user id, Peck key, Treechat
+  // name, Fwetch address, or bChat address / BAP): bmap alone had none for most authors.
+  const ref = useMemo(
+    () => authorRef(author),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [author.address, author.bapId, author.source, author.sourceId],
+  );
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [info, setInfo] = useState<AuthorProfile | null>(null);
+  const reqRef = useRef(0);
   useEffect(() => {
+    const req = ++reqRef.current;
     setPosts(null);
-    const q = author.bapId
-      ? fetchByBap(author.bapId)
-      : author.address
-        ? fetchByAddress(author.address)
-        : Promise.resolve([]);
-    q.then(setPosts).catch((e) => {
-      setError(e instanceof Error ? e.message : String(e));
-      setPosts([]);
-    });
-  }, [author.bapId, author.address]);
+    setError('');
+    setNext(null);
+    setInfo(null);
+    fetchAuthorPage(ref, null, authorDeps)
+      .then((pg) => {
+        if (req !== reqRef.current) return;
+        setPosts(pg.posts);
+        setNext(pg.next);
+      })
+      .catch((e) => {
+        if (req !== reqRef.current) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setPosts([]);
+      });
+    fetchAuthorProfile(ref, authorDeps)
+      .then((p) => req === reqRef.current && setInfo(p))
+      .catch(() => undefined);
+  }, [ref]);
+  const loadMore = () => {
+    if (!next || loadingMore) return;
+    const req = reqRef.current;
+    setLoadingMore(true);
+    fetchAuthorPage(ref, next, authorDeps)
+      .then((pg) => {
+        if (req !== reqRef.current) return;
+        setPosts((cur) => mergePosts(cur ?? [], pg.posts));
+        setNext(pg.next);
+      })
+      .catch((e) => req === reqRef.current && setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => req === reqRef.current && setLoadingMore(false));
+  };
+  const homeUrl = authorProfileUrl(ref);
+  const homeLabel = sourceLabel(ref.source === 'bchat' ? FEED_APP : ref.source === 'peck' ? 'peck.to' : ref.source);
   const shown = useMemo(
     () => (posts ? visiblePosts(posts, isMe ? [] : mutes) : null),
     // safetyTick isn't read here: it bumps when the hide/block lists (module state that
@@ -2331,8 +2367,49 @@ const ProfileView = ({
         />
         <AuthorName name={author.name} className="mt-3 block text-lg font-bold text-white" />
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
-          {author.bapId ? `BAP ${author.bapId}` : author.address ? shortAddress(author.address) : ''}
+          {author.bapId
+            ? `BAP ${author.bapId}`
+            : ref.source === 'twetch'
+              ? `@${ref.id} on Twetch`
+              : ref.source === 'treechat'
+                ? `@${ref.id} on Treechat`
+                : author.address && !author.address.includes(':')
+                  ? shortAddress(author.address)
+                  : ref.id
+                    ? `${shortAddress(ref.id)} on ${homeLabel}`
+                    : ''}
         </p>
+        {info?.bio && (
+          <p className="text-xs mt-2 whitespace-pre-line break-words" style={{ color: 'white' }}>
+            {info.bio}
+          </p>
+        )}
+        {info && (info.followers !== null || info.following !== null) && (
+          <p className="text-xs mt-2" style={{ color: MUTED }}>
+            {info.followers !== null && (
+              <>
+                <b className="text-white">{info.followers}</b> followers
+              </>
+            )}
+            {info.followers !== null && info.following !== null && ' · '}
+            {info.following !== null && (
+              <>
+                <b className="text-white">{info.following}</b> following
+              </>
+            )}
+          </p>
+        )}
+        {homeUrl && (
+          <a
+            href={homeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 text-xs font-semibold"
+            style={{ color: GOLD }}
+          >
+            Open on {homeLabel} ↗
+          </a>
+        )}
         {isMe && !author.bapId && (
           <p className="text-xs mt-2" style={{ color: MUTED }}>
             Your first post sets up your posting profile.
@@ -2396,11 +2473,28 @@ const ProfileView = ({
         posts={shown}
         a={{ ...actions, onAuthor: () => undefined }}
         empty={
-          <p className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            No posts yet.
-          </p>
+          <div className="text-center text-xs pt-10 flex flex-col items-center gap-2" style={{ color: MUTED }}>
+            <p>No posts yet.</p>
+            {homeUrl && (
+              <a href={homeUrl} target="_blank" rel="noopener noreferrer" style={{ color: GOLD }}>
+                See {safeName(author.name)} on {homeLabel} ↗
+              </a>
+            )}
+          </div>
         }
       />
+      {next && posts && posts.length > 0 && (
+        <div className="flex justify-center py-4">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-2xl px-5 py-2 text-sm font-semibold"
+            style={{ background: PANEL, color: 'white', border: `1px solid ${LINE}` }}
+          >
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
     </Layer>
   );
 };
