@@ -1,5 +1,6 @@
 // bShares client for bit-sign (/api/bitsign/bshares/*). Uses the account's bChat (bit-sign) session.
 import { BCHAT_ORIGIN, ChatApiError, type ChatSession, type Http } from '../chat/api';
+import type { ExcessChoice } from './minute';
 import type { BsharesMe, PlacementOffer } from './placement';
 
 export type NewOffer = {
@@ -38,10 +39,14 @@ export class BsharesApi {
   createOffer = (o: NewOffer) => this.call<PlacementOffer>('POST', '/offers', o);
   accept = (id: string, investorPubKey: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/accept`, { investorPubKey });
-  paid = (id: string, txid: string) =>
-    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/paid`, { txid });
-  approve = (id: string, directorPubKey: string, boardMinute: string) =>
-    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/approve`, { directorPubKey, boardMinute });
+  /** `excessChoice` is the investor's answer to the offer's overpayment term, made at payment time. */
+  paid = (id: string, txid: string, excessChoice: ExcessChoice) =>
+    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/paid`, { txid, excessChoice });
+  /** Single-director resolution: bit-sign writes the minute (BCORP-BM-<date>-<NNN>) from the allotment data. */
+  approve = (id: string, directorPubKey: string, minuteNumber: number) =>
+    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/approve`, { directorPubKey, minuteNumber });
+  refundExcess = (id: string, refundTxid: string) =>
+    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/refund-excess`, { refundTxid });
   token = (id: string, outpoint: string, lockingScriptHex: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/token`, { outpoint, lockingScriptHex });
   decline = (id: string, reason: string) =>

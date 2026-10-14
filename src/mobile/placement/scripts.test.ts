@@ -4,6 +4,9 @@ import {
   keySigner,
   multisigUnlock,
   parseShareLock,
+  reassignTreasuryKey,
+  treasuryScriptFor,
+  type TreasuryConfig,
   shareLabel,
   shareLock,
   shareUnlock2of2,
@@ -143,6 +146,59 @@ describe('treasury m-of-n', () => {
     const pk = d[0].toPublicKey();
     expect(() => treasuryLock(3, [pk, d[1].toPublicKey()])).toThrow();
     expect(() => treasuryLock(1, [pk, pk])).toThrow();
+  });
+});
+
+describe('bCorp treasury: configurable 2-of-3, all keys with the director', () => {
+  const k = [PrivateKey.fromRandom(), PrivateKey.fromRandom(), PrivateKey.fromRandom()];
+  const cfg: TreasuryConfig = {
+    m: 2,
+    slots: [
+      { label: 'phone', holder: 'director', pubKey: k[0].toPublicKey().toString() },
+      { label: 'desktop', holder: 'director', pubKey: k[1].toPublicKey().toString() },
+      { label: 'offline backup', holder: 'director', pubKey: k[2].toPublicKey().toString() },
+    ],
+  };
+  const t = treasuryScriptFor(cfg);
+  test('any two of the three devices spend; one lost device does not lock the treasury', async () => {
+    expect(await spends(t, multisigUnlock([sig(k[0]), sig(k[1])]))).toBe(true);
+    expect(await spends(t, multisigUnlock([sig(k[0]), sig(k[2])]))).toBe(true);
+    expect(await spends(t, multisigUnlock([sig(k[1]), sig(k[2])]))).toBe(true);
+  });
+  test('one key alone, a stranger, or the wrong order fails', async () => {
+    expect(await spends(t, multisigUnlock([sig(k[2])]))).toBe(false);
+    expect(await spends(t, multisigUnlock([sig(k[0]), sig(stranger)]))).toBe(false);
+    expect(await spends(t, multisigUnlock([sig(k[1]), sig(k[0])]))).toBe(false);
+  });
+  test('script is OP_2 <3 keys> OP_3 OP_CHECKMULTISIG', () => {
+    const hex = t.toHex();
+    expect(hex.startsWith('5221')).toBe(true);
+    expect(hex.endsWith('53ae')).toBe(true);
+  });
+  test('refuses anything but 2-of-3 with distinct compressed keys', () => {
+    expect(() => treasuryScriptFor({ ...cfg, m: 3 })).toThrow();
+    expect(() => treasuryScriptFor({ m: 2, slots: cfg.slots.slice(0, 2) })).toThrow();
+    expect(() => treasuryScriptFor({ m: 2, slots: [cfg.slots[0], cfg.slots[0], cfg.slots[2]] })).toThrow();
+    expect(() =>
+      treasuryScriptFor({ m: 2, slots: [{ ...cfg.slots[0], pubKey: 'not-a-key' }, cfg.slots[1], cfg.slots[2]] }),
+    ).toThrow();
+  });
+  test('one slot can be reassigned to a second director; the new script needs them or two of the rest', async () => {
+    const second = PrivateKey.fromRandom();
+    const next = reassignTreasuryKey(cfg, 'offline backup', {
+      holder: 'second director',
+      pubKey: second.toPublicKey().toString(),
+    });
+    expect(next.slots[2]).toEqual({
+      label: 'offline backup',
+      holder: 'second director',
+      pubKey: second.toPublicKey().toString(),
+    });
+    const t2 = treasuryScriptFor(next);
+    expect(await spends(t2, multisigUnlock([sig(k[0]), sig(second)]))).toBe(true);
+    expect(await spends(t2, multisigUnlock([sig(k[0]), sig(k[2])]))).toBe(false); // retired key is out
+    expect(() => reassignTreasuryKey(cfg, 'nope', { holder: 'x', pubKey: second.toPublicKey().toString() })).toThrow();
+    expect(() => reassignTreasuryKey(cfg, 'phone', { holder: 'x', pubKey: cfg.slots[1].pubKey })).toThrow();
   });
 });
 

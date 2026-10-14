@@ -10,8 +10,10 @@ import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { issueShareToken, payTreasury, shareLockKey } from './actions';
+import { OVERPAYMENT_TERM, allotmentMinute, excessRefundDue, type ExcessChoice } from './minute';
 import {
   STATUS_LABEL,
+  tickerLabel,
   bsv,
   mayOpenBshares,
   nextStep,
@@ -147,17 +149,23 @@ const OfferCard = ({
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [busy, setBusy] = useState(false);
-  const [minute, setMinute] = useState('');
+  const [minuteNo, setMinuteNo] = useState('');
+  const [excessChoice, setExcessChoice] = useState<ExcessChoice>('refund');
   const role = me.role === 'director' ? 'director' : 'investor';
   const step = nextStep(offer, role);
   const run = async () => {
     setBusy(true);
     try {
       if (step === 'Accept') await api.accept(offer.id, await shareLockKey(apiContext, offer.id));
-      else if (step === 'Pay') await api.paid(offer.id, await payTreasury(apiContext, me.company, offer));
+      else if (step === 'Pay') await api.paid(offer.id, await payTreasury(apiContext, me.company, offer), excessChoice);
       else if (step === 'Approve allotment') {
-        if (!minute.trim()) throw new Error('Record the board approval first');
-        await api.approve(offer.id, await shareLockKey(apiContext, offer.id), minute.trim());
+        const no = Number(minuteNo);
+        if (!Number.isInteger(no) || no < 1) throw new Error('Enter the next board minute number');
+        await api.approve(offer.id, await shareLockKey(apiContext, offer.id), no);
+      } else if (step === 'Refund excess') {
+        const txid = window.prompt('Refund transaction id (two treasury keys signed it)')?.trim();
+        if (!txid) return;
+        await api.refundExcess(offer.id, txid);
       } else if (step === 'Issue share token') {
         const t = await issueShareToken(apiContext, offer, {
           p: '403',
@@ -185,11 +193,48 @@ const OfferCard = ({
       setBusy(false);
     }
   };
+  let preview = '';
+  if (step === 'Approve allotment' && Number(minuteNo) >= 1 && me.company.nominalNanoPounds) {
+    try {
+      preview = allotmentMinute({
+        company: { name: me.company.name, number: me.company.companyNumber ?? '' },
+        date: new Date().toISOString().slice(0, 10),
+        minuteNumber: Number(minuteNo),
+        director: { name: 'Sole Director', handle: 'director' },
+        allottee: { name: offer.investorHandle, handle: offer.investorHandle },
+        offer: {
+          id: offer.id,
+          offeredAt: (offer.events[0]?.at ?? new Date().toISOString()).slice(0, 10),
+          closesAt: offer.expiresAt.slice(0, 10),
+          shares: offer.shares,
+          pricePence: offer.pricePence,
+          gbpPerBsvPence: offer.gbpPerBsvPence,
+          rateDate: offer.rateDate,
+          sats: offer.sats,
+          lockMonths: offer.lockMonths,
+        },
+        payment: {
+          txid: offer.paymentTxid ?? '',
+          paidSats: offer.paidSats ?? offer.sats,
+          excessChoice: offer.excessChoice ?? null,
+        },
+        register: {
+          nominalNanoPounds: me.company.nominalNanoPounds,
+          certificate: '(next)',
+          holdingBefore: offer.holdingBefore ?? 0,
+          issuedBefore: me.company.sharesInIssue,
+          authorised: me.company.authorised ?? null,
+        },
+      }).text;
+    } catch (e) {
+      preview = e instanceof Error ? e.message : '';
+    }
+  }
   return (
     <div className={CARD}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-white font-bold">
-          {offer.shares.toLocaleString('en-GB')} shares · {offer.investorHandle}
+          {offer.shares.toLocaleString('en-GB')} {tickerLabel(offer.ticker)} shares · {offer.investorHandle}
         </span>
         <span className="text-[11px] font-bold" style={{ color: GOLD }}>
           {STATUS_LABEL[offer.status]}
@@ -199,8 +244,59 @@ const OfferCard = ({
         {pounds(offer.pricePence)} a share · {bsv(offer.sats)} at {pounds(offer.gbpPerBsvPence)}/BSV ({offer.rateDate})
         · locked 2-of-2, yours alone after {offer.lockMonths} months
       </p>
+      {step === 'Pay' && (
+        <fieldset className="m-0 p-0 border-0 flex flex-col gap-1 text-xs" style={{ color: MUTED }}>
+          <legend className="text-white text-sm mb-1">{OVERPAYMENT_TERM}</legend>
+          {(
+            [
+              ['refund', 'Refund any excess to me in BSV'],
+              ['premium', 'Treat any excess as share premium (no extra shares)'],
+            ] as const
+          ).map(([v, label]) => (
+            <label key={v} className="flex items-center gap-2">
+              <input
+                type="radio"
+                name={`excess-${offer.id}`}
+                checked={excessChoice === v}
+                onChange={() => setExcessChoice(v)}
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {offer.excessSats ? (
+        <p className="m-0 text-xs" style={{ color: MUTED }}>
+          Paid {bsv(offer.paidSats ?? offer.sats)}: {bsv(offer.excessSats)} over, as{' '}
+          {offer.excessChoice === 'premium' ? 'share premium' : 'a refund'}
+          {excessRefundDue(offer) ? ' · refund pending (director)' : offer.excessRefundTxid ? ' · refunded' : ''}
+        </p>
+      ) : null}
       {step === 'Approve allotment' && (
-        <Field label="Board approval (minute reference)" value={minute} onChange={setMinute} />
+        <>
+          <Field
+            label="Board minute number (next in sequence, e.g. 11)"
+            value={minuteNo}
+            onChange={setMinuteNo}
+            type="number"
+          />
+          {preview && (
+            <details>
+              <summary className="text-xs cursor-pointer" style={{ color: MUTED }}>
+                Preview the minute (sole director resolution)
+              </summary>
+              <pre className="m-0 whitespace-pre-wrap text-[11px] text-white">{preview}</pre>
+            </details>
+          )}
+        </>
+      )}
+      {offer.boardMinuteText && (
+        <details>
+          <summary className="text-xs cursor-pointer" style={{ color: MUTED }}>
+            Board minute {offer.boardMinute}
+          </summary>
+          <pre className="m-0 whitespace-pre-wrap text-[11px] text-white">{offer.boardMinuteText}</pre>
+        </details>
       )}
       {step && (
         <Btn onClick={run} busy={busy}>
@@ -279,6 +375,25 @@ export const BsharesPage = () => {
         {me.offers.map((o) => (
           <OfferCard key={o.id} offer={o} me={me} api={api} onDone={reload} />
         ))}
+        <details className={CARD}>
+          <summary className="text-white font-bold cursor-pointer">How your shares are held</summary>
+          <ul className="m-0 pl-4 text-xs flex flex-col gap-1" style={{ color: MUTED }}>
+            <li>The register of members is the legal title. The $403 token in your wallet follows it.</li>
+            <li>
+              Your token is locked 2-of-2 (you and the director). After the lock period you can move it alone, with no
+              server and no director: your key comes back from your seed and the offer id.
+            </li>
+            <li>
+              Payments go to the company treasury, a 2-of-3 multisig. The director holds the three keys on separate
+              devices, so losing one device does not lock the treasury.
+            </li>
+            <li>
+              If the director loses their share-lock key, nothing is lost: you can still move your shares alone after
+              the lock period, and the company can re-issue your token to a new director key under a board minute.
+            </li>
+            <li>{OVERPAYMENT_TERM}</li>
+          </ul>
+        </details>
         <button
           type="button"
           onClick={() => navigate('/m/lock')}

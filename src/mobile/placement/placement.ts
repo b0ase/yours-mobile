@@ -1,6 +1,12 @@
 // bShares: the bCorp share placement domain (docs/BCORP-PLACEMENT.md). Pure: no network, no keys.
 // Tranche size, price and BSV rate are entered by the director in the UI. Nothing here is a cap-table number;
 // shares in issue and holders always come from bit-sign's register.
+import { excessRefundDue, type ExcessChoice } from './minute';
+
+/** The company bShares serves (owner decision 14 Oct 2026). bit-sign stores room tickers upper-case without '$'. */
+export const BSHARES_TICKER = 'bcorp';
+/** "$bcorp" — how the ticker is shown. */
+export const tickerLabel = (t: string = BSHARES_TICKER) => `$${t.replace(/^\$/, '').toLowerCase()}`;
 
 export type OfferStatus =
   | 'offered' // director created it for a named member
@@ -34,6 +40,17 @@ export type PlacementOffer = {
   tokenOutpoint?: string;
   refundTxid?: string;
   boardMinute?: string;
+  /** The minute text generated from the allotment (BCORP-BM-… format), stored with it. */
+  boardMinuteText?: string;
+  /** Investor's choice for any overpayment, made at payment time. */
+  excessChoice?: ExcessChoice;
+  /** What actually reached the treasury, and how much of it was above `sats`. */
+  paidSats?: number;
+  excessSats?: number;
+  /** Treasury refund of an excess the investor asked back (pending director action until set). */
+  excessRefundTxid?: string;
+  /** Directors only: the member's holding on the register before this allotment (for the minute preview). */
+  holdingBefore?: number;
   events: { at: string; by: string; kind: string; note?: string }[];
 };
 
@@ -49,6 +66,12 @@ export type Company = {
   name: string;
   /** From the register (sum of the class's shares in issue). Never hardcoded. */
   sharesInIssue: number;
+  /** Authorised ceiling from the articles (bit-sign config), null when none. */
+  authorised?: number | null;
+  /** Nominal value per share in nano-pounds, from the register's share class. */
+  nominalNanoPounds?: number;
+  /** Company number at Companies House, for the minute. */
+  companyNumber?: string;
   treasury: { m: number; n: number; lockingScriptHex: string } | null;
 };
 
@@ -81,7 +104,10 @@ export const pounds = (pence: number) =>
 export const bsv = (sats: number) => `${(sats / 1e8).toLocaleString('en-GB', { maximumFractionDigits: 8 })} BSV`;
 
 /** What the investor or director can do next, per status. */
-export function nextStep(o: Pick<PlacementOffer, 'status'>, role: 'director' | 'investor'): string | null {
+export function nextStep(
+  o: Pick<PlacementOffer, 'status'> & Partial<Pick<PlacementOffer, 'excessChoice' | 'excessSats' | 'excessRefundTxid'>>,
+  role: 'director' | 'investor',
+): string | null {
   const s = o.status;
   if (role === 'investor') {
     if (s === 'offered') return 'Accept';
@@ -89,6 +115,7 @@ export function nextStep(o: Pick<PlacementOffer, 'status'>, role: 'director' | '
     return null;
   }
   if (s === 'paid') return 'Approve allotment';
+  if ((s === 'approved' || s === 'issued') && excessRefundDue(o)) return 'Refund excess';
   if (s === 'approved') return 'Issue share token';
   if (s === 'refund_due') return 'Record refund';
   if (s === 'offered' || s === 'accepted') return 'Withdraw';

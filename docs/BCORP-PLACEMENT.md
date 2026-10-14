@@ -7,6 +7,24 @@ Existing investors buy shares in The Bitcoin Corporation Ltd for BSV inside bWal
 - **No hardcoded cap table.** Shares in issue, holders and holdings are always read from bit-sign's register.
 - **Non-custodial.** Neither bit-sign nor bWalletX ever holds an investor's key.
 
+## Owner decisions (14 Oct 2026)
+
+| #   | Decision                                                                                                                                                                                                                                                                                        | Where                                                                                         |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 1   | Register import and allotment sign-off: Richard Boase, sole director and sole board member. Board approval in the app is a single-director resolution.                                                                                                                                          | approve step (serving director)                                                               |
+| 2   | Treasury: **2-of-3 multisig**, all three keys held by the director on separate devices (phone, desktop, offline backup). One slot can later be reassigned to a second director. Keys are made and held client-side only; the server is given the three public keys at setup (env), never a key. | `scripts.ts` `treasuryScriptFor` / `reassignTreasuryKey`; bit-sign `BSHARES_TREASURY_PUBKEYS` |
+| 3   | Overpayment: offers carry “Any excess is refunded in BSV within 14 days, unless you choose to have it treated as share premium.” The investor chooses at payment. Refund → pending director action; premium → recorded in the minute like BCORP-BM-2026-10-03-010 §4.                           | `minute.ts`, Pay step, `refund-excess` action                                                 |
+| 4   | Lost director key: see below.                                                                                                                                                                                                                                                                   | help text on the bShares page                                                                 |
+| 5   | Board minute: generated from the allotment in the round-2026-08 `Board_Minute_*_NDS` format, reference `BCORP-BM-<date>-<NNN>`.                                                                                                                                                                 | `minute.ts` (preview) and bit-sign `share-placement-minute.ts` (stored)                       |
+| 6   | Ticker: `$bcorp` (`BSHARES_TICKER = 'bcorp'`; bit-sign stores it as `BCORP`).                                                                                                                                                                                                                   | `placement.ts`, bit-sign default                                                              |
+| 7   | Share ceiling: **10,000,000,000 ordinary shares of £0.000001**, Article 19.1 of the Articles of Association as amended by Special Resolution BCORP-SR-2026-04-19-002 (19 April 2026). Enforced from bit-sign config (`BSHARES_AUTHORISED_SHARES`, default from the articles).                   | bit-sign approve + `allot_from_placement()`                                                   |
+
+## Lost keys
+
+- **One treasury device lost.** The other two keys still sign. Move the funds to a new 2-of-3 with a replacement key, under a board minute.
+- **Director share-lock key lost.** The investor's shares are never stuck: after the lock period the investor spends alone (the timelock path needs no director and no server). Before then, the company re-issues the token to a new director key: a new 2-of-2 token for the same holding, recorded by a board minute in the standard format, and the old token is noted as superseded on the register. The register, not the token, is the legal title throughout.
+- **Investor device lost.** The key comes back from the seed plus the offer id.
+
 ## Where it lives
 
 | Surface                                  | What it shows                                                                                                                                                                                                                                     | Code                                               |
@@ -82,7 +100,8 @@ OP_m <dir1Pub> … <dirnPub> OP_n OP_CHECKMULTISIG
 
 - **Unlock:** `OP_0 <sig_i> … <sig_k>`, with the signatures in key order.
 - **Builder:** `treasuryLock(m, keys)` checks 1 ≤ m ≤ n ≤ 15 and that the keys are distinct.
-- **On bit-sign:** the treasury is the company room's existing derived bare multisig (`lib/room-treasury.ts`, `metadata.treasury.redeem_script_hex`). bWalletX pays that script exactly. Today it is unanimous n-of-n. Making m configurable means changing `treasuryConfig` (see the open questions).
+- **bCorp treasury:** 2-of-3. `treasuryScriptFor({ m: 2, slots })` takes three labelled slots (`phone`, `desktop`, `offline backup`, all held by the director) and refuses anything else. `reassignTreasuryKey(cfg, label, { holder, pubKey })` hands one slot to a second director; two current keys then move the funds to the new script.
+- **On bit-sign:** the treasury script is built from `BSHARES_TREASURY_PUBKEYS` (three compressed public keys, comma-separated, in slot order) and `BSHARES_TREASURY_M` (default 2). Both are empty until the director supplies the public keys; until then payment is refused with "The treasury multisig is not set up". bWalletX pays that script exactly.
 
 ## Data model (bit-sign, `migrations/20261130_share_placements.sql`, not run)
 
@@ -113,29 +132,32 @@ RLS is on for all four tables with no policies, so only the service role reads o
 
 Each transition appends `{at, by, kind, note}` to `share_placements.events`. Allotments also write a row to `company_register_entries`.
 
-| Step                            | Recorded                                                                       |
-| ------------------------------- | ------------------------------------------------------------------------------ |
-| offered                         | director handle, terms (shares, £/share, £/BSV, rate date, lock months, close) |
-| accepted                        | investor handle, investor share-lock pubkey                                    |
-| paid                            | payment txid (claimed once in `payment-reuse`, unique column)                  |
-| approved                        | board minute ref, director pubkey, unlock height, certificate, invariant trace |
-| issued                          | token outpoint, which must exist on chain with exactly the expected script     |
-| declined_refund_due / withdrawn | director, reason                                                               |
-| refunded                        | refund txid (signed by the treasury directors outside this flow)               |
+| Step                            | Recorded                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| offered                         | director handle, terms (shares, £/share, £/BSV, rate date, lock months, close)                         |
+| accepted                        | investor handle, investor share-lock pubkey                                                            |
+| paid                            | payment txid (claimed once in `payment-reuse`, unique column)                                          |
+| paid                            | also paid sats, excess sats and the investor's excess choice                                           |
+| approved                        | board minute ref + generated minute text, director pubkey, unlock height, certificate, invariant trace |
+| excess_refunded                 | refund txid for an excess the investor asked back                                                      |
+| issued                          | token outpoint, which must exist on chain with exactly the expected script                             |
+| declined_refund_due / withdrawn | director, reason                                                                                       |
+| refunded                        | refund txid (signed by the treasury directors outside this flow)                                       |
 
 ## Failure handling
 
-| Situation                                         | Result                                                                                                                                                                                   |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Paid, but the director declines or never approves | Decline moves `paid → refund_due`. Treasury directors sign a refund from the multisig to the payer and record it with `refund {refundTxid}` → `refunded`. The register is never touched. |
-| Payment still in the mempool                      | 409 "Waiting for one confirmation". The investor submits again once it is mined.                                                                                                         |
-| Underpaid, wrong script or reused txid            | Refused, and the status stays `accepted`. An overpayment is accepted as paid; the director can refund the difference by hand (open question).                                            |
-| Offer passes its close date                       | Accept and pay are refused. Withdrawing is allowed.                                                                                                                                      |
-| Two presses or a race                             | Every transition is guarded on status (`update … where status = from`). The txid claim is atomic in the database.                                                                        |
-| Allotment refused by the invariants               | 409 with the full trace. Nothing is written.                                                                                                                                             |
-| Token issued with the wrong keys                  | Refused. The status stays `approved` until a matching output is on chain.                                                                                                                |
-| Investor loses their device                       | The key comes back from the seed plus the offer id. After the timelock they can spend alone. Before it, director and investor sign together.                                             |
-| Director key lost                                 | The investor still gets sole control after the timelock. Other directors can re-issue by a 2-of-2 swap later (open question: a key-rotation flow).                                       |
+| Situation                                         | Result                                                                                                                                                                                                                                               |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Paid, but the director declines or never approves | Decline moves `paid → refund_due`. Treasury directors sign a refund from the multisig to the payer and record it with `refund {refundTxid}` → `refunded`. The register is never touched.                                                             |
+| Payment still in the mempool                      | 409 "Waiting for one confirmation". The investor submits again once it is mined.                                                                                                                                                                     |
+| Underpaid, wrong script or reused txid            | Refused, and the status stays `accepted`.                                                                                                                                                                                                            |
+| Overpaid                                          | Accepted as paid. The investor's choice (made at payment) is recorded. Premium: the minute records it as premium, no further shares, not a loan. Refund: pending director action "Refund excess" until the refund txid is recorded (within 14 days). |
+| Offer passes its close date                       | Accept and pay are refused. Withdrawing is allowed.                                                                                                                                                                                                  |
+| Two presses or a race                             | Every transition is guarded on status (`update … where status = from`). The txid claim is atomic in the database.                                                                                                                                    |
+| Allotment refused by the invariants               | 409 with the full trace. Nothing is written.                                                                                                                                                                                                         |
+| Token issued with the wrong keys                  | Refused. The status stays `approved` until a matching output is on chain.                                                                                                                                                                            |
+| Investor loses their device                       | The key comes back from the seed plus the offer id. After the timelock they can spend alone. Before it, director and investor sign together.                                                                                                         |
+| Director key lost                                 | The investor still gets sole control after the timelock. Before it, the company re-issues the token to a new director key under a board minute (see Lost keys).                                                                                      |
 
 ## Store build
 

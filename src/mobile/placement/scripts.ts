@@ -10,7 +10,11 @@
 // nLockTime from the sighash preimage and refuses a final nSequence). That is
 // the same script bWalletX already uses for non-custodial locks.
 //
-// Treasury: bare m-of-n multisig, OP_m <pk1..pkn> OP_n OP_CHECKMULTISIG.
+// Treasury: bare m-of-n multisig, OP_m <pk1..pkn> OP_n OP_CHECKMULTISIG. The bCorp treasury is 2-of-3
+// (owner decision 14 Oct 2026): three keys held by the director on separate devices (phone, desktop, offline
+// backup), any two sign. One slot can later be reassigned to a second director (reassignTreasuryKey), which
+// needs two of the current keys to move the funds to the new script. Keys are generated and held client-side
+// only; the server sees public keys.
 
 import { Lock } from '@1sat/templates';
 import {
@@ -125,6 +129,53 @@ export function treasuryLock(m: number, pubKeys: (PublicKey | string)[]): Lockin
   for (const k of keys) s.writeBin(Utils.toArray(k, 'hex'));
   s.writeOpCode(smallInt(keys.length)).writeOpCode(OP.OP_CHECKMULTISIG);
   return new LockingScript(s.chunks);
+}
+
+export const TREASURY_M = 2;
+export const TREASURY_N = 3;
+
+export type TreasuryKeySlot = {
+  /** Where the key lives, e.g. "phone", "desktop", "offline backup". */
+  label: string;
+  /** Who holds it (a director's handle). All three are the sole director's today. */
+  holder: string;
+  pubKey: string;
+};
+export type TreasuryConfig = { m: number; slots: TreasuryKeySlot[] };
+
+/** Checks a treasury config: 2-of-3 by default, distinct valid compressed keys, labelled slots. */
+export function validateTreasury(cfg: TreasuryConfig, expect = { m: TREASURY_M, n: TREASURY_N }): TreasuryConfig {
+  if (cfg.slots.length !== expect.n) throw new Error(`treasury needs exactly ${expect.n} keys`);
+  if (cfg.m !== expect.m) throw new Error(`treasury must be ${expect.m}-of-${expect.n}`);
+  if (new Set(cfg.slots.map((s) => s.pubKey)).size !== cfg.slots.length)
+    throw new Error('treasury keys must be distinct');
+  for (const s of cfg.slots) {
+    if (!/^0[23][0-9a-f]{64}$/.test(s.pubKey)) throw new Error(`"${s.label}" is not a compressed public key`);
+    if (!s.label.trim() || !s.holder.trim()) throw new Error('every treasury key needs a label and a holder');
+  }
+  return cfg;
+}
+
+/** The treasury locking script, keys in slot order (signatures must follow the same order). */
+export const treasuryScriptFor = (cfg: TreasuryConfig) =>
+  treasuryLock(
+    validateTreasury(cfg).m,
+    cfg.slots.map((s) => s.pubKey),
+  );
+
+/**
+ * Reassign one slot (e.g. the offline backup) to a second director's key. Returns the new config; the
+ * funds then move from the old script to the new one with two of the CURRENT keys, under a board minute.
+ */
+export function reassignTreasuryKey(
+  cfg: TreasuryConfig,
+  label: string,
+  next: { holder: string; pubKey: string },
+): TreasuryConfig {
+  const i = cfg.slots.findIndex((s) => s.label === label);
+  if (i < 0) throw new Error(`no treasury key labelled "${label}"`);
+  const slots = cfg.slots.map((s, j) => (j === i ? { label, ...next } : s));
+  return validateTreasury({ m: cfg.m, slots });
 }
 
 // ── unlocking ────────────────────────────────────────────────────────────────
