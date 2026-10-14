@@ -27,6 +27,10 @@ describe('toRouter', () => {
     expect(toRouter('/exchange/swap', '')).toBe('/m/exchange/swap');
     expect(toRouter(`/exchange/${tok}`, '')).toBe(`/m/exchange/${tok}`);
     expect(toRouter('/market', '')).toBe('/m/exchange');
+    expect(toRouter('/m/market', '')).toBe('/m/exchange');
+    expect(toRouter('/m/market/swap', '?x=1')).toBe('/m/exchange/swap?x=1');
+    expect(toRouter('/m/exchange', '')).toBe('/m/exchange');
+    expect(toRouter('/m/nfts', '')).toBe('/m/nfts');
     expect(toRouter('/market/swap', '?x=1')).toBe('/m/exchange/swap?x=1');
   });
   test('round trips', () => {
