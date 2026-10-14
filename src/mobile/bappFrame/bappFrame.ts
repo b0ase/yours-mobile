@@ -5,6 +5,7 @@ import { openDappBrowser } from '../dappBrowser';
 import { isNative } from '../native';
 import { IS_EXTENSION } from '../extension';
 import { frameAllowlist, frameOriginFor, framingAllowed } from './frameBridge';
+import { frameModeFor } from './webFrame';
 
 /**
  * In-frame bApps: our own apps (Apps › bApps) run inside bWallet's main frame, between TopNav
@@ -85,12 +86,14 @@ let seq = 0;
  */
 export const openBapp = async (name: string, url: string): Promise<void> => {
   const origin = frameOriginFor(url, BAPP_FRAME_ALLOWLIST);
-  // Phone apps and the Chrome extension (desktop) run bApps in-frame; the web wallet opens them in a tab.
-  if (!(isNative || IS_EXTENSION) || !origin) return openDappBrowser(url);
+  // Phone apps and the Chrome extension run bApps in-frame (headers probed); the web/Desktop wallet frames only the
+  // bApps that allow it (WEB_FRAME_ORIGINS) and opens the rest in a tab.
+  const mode = frameModeFor(origin, { native: isNative, extension: IS_EXTENSION });
+  if (mode === 'tab' || !origin) return openDappBrowser(url);
   if (state.session?.origin === origin && state.session.url === url) return set({ visible: true });
   set({ opening: name });
   try {
-    if (!(await canFrame(url, origin))) return await openDappBrowser(url);
+    if (mode === 'frame' && !(await canFrame(url, origin))) return await openDappBrowser(url);
     set({ session: { name, url, origin, key: ++seq } });
   } finally {
     set({ opening: null });

@@ -6,6 +6,8 @@ import { beginPairing, type PendingPair } from './sessions';
 import { CliPairConfirm } from './CliPairConfirm';
 import { CLI_ORIGIN } from './agentPairing';
 import { IS_EXTENSION } from '../extension';
+import { Capacitor } from '@capacitor/core';
+import { switchBackHint } from './doneHint';
 import { Scanner } from '../scan/Scanner';
 
 const GOLD = '#F5B800';
@@ -184,7 +186,10 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
             <p className="mt-2 text-sm" style={{ color: MUTED }}>
               {IS_EXTENSION
                 ? 'Requests are answered while the bWalletX side panel (or tab) is open; with it closed, CLI requests fail until you open it again.'
-                : 'Keep bWallet open while you use the site.'}{' '}
+                : switchBackHint(
+                    new URL(stage.origin).host,
+                    Capacitor.getPlatform() === 'ios' || /iPhone|iPad|iPod/i.test(navigator.userAgent),
+                  )}{' '}
               Disconnect any time in Settings › Paired websites.
             </p>
             <button

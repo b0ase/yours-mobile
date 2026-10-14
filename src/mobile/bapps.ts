@@ -59,6 +59,12 @@ export type BApp = {
   layout?: 'mobile' | 'desktop';
   /** bWalletX only: never listed in the store edition (bWallet). */
   privateOnly?: boolean;
+  /**
+   * Also runs in-frame in the web and Desktop wallets, without a header probe (browsers can't read
+   * cross-origin headers). Only for sites that send CSP frame-ancestors allowing https://web.bwalletx.com
+   * and https://desktop.bwalletx.com (bappFrame.ts WEB_FRAME_ORIGINS).
+   */
+  webFrame?: boolean;
 };
 
 const suite = (repo: string) => `https://github.com/bitcoin-apps-suite/${repo}`;
@@ -72,6 +78,16 @@ export const BAPP_GROUPS: { id: BAppGroup; label: string }[] = [
 
 export const BAPPS: BApp[] = [
   // Featured
+  {
+    // bChatX signs in over XDM (WalletClient 'XDM') when framed; deep link: /bapp/bchatx?to=/u/<name> (BappLinkPage).
+    name: 'bChatX',
+    url: 'https://www.bchatx.com',
+    webFrame: true,
+    verb: 'Chat rooms, Spaces and feeds for every token',
+    group: 'featured',
+    status: 'live',
+    icon: app_bchatIcon,
+  },
   {
     name: 'bChat',
     url: 'https://www.bitcoinchat.online',
