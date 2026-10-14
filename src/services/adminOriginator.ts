@@ -9,6 +9,9 @@
  * originator is refused outright.
  */
 
+/** The web/phone builds' stand-in runtime id (src/mobile MOBILE_EXTENSION_ID). */
+export const MOBILE_RUNTIME_ID = 'yours-mobile';
+
 export type MessageSender = { id?: string; origin?: string; url?: string };
 
 /** The sender is one of the extension's (or mobile app's) own pages, not a web page. */
@@ -17,8 +20,13 @@ export const isExtensionSender = (sender: MessageSender | undefined, runtimeId: 
   const base = `chrome-extension://${runtimeId}`;
   if (sender.id !== runtimeId) return false;
   if (sender.origin !== base) return false;
-  // A URL, when present, must be one of ours too.
-  if (sender.url !== undefined && !sender.url.startsWith(`${base}/`)) return false;
+  // Identity is id + origin. On the real extension both come from Chrome. In the web/phone builds
+  // the hub stamps them (src/mobile/main.ts senderFor) and sender.url is the page's real address
+  // (https://web.bwalletx.com/…, capacitor://…), so the URL must not be required to share the
+  // chrome-extension:// prefix. Web pages and bApp frames never get this origin: the hub gives them
+  // their own https origin (dappBrowser), which is what blocks the H1 spoof.
+  // On the real extension a URL, when present, must still be one of ours.
+  if (runtimeId !== MOBILE_RUNTIME_ID && sender.url !== undefined && !sender.url.startsWith(`${base}/`)) return false;
   return true;
 };
 
