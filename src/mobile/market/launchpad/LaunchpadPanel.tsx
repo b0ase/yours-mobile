@@ -33,6 +33,8 @@ import { cancelTrade, executeTrade, prepareTrade, type PreparedTrade } from './c
 import { describeRow } from './validate';
 import { ErrorActions } from '../../errors/ErrorActions';
 import { LAUNCH_ROUTE, tradeRoute } from '../../exchange/exchangeData';
+import { localLaunches, mergeLaunches, type Launch } from '../../exchange/launch/launch';
+import { registryLaunches } from '../../exchange/launch/launchNet';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const GOLD = '#FFD24D';
@@ -97,6 +99,8 @@ export const LaunchpadPanel = () => {
       >
         <Rocket size={16} /> Launch your own coin
       </button>
+      <OurLaunches onOpen={(id) => navigate(tradeRoute(id))} />
+      <h3 className="text-xs font-bold uppercase tracking-wide text-[#98A2B3] m-0 mt-2">On BlastPad</h3>
       {coins === null && !error && <p className="text-xs text-[#98A2B3] text-center py-8">Loading launched coins…</p>}
       {error && (
         <div className="flex flex-col items-center gap-3 py-8">
@@ -156,6 +160,50 @@ export const LaunchpadPanel = () => {
 
 const BUY_PICKS = ['0.001', '0.01', '0.05', '0.1'];
 const SLIPS = [100, 300, 500];
+
+/** "Launched in bWalletX": this device's launches plus the shared registry (empty until it is deployed). */
+const OurLaunches = ({ onOpen }: { onOpen: (id: string) => void }) => {
+  const [list, setList] = useState<Launch[]>(() => mergeLaunches([], localLaunches()));
+  useEffect(() => {
+    let live = true;
+    void registryLaunches().then((r) => live && setList(mergeLaunches(r, localLaunches())));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <>
+      <h3 className="text-xs font-bold uppercase tracking-wide text-[#98A2B3] m-0 mt-2">Launched in bWalletX</h3>
+      {list.length === 0 && (
+        <p className="text-xs text-[#98A2B3] text-center py-3 m-0">No coins launched here yet. Be the first.</p>
+      )}
+      {list.map((l) => (
+        <button
+          key={l.tokenId}
+          onClick={() => onOpen(l.tokenId)}
+          className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+        >
+          {l.icon ? (
+            <img
+              src={`https://ordfs.network/${l.icon}`}
+              alt=""
+              loading="lazy"
+              className="h-10 w-10 rounded-lg object-cover shrink-0 bg-[#2b2f36]"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-lg bg-[#2b2f36] flex items-center justify-center shrink-0">
+              <Coins size={16} color="#98A2B3" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>${l.ticker}</div>
+            <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{l.name}</div>
+          </div>
+        </button>
+      ))}
+    </>
+  );
+};
 
 const CoinSheet = ({
   coin: initial,

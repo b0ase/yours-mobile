@@ -1,20 +1,39 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Check, ImagePlus, Rocket } from 'lucide-react';
+import { Check, ChevronDown, ImagePlus, MessageCircle, Rocket } from 'lucide-react';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { useBackClose } from '../../backStack';
 import { money, moneyWithSats, useBsvUsd } from '../../money/money';
-import { checkSize, formatBytes, iconFile, notifyMinted, mintFeeAddress, withFeeOutput } from '../../mint/mint';
+import { checkSize, formatBytes, iconFile, notifyMinted } from '../../mint/mint';
 import { inscribeIcon } from '../../tickets/mintTicket';
 import { MAX_ICON_BYTES, suggestTicker } from '../../tickets/tickets';
-import { deployToken, type MintedToken } from '../../tokens/mintToken';
-import { showOnWallet } from '../../tokens/indexFund';
+import { indexCostSats, showOnWallet } from '../../tokens/indexFund';
 import { RETURNS_WARNING, hasReturnsWording } from '../../tokens/returnsWording';
 import type { TokenForm } from '../../tokens/token';
 import { ErrorActions } from '../../errors/ErrorActions';
 import { tradeRoute } from '../exchangeData';
-import { approvalLines, emptyLaunchForm, launchCost, validateLaunch } from './launch';
+import { requestChatRoom } from '../../chat/nav';
+import { useBottomMenu } from '../../../hooks/useBottomMenu';
+import { asMenuItem } from '../../tabs/tabs';
+import { CATEGORIES } from '../registry/catalog';
+import {
+  LAUNCH_NOTICE,
+  approvalLines,
+  defaultLaunchOptions,
+  emptyLaunchForm,
+  launchCost,
+  mapBytes,
+  validateLaunch,
+  validateOptions,
+  withOptions,
+  type Launch,
+  type LaunchOptions,
+} from './launch';
+import { deployLaunch } from './launchNet';
+
+const CATEGORY_SLUGS = CATEGORIES.map((c) => c.slug);
+type Done = { launch: Launch; supply: string; roomError: boolean; indexError: string | null };
 
 /**
  * Exchange › Launchpad › Launch your own coin: name, ticker, supply (1B default), icon, then ONE
@@ -36,13 +55,22 @@ export const LaunchCoin = () => {
   const [error, setError] = useState('');
   const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState('');
-  const [done, setDone] = useState<MintedToken | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
+  const [opts, setOpts] = useState<LaunchOptions>(defaultLaunchOptions);
+  const [advanced, setAdvanced] = useState(false);
+  const { handleSelect } = useBottomMenu();
+  const setOpt = <K extends keyof LaunchOptions>(k: K, v: LaunchOptions[K]) => setOpts((o) => ({ ...o, [k]: v }));
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
 
-  const cost = launchCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate());
+  const cost = launchCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), undefined, {
+    indexNow: opts.indexNow,
+    mapBytes: mapBytes(form, opts),
+  });
+  const check = () => validateLaunch(withOptions(form, opts)) ?? validateOptions(opts, CATEGORY_SLUGS);
   const fmt = (sats: number) => money(sats, rate);
+  const fmtIndex = fmt(indexCostSats());
 
   const set = (k: keyof TokenForm) => (v: string) =>
     setForm((f) => ({ ...f, [k]: v, ...(k === 'name' && !tickerTouched ? { ticker: suggestTicker(v) } : {}) }));
@@ -62,13 +90,14 @@ export const LaunchCoin = () => {
   };
 
   const review = () => {
-    const err = validateLaunch(form);
+    const err = check();
     setError(err ?? '');
+    if (err && validateOptions(opts, CATEGORY_SLUGS)) setAdvanced(true);
     if (!err) setSheet(true);
   };
 
   const launch = async () => {
-    const err = validateLaunch(form);
+    const err = check();
     if (err) {
       setSheet(false);
       return setError(err);
@@ -77,12 +106,11 @@ export const LaunchCoin = () => {
     try {
       const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'coin') : null;
       // The flat launch fee rides on the deploy tx as its own labelled output (no fee address = none).
-      const feeCtx = withFeeOutput(apiContext, cost.launchFeeSats, mintFeeAddress());
-      const token = await deployToken(feeCtx, form, { icon: iconOutpoint, feeSats: 0 });
-      void showOnWallet(chromeStorageService, token.tokenId);
+      const res = await deployLaunch(apiContext, form, opts, { icon: iconOutpoint, launchFeeSats: cost.launchFeeSats });
+      void showOnWallet(chromeStorageService, res.launch.tokenId);
       notifyMinted();
       setSheet(false);
-      setDone(token);
+      setDone(res);
     } catch (e) {
       setSheet(false);
       setError(e instanceof Error ? e.message : 'Launch failed');
@@ -94,29 +122,50 @@ export const LaunchCoin = () => {
   const input = 'w-full rounded-xl px-3 py-2.5 text-sm outline-none border bg-transparent text-white';
   const inputStyle = { borderColor: LINE };
 
-  if (done)
+  if (done) {
+    const l = done.launch;
     return (
       <section className="flex flex-col gap-3 rounded-2xl border p-4" style={{ borderColor: LINE }}>
         <div className="flex items-center gap-2 text-white font-bold">
-          <Check size={18} color="#A1FF8B" /> ${done.ticker} is launched
+          <Check size={18} color="#A1FF8B" /> ${l.ticker} is launched
         </div>
         <p className="text-sm m-0" style={{ color: MUTED }}>
-          {BigInt(done.supply).toLocaleString('en-US')} ${done.ticker} are in your wallet. Its Exchange page is live; it
+          {BigInt(done.supply).toLocaleString('en-US')} ${l.ticker} are in your wallet. Its Exchange page is live; it
           shows trades once the token is indexed (usually a few minutes).
         </p>
         <p className="text-[11px] break-all m-0" style={{ color: MUTED }}>
-          {done.tokenId}
+          {l.tokenId}
+        </p>
+        <p className="text-xs m-0" style={{ color: MUTED }}>
+          {done.roomError
+            ? "Its holders' room opens once the token is indexed: open it from Chat or Settings › My tokens."
+            : `The holders' room "${l.name}" is open.`}
+          {done.indexError
+            ? ` Indexing wasn't paid (${done.indexError}); you can pay it later from the room setup.`
+            : ''}
         </p>
         <button
           type="button"
-          onClick={() => navigate(tradeRoute(done.tokenId))}
+          onClick={() => navigate(tradeRoute(l.tokenId))}
           className="bw-pill bw-pill-gold min-h-[44px] w-full text-sm font-bold"
         >
-          Open ${done.ticker} on the Exchange
+          Open ${l.ticker} on the Exchange
         </button>
         <button
           type="button"
           onClick={() => {
+            requestChatRoom(`bsv21:${l.tokenId}`);
+            handleSelect(asMenuItem('chat'));
+          }}
+          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full border bg-transparent text-sm font-bold cursor-pointer"
+          style={{ borderColor: LINE, color: GOLD }}
+        >
+          <MessageCircle size={16} /> Open its room
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpts(defaultLaunchOptions());
             setDone(null);
             setForm(emptyLaunchForm());
             setTickerTouched(false);
@@ -129,6 +178,7 @@ export const LaunchCoin = () => {
         </button>
       </section>
     );
+  }
 
   return (
     <section className="flex flex-col gap-3 rounded-2xl border p-4" style={{ borderColor: LINE }}>
@@ -208,6 +258,102 @@ export const LaunchCoin = () => {
         maxLength={1000}
         onChange={(e) => set('description')(e.target.value)}
       />
+      <button
+        type="button"
+        onClick={() => setAdvanced((a) => !a)}
+        aria-expanded={advanced}
+        className="flex items-center justify-between bg-transparent border-0 p-0 text-sm font-bold cursor-pointer"
+        style={{ color: GOLD }}
+      >
+        Advanced options
+        <ChevronDown size={16} style={{ transform: advanced ? 'rotate(180deg)' : undefined }} />
+      </button>
+      {advanced && (
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <label className="flex-1 text-xs" style={{ color: MUTED }}>
+              Decimals (0 = whole coins)
+              <input
+                className={`${input} mt-1`}
+                style={inputStyle}
+                inputMode="numeric"
+                maxLength={2}
+                value={opts.decimals}
+                onChange={(e) => setOpt('decimals', e.target.value.replace(/\D/g, ''))}
+              />
+            </label>
+            <label className="flex-1 text-xs" style={{ color: MUTED }}>
+              Coins to enter the room
+              <input
+                className={`${input} mt-1`}
+                style={inputStyle}
+                inputMode="numeric"
+                value={opts.roomMin}
+                onChange={(e) => setOpt('roomMin', e.target.value)}
+              />
+            </label>
+          </div>
+          <label className="text-xs" style={{ color: MUTED }}>
+            Category
+            <select
+              className={`${input} mt-1`}
+              style={{ ...inputStyle, background: '#0d0e11' }}
+              value={opts.category}
+              onChange={(e) => setOpt('category', e.target.value)}
+            >
+              <option value="">None</option>
+              {CATEGORIES.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <input
+            className={input}
+            style={inputStyle}
+            placeholder="Website (https://…)"
+            aria-label="Website"
+            inputMode="url"
+            value={opts.website}
+            onChange={(e) => setOpt('website', e.target.value)}
+          />
+          <div className="flex gap-2">
+            <input
+              className={input}
+              style={inputStyle}
+              placeholder="X handle"
+              aria-label="X handle"
+              value={opts.x}
+              onChange={(e) => setOpt('x', e.target.value)}
+            />
+            <input
+              className={input}
+              style={inputStyle}
+              placeholder="Telegram"
+              aria-label="Telegram"
+              value={opts.telegram}
+              onChange={(e) => setOpt('telegram', e.target.value)}
+            />
+          </div>
+          <label className="flex items-start gap-2 text-xs cursor-pointer" style={{ color: MUTED }}>
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={opts.indexNow}
+              onChange={(e) => setOpt('indexNow', e.target.checked)}
+            />
+            <span>
+              Pay indexing now ({fmtIndex}) so every wallet shows the coin from the start. You can also do this later
+              from the room setup.
+            </span>
+          </label>
+          <p className="text-[11px] m-0" style={{ color: MUTED }}>
+            Links and category are written on-chain with the coin. Fee routes, bonding-curve trading and graduation come
+            with partner launchpads later.
+          </p>
+        </div>
+      )}
       {hasReturnsWording(`${form.name} ${form.description}`) && (
         <p className="text-xs m-0" style={{ color: GOLD }}>
           {RETURNS_WARNING}
@@ -215,7 +361,9 @@ export const LaunchCoin = () => {
       )}
       <p className="text-xs m-0" style={{ color: MUTED }}>
         Launch fee: {cost.launchFeeSats > 0 ? `${fmt(cost.launchFeeSats)} flat` : 'none'} · network ≈{' '}
-        {fmt(cost.networkSats)} · total ≈ {moneyWithSats(cost.totalSats, rate)}. No share of your coin is taken.
+        {fmt(cost.networkSats)}
+        {cost.indexSats > 0 ? ` · indexing ${fmt(cost.indexSats)}` : ''} · total ≈ {moneyWithSats(cost.totalSats, rate)}
+        . No share of your coin is taken.
       </p>
       {error && (
         <div className="flex flex-col gap-1.5">
@@ -230,7 +378,7 @@ export const LaunchCoin = () => {
       </button>
       {sheet && (
         <ApproveSheet
-          lines={approvalLines(form, cost, fmt, !!icon)}
+          lines={approvalLines(withOptions(form, opts), cost, fmt, !!icon, opts)}
           total={moneyWithSats(cost.totalSats, rate)}
           busy={busy}
           onAllow={() => void launch()}
@@ -282,6 +430,9 @@ const ApproveSheet = ({
             </li>
           ))}
         </ul>
+        <p className="text-[11px] m-0" style={{ color: MUTED }}>
+          {LAUNCH_NOTICE}
+        </p>
         <div className="flex items-center justify-between border-t pt-3 text-sm" style={{ borderColor: LINE }}>
           <span style={{ color: MUTED }}>Total</span>
           <span className="text-white font-bold">{total}</span>

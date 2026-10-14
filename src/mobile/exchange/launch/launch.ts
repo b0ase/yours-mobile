@@ -1,4 +1,7 @@
 import { mintFeeAddress, txFeeSats } from '../../mint/mint';
+import { LockingScript, OP, Utils } from '@bsv/sdk';
+import { MAP_PREFIX } from '../../names/personalToken';
+import { indexCostSats } from '../../tokens/indexFund';
 import { TOKEN_DEPLOY_BYTES, validateToken, type TokenForm } from '../../tokens/token';
 import { safety, type SafetyFilter } from '../../market/safety';
 import { hasReturnsWording, RETURNS_BLOCK } from '../../tokens/returnsWording';
@@ -31,16 +34,30 @@ export const launchFeeFor = (feeAddress?: string): number => (mintFeeAddress(fee
 export interface LaunchCost {
   networkSats: number;
   launchFeeSats: number;
+  /** The optional indexing fund (Advanced › index now), 0 when off. */
+  indexSats: number;
   totalSats: number;
   txCount: number;
 }
 
 /** Network fee for the optional icon inscription plus the deploy, and the flat launch fee. */
-export function launchCost(iconBytes: number, satsPerKb: number, feeAddress?: string): LaunchCost {
+export function launchCost(
+  iconBytes: number,
+  satsPerKb: number,
+  feeAddress?: string,
+  opts: { indexNow?: boolean; mapBytes?: number } = {},
+): LaunchCost {
   const icon = iconBytes > 0 ? txFeeSats(iconBytes, satsPerKb) : 0;
-  const networkSats = icon + txFeeSats(TOKEN_DEPLOY_BYTES, satsPerKb);
+  const networkSats = icon + txFeeSats(TOKEN_DEPLOY_BYTES + (opts.mapBytes ?? 0), satsPerKb);
   const launchFeeSats = launchFeeFor(feeAddress);
-  return { networkSats, launchFeeSats, totalSats: networkSats + launchFeeSats, txCount: iconBytes > 0 ? 2 : 1 };
+  const indexSats = opts.indexNow ? indexCostSats() : 0;
+  return {
+    networkSats,
+    launchFeeSats,
+    indexSats,
+    totalSats: networkSats + launchFeeSats + indexSats,
+    txCount: (iconBytes > 0 ? 2 : 1) + (opts.indexNow ? 1 : 0),
+  };
 }
 
 /** Form check before the approval sheet: token rules plus the returns-wording block. */
@@ -48,20 +65,203 @@ export function validateLaunch(f: TokenForm, s: SafetyFilter = safety()): string
   return validateToken(f, s) ?? (hasReturnsWording(`${f.name} ${f.description}`) ? RETURNS_BLOCK : null);
 }
 
+/** Shown on the approval sheet (replaces tokenblaster's "I understand" checkbox: nothing to tick). */
+export const LAUNCH_NOTICE =
+  'This is a real BSV transaction from your wallet, signed with your key. Coins are for fun and can be worth nothing.';
+
 /** The one approval sheet's lines: everything the launch does, all in one Allow. */
 export function approvalLines(
   f: TokenForm,
   cost: LaunchCost,
   fmt: (sats: number) => string,
   hasIcon: boolean,
+  o: LaunchOptions = defaultLaunchOptions(),
 ): { label: string; value: string }[] {
+  const c = cleanOptions(o);
   const ticker = f.ticker.trim().replace(/^\$/, '');
   const supply = BigInt((f.supply || '0').replace(/[,_\s]/g, '') || '0').toLocaleString('en-US');
   return [
     { label: 'Create token', value: `$${ticker}` },
     { label: 'Supply to your wallet', value: supply },
     ...(hasIcon ? [{ label: 'Inscribe icon', value: 'On-chain image' }] : []),
+    ...(hasMapExtras(o) ? [{ label: 'Coin card on-chain', value: 'Links and category' }] : []),
+    { label: "Open holders' room", value: `Hold ${BigInt(c.roomMin).toLocaleString('en-US')} to enter` },
+    ...(cost.indexSats > 0 ? [{ label: 'Indexing fund', value: fmt(cost.indexSats) }] : []),
     { label: 'Network fee', value: fmt(cost.networkSats) },
     { label: 'Launch fee (flat)', value: cost.launchFeeSats > 0 ? fmt(cost.launchFeeSats) : 'None' },
   ];
 }
+
+// ── Advanced options (parity with tokenblaster.lol's launch form where it fits a wallet launch) ──
+
+export interface LaunchOptions {
+  /** 0 = whole tokens only (tokenblaster: always 0). */
+  decimals: string;
+  website: string;
+  /** X handle, without @. */
+  x: string;
+  /** Telegram handle or group, without @. */
+  telegram: string;
+  /** Exchange category slug ('' = none). */
+  category: string;
+  /** Whole tokens a holder needs to enter the holders' room. */
+  roomMin: string;
+  /** Pay the 0.1 BSV indexing fund now so every wallet sees the coin from the start (tokenblaster always does). */
+  indexNow: boolean;
+}
+
+export const defaultLaunchOptions = (): LaunchOptions => ({
+  decimals: '0',
+  website: '',
+  x: '',
+  telegram: '',
+  category: '',
+  roomMin: '1',
+  indexNow: false,
+});
+
+const HANDLE = /^[A-Za-z0-9_]{1,32}$/;
+const handle = (s: string) =>
+  s
+    .trim()
+    .replace(/^@/, '')
+    .replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, '')
+    .replace(/^https?:\/\/t\.me\//i, '');
+
+export const cleanOptions = (o: LaunchOptions): LaunchOptions => ({
+  ...o,
+  decimals: o.decimals.trim() || '0',
+  website: o.website.trim(),
+  x: handle(o.x),
+  telegram: handle(o.telegram),
+  roomMin: o.roomMin.trim().replace(/[,_\s]/g, '') || '1',
+});
+
+export function validateOptions(o: LaunchOptions, categories: readonly string[]): string | null {
+  const c = cleanOptions(o);
+  if (c.website && !/^https:\/\/[^\s/$.?#][^\s]*\.[^\s]+$/i.test(c.website)) return 'Website: a full https:// link.';
+  if (c.website.length > 200) return 'Keep the website link under 200 characters.';
+  if (c.x && !HANDLE.test(c.x)) return 'X: just the handle, like bwalletx.';
+  if (c.telegram && !HANDLE.test(c.telegram)) return 'Telegram: just the handle or group name.';
+  if (c.category && !categories.includes(c.category)) return 'Pick a category from the list.';
+  if (!/^\d{1,18}$/.test(c.roomMin) || BigInt(c.roomMin) < 1n) return 'Room entry: a whole number of coins, 1 or more.';
+  return null;
+}
+
+/** The token form with the advanced decimals folded in (TokenForm carries decimals). */
+export const withOptions = (f: TokenForm, o: LaunchOptions): TokenForm => ({
+  ...f,
+  decimals: cleanOptions(o).decimals,
+});
+
+/** Room entry minimum in raw units. */
+export const roomMinRaw = (o: LaunchOptions): string => {
+  const c = cleanOptions(o);
+  return (BigInt(c.roomMin) * 10n ** BigInt(Number(c.decimals) || 0)).toString();
+};
+
+/** MAP SET fields on the deploy tx: the coin's public card (links, category, story). */
+export function launchMapFields(f: TokenForm, o: LaunchOptions): string[] {
+  const c = cleanOptions(o);
+  const pairs: [string, string][] = [
+    ['app', 'bWallet'],
+    ['type', 'coin'],
+    ['name', f.name.trim()],
+  ];
+  const d = f.description.trim();
+  if (d) pairs.push(['description', d]);
+  if (c.website) pairs.push(['website', c.website]);
+  if (c.x) pairs.push(['x', c.x]);
+  if (c.telegram) pairs.push(['telegram', c.telegram]);
+  if (c.category) pairs.push(['category', c.category]);
+  return pairs.flat();
+}
+
+export function launchMapScript(f: TokenForm, o: LaunchOptions): LockingScript {
+  const s = new LockingScript();
+  s.writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
+  for (const part of [MAP_PREFIX, 'SET', ...launchMapFields(f, o)]) s.writeBin(Utils.toArray(part, 'utf8'));
+  return s;
+}
+
+/** Rough MAP output size for the fee estimate (0 when there is nothing extra to write). */
+export const mapBytes = (f: TokenForm, o: LaunchOptions): number =>
+  hasMapExtras(o) ? 60 + launchMapFields(f, o).reduce((n, x) => n + x.length + 2, 0) : 0;
+
+export const hasMapExtras = (o: LaunchOptions): boolean => {
+  const c = cleanOptions(o);
+  return !!(c.website || c.x || c.telegram || c.category);
+};
+
+// ── Launched in bWalletX: this device's launches + the shared registry (bit-sign /api/bitsign/launches) ──
+
+export interface Launch {
+  tokenId: string;
+  ticker: string;
+  name: string;
+  icon: string | null;
+  category: string | null;
+  roomTicker: string | null;
+  createdAt: number;
+}
+
+const TOKEN_ID = /^[0-9a-f]{64}_\d{1,6}$/i;
+const str = (v: unknown, max = 200): string | null =>
+  typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
+
+export const parseLaunch = (r: unknown): Launch | null => {
+  const o = (r ?? {}) as Record<string, unknown>;
+  const tokenId = str(o.token_id ?? o.tokenId, 80);
+  const ticker = str(o.ticker, 32);
+  if (!tokenId || !TOKEN_ID.test(tokenId) || !ticker) return null;
+  const created = o.created_at ?? o.createdAt;
+  const at = typeof created === 'number' ? created : Date.parse(String(created ?? ''));
+  return {
+    tokenId: tokenId.toLowerCase(),
+    ticker,
+    name: str(o.name, 64) ?? ticker,
+    icon: str(o.icon, 80),
+    category: str(o.category, 32),
+    roomTicker: str(o.room_ticker ?? o.roomTicker, 64),
+    createdAt: Number.isFinite(at) ? at : 0,
+  };
+};
+
+export const parseLaunchList = (data: unknown): Launch[] => {
+  const rows = Array.isArray(data) ? data : (data as { launches?: unknown } | null)?.launches;
+  return Array.isArray(rows) ? rows.map(parseLaunch).filter((l): l is Launch => !!l) : [];
+};
+
+/** Registry rows win over local ones; newest first. */
+export const mergeLaunches = (registry: Launch[], local: Launch[]): Launch[] => {
+  const by = new Map<string, Launch>();
+  for (const l of local) by.set(l.tokenId, l);
+  for (const l of registry) by.set(l.tokenId, l);
+  return [...by.values()].sort((a, b) => b.createdAt - a.createdAt);
+};
+
+export const launchRegistration = (l: Launch) => ({
+  token_id: l.tokenId,
+  ticker: l.ticker,
+  name: l.name,
+  icon: l.icon,
+  category: l.category,
+  room_ticker: l.roomTicker,
+});
+
+const KEY = 'bwallet.launches';
+export const localLaunches = (): Launch[] => {
+  try {
+    return parseLaunchList(JSON.parse(localStorage.getItem(KEY) || '[]'));
+  } catch {
+    return [];
+  }
+};
+export const saveLocalLaunch = (l: Launch) => {
+  try {
+    const rest = localLaunches().filter((x) => x.tokenId !== l.tokenId);
+    localStorage.setItem(KEY, JSON.stringify([l, ...rest].slice(0, 200)));
+  } catch {
+    /* storage unavailable */
+  }
+};
