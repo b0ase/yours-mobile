@@ -125,6 +125,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.5.7",
+    "fake-indexeddb": "6.0.0",
     "globals": "^17.13.0",
     "husky": "^9.1.6",
     "prettier": "3.8.3",
