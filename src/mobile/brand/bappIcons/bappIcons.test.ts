@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { FEED_COLORS } from '../../feed/feeds';
-import { BAPP_ICONS, bappIconContent, bappIconDef, bappIconSvg, bappIconUrl, GLYPHS, ICON_SIZES, layout } from '.';
+import {
+  BAPP_ICONS,
+  bappIconContent,
+  bappIconDef,
+  bappIconSvg,
+  bappIconUrl,
+  GLYPHS,
+  ICON_SIZES,
+  badgeColors,
+  layout,
+} from '.';
 
 const SIXTEEN = [
   'bmovies',
@@ -50,7 +60,7 @@ describe('bApp icon set', () => {
     expect(bappIconContent('bmaps', { label: 'bMaps', color: '#5BB98B' })).toEqual({ letter: 'M', color: '#5BB98B' });
     const svg = bappIconSvg('bmaps', 28, { label: 'bMaps', color: '#5BB98B' });
     expect(svg).toContain('>M</text>');
-    expect(svg).toContain('stroke="#FFD24D"'); // the gold b badge ring
+    expect(svg).toContain('stroke="#5BB98B"'); // the badge ring in the app colour
   });
 
   test('every icon renders valid SVG at each size, with the badge', () => {
@@ -63,6 +73,19 @@ describe('bApp icon set', () => {
         expect(bappIconUrl(s, size)).toStartWith('data:image/svg+xml');
       }
     }
+  });
+
+  test('the badge (ring + b) takes each app colour; dark colours are lifted', () => {
+    for (const s of SIXTEEN) {
+      const c = BAPP_ICONS[s as keyof typeof BAPP_ICONS].color;
+      const k = badgeColors(c);
+      const svg = bappIconSvg(s, 28);
+      expect(svg).toContain(`stroke="${k.ring}"`);
+      expect(svg).toContain(`stop-color="${k.mid}"`);
+      expect(svg).not.toContain('#FFD24D"/><stop'); // no gold b unless the app is gold
+    }
+    expect(badgeColors(BAPP_ICONS.bmovies.color).ring).toBe(BAPP_ICONS.bmovies.color);
+    expect(badgeColors(BAPP_ICONS.bbooks.color).ring).not.toBe(BAPP_ICONS.bbooks.color);
   });
 
   test('the badge grows at small sizes (~40% of the tile at 28px)', () => {

@@ -1,6 +1,6 @@
 /**
  * bApp glyphs: line art on a 24-unit grid, drawn with `currentColor` (stroke, and fill for the few dots).
- * The renderer (render.ts) places one on the black tile in the app's colour, beside the gold b badge.
+ * The renderer (render.ts) places one on the black tile in the app's colour, beside the b badge in the app colour.
  */
 export const GLYPHS = {
   bmovies:
