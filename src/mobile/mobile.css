@@ -1782,9 +1782,11 @@ button.bw-mail-card:active {
 .bw-wcard-stripe-text {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
   min-width: 0;
+  white-space: nowrap;
 }
 .bw-wcard-stripe-label {
   font-size: 7px;
@@ -1796,8 +1798,10 @@ button.bw-mail-card:active {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 8px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -2267,9 +2271,11 @@ button.bw-mail-card:active {
 .bw-wcard-stripe-text {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
   min-width: 0;
+  white-space: nowrap;
 }
 .bw-wcard-stripe-label {
   font-size: 7px;
@@ -2281,8 +2287,10 @@ button.bw-mail-card:active {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 8px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
   user-select: text;
   -webkit-user-select: text;
 }

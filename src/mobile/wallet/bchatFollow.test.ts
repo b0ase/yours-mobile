@@ -110,7 +110,8 @@ describe('wallet card layout', () => {
 
   it('identity key sits in the magnetic strip with a small copy icon', () => {
     const strip = card.slice(card.indexOf('<div className="bw-wcard-stripe">'), card.indexOf('bw-wcard-backbody'));
-    expect(strip).toContain('IDENTITY KEY');
+    expect(strip).toContain('ID KEY:');
+    expect(strip).toContain('keyFingerprint(backKey)');
     expect(strip).toContain('aria-label="Copy identity key"');
     expect(card).not.toContain('Signed by identity key');
   });
