@@ -68,7 +68,7 @@ describe('bApp icon set', () => {
     expect(bappIconContent('bmaps', { label: 'bMaps', color: '#5BB98B' })).toEqual({ letter: 'M', color: '#5BB98B' });
     const svg = bappIconSvg('bmaps', 28, { label: 'bMaps', color: '#5BB98B' });
     expect(svg).toContain('>M</text>');
-    expect(svg).toContain('stroke="#5BB98B"'); // the badge ring in the app colour
+    expect(svg).toContain(`stop-color="#5BB98B"`); // the b in the app colour
   });
 
   test('every icon renders valid SVG at each size, with the badge', () => {
@@ -83,24 +83,37 @@ describe('bApp icon set', () => {
     }
   });
 
-  test('the badge (ring + b) takes each app colour; dark colours are lifted', () => {
-    for (const s of ALL_SLUGS) {
-      const c = BAPP_ICONS[s as keyof typeof BAPP_ICONS].color;
-      const k = badgeColors(c);
-      const svg = bappIconSvg(s, 28);
-      expect(svg).toContain(`stroke="${k.ring}"`);
-      expect(svg).toContain(`stop-color="${k.mid}"`);
-      expect(svg).not.toContain('#FFD24D"/><stop'); // no gold b unless the app is gold
+  test('the b takes each app colour (no disc, no ring); very dark colours are lifted', () => {
+    for (const slug of ALL_SLUGS) {
+      const c = BAPP_ICONS[slug as keyof typeof BAPP_ICONS].color;
+      const svg = bappIconSvg(slug, 28);
+      expect(svg).toContain(`stop-color="${badgeColors(c).mid}"`);
+      expect(svg).not.toContain('<circle cx="60" cy="72" r="33" fill="#0B0B0D"/>');
+      expect(svg).not.toMatch(/stroke="#FFD24D"/);
     }
-    expect(badgeColors(BAPP_ICONS.bmovies.color).ring).toBe(BAPP_ICONS.bmovies.color);
-    expect(badgeColors('#4A2E1A').ring).not.toBe('#4A2E1A');
+    expect(badgeColors(BAPP_ICONS.bmovies.color).base).toBe(BAPP_ICONS.bmovies.color);
+    expect(badgeColors('#4A2E1A').base).not.toBe('#4A2E1A');
   });
 
-  test('the badge grows at small sizes (~40% of the tile at 28px)', () => {
-    expect(layout(64).badge.d / 64).toBeCloseTo(0.3, 2);
-    const at28 = layout(28).badge.d / 64;
-    expect(at28).toBeGreaterThan(0.38);
-    expect(at28).toBeLessThan(0.46);
-    expect(layout(20).badge.d).toBeGreaterThan(layout(28).badge.d);
+  test('two icons in one document: unique def ids, different badge fills', () => {
+    const doc = bappIconSvg('bmovies', 28) + bappIconSvg('bmusic', 28) + bappIconSvg('bmusic', 28);
+    const ids = [...doc.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+    expect(ids.length).toBe(9);
+    expect(new Set(ids).size).toBe(ids.length);
+    const fills = [...doc.matchAll(/<linearGradient id="[^"]+"[^>]*><stop offset="0" stop-color="([^"]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(fills[0]).not.toBe(fills[1]);
+    // each b points at its own gradient
+    for (const id of ids.filter((i) => i.endsWith('-g'))) expect(doc).toContain(`url(#${id})`);
+  });
+
+  test('the b grows at small sizes (~32% at 64px, ~38–46% at 28 and 20px)', () => {
+    expect(layout(64).badge.h / 64).toBeCloseTo(0.32, 2);
+    for (const sz of [28, 20]) {
+      const f = layout(sz).badge.h / 64;
+      expect(f).toBeGreaterThanOrEqual(0.38);
+      expect(f).toBeLessThanOrEqual(0.46);
+    }
   });
 });
