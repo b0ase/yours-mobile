@@ -180,10 +180,12 @@ import {
   movePin,
   type FeedId,
 } from './feeds';
-import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+import { BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
+// Feed › b3D: the Exchange's 3D listings with live models. bWalletX only (no 3D market in a store build).
+const B3dFeed = TOKENBLASTER_ENABLED ? lazy(() => import('./B3dFeed')) : null;
 const NewsVideos = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/NewsVideos')) : null;
 
 /**
@@ -1946,6 +1948,10 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 <BmoviesReel key={feed} brand={feed} />
               </Suspense>
             </>
+          ) : feed === 'b3d' && B3dFeed ? (
+            <Suspense fallback={null}>
+              <B3dFeed />
+            </Suspense>
           ) : !hasCustomView(feed) ? (
             <BrandFeed slug={feed} />
           ) : news ? (
