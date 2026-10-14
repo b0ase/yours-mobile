@@ -190,7 +190,7 @@ const Toggle = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
 const Screen = ({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) => {
   useBackClose(true, onBack);
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}

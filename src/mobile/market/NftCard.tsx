@@ -219,7 +219,7 @@ export const NftCard = ({
   const src = contentUrls(item.origin)[0];
   const [videoRef, videoNear] = useNearViewport<HTMLDivElement>('200px');
   return (
-    <div className="flex flex-col rounded-xl overflow-hidden bg-[#17191E] border border-white/5">
+    <div className="flex flex-col rounded-xl overflow-hidden bg-[var(--bw-surface)] border border-white/5">
       <div
         className="relative w-full bg-[#0b0c0f]"
         style={{ aspectRatio: '1/1' }}

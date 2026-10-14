@@ -118,7 +118,7 @@ export const HandleOnboarding = () => {
   return (
     <div
       className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
-      style={{ background: '#17191E', border: '1px solid #3a2f0c' }}
+      style={{ background: 'var(--bw-surface)', border: '1px solid #3a2f0c' }}
       onClick={() => setOpen(true)}
       role="button"
       aria-label="Get your $name"

@@ -66,7 +66,7 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
         onClick={onOpen}
         aria-label={active ? `${title}, ${sub}. Open to track it` : `${title}. ${sub}`}
         className="w-full min-h-[52px] pl-3 pr-3 py-2 rounded-xl border flex items-center gap-3 text-left cursor-pointer"
-        style={{ background: '#17191E', borderColor: active ? 'rgb(var(--bw-accent-rgb)/0.6)' : '#2b2f36' }}
+        style={{ background: 'var(--bw-surface)', borderColor: active ? 'rgb(var(--bw-accent-rgb)/0.6)' : '#2b2f36' }}
       >
         {active ? (
           <span className="relative w-[22px] h-[22px] grid place-items-center shrink-0" aria-hidden="true">

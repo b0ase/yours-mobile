@@ -99,7 +99,7 @@ export const BackFundSheet = ({
             placeholder="Other $"
             inputMode="decimal"
             className="rounded-full px-4 py-2 text-sm text-white outline-none border w-24"
-            style={{ background: '#010101', borderColor: custom.trim() ? GOLD : LINE }}
+            style={{ background: 'var(--bw-bg)', borderColor: custom.trim() ? GOLD : LINE }}
           />
         </div>
         <div className="text-xs font-bold text-white">Set aside</div>
@@ -116,7 +116,7 @@ export const BackFundSheet = ({
             </button>
           ))}
         </div>
-        <div className="rounded-xl p-3 text-sm" style={{ background: '#010101', border: `1px solid ${LINE}` }}>
+        <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--bw-bg)', border: `1px solid ${LINE}` }}>
           <div className="text-white font-bold">
             ${monthly > 0 ? monthly.toFixed(2) : '0.00'} a month · put ${plan.setAsideUsd.toFixed(2)} in the pot
           </div>

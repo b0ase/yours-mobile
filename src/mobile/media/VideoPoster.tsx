@@ -7,7 +7,7 @@ const GOLD = 'var(--bw-accent)';
 
 /** Gold video tile: icon, "Video" and the title (when there's room). Never a blank square. */
 export const VideoFallback = ({ title, compact }: { title?: string; compact?: boolean }) => (
-  <div className="w-full h-full flex flex-col items-center justify-center gap-1 px-2 text-center bg-[#17191E]">
+  <div className="w-full h-full flex flex-col items-center justify-center gap-1 px-2 text-center bg-[var(--bw-surface)]">
     <Video size={compact ? 16 : 28} style={{ color: GOLD }} />
     <span className="text-[10px] font-bold tracking-wide" style={{ color: GOLD }}>
       Video

@@ -61,7 +61,7 @@ const SearchBox = ({
   onChange: (v: string) => void;
   placeholder: string;
 }) => (
-  <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: '#17191E' }}>
+  <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: 'var(--bw-surface)' }}>
     <Search size={15} color={MUTED} />
     <input
       type="search"

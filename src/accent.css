@@ -8,4 +8,12 @@
   --bw-accent-hi-rgb: 255 210 77;
   --bw-accent-lo-rgb: 234 179 0;
   --bw-on-accent: #010101;
+  /* Theme surfaces (src/mobile/theme/accents.ts); Classic values. */
+  --bw-bg: #010101;
+  --bw-surface: #17191e;
+  --bw-trim: transparent;
+  --bw-glow: none;
+  --bw-font-num: inherit;
+  --bw-font-head: inherit;
+  --bw-radius-btn: 12px;
 }

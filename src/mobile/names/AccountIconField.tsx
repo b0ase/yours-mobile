@@ -30,7 +30,7 @@ export const AccountIconField = ({ value, onChange }: { value: string; onChange:
       <button
         type="button"
         onClick={() => input.current?.click()}
-        className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-2 text-left w-full"
+        className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-2 text-left w-full"
       >
         {preview ? (
           <img src={preview} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" />
@@ -73,7 +73,7 @@ export const AccountIconField = ({ value, onChange }: { value: string; onChange:
           placeholder="NFT ID (txid_0) or image link"
           autoCapitalize="off"
           autoCorrect="off"
-          className="w-full rounded-xl bg-[#17191E] px-3 py-2 text-sm text-white outline-none"
+          className="w-full rounded-xl bg-[var(--bw-surface)] px-3 py-2 text-sm text-white outline-none"
         />
       ) : (
         <button type="button" onClick={() => setTyping(true)} className="text-[11px] text-[#98A2B3] underline">

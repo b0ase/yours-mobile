@@ -46,7 +46,7 @@ const GradientButton = ({
     style={
       outlined
         ? { borderColor: 'rgb(var(--bw-accent-rgb)/0.53)', color: 'var(--bw-accent)' }
-        : { background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: theme.color.global.row }
+        : { background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))', color: theme.color.global.row }
     }
   >
     {action.label}
@@ -173,7 +173,7 @@ export const AssetRow = (props: AssetRowProps) => {
                   button.onClick();
                 }}
                 className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
-                style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+                style={{ background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))', color: 'var(--bw-on-accent)' }}
               >
                 {button.label}
               </button>

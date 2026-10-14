@@ -64,7 +64,7 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
   };
 
   const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border';
-  const style = { background: '#010101', borderColor: LINE };
+  const style = { background: 'var(--bw-bg)', borderColor: LINE };
   return (
     <div className="rounded-2xl p-3 flex flex-col gap-2" style={{ background: CARD }}>
       <div className="text-sm font-bold text-white">Run on a computer</div>

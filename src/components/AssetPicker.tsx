@@ -85,7 +85,7 @@ export const AssetPicker = ({ onBack, onSelect, assets }: AssetPickerProps) => {
           whileTap={{ scale: 0.9 }}
           onClick={onBack}
           className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 border-0 outline-none cursor-pointer"
-          style={{ background: '#17191E' }}
+          style={{ background: 'var(--bw-surface)' }}
         >
           <ArrowLeft size={16} style={{ color: '#FFFFFF' }} />
         </motion.button>

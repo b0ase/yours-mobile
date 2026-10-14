@@ -11,7 +11,7 @@ export const WalletRow = (props: WalletRowTypes) => {
   return (
     <div
       onClick={onClick}
-      className="flex items-center rounded-xl px-4 py-3 mx-3 cursor-pointer transition-colors duration-150 bg-[#17191E] hover:bg-[#1f2128]"
+      className="flex items-center rounded-xl px-4 py-3 mx-3 cursor-pointer transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
       style={{ border: `1px solid ${theme.color.global.gray}15` }}
     >
       {element}

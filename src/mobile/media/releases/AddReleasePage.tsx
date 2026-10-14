@@ -179,10 +179,10 @@ const AddReleasePage = () => {
   const label = 'text-[11px] font-bold uppercase tracking-widest';
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[150] overflow-y-auto" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="sticky top-0 z-10 flex items-center gap-2 px-2 py-2"
-        style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+        style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
       >
         <button aria-label="Back" onClick={close} className="p-2">
           <ArrowLeft size={20} color="#fff" />

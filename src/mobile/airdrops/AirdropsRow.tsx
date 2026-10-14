@@ -14,7 +14,7 @@ export const AirdropsRow = () => {
       type="button"
       onClick={() => navigate('/m/bmail?tab=quarantine')}
       className="w-[92%] mx-auto mt-4 flex items-center gap-3 rounded-2xl px-4 py-3 border text-left cursor-pointer"
-      style={{ background: '#17191E', borderColor: '#2b2f36' }}
+      style={{ background: 'var(--bw-surface)', borderColor: '#2b2f36' }}
     >
       <Gift size={16} color="var(--bw-accent-hi)" />
       <span className="flex-1 text-sm font-semibold text-white">Airdrops</span>

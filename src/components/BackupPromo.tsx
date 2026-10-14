@@ -67,7 +67,7 @@ export const BackupPromo = ({ theme, keysService, keysAlreadyBackedUp, onKeysBac
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[200] flex flex-col items-center px-6 overflow-y-auto"
-      style={{ background: '#010101', paddingTop: '3rem', paddingBottom: '3rem' }}
+      style={{ background: 'var(--bw-bg)', paddingTop: '3rem', paddingBottom: '3rem' }}
     >
       {/* Step indicator — hidden on the informational Step 3, since it would imply
           the user just completed action steps they never saw (legacy users open

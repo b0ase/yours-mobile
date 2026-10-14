@@ -78,7 +78,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
   return (
     <div className="flex flex-col gap-3 w-full">
       <div className="flex gap-2 items-center flex-wrap">
-        <label className="flex-1 min-w-[200px] flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 focus-within:border-[color:var(--bw-accent)]">
+        <label className="flex-1 min-w-[200px] flex items-center gap-2 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 focus-within:border-[color:var(--bw-accent)]">
           <Search size={16} color={MUTED} aria-hidden="true" />
           <input
             value={q}
@@ -130,7 +130,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
           )}
         </div>
       ) : (
-        <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] overflow-hidden">
+        <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs" style={{ color: MUTED }}>

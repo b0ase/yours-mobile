@@ -37,7 +37,7 @@ export const OpenTokenRoomButton = ({
         className ??
         'flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer'
       }
-      style={style ?? { background: '#17191E', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
+      style={style ?? { background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
     >
       <MessageCircle size={14} />
       Chat
@@ -57,7 +57,7 @@ export const BuyTokenButton = ({ kind = 'bsv21', id }: { kind?: 'bsv21' | 'coll'
         handleSelect(asMenuItem('market'));
       }}
       className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
-      style={{ background: '#17191E', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
+      style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
     >
       <ShoppingCart size={14} />
       Buy

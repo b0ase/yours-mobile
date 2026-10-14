@@ -30,7 +30,7 @@ export const SettingsAccountHeader = () => {
       <button
         onClick={() => accounts.length > 1 && setOpen((o) => !o)}
         className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left border-0"
-        style={{ background: '#17191E', border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)` }}
+        style={{ background: 'var(--bw-surface)', border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)` }}
         aria-expanded={open}
         aria-label="Settings for account"
       >

@@ -105,7 +105,7 @@ export const TicketsSection = () => {
     return (
       <div className="w-[92%] mx-auto flex flex-col gap-2" aria-busy="true">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-[68px] rounded-xl border border-[#2b2f36] bg-[#17191E] animate-pulse" />
+          <div key={i} className="h-[68px] rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] animate-pulse" />
         ))}
       </div>
     );
@@ -113,13 +113,13 @@ export const TicketsSection = () => {
 
   if (state.status === 'error') {
     return (
-      <div className="w-[92%] mx-auto rounded-xl border border-[#2b2f36] bg-[#17191E] p-4 text-center">
+      <div className="w-[92%] mx-auto rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] p-4 text-center">
         <p className="text-sm text-[#98A2B3] m-0 mb-3">Couldn't load your tickets. {state.message}</p>
         <button
           type="button"
           onClick={() => setTick((n) => n + 1)}
           className="inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-bold border cursor-pointer outline-none"
-          style={{ background: '#17191E', borderColor: '#3a2f0c', color: GOLD }}
+          style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
         >
           <RefreshCw size={14} /> Try again
         </button>
@@ -129,7 +129,7 @@ export const TicketsSection = () => {
 
   if (!state.rows.length) {
     return (
-      <div className="w-[92%] mx-auto rounded-xl border border-[#2b2f36] bg-[#17191E] p-6 text-center">
+      <div className="w-[92%] mx-auto rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] p-6 text-center">
         <TicketIcon size={28} color={GOLD} className="mx-auto mb-2" />
         <p className="text-sm text-[#98A2B3] m-0">No tickets yet — mint a chatroom or get invited.</p>
       </div>
@@ -143,7 +143,7 @@ export const TicketsSection = () => {
         return (
           <div
             key={t.key}
-            className="flex items-center gap-3 rounded-xl border border-[#2b2f36] bg-[#17191E] px-3 py-3"
+            className="flex items-center gap-3 rounded-xl border border-[#2b2f36] bg-[var(--bw-surface)] px-3 py-3"
           >
             {src ? (
               <img src={src} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
@@ -185,7 +185,7 @@ export const TicketsSection = () => {
                   })
                 }
                 className="flex items-center gap-1 h-9 px-2.5 rounded-lg text-xs font-bold border outline-none cursor-pointer flex-shrink-0"
-                style={{ background: '#17191E', borderColor: '#3a2f0c', color: GOLD }}
+                style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
               >
                 <Tag size={13} />
                 Sell
@@ -196,7 +196,7 @@ export const TicketsSection = () => {
               onClick={() => open(t)}
               disabled={!t.canEnter}
               className="flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold border outline-none cursor-pointer flex-shrink-0 disabled:opacity-40 disabled:cursor-default"
-              style={{ background: '#17191E', borderColor: '#3a2f0c', color: GOLD }}
+              style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
             >
               <MessageCircle size={13} />
               Open room

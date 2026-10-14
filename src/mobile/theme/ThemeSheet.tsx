@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Sparkles, X } from 'lucide-react';
-import { ACCENTS, DEFAULT_ACCENT, type AccentId } from './accents';
+import { DEFAULT_ACCENT, MORE_COLOURS, THEMES, type Accent, type AccentId } from './accents';
 import { loadAccent, saveAccent } from './accent';
 
 type ThemeTab = 'colours' | 'card';
@@ -98,29 +98,39 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           </span>
         </div>
       </div>
-      <div className="bw-theme-swatches" role="radiogroup" aria-label="App colour">
-        {ACCENTS.map((a) => (
+      <div className="bw-theme-cards" role="radiogroup" aria-label="Theme">
+        {THEMES.map((a) => (
           <button
             key={a.id}
             type="button"
             role="radio"
             aria-checked={current === a.id}
-            className={`bw-theme-swatch${current === a.id ? ' is-on' : ''}`}
+            className={`bw-theme-card${current === a.id ? ' is-on' : ''}`}
+            style={{ background: a.bg, borderColor: current === a.id ? a.accent : a.trim, borderRadius: 14 }}
             onClick={() => pick(a.id)}
           >
             <span
-              className="bw-theme-dot"
+              className="bw-theme-card-swatch"
               style={{ background: `linear-gradient(135deg, ${a.hi}, ${a.accent} 55%, ${a.lo})`, color: a.on }}
             >
               {current === a.id && <Check size={16} aria-hidden="true" />}
             </span>
-            <span className="bw-theme-name">{a.label}</span>
+            <span className="bw-theme-card-text" style={{ fontFamily: a.fontHead }}>
+              <b style={{ color: a.hi }}>{a.label}</b>
+              <small>{a.blurb}</small>
+            </span>
           </button>
         ))}
       </div>
+      <p className="bw-theme-more">More colours</p>
+      <div className="bw-theme-swatches" role="radiogroup" aria-label="More colours">
+        {MORE_COLOURS.map((a) => (
+          <Swatch key={a.id} a={a} on={current === a.id} pick={pick} />
+        ))}
+      </div>
       <p className="bw-cdes-note">
-        Changes the accent only. The black background stays, and so does the gold b. Kept for this account on this
-        device.
+        A theme sets colours, type and the card pattern it suggests; More colours change the accent only. The b stays.
+        Kept for this account on this device.
       </p>
       <div className="bw-cdes-actions">
         <button
@@ -129,7 +139,7 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           onClick={() => pick(DEFAULT_ACCENT)}
           disabled={current === DEFAULT_ACCENT}
         >
-          Reset to Gold
+          Reset to Classic
         </button>
         <button type="button" className="bw-cdes-done bw-theme-done" onClick={onClose}>
           Done
@@ -137,5 +147,25 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
       </div>
     </div>,
     document.body,
+  );
+}
+
+function Swatch({ a, on, pick }: { a: Accent; on: boolean; pick: (id: AccentId) => void }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on}
+      className={`bw-theme-swatch${on ? ' is-on' : ''}`}
+      onClick={() => pick(a.id)}
+    >
+      <span
+        className="bw-theme-dot"
+        style={{ background: `linear-gradient(135deg, ${a.hi}, ${a.accent} 55%, ${a.lo})`, color: a.on }}
+      >
+        {on && <Check size={16} aria-hidden="true" />}
+      </span>
+      <span className="bw-theme-name">{a.label}</span>
+    </button>
   );
 }

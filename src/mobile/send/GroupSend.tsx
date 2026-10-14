@@ -87,7 +87,7 @@ export const GroupSendBar = ({
           onChange={(e) => applyEach(e.target.value.replace(/[^0-9.]/g, ''))}
           inputMode="decimal"
           placeholder="amount"
-          className="w-24 min-w-0 rounded-lg bg-[#17191E] border border-[#2b2f36] px-2 py-1.5 text-sm text-white outline-none"
+          className="w-24 min-w-0 rounded-lg bg-[var(--bw-surface)] border border-[#2b2f36] px-2 py-1.5 text-sm text-white outline-none"
         />
         <span className="text-xs" style={{ color: '#98A2B3' }}>
           ${ticker}
@@ -131,7 +131,7 @@ const FriendPicker = ({ onClose, onAdd }: { onClose: () => void; onAdd: (c: Cont
     });
   const shown = filterContacts(contacts, query);
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <button type="button" onClick={onClose} aria-label="Back" className="p-2 bg-transparent border-0">
           <ArrowLeft size={20} color="white" />
@@ -152,7 +152,7 @@ const FriendPicker = ({ onClose, onAdd }: { onClose: () => void; onAdd: (c: Cont
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search friends"
-          className="rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
+          className="rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
         />
         {contacts.length === 0 && (
           <p className="text-sm text-center py-8" style={{ color: '#98A2B3' }}>

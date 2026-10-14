@@ -32,7 +32,7 @@ export const FinishIndexing = ({
   return (
     <div
       className={`flex flex-col gap-2 rounded-2xl ${compact ? 'px-3 py-2.5' : 'px-4 py-3'}`}
-      style={{ background: '#17191E', border: '1px solid #3a2f0c' }}
+      style={{ background: 'var(--bw-surface)', border: '1px solid #3a2f0c' }}
     >
       <div className="flex items-center gap-2">
         <Sparkles size={15} color="var(--bw-accent-hi)" />

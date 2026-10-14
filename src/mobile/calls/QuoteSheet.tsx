@@ -37,7 +37,7 @@ export const QuoteSheet = ({ s }: { s: Extract<CallState, { phase: 'quote' }> })
     <div className="flex flex-col items-center gap-5 w-full px-6 relative z-[1]" aria-label="Call price">
       <div
         className="w-full rounded-2xl p-4 flex flex-col gap-2"
-        style={{ background: '#17191E', border: '1px solid #2b2f36' }}
+        style={{ background: 'var(--bw-surface)', border: '1px solid #2b2f36' }}
       >
         <div className="text-xs text-[#98A2B3]">{bareName(s.peer.label)} charges to receive calls</div>
         <div className="text-xl font-bold text-white">{rateLabel(s.card)}</div>

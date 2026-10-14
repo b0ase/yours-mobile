@@ -64,7 +64,7 @@ export const StorageBadge = () => {
       {open && (
         <div
           className="mt-1 rounded-xl p-3 text-xs leading-relaxed select-text"
-          style={{ background: '#17191E', color: '#D0D5DD' }}
+          style={{ background: 'var(--bw-surface)', color: '#D0D5DD' }}
         >
           <p className="m-0 font-bold text-white">{label.title}</p>
           <p className="m-0 mt-0.5" style={{ color: label.warn ? RED : MUTED }}>

@@ -64,7 +64,7 @@ const OfferCard = ({
 }) => {
   const third = o.section === 'other';
   return (
-    <div className="rounded-xl bg-[#17191E] px-3 py-3 flex flex-col gap-1.5">
+    <div className="rounded-xl bg-[var(--bw-surface)] px-3 py-3 flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
         {o.icon ? (
           <img src={o.icon} alt="" className="h-8 w-8 rounded-lg object-cover shrink-0" />
@@ -176,7 +176,7 @@ export const SharesPanel = () => {
   if (gate.state !== 'qualified') {
     const step1 = gate.state === 'need-kyc';
     return (
-      <div className="rounded-xl bg-[#17191E] px-4 py-5 flex flex-col gap-3">
+      <div className="rounded-xl bg-[var(--bw-surface)] px-4 py-5 flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Lock size={18} color={GOLD} />
           <span className="text-sm font-semibold text-white">Share offers are for verified investors</span>

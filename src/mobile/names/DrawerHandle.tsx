@@ -39,7 +39,7 @@ export const DrawerHandle = ({
         type="button"
         onClick={onGetName}
         className="mx-2 mb-2 flex items-center gap-2 rounded-xl px-3 py-2.5 text-left cursor-pointer"
-        style={{ background: '#17191E', border: '1px solid #3a2f0c' }}
+        style={{ background: 'var(--bw-surface)', border: '1px solid #3a2f0c' }}
       >
         <AtSign size={15} color="var(--bw-accent-hi)" />
         <span className="text-sm font-semibold" style={{ color: 'var(--bw-accent-hi)' }}>
@@ -51,7 +51,7 @@ export const DrawerHandle = ({
   return (
     <div
       className="mx-2 mb-2 flex flex-col gap-1.5 rounded-xl px-3 py-2"
-      style={{ background: '#17191E', border: '1px solid #2b2f36' }}
+      style={{ background: 'var(--bw-surface)', border: '1px solid #2b2f36' }}
     >
       {roomKey && (
         <button

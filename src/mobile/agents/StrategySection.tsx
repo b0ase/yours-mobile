@@ -95,7 +95,7 @@ export const StrategySection = ({ id }: { id: string }) => {
           The wallet checks these rules before anything is signed. The agent can't change them.
         </div>
         {book && (
-          <div className="rounded-lg px-3 py-2 text-xs" style={{ background: '#010101', color: '#D0D5DD' }}>
+          <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--bw-bg)', color: '#D0D5DD' }}>
             Paper money: ${book.cashUsd.toFixed(2)} cash
             {Object.entries(book.tokens)
               .filter(([, n]) => n > 0)
@@ -222,7 +222,7 @@ export const StrategySection = ({ id }: { id: string }) => {
         rows={text ? 12 : 3}
         spellCheck={false}
         className="rounded-lg px-3 py-2 text-xs font-mono text-white outline-none border"
-        style={{ background: '#010101', borderColor: LINE }}
+        style={{ background: 'var(--bw-bg)', borderColor: LINE }}
       />
       {errors.length > 0 && (
         <ul className="m-0 pl-4 text-xs" style={{ color: '#FDA29B' }}>
