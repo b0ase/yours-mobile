@@ -4,6 +4,9 @@ import { originatorForOrigin } from './services/originKey';
 import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
+import { recoverySummary } from './services/recoverFailed';
+import { paymailRestoreSummary } from './mobile/names/paymail';
+import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
@@ -415,6 +418,11 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     const ctx = accountContext;
     void (async () => {
       await preferLocalStorage(ctx);
+      // Paymail receipts whose derivation only the server recorded (restore from seed, 14 Oct 2026). Idempotent.
+      await ctx
+        .restorePaymails()
+        .then((p) => (p.restored || p.errors.length ? console.log('[background] paymail restore:', p) : undefined))
+        .catch((err: unknown) => console.warn('[background] paymail restore failed:', err));
       const r = await ctx.recoverFailed();
       if (r.failed || r.error || r.skipped) console.log('[background] failed-action review:', r);
       // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
@@ -430,26 +438,81 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
 /**
  * bWallet: keep the wallet's main copy on the device, 1Sat storage as the backup (owner, 4 Oct 2026).
  * 1Sat's remote storage caps BEEF depth at 12, so token buys with a deep ancestry fail while it is
- * active ("Maximum BEEF depth exceeded"). Once per account, switch a remote-active wallet to local;
- * setActiveStorage merges both stores first, and the remote stays as a backup. Someone who later
+ * active ("Maximum BEEF depth exceeded"). Once per account, switch a remote-active wallet to local,
+ * but only after verifying the device holds everything the remote holds (services/restoreFromRemote.ts;
+ * restore incident 14 Oct 2026). Short → stay remote-active and retry next open. Someone who later
  * picks remote again in Wallet Backup keeps that choice (the flag is set).
  */
 const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
   try {
     const { account } = chromeStorageService.getCurrentAccountObject();
     const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
-    if (!account || !config?.activeRemote || config.localFirst) return;
-    console.log('[background] storage: switching active to this device (remote stays a backup)');
-    await ctx.setActiveStorage('local');
-    const remotes = config.remotes?.includes(config.activeRemote) ? config.remotes : [...(config.remotes ?? []), config.activeRemote];
-    await chromeStorageService.updateNested('accounts', {
-      [account.addresses.identityAddress]: {
-        storageConfig: { ...config, activeRemote: undefined, remotes, localFirst: true },
-      } as unknown as Account,
-    });
+    if (!account || !config) return;
+    const remoteUrl = config.activeRemote || config.remotes?.[0];
+    if (!remoteUrl) return;
+    const save = (storageConfig: StorageConfig & { localFirst?: boolean }) =>
+      chromeStorageService.updateNested('accounts', {
+        [account.addresses.identityAddress]: { storageConfig } as unknown as Account,
+      });
+    const remotes = config.remotes?.includes(remoteUrl) ? config.remotes : [...(config.remotes ?? []), remoteUrl];
+    const deps = restoreDeps(ctx, remoteUrl);
+
+    if (config.activeRemote && !config.localFirst) {
+      // First open on this device (or a retry after a short pull): switch only once the device holds it all.
+      console.log('[background] storage: switching active to this device after a verified copy of the backup');
+      const r = await switchToLocalVerified(deps);
+      sendRestoreStatus(r.ok ? undefined : null);
+      console.log('[background] storage: verified switch', r);
+      if (r.ok) await save({ ...config, activeRemote: undefined, remotes, localFirst: true });
+      return;
+    }
+
+    if (!config.activeRemote) {
+      // Already local-active (switched before this fix): an EMPTY device store beside a backup is the incident
+      // state ($bug, 14 Oct 2026). Pull the backup in, verified; stay on the backup if that fails.
+      const local = await summarizeActive(ctx.baseWallet as never);
+      if (!isEmpty(local)) return;
+      console.log('[background] storage: this device holds nothing; loading from the backup');
+      const r = await switchToLocalVerified(deps);
+      sendRestoreStatus(r.ok ? undefined : null);
+      console.log('[background] storage: recovery from backup', r);
+      if (!r.ok && r.activeIsRemote) await save({ ...config, activeRemote: remoteUrl, remotes, localFirst: false });
+    }
   } catch (err) {
-    console.warn('[background] storage: could not switch to local-active:', err);
+    sendRestoreStatus(null);
+    console.warn('[background] storage: could not settle the active store:', err);
   }
+};
+
+/** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
+const sendRestoreStatus = (message: string | undefined | null) => {
+  chrome.runtime
+    .sendMessage({
+      action: YoursEventName.SYNC_STATUS_UPDATE,
+      data: message ? { status: 'restoring', message } : { status: 'restored', ok: message === undefined },
+    })
+    .catch(() => undefined);
+};
+
+/** Production wiring of services/restoreFromRemote.ts. */
+const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string): SwitchDeps => {
+  const activeRemoteUrl = () => ctx.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL;
+  return {
+    remoteUrl,
+    activeRemoteUrl,
+    setActiveStorage: ctx.setActiveStorage,
+    summarize: () => summarizeActive(ctx.baseWallet as never),
+    pullRemote: async () => {
+      const store = (
+        ctx.storage as unknown as { _stores: { storage: { endpointUrl?: string } }[] }
+      )._stores.find((s) => s.storage.endpointUrl === remoteUrl)?.storage;
+      if (!store) throw new Error('backup store not connected');
+      const { identityKey } = await ctx.storage.getAuth();
+      await ctx.storage.syncFromReader(identityKey, store as never);
+    },
+    progress: (m) => sendRestoreStatus(m),
+    log: (...a) => console.log(...a),
+  };
 };
 
 // Start initialization — clean up stale popup windows then initialize wallet.
@@ -1284,6 +1347,8 @@ if (isInServiceWorker) {
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
       'STORAGE_REPAIR_SYNC',
+      'STORAGE_RECOVER_MINED',
+      'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
       'STORAGE_SET_ACTIVE_STORAGE',
       'STORAGE_ADD_REMOTE',
@@ -1597,6 +1662,12 @@ if (isInServiceWorker) {
           return true;
         case 'STORAGE_REPAIR_SYNC':
           processStorageRepairSync(sendResponse, Array.isArray(message.tokenIds) ? message.tokenIds : undefined);
+          return true;
+        case 'STORAGE_RECOVER_MINED':
+          processRecoverMined(sendResponse);
+          return true;
+        case 'STORAGE_RESTORE_BACKUP':
+          processRestoreBackup(sendResponse);
           return true;
         case 'BSV21_FIX_STALE':
           processBsv21FixStale(typeof message.tokenId === 'string' ? message.tokenId : '', sendResponse);
@@ -1982,6 +2053,74 @@ if (isInServiceWorker) {
   };
 
   /** Reconcile local and remote storage to the union of both; see storageReconcileBackground. */
+  /**
+   * Settings › Troubleshooting › Find mined payments: the same mined-but-stuck repair the worker runs at startup
+   * (services/recoverFailed.ts), on demand, with a one-line result (dkg sweep, 14 Oct 2026).
+   */
+  const processRecoverMined = async (sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const report = await accountContext.recoverFailed();
+      console.log('[STORAGE_RECOVER_MINED]', report);
+      sendResponse({ type: 'STORAGE_RECOVER_MINED', success: !report.error, data: { report, summary: recoverySummary(report) } });
+    } catch (err) {
+      sendResponse({
+        type: 'STORAGE_RECOVER_MINED',
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  /**
+   * Settings › Troubleshooting › Restore from backup: pull the remote store in (verified) and re-internalize paymail
+   * receipts the device lacks (restore from seed, 14 Oct 2026). Merge only; never deletes.
+   */
+  const processRestoreBackup = async (sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      const ctx = accountContext;
+      if (!ctx) throw new Error('Wallet not initialized');
+      const { account } = chromeStorageService.getCurrentAccountObject();
+      const config = account?.storageConfig;
+      const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+      const parts: string[] = [];
+      let ok = true;
+      if (remoteUrl) {
+        const r = await switchToLocalVerified(restoreDeps(ctx, remoteUrl));
+        sendRestoreStatus(r.ok ? undefined : null);
+        console.log('[STORAGE_RESTORE_BACKUP] store', r);
+        if (r.ok) {
+          parts.push(`Backup copied (${r.local.outputs} coins, ${r.local.spendableSats.toLocaleString()} sats)`);
+          if (account && config?.activeRemote) {
+            await chromeStorageService.updateNested('accounts', {
+              [account.addresses.identityAddress]: {
+                storageConfig: { ...config, activeRemote: undefined, localFirst: true },
+              } as unknown as Account,
+            });
+          }
+        } else {
+          ok = false;
+          parts.push(`Backup not copied: ${r.reason}`);
+        }
+      }
+      const p = await ctx.restorePaymails().catch((e: unknown) => {
+        ok = false;
+        return e instanceof Error ? e.message : String(e);
+      });
+      parts.push(typeof p === 'string' ? `Paymail: ${p}` : paymailRestoreSummary(p));
+      void ctx.resyncAddresses({ quiet: true });
+      sendResponse({ type: 'STORAGE_RESTORE_BACKUP', success: ok, data: { summary: parts.join('. ') } });
+    } catch (err) {
+      sendResponse({
+        type: 'STORAGE_RESTORE_BACKUP',
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   const processStorageRepairSync = async (sendResponse: CallbackResponse, tokenIds?: string[]) => {
     try {
       await ensureWallet(true);

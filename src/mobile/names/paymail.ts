@@ -222,6 +222,84 @@ export const collectPaymailInbox = async (
   return { collected: done.length, satoshis };
 };
 
+export type PaymailRestoreDeps = {
+  /** Does the wallet already hold this output (any basket)? */
+  hasOutput: (txid: string, vout: number) => Promise<boolean>;
+  /** On-chain verdict: true unspent, false spent, undefined unknown (unknown is restored: never hide money). */
+  isUnspent: (txid: string, vout: number) => Promise<boolean | undefined>;
+  fetchBeef?: (txid: string) => Promise<number[] | undefined>;
+};
+
+export type PaymailRestoreReport = {
+  payments: number;
+  restored: number;
+  satoshis: number;
+  alreadyHeld: number;
+  spent: number;
+  errors: string[];
+};
+
+/**
+ * Restore from seed (incident 14 Oct 2026, $bug): every paymail payment ever received for this identity, collected
+ * ones too, comes back from the server's record (site/lib/paymail.js `history`), and each output the wallet lacks and
+ * the chain still holds is internalized again with its original derivation. Idempotent: held outputs are skipped and
+ * the toolbox merges a known txid. Nothing is acked or changed on the server.
+ */
+export const restorePaymailHistory = async (
+  f: Fetch,
+  wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature' | 'internalizeAction'>,
+  deps: PaymailRestoreDeps,
+): Promise<PaymailRestoreReport> => {
+  const report: PaymailRestoreReport = { payments: 0, restored: 0, satoshis: 0, alreadyHeld: 0, spent: 0, errors: [] };
+  if (!paymailEnabled()) return report;
+  const hist = await postJson(f, api('history'), await signRequest(wallet, 'history', {}));
+  const payments = (hist.payments ?? []) as InboxPayment[];
+  report.payments = payments.length;
+  for (const p of payments) {
+    try {
+      const wanted: InboxPayment['outputs'] = [];
+      for (const o of p.outputs) {
+        if (await deps.hasOutput(p.txid, o.vout)) {
+          report.alreadyHeld++;
+          continue;
+        }
+        if ((await deps.isUnspent(p.txid, o.vout)) === false) {
+          report.spent++;
+          continue;
+        }
+        wanted.push(o);
+      }
+      if (!wanted.length) continue;
+      await wallet.internalizeAction({
+        tx: await atomicBeefFor(p, deps.fetchBeef),
+        outputs: wanted.map((o) => ({
+          outputIndex: o.vout,
+          protocol: 'wallet payment' as const,
+          paymentRemittance: {
+            derivationPrefix: o.derivationPrefix,
+            derivationSuffix: o.derivationSuffix,
+            senderIdentityKey: hist.senderIdentityKey,
+          },
+        })),
+        description: `Paymail payment${p.sender ? ` from ${p.sender}` : ''}`.slice(0, 50),
+        labels: ['paymail'],
+      });
+      report.restored++;
+      report.satoshis += wanted.reduce((s, o) => s + Number(o.satoshis), 0);
+    } catch (e) {
+      report.errors.push(`${p.txid}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return report;
+};
+
+export const paymailRestoreSummary = (r: PaymailRestoreReport) =>
+  r.restored
+    ? `Restored ${r.restored} paymail payment${r.restored === 1 ? '' : 's'} (${r.satoshis.toLocaleString()} sats)`
+    : r.errors.length
+      ? `Could not restore ${r.errors.length} paymail payment${r.errors.length === 1 ? '' : 's'}`
+      : 'No paymail payments missing';
+
 /** Why the paymail can't be changed to `alias`, or null if it can (mirrors site/lib/paymail.js `register`). */
 export const nameChangeBlocked = (current: string | null | undefined, alias: string): string | null => {
   // Owner, 9 Oct 2026 (handle rule): users choose their handle, and a wallet with a verified .x / .gmail

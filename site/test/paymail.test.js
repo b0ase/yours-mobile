@@ -58,6 +58,7 @@ const memStore = () => {
     getPayment: async (ref) => pays.get(ref) ?? null,
     updatePayment: async (ref, patch) => void Object.assign(pays.get(ref), patch),
     listInbox: async (k) => [...pays.values()].filter((p) => p.identity_key === k && p.status === 'received'),
+    listHistory: async (k) => [...pays.values()].filter((p) => p.identity_key === k),
     countRecentPayments: async () => 0,
     deleteByKey: async (k) => {
       let a = 0;
@@ -312,6 +313,14 @@ describe('P2P receive → inbox → wallet can spend', () => {
     expect(as).toBe(200);
     expect(ar.collected).toBe(1);
     expect((await h.inbox({}, await u.sign('inbox', {})))[1].payments).toHaveLength(0);
+    // Restore from seed: history still returns the collected payment with its derivation, only to its owner.
+    const [hs, hist] = await h.history({}, await u.sign('history', {}));
+    expect(hs).toBe(200);
+    expect(hist.payments).toHaveLength(1);
+    expect(hist.payments[0].status).toBe('collected');
+    expect(hist.payments[0].outputs[0].derivationPrefix).toBe(p.outputs[0].derivationPrefix);
+    expect((await h.history({}, await user().sign('history', {})))[1].payments).toHaveLength(0);
+    expect((await h.history({}, await u.sign('inbox', {})))[0]).toBe(401);
   });
 
   test('unknown reference / unknown alias', async () => {
