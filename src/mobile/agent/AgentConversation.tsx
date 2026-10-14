@@ -138,19 +138,25 @@ const ConfirmSheet = ({
 
 /**
  * Quick starts above the composer (bWalletX only, owner 5 Oct 2026): each fills in a prompt the user can edit
- * before sending, so nothing is paid for until they tap Send.
+ * before sending, so nothing is paid for until they tap Send. Only things b's guide covers (guide.ts MAKING_THINGS);
+ * sentence case, no near-duplicates (owner, 14 Oct 2026).
  */
 const QUICK_STARTS: { label: string; prompt: string }[] = [
+  {
+    label: 'Launch a coin',
+    prompt: 'Help me launch my own coin. Ask me for its name, ticker, supply and what it is for.',
+  },
+  {
+    label: 'List my app as a bApp',
+    prompt:
+      'Help me list my app as a bApp with its own token. Ask me for the app name, its website and what the token should do.',
+  },
   {
     label: 'Create a strategy',
     prompt: 'Help me create a strategy. Ask me what I want it to do, which tokens, my budget and when it should stop.',
   },
   {
-    label: 'Trade a Strategy',
-    prompt: 'Help me trade with a strategy: load one into an agent account, check its limits, and run it.',
-  },
-  {
-    label: 'Buy / sell a strategy',
+    label: 'Buy or sell a strategy',
     prompt:
       'Help me buy or sell a strategy on Exchange › Strategies: compare listings, or fill in the listing spec for mine and suggest a price.',
   },
@@ -640,16 +646,6 @@ export const AgentConversation = ({
           />
         </div>
       )}
-      {/* Price / key status: a small yellow banner under the title row (owner, 5 Oct 2026). Tap for Settings. */}
-      <button
-        type="button"
-        onClick={() => navigate('/m/settings')}
-        className="relative z-10 shrink-0 w-full px-4 py-1 text-[11px] leading-tight font-semibold text-left border-0 overflow-hidden text-ellipsis whitespace-nowrap"
-        style={{ background: '#F5B800', color: '#1a1300' }}
-      >
-        {status}
-      </button>
-
       {/* Own-key nudge (owner, 5 Oct 2026): most people never find Settings › b agent. With their own key, messages
           go from this device straight to their AI provider instead of through bCorp's paid service. */}
       {/* Shown until dismissed (✕), remembered per account on this device (owner, 8 Oct 2026: "a lot of text"). */}
@@ -695,67 +691,69 @@ export const AgentConversation = ({
         />
       )}
 
-      <div className="askb-pagepad relative z-10 flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className="max-w-[85%] rounded-2xl px-3 py-2 text-[14px] whitespace-pre-wrap break-words"
-              style={
-                m.role === 'user'
-                  ? { background: GOLD, color: '#1a1300' }
-                  : { background: PANEL, color: '#F2F2F0', border: `1px solid ${LINE}` }
-              }
-            >
-              {m.text}
-              {m.role === 'assistant' && (
-                <button
-                  onClick={() => setReportingReply({ text: m.text, index: i })}
-                  className="mt-1.5 flex items-center gap-1 text-[11px]"
-                  style={{ color: MUTED }}
-                  aria-label="Report response"
-                >
-                  <Flag size={11} /> Report response
-                </button>
-              )}
+      <div className="askb-pagepad relative z-10 flex-1 overflow-y-auto px-4 py-4">
+        <div className="askb-thread mx-auto w-full flex flex-col gap-4">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className="max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap break-words"
+                style={
+                  m.role === 'user'
+                    ? { background: GOLD, color: '#1a1300' }
+                    : { background: PANEL, color: '#F2F2F0', border: `1px solid ${LINE}` }
+                }
+              >
+                {m.text}
+                {m.role === 'assistant' && (
+                  <button
+                    onClick={() => setReportingReply({ text: m.text, index: i })}
+                    className="mt-1.5 flex items-center gap-1 text-[11px]"
+                    style={{ color: MUTED }}
+                    aria-label="Report response"
+                  >
+                    <Flag size={11} /> Report response
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
-        {busy && (
-          <div className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
-            <Loader2 size={14} className="animate-spin" /> {notice ?? 'b is thinking…'}
-          </div>
-        )}
-        {notice && !busy && (
-          <p className="text-xs" style={{ color: GOLD }}>
-            {notice}
-          </p>
-        )}
-        {error && (
-          <p className="text-xs" style={{ color: '#ff6b6b' }}>
-            {error}
-          </p>
-        )}
-        {unanswered && !busy && (
-          <button
-            onClick={() => void retry()}
-            className="self-start rounded-full px-3 py-1 text-xs font-bold"
-            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
-          >
-            Paid — get the answer (no new payment)
-          </button>
-        )}
-        <div ref={endRef} />
+          ))}
+          {busy && (
+            <div className="flex items-center gap-2 text-xs" style={{ color: MUTED }}>
+              <Loader2 size={14} className="animate-spin" /> {notice ?? 'b is thinking…'}
+            </div>
+          )}
+          {notice && !busy && (
+            <p className="text-xs" style={{ color: GOLD }}>
+              {notice}
+            </p>
+          )}
+          {error && (
+            <p className="text-xs" style={{ color: '#ff6b6b' }}>
+              {error}
+            </p>
+          )}
+          {unanswered && !busy && (
+            <button
+              onClick={() => void retry()}
+              className="self-start rounded-full px-3 py-1 text-xs font-bold"
+              style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+            >
+              Paid — get the answer (no new payment)
+            </button>
+          )}
+          <div ref={endRef} />
+        </div>
       </div>
 
       {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
-        <div className="relative z-10 shrink-0 flex gap-1.5 overflow-x-auto px-3 pb-1">
+        <div className="askb-chips relative z-10 shrink-0 flex gap-1.5 overflow-x-auto px-3 pb-2">
           {QUICK_STARTS.map((q) => (
             <button
               key={q.label}
               type="button"
               onClick={() => setInput(q.prompt)}
-              className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
-              style={{ border: `1px solid ${GOLD}88`, color: GOLD, background: 'transparent' }}
+              className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
+              style={{ border: `1px solid ${GOLD}66`, color: GOLD, background: 'rgba(0,0,0,0.35)' }}
             >
               {q.label}
             </button>
@@ -763,6 +761,16 @@ export const AgentConversation = ({
         </div>
       )}
       <div className="relative z-10 shrink-0">{bar('page')}</div>
+      {/* Price / key status: a small, quiet line under the composer (owner, 14 Oct 2026: the full-width yellow banner
+          was too loud). Tap for Settings. */}
+      <button
+        type="button"
+        onClick={() => navigate('/m/settings')}
+        className="askb-meta relative z-10 shrink-0 self-center max-w-full px-4 pb-2 text-[11px] leading-tight text-center border-0 bg-transparent overflow-hidden text-ellipsis whitespace-nowrap"
+        style={{ color: MUTED }}
+      >
+        {status}
+      </button>
       {reportingReply && (
         <ReportSheet
           title="Report this response"

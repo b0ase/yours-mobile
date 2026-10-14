@@ -52,18 +52,21 @@
   height: 34px;
 }
 
-/* Desktop /m/ask-b: thinner, centred, 84px + one bar-height above the bottom (owner, 12 Oct 2026). */
-html.ww-on .askb-bar.place-page {
-  position: absolute;
-  left: 50%;
-  bottom: calc(84px + var(--askb-bar-h));
-  transform: translateX(-50%);
-  width: min(640px, calc(100% - 32px));
-  margin: 0;
-  z-index: 20;
+/* Desktop /m/ask-b (owner, 14 Oct 2026): the composer sits at the bottom of the conversation, in the same centred
+   column as the messages and the quick starts above it; no floating gap. */
+.askb-thread {
+  max-width: 760px;
 }
-html.ww-on .askb-pagepad {
-  padding-bottom: calc(150px + var(--askb-bar-h));
+html.ww-on .askb-bar.place-page {
+  width: min(720px, calc(100% - 32px));
+  margin: 0 auto 6px;
+}
+html.ww-on .askb-chips {
+  width: min(720px, calc(100% - 32px));
+  margin: 0 auto;
+  padding-left: 0;
+  padding-right: 0;
+  flex-wrap: wrap;
 }
 
 /* Floating, every Desktop page: bottom-centre, over the content. */

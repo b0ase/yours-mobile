@@ -70,6 +70,7 @@ export const IDEAS: Idea[] = [
         ]),
         ...T('Tokens', [
           'Launch a token for your community',
+          'List my app as a bApp with its own token',
           'Mint a ticket for an event',
           'What is a BSV-21 token?',
           'Why does only one token have a ✓?',
