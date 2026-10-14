@@ -2,6 +2,7 @@ import { applyBapAip, BSOCIAL_BASKET, executeTrackedAction, LOCK_BASKET, type On
 import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
+import type { AuthorDeps } from './authorFeed';
 import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
 import {
   parseOverlayAny,
@@ -279,6 +280,21 @@ export const fetchTwetchReplies = async (id: number, limit = 50): Promise<FeedPo
 /** A Twetch user's own posts, newest first. */
 export const fetchTwetchUserPosts = async (userId: string, limit = 20): Promise<FeedPost[]> =>
   parseTwetchFeed(await twetchGet(`/v1/users/${encodeURIComponent(userId)}/posts?limit=${limit}`), twetchAddress);
+
+/** Live readers for an author's profile feed (authorFeed.ts). */
+export const authorDeps: AuthorDeps = {
+  getJson: async (url) => {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`Couldn't load posts (${res.status})`);
+    const text = await res.text();
+    return url.startsWith(PECK_OVERLAY) ? parsePeckBody(text) : JSON.parse(text);
+  },
+  twetchAddressOf: twetchAddress,
+  bchatApi: BCHAT_FEED_API,
+  bmapApi: FEED_API,
+  fwetchPage: (limit, offset) => fetchFwetch(limit, offset),
+  treechatEnrich: (posts) => withTreechatThreadIds(posts),
+};
 
 /** One on-chain post by txid from bmap, or null when unindexed. */
 export const fetchBmapPost = async (txid: string): Promise<FeedPost | null> => {

@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type TouchEvent,
+} from 'react';
 import { readListCache, writeListCache } from '../ui/listCache';
 import { FlipBavatar } from '../bavatar/FlipBavatar';
 import { isPayAddress } from '../bavatar/flipQr';
@@ -36,7 +46,6 @@ import {
   Clock,
   Trophy,
   EyeOff,
-  Newspaper,
 } from 'lucide-react';
 import { inscribe } from '@1sat/actions';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -68,6 +77,7 @@ import {
   filterFeed,
   MAX_INLINE_IMAGE_BYTES,
   MAX_POST_CHARS,
+  mergePosts,
   shortAddress,
   sourceLabel,
   sourceUrl,
@@ -80,8 +90,7 @@ import {
   type Source,
 } from './post';
 import {
-  fetchByAddress,
-  fetchByBap,
+  authorDeps,
   fetchFollowing,
   fetchForYou,
   fetchLeaderboard,
@@ -169,6 +178,28 @@ import type { WalletInterface } from '@bsv/sdk';
 import { ErrorActions } from '../errors/ErrorActions';
 import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
+import { AllFeedsSheet, FeedPicker } from './FeedPicker';
+import { BrandFeed } from './BrandFeed';
+import { authorProfileUrl, authorRef, fetchAuthorPage, fetchAuthorProfile, type AuthorProfile } from './authorFeed';
+import { FeaturedAlbum } from './FeaturedAlbum';
+import {
+  feedColor,
+  feedDef,
+  hasCustomView,
+  loadPins,
+  migrateFeedId,
+  savePins,
+  stepFeed,
+  swipeDir,
+  togglePin,
+  movePin,
+  type FeedId,
+} from './feeds';
+import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+
+// bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
+const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
+const NewsVideos = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/NewsVideos')) : null;
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -186,6 +217,10 @@ const RED = '#F97066';
 const AIP_BYTES = 140;
 
 type Tab = 'following' | 'foryou';
+const HOME_FILTERS: { id: Tab; label: string }[] = [
+  { id: 'following', label: 'Following' },
+  { id: 'foryou', label: 'For you' },
+];
 const SOURCE_KEY = 'bwallet.feed.source';
 const loadSource = (): Source | 'all' => {
   try {
@@ -1608,7 +1643,42 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     quote?: FeedPost;
     link?: { url: string; title: string };
   } | null>(null);
-  const [news, setNews] = useState<boolean>(loadNewsMode);
+  const [feed, setFeed] = useState<FeedId>(() => (loadNewsMode() ? 'bnews' : 'home'));
+  const [pins, setPins] = useState<FeedId[]>(loadPins);
+  const [allFeeds, setAllFeeds] = useState(false);
+  const news = feed === 'bnews';
+  const pickFeed = (picked: FeedId) => {
+    const id = migrateFeedId(picked);
+    setFeed(id);
+    setAllFeeds(false);
+    saveNewsMode(id === 'bnews');
+  };
+  // Home's two filters (Following | For you), remembered per device as the Feed setting's default
+  // (For you keeps "Latest" when that was the setting).
+  const pickHomeFilter = (f: Tab) => {
+    setTab(f);
+    const was = loadPrefs().defaultFeed;
+    if (f === 'following' ? was !== 'following' : was === 'following') savePrefs({ defaultFeed: f });
+  };
+  // Swipe the feed left / right for the next / previous feed (a vertical scroll never switches).
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onSwipeStart = (e: TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onSwipeEnd = (e: TouchEvent) => {
+    const s0 = swipeStart.current;
+    const t = e.changedTouches[0];
+    swipeStart.current = null;
+    if (!s0 || !t) return;
+    const dir = swipeDir(t.clientX - s0.x, t.clientY - s0.y);
+    // bNews cards close on a left swipe, so there only a right swipe changes feed.
+    if (!dir || (news && dir === 1 && (e.target as HTMLElement).closest?.('[data-news-card]'))) return;
+    // In the bMovies / bMusic reel a horizontal swipe is a 1p buy/sell; feeds change via the chips there.
+    if (feed === 'bmovies' || feed === 'bmusic') return;
+    const to = stepFeed(pins, feed, dir);
+    if (to) pickFeed(to);
+  };
   const [story, setStory] = useState<NewsItem | null>(null);
   const [postedTick, setPostedTick] = useState(0);
   const [tipping, setTipping] = useState<FeedPost | null>(null);
@@ -1893,7 +1963,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
       <TopNav />
       <div className="w-full pt-16 flex flex-col">
         {header && <SegmentRow>{header}</SegmentRow>}
-        <SegmentTitle title="Feed">
+        <SegmentTitle title={feed === 'home' ? 'Feed' : feedDef(feed).label}>
           <NotificationsBell onOpenPost={(t) => void openTarget(t)} />
           <button onClick={() => setShowBookmarks(true)} aria-label="Bookmarks" className="p-2 active:opacity-60">
             <Bookmark size={18} color={MUTED} />
@@ -1910,60 +1980,62 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </button>
         </SegmentTitle>
 
-        <div className="flex px-4" style={{ borderBottom: `1px solid ${LINE}` }}>
-          {(['following', 'foryou'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className="flex-1 py-2 text-[14px] font-bold"
-              style={{
-                color: tab === t ? 'white' : MUTED,
-                borderBottom: `2px solid ${tab === t ? GOLD : 'transparent'}`,
-              }}
-            >
-              {t === 'following' ? 'Following' : 'For you'}
-            </button>
-          ))}
-        </div>
+        <FeedPicker
+          pins={pins}
+          current={feed}
+          allOpen={allFeeds}
+          onPick={pickFeed}
+          onOpenAll={() => setAllFeeds(true)}
+        />
+        <div style={{ borderBottom: `1px solid ${LINE}` }} />
 
-        <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
-          {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
-          <div className="flex gap-2" role="tablist" aria-label="Source">
-            {SOURCES.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  setSource(s.id);
-                  saveSource(s.id);
-                  setNews(false);
-                  saveNewsMode(false);
-                }}
-                className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
-                style={
-                  !news && source === s.id
-                    ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
-                    : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
-                }
-              >
-                {s.label}
-              </button>
-            ))}
-            <button
-              onClick={() => {
-                setNews(true);
-                saveNewsMode(true);
-              }}
-              className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold flex items-center gap-1"
-              style={
-                news
-                  ? { background: GOLD, color: textOn(GOLD) }
-                  : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
-              }
+        {feed === 'home' && (
+          <div className="px-4 pt-3">
+            <div
+              role="tablist"
+              aria-label="Home filter"
+              className="flex rounded-full p-0.5"
+              style={{ background: PANEL, border: `1px solid ${LINE}` }}
             >
-              <Newspaper size={12} /> bNews
-            </button>
+              {HOME_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  role="tab"
+                  aria-selected={tab === f.id}
+                  onClick={() => pickHomeFilter(f.id)}
+                  className="flex-1 rounded-full py-1.5 text-[13px] font-semibold"
+                  style={tab === f.id ? { background: GOLD, color: '#1a1300' } : { color: MUTED }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+        {feed === 'home' && (
+          <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
+            {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
+            <div className="flex gap-2" role="tablist" aria-label="Source">
+              {SOURCES.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSource(s.id);
+                    saveSource(s.id);
+                  }}
+                  className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+                  style={
+                    source === s.id
+                      ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
+                      : { background: PANEL, color: MUTED, border: `1px solid ${LINE}` }
+                  }
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {!online && (
           <div
@@ -1982,25 +2054,66 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </div>
         )}
 
-        {news ? (
-          <NewsList posts={knownPosts} onOpen={setStory} />
-        ) : (
-          <PostList
-            posts={sorted}
-            a={actions}
-            empty={
-              <div className="px-8 pt-14 text-center">
-                <p className="text-sm text-white font-semibold">
-                  {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
-                </p>
-                <p className="text-xs mt-1" style={{ color: MUTED }}>
-                  {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
-                </p>
-              </div>
-            }
-          />
-        )}
+        <div onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd} className="flex flex-col">
+          {(feed === 'bmovies' || feed === 'bmusic') && BmoviesReel ? (
+            <>
+              {feed === 'bmusic' && <FeaturedAlbum color={feedColor('bmusic')} />}
+              <Suspense fallback={null}>
+                <BmoviesReel key={feed} brand={feed} />
+              </Suspense>
+            </>
+          ) : !hasCustomView(feed) ? (
+            <BrandFeed slug={feed} />
+          ) : news ? (
+            <>
+              {NewsVideos && (
+                <Suspense fallback={null}>
+                  <NewsVideos />
+                </Suspense>
+              )}
+              <NewsList posts={knownPosts} onOpen={setStory} />
+            </>
+          ) : (
+            <PostList
+              posts={sorted}
+              a={actions}
+              empty={
+                <div className="px-8 pt-14 text-center">
+                  <p className="text-sm text-white font-semibold">
+                    {tab === 'following' && !follows.length ? 'Nobody followed yet' : 'Nothing here yet'}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: MUTED }}>
+                    {tab === 'following' ? 'Tap a name in For you and follow them.' : 'Pull refresh in a moment.'}
+                  </p>
+                </div>
+              }
+            />
+          )}
+        </div>
       </div>
+
+      {allFeeds && (
+        <AllFeedsSheet
+          pins={pins}
+          current={feed}
+          onPick={pickFeed}
+          onTogglePin={(id) =>
+            setPins((p) => {
+              const next = togglePin(p, id);
+              savePins(next);
+              return next;
+            })
+          }
+          onMovePin={(id, dir) =>
+            setPins((p) => {
+              const next = movePin(p, id, dir);
+              savePins(next);
+              return next;
+            })
+          }
+          onClose={() => setAllFeeds(false)}
+        />
+      )}
 
       <button
         onClick={() => setComposing({ replyTo: null })}
@@ -2225,18 +2338,53 @@ const ProfileView = ({
   const [reporting, setReporting] = useState(false);
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
   const [error, setError] = useState('');
+  // Read the author's posts from the source they came from (Twetch user id, Peck key, Treechat
+  // name, Fwetch address, or bChat address / BAP): bmap alone had none for most authors.
+  const ref = useMemo(
+    () => authorRef(author),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [author.address, author.bapId, author.source, author.sourceId],
+  );
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [info, setInfo] = useState<AuthorProfile | null>(null);
+  const reqRef = useRef(0);
   useEffect(() => {
+    const req = ++reqRef.current;
     setPosts(null);
-    const q = author.bapId
-      ? fetchByBap(author.bapId)
-      : author.address
-        ? fetchByAddress(author.address)
-        : Promise.resolve([]);
-    q.then(setPosts).catch((e) => {
-      setError(e instanceof Error ? e.message : String(e));
-      setPosts([]);
-    });
-  }, [author.bapId, author.address]);
+    setError('');
+    setNext(null);
+    setInfo(null);
+    fetchAuthorPage(ref, null, authorDeps)
+      .then((pg) => {
+        if (req !== reqRef.current) return;
+        setPosts(pg.posts);
+        setNext(pg.next);
+      })
+      .catch((e) => {
+        if (req !== reqRef.current) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setPosts([]);
+      });
+    fetchAuthorProfile(ref, authorDeps)
+      .then((p) => req === reqRef.current && setInfo(p))
+      .catch(() => undefined);
+  }, [ref]);
+  const loadMore = () => {
+    if (!next || loadingMore) return;
+    const req = reqRef.current;
+    setLoadingMore(true);
+    fetchAuthorPage(ref, next, authorDeps)
+      .then((pg) => {
+        if (req !== reqRef.current) return;
+        setPosts((cur) => mergePosts(cur ?? [], pg.posts));
+        setNext(pg.next);
+      })
+      .catch((e) => req === reqRef.current && setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => req === reqRef.current && setLoadingMore(false));
+  };
+  const homeUrl = authorProfileUrl(ref);
+  const homeLabel = sourceLabel(ref.source === 'bchat' ? FEED_APP : ref.source === 'peck' ? 'peck.to' : ref.source);
   const shown = useMemo(
     () => (posts ? visiblePosts(posts, isMe ? [] : mutes) : null),
     // safetyTick isn't read here: it bumps when the hide/block lists (module state that
@@ -2262,8 +2410,49 @@ const ProfileView = ({
         />
         <AuthorName name={author.name} className="mt-3 block text-lg font-bold text-white" />
         <p className="text-[11px] mt-1 break-all" style={{ color: MUTED }}>
-          {author.bapId ? `BAP ${author.bapId}` : author.address ? shortAddress(author.address) : ''}
+          {author.bapId
+            ? `BAP ${author.bapId}`
+            : ref.source === 'twetch'
+              ? `@${ref.id} on Twetch`
+              : ref.source === 'treechat'
+                ? `@${ref.id} on Treechat`
+                : author.address && !author.address.includes(':')
+                  ? shortAddress(author.address)
+                  : ref.id
+                    ? `${shortAddress(ref.id)} on ${homeLabel}`
+                    : ''}
         </p>
+        {info?.bio && (
+          <p className="text-xs mt-2 whitespace-pre-line break-words" style={{ color: 'white' }}>
+            {info.bio}
+          </p>
+        )}
+        {info && (info.followers !== null || info.following !== null) && (
+          <p className="text-xs mt-2" style={{ color: MUTED }}>
+            {info.followers !== null && (
+              <>
+                <b className="text-white">{info.followers}</b> followers
+              </>
+            )}
+            {info.followers !== null && info.following !== null && ' · '}
+            {info.following !== null && (
+              <>
+                <b className="text-white">{info.following}</b> following
+              </>
+            )}
+          </p>
+        )}
+        {homeUrl && (
+          <a
+            href={homeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 text-xs font-semibold"
+            style={{ color: GOLD }}
+          >
+            Open on {homeLabel} ↗
+          </a>
+        )}
         {isMe && !author.bapId && (
           <p className="text-xs mt-2" style={{ color: MUTED }}>
             Your first post sets up your posting profile.
@@ -2327,11 +2516,28 @@ const ProfileView = ({
         posts={shown}
         a={{ ...actions, onAuthor: () => undefined }}
         empty={
-          <p className="text-center text-xs pt-10" style={{ color: MUTED }}>
-            No posts yet.
-          </p>
+          <div className="text-center text-xs pt-10 flex flex-col items-center gap-2" style={{ color: MUTED }}>
+            <p>No posts yet.</p>
+            {homeUrl && (
+              <a href={homeUrl} target="_blank" rel="noopener noreferrer" style={{ color: GOLD }}>
+                See {safeName(author.name)} on {homeLabel} ↗
+              </a>
+            )}
+          </div>
         }
       />
+      {next && posts && posts.length > 0 && (
+        <div className="flex justify-center py-4">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-2xl px-5 py-2 text-sm font-semibold"
+            style={{ background: PANEL, color: 'white', border: `1px solid ${LINE}` }}
+          >
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
     </Layer>
   );
 };

@@ -85,12 +85,14 @@ function parseOverlayItem(item: unknown, kind: 'peck' | 'treechat'): FeedPost | 
           bapId: null,
           name: name || 'Treechat user',
           avatar: null,
+          ...(name ? { source: 'treechat' as const, sourceId: name } : {}),
         }
       : {
           address: verified ? signer : `peck:${signer.slice(0, 80)}`,
           bapId: null,
           name: name || (signer ? shortAddress(signer) : 'Peck user'),
           avatar: null,
+          ...(signer ? { source: 'peck' as const, sourceId: signer.slice(0, 80) } : {}),
         };
   return {
     txid,

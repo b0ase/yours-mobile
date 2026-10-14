@@ -278,6 +278,10 @@ export type Author = {
   avatar: string | null;
   /** The paymail the post declared (MAP `paymail`), when it looks like one. Unverified: resolve before use. */
   paymail?: string;
+  /** Where this author was read from (unset = bChat / bmap). Picks the profile's post source. */
+  source?: Source;
+  /** That source's own id: Twetch user id, Peck signer key, Treechat username, Fwetch address. */
+  sourceId?: string;
 };
 export type FeedImage = { src: string; mime: string };
 // Source registry (labels, logos, original-post links) lives in sources.ts; re-exported here.
@@ -627,6 +631,7 @@ function parseTwetchItem(item: unknown, c: TwetchCtx): FeedPost | null {
       bapId: null,
       name: asStr(u.name).trim().slice(0, 60) || `Twetch user ${uid}`,
       avatar: icon ? twetchMediaUrl(icon) : null,
+      ...(uid ? { source: 'twetch' as const, sourceId: uid } : {}),
     },
     at: Number(p.postedAtMs) || Number(p.createdAtMs) || 0,
     likes: Number(p.numLikes) || 0,

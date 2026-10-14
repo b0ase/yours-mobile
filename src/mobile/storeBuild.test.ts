@@ -567,3 +567,58 @@ describe('BMINT_NOTES_ENABLED: the bMint banknote designer is bWalletX only', ()
     );
   });
 });
+
+/** Feed › bMovies (tokenised clip pitches) is bWalletX only: no reel, no feed entry in a store build. */
+describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const feedIds = (env: Record<string, string>) => {
+    const r = Bun.spawnSync(
+      [
+        'bun',
+        '-e',
+        "const f = await import('./src/mobile/feed/feeds.ts'); console.log(JSON.stringify(f.FEEDS.map((x) => x.id)));",
+      ],
+      { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env } },
+    );
+    return JSON.parse(r.stdout.toString()) as string[];
+  };
+  test('inverse of STORE_BUILD, from the same literal env', async () => {
+    const { BMOVIES_FEED_ENABLED } = await import('./storeBuild');
+    expect(BMOVIES_FEED_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BMOVIES_FEED_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('store builds list no bMovies feed; bWalletX does', () => {
+    expect(feedIds({ VITE_STORE_BUILD: '1' })).not.toContain('bmovies');
+    expect(feedIds({ VITE_CHANNEL: 'ios-store' })).not.toContain('bmovies');
+    expect(feedIds({ VITE_CHANNEL: 'android-play' })).not.toContain('bmovies');
+    expect(feedIds({})).toContain('bmovies');
+  });
+  test('adult-leaning brands (cherryx, aigf) are in no build; the store keeps the other bApp feeds', () => {
+    for (const env of [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, {}]) {
+      const ids = feedIds(env);
+      expect(ids).not.toContain('cherryx');
+      expect(ids).not.toContain('aigf');
+      expect(ids).toContain('bnews');
+      expect(ids).toContain('bmusic');
+    }
+  });
+  test('the reel is a lazy chunk behind the flag and the feed entry is data behind it', () => {
+    const page = src('./feed/FeedPage.tsx');
+    expect(page).toMatch(
+      /const BmoviesReel = BMOVIES_FEED_ENABLED \? lazy\(\(\) => import\('\.\/bmovies\/BmoviesReel'\)\) : null;/,
+    );
+    expect(page).not.toMatch(/^import (?!type )[^;]*from '\.\/bmovies\//m);
+    expect(src('./feed/feeds.ts')).toContain("BMOVIES_FEED_ENABLED ? [['bmovies', 'bMovies'");
+    expect(src('./feed/FeedPicker.tsx')).not.toMatch(/from '\.\/bmovies\//);
+  });
+  test('the store audit lists the bMovies grep strings', () => {
+    expect(readFileSync(new URL('../../docs/STORE-AUDIT.md', import.meta.url), 'utf8')).toContain(
+      'api/feed?cursor|tweet-video|tweet-result|Open bmovies.app',
+    );
+  });
+});
