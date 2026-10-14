@@ -132,6 +132,7 @@ export type ExchangeView =
   | { tab: 'orders' }
   | { tab: 'names' }
   | { tab: 'launchpad' }
+  | { tab: 'launch' }
   | { tab: 'more' }
   | { tab: 'platforms' }
   | { tab: 'platform'; slug: string }
@@ -151,7 +152,7 @@ export const exchangeView = (rest: string): ExchangeView => {
   if (seg === 'swap') return { tab: 'swap' };
   if (seg === 'orders') return { tab: 'orders' };
   if (seg === 'names') return { tab: 'names' };
-  if (seg === 'launchpad') return { tab: 'launchpad' };
+  if (seg === 'launchpad') return segs[1] === 'new' ? { tab: 'launch' } : { tab: 'launchpad' };
   if (seg === 'collectibles') return { tab: 'more' };
   const id = decodeURIComponent(seg).replace('.', '_');
   if (TOKEN_ID.test(id)) return { tab: 'trade', id: id.toLowerCase() };
@@ -160,6 +161,8 @@ export const exchangeView = (rest: string): ExchangeView => {
 
 export const EXCHANGE_ROUTE = '/m/exchange';
 export const tradeRoute = (id: string) => `${EXCHANGE_ROUTE}/${id}`;
+/** Launch your own coin (Exchange › Launchpad). */
+export const LAUNCH_ROUTE = `${EXCHANGE_ROUTE}/launchpad/new`;
 export const platformRoute = (slug?: string) => `${EXCHANGE_ROUTE}/platform${slug ? `/${slug}` : ''}`;
 
 // ── favourites + my trades (this device) ────────────────────────────────────
