@@ -25,6 +25,8 @@ import {
   refuseText,
   type PaidBackend,
   type PriceInfo,
+  noKeyReply,
+  reportToB,
 } from './paid';
 import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
@@ -418,7 +420,7 @@ export const AgentConversation = ({
       return;
     }
     // ⚠ Nothing leaves the phone for an AI provider the user has not allowed (Apple 5.1.2(i)).
-    const target = consentTarget(prefs.mode, prefs.provider);
+    const target = prefs.mode === 'own' && keyReady === false ? 'paid' : consentTarget(prefs.mode, prefs.provider);
     if (!hasConsent(target)) {
       const ok = await new Promise<boolean>((resolve) => setConsentAsk(() => resolve));
       setConsentAsk(null);
@@ -432,6 +434,12 @@ export const AgentConversation = ({
     setNotice(null);
     setBusy(true);
     try {
+      // No key in own-key mode: b can't answer, but it still takes the message for the team (paid.ts reportToB).
+      if (prefs.mode === 'own' && keyReady === false) {
+        const r = await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text);
+        setMessages([...next, { role: 'assistant', text: noKeyReply(r, provider.label) }]);
+        return;
+      }
       const sent = transcript(next);
       const reply = prefs.mode === 'own' ? await runOwn(sent) : await runPaid(sent, next);
       if (reply === null) {
@@ -466,14 +474,15 @@ export const AgentConversation = ({
   const status =
     prefs.mode === 'own'
       ? keyReady === false
-        ? `Add your ${provider.label} API key in Settings › b agent.`
+        ? 'No AI key yet: what you type here goes to the team as feedback. Add a key in Settings › b agent for answers.'
         : `Your ${provider.label} key · ${prefs.models[prefs.provider]}`
       : price === null
         ? 'Checking the price…'
         : price.enabled
           ? `${formatPrice(price.sats, bsvUsd, price.usd)} per message · today ${money(today, bsvUsd)} / $${(prefs.dailyLimitCents / 100).toFixed(2)}`
           : (price.reason ?? 'Paid messages are not available yet.');
-  const canSend = prefs.mode === 'own' ? keyReady !== false : !!price?.enabled;
+  // Own-key mode sends even without a key: the message goes to the team as feedback (reportToB).
+  const canSend = prefs.mode === 'own' ? keyReady !== null : !!price?.enabled;
   const statusKnown = prefs.mode === 'own' ? keyReady !== null : price !== null;
   // Spoken request: sent through send() like a typed one, so consent, the price and the confirm step all apply.
   // If b can't take it (no key, paid off) it stays typed in the composer.

@@ -144,6 +144,29 @@ const clientInfo = (): { platform: string; version?: string } => {
 export const NOT_YET_RETRY_MS = [3000, 6000] as const;
 
 /** bit-sign implementation over any JSON caller (the signed-in bChat client). */
+/**
+ * Tell b something without an answer (owner, 14 Oct 2026). In bWallet, the store edition, b runs only on the
+ * person's own AI key; with no key nothing could reach the team. Now what they type goes to
+ * POST /api/bitsign/agent/feedback, which classifies and logs it (bit-sign lib/b-feedback.ts) and returns the
+ * words b shows: the ack with a reference, or a note that it could not be logged.
+ */
+export type ReportResult = { ok: boolean; ack: string; ref?: string };
+export const parseReport = (v: unknown): ReportResult => {
+  const o = obj(v);
+  const ack = typeof o.ack === 'string' && o.ack.trim() ? o.ack.trim() : '';
+  if (!ack) throw new Error(typeof o.error === 'string' ? o.error : 'b could not take that just now.');
+  return { ok: o.ok === true, ack, ...(typeof o.ref === 'string' ? { ref: o.ref } : {}) };
+};
+export const reportToB = async (
+  call: (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<unknown>,
+  text: string,
+): Promise<ReportResult> =>
+  parseReport(await call('POST', '/api/bitsign/agent/feedback', { text, client: clientInfo() }));
+
+/** What b says in place of an answer when it has no key: the ack, then how to get answers. */
+export const noKeyReply = (r: ReportResult, providerLabel: string) =>
+  `${r.ack}\n\nI can't answer questions in this edition without an AI key. Add your ${providerLabel} key in Settings › b agent and I'll reply here too.`;
+
 export const bitsignPaidBackend = (
   call: (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<unknown>,
 ): PaidBackend => ({

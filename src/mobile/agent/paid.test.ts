@@ -97,3 +97,17 @@ describe('agent prefs', () => {
     expect(p.models.openai).toBe('gpt-5-mini');
   });
 });
+
+describe('tell b without a key (14 Oct 2026)', () => {
+  test('parses the ack and ref; an error body throws its message', async () => {
+    const { parseReport, noKeyReply } = await import('./paid');
+    expect(parseReport({ ok: true, id: 12, ref: '#F-12', ack: 'Passed to the team as #F-12.' })).toEqual({
+      ok: true,
+      ack: 'Passed to the team as #F-12.',
+      ref: '#F-12',
+    });
+    expect(parseReport({ ok: false, ack: "I couldn't log that just now." }).ok).toBe(false);
+    expect(() => parseReport({ error: 'Unauthorized' })).toThrow('Unauthorized');
+    expect(noKeyReply({ ok: true, ack: 'Logged.' }, 'Claude')).toContain('Settings › b agent');
+  });
+});
