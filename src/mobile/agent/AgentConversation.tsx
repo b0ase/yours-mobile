@@ -29,7 +29,18 @@ import {
   paymentFailedText,
   reportToB,
 } from './paid';
-import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
+import { BCREDITS_ENABLED, MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
+import { useAgentCredits, type AgentCredits } from '../credits/useAgentCredits';
+
+/** Store build: never routes b to bCredits (the literal flag drops useAgentCredits from the bundle). */
+const useNoAgentCredits = (_withClient: unknown, _ready: boolean): AgentCredits => ({
+  route: async () => 'other',
+  run: () => Promise.reject(new Error('Not available')),
+  lowText: () => null,
+  low: false,
+  setLow: () => {},
+});
+const useCreditsForB = BCREDITS_ENABLED ? useAgentCredits : useNoAgentCredits;
 import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
@@ -243,6 +254,7 @@ export const AgentConversation = ({
     },
     [apiContext],
   );
+  const creditsForB = useCreditsForB(withClient, !!apiContext && !STORE_BUILD);
   const backend = useMemo(
     () =>
       STORE_BUILD
@@ -440,6 +452,7 @@ export const AgentConversation = ({
     setInput('');
     setError(null);
     setNotice(null);
+    creditsForB.setLow(false);
     setBusy(true);
     try {
       // No key in own-key mode: b can't answer, but it still takes the message for the team (paid.ts reportToB).
@@ -449,14 +462,30 @@ export const AgentConversation = ({
         return;
       }
       const sent = transcript(next);
-      const reply = prefs.mode === 'own' ? await runOwn(sent) : await runPaid(sent, next);
+      // bCredits first when there is a balance; once used, an empty balance asks for a top-up (never debt).
+      const way = await creditsForB.route(prefs.mode !== 'own');
+      if (way === 'low') {
+        setMessages([...next, { role: 'assistant', text: creditsForB.lowText() ?? '' }]);
+        creditsForB.setLow(true);
+        return;
+      }
+      const reply =
+        prefs.mode === 'own'
+          ? await runOwn(sent)
+          : way === 'credits'
+            ? await creditsForB.run(sent, system)
+            : await runPaid(sent, next);
       if (reply === null) {
         // Cancelled at the confirm step: nothing paid, put the text back.
         setMessages(messages);
         setInput(text);
       } else await answer(next, reply);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const low = creditsForB.lowText(e);
+      if (low) {
+        setMessages([...next, { role: 'assistant', text: low }]);
+        creditsForB.setLow(true);
+      } else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -733,6 +762,18 @@ export const AgentConversation = ({
             <p className="text-xs" style={{ color: '#ff6b6b' }}>
               {error}
             </p>
+          )}
+          {BCREDITS_ENABLED && creditsForB.low && !busy && (
+            <button
+              onClick={() => {
+                creditsForB.setLow(false);
+                navigate('/m/credits');
+              }}
+              className="self-start rounded-full px-3 py-1 text-xs font-bold"
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              Top up bCredits
+            </button>
           )}
           {unanswered && !busy && (
             <button

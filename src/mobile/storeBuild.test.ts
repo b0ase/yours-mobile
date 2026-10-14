@@ -625,3 +625,29 @@ describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () =>
     );
   });
 });
+
+describe('BCREDITS_ENABLED: bCredits are bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const flagFor = (env: Record<string, string>) => {
+    const expr = /export const BCREDITS_ENABLED: boolean = ([^;]*);/s
+      .exec(src('./storeBuild.ts'))![1]
+      .replace(/import\.meta\.env/g, 'env');
+    return new Function('env', `return ${expr};`)(env) as boolean;
+  };
+  test('inverse of STORE_BUILD', async () => {
+    const { BCREDITS_ENABLED } = await import('./storeBuild');
+    expect(BCREDITS_ENABLED).toBe(!STORE_BUILD);
+  });
+  test.each([
+    [{ VITE_STORE_BUILD: '1' }, false],
+    [{ VITE_CHANNEL: 'ios-store' }, false],
+    [{ VITE_CHANNEL: 'android-play' }, false],
+    [{}, true],
+  ])('env %p → %p', (env, want) => expect(flagFor(env)).toBe(want));
+  test('the credits UI is a lazy chunk behind the flag', () => {
+    const row = src('./credits/CreditsRow.tsx');
+    expect(row).toContain("BCREDITS_ENABLED ? lazy(() => import('./CreditsPanel')) : null");
+    const agent = src('./agent/AgentConversation.tsx');
+    expect(agent).toContain('BCREDITS_ENABLED ? useAgentCredits : useNoAgentCredits');
+  });
+});

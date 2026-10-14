@@ -123,7 +123,7 @@ export const turnBody = (quote: Quote, txid: string, messages: AgentMessage[], s
   client: clientInfo(),
 });
 
-const clientInfo = (): { platform: string; version?: string } => {
+export const clientInfo = (): { platform: string; version?: string } => {
   const g = globalThis as {
     chrome?: { runtime?: { getManifest?: () => { version?: string } } };
     Capacitor?: { getPlatform?: () => string };
