@@ -1,0 +1,245 @@
+/**
+ * The Feed picker: which feeds exist, their colours, the scrolling row and the swipe order.
+ *
+ * The row at the top of Feed scrolls left / right: Following and For you, the basic suite (bMovies red,
+ * bNews green, bMusic blue), then the user's pinned feeds, then "All feeds" (a sheet listing every bApp
+ * feed, bApps first then Other, where favourites are pinned). Pins persist per device. Swiping the feed
+ * left / right moves through the row (plus the open feed when it isn't in the row).
+ *
+ * Every bApp without a custom view shows its bChatX brand account's posts (bchatxFeed.ts). The list is
+ * local for now; GET https://www.bchatx.com/api/public/bapps will replace it (see BAPPS_API).
+ * bMovies is bWalletX only: its entry is behind BMOVIES_FEED_ENABLED so a store build has none of it.
+ * Adult-leaning brands (cherryx, aigf) are left out of every build.
+ */
+import { BMOVIES_FEED_ENABLED } from '../storeBuild';
+
+/** A feed id: a built-in ('following', 'foryou') or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
+export type FeedId = string;
+
+export type FeedGroup = 'core' | 'bapps' | 'other';
+
+export type FeedDef = { id: FeedId; label: string; hint: string; group: FeedGroup; color: string };
+
+/** Feeds with their own view in FeedPage; everything else is a generic bChatX brand-account feed. */
+export const CUSTOM_VIEWS: readonly FeedId[] = ['following', 'foryou', 'bnews', 'bmovies'];
+
+/** TODO: when live, load the list from here ([{slug, name, url, avatar, banner, bio, hasPosts}]). */
+export const BAPPS_API = 'https://www.bchatx.com/api/public/bapps';
+
+export const GOLD = '#FFD24D';
+
+/** Each bApp's colour: chip / icon ring and the selected state. One map, here. */
+export const FEED_COLORS: Record<FeedId, string> = {
+  following: GOLD,
+  foryou: GOLD,
+  // The basic suite: red, green, blue.
+  bmovies: '#E5484D',
+  bnews: '#30A46C',
+  bmusic: '#3E8BFF',
+  bradio: '#F76B15',
+  bgame: '#8E4EC6',
+  b3d: '#12A594',
+  bbooks: '#A18072',
+  writer: '#E2B6FF',
+  bmail: '#0090FF',
+  bsocial: '#D6409F',
+  bphotos: '#FFB224',
+  bpaint: '#FF8DCC',
+  bdrive: '#7CE2FE',
+  bsheets: '#46A758',
+  bcal: '#FF6369',
+  bmaps: '#5BB98B',
+  bjobs: '#978365',
+  bedu: '#86EAD4',
+  bexchange: '#FFE629',
+  bmarket: '#F1A10D',
+  bdns: '#9E8CFC',
+  bfile: '#8DA4EF',
+  bidentity: '#BF7AF0',
+  bbrowser: '#3DB9CF',
+  bitcoincode: '#99D52A',
+  bitcoinos: '#C2C2C2',
+  bapps: GOLD,
+};
+
+/** The colour for a feed: its own, else gold. */
+export const feedColor = (id: FeedId): string => FEED_COLORS[id] ?? GOLD;
+
+type Entry = [slug: string, label: string, hint?: string];
+
+const BMOVIES_ENTRY: Entry[] = BMOVIES_FEED_ENABLED ? [['bmovies', 'bMovies', 'Clips from bmovies.app']] : [];
+
+/** The $b* apps, by bChatX brand slug. */
+const BAPP_ENTRIES: Entry[] = [
+  ...BMOVIES_ENTRY,
+  ['bnews', 'bNews', 'Headlines to discuss'],
+  ['bmusic', 'bMusic', 'New releases'],
+  ['bradio', 'bRadio'],
+  ['bgame', 'bGames'],
+  ['b3d', 'b3D'],
+  ['bphotos', 'bPhotos'],
+  ['bbooks', 'bBooks'],
+  ['writer', 'bWriter'],
+  ['bmail', 'bMail'],
+  ['bsocial', 'bSocial'],
+  ['bpaint', 'bPaint'],
+  ['bdrive', 'bDrive'],
+  ['bsheets', 'bSheets'],
+  ['bcal', 'bCal'],
+  ['bmaps', 'bMaps'],
+  ['bjobs', 'bJobs'],
+  ['bedu', 'bEdu'],
+  ['bexchange', 'bExchange'],
+  ['bmarket', 'bMarket'],
+  ['bdns', 'bDNS'],
+  ['bfile', 'bFile'],
+  ['bidentity', 'bID'],
+  ['bbrowser', 'bBrowser'],
+  ['bitcoincode', 'bCode'],
+  ['bitcoinos', 'Bitcoin OS'],
+  ['bapps', 'bApps'],
+];
+
+/** Ventures and the rest, by bChatX brand slug. cherryx and aigf are deliberately absent. */
+const OTHER_ENTRIES: Entry[] = [
+  ['aibuildersclub', 'AI Builders Club'],
+  ['aitribes', 'AI Tribes'],
+  ['aivj', 'bTV: AIVJ'],
+  ['bcorp', 'Bitcoin Corp'],
+  ['bitgit', 'BitGit'],
+  ['bsvex', 'BSVEX'],
+  ['coursekings', 'CourseKings'],
+  ['divvy', 'Divvy'],
+  ['dnsdex', 'DNS DEX'],
+  ['ffnews', 'FFNEWS'],
+  ['floop', 'FLOOP!'],
+  ['hyperflix', 'HyperFlix'],
+  ['kintsugi', 'Kintsugi'],
+  ['kwegwong', 'KWEGWONG'],
+  ['metagraph', 'MetaGraph'],
+  ['mikrocosm', 'Mikrocosm'],
+  ['moneybutton', 'MoneyButton'],
+  ['npg', 'Ninja Punk Girls'],
+  ['npgx', 'NPGX'],
+  ['oneshotcomics', 'One-Shot Comics'],
+  ['overnerd', 'overNERD'],
+  ['path401', '$401'],
+  ['path402', '$402'],
+  ['path403', '$403'],
+  ['pennypics', 'Penny Pics'],
+  ['repodex', 'Repo-DEX'],
+  ['scrollpay', 'ScrollPay'],
+  ['senseii', 'Senseii'],
+  ['tinycapital', 'Tiny Capital'],
+  ['tokenblaster', 'TokenBlaster'],
+  ['tribeswallet', 'Tribes Wallet'],
+  ['tribify', 'Tribify'],
+  ['vexvoid', 'VexVoid'],
+  ['websitestrategypro', 'WebsiteStrategy Pro'],
+];
+
+const def =
+  (group: FeedGroup) =>
+  ([id, label, hint]: Entry): FeedDef => ({
+    id,
+    label,
+    hint: hint ?? `${label} on bChatX`,
+    group,
+    color: feedColor(id),
+  });
+
+/** Every feed this build has: core, then bApps, then Other. */
+export const FEEDS: readonly FeedDef[] = [
+  { id: 'following', label: 'Following', hint: 'People you follow', group: 'core' as const, color: GOLD },
+  { id: 'foryou', label: 'For you', hint: 'Everything on the feed', group: 'core' as const, color: GOLD },
+  ...BAPP_ENTRIES.map(def('bapps')),
+  ...OTHER_ENTRIES.map(def('other')),
+];
+
+/** The "All feeds" sheet's sections. */
+export const feedGroups = (feeds: readonly FeedDef[] = FEEDS) => [
+  { id: 'bapps' as const, label: 'bApps', feeds: feeds.filter((f) => f.group === 'bapps') },
+  { id: 'other' as const, label: 'Other', feeds: feeds.filter((f) => f.group === 'other') },
+];
+
+/** Always at the front of the row: Following, For you, then the red / green / blue suite. */
+export const FIXED_ROW: readonly FeedId[] = ['following', 'foryou', 'bmovies', 'bnews', 'bmusic'];
+
+/** Pinned feeds the row holds after the fixed ones. */
+export const MAX_PINNED = 12;
+
+export const isFeedId = (v: unknown, feeds: readonly FeedDef[] = FEEDS): v is FeedId =>
+  typeof v === 'string' && feeds.some((f) => f.id === v);
+
+export const feedDef = (id: FeedId, feeds: readonly FeedDef[] = FEEDS): FeedDef =>
+  feeds.find((f) => f.id === id) ?? feeds[0];
+
+export const hasCustomView = (id: FeedId) => CUSTOM_VIEWS.includes(id);
+
+/** Known, unique, non-fixed ids only, at most MAX_PINNED (old saved rows with core feeds still load). */
+export const cleanPins = (raw: unknown, feeds: readonly FeedDef[] = FEEDS): FeedId[] =>
+  (Array.isArray(raw) ? (raw as unknown[]) : [])
+    .filter((v, i, a): v is FeedId => isFeedId(v, feeds) && !FIXED_ROW.includes(v) && a.indexOf(v) === i)
+    .slice(0, MAX_PINNED);
+
+/** Pin or unpin a feed. Fixed feeds are always in the row; a full row drops its oldest pin. */
+export const togglePin = (pins: FeedId[], id: FeedId): FeedId[] => {
+  if (FIXED_ROW.includes(id)) return pins;
+  if (pins.includes(id)) return pins.filter((p) => p !== id);
+  return [...pins, id].slice(-MAX_PINNED);
+};
+
+/** The scrolling row (before "All feeds"): the fixed feeds this build has, then the pins. */
+export const rowFeeds = (pins: FeedId[], feeds: readonly FeedDef[] = FEEDS): FeedId[] => [
+  ...FIXED_ROW.filter((id) => isFeedId(id, feeds)),
+  ...pins.filter((id) => isFeedId(id, feeds) && !FIXED_ROW.includes(id)),
+];
+
+/** The swipe order: the row, then the open feed when it was opened from All feeds. */
+export const swipeOrder = (pins: FeedId[], current: FeedId): FeedId[] => {
+  const row = rowFeeds(pins);
+  return row.includes(current) ? row : [...row, current];
+};
+
+/** The next (dir 1) or previous (dir -1) feed, or null at either end. */
+export const stepFeed = (pins: FeedId[], current: FeedId, dir: 1 | -1): FeedId | null => {
+  const order = swipeOrder(pins, current);
+  return order[order.indexOf(current) + dir] ?? null;
+};
+
+/** Horizontal distance (px) past which a swipe changes feed; a mostly vertical drag never does. */
+export const FEED_SWIPE_PX = 70;
+export const swipeDir = (dx: number, dy: number, threshold = FEED_SWIPE_PX): 1 | -1 | 0 =>
+  Math.abs(dx) >= threshold && Math.abs(dx) > Math.abs(dy) * 1.5 ? (dx < 0 ? 1 : -1) : 0;
+
+// ── persistence (per device) ───────────────────────────────────────────────
+
+export const PINS_KEY = 'bwallet.feed.pins';
+
+type Store = Pick<Storage, 'getItem' | 'setItem'>;
+const defaultStore = (): Store | null => {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+};
+
+const read = (key: string, store: Store | null): unknown => {
+  try {
+    return JSON.parse(store?.getItem(key) ?? 'null');
+  } catch {
+    return null;
+  }
+};
+
+const write = (key: string, v: unknown, store: Store | null) => {
+  try {
+    store?.setItem(key, JSON.stringify(v));
+  } catch {
+    // storage unavailable
+  }
+};
+
+export const loadPins = (store = defaultStore()): FeedId[] => cleanPins(read(PINS_KEY, store));
+export const savePins = (pins: FeedId[], store = defaultStore()) => write(PINS_KEY, pins, store);

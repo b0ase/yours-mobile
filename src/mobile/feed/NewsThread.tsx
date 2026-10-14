@@ -44,7 +44,7 @@ const NewsCard = ({
   const start = useRef<{ x: number; y: number } | null>(null);
   const moved = useRef(false);
   return (
-    <div className="relative overflow-hidden" style={{ borderBottom: `1px solid ${LINE}` }}>
+    <div data-news-card className="relative overflow-hidden" style={{ borderBottom: `1px solid ${LINE}` }}>
       <div
         aria-hidden
         className="absolute inset-0 flex items-center justify-end pr-5 text-xs font-semibold"
