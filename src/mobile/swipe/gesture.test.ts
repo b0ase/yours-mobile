@@ -10,6 +10,11 @@ describe('lockAxis', () => {
   test('undecided under 10px', () => expect(lockAxis(6, 7)).toBeNull());
   test('horizontal wins', () => expect(lockAxis(-12, 4)).toBe('x'));
   test('vertical scroll is not hijacked', () => expect(lockAxis(8, 14)).toBe('y'));
+  test('a diagonal scroll stays a scroll (no sideways row slide)', () => {
+    expect(lockAxis(12, 10)).toBe('y');
+    expect(lockAxis(-14, 10)).toBe('y');
+    expect(lockAxis(16, 10)).toBe('x');
+  });
 });
 
 describe('resolveRelease', () => {

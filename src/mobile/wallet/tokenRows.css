@@ -8,3 +8,7 @@
   pointer-events: none;
   transform: rotate(35deg);
 }
+/* Balances update in place without nudging the row: fixed-width digits. */
+.bw-swipe-face {
+  font-variant-numeric: tabular-nums;
+}

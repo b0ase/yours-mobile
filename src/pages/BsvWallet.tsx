@@ -94,6 +94,7 @@ import { SendCard } from '../mobile/wallet/send/SendCard';
 import { isMainnetAddress } from '../mobile/names/address';
 import { rememberSent } from '../mobile/wallet/send/sendLogic';
 import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
@@ -1534,6 +1535,7 @@ export const BsvWallet = () => {
             onLock={() => handleSelect('tools', 'lock')}
           >
           <AssetRow
+            still={!IS_EXTENSION}
             balance={bsvBalance}
             icon={bsvCoin}
             ticker="BSV"
@@ -1579,6 +1581,7 @@ export const BsvWallet = () => {
               onLock={() => addSnackbar('Locking MNEE isn’t available yet.', 'info', 2500)}
             >
             <AssetRow
+              still={!IS_EXTENSION}
               balance={mneeBalance}
               icon={MNEE_ICON_URL}
               ticker="MNEE USD"

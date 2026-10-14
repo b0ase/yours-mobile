@@ -51,11 +51,12 @@ const YoursChip = () => (
 );
 
 /** Token icon: a personal token shows its creator's profile picture (mobile/tokens/tokenIcon). */
-const TokenAssetRow = ({ t, usdBalance }: { t: Bsv21Balance; usdBalance: number }) => {
+const TokenAssetRow = ({ t, usdBalance, still }: { t: Bsv21Balance; usdBalance: number; still?: boolean }) => {
   const icon = useTokenIcon(t.id, getTokenName(t), t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON);
   return (
     <AssetRow
       animate
+      still={still}
       balance={Number(showAmount(t.all.confirmed, t.dec))}
       decimals={t.dec}
       showPointer={true}
@@ -174,7 +175,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
           style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
           onClick={() => onTokenClick(t)}
         >
-          <TokenAssetRow t={t} usdBalance={usdOf(t)} />
+          <TokenAssetRow t={t} usdBalance={usdOf(t)} still />
         </div>
       </TokenSwipe>
     );
