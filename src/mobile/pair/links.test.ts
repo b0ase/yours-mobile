@@ -3,7 +3,12 @@ import { describe, expect, mock, test } from 'bun:test';
 // Native app: a cold start hands the link over via getLaunchUrl, a warm one via appUrlOpen.
 const COLD = 'https://www.bwallet.space/pair?v=1&c=cold';
 let urlOpen: ((e: { url: string }) => void) | undefined;
-mock.module('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => true } }));
+// bun's mock.module is process-wide, so keep the real exports (registerPlugin etc.) for later test files.
+const realCore = await import('@capacitor/core');
+mock.module('@capacitor/core', () => ({
+  ...realCore,
+  Capacitor: { ...realCore.Capacitor, isNativePlatform: () => true },
+}));
 mock.module('@capacitor/app', () => ({
   App: {
     addListener: (ev: string, fn: (e: { url: string }) => void) => {
