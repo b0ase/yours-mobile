@@ -246,6 +246,7 @@ export type OpnsListing = { name: string; outpoint: string; origin: string; pric
 
 type Row = {
   outpoint?: string;
+  score?: number;
   data?: { ordlock?: { name?: string; origin?: string; price?: number; seller?: string; content_type?: string } };
 };
 
@@ -254,9 +255,13 @@ export const fetchOpnsListings = async (f: Fetch, url = OPNS_LISTINGS_URL): Prom
   const res = await f(url);
   if (!res.ok) throw new Error(`Listings unavailable (${res.status})`);
   const rows = ((await res.json().catch(() => null)) ?? []) as Row[];
+  return parseListingRows(Array.isArray(rows) ? rows : []);
+};
+
+const parseListingRows = (rows: Row[]): OpnsListing[] => {
   const out: OpnsListing[] = [];
   const seen = new Set<string>();
-  for (const r of Array.isArray(rows) ? rows : []) {
+  for (const r of rows) {
     const l = r.data?.ordlock;
     const name = (l?.name ?? '').trim().toLowerCase();
     const price = Number(l?.price);
@@ -272,6 +277,30 @@ export const fetchOpnsListings = async (f: Fetch, url = OPNS_LISTINGS_URL): Prom
     });
   }
   return out.sort((a, b) => a.priceSats - b.priceSats || a.name.localeCompare(b.name));
+};
+
+/**
+ * Every live OpNS listing: the indexer pages by descending score, `from=<last score>` gives the next page.
+ * Stops on an empty or non-advancing page, or after maxPages.
+ */
+export const fetchAllOpnsListings = async (f: Fetch, maxPages = 40): Promise<OpnsListing[]> => {
+  const rows: Row[] = [];
+  let from: number | null = null;
+  for (let i = 0; i < maxPages; i++) {
+    const res = await f(from === null ? OPNS_LISTINGS_URL : `${OPNS_LISTINGS_URL}&from=${from}`);
+    if (!res.ok) {
+      if (rows.length) break;
+      throw new Error(`Listings unavailable (${res.status})`);
+    }
+    const page = ((await res.json().catch(() => null)) ?? []) as Row[];
+    const fresh = (Array.isArray(page) ? page : []).filter(
+      (r) => typeof r.score === 'number' && (from === null || r.score < from),
+    );
+    if (!fresh.length) break;
+    rows.push(...fresh);
+    from = fresh[fresh.length - 1].score as number;
+  }
+  return parseListingRows(rows);
 };
 
 /** Search box: case-insensitive substring; a leading @ or $ is ignored. Exact match first. */
