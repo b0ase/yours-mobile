@@ -42,6 +42,12 @@ const BG = '#0d0e11';
 const CARD = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
+
+/** Height of the web wallet's beta banner when it is on screen (0 elsewhere). */
+const webBannerHeight = () =>
+  typeof document === 'undefined'
+    ? 0
+    : Math.round(document.querySelector('.bwallet-web-banner')?.getBoundingClientRect().height ?? 0);
 const GOLD = 'var(--bw-accent-hi)';
 const GREEN = '#32D583';
 const RED = '#F97066';
@@ -193,7 +199,8 @@ export const HistoryScreen = ({
         background: BG,
         color: '#fff',
         zIndex: inline ? undefined : 2000,
-        paddingTop: inline ? 0 : 'env(safe-area-inset-top)',
+        // Clear the web beta banner (it sits above every overlay), else it hides the close button.
+        paddingTop: inline ? 0 : `calc(env(safe-area-inset-top) + ${webBannerHeight()}px)`,
       }}
     >
       <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${LINE}` }}>
