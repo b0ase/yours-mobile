@@ -8,6 +8,8 @@ import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled } from '../storeBuild';
 import { TAB_TAP } from '../tabs/tabs';
 import { onTabRetap } from '../tabs/tabRetap';
+import { badgeText, walletBadgeLabel } from '../tabs/tabBadges';
+import { useTabBadges } from '../tabs/useTabBadges';
 import { setWalletKind } from '../wallet/walletKind';
 import { AddToDockSheet } from './AddToDockSheet';
 import { Dock } from './Dock';
@@ -504,9 +506,15 @@ const Shell = () => {
     }
   };
 
+  // Chat and Feed unread (tabs/tabBadges.ts). Wallet keeps only its rooms-to-set-up count: new tokens show in bMail.
+  const unread = useTabBadges();
   const badges = useMemo(
-    () => ({ 'screen:wallet': pending && indexingEnabled() ? String(pending) : undefined }),
-    [pending],
+    () => ({
+      'screen:wallet': pending && indexingEnabled() ? String(pending) : undefined,
+      'screen:chat': badgeText(unread.chat) || undefined,
+      'screen:feed': badgeText(unread.feed) || undefined,
+    }),
+    [pending, unread.chat, unread.feed],
   );
 
   return (
@@ -517,6 +525,10 @@ const Shell = () => {
           labels={LABELS}
           activeKey={current ? dockKey({ kind: 'screen', id: current.id }) : null}
           badges={badges}
+          badgeLabels={{
+            'screen:wallet':
+              pending && indexingEnabled() ? walletBadgeLabel(LABELS.wallet ?? 'Wallet', pending) : undefined,
+          }}
           onOpen={open}
           onHome={goHome}
           onAgent={() => navigate('/m/ask-b')}

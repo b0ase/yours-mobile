@@ -19,6 +19,7 @@ import type { OneSatContext } from '@1sat/actions';
 import {
   FEED_API,
   fetchByAddress,
+  fetchForYou,
   fetchByBap,
   fetchReplies,
   fetchTwetchReplies,
@@ -58,6 +59,7 @@ import {
   type MeKeys,
   type NotifyItem,
 } from './notify';
+import { clearChatBadges, setChatRooms, setFeedLatest } from '../tabs/tabBadges';
 import { loadPollState, pushItems, savePollState, setAsked, wasAsked, type PollState } from './store';
 
 export type Me = MeKeys & {
@@ -333,6 +335,8 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
   const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()), session);
   const rooms = await client.rooms();
   roomTickers = new Map(rooms.map((r) => [r.id, r.ticker]));
+  // Chat tab badge (tabs/tabBadges.ts): the server's unread counts, muted rooms dropped at display.
+  setChatRooms(rooms);
   // Watch the most recently active rooms on the realtime feed (capped there).
   roomFeed()?.setRooms(
     [...rooms]
@@ -368,6 +372,16 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
     }
     return counts;
   });
+}
+
+/** Feed tab badge: the For you list's newest post times, at most every FEED_BADGE_MS (it is six requests). */
+const FEED_BADGE_MS = 5 * 60_000;
+let feedCheckedAt = 0;
+async function feedBadge() {
+  if (Date.now() - feedCheckedAt < FEED_BADGE_MS) return;
+  feedCheckedAt = Date.now();
+  const posts = await fetchForYou();
+  setFeedLatest(posts.map((p) => p.at));
 }
 
 const outpointKey = (o: string) => o.replace('.', '_');
@@ -604,6 +618,7 @@ export async function pollNow(): Promise<void> {
       bchat(m, st, out),
       incoming(m, st, out),
       bmail(m, st, out),
+      feedBadge(),
     ]);
     savePollState(st);
     await deliver(out);
@@ -694,6 +709,8 @@ export function stopNotify() {
   unsubFeed?.();
   unsubFeed = null;
   roomTickers = new Map();
+  clearChatBadges();
+  feedCheckedAt = 0;
   void resumeSub?.remove();
   resumeSub = null;
   void tapSub?.remove();
