@@ -89,6 +89,7 @@ import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay, takePayAmount } from '../mobile/wallet/payNav';
 import { onWalletAction, takeWalletAction } from '../mobile/phone/walletAction';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
+import { HiddenTokens } from '../mobile/wallet/HiddenTokens';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
@@ -1696,6 +1697,7 @@ export const BsvWallet = () => {
               style={listItemStyle}
               onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))}
             />
+            <HiddenTokens tokens={bsv21s} style={listItemStyle} />
           </motion.div>
         </Show>
 
