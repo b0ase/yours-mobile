@@ -49,6 +49,7 @@
                 <data android:scheme="bwalletx" android:host="space" />
                 <data android:scheme="bwalletx" android:host="invite" />
                 <data android:scheme="bwalletx" android:host="room" />
+                <data android:scheme="bwalletx" android:host="xinvite" />
             </intent-filter>
 
         </activity>

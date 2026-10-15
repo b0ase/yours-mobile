@@ -429,3 +429,15 @@ export const BALANCE_CARDS_ENABLED: boolean = !(
  * updater from every other build (STORE-AUDIT.md lists its strings for the store grep).
  */
 export const DIRECT_UPDATE_ENABLED: boolean = import.meta.env.VITE_CHANNEL === 'android-direct';
+
+/**
+ * Room X invites (chat/xInvites.ts, XInvitesSheet, XInviteClaim): a room host pre-funds one-time keys with the
+ * gate token and hands each invitee a link that carries the key. Token transfers that admit someone to a token
+ * room, so bWalletX only (token rooms are off in a store build, STORE-AUDIT 2.1). Literal env check so Vite
+ * inlines it and Rollup drops the lazy chunks. Store grep: `x-invites|Whoever opens this link|bwx.xinvites`.
+ */
+export const XINVITES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
