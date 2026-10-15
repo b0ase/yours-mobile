@@ -91,6 +91,10 @@
 
 /* Flip control = the BSV card's own pen (.bw-wcard-penflip, right-centre), reused on every balance card. */
 .bw-bc .bw-wcard-penflip {
+  /* Right edge, halfway down, like the BSV card (owner, 15 Oct 2026); the skin's 'everything after me is
+     relative' rule must not pull it into the flow. */
+  position: absolute;
+  z-index: 3;
   color: var(--bc-ink, var(--bw-accent-hi, #ffd24d));
 }
 
