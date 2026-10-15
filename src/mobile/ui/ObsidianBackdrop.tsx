@@ -58,6 +58,7 @@ export const ObsidianBackdrop = ({
     <div
       aria-hidden
       data-pool={poolMode(!failed, still)}
+      data-pool-dark={colours ? undefined : ''}
       className={`${fixed ? 'fixed' : 'absolute'} inset-0 overflow-hidden pointer-events-none ${className}`}
       style={{ zIndex: -1, ...style }}
     >

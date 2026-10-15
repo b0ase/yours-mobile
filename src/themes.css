@@ -318,6 +318,12 @@
     .bg-\[var\(--bw-accent-lo\)\],
     .bw-wcard-getname,
     .askb-send,
+    .askb-bubble.user,
+    .bw-cdes-done,
+    .bw-idwarn-go,
+    .bw-mixer-base button.on,
+    .bw-sigpad-btns .is-primary,
+    .bw-bc-logo,
     .bw-wcard-unit button.is-on
   ) {
   background: var(--bw-tint) !important;
@@ -343,8 +349,8 @@
   --bw-wcard-ok: var(--bw-success);
 }
 :root[data-bw-tone='mono'] .bw-wcard-art {
-  opacity: 0.16;
-  filter: grayscale(1) !important;
+  opacity: 0.28;
+  filter: none !important;
 }
 :root[data-bw-tone='mono'] .bw-wcard-art-shade {
   background: none;
@@ -422,4 +428,43 @@
     :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, .bw-pack) *
   ):not(.bw-pack):not([style*='background: rgb(240, 68, 56)']):not([style*='background-color: rgb(240, 68, 56)']) {
   color: var(--bw-text) !important;
+}
+/* Screens over the dark obsidian pool (unlock, welcome, create, restore; ui/ObsidianBackdrop without a pack) keep
+   Gold's light-on-dark ink in every pack, so headings and labels never land dark on the dark art. */
+:root[data-bw-pack] :has(> [data-pool-dark]) {
+  --bw-pack-bg: #010101;
+  --bw-bg: #010101;
+  --bw-surface: #17191e;
+  --bw-tint: #1f2128;
+  --bw-text: #ffffff;
+  --bw-text-rgb: 255 255 255;
+  --bw-muted: #98a2b3;
+  --bw-card: #17191e;
+  --bw-card2: #1f2128;
+  --bw-line: #2b2f36;
+  color: #fff;
+}
+/* …and their accent buttons keep a solid accent fill with white ink (a Mono tint would carry white text). */
+:root[data-bw-tone='mono']
+  /* attribute repeated: outranks the Mono tint rule's :is() (its most specific entry is 0,2,1) */
+  :has(> [data-pool-dark][data-pool-dark][data-pool-dark])
+  :is(
+    .bw-pill-gold,
+    .yours-sheet-primary,
+    [style*='var(--bw-accent-hi), var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo), var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent)'],
+    [style*='background: var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent-lo)']
+  ) {
+  background: var(--bw-accent) !important;
+  color: var(--bw-on-accent) !important;
+  border-color: transparent !important;
+}
+:root[data-bw-tone='mono']
+  /* attribute repeated: outranks the Mono tint rule's :is() (its most specific entry is 0,2,1) */
+  :has(> [data-pool-dark][data-pool-dark][data-pool-dark])
+  :is(.bw-pill-gold, .yours-sheet-primary, [style*='background: var(--bw-accent'])
+  * {
+  color: var(--bw-on-accent) !important;
 }

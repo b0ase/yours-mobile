@@ -285,7 +285,11 @@ const WalletCardInner = ({
     const r = artMod?.resolveArt(design);
     return r ? { src: r.src, attribution: r.line } : null;
   }, [design, artMod, accentId]);
-  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || bavatarArt;
+  // Mono packs (owner, 15 Oct 2026): the default bAvatar art read as a grey smudge on the white card, so Mono
+  // draws its own card pattern in the pack's hue instead (an own picture or chosen design still shows).
+  const pack = accentById(accentId);
+  const monoArt = pack.group === 'mono' && bavatarArt ? patternUri(pack.pattern, pack.accent) : null;
+  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || monoArt || bavatarArt;
   const artAttribution = !cardImage && designArt?.attribution ? designArt.attribution : '';
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;
