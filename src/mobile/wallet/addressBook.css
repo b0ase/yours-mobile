@@ -253,3 +253,27 @@
 :root[data-bw-pack] .bw-abook :is([class*='text-[#98A2B3]'], [class*='text-[#98a2b3]']) {
   color: var(--bw-muted) !important;
 }
+/* Import / Export in the notebook header (wallet/AbookImport.tsx). */
+.bw-abook-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.bw-abook-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.35);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--bw-accent);
+  cursor: pointer;
+}
+.bw-abook-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

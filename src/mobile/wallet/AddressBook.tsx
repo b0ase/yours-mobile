@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { Download, Upload, X } from 'lucide-react';
 import { FriendsSection } from './FriendsSection';
+import { AddressBookImport } from './AddressBookImport';
+import { exportAddressBook } from './addressBookExport';
+import { useContacts } from '../chat/useContacts';
+import { useServiceContext } from '../../hooks/useServiceContext';
 import { closesAddressBook, opensAddressBook } from './addressBookGesture';
 import './addressBook.css';
 
@@ -13,6 +17,10 @@ import './addressBook.css';
  */
 export const AddressBook = ({ onClose }: { onClose: () => void }) => {
   const start = useRef<{ x: number; y: number } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const contacts = useContacts();
+  const { chromeStorageService } = useServiceContext();
+  const account = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', key);
@@ -38,12 +46,29 @@ export const AddressBook = ({ onClose }: { onClose: () => void }) => {
         <div className="bw-abook-page">
           <div className="bw-abook-head">
             <h2>Address book</h2>
+            <div className="bw-abook-actions">
+              <button type="button" className="bw-abook-action" onClick={() => setImporting(true)}>
+                <Download size={14} aria-hidden="true" /> Import
+              </button>
+              <button
+                type="button"
+                className="bw-abook-action"
+                disabled={!contacts.length}
+                onClick={() => void exportAddressBook(contacts, account)}
+              >
+                <Upload size={14} aria-hidden="true" /> Export
+              </button>
+            </div>
             <button type="button" className="bw-abook-close" aria-label="Close address book" onClick={onClose}>
               <X size={18} aria-hidden="true" />
             </button>
           </div>
           <div className="bw-abook-lines">
-            <FriendsSection />
+            {importing ? (
+              <AddressBookImport contacts={contacts} account={account} onBack={() => setImporting(false)} />
+            ) : (
+              <FriendsSection />
+            )}
           </div>
         </div>
       </div>
