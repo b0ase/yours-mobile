@@ -275,7 +275,7 @@ describe('store build has no Market', () => {
     expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{\(\) => setPortfolioOpen\(true\)\} change=\{change\} \/>/);
     expect(bar).toMatch(/import\('..\/portfolio\/PortfolioScreen'\)/);
     // All cards | Swap row (15 Oct 2026): Swap only when swapOn; All cards only with the balance cards (bWalletX).
-    expect(bar).toMatch(/swapRowButtons\(swapOn && !!SwapPromo, BALANCE_CARDS_ENABLED\)/);
+    expect(bar).toMatch(/swapRowButtons\(swapOn && !!SwapPromo, false\)/);
     // Permanent card (owner, 10 Oct 2026): no × and no dismissed flag, so nobody is left without a swap entry.
     const promo = src('./swap/SwapPromo.tsx');
     expect(promo).not.toMatch(/Hide the swap card|setDismissed|localStorage/);
