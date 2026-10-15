@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { avatarUrl } from './post';
+import { avatarSeed, avatarUrl } from './post';
+import { parseTreechatOverlayItem } from './peck';
 
 const TX = 'a'.repeat(64);
 
@@ -24,5 +25,33 @@ describe('avatarUrl', () => {
   it('drops empty and unsafe values', () => {
     for (const v of [null, undefined, '', '  ', 'javascript:alert(1)', 'data:text/html,x', 'T'])
       expect(avatarUrl(v)).toBeNull();
+  });
+});
+
+describe('Treechat avatar seed', () => {
+  const RELAY = '14aqJ2hMtENYJVCJaekcrqi12fiZJzoWGK';
+  it('two relay-signed posts with different MAP usernames get different seeds', () => {
+    const a = parseTreechatOverlayItem({
+      txid: TX,
+      app: 'treechat',
+      type: 'post',
+      content: 'hi',
+      author: RELAY,
+      display_name: 'SMART_SOY_RECORDINALS',
+    });
+    const b = parseTreechatOverlayItem({
+      txid: 'b'.repeat(64),
+      app: 'treechat',
+      type: 'post',
+      content: 'hi',
+      author: RELAY,
+      display_name: 'GaryM',
+    });
+    expect(a && b).toBeTruthy();
+    const sa = avatarSeed(a!.author, 'treechat');
+    const sb = avatarSeed(b!.author, 'treechat');
+    expect(sa).toBe('tc:smart_soy_recordinals');
+    expect(sb).toBe('tc:garym');
+    expect(sa).not.toBe(sb);
   });
 });
