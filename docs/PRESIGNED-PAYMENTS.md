@@ -317,3 +317,90 @@ Open items to resolve before step 1:
 2. ARC/Teranode reject non-final refund txs before T instead of holding them, and the wallet must not pre-broadcast.
 3. The exact claim fee rate the service budgets per set.
 4. The bit-sign session agrees the API in §5.
+
+---
+
+## 8. Step 1: mainnet proofs
+
+The goal is to answer the two blocking questions on mainnet, at a total cost of **3 SCAM and about 5,000 sats**, before any user funds are involved. Everything runs from a test script (`scripts/presign-proof.ts`, not shipped) using `@bsv/sdk` and `@1sat/templates`. Its keys come from a **fresh throwaway test seed** that is never used elsewhere. Keys come from env at runtime and are never committed.
+
+### 8.1 Setup
+
+| Item | Value |
+|---|---|
+| Test payer `P`, refund `R` | BRC-42 from the test seed, `protocolID [2,'bwalletx presign']`, keyIDs `proof:0`, `proof:0:refund` |
+| Test service `S` | separate throwaway key (stands in for the signer worker) |
+| Recipient | a test bWalletX identity's BRC-29 P2PKH |
+| Funding | 3 SCAM in one UTXO + 5,000 sats P2PKH to the test payer |
+| Deadline | `T = currentHeight + 3` for slot B (short, so the test finishes in about 30 min); `T = currentHeight + 1000` for slot A |
+
+Slot lock (from §1.3), with the BSV-21 envelope prefixed:
+
+```
+OP_FALSE OP_IF "ord" OP_1 "application/bsv-20" OP_0 {"p":"bsv-20","op":"transfer","id":"8353949b…98804_0","amt":"1"} OP_ENDIF
+OP_IF <S> OP_CHECKSIGVERIFY <P> OP_CHECKSIG
+OP_ELSE <LOCK_PREFIX> <HASH160(R)> <T> <LOCK_SUFFIX> OP_ENDIF
+```
+
+### 8.2 Transactions
+
+**TX0 (create).** Inputs: 3 SCAM UTXO and 5,000 sats.
+
+```
+out0  slot A  transfer amt 1  T=h+1000   1 sat
+out1  slot B  transfer amt 1  T=h+3      1 sat
+out2  transfer amt 1 → test payer P2PKH (token change)   1 sat
+out3  BSV change → test payer
+```
+
+Expected: TX0 is accepted by ARC. After indexing, the 1sat-stack BSV-21 API shows `out0` and `out1` as 1 SCAM each, owned by script (not burned), and `out2` as 1 SCAM to the payer. **Fail** if any output shows 0, or the token is marked invalid or burned.
+
+**TX1 (claim slot A, open-output path).**
+
+```
+in0  TX0:0   unlock <sigP 0xC2> <sigS 0x41> OP_TRUE
+in1  fee UTXO (service pool key)  0x41
+out0 transfer amt 1 → recipient P2PKH   1 sat
+out1 fee change
+```
+
+`sigP` is made first, over a tx that has a **different** out0 (to prove NONE leaves outputs open). It is then reused unchanged.
+
+Expected: accepted and mined. The indexer moves 1 SCAM to the recipient. This proves (a) the NONE pre-sig survives an output change, (b) the indexer accepts a BSV-21 spend out of the 2-of-2+covenant lock, and (c) the recipient output carries the inscription.
+
+**TX1-neg (local only, do not broadcast).** Same as TX1, but `sigP` uses `0xC3` SINGLE bound to a different out0. Expected: the `@bsv/sdk` interpreter rejects it. This shows SINGLE pins the output.
+
+**TX2 (early refund of slot B, non-final).** Built at height `< T`:
+
+```
+in0  TX0:1   unlock: Lock branch (sigR, R, preimage) OP_FALSE   nSequence 0xfffffffe
+in1  payer fee UTXO   nSequence 0xfffffffe
+out0 transfer amt 1 → payer P2PKH   1 sat
+out1 change
+nLockTime = T
+```
+
+Broadcast TX2 **before T** to:
+
+| Endpoint | Expected (to confirm) | Record |
+|---|---|---|
+| ARC `POST /v1/tx` | rejected as non-final (e.g. status 4xx, "non-final" / txStatus REJECTED), **not** stored to be mined later | exact HTTP status + body |
+| WhatsOnChain `POST /v1/bsv/main/tx/raw` | rejected (non-final / 64) | exact response |
+| Then re-query both after T | TX2 is **not** known to either (proves no silent holding) | GET tx by id |
+
+If either endpoint *holds* the tx and later mines it, that is still safe, because the covenant forbids mining it before T. But the wallet must then treat "broadcast before T" as allowed and track it. Write this down in the doc.
+
+**TX2b (local negative).** The same tx with `nLockTime = T − 1` fails the covenant in the interpreter. Expected: rejected locally.
+
+**TX3 (refund after T).** The same as TX2, rebuilt and broadcast at height `≥ T` by a **wallet restored from the test seed with the bit-sign signer stopped**. Expected: accepted and mined. The indexer shows 1 SCAM back with the payer. This proves recovery needs no server.
+
+**TX4 (race note, optional).** After T, try the claim for slot B (2-of-2 path) *after* TX3 is mined. Expected: rejected as a double-spend. This documents that first-mined wins.
+
+### 8.3 Pass criteria
+
+1. TX0, TX1 and TX3 are mined, and the indexer balances are correct at every step. The test ends with 1 SCAM at the recipient and 2 SCAM back at the payer, and **0 burned**.
+2. The responses to TX2 from ARC and WhatsOnChain are recorded verbatim in this doc.
+3. TX1-neg and TX2b fail in the interpreter.
+4. Total spend is under 5,000 sats.
+
+Any failure in item 1 blocks step 2 (Named Invites, owner only).
