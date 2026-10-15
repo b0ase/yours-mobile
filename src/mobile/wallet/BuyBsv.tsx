@@ -161,8 +161,8 @@ const AllCardsButtonImpl = () => (
     onClick={() => requestAllCards()}
     aria-label="All cards"
     title="All cards"
-    className="shrink-0 grow-0 w-[calc((100%-1rem)/3)] min-h-[52px] rounded-xl border flex items-center justify-center cursor-pointer"
-    style={{ background: 'var(--bw-surface)', borderColor: 'var(--bw-line)' }}
+    className="shrink-0 grow-0 w-[calc((100%-1rem)/3)] min-h-[52px] rounded-xl flex items-center justify-center cursor-pointer"
+    style={{ background: 'var(--bw-surface)' }}
   >
     <Layers size={22} color="var(--bw-accent-hi)" aria-hidden="true" />
   </button>

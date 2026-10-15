@@ -231,6 +231,7 @@ import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
 import { LIST_TYPES, THREAD_TYPES, useLive, useLiveHealth, useLiveTyping } from '../chat/live';
+import { useRoomFeed } from '../chat/roomFeed';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -532,6 +533,8 @@ const Conversation = ({
     enabled: !loading && !offScreen,
   });
   usePoll(poll, threadMs, !loading && !offScreen);
+  // Realtime inserts for this room (chat/roomFeed.ts): messages and join/leave events re-read now.
+  useRoomFeed(room.id, poll, !loading && !offScreen);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;

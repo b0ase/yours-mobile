@@ -29,6 +29,7 @@ import { parseBmapFeed, parseTwetchFeed, TWETCH_API, type FeedPost } from '../fe
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { isRoomMuted } from '../chat/listPrefs';
 import { liveHub } from '../chat/live';
+import { feedRowWantsPoll, roomFeed } from '../chat/roomFeed';
 import { subscribe as subscribeCalls } from '../calls/store';
 import { App } from '@capacitor/app';
 import { ONESAT, search, type SearchRow } from '../market/indexer';
@@ -73,6 +74,10 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let unsubCalls: (() => void) | null = null;
 let unsubLive: (() => void) | null = null;
+let unsubFeed: (() => void) | null = null;
+/** room id → ticker, from the last bChat room list (the feed's rows carry only room_id). */
+let roomTickers = new Map<string, string>();
+
 let resumeSub: { remove: () => Promise<void> } | null = null;
 let tapSub: { remove: () => Promise<void> } | null = null;
 
@@ -327,6 +332,13 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
   if (!session) return;
   const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()), session);
   const rooms = await client.rooms();
+  roomTickers = new Map(rooms.map((r) => [r.id, r.ticker]));
+  // Watch the most recently active rooms on the realtime feed (capped there).
+  roomFeed()?.setRooms(
+    [...rooms]
+      .sort((a, b) => (Date.parse(b.updated_at ?? '') || 0) - (Date.parse(a.updated_at ?? '') || 0))
+      .map((r) => r.id),
+  );
   const names = [...m.names, session.handle].filter(Boolean);
   await source(st, 'bchat.rooms', async (_seen, prev) => {
     const counts: Record<string, number> = {};
@@ -653,6 +665,21 @@ export function startNotify(next: Me) {
         release();
       };
     }
+    // Realtime room feed (the postgres_changes feed bChatX web uses): bit-sign never sends joins to
+    // the rt relay, so this is what brings "$mike joined" in seconds. Polling stays as the fallback.
+    const feed = roomFeed();
+    if (feed) {
+      const release = feed.acquire();
+      const off = feed.on(undefined, (row) => {
+        const handle = loadSession()?.handle;
+        const muted = (t: string) => !!handle && isRoomMuted(handle, t);
+        if (me && feedRowWantsPoll(row, (id) => roomTickers.get(id), muted)) schedule(1_500);
+      });
+      unsubFeed = () => {
+        off();
+        release();
+      };
+    }
   }
 }
 
@@ -664,6 +691,9 @@ export function stopNotify() {
   unsubCalls = null;
   unsubLive?.();
   unsubLive = null;
+  unsubFeed?.();
+  unsubFeed = null;
+  roomTickers = new Map();
   void resumeSub?.remove();
   resumeSub = null;
   void tapSub?.remove();
