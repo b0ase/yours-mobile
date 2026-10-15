@@ -1,13 +1,15 @@
 /**
  * Feed › bApps: one full-screen card per app in the bApps store (bapps.ts), snap scrolling like the bMovies reel.
- * Only the card on screen loads its live preview (a sandboxed, non-interactive frame of the site; apps that refuse
- * framing show their art). Open runs the app in the wallet's restricted bApp frame (bappFrame.ts).
+ * Cards are static (owner, 15 Oct 2026: the reel quit on iPhone while scrolling; a live third-party site per card
+ * was the heaviest thing in it). No iframe ever mounts in the reel: a live app runs only after Open, in the wallet's
+ * restricted bApp frame (bappFrame.ts). Each card: icon, name, one plain line, facts, then pages to swipe sideways
+ * (What it is / What you can do / How to start). Swipe up/down = next app; left/right = that app's pages.
  *
  * Buttons: Open, Comment (the app's bChatX page), Tip (to the builder), Contribute (open-source apps only: the repo
  * and "suggest an improvement"), Tokenise (the builder only, to the Launchpad prefilled; bWalletX only), Report.
  * Sorts: New, Most paid to builder, A–Z (helpers in bappsCards.ts).
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Code2, Flag, Lightbulb, MessageCircle, Play, Rocket } from 'lucide-react';
@@ -30,8 +32,11 @@ import {
   tokeniseQuery,
   type AppCard,
   type AppSort,
-  previewSandbox,
+  appFacts,
+  appPages,
+  swipeAxis,
 } from './bappsCards';
+import './bappsReel.css';
 import { useReel } from './useReel';
 import { inReelWindow, useAppVisible } from '../reelMemory';
 import { useInPeek } from '../../phone/pageEl';
@@ -75,6 +80,79 @@ const ContributeSheet = ({ c, onClose }: { c: AppCard; onClose: () => void }) =>
   );
 };
 
+/** An app's static pages, swiped left/right. Touches that turn out vertical lock the strip so the reel scrolls. */
+const Pages = ({ c }: { c: AppCard }) => {
+  const pages = appPages(c);
+  const [page, setPage] = useState(0);
+  const strip = useRef<HTMLDivElement>(null);
+  const start = useRef<{ x: number; y: number; axis: 'x' | 'y' | null } | null>(null);
+  const go = (n: number) => {
+    const el = strip.current;
+    if (el) el.scrollTo({ left: n * el.clientWidth });
+  };
+  return (
+    <div>
+      <div
+        ref={strip}
+        className="bw-bapps-pages"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setPage(Math.round(el.scrollLeft / Math.max(1, el.clientWidth)));
+        }}
+        onTouchStart={(e) => {
+          const t = e.touches[0];
+          start.current = { x: t.clientX, y: t.clientY, axis: null };
+        }}
+        onTouchMove={(e) => {
+          const s = start.current;
+          if (!s || s.axis) return;
+          const t = e.touches[0];
+          s.axis = swipeAxis(t.clientX - s.x, t.clientY - s.y);
+          if (s.axis === 'y' && strip.current) strip.current.dataset.lock = 'y';
+        }}
+        onTouchEnd={() => {
+          start.current = null;
+          if (strip.current) delete strip.current.dataset.lock;
+        }}
+        onTouchCancel={() => {
+          start.current = null;
+          if (strip.current) delete strip.current.dataset.lock;
+        }}
+      >
+        {pages.map((p) => (
+          <section
+            key={p.id}
+            className="bw-bapps-page rounded-2xl px-4 py-3"
+            style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.12)' }}
+          >
+            <div className="text-[12px] font-bold uppercase tracking-wide" style={{ color: GOLD }}>
+              {p.title}
+            </div>
+            {p.lines.map((l) => (
+              <p key={l} className="m-0 mt-1.5 text-[14px] leading-snug text-white">
+                {l}
+              </p>
+            ))}
+          </section>
+        ))}
+      </div>
+      <div className="mt-2 flex justify-center gap-1.5" role="tablist" aria-label={`${c.name} pages`}>
+        {pages.map((p, n) => (
+          <button
+            key={p.id}
+            role="tab"
+            aria-selected={page === n}
+            aria-label={p.title}
+            onClick={() => go(n)}
+            className="h-2 rounded-full"
+            style={{ width: page === n ? 18 : 8, background: page === n ? GOLD : 'rgba(255,255,255,0.35)' }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const AppSlide = ({
   c,
   i,
@@ -87,15 +165,14 @@ const AppSlide = ({
   c: AppCard;
   i: number;
   active: number;
-  /** False while the Feed page or the app is hidden: no preview, no art (reelMemory.ts). */
+  /** False while the Feed page or the app is hidden: nothing mounts (reelMemory.ts). */
   shown: boolean;
   mine: boolean;
   onContribute: () => void;
   onReport: () => void;
 }) => {
   const navigate = useNavigate();
-  // Only the card on screen loads a live preview; the next one waits.
-  const preview = shown && i === active && c.frameable;
+  // Only the card on screen and its neighbours mount content (at most 3); the rest are empty snap slots.
   const near = inReelWindow(i, active, shown);
   const open = () => {
     if (c.internal) return navigate(c.url);
@@ -108,96 +185,77 @@ const AppSlide = ({
       className="relative w-full overflow-hidden"
       style={{ height: '100%', scrollSnapAlign: 'start', background: BACKDROP }}
     >
-      {/* The app's art: always under the preview, so a blank or refused frame never shows grey. */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        {!near ? null : c.icon ? (
-          <img src={c.icon} alt="" decoding="async" className="h-28 w-28 rounded-3xl object-contain" />
-        ) : (
-          <span className="text-[56px] font-bold" style={{ color: GOLD }}>
-            {c.name}
-          </span>
-        )}
-      </div>
-      {preview && (
-        <iframe
-          title={`${c.name} preview`}
-          src={c.url}
-          sandbox={previewSandbox(c.url)}
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          tabIndex={-1}
-          aria-hidden="true"
-          className="absolute inset-0 h-full w-full border-0"
-          style={{ pointerEvents: 'none', background: 'transparent' }}
-        />
-      )}
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%]"
-        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.92), rgba(0,0,0,0))' }}
-      />
-      <button
-        onClick={onReport}
-        aria-label={`Report ${c.name}`}
-        className="absolute right-3 top-14 flex h-9 w-9 items-center justify-center rounded-full"
-        style={chipStyle}
-      >
-        <Flag size={15} />
-      </button>
-      <div className="absolute inset-x-0 bottom-0 px-4 pb-4">
-        <div className="flex items-center gap-2">
-          {c.icon && near && <img src={c.icon} alt="" decoding="async" className="h-9 w-9 rounded-xl object-contain" />}
-          <div className="min-w-0">
-            <div className="truncate text-[20px] font-extrabold text-white">
-              {c.name}
-              {c.demo && (
+      {near && (
+        <div className="absolute inset-0 flex flex-col justify-end gap-3 px-4 pb-4 pt-14">
+          <button
+            onClick={onReport}
+            aria-label={`Report ${c.name}`}
+            className="absolute right-3 top-14 flex h-9 w-9 items-center justify-center rounded-full"
+            style={chipStyle}
+          >
+            <Flag size={15} />
+          </button>
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-center">
+            {c.icon ? (
+              <img src={c.icon} alt="" decoding="async" className="h-24 w-24 rounded-3xl object-contain" />
+            ) : (
+              <span className="text-[44px] font-bold" style={{ color: GOLD }}>
+                b
+              </span>
+            )}
+            <div className="mt-3 text-[26px] font-extrabold text-white">{c.name}</div>
+            <p className="m-0 mt-1 max-w-[30ch] text-[15px] leading-snug text-white">{c.about}</p>
+            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+              {appFacts(c).map((f) => (
                 <span
-                  className="ml-2 rounded px-1.5 py-0.5 align-middle text-[10px] font-bold"
-                  style={{ background: '#2a2100', color: GOLD }}
+                  key={f}
+                  className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: 'rgba(255,255,255,0.08)', color: MUTED }}
                 >
-                  Demo
+                  {f}
                 </span>
-              )}
+              ))}
             </div>
-            <div className="truncate text-xs" style={{ color: MUTED }}>
+            <div className="mt-1.5 text-xs" style={{ color: MUTED }}>
               by {c.builder.name}
             </div>
           </div>
-        </div>
-        <p className="mb-3 mt-2 text-sm text-white">{c.verb}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={open}
-            className="flex items-center gap-1.5 rounded-full px-5 py-2 text-[14px] font-bold active:opacity-70"
-            style={{ background: GOLD, color: '#1a1300' }}
-          >
-            <Play size={15} /> Open
-          </button>
-          <button onClick={() => external(commentUrl(c))} className={chip} style={chipStyle}>
-            <MessageCircle size={15} /> Comment
-          </button>
-          {c.builder.paymail && (
-            <TipButton
-              to={{ name: c.builder.name, paymail: c.builder.paymail }}
-              context={{ kind: 'person' }}
-              className="!px-3 !py-2 !text-[13px]"
-            />
-          )}
-          {c.source && contributeLinks(c) && (
-            <button onClick={onContribute} className={chip} style={chipStyle}>
-              <Code2 size={15} /> Contribute
-            </button>
-          )}
-          {LAUNCH_ROUTE && mine && (
+          <Pages c={c} />
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => navigate(`${LAUNCH_ROUTE}${tokeniseQuery(c)}`)}
-              className={chip}
-              style={{ ...chipStyle, color: GOLD, borderColor: `${GOLD}88` }}
+              onClick={open}
+              className="flex items-center gap-1.5 rounded-full px-6 py-2.5 text-[15px] font-bold active:opacity-70"
+              style={{ background: GOLD, color: '#1a1300' }}
             >
-              <Rocket size={15} /> Tokenise
+              <Play size={15} /> Open
             </button>
-          )}
+            <button onClick={() => external(commentUrl(c))} className={chip} style={chipStyle}>
+              <MessageCircle size={15} /> Comment
+            </button>
+            {c.builder.paymail && (
+              <TipButton
+                to={{ name: c.builder.name, paymail: c.builder.paymail }}
+                context={{ kind: 'person' }}
+                className="!px-3 !py-2 !text-[13px]"
+              />
+            )}
+            {c.source && contributeLinks(c) && (
+              <button onClick={onContribute} className={chip} style={chipStyle}>
+                <Code2 size={15} /> Contribute
+              </button>
+            )}
+            {LAUNCH_ROUTE && mine && (
+              <button
+                onClick={() => navigate(`${LAUNCH_ROUTE}${tokeniseQuery(c)}`)}
+                className={chip}
+                style={{ ...chipStyle, color: GOLD, borderColor: `${GOLD}88` }}
+              >
+                <Rocket size={15} /> Tokenise
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

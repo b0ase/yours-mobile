@@ -1,0 +1,27 @@
+/* Feed › bApps reel only (BappsReel.tsx). Kept apart from the theme files. */
+.bw-bapps-pages {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  touch-action: pan-x pan-y;
+}
+.bw-bapps-pages::-webkit-scrollbar {
+  display: none;
+}
+.bw-bapps-pages[data-lock='y'] {
+  overflow-x: hidden;
+}
+.bw-bapps-page {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-bapps-pages {
+    scroll-behavior: auto;
+  }
+}
