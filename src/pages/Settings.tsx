@@ -1343,7 +1343,7 @@ export const Settings = () => {
               />
               <Button
                 theme={theme}
-                type="secondary"
+                type="primary"
                 label="Search"
                 disabled={!missingTokenValid || repairOutcome === 'running'}
                 onClick={() => void handleRepairSync([missingTokenId.trim()])}
@@ -1370,7 +1370,7 @@ export const Settings = () => {
               />
               <Button
                 theme={theme}
-                type="secondary"
+                type="primary"
                 label={recoveringTxid ? 'Checking…' : recoverFailedTxid ? 'Try again' : 'Recover'}
                 disabled={!/^[0-9a-fA-F]{64}$/.test(recoverTxid.trim()) || recoveringTxid}
                 onClick={() => void handleRecoverTxid()}
