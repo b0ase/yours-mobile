@@ -19,6 +19,8 @@ import { placeFirstFree, renameScreen, screenTitle } from './appScreens';
 import { nextPullHint, PULL_HINT_DELAY_MS, PULL_HINT_KEY, PULL_HINT_TEXT } from './pullHint';
 import { getAppScreens, setAppScreens, useAppScreens } from './appScreensStore';
 import {
+  bCloseReached,
+  bCloseStartOk,
   lockAxis,
   PAGE_SNAP_MS,
   pageRelease,
@@ -364,6 +366,62 @@ const Shell = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, reduce, count]);
+
+  // Swipe up on the b screen = close it, back to the screen it was opened from (owner, 15 Oct 2026): the mirror
+  // of the pull-down above, same distance. Never takes a scroll from b's chat (gesture.ts bCloseStartOk).
+  const goHomeRef = useRef(goHome);
+  goHomeRef.current = goHome;
+  useEffect(() => {
+    if (!pathname.startsWith('/m/ask-b')) return;
+    let d: { x: number; y: number; axis: 'x' | 'y' | null; dy: number } | null = null;
+    const down = (e: TouchEvent) => {
+      d = null;
+      if (e.touches.length !== 1 || sheetOnScreen()) return;
+      const t = e.target as Element | null;
+      if (!t) return;
+      const p = e.touches[0];
+      const sc = t.closest?.('.askb-pagepad, .askb-bubbles') as HTMLElement | null;
+      const ok = bCloseStartOk({
+        y: p.clientY,
+        viewportH: window.innerHeight,
+        scroll: sc ? { top: sc.scrollTop, height: sc.scrollHeight, client: sc.clientHeight } : null,
+        onField: !!t.closest?.(NO_SWIPE),
+      });
+      if (ok) d = { x: p.clientX, y: p.clientY, axis: null, dy: 0 };
+    };
+    const move = (e: TouchEvent) => {
+      const p = e.touches[0];
+      if (!d || !p) return;
+      const dy = p.clientY - d.y;
+      if (!d.axis) {
+        d.axis = lockAxis(p.clientX - d.x, dy);
+        if (!d.axis) return;
+        if (d.axis !== 'y' || dy > 0) return void (d = null); // sideways or down: not ours
+      }
+      d.dy = dy;
+    };
+    const up = () => {
+      const s = d;
+      d = null;
+      if (!s || s.axis !== 'y' || !bCloseReached(s.dy)) return;
+      // No animation: the route change is the motion, so reduced motion needs nothing extra.
+      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+      if (idx > 0) navigate(-1);
+      else goHomeRef.current();
+    };
+    document.addEventListener('touchstart', down, { passive: true });
+    document.addEventListener('touchmove', move, { passive: true });
+    document.addEventListener('touchend', up, { passive: true });
+    const cancel = () => void (d = null);
+    document.addEventListener('touchcancel', cancel, { passive: true });
+    return () => {
+      document.removeEventListener('touchstart', down);
+      document.removeEventListener('touchmove', move);
+      document.removeEventListener('touchend', up);
+      document.removeEventListener('touchcancel', cancel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   // Others (an app's details "Add to Dock") reach the shell by event.
   useEffect(() => {

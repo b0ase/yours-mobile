@@ -5,6 +5,7 @@ import type { FeedMedia, LinkEmbed } from './media';
 import { isOwnHost, ownLinkPreview, type OgPreview } from './unfurl';
 import { usePrefs } from '../settings/usePrefs';
 import { VideoEmbed } from './VideoEmbed';
+import { useAppVisible, useNearView } from './reelMemory';
 import { parseVideoLink } from './video-embed';
 
 /**
@@ -18,20 +19,6 @@ const MUTED = '#8a8f98';
 const PANEL = '#121316';
 
 const stop = (e: MouseEvent) => e.stopPropagation();
-
-/** True while the element is within ~1.5 screens of the viewport. */
-function useNearView<T extends Element>(): [React.RefObject<T>, boolean] {
-  const ref = useRef<T>(null);
-  const [near, setNear] = useState(true);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver(([e]) => setNear(e.isIntersecting), { rootMargin: '150% 0px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return [ref, near];
-}
 
 /** True while at least `threshold` of the element is on screen (for autoplay). */
 function useInView<T extends Element>(ref: React.RefObject<T>, enabled: boolean, threshold = 0.6): boolean {
@@ -144,9 +131,11 @@ export const VideoView = ({ m, blur }: { m: FeedMedia; blur: boolean }) => {
   const [ref, near] = useNearView<HTMLDivElement>();
   const inView = useInView(ref, autoplay && shown);
   const video = useRef<HTMLVideoElement>(null);
+  const appVisible = useAppVisible();
   useEffect(() => {
-    if (!near && playing) setPlaying(false); // unmounts the <video>, releasing its buffer
-  }, [near, playing]);
+    // Far off-screen, or the app went to the background: unmount the <video>, releasing its buffer.
+    if ((!near || !appVisible) && playing) setPlaying(false);
+  }, [near, appVisible, playing]);
   useEffect(() => {
     if (!autoplay || !shown) return;
     if (inView && !playing) {

@@ -1,9 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Dices, Moon, Palette, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
-import { DEFAULT_ACCENT, MORE_COLOURS, THEMES, accentById, type Accent, type AccentId } from './accents';
+import {
+  DEFAULT_ACCENT,
+  DUO_PACKS,
+  MORE_COLOURS,
+  SINGLE_PACKS,
+  THEMES,
+  accentById,
+  type Accent,
+  type AccentId,
+} from './accents';
 import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
-import { deriveMix, mixFromPack, type MixSpec } from './mixer';
+import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
+
+// Mix your own is open by default (owner, 15 Oct 2026: found it by accident when collapsed) and remembers the
+// user's own collapse for this session, so a remount of the sheet never snaps it shut mid-edit.
+let mixerOpen = true;
 
 type ThemeTab = 'colours' | 'card';
 
@@ -74,7 +87,9 @@ export function ThemeSheet({
 function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNode; onClose: () => void }) {
   const [current, setCurrent] = useState<AccentId>(() => loadAccent(account));
   const [mix, setMix] = useState<MixSpec>(() => loadMix(account) ?? mixFromPack(accentById(loadAccent(account))));
-  const [mixing, setMixing] = useState(() => loadAccent(account) === 'custom');
+  const [mixing, setMixingState] = useState(() => mixerOpen);
+  const setMixing = (act: Parameters<typeof nextMixerOpen>[1]) =>
+    setMixingState((open) => (mixerOpen = nextMixerOpen(open, act)));
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
@@ -85,7 +100,6 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
   const pick = (id: AccentId) => {
     saveAccent(account, id);
     setCurrent(id);
-    setMixing(false);
     if (id !== 'custom') setMix(mixFromPack(accentById(id)));
   };
   // Sliders paint live; the mix is saved when the finger lifts (and on Done), not on every frame.
@@ -102,7 +116,7 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
     pick(others[Math.floor(Math.random() * others.length)].id);
   };
   const surprise = () => {
-    setMixing(true);
+    setMixing('open');
     slide(surpriseMix(mix), true);
   };
   const corner = CORNERS.find((c) => c.radiusCard === derived.radiusCard)?.id;
@@ -127,21 +141,28 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           Surprise me
         </button>
       </div>
-      <div className="bw-pack-grid" role="radiogroup" aria-label="Theme packs">
-        {THEMES.map((a) => (
+      <p className="bw-theme-group">Single tones</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Single tones">
+        {SINGLE_PACKS.map((a) => (
+          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+        ))}
+      </div>
+      <p className="bw-theme-group">Duo-tones</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Duo-tones">
+        {DUO_PACKS.map((a) => (
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
         <PackTile
           a={derived}
           on={current === 'custom'}
           onPick={() => {
-            setMixing(true);
+            setMixing('open');
             slide(mix, true);
           }}
         />
       </div>
       <div className="bw-mixer" data-open={mixing ? '' : undefined}>
-        <button type="button" className="bw-mixer-head" aria-expanded={mixing} onClick={() => setMixing((m) => !m)}>
+        <button type="button" className="bw-mixer-head" aria-expanded={mixing} onClick={() => setMixing('toggle')}>
           <SlidersHorizontal size={18} aria-hidden="true" />
           <span>
             <b>Mix your own</b>

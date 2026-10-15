@@ -45,6 +45,8 @@ import {
   withTokenEvidence,
   type MarketActivity,
 } from '../../exchange/marketActivity';
+import { inReelWindow, useAppVisible, useReelDevLog, useReelVideo } from '../reelMemory';
+import { useInPeek } from '../../phone/pageEl';
 
 const GOLD = '#FFD24D';
 const MUTED = '#a3a8b0';
@@ -82,45 +84,52 @@ const Spark = ({ trades, up }: { trades: Trade[]; up: boolean }) => {
   );
 };
 
-const Art = ({ c, playing }: { c: TokenCard; playing: boolean }) => (
-  <div className="absolute inset-0 flex items-center justify-center" style={{ background: BACKDROP }}>
-    {c.icon?.startsWith('https://') ? (
-      <img src={c.icon} alt="" className="h-36 w-36 rounded-full object-cover" />
-    ) : (
-      <TokenIcon icon={c.icon} sym={c.ticker} size={144} />
-    )}
-    {c.video && playing && (
-      <>
-        <video
-          src={c.video}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        <span
-          className="absolute left-3 top-14 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
-          style={{ background: 'rgba(0,0,0,0.55)' }}
-        >
-          Advert made by the creator
-        </span>
-      </>
-    )}
-  </div>
-);
+/** Art only within the reel window (reelMemory.ts); further away the card is just its backdrop. */
+const Art = ({ c, near, playing }: { c: TokenCard; near: boolean; playing: boolean }) => {
+  const video = useReelVideo(playing);
+  return (
+    <div className="absolute inset-0 flex items-center justify-center" style={{ background: BACKDROP }}>
+      {!near ? null : c.icon?.startsWith('https://') ? (
+        <img src={c.icon} alt="" decoding="async" className="h-36 w-36 rounded-full object-cover" />
+      ) : (
+        <TokenIcon icon={c.icon} sym={c.ticker} size={144} />
+      )}
+      {c.video && playing && (
+        <>
+          <video
+            ref={video}
+            src={c.video}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <span
+            className="absolute left-3 top-14 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
+            style={{ background: 'rgba(0,0,0,0.55)' }}
+          >
+            Advert made by the creator
+          </span>
+        </>
+      )}
+    </div>
+  );
+};
 
 const TokenSlide = ({
   c,
   i,
   active,
+  shown,
   live,
   rate,
 }: {
   c: TokenCard;
   i: number;
   active: number;
+  shown: boolean;
   live: Live | undefined;
   rate: number;
 }) => {
@@ -132,7 +141,7 @@ const TokenSlide = ({
     'min-w-0 flex-1 basis-0 select-none rounded-md px-3 py-2.5 text-center text-[16px] font-extrabold uppercase tracking-[0.06em] active:opacity-70';
   return (
     <div data-i={i} className="relative w-full overflow-hidden" style={{ height: '100%', scrollSnapAlign: 'start' }}>
-      <Art c={c} playing={i === active} />
+      <Art c={c} near={inReelWindow(i, active, shown)} playing={shown && i === active} />
       <div
         className="pointer-events-none absolute inset-x-0 bottom-0 h-[60%]"
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.94), rgba(0,0,0,0))' }}
@@ -291,6 +300,10 @@ const BexReel = () => {
   const byId = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const sorted = order.map((id) => byId.get(id)).filter((c): c is TokenCard => !!c);
   const { box, style, active, toTop } = useReel(sorted.length);
+  const offScreen = useInPeek();
+  const appVisible = useAppVisible();
+  const shown = !offScreen && appVisible;
+  useReelDevLog('bExchange', shown ? sorted.filter((_, i) => inReelWindow(i, active)).length : 0);
 
   // Only the card on screen refreshes its price.
   const activeId = sorted[active]?.id;
@@ -319,7 +332,7 @@ const BexReel = () => {
           </p>
         )}
         {sorted.map((c, i) => (
-          <TokenSlide key={c.id} c={c} i={i} active={active} live={live[c.id]} rate={rate} />
+          <TokenSlide key={c.id} c={c} i={i} active={active} shown={shown} live={live[c.id]} rate={rate} />
         ))}
       </div>
       <div className="absolute inset-x-0 top-0 flex gap-2 overflow-x-auto px-3 pt-3" role="tablist" aria-label="Sort">

@@ -99,6 +99,9 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   stop2();
 
   stop();
+  // stop() leaves a handed-over channel open, and its socket reconnects 2 s after the relay drops it, through
+  // whatever WebSocket is global by then: a later test file's fake. Close it for good first.
+  site.disconnectPhone();
   // Close the phone's live sessions before the relay goes, so no reconnect timer outlives the test.
   for (const s of phone.pairedSites() as { c: string }[]) phone.forget(s.c, false);
   relay.close();
