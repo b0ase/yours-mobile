@@ -79,7 +79,7 @@ html.has-account-strip:root {
   top: calc(var(--wallet-inset-top) - var(--account-strip-height));
   height: var(--account-strip-height);
   background: var(--bw-bg);
-  border-bottom: 1px solid #1d1f24;
+  border-bottom: 1px solid var(--bw-line, #1d1f24);
   box-sizing: border-box;
 }
 
@@ -114,7 +114,7 @@ select {
   border: 0;
   border-radius: 22px;
   background: transparent;
-  color: #9ca3af;
+  color: var(--bw-muted, #9ca3af);
   font-size: 20px;
 }
 
@@ -140,7 +140,7 @@ select {
   padding: 24px 20px calc(env(safe-area-inset-bottom) + 20px);
   border-radius: 20px 20px 0 0;
   background: var(--bw-surface);
-  color: #fff;
+  color: var(--bw-text, #fff);
   font-family: Inter, system-ui, sans-serif;
   display: flex;
   flex-direction: column;
@@ -187,7 +187,7 @@ html.ww-on.ww-onb .yours-sheet {
   margin: 0 0 8px;
   font-size: 13px;
   line-height: 1.5;
-  color: #98a2b3;
+  color: var(--bw-muted, #98a2b3);
 }
 
 .yours-sheet-primary,
@@ -209,7 +209,7 @@ html.ww-on.ww-onb .yours-sheet {
 .yours-sheet-secondary {
   border: 1px solid #344054;
   background: none;
-  color: #fff;
+  color: var(--bw-text, #fff);
 }
 
 .yours-toast {
@@ -221,8 +221,8 @@ html.ww-on.ww-onb .yours-sheet {
   max-width: 85%;
   padding: 10px 16px;
   border-radius: 10px;
-  background: #2b2f36;
-  color: #fff;
+  background: var(--bw-card2, #2b2f36);
+  color: var(--bw-text, #fff);
   font:
     13px Inter,
     system-ui,
@@ -265,7 +265,7 @@ html.android [class*='overflow-auto']:not(:has(.fixed)) {
 html,
 body,
 #root {
-  background-color: #000;
+  background-color: var(--bw-pack-bg, #000);
 }
 
 .bw-balance {
@@ -276,7 +276,7 @@ body,
 .bw-label {
   font-size: 13px;
   font-weight: 500;
-  color: var(--bw-wcard-muted, #8e8e89);
+  color: var(--bw-wcard-muted, var(--bw-muted, #8e8e89));
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -285,7 +285,7 @@ body,
   font-family: 'Space Grotesk', Inter, system-ui, sans-serif;
   font-size: 44px !important;
   line-height: 1.05;
-  color: #f2f2f0 !important;
+  color: var(--bw-text, #f2f2f0) !important;
 }
 
 .bw-pill {
@@ -304,13 +304,13 @@ body,
 
 .bw-pill-outline {
   background: transparent !important;
-  border: 1px solid #3a3a3c !important;
-  color: #f2f2f0 !important;
+  border: 1px solid var(--bw-line, #3a3a3c) !important;
+  color: var(--bw-text, #f2f2f0) !important;
 }
 
 .bw-card {
   border-radius: 18px;
-  background: linear-gradient(180deg, #1b1d22, #131418);
+  background: linear-gradient(180deg, var(--bw-card, #1b1d22), var(--bw-card, #131418));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 0 0 1px #23252b;
@@ -564,11 +564,11 @@ body,
 .bw-idwarn-card {
   width: 100%;
   max-width: 420px;
-  background: #121316;
-  border: 1px solid #1f2127;
+  background: var(--bw-card, #121316);
+  border: 1px solid var(--bw-line, #1f2127);
   border-radius: 16px;
   padding: 18px 16px 12px;
-  color: #f2f2f0;
+  color: var(--bw-text, #f2f2f0);
 }
 .bw-idwarn-title {
   font-size: 16px;
@@ -577,7 +577,7 @@ body,
 }
 .bw-idwarn-body {
   font-size: 13px;
-  color: #b6b8be;
+  color: var(--bw-muted, #b6b8be);
   margin: 0 0 14px;
   line-height: 1.4;
 }
@@ -598,7 +598,7 @@ body,
 }
 .bw-idwarn-cancel {
   margin-top: 6px;
-  color: #b6b8be;
+  color: var(--bw-muted, #b6b8be);
   background: transparent;
 }
 .bw-wcard-mark {
@@ -670,14 +670,14 @@ body,
   line-height: 1;
   padding: 3px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.14);
   background: rgba(0, 0, 0, 0.28);
-  color: #f5f5f0;
+  color: var(--bw-text, #f5f5f0);
   cursor: pointer;
   animation: bw-live-in 220ms ease-out;
 }
 .bw-live-tick.is-out {
-  color: #ffb3b5;
+  color: var(--bw-text, #ffb3b5);
 }
 .bw-live-tick.is-in {
   color: #9ff0c0;
@@ -693,7 +693,7 @@ body,
   width: 34px;
   height: 3px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.15);
   overflow: hidden;
 }
 .bw-live-bar > span {
@@ -928,11 +928,11 @@ body,
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #121214;
+  background: var(--bw-card, #121214);
   border: 1px solid rgb(var(--bw-accent-hi-rgb) / 0.22);
   border-radius: 16px;
   padding: 14px;
-  color: #f2f2f0;
+  color: var(--bw-text, #f2f2f0);
 }
 /* Signature strip labels: like the "authorised signature" line on a bank card. */
 .bw-wcard-sig-cap {
@@ -1033,7 +1033,7 @@ body,
 .bw-sigpad-note {
   margin: 0;
   font-size: 11px;
-  color: var(--bw-wcard-muted, #8e8e89);
+  color: var(--bw-wcard-muted, var(--bw-muted, #8e8e89));
 }
 .bw-sigpad-btns {
   display: grid;
@@ -1044,9 +1044,9 @@ body,
 .bw-sigpad-menu button {
   font-size: 13px;
   font-weight: 700;
-  color: #f2f2f0;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--bw-text, #f2f2f0);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.16);
   border-radius: 999px;
   padding: 7px 14px;
   cursor: pointer;
@@ -1065,7 +1065,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #121214;
+  background: var(--bw-card, #121214);
   border-radius: 16px;
   padding: 14px;
 }
@@ -1386,13 +1386,13 @@ label:has(> .sr-only) {
    WKWebView, so they get their own (owner, 8 Oct 2026: Settings › Tax reports was black on dark grey). */
 select {
   color-scheme: dark;
-  color: #fff !important;
-  background-color: #1a1a1a !important;
+  color: var(--bw-text, #fff) !important;
+  background-color: var(--bw-card, #1a1a1a) !important;
 }
 select option,
 select optgroup {
-  color: #fff;
-  background-color: #1a1a1a;
+  color: var(--bw-text, #fff);
+  background-color: var(--bw-card, #1a1a1a);
 }
 /* Receive › Airdrops tab (src/mobile/airdrops/ReceiveTabs.tsx): hide the payment QR and copy row after it. */
 .bw-rcv-airdrop ~ * {
@@ -1423,7 +1423,7 @@ html.ww-on body {
   max-width: none !important;
   margin: 0 !important;
   padding: 0 !important;
-  background: #050505 !important;
+  background: var(--bw-pack-bg, #050505) !important;
   overflow: hidden;
 }
 html.ww-on body > .bwallet-web-banner {
@@ -1447,7 +1447,7 @@ html.ww-on.ww-onb body {
   display: flex;
   align-items: center;
   min-height: 100vh;
-  background: #050505 !important;
+  background: var(--bw-pack-bg, #050505) !important;
 }
 html.ww-on.ww-onb body #root {
   position: fixed;
@@ -1465,14 +1465,14 @@ html.ww-on.ww-onb body #root {
   padding: 0;
   transform: translateY(-50%);
   border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #050505 !important;
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  background: var(--bw-pack-bg, #050505) !important;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
   scrollbar-width: none;
 }
 /* Pure black, the phone flow's own background, so its logo tiles and headers don't show as boxes. */
 html.ww-on.ww-onb body #root {
-  background: #000 !important;
+  background: var(--bw-pack-bg, #000) !important;
 }
 /* The flow's wrappers fill the panel (min-height, so a tall step grows and scrolls instead of spilling above
    the top) and centre their content. They carry no background or frame of their own: one box, not two. */
@@ -1517,7 +1517,7 @@ html.ww-on body #root .absolute.bottom-0.z-\[9999\] {
   z-index: 0;
   overflow: hidden;
   font-family: Inter, system-ui, sans-serif;
-  color: #f2f2f0;
+  color: var(--bw-text, #f2f2f0);
   background:
     radial-gradient(900px 700px at 25% 40%, rgba(232, 184, 0, 0.14), transparent 65%),
     linear-gradient(90deg, rgba(5, 5, 5, 0.2) 0%, rgba(5, 5, 5, 0.75) 50%, rgba(5, 5, 5, 0.92) 100%);
@@ -1549,7 +1549,7 @@ html.ww-on body #root .absolute.bottom-0.z-\[9999\] {
   margin: 0 0 32px;
   font-size: clamp(17px, 1.4vw, 21px);
   line-height: 1.4;
-  color: #c9c9c4;
+  color: var(--bw-text, #c9c9c4);
 }
 .ww-auth-hero ul {
   list-style: none;
@@ -1570,7 +1570,7 @@ html.ww-on body #root .absolute.bottom-0.z-\[9999\] {
 }
 .ww-auth-hero li span {
   font-size: 14px;
-  color: #a5a5a0;
+  color: var(--bw-muted, #a5a5a0);
 }
 
 /* Wide auth panel: nothing until the flow mounts (an empty 30px frame showed for the first ~200ms). */
@@ -1598,7 +1598,7 @@ html.ww-on.ww-onb body #root:empty {
     ),
     radial-gradient(120% 90% at 0% 0%, rgba(42, 42, 44, 0.55) 0%, transparent 60%),
     linear-gradient(160deg, rgba(27, 27, 29, 0.78) 0%, rgba(11, 11, 12, 0.82) 55%, rgba(5, 5, 5, 0.86) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
   box-shadow:
     0 10px 24px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -1673,7 +1673,7 @@ button.bw-mail-card:active {
 }
 .bw-mail-seg {
   background: rgba(10, 10, 11, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.06);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -1686,13 +1686,13 @@ button.bw-mail-card:active {
   max-width: 62ch;
   font-size: 15px;
   line-height: 1.65;
-  color: #ecebe6;
+  color: var(--bw-text, #ecebe6);
 }
 /* Postage stamp: perforated edge (half-circle bites from a mask on a 3px band), inner frame in the stamp colour. */
 .bw-mail-stamp {
   display: inline-flex;
   padding: 3px;
-  background: color-mix(in srgb, currentColor 22%, #0b0b0c);
+  background: color-mix(in srgb, currentColor 22%, var(--bw-card, #0b0b0c));
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     radial-gradient(circle at center, transparent 1.6px, #000 1.9px) -3px -3px / 6px 6px;
@@ -1883,7 +1883,7 @@ button.bw-mail-card:active {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: var(--bw-bg);
-  color: #f2f2f0;
+  color: var(--bw-text, #f2f2f0);
 }
 .bw-cdes > * {
   width: 100%;
@@ -1910,7 +1910,7 @@ button.bw-mail-card:active {
   border: 0;
   border-radius: 22px;
   background: transparent;
-  color: #cfc8b6;
+  color: var(--bw-text, #cfc8b6);
   cursor: pointer;
 }
 .bw-cdes-card {
@@ -1922,7 +1922,7 @@ button.bw-mail-card:active {
   margin-top: 8px;
   overflow: hidden;
   border-radius: 18px;
-  background: #0b0b0c;
+  background: var(--bw-card, #0b0b0c);
   box-shadow:
     0 20px 60px rgb(0 0 0 / 0.6),
     inset 0 1px 0 rgb(255 255 255 / 0.08);
@@ -1959,13 +1959,13 @@ button.bw-mail-card:active {
 .bw-cdes-bal small {
   margin-top: 3px;
   font-size: 12px;
-  color: #b9b4a6;
+  color: var(--bw-muted, #b9b4a6);
 }
 .bw-cdes-hint {
   margin: 0;
   text-align: center;
   font-size: 12px;
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
 }
 .bw-cdes-controls {
   display: flex;
@@ -1980,7 +1980,7 @@ button.bw-mail-card:active {
   gap: 12px;
   min-height: 44px;
   font-size: 14px;
-  color: #cfc8b6;
+  color: var(--bw-text, #cfc8b6);
 }
 .bw-cdes-row input {
   width: 100%;
@@ -2001,7 +2001,7 @@ button.bw-mail-card:active {
   height: 22px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid #0b0a08;
+  border: 2px solid var(--bw-line, #0b0a08);
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
   cursor: pointer;
 }
@@ -2010,7 +2010,7 @@ button.bw-mail-card:active {
   height: 22px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid #0b0a08;
+  border: 2px solid var(--bw-line, #0b0a08);
   cursor: pointer;
 }
 .bw-cdes-picture {
@@ -2046,7 +2046,7 @@ button.bw-mail-card:active {
   display: flex;
   padding: 3px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.06);
 }
 .bw-cdes-seg button {
   flex: 1;
@@ -2054,7 +2054,7 @@ button.bw-mail-card:active {
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -2120,7 +2120,7 @@ button.bw-mail-card:active {
   border: 0;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  color: var(--bw-text, #fff);
   cursor: pointer;
 }
 .bw-cdes-libbusy {
@@ -2132,14 +2132,14 @@ button.bw-mail-card:active {
   flex-basis: 100%;
   margin: 0;
   font-size: 13px;
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
 }
 .bw-cdes-note,
 .bw-cdes-imgerr {
   flex-basis: 100%;
   margin: 0;
   font-size: 12px;
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
 }
 .bw-cdes-imgerr {
   color: #f97066;
@@ -2170,7 +2170,7 @@ button.bw-mail-card:active {
 }
 .bw-cdes-reset {
   background: transparent;
-  color: #cfc8b6;
+  color: var(--bw-text, #cfc8b6);
 }
 .bw-cdes-reset:disabled {
   opacity: 0.4;
@@ -2357,7 +2357,7 @@ button.bw-mail-card:active {
   display: block;
   width: 100%;
   height: 100%;
-  background: radial-gradient(circle at 30% 25%, var(--bw-accent) 0%, #8a6400 45%, #0b0b0c 100%);
+  background: radial-gradient(circle at 30% 25%, var(--bw-accent) 0%, #8a6400 45%, var(--bw-card, #0b0b0c) 100%);
 }
 .bw-cdes-vidbadge {
   position: absolute;
@@ -2383,7 +2383,7 @@ button.bw-mail-card:active {
   align-items: center;
   gap: 12px;
   padding: calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
-  background: #070605;
+  background: var(--bw-pack-bg, #070605);
   overflow-y: auto;
 }
 .bw-cdes-frame > * {
@@ -2394,7 +2394,7 @@ button.bw-mail-card:active {
   width: calc(100% + 32px);
   max-width: none;
   margin: 0 -16px;
-  background: #000;
+  background: var(--bw-pack-bg, #000);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2416,7 +2416,7 @@ button.bw-mail-card:active {
   gap: 10px;
   color: var(--bw-accent);
   font-size: 14px;
-  background: radial-gradient(circle at 50% 40%, rgb(var(--bw-accent-rgb) / 0.25), #0b0b0c 70%);
+  background: radial-gradient(circle at 50% 40%, rgb(var(--bw-accent-rgb) / 0.25), var(--bw-card, #0b0b0c) 70%);
 }
 .bw-cdes-framebar {
   display: flex;
@@ -2431,7 +2431,7 @@ button.bw-mail-card:active {
   min-width: 44px;
   text-align: right;
   font-size: 12px;
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2547,7 +2547,7 @@ button.bw-mail-card:active {
   gap: 12px;
   padding: 14px;
   border-radius: 18px;
-  background: #0d0e11;
+  background: var(--bw-card, #0d0e11);
   border: 1px solid rgb(var(--bw-accent-rgb) / 0.3);
 }
 .bw-theme-pv-row {
@@ -2574,7 +2574,7 @@ button.bw-mail-card:active {
   font-size: 14px;
 }
 .bw-theme-pv-text small {
-  color: #98a2b3;
+  color: var(--bw-muted, #98a2b3);
   font-size: 12px;
 }
 .bw-theme-pv-chip {
@@ -2592,7 +2592,7 @@ button.bw-mail-card:active {
 .bw-theme-pv-tabs span {
   padding: 6px 12px;
   border-radius: 999px;
-  color: #d0d5dd;
+  color: var(--bw-text, #d0d5dd);
   font-size: 12px;
   font-weight: 600;
 }
@@ -2651,9 +2651,9 @@ button.bw-mail-card:active {
   min-height: 44px;
   padding: 12px 6px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: #f2f2f0;
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.03);
+  color: var(--bw-text, #f2f2f0);
   cursor: pointer;
 }
 .bw-theme-swatch.is-on {
@@ -2701,11 +2701,11 @@ button.bw-mail-card:active {
 .bw-cdes-tile {
   position: relative;
   padding: 0;
-  border: 1px solid #2b2f36;
+  border: 1px solid var(--bw-line, #2b2f36);
   border-radius: 10px;
   overflow: hidden;
   background: var(--bw-surface);
-  color: #e6e6e3;
+  color: var(--bw-text, #e6e6e3);
   cursor: pointer;
   aspect-ratio: 1.586;
 }
@@ -2744,7 +2744,7 @@ button.bw-mail-card:active {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #e6e6e3;
+  color: var(--bw-text, #e6e6e3);
 }
 .bw-cdes-toggle input {
   accent-color: var(--bw-accent);
@@ -2773,12 +2773,12 @@ button.bw-mail-card:active {
   gap: 8px;
   margin: 6px 0;
   font-size: 14px;
-  color: #fff;
+  color: var(--bw-text, #fff);
 }
 .bw-cdes-pack h4 small {
   font-size: 11px;
   font-weight: 500;
-  color: #a6a6a1;
+  color: var(--bw-muted, #a6a6a1);
 }
 .bw-cdes-unlock {
   display: inline-flex;
@@ -2817,7 +2817,7 @@ button.bw-mail-card:active {
   padding: 1px 4px;
   border-radius: 4px;
   background: rgb(0 0 0 / 0.7);
-  color: #fff;
+  color: var(--bw-text, #fff);
 }
 .bw-cdes-mock {
   align-self: flex-start;
@@ -2837,7 +2837,7 @@ button.bw-mail-card:active {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #e6e6e3;
+  color: var(--bw-text, #e6e6e3);
 }
 .bw-cdes-subrow button {
   border: 1px solid var(--bw-accent);
@@ -2860,7 +2860,7 @@ button.bw-mail-card:active {
 .bw-cdes-confirm > div {
   width: min(480px, 100%);
   background: var(--bw-surface);
-  color: #fff;
+  color: var(--bw-text, #fff);
   border-radius: 18px 18px 0 0;
   padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
   display: flex;
@@ -2932,5 +2932,226 @@ button.bw-mail-card:active {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #a6a6a1;
+  color: var(--bw-muted, #a6a6a1);
+}
+
+/* Theme packs + colour mixer (Theme → App colours, owner 15 Oct 2026). Tiles draw in their own pack's colours. */
+.bw-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 520px;
+}
+.bw-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 10px;
+  border: 1px solid;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.bw-pack:active {
+  transform: scale(0.97);
+}
+.bw-pack-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: none;
+}
+.bw-pack-bar {
+  display: flex;
+  justify-content: space-between;
+}
+.bw-pack-bar i {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+}
+.bw-pack-card {
+  display: flex;
+  align-items: flex-end;
+  height: 44px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.bw-pack-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border: 1px solid;
+  border-radius: 8px;
+}
+.bw-pack-row > i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+}
+.bw-pack-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.bw-pack-row em {
+  display: block;
+  height: 3px;
+  width: 80%;
+  border-radius: 2px;
+}
+.bw-pack-row small {
+  font-size: 9px;
+  font-weight: 700;
+}
+.bw-pack-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.bw-pack-btns span {
+  padding: 4px 0;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.bw-pack-nav {
+  display: flex;
+  justify-content: space-around;
+  padding: 5px 0 3px;
+  border-top: 1px solid;
+  margin: 0 -8px;
+}
+.bw-pack-nav i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.bw-pack-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 14px;
+}
+.bw-pack-blurb {
+  font-size: 11px;
+  line-height: 1.25;
+}
+.bw-mixer {
+  width: 100%;
+  max-width: 520px;
+  border: 1px solid var(--bw-line, #2b2f36);
+  border-radius: 16px;
+  background: var(--bw-card, #0b0b0c);
+}
+.bw-mixer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bw-mixer-head span {
+  display: flex;
+  flex-direction: column;
+}
+.bw-mixer-head small,
+.bw-mixer-group small,
+.bw-mixer-note {
+  color: var(--bw-muted, #98a2b3);
+  font-size: 12px;
+}
+.bw-mixer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+.bw-mixer-base {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.bw-mixer-base button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--bw-line, #2b2f36);
+  background: var(--bw-card2, #17191e);
+  color: inherit;
+  font-weight: 600;
+}
+.bw-mixer-base button.on {
+  background: var(--bw-accent);
+  color: var(--bw-on-accent);
+  border-color: var(--bw-accent);
+}
+.bw-mixer-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.bw-mixer-group legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.bw-mixer-sw {
+  display: flex;
+}
+.bw-mixer-sw i {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin-left: -4px;
+  box-shadow: 0 0 0 2px var(--bw-card, #0b0b0c);
+}
+.bw-mixer-row {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.bw-mixer-row input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  border-radius: 14px;
+  outline-offset: 3px;
+  touch-action: pan-y;
+}
+.bw-mixer-row input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid rgb(0 0 0 / 0.55);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
+}
+.bw-mixer-row input[type='range']::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid rgb(0 0 0 / 0.55);
 }

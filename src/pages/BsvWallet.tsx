@@ -93,6 +93,7 @@ import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
 import { isMainnetAddress } from '../mobile/names/address';
 import { rememberSent } from '../mobile/wallet/send/sendLogic';
+import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -514,6 +515,7 @@ export const BsvWallet = () => {
   const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
     saveLastBalance(identityAddress, satoshis);
+    publishBalance('bsv', satoshis / 100_000_000, 'BSV');
     setBalanceKnown(true);
     setBalanceFailed(false);
     setBalanceLoading(false);
