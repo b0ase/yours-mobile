@@ -1,4 +1,3 @@
-import { OPNS_PROFILE_DOMAIN } from '../../names/config';
 import { isOurDomain } from '../../names/names';
 import { keyFingerprint } from '../identityLine';
 
@@ -9,6 +8,9 @@ import { keyFingerprint } from '../identityLine';
  * DIFFERENT name this wallet has paid or saved as a contact. Pure helpers plus a small local store.
  */
 
+/** Canonical bWalletX domain for comparisons (not imported from names/config: some tests mock that module). */
+const OUR_DOMAIN = 'bwalletx.com';
+
 /** A paymail this wallet knows: paid before or saved as a contact. */
 export type KnownPayee = { paymail: string; label: string; avatar?: string };
 
@@ -17,7 +19,7 @@ export const canonPaymail = (target: string): string => {
   const t = (target || '').trim().toLowerCase().replace(/^\$/, '');
   const m = t.match(/^([^@\s]+)@([a-z0-9.-]+\.[a-z]{2,})$/);
   if (!m) return '';
-  return `${m[1]}@${isOurDomain(m[2]) || m[2] === OPNS_PROFILE_DOMAIN ? OPNS_PROFILE_DOMAIN : m[2]}`;
+  return `${m[1]}@${isOurDomain(m[2]) || m[2] === OUR_DOMAIN ? OUR_DOMAIN : m[2]}`;
 };
 
 const CHAR: Record<string, string> = { '0': 'o', '1': 'l', i: 'l', '5': 's', '2': 'z', '8': 'b', '9': 'g', q: 'g' };
