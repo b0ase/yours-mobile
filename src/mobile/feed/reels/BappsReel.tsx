@@ -32,6 +32,8 @@ import {
   type AppSort,
 } from './bappsCards';
 import { useReel } from './useReel';
+import { inReelWindow, useAppVisible } from '../reelMemory';
+import { useInPeek } from '../../phone/pageEl';
 
 const GOLD = '#FFD24D';
 const MUTED = '#a3a8b0';
@@ -76,6 +78,7 @@ const AppSlide = ({
   c,
   i,
   active,
+  shown,
   mine,
   onContribute,
   onReport,
@@ -83,13 +86,16 @@ const AppSlide = ({
   c: AppCard;
   i: number;
   active: number;
+  /** False while the Feed page or the app is hidden: no preview, no art (reelMemory.ts). */
+  shown: boolean;
   mine: boolean;
   onContribute: () => void;
   onReport: () => void;
 }) => {
   const navigate = useNavigate();
   // Only the card on screen loads a live preview; the next one waits.
-  const preview = i === active && c.frameable;
+  const preview = shown && i === active && c.frameable;
+  const near = inReelWindow(i, active, shown);
   const open = () => {
     if (c.internal) return navigate(c.url);
     if (IS_EXTENSION) return void chrome.tabs.create({ url: c.url });
@@ -103,8 +109,8 @@ const AppSlide = ({
     >
       {/* The app's art: always under the preview, so a blank or refused frame never shows grey. */}
       <div className="absolute inset-0 flex items-center justify-center">
-        {c.icon ? (
-          <img src={c.icon} alt="" className="h-28 w-28 rounded-3xl object-contain" />
+        {!near ? null : c.icon ? (
+          <img src={c.icon} alt="" decoding="async" className="h-28 w-28 rounded-3xl object-contain" />
         ) : (
           <span className="text-[56px] font-bold" style={{ color: GOLD }}>
             {c.name}
@@ -138,7 +144,7 @@ const AppSlide = ({
       </button>
       <div className="absolute inset-x-0 bottom-0 px-4 pb-4">
         <div className="flex items-center gap-2">
-          {c.icon && <img src={c.icon} alt="" className="h-9 w-9 rounded-xl object-contain" />}
+          {c.icon && near && <img src={c.icon} alt="" decoding="async" className="h-9 w-9 rounded-xl object-contain" />}
           <div className="min-w-0">
             <div className="truncate text-[20px] font-extrabold text-white">
               {c.name}
@@ -200,6 +206,9 @@ const BappsReel = () => {
   const me = useMe();
   const cards = useMemo(() => sortApps(appCards(BAPPS.filter((a) => !(STORE_BUILD && a.privateOnly))), sort), [sort]);
   const { box, style, active, toTop } = useReel(cards.length);
+  const offScreen = useInPeek();
+  const appVisible = useAppVisible();
+  const shown = !offScreen && appVisible;
   const [contributing, setContributing] = useState<AppCard | null>(null);
   const [reporting, setReporting] = useState<AppCard | null>(null);
   return (
@@ -211,6 +220,7 @@ const BappsReel = () => {
             c={c}
             i={i}
             active={active}
+            shown={shown}
             mine={!!me && isBuilder(c.builder, me.names)}
             onContribute={() => setContributing(c)}
             onReport={() => setReporting(c)}
