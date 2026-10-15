@@ -135,6 +135,7 @@ export type ExchangeView =
   | { tab: 'launchpad' }
   | { tab: 'launch' }
   | { tab: 'more' }
+  | { tab: 'photos' }
   | { tab: 'platforms' }
   | { tab: 'platform'; slug: string }
   | { tab: 'trade'; id: string };
@@ -156,6 +157,7 @@ export const exchangeView = (rest: string): ExchangeView => {
   if (seg === 'podcasts') return { tab: 'podcasts' };
   if (seg === 'launchpad') return segs[1] === 'new' ? { tab: 'launch' } : { tab: 'launchpad' };
   if (seg === 'collectibles') return { tab: 'more' };
+  if (seg === 'photos') return { tab: 'photos' };
   const id = decodeURIComponent(seg).replace('.', '_');
   if (TOKEN_ID.test(id)) return { tab: 'trade', id: id.toLowerCase() };
   return { tab: 'markets' };
