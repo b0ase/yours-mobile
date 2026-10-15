@@ -5,6 +5,7 @@ import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
 import { getState, pauseAudio, playQueue, subscribe, toggle, type Track } from './player';
+import { YourPodcasts } from '../bradio/YourPodcasts';
 import { FEATURED_TRACKS, featuredQueue, HEADLINE_ALBUM, type FeaturedTrack } from './featured/featured';
 import { VEXVOID_STILLS } from './featured/stills';
 import { StillsBanner } from './featured/StillsBanner';
@@ -648,6 +649,7 @@ const MediaPage = () => {
           />
         ) : (
           <>
+            {showMusic && <YourPodcasts />}
             {showMusic && hero && view !== 'list' && (
               <section
                 className="relative overflow-hidden flex flex-col lg:flex-row lg:items-center gap-5 lg:gap-8 p-4 md:p-6"

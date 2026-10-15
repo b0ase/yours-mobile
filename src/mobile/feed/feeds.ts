@@ -1,7 +1,7 @@
 /**
  * The Feed picker: which feeds exist, their colours, the scrolling row and the swipe order.
  *
- * The row at the top of Feed scrolls left / right: Home (Following | For you), the basic suite (bMovies red,
+ * The row at the top of Feed scrolls left / right: Home (Following | For you), bApps (the app reel), the basic suite (bMovies red,
  * bNews green, bMusic blue), then the user's pins (any feed, in pin order), then every other $b* bApp in a
  * fixed order, then "All feeds" (a sheet listing every feed, bApps then Other, where any feed is pinned,
  * unpinned and reordered). Ventures are in the row only when pinned. Pins persist per device. Swiping the feed
@@ -11,8 +11,11 @@
  * local for now; GET https://www.bchatx.com/api/public/bapps will replace it (see BAPPS_API).
  * bMovies is bWalletX only: its entry is behind BMOVIES_FEED_ENABLED so a store build has none of it.
  * Adult-leaning brands (cherryx, aigf) are left out of every build.
+ * bMail and bDrive are not feeds: bMail is personal (or spam-filtered commercial) mail, in the top-bar mailbox
+ * only; bDrive is personal storage (a public file-download feed is a malware risk). Old saved 'bmail' /
+ * 'bdrive' pins are dropped by cleanPins because they are no longer FeedIds in FEEDS.
  */
-import { BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 /** A feed id: the built-in 'home' (Following | For you inside) or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
 export type FeedId = string;
@@ -22,7 +25,7 @@ export type FeedGroup = 'core' | 'bapps' | 'other';
 export type FeedDef = { id: FeedId; label: string; hint: string; group: FeedGroup; color: string };
 
 /** Feeds with their own view in FeedPage; everything else is a generic bChatX brand-account feed. */
-export const CUSTOM_VIEWS: readonly FeedId[] = ['home', 'bnews', 'bmovies'];
+export const CUSTOM_VIEWS: readonly FeedId[] = ['home', 'bapps', 'bnews', 'bmovies', 'bexchange'];
 
 /** Old saved ids for Home's filters (before Following and For you were one chip) → 'home'. */
 export const LEGACY_HOME_IDS: readonly string[] = ['following', 'foryou'];
@@ -45,10 +48,12 @@ export const FEED_COLORS: Record<FeedId, string> = {
   b3d: '#12A594',
   bbooks: '#A18072',
   writer: '#E2B6FF',
+  // bMail is not a feed (it lives in the top-bar mailbox); its colour stays for its icon.
   bmail: '#0090FF',
   bsocial: '#D6409F',
   bphotos: '#FFB224',
   bpaint: '#FF8DCC',
+  // Not a feed either (personal storage); colour kept for its icon.
   bdrive: '#7CE2FE',
   bsheets: '#46A758',
   bcal: '#FF6369',
@@ -72,9 +77,12 @@ export const feedColor = (id: FeedId): string => FEED_COLORS[id] ?? GOLD;
 type Entry = [slug: string, label: string, hint?: string];
 
 const BMOVIES_ENTRY: Entry[] = BMOVIES_FEED_ENABLED ? [['bmovies', 'bMovies', 'Clips from bmovies.app']] : [];
+/** Feed › bExchange is the token reel: bWalletX only (BEX_REEL_ENABLED), so a store build has no entry. */
+const BEX_ENTRY: Entry[] = BEX_REEL_ENABLED ? [['bexchange', 'bExchange', 'Every token, one card each']] : [];
 
 /** The $b* apps, by bChatX brand slug. */
 const BAPP_ENTRIES: Entry[] = [
+  ['bapps', 'bApps', 'Apps people build: open, tip, improve'],
   ...BMOVIES_ENTRY,
   ['bnews', 'bNews', 'Headlines to discuss'],
   ['bmusic', 'bMusic', 'New releases'],
@@ -84,16 +92,14 @@ const BAPP_ENTRIES: Entry[] = [
   ['bphotos', 'bPhotos'],
   ['bbooks', 'bBooks'],
   ['writer', 'bWriter'],
-  ['bmail', 'bMail'],
   ['bsocial', 'bSocial'],
   ['bpaint', 'bPaint'],
-  ['bdrive', 'bDrive'],
   ['bsheets', 'bSheets'],
   ['bcal', 'bCal'],
   ['bmaps', 'bMaps'],
   ['bjobs', 'bJobs'],
   ['bedu', 'bEdu'],
-  ['bexchange', 'bExchange'],
+  ...BEX_ENTRY,
   ['bmarket', 'bMarket'],
   ['bdns', 'bDNS'],
   ['bfile', 'bFile'],
@@ -101,7 +107,6 @@ const BAPP_ENTRIES: Entry[] = [
   ['bbrowser', 'bBrowser'],
   ['bitcoincode', 'bCode'],
   ['bitcoinos', 'Bitcoin OS'],
-  ['bapps', 'bApps'],
 ];
 
 /** Ventures and the rest, by bChatX brand slug. cherryx and aigf are deliberately absent. */
@@ -166,8 +171,8 @@ export const feedGroups = (feeds: readonly FeedDef[] = FEEDS) => [
   { id: 'other' as const, label: 'Other', feeds: feeds.filter((f) => f.group === 'other') },
 ];
 
-/** Always at the front of the row: Home, then the red / green / blue suite. */
-export const FIXED_ROW: readonly FeedId[] = ['home', 'bmovies', 'bnews', 'bmusic'];
+/** Always at the front of the row: Home, then bApps (owner, 15 Oct 2026), then the red / green / blue suite. */
+export const FIXED_ROW: readonly FeedId[] = ['home', 'bapps', 'bmovies', 'bnews', 'bmusic'];
 
 /** The fixed order of the other $b* bApps in the row, after the pins (any bApp not listed follows, in FEEDS order). */
 export const BAPP_ROW_ORDER: readonly FeedId[] = [
@@ -178,12 +183,10 @@ export const BAPP_ROW_ORDER: readonly FeedId[] = [
   'bphotos',
   'bbooks',
   'writer',
-  'bmail',
   'bsocial',
   'bchatx',
   'bexchange',
   'bjobs',
-  'bdrive',
   'bsheets',
   'bcal',
   'bitcoincode',

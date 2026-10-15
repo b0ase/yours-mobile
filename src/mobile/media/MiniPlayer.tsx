@@ -18,13 +18,27 @@ const MiniPlayer = () => {
       style={{ bottom: '4rem' }}
     >
       <div className="flex items-center gap-2">
-        <Music size={16} className="shrink-0" style={{ color: '#A1FF8B' }} />
-        <div className="flex-1 min-w-0">
+        {track.artwork ? (
+          <img src={track.artwork} alt="" className="w-8 h-8 rounded-md object-cover shrink-0" />
+        ) : (
+          <Music size={16} className="shrink-0" style={{ color: '#A1FF8B' }} />
+        )}
+        <button
+          type="button"
+          className="flex-1 min-w-0 text-left bg-transparent border-0 p-0"
+          style={{ cursor: track.onExpand ? 'pointer' : 'default' }}
+          onClick={track.onExpand}
+          disabled={!track.onExpand}
+          aria-label={track.onExpand ? `Open ${track.title}` : undefined}
+        >
           <div className="text-xs font-semibold text-white truncate">{track.title}</div>
-          <div className="text-[10px] text-[#98A2B3]">
-            {fmt(s.time)} / {fmt(s.duration)} · {s.index + 1} of {s.queue.length}
+          <div className="text-[10px] text-[#98A2B3] truncate">
+            {fmt(s.time)} / {fmt(s.duration)}
+            {s.queue.length > 1 ? ` · ${s.index + 1} of ${s.queue.length}` : ''}
+            {track.subtitle ? ` · ${track.subtitle}` : ''}
+            {track.label ? ` · ${track.label}` : ''}
           </div>
-        </div>
+        </button>
         <button aria-label="Previous" className={btn} onClick={previous}>
           <SkipBack size={16} color="#fff" />
         </button>
