@@ -440,3 +440,12 @@
   color: #fff;
   cursor: pointer;
 }
+
+/* Value cards (owner, 15 Oct 2026): the fiat/BSV switch sits in the BSV card's corner, not inside the pen's gutter. */
+.bw-bc .bw-wcard-bottom {
+  margin-right: -36px;
+}
+.bw-bc .bw-wcard-sats {
+  color: var(--bc-ink);
+  opacity: 0.75;
+}
