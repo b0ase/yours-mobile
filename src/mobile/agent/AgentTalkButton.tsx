@@ -3,7 +3,7 @@ import { HoldRing, TalkSheetView } from './TalkVisuals';
 import { useHoldToTalk } from './useHoldToTalk';
 import { voiceNote } from './voiceText';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 /**
  * Push-to-talk in Ask b's chat bar (owner, 12 Oct 2026): the Dock's round gold ring, scaled to the bar, with a mic
@@ -56,7 +56,7 @@ export const AgentTalkButton = ({
         {...handlers}
         className="relative shrink-0 h-10 w-10 rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
-          background: '#010101',
+          background: 'var(--bw-bg)',
           boxShadow: `0 0 0 2px ${GOLD}, 0 4px 12px rgba(0,0,0,0.6)`,
           transform: phase === 'pressing' ? 'scale(0.94)' : listening ? 'scale(1.06)' : undefined,
           WebkitTouchCallout: 'none',

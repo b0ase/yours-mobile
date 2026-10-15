@@ -235,7 +235,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       type="button"
                       onClick={() => onType(r.didYouMean!)}
                       className="mt-1 text-xs font-semibold border-0 bg-transparent p-0 cursor-pointer"
-                      style={{ color: '#FFD24D' }}
+                      style={{ color: 'var(--bw-accent-hi)' }}
                     >
                       Did you mean {r.didYouMean}? (a bWalletX name)
                     </button>
@@ -260,7 +260,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                   type="button"
                   onClick={() => confirm(r)}
                   className="w-full py-2 rounded-lg text-sm font-semibold border-0 cursor-pointer"
-                  style={{ background: '#FFD24D', color: '#000' }}
+                  style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
                 >
                   Send to this name
                 </button>

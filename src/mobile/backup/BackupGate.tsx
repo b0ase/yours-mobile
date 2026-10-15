@@ -108,7 +108,7 @@ export const BackupGate = ({ sats }: { sats: number }) => {
                 void markBackupChecked(chromeStorageService);
               }}
               className="flex-1 rounded-lg py-2 text-sm font-bold border-0"
-              style={{ background: '#F5B800', color: '#000' }}
+              style={{ background: 'var(--bw-accent)', color: '#000' }}
             >
               Yes, I have it
             </button>

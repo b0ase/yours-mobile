@@ -28,7 +28,7 @@ const webPip = (() => {
   }
 })();
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 
@@ -87,7 +87,7 @@ const Tile = ({
       className="relative h-full w-full overflow-hidden rounded-2xl flex items-center justify-center cursor-pointer"
       style={{
         background: bg,
-        boxShadow: speaking ? `0 0 0 3px ${GOLD}, 0 0 24px rgba(255,210,77,.45)` : `0 0 0 1px ${LINE}`,
+        boxShadow: speaking ? `0 0 0 3px ${GOLD}, 0 0 24px rgb(var(--bw-accent-hi-rgb) / .45)` : `0 0 0 1px ${LINE}`,
         transition: 'box-shadow .15s',
       }}
       aria-label={`$${p.handle}`}
@@ -146,7 +146,11 @@ const Tile = ({
           aria-hidden="true"
           onError={avatar ? undefined : fallBackToLocal(p.handle)}
           className="absolute left-2 top-2 z-10 rounded-full object-cover"
-          style={{ width: face2, height: face2, boxShadow: '0 0 0 2px rgba(255,210,77,.6), 0 2px 8px rgba(0,0,0,.6)' }}
+          style={{
+            width: face2,
+            height: face2,
+            boxShadow: '0 0 0 2px rgb(var(--bw-accent-hi-rgb) / .6), 0 2px 8px rgba(0,0,0,.6)',
+          }}
           draggable={false}
         />
       )}
@@ -169,7 +173,9 @@ const Tile = ({
           style={{
             width: face,
             height: face,
-            boxShadow: speaking ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}` : '0 0 0 2px rgba(255,210,77,.35)',
+            boxShadow: speaking
+              ? `0 0 0 3px #010101, 0 0 0 6px ${GOLD}`
+              : '0 0 0 2px rgb(var(--bw-accent-hi-rgb) / .35)',
           }}
         />
       )}

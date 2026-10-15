@@ -15,7 +15,7 @@ import { isPremiumName, nameTierUsd } from './tiers';
  */
 
 const BG = '#07080a';
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.7)';
 const HAIR = 'rgba(244,241,232,0.14)';

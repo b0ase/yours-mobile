@@ -81,12 +81,12 @@
   color: #f2f2f0;
 }
 .bwx-bapp-sections > button.on {
-  background: rgba(255, 210, 77, 0.12);
-  color: #ffd24d;
+  background: rgb(var(--bw-accent-hi-rgb) / 0.12);
+  color: var(--bw-accent-hi);
   font-weight: 700;
 }
 .bwx-bapp-sections > button:focus-visible {
-  outline: 2px solid #ffd24d;
+  outline: 2px solid var(--bw-accent-hi);
   outline-offset: 1px;
 }
 .bwx-bapp-foot {

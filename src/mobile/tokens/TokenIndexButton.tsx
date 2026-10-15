@@ -36,14 +36,14 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
   return (
     <div
       className="mx-4 mb-4 flex flex-col gap-2 rounded-2xl px-4 py-3"
-      style={{ background: '#17191E', border: '1px solid #3a2f0c' }}
+      style={{ background: 'var(--bw-surface)', border: '1px solid #3a2f0c' }}
     >
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
         The 1Sat indexer has stopped validating ${ticker} until its fee balance is topped up, so it can't be listed or
         sent as verified. Paying {money(s.total.totalSats, s.rate)} funds it for every holder.
       </p>
       {s.needs && s.freeNote && (
-        <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>
+        <p className="text-[11px] font-semibold m-0" style={{ color: 'var(--bw-accent-hi)' }}>
           {s.freeNote}
         </p>
       )}
@@ -53,7 +53,7 @@ const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker:
           disabled={s.busy}
           onClick={s.start}
           className="h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
-          style={{ background: '#FFD24D', color: '#000' }}
+          style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
         >
           <Sparkles size={15} />
           {`Index $${ticker} · ${money(s.total.totalSats, s.rate)} (${s.total.totalSats.toLocaleString()} sats${s.total.feeSats > 0 ? ' incl. bCorp setup' : ''})`}

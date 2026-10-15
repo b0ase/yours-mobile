@@ -232,7 +232,7 @@ export const NftDetail = ({
           </button>
         )}
         {burned || burning ? null : sent ? (
-          <div className="flex flex-col gap-1 rounded-xl bg-[#17191E] p-3">
+          <div className="flex flex-col gap-1 rounded-xl bg-[var(--bw-surface)] p-3">
             <span className="text-sm font-semibold text-[#A1FF8B]">Sent to {sent.name}</span>
             <a
               href={`https://whatsonchain.com/tx/${sent.txid}`}
@@ -246,7 +246,7 @@ export const NftDetail = ({
         ) : onChain === false && pending ? (
           <PendingCard />
         ) : onChain === false ? (
-          <div className="rounded-xl bg-[#17191E] p-3 text-xs text-[#F5B800]">
+          <div className="rounded-xl bg-[var(--bw-surface)] p-3 text-xs text-[color:var(--bw-accent)]">
             Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent or
             burned. Nothing on chain needs burning.
           </div>
@@ -254,12 +254,12 @@ export const NftDetail = ({
           <button
             onClick={() => setSending(true)}
             className={`${btn} text-[#010101]`}
-            style={{ background: '#F5B800' }}
+            style={{ background: 'var(--bw-accent)' }}
           >
             <Send size={16} /> Send
           </button>
         ) : (
-          <div className="flex flex-col gap-2 rounded-xl bg-[#17191E] p-3">
+          <div className="flex flex-col gap-2 rounded-xl bg-[var(--bw-surface)] p-3">
             <div className="text-xs font-semibold text-[#98A2B3]">Who gets it?</div>
             <NameInput
               theme={theme}
@@ -281,7 +281,7 @@ export const NftDetail = ({
               disabled={!button.enabled}
               onClick={() => void send()}
               className={`${btn} w-full text-[#010101] disabled:opacity-40`}
-              style={{ background: '#FFD24D' }}
+              style={{ background: 'var(--bw-accent-hi)' }}
             >
               <Send size={16} /> {button.label}
             </button>
@@ -300,7 +300,7 @@ export const NftDetail = ({
           </div>
         )}
         {burned ? (
-          <div className="flex flex-col gap-1 rounded-xl bg-[#17191E] p-3">
+          <div className="flex flex-col gap-1 rounded-xl bg-[var(--bw-surface)] p-3">
             <span className="text-sm font-semibold text-[#F97066]">Burned</span>
             <a
               href={`https://whatsonchain.com/tx/${burned}`}
@@ -321,7 +321,7 @@ export const NftDetail = ({
             <Flame size={16} /> Burn
           </button>
         ) : (
-          <div className="flex flex-col gap-3 rounded-xl border border-[#F97066]/40 bg-[#17191E] p-3">
+          <div className="flex flex-col gap-3 rounded-xl border border-[#F97066]/40 bg-[var(--bw-surface)] p-3">
             <div className="flex items-center gap-3">
               {item.kind === 'images' ? (
                 <img src={item.url} alt="" className="h-12 w-12 rounded-lg object-cover" />

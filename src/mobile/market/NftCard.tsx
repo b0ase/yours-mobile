@@ -163,11 +163,11 @@ export type CardItem = {
 
 const Box3dPlaceholder = ({ name }: { name: string }) => (
   <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 text-center">
-    <Box size={34} style={{ color: '#F5B800' }} />
+    <Box size={34} style={{ color: 'var(--bw-accent)' }} />
     <span className="text-[11px] font-semibold text-white line-clamp-2 break-words">{name}</span>
     <span
       className="rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
-      style={{ background: '#2b2f36', color: '#F5B800' }}
+      style={{ background: '#2b2f36', color: 'var(--bw-accent)' }}
     >
       3D
     </span>
@@ -195,7 +195,7 @@ const Model3dTile = ({ item }: { item: CardItem }) => {
       {body}
       <span
         className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-        style={{ background: '#000000aa', color: '#F5B800' }}
+        style={{ background: '#000000aa', color: 'var(--bw-accent)' }}
       >
         <Box size={10} /> 3D
       </span>
@@ -219,7 +219,7 @@ export const NftCard = ({
   const src = contentUrls(item.origin)[0];
   const [videoRef, videoNear] = useNearViewport<HTMLDivElement>('200px');
   return (
-    <div className="flex flex-col rounded-xl overflow-hidden bg-[#17191E] border border-white/5">
+    <div className="flex flex-col rounded-xl overflow-hidden bg-[var(--bw-surface)] border border-white/5">
       <div
         className="relative w-full bg-[#0b0c0f]"
         style={{ aspectRatio: '1/1' }}
@@ -260,11 +260,11 @@ export const NftCard = ({
         {item.category === 'documents' && (
           // No thumbnails for documents: file icon, title and a type badge. Tap opens it via ORDFS.
           <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3 text-center">
-            <FileText size={34} style={{ color: '#FFD24D' }} />
+            <FileText size={34} style={{ color: 'var(--bw-accent-hi)' }} />
             <span className="text-[11px] font-semibold text-white line-clamp-2 break-words">{item.name}</span>
             <span
               className="rounded-md px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
-              style={{ background: '#2b2f36', color: '#FFD24D' }}
+              style={{ background: '#2b2f36', color: 'var(--bw-accent-hi)' }}
             >
               {documentLabel(item.contentType) ?? 'DOC'}
             </span>

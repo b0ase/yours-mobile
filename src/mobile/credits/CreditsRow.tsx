@@ -39,7 +39,7 @@ import { ErrorActions } from '../errors/ErrorActions';
  * has a token id + treasury configured, the row says "coming soon". The balance loads on its own:
  * the wallet signs in to bit-sign silently with its key, so the user never signs in.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';

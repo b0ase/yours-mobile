@@ -25,8 +25,8 @@ import { isPremiumName, nameTierUsd } from './store/tiers';
  * bMint › OpNS names › Owned names (bWalletX; the store edition shows OpnsGiftSection): Gift and Sell. Tick names, "List selected for $1", one approval, then each name is
  * listed in turn (OrdLock v2, sellOpns) with progress; the queue is saved so a closed window can Resume.
  */
-const GOLD = '#FFD24D';
-const GOLD_DIM = 'rgba(255,210,77,0.14)';
+const GOLD = 'var(--bw-accent-hi)';
+const GOLD_DIM = 'rgb(var(--bw-accent-hi-rgb) / 0.14)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.58)';
 const HAIR = 'rgba(255,255,255,0.08)';
@@ -200,7 +200,7 @@ export const OpnsSellSection = (p: {
       className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3"
       style={{
         background: CARD_BG,
-        border: `1px solid ${showProgress || chosen.length ? 'rgba(255,210,77,0.28)' : HAIR}`,
+        border: `1px solid ${showProgress || chosen.length ? 'rgb(var(--bw-accent-hi-rgb) / 0.28)' : HAIR}`,
       }}
     >
       <header className="flex items-center justify-between gap-3">
@@ -315,7 +315,7 @@ export const OpnsSellSection = (p: {
                     checked={on}
                     disabled={running || !!gifting}
                     onChange={() => toggle(o.name)}
-                    className="w-4 h-4 shrink-0 accent-[#FFD24D] cursor-pointer disabled:cursor-not-allowed"
+                    className="w-4 h-4 shrink-0 accent-[color:var(--bw-accent-hi)] cursor-pointer disabled:cursor-not-allowed"
                     aria-label={`Select ${o.name}`}
                   />
                   <span className="font-medium break-all" style={{ color: listed ? MUTED : TEXT }}>
@@ -429,7 +429,7 @@ export const OpnsSellSection = (p: {
         <button
           type="button"
           className={`${goldBtn} w-full py-3 text-[14px]`}
-          style={{ background: 'transparent', color: GOLD, border: `1px solid rgba(255,210,77,0.45)` }}
+          style={{ background: 'transparent', color: GOLD, border: `1px solid rgb(var(--bw-accent-hi-rgb) / 0.45)` }}
           disabled={!ctx || !chosenAll.length || running}
           onClick={() => setGifting(chosenAll)}
         >

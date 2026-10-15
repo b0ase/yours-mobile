@@ -2,7 +2,7 @@ import { B_HOLD_MS, type BHoldPhase } from '../phone/gesture';
 import { levelToBars } from '../spaces/levelMeter';
 import type { TalkSheet } from './holdToTalk';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
 
 /** The talk sheet above a held b: level bars, live transcript and the hint line (Dock and Ask b composer). */

@@ -5,9 +5,12 @@ import { App } from './App';
 import { ServiceProvider } from './contexts/providers/ServiceProvider';
 import { ThemeProvider } from './contexts/providers/ThemeProvider';
 import './index.css';
+import { applyBootAccent } from './mobile/theme/accent';
 global.Buffer = Buffer;
 global.process = process;
 window.Buffer = Buffer;
+// App accent (Theme → App colours) before the first paint: the extension popup/side panel and the web edition.
+applyBootAccent();
 
 // After a web deploy, an open tab asks for old chunk/CSS hashes that no longer exist ("Refused to apply style …
 // MIME type text/plain"). Reload once to pick up the new build; a session flag stops a reload loop.

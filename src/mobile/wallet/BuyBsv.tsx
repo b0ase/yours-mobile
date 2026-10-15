@@ -1,3 +1,4 @@
+import { fetchSeries } from '../portfolio/market';
 import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -17,7 +18,7 @@ import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { HistoryButton } from './HistoryButton';
 import { formatUSD } from '../../utils/format';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
 /** Live BSV price for the bar (re-read every minute while shown). */
@@ -53,7 +54,10 @@ export const BuyBsvCard = ({
     type="button"
     onClick={onClick}
     className={`flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer ${className}`}
-    style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+    style={{
+      background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+      color: 'var(--bw-on-accent)',
+    }}
   >
     <span className="text-base font-extrabold">Buy BSV</span>
     <span className="text-sm font-bold">
@@ -95,17 +99,14 @@ const useDayChange = (rate: number): number | null => {
   useEffect(() => {
     if (dayAgoCache) return;
     let live = true;
-    const now = Math.floor(Date.now() / 1000);
-    fetch(`https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical?from=${now - 3 * 86400}&to=${now}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: { rate: number; time: number }[]) => {
-        const target = now - 86400;
-        const best = rows
-          .filter((r) => r.rate > 0)
-          .sort((a, b) => Math.abs(a.time - target) - Math.abs(b.time - target))[0];
+    // Cached CoinGecko/WhatsOnChain series (portfolio/market.ts), not a direct WoC call (CORS-blocked on errors).
+    fetchSeries('bsv', '1W', Date.now() - 7 * 86400_000)
+      .then((pts) => {
+        const target = Date.now() - 86400_000;
+        const best = [...pts].sort((x, y) => Math.abs(x.t - target) - Math.abs(y.t - target))[0];
         if (best && live) {
-          dayAgoCache = best.rate;
-          setDayAgo(best.rate);
+          dayAgoCache = best.p;
+          setDayAgo(best.p);
         }
       })
       .catch(() => undefined);
@@ -126,7 +127,7 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
     onClick={onOpen}
     aria-label="BSV price"
     className={`${CELL} flex-col leading-tight`}
-    style={{ background: '#17191E', borderColor: '#2b2f36', color: '#fff' }}
+    style={{ background: 'var(--bw-surface)', borderColor: '#2b2f36', color: '#fff' }}
   >
     <span className="text-[15px] font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
     {change == null ? (
@@ -195,9 +196,9 @@ export const BsvPriceBar = ({
           onClick={BUY_CRYPTO_ENABLED ? () => setOpen(true) : onReceive}
           className={`${CELL} text-sm font-extrabold`}
           style={{
-            background: 'linear-gradient(135deg, #de973f, #f9dd63)',
-            borderColor: '#f5b80066',
-            color: '#1a1300',
+            background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+            borderColor: 'rgb(var(--bw-accent-rgb)/0.4)',
+            color: 'var(--bw-on-accent)',
           }}
         >
           {BUY_CRYPTO_ENABLED ? 'Buy BSV' : 'Receive'}
@@ -281,7 +282,7 @@ const Row = ({
     type="button"
     onClick={onClick}
     className="flex items-center gap-3 w-full p-3 rounded-xl text-left border-0 cursor-pointer"
-    style={{ background: '#17191E', color: '#fff' }}
+    style={{ background: 'var(--bw-surface)', color: '#fff' }}
   >
     <span style={{ color: GOLD }}>{icon}</span>
     <span className="flex-1 min-w-0">

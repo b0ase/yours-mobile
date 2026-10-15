@@ -41,7 +41,7 @@ type Done = { launch: Launch; supply: string; roomError: boolean; indexError: st
  * the coin's Exchange page. Signing is the active account's own wallet (apiContext); nothing is
  * broadcast before Allow.
  */
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 
@@ -234,7 +234,10 @@ export const LaunchCoin = () => {
         {icon ? (
           <img src={icon.url} alt="" className="h-10 w-10 rounded-lg object-cover" />
         ) : (
-          <span className="h-10 w-10 rounded-lg flex items-center justify-center" style={{ background: '#17191E' }}>
+          <span
+            className="h-10 w-10 rounded-lg flex items-center justify-center"
+            style={{ background: 'var(--bw-surface)' }}
+          >
             <ImagePlus size={18} />
           </span>
         )}

@@ -8,7 +8,7 @@
   --ww-line-2: rgba(255, 255, 255, 0.14);
   --ww-text: #f2f2f0;
   --ww-muted: #8e8e89;
-  --ww-gold: #ffd24d;
+  --ww-gold: var(--bw-accent-hi);
   --ww-gold-2: #e0a92a;
   --ww-green: #34d399;
   --ww-red: #f87171;
@@ -58,7 +58,7 @@
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(80% 60% at 70% 0%, rgba(255, 210, 77, 0.06), transparent 60%),
+    radial-gradient(80% 60% at 70% 0%, rgb(var(--bw-accent-hi-rgb) / 0.06), transparent 60%),
     linear-gradient(180deg, rgba(1, 1, 1, 0.78), rgba(1, 1, 1, 0.9));
   pointer-events: none;
 }
@@ -164,7 +164,7 @@ kbd {
   color: var(--ww-text);
 }
 .ww-nav button.on {
-  background: linear-gradient(90deg, rgba(255, 210, 77, 0.14), rgba(255, 210, 77, 0.03));
+  background: linear-gradient(90deg, rgb(var(--bw-accent-hi-rgb) / 0.14), rgb(var(--bw-accent-hi-rgb) / 0.03));
   color: var(--ww-text);
   box-shadow: inset 2px 0 0 var(--ww-gold);
 }
@@ -359,9 +359,9 @@ kbd {
   margin-left: 6px;
 }
 .ww-chip.gold {
-  border-color: rgba(255, 210, 77, 0.4);
+  border-color: rgb(var(--bw-accent-hi-rgb) / 0.4);
   color: var(--ww-gold);
-  background: rgba(255, 210, 77, 0.08);
+  background: rgb(var(--bw-accent-hi-rgb) / 0.08);
 }
 .ww-av {
   display: inline-grid;
@@ -383,7 +383,7 @@ kbd {
 .ww-av.talking {
   box-shadow:
     0 0 0 2px var(--ww-gold),
-    0 0 18px rgba(255, 210, 77, 0.4);
+    0 0 18px rgb(var(--bw-accent-hi-rgb) / 0.4);
 }
 
 /* Wallet */
@@ -589,7 +589,7 @@ kbd {
   background: rgba(255, 255, 255, 0.05);
 }
 .ww-folder.on {
-  background: rgba(255, 210, 77, 0.1);
+  background: rgb(var(--bw-accent-hi-rgb) / 0.1);
   color: var(--ww-text);
 }
 .ww-note {
@@ -612,7 +612,7 @@ kbd {
   background: rgba(255, 255, 255, 0.03) !important;
 }
 .ww-mail.on {
-  background: rgba(255, 210, 77, 0.07) !important;
+  background: rgb(var(--bw-accent-hi-rgb) / 0.07) !important;
   box-shadow: inset 3px 0 0 var(--ww-gold);
 }
 .ww-mail.unread b::before {
@@ -686,7 +686,7 @@ kbd {
   outline: none;
 }
 .ww-replybox input:focus {
-  border-color: rgba(255, 210, 77, 0.5);
+  border-color: rgb(var(--bw-accent-hi-rgb) / 0.5);
 }
 
 /* Chat */
@@ -699,7 +699,7 @@ kbd {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
 }
 .ww-room.on {
-  background: rgba(255, 210, 77, 0.07) !important;
+  background: rgb(var(--bw-accent-hi-rgb) / 0.07) !important;
   box-shadow: inset 3px 0 0 var(--ww-gold);
 }
 .ww-convo {
@@ -737,8 +737,8 @@ kbd {
   padding: 16px;
   margin-bottom: 8px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 210, 77, 0.25);
-  background: radial-gradient(120% 100% at 0% 0%, rgba(255, 210, 77, 0.12), rgba(0, 0, 0, 0.2));
+  border: 1px solid rgb(var(--bw-accent-hi-rgb) / 0.25);
+  background: radial-gradient(120% 100% at 0% 0%, rgb(var(--bw-accent-hi-rgb) / 0.12), rgba(0, 0, 0, 0.2));
 }
 .ww-space h3 {
   margin: 12px 0;
@@ -767,7 +767,7 @@ kbd {
 /* Live wallet pane, b button, command bar */
 .ww-live-pane {
   border-left: 1px solid var(--ww-line);
-  background: #010101;
+  background: var(--bw-bg);
 }
 .ww-live-pane iframe {
   width: 100%;
@@ -792,7 +792,7 @@ kbd {
   background: radial-gradient(circle at 35% 30%, #fff1b8, var(--ww-gold) 45%, var(--ww-gold-2)) !important;
   box-shadow:
     0 12px 30px rgba(255, 180, 30, 0.3),
-    0 0 0 6px rgba(255, 210, 77, 0.1);
+    0 0 0 6px rgb(var(--bw-accent-hi-rgb) / 0.1);
 }
 .with-live .ww-b {
   right: 428px;
@@ -846,7 +846,7 @@ kbd {
   padding: 10px 16px;
 }
 .ww-cmd-row.on {
-  background: rgba(255, 210, 77, 0.08);
+  background: rgb(var(--bw-accent-hi-rgb) / 0.08);
 }
 @media (max-width: 1360px) {
   .ww-wallet {
@@ -933,7 +933,7 @@ kbd {
 .ww-content.view-chat .ww-colwrap {
   border-radius: 16px;
   border: 1px solid var(--ww-line);
-  background: #010101;
+  background: var(--bw-bg);
 }
 .ww-content.view-wallet .ww-colwrap {
   flex: 0 0 460px;
@@ -1149,7 +1149,7 @@ html.ww-on body > .fixed.inset-0.items-end > * {
 .ww-notice {
   border-radius: 12px;
   border: 1px solid var(--ww-hair);
-  background: rgba(255, 210, 77, 0.06);
+  background: rgb(var(--bw-accent-hi-rgb) / 0.06);
   padding: 12px 14px;
   font-size: 13px;
   line-height: 1.5;
@@ -1211,7 +1211,7 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
 }
 .ww-rd-count {
   margin-left: 6px;
-  color: #ffd24d;
+  color: var(--bw-accent-hi);
 }
 .ww-rd-dl {
   display: grid;
@@ -1247,8 +1247,8 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 210, 77, 0.12);
-  color: #ffd24d;
+  background: rgb(var(--bw-accent-hi-rgb) / 0.12);
+  color: var(--bw-accent-hi);
   font-weight: 700;
   font-size: 12px;
 }
@@ -1265,15 +1265,15 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   height: 34px;
   padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid rgba(245, 184, 0, 0.55);
-  background: rgba(245, 184, 0, 0.1);
-  color: #ffd24d;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.55);
+  background: rgb(var(--bw-accent-rgb) / 0.1);
+  color: var(--bw-accent-hi);
   font-weight: 600;
   font-size: 13px;
   white-space: nowrap;
 }
 .ww-install:hover {
-  background: rgba(245, 184, 0, 0.2);
+  background: rgb(var(--bw-accent-rgb) / 0.2);
 }
 
 /* bSpaces (/m/spaces) is a plain page, not a fixed screen under the phone top bar: .ww-col's -3.5rem offset clipped

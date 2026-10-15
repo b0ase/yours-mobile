@@ -13,7 +13,7 @@ import { dial } from './store';
 import { useCalls } from './useCalls';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const GREEN = '#2ecc71';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
@@ -39,7 +39,11 @@ const Badge = ({ children, tone }: { children: ReactNode; tone: 'gold' | 'grey' 
     className="inline-flex items-center gap-[3px] rounded-full px-[6px] py-[1px] text-[9px] font-bold shrink-0"
     style={
       tone === 'gold'
-        ? { background: 'rgba(245,184,0,0.12)', color: GOLD, border: '1px solid rgba(245,184,0,0.35)' }
+        ? {
+            background: 'rgb(var(--bw-accent-rgb) / 0.12)',
+            color: GOLD,
+            border: '1px solid rgb(var(--bw-accent-rgb) / 0.35)',
+          }
         : { background: '#1b1c20', color: '#a3a8b1', border: '1px solid #2b2f36' }
     }
   >

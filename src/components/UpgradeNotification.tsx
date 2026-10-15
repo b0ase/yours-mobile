@@ -24,7 +24,7 @@ export const UpgradeNotification = ({ onDismiss }: UpgradeNotificationProps) => 
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          background: `radial-gradient(ellipse 60% 40% at 50% 30%, ${theme.color.component.primaryButtonLeftGradient}12 0%, transparent 70%)`,
+          background: `radial-gradient(ellipse 60% 40% at 50% 30%, color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 7%, transparent) 0%, transparent 70%)`,
         }}
       />
 
@@ -43,7 +43,7 @@ export const UpgradeNotification = ({ onDismiss }: UpgradeNotificationProps) => 
         <div
           className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider"
           style={{
-            background: `${theme.color.component.primaryButtonLeftGradient}20`,
+            background: `color-mix(in srgb, ${theme.color.component.primaryButtonLeftGradient} 13%, transparent)`,
             color: theme.color.component.primaryButtonLeftGradient,
           }}
         >

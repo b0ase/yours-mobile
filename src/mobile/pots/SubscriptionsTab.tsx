@@ -4,7 +4,7 @@ import { getPot, listPots, listSubs, monthlyUsd, onPotsChange } from './pots';
 import { SubscriptionCard } from './SubscriptionCard';
 import { subsForTab } from './subsList';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
 /** Gold art for the empty state: a payment flowing out of a pot, once a period. */
@@ -18,7 +18,12 @@ const PotArt = () => (
       </linearGradient>
     </defs>
     <ellipse cx="44" cy="30" rx="30" ry="8" fill="none" stroke="url(#subs-gold)" strokeWidth="3" />
-    <path d="M14 30 Q14 78 44 82 Q74 78 74 30" fill="#F5B80018" stroke="url(#subs-gold)" strokeWidth="3" />
+    <path
+      d="M14 30 Q14 78 44 82 Q74 78 74 30"
+      fill="rgb(var(--bw-accent-rgb)/0.09)"
+      stroke="url(#subs-gold)"
+      strokeWidth="3"
+    />
     <circle cx="44" cy="54" r="11" fill="url(#subs-gold)" />
     <text x="44" y="59" textAnchor="middle" fontSize="13" fontWeight="800" fill="#1a1300">
       $
@@ -45,7 +50,10 @@ const SubscriptionsTab = () => {
     return (
       <div
         className="rounded-2xl p-5 flex flex-col items-center gap-3 text-center"
-        style={{ background: '#F5B8000f', border: `1px solid ${GOLD}44` }}
+        style={{
+          background: 'rgb(var(--bw-accent-rgb)/0.06)',
+          border: `1px solid color-mix(in srgb, ${GOLD} 27%, transparent)`,
+        }}
       >
         <PotArt />
         <div className="text-base font-bold text-white">No subscriptions yet</div>

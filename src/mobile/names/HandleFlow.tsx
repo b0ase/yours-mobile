@@ -55,7 +55,7 @@ import { bsv20TakenError, duplicateNote, personalTokenLabel, type ExistingChoice
  * The on-chain OpNS name is NOT offered here: it stays a quiet optional link in Settings → Identity.
  * Nothing is broadcast without a confirmation; the user can skip.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#2b2f36';
 const GRAY = '#98A2B3';

@@ -37,7 +37,7 @@ export default function ExtensionEdge() {
         window.addEventListener('pointerup', up);
       }}
       className="fixed left-0 top-0 bottom-0 z-[1000] w-[6px] cursor-ew-resize p-0 border-0 hover:w-[10px] transition-[width]"
-      style={{ background: 'linear-gradient(#FFE58A, #F5B800 50%, #C98F00)' }}
+      style={{ background: 'linear-gradient(var(--bw-accent-hi), var(--bw-accent) 50%, var(--bw-accent-lo))' }}
     />
   );
 }

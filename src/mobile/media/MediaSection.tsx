@@ -125,7 +125,7 @@ export const MediaSection = () => {
       <button
         key={item.output.outpoint}
         onClick={() => tap(item)}
-        className="relative rounded-xl overflow-hidden bg-[#17191E] border border-white/5"
+        className="relative rounded-xl overflow-hidden bg-[var(--bw-surface)] border border-white/5"
         style={{ aspectRatio: '1/1' }}
       >
         <Blurred forceBlur={item.flagged}>
@@ -147,7 +147,7 @@ export const MediaSection = () => {
           <Play size={14} className="absolute top-1.5 right-1.5" color="#fff" fill="#fff" />
         )}
         {item.pending && (
-          <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold text-[#F5B800]">
+          <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold text-[color:var(--bw-accent)]">
             Pending
           </span>
         )}
@@ -171,13 +171,13 @@ export const MediaSection = () => {
               aria-label="Refresh NFTs"
               onClick={() => void doRefresh()}
               disabled={refreshing}
-              className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
+              className="flex items-center gap-1 rounded-lg bg-[var(--bw-surface)] px-3 py-1.5 text-xs font-semibold text-white"
             >
               <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> Refresh
             </button>
             <button
               onClick={() => navigate('/ord-wallet')}
-              className="flex items-center gap-1 rounded-lg bg-[#17191E] px-3 py-1.5 text-xs font-semibold text-white"
+              className="flex items-center gap-1 rounded-lg bg-[var(--bw-surface)] px-3 py-1.5 text-xs font-semibold text-white"
             >
               <Send size={12} /> Send / List
             </button>
@@ -204,9 +204,9 @@ export const MediaSection = () => {
           ))}
         </div>
         {error && (
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-[#17191E] px-3 py-2">
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-2">
             <p className="text-xs text-[#98A2B3]">{error}</p>
-            <button onClick={reload} className="shrink-0 text-xs font-semibold text-[#FFD24D]">
+            <button onClick={reload} className="shrink-0 text-xs font-semibold text-[color:var(--bw-accent-hi)]">
               Try again
             </button>
           </div>
@@ -227,7 +227,7 @@ export const MediaSection = () => {
                 type="button"
                 onClick={() => navigate('/m/media/browse')}
                 className="rounded-xl px-4 py-2 text-sm font-bold"
-                style={{ background: '#FFD24D', color: '#1a1300' }}
+                style={{ background: 'var(--bw-accent-hi)', color: '#1a1300' }}
               >
                 Browse the store
               </button>
@@ -247,7 +247,7 @@ export const MediaSection = () => {
           <button
             onClick={() => void loadMore()}
             disabled={loading}
-            className="rounded-xl bg-[#17191E] py-2.5 text-xs font-semibold text-[#98A2B3]"
+            className="rounded-xl bg-[var(--bw-surface)] py-2.5 text-xs font-semibold text-[#98A2B3]"
           >
             {loading ? 'Loading…' : 'Load more'}
           </button>
@@ -263,7 +263,7 @@ export const MediaSection = () => {
         <button
           onClick={() => void doRefresh()}
           disabled={refreshing}
-          className="flex items-center justify-center gap-2 rounded-xl bg-[#17191E] py-2.5 text-xs font-semibold text-white"
+          className="flex items-center justify-center gap-2 rounded-xl bg-[var(--bw-surface)] py-2.5 text-xs font-semibold text-white"
         >
           <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
           {refreshing ? 'Refreshing NFTs…' : 'Refresh NFTs'}

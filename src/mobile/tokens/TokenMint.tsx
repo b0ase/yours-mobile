@@ -21,7 +21,7 @@ import { ErrorActions } from '../errors/ErrorActions';
  * description) and its holders' room. No ticket MAP tag. Nothing is broadcast until the user
  * confirms SendConfirmation.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
@@ -240,7 +240,7 @@ export const TokenMint = ({
         onChange={(e) => set('description')(e.target.value)}
       />
       {hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) && (
-        <p className="text-xs m-0" style={{ color: '#FFD24D' }}>
+        <p className="text-xs m-0" style={{ color: 'var(--bw-accent-hi)' }}>
           {RETURNS_WARNING}
         </p>
       )}

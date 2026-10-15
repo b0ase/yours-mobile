@@ -23,7 +23,7 @@ import {
  * send as a referrer), so there the tap opens the video in the in-app browser instead.
  */
 const LINE = '#1f2127';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 const stop = (e: MouseEvent) => e.stopPropagation();
 
@@ -126,7 +126,10 @@ export const VideoEmbed = ({
             <span className="absolute inset-0 flex items-center justify-center">
               <span
                 className="flex h-14 w-14 items-center justify-center rounded-full"
-                style={{ background: 'rgba(0,0,0,0.7)', border: `1px solid ${GOLD}88` }}
+                style={{
+                  background: 'rgba(0,0,0,0.7)',
+                  border: `1px solid color-mix(in srgb, ${GOLD} 53%, transparent)`,
+                }}
               >
                 <Play size={22} color={GOLD} fill={GOLD} />
               </span>

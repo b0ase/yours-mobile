@@ -56,9 +56,9 @@ const SettingsHub = () => {
     <div className="relative w-full h-full">
       <div
         className="fixed left-0 right-0 z-[11] px-4 pb-2"
-        style={{ top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)', background: '#010101' }}
+        style={{ top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)', background: 'var(--bw-bg)' }}
       >
-        <div className="flex gap-1 rounded-xl p-1 bg-[#17191E]">
+        <div className="flex gap-1 rounded-xl p-1 bg-[var(--bw-surface)]">
           {pill('settings', 'Settings')}
           {pill('new', 'New')}
           {pill('tools', 'Tools')}
@@ -76,13 +76,13 @@ const SettingsHub = () => {
         )}
         {section === 'about' && (
           <div className="w-full px-4 pt-20 flex flex-col gap-3">
-            <div className="rounded-xl bg-[#17191E] px-4 py-3">
+            <div className="rounded-xl bg-[var(--bw-surface)] px-4 py-3">
               <div className="text-sm font-semibold text-white">{theme.settings.displayName}</div>
               <div className="text-[11px] text-[#98A2B3]">Version {versionLabel(__MOBILE_VERSION__)}</div>
             </div>
             <button
               onClick={() => void openDappBrowser(theme.settings.repo)}
-              className="flex items-center gap-3 rounded-xl bg-[#17191E] px-4 py-3 text-left"
+              className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-4 py-3 text-left"
             >
               <Github size={18} color="#98A2B3" />
               <div>

@@ -11,7 +11,7 @@ import { assetText } from './historyEvents';
 const CARD = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const GREEN = '#32D583';
 const RED = '#F97066';
 
