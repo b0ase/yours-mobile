@@ -570,10 +570,18 @@ async function deliver(found: NotifyItem[]) {
   }
 }
 
+let again = false;
+
 export async function pollNow(): Promise<void> {
   const m = me;
-  if (!m || running) return;
+  if (!m) return;
+  // A live event during a slow poll (Twetch/bmap can take 15 s) used to be dropped until the next 90 s poll.
+  if (running) {
+    again = true;
+    return;
+  }
   running = true;
+  again = false;
   try {
     const st = loadPollState();
     const out: NotifyItem[] = [];
@@ -589,6 +597,8 @@ export async function pollNow(): Promise<void> {
     await deliver(out);
   } finally {
     running = false;
+    // After the caller's own reschedule (schedule() sets POLL_MS in its finally), so this one wins.
+    if (again && me) setTimeout(() => me && schedule(1_500), 0);
   }
 }
 
@@ -628,13 +638,18 @@ export function startNotify(next: Me) {
     const lh = liveHub();
     if (lh) {
       const release = lh.acquire();
-      const off = lh.on('message.new', undefined, (ev) => {
+      // System events ("$mike joined" is a member_joined event message) arrive as message.event / member.join,
+      // not message.new; they used to wait for the 90 s poll (latency audit, 15 Oct 2026).
+      const onRoomEvent = (ev: { room?: string }) => {
         const handle = loadSession()?.handle;
         if (!me || !ev.room || (handle && isRoomMuted(handle, ev.room))) return;
         schedule(1_500);
-      });
+      };
+      const offs = (['message.new', 'message.event', 'member.join'] as const).map((t) =>
+        lh.on(t, undefined, onRoomEvent),
+      );
       unsubLive = () => {
-        off();
+        offs.forEach((off) => off());
         release();
       };
     }
