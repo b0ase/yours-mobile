@@ -3,6 +3,7 @@ import { BCHAT_ORIGIN, ChatApiError, type ChatSession, type Http } from '../chat
 import type { ExcessChoice } from './minute';
 import type { BsharesMe, PlacementOffer } from './placement';
 import type { CompanyListing } from './company';
+import type { PartnerLockState, PartnerLockAction } from './partnership/lockState';
 
 export type NewOffer = {
   investorHandle: string;
@@ -114,4 +115,27 @@ export class BsharesApi {
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/decline`, { reason });
   refund = (id: string, refundTxid: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/refund`, { refundTxid });
+
+  // ── Partnership shares partner lock (pending approvals mailbox; it never holds a key) ─────────────
+  myPartnerships = () =>
+    this.call<{ partnerships: { ticker: string; name: string; version: number }[] }>(
+      'GET',
+      '',
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  partnerLock = (ticker: string) =>
+    this.call<PartnerLockState>(
+      'GET',
+      `/${encodeURIComponent(ticker)}/lock`,
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  partnerLockAction = (ticker: string, body: PartnerLockAction) =>
+    this.call<{ ok: true; id?: string }>(
+      'POST',
+      `/${encodeURIComponent(ticker)}/lock`,
+      body,
+      '/api/bitsign/bshares/partnership',
+    );
 }
