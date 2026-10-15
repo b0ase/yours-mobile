@@ -101,6 +101,7 @@ const NewsCard = ({
             src={item.image}
             alt=""
             loading="lazy"
+            decoding="async"
             referrerPolicy="no-referrer"
             className="h-[72px] w-[72px] shrink-0 rounded-xl object-cover"
             style={{ background: PANEL }}
