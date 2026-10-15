@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { BetaGate } from '../../mobile/sweep/BetaGate';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, CheckCircle, ChevronRight, FileUp, Plus, Upload, Usb } from 'lucide-react';
@@ -39,7 +40,7 @@ const stepVariants = {
   exit: { opacity: 0, x: -24 },
 };
 
-export const RestoreAccount = ({ onNavigateBack, newWallet = false, onNewAccount }: RestoreAccountProps) => {
+const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }: RestoreAccountProps) => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
@@ -688,3 +689,10 @@ export const RestoreAccount = ({ onNavigateBack, newWallet = false, onNewAccount
     </Show>
   );
 };
+
+/** Beta: a one-tap "start small" notice before restoring an existing wallet (15 Oct 2026). */
+export const RestoreAccount = (p: RestoreAccountProps) => (
+  <BetaGate>
+    <RestoreAccountInner {...p} />
+  </BetaGate>
+);

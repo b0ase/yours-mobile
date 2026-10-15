@@ -4,7 +4,20 @@
  * AVAudioSession .playback in AppDelegate). Lock-screen / Now Playing
  * controls come from the Media Session API, which WKWebView supports.
  */
-export type Track = { id: string; title: string; url: string; artwork?: string };
+export type Track = {
+  id: string;
+  title: string;
+  url: string;
+  artwork?: string;
+  /** Second line in the mini player and Now Playing (e.g. a podcast's host). */
+  subtitle?: string;
+  /** 'preview': a short public clip of something not owned. */
+  label?: string;
+  /** Tap the mini player to open where this came from (set by the caller, which has the router). */
+  onExpand?: () => void;
+  /** Album name in Now Playing (default "Inscriptions"). */
+  album?: string;
+};
 
 type State = { queue: Track[]; index: number; playing: boolean; time: number; duration: number };
 
@@ -50,8 +63,8 @@ const load = (index: number) => {
   if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
-      artist: 'bWallet',
-      album: 'Inscriptions',
+      artist: track.subtitle || 'bWallet',
+      album: track.album || 'Inscriptions',
       artwork: track.artwork ? [{ src: track.artwork, sizes: '512x512' }] : [],
     });
   }

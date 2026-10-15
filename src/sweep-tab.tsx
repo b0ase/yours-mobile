@@ -7,6 +7,7 @@ import { createChromeCWI, OneSatServices } from '@1sat/wallet-browser';
 import { createContext } from '@1sat/actions';
 import { decrypt } from './utils/crypto';
 import { cancelOwnedOrdLockListings } from './utils/cancelOrdLockListings';
+import { BetaGate } from './mobile/sweep/BetaGate';
 import './sweep-tab.css';
 
 global.Buffer = Buffer;
@@ -137,7 +138,12 @@ function SweepTab() {
 
   if (!keys) return null;
 
-  return <SweepApp legacyKeys={keys} wallet={wallet} sweepOnly />;
+  // Beta (15 Oct 2026): one-tap "start small" notice before the sweep UI.
+  return (
+    <BetaGate>
+      <SweepApp legacyKeys={keys} wallet={wallet} sweepOnly />
+    </BetaGate>
+  );
 }
 
 const root = document.getElementById('root');

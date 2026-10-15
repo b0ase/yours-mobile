@@ -376,3 +376,26 @@ export const BMOVIES_FEED_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Feed › bExchange (the token reel: price, 24h change, sparkline, BUY / SELL): bWalletX only, absent from a store
+ * build even as code (exchange functionality, Apple 3.1.5(iii); the same rejection as the Market). Literal env
+ * check so Vite inlines it and Rollup drops feed/reels/BexReel and its Feed picker entry. Feed › bApps stays in
+ * every build, but its Tokenise button (Launchpad) is behind MARKET_ENABLED. Same env as STORE_BUILD.
+ */
+export const BEX_REEL_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * bShares, the bCorp share placement (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
+ * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
+ * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2`.
+ */
+export const PLACEMENT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

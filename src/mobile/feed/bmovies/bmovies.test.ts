@@ -10,6 +10,7 @@ import {
   parseFeed,
   playableUrl,
   posterFromSyndication,
+  registerUrl,
   toClip,
   tweetIdOf,
 } from './bmovies';
@@ -163,5 +164,26 @@ describe('attribution', () => {
   });
   test('avatar asks unavatar for no fallback', () => {
     expect(avatarUrl('some_artist')).toBe('https://unavatar.io/x/some_artist?fallback=false');
+  });
+});
+
+describe('registered on chain vs REGISTER', () => {
+  const MINT = 'a'.repeat(64);
+  test('only a minted item is registered; a display ticker alone is not', () => {
+    expect(toClip(item())?.registered).toBe(false);
+    expect(toClip(item({ tokenised: false }))?.registered).toBe(false);
+    expect(toClip(item({ tokenised: 'true' }))?.registered).toBe(false);
+    expect(toClip(item({ mintTxid: 'not-a-txid' }))?.registered).toBe(false);
+    expect(toClip(item({ tokenised: true }))?.registered).toBe(true);
+    expect(toClip(item({ mintTxid: MINT }))?.registered).toBe(true);
+  });
+
+  test('REGISTER: a scouted tweet goes to /tweet/<id>, an unminted offer to its X claim page', () => {
+    const tweet = toClip(item({ id: 'tweet-2103132532766331372', offerId: undefined }))!;
+    expect(registerUrl(tweet)).toBe('https://www.bmovies.app/tweet/2103132532766331372');
+    const conv = toClip(item())!;
+    expect(registerUrl(conv)).toBe('https://www.bmovies.app/tweet/2102001651062026668');
+    const offer = toClip(item({ id: '5b1f0c1e-uuid', offerId: '5b1f0c1e-uuid' }))!;
+    expect(registerUrl(offer)).toBe('https://www.bmovies.app/claim/5b1f0c1e-uuid');
   });
 });

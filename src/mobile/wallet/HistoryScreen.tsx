@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownLeft, ArrowUpRight, Download, ExternalLink, FileText, RefreshCw, Repeat, X } from 'lucide-react';
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  RefreshCw,
+  Repeat,
+  X,
+} from 'lucide-react';
+import { copyLink } from '../chat/shareLink';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { saveTextFile } from '../agents/saveText';
@@ -30,6 +42,12 @@ const BG = '#0d0e11';
 const CARD = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
+
+/** Height of the web wallet's beta banner when it is on screen (0 elsewhere). */
+const webBannerHeight = () =>
+  typeof document === 'undefined'
+    ? 0
+    : Math.round(document.querySelector('.bwallet-web-banner')?.getBoundingClientRect().height ?? 0);
 const GOLD = 'var(--bw-accent-hi)';
 const GREEN = '#32D583';
 const RED = '#F97066';
@@ -181,7 +199,8 @@ export const HistoryScreen = ({
         background: BG,
         color: '#fff',
         zIndex: inline ? undefined : 2000,
-        paddingTop: inline ? 0 : 'env(safe-area-inset-top)',
+        // Clear the web beta banner (it sits above every overlay), else it hides the close button.
+        paddingTop: inline ? 0 : `calc(env(safe-area-inset-top) + ${webBannerHeight()}px)`,
       }}
     >
       <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${LINE}` }}>
@@ -516,6 +535,7 @@ const Row = ({ r }: { r: HistoryRow }) => {
           {r.txid.slice(0, 12)}…{r.txid.slice(-6)} <ExternalLink size={11} />
           {r.confirmations === 0 && <span style={{ color: MUTED }}> · unconfirmed</span>}
         </a>
+        <CopyTxid txid={r.txid} />
       </div>
     </div>
   );
@@ -579,6 +599,7 @@ const TxTable = ({ rows, all }: { rows: HistoryRow[]; all: HistoryRow[] }) => {
                   >
                     {r.txid.slice(0, 12)}…{r.txid.slice(-6)} <ExternalLink size={11} />
                   </a>
+                  <CopyTxid txid={r.txid} />
                 </td>
                 <td className={`${td} text-right whitespace-nowrap font-mono`} style={{ color }}>
                   {r.amountSats > 0 ? '+' : ''}
@@ -602,6 +623,27 @@ const TxTable = ({ rows, all }: { rows: HistoryRow[]; all: HistoryRow[] }) => {
         </tbody>
       </table>
     </div>
+  );
+};
+
+/** Copy a transaction ID in one tap (for Settings › Troubleshooting › Recover a payment by transaction ID). */
+const CopyTxid = ({ txid }: { txid: string }) => {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy transaction ID"
+      title="Copy transaction ID"
+      className="text-xs inline-flex items-center gap-1 ml-2"
+      style={{ color: MUTED }}
+      onClick={async () => {
+        if ((await copyLink(txid)) !== 'copied') return;
+        setDone(true);
+        setTimeout(() => setDone(false), 1500);
+      }}
+    >
+      {done ? <Check size={11} /> : <Copy size={11} />} {done ? 'Copied' : 'Copy ID'}
+    </button>
   );
 };
 

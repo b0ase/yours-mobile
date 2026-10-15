@@ -43,7 +43,7 @@ import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { TokenLinks } from '../tokens/TokenLinks';
-import { onTokenNav, takeMarketToken } from '../chat/nav';
+import { onTokenNav, takeMarketNft, takeMarketToken } from '../chat/nav';
 import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
 import { BAPPS } from '../bapps';
@@ -311,6 +311,11 @@ const MarketPage = () => {
   // "Buy in Market" from a locked token room in Chat: open that token's page.
   useEffect(() => {
     const take = () => {
+      const nft = takeMarketNft();
+      if (nft) {
+        setView('3d');
+        setPreview(nft);
+      }
       const want = takeMarketToken();
       const ref = want && parseRoom(want.kind, want.id);
       if (!ref) return;
