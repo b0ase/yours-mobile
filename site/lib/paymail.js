@@ -236,7 +236,10 @@ function dotRefusal(alias) {
   // The one system path that issues dotted names here: a proven X / Gmail name.
   return SOCIAL_RE.test(f) ? null : DOT_MSG;
 }
+/** A removed extra name is renamed to this (it keeps its payment history; never resolvable or claimable). */
+const TOMB_RE = /^rm-[0-9a-f]{28}$/;
 function validAlias(alias) {
+  if (TOMB_RE.test(String(alias))) return 'That name is not available';
   const dot = dotRefusal(alias);
   if (dot) return dot;
   if (!aliasOk(alias)) return 'Alias must be 1-32 chars: a-z, 0-9, - or _ (not at the ends)';
@@ -375,7 +378,7 @@ function makeHandlers({
   };
   const publicAlias = async (handle) => {
     const p = parseHandleParts(handle, env);
-    if (!p) return [404, { error: 'not-found' }];
+    if (!p || TOMB_RE.test(p.alias)) return [404, { error: 'not-found' }];
     let row = await store.getAlias(p.alias);
     // An old (or extra) name forwards to the wallet's name (one hop), so payments to it still arrive.
     if (!row) {
@@ -753,6 +756,119 @@ function makeHandlers({
       return [200, { unlinked: handleOf(alias) }];
     },
 
+    // ---- several plain names per wallet, one primary (owner, 15 Oct 2026) ---------------------
+    // Needs migration STEP A (is_primary + partial unique index). Adding a second plain name also
+    // needs STEP B (drop UNIQUE(identity_key, kind)); until then the insert clashes and is refused.
+    'names-list': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'names-list', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const main = await store.getAliasByKey(key);
+      const all = main && store.listByKey ? await store.listByKey(key) : main ? [main] : [];
+      return [
+        200,
+        {
+          names: all.map((r) => ({
+            paymail: handleOf(r.alias),
+            kind: r.kind || 'plain',
+            main: !!main && r.alias === main.alias,
+          })),
+        },
+      ];
+    },
+
+    'names-add': async (_q, body, ctx = {}) => {
+      body = body || {};
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      if (SOCIAL_RE.test(alias)) return [400, { error: 'Extra names are plain names (a-z, 0-9, - or _)' }];
+      const bad = validAlias(alias);
+      if (bad) return [400, { error: bad }];
+      const sigErr = await verifySigned(body, 'names-add', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const main = await store.getAliasByKeyKind?.(key, 'plain');
+      if (!main) return [409, { error: 'Claim your main name first' }];
+      if (await store.getAlias(alias)) return [409, { error: 'That name is taken' }];
+      // A held name (renamed or removed < 90 days ago) is taken unless it is this wallet's own.
+      const fwd = await liveForward(alias);
+      if (fwd && fwd.identity_key !== key) return [409, { error: 'That name is taken' }];
+      const ipHash = hashIp(ctx.ip, env);
+      if (ipHash && store.countIpClaims) {
+        const max = Number(env.PAYMAIL_NAMES_PER_IP_DAY) || NAME_IP_DAILY;
+        const since = new Date(now() - 86_400_000).toISOString();
+        if ((await store.countIpClaims(ipHash, since)) >= max)
+          return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
+      }
+      // Each extra name costs the name fee (owner, 15 Oct 2026; the first name's fee rules are in register).
+      // Verified on chain here: paid to BWALLET_NAME_FEE_ADDRESS, at least the fee at the live rate, txid
+      // used once. No address configured = fee off.
+      const address = nameFee.feeAddress(env);
+      if (address) {
+        const txid = String(body.fields?.feeTxid || '').toLowerCase();
+        const chk = await nameFee.checkFeeTx({
+          txid,
+          txHex: body.feeTx,
+          address,
+          c: feeChain,
+          broadcast,
+          parse: parseIncoming,
+        });
+        if (!chk.ok) return [402, { error: chk.error, nameFee: { address, usd: nameFee.FEE_USD } }];
+        if (store.useFeeTx && !(await store.useFeeTx({ txid, identity_key: key, alias, satoshis: chk.satoshis })))
+          return [409, { error: 'That payment already paid for a name' }];
+      }
+      let row;
+      try {
+        row = await store.insertExtraAlias({ alias, identity_key: key });
+      } catch (e) {
+        if (/supabase 409/.test(String(e && e.message))) return [409, { error: 'Could not add that name yet' }];
+        throw e;
+      }
+      if (!row) return [500, { error: 'server-error' }];
+      if (fwd) await store.deleteForward?.(alias);
+      await store.recordNameEvent?.({ identity_key: key, alias, kind: 'claim', ip_hash: ipHash });
+      return [200, { added: handleOf(alias) }];
+    },
+
+    'names-primary': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'names-primary', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const key = String(body.identityKey).toLowerCase();
+      const row = alias && !TOMB_RE.test(alias) ? await store.getAlias(alias) : null;
+      if (!row || String(row.identity_key).toLowerCase() !== key || (row.kind ?? 'plain') !== 'plain')
+        return [404, { error: 'That name is not on this wallet' }];
+      const main = await store.getAliasByKeyKind?.(key, 'plain');
+      if (main && main.alias === alias) return [200, { main: handleOf(alias) }];
+      await store.setPrimary(key, main ? main.alias : null, alias);
+      return [200, { main: handleOf(alias) }];
+    },
+
+    // Remove an extra name. Never a DELETE (payments reference the alias, ON DELETE RESTRICT): the
+    // name forwards to the main name for 90 days (the rename hold), and the row is renamed to an
+    // rm-… tombstone so its payment history stays with the wallet.
+    'names-remove': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'names-remove', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const key = String(body.identityKey).toLowerCase();
+      const row = alias && !TOMB_RE.test(alias) ? await store.getAlias(alias) : null;
+      if (!row || String(row.identity_key).toLowerCase() !== key || (row.kind ?? 'plain') !== 'plain')
+        return [404, { error: 'That name is not on this wallet' }];
+      const main = await store.getAliasByKeyKind?.(key, 'plain');
+      if (!main || main.alias === alias) return [409, { error: 'Make another name main first' }];
+      // Forward first, so there is no moment when the name answers nothing.
+      await store.retargetForwards?.(alias, main.alias);
+      await store.putForward({
+        from_alias: alias,
+        to_alias: main.alias,
+        identity_key: key,
+        expires_at: new Date(now() + FORWARD_MS).toISOString(),
+      });
+      await store.renameAlias(alias, `rm-${Utils.toHex(Random(14))}`);
+      return [200, { removed: handleOf(alias), forwardsTo: handleOf(main.alias) }];
+    },
+
     delete: async (_q, body) => {
       const sigErr = await verifySigned(body || {}, 'delete', now());
       if (sigErr) return [401, { error: sigErr }];
@@ -914,6 +1030,7 @@ module.exports = {
   parseHandle,
   parseHandleParts,
   validAlias,
+  TOMB_RE,
   dotRefusal,
   SYSTEM_TLDS,
   signedMessage,
