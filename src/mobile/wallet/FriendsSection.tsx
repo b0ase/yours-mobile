@@ -15,6 +15,8 @@ import { addFriend } from '../calls/friends';
 import { getPersonalLink, normId } from '../names/personalToken';
 import { requestChatRoom } from '../chat/nav';
 import { tokenKey } from '../chat/tokenRooms';
+import type { Contact } from '../chat/contacts';
+import { ContactCard } from './ContactCard';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -34,7 +36,9 @@ export const FriendsSection = () => {
   }, [apiContext]);
   const { handleSelect } = useBottomMenu();
   // Your own $NAME token, pinned at the top of Friends (owner, 5 Oct 2026).
-  const me = getPersonalLink(chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress);
+  const account = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  const me = getPersonalLink(account);
+  const [open, setOpen] = useState<Contact | null>(null);
   const mine = me ? held.find((b) => b.id && normId(b.id) === normId(me.tokenId)) : undefined;
   const mineAmount = mine ? Number(mine.all.confirmed) / 10 ** (mine.dec ?? 0) : 0;
   const [query, setQuery] = useState('');
@@ -60,6 +64,7 @@ export const FriendsSection = () => {
   };
 
   const shown = filterContacts(contacts, query);
+  if (open) return <ContactCard c={open} account={account} onBack={() => setOpen(null)} />;
   return (
     <div className="w-[92%] mx-auto flex flex-col gap-3 pb-6">
       {me && (
@@ -137,6 +142,8 @@ export const FriendsSection = () => {
               c={c}
               busy={false}
               onRemove={null}
+              onOpen={setOpen}
+              messageLabel="Chat"
               extra={<FriendToken c={c} held={held} />}
               onMessage={(x) => {
                 if (!x.handle) return;
