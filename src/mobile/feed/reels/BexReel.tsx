@@ -39,6 +39,12 @@ import {
   type TokenSort,
 } from './bexCards';
 import { useReel } from './useReel';
+import {
+  isActiveOnMarket,
+  marketActivity,
+  withTokenEvidence,
+  type MarketActivity,
+} from '../../exchange/marketActivity';
 import { inReelWindow, useAppVisible, useReelDevLog, useReelVideo } from '../reelMemory';
 import { useInPeek } from '../../phone/pageEl';
 
@@ -202,6 +208,33 @@ const BexReel = () => {
   const people = usePeopleTokens();
   const [live, setLive] = useState<Record<string, Live>>({});
   const [statsDone, setStatsDone] = useState(0);
+  // Default: only tokens with an active listing or a trade in the last 30 days on 1sat.market.
+  const [activeOnly, setActiveOnly] = useState(true);
+  const [activity, setActivity] = useState<MarketActivity | null | 'error'>(null);
+
+  useEffect(() => {
+    let on = true;
+    void marketActivity()
+      .then((a) => on && setActivity(a))
+      .catch(() => on && setActivity('error'));
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  // A card's own live data (a floor or its trades) also counts as activity.
+  useEffect(() => {
+    setActivity((a) => {
+      if (!a || a === 'error') return a;
+      let next = a;
+      for (const [id, l] of Object.entries(live))
+        next = withTokenEvidence(next, id, {
+          listed: l.floor !== null,
+          lastTradeHeight: l.trades.length ? l.trades[l.trades.length - 1].height : null,
+        });
+      return next;
+    });
+  }, [live]);
 
   useEffect(() => {
     let on = true;
@@ -220,7 +253,7 @@ const BexReel = () => {
     };
   }, []);
 
-  const cards = useMemo(
+  const allCards = useMemo(
     () =>
       mergeTokens(
         (board ?? []).map((r) => ({ id: r.ref.id, title: r.title, icon: r.icon, outputs: r.outputs })),
@@ -229,6 +262,13 @@ const BexReel = () => {
       ),
     [board, launches, people],
   );
+  // When 1sat.market can't be reached, show everything rather than nothing (and say so).
+  const filtering = activeOnly && activity !== 'error';
+  const cards = useMemo(
+    () => (!filtering ? allCards : activity ? allCards.filter((c) => isActiveOnMarket(c.id, activity)) : []),
+    [allCards, filtering, activity],
+  );
+  const waiting = board === null || (filtering && activity === null);
 
   // 24h stats for the first cards (once each, cached by the indexer), so change / volume sorts have data.
   const statsKey = cards
@@ -285,10 +325,10 @@ const BexReel = () => {
   return (
     <div className="relative w-full">
       <div ref={box} className="w-full overflow-y-auto" style={style}>
-        {board === null && <div className="h-full w-full animate-pulse" style={{ background: BACKDROP }} />}
-        {board !== null && !sorted.length && (
-          <p className="pt-20 text-center text-sm" style={{ color: MUTED }}>
-            No tokens to show yet.
+        {waiting && <div className="h-full w-full animate-pulse" style={{ background: BACKDROP }} />}
+        {!waiting && !sorted.length && (
+          <p className="pt-24 text-center text-sm" style={{ color: MUTED }}>
+            {filtering ? 'No tokens active on 1sat.market right now.' : 'No tokens to show yet.'}
           </p>
         )}
         {sorted.map((c, i) => (
@@ -320,6 +360,39 @@ const BexReel = () => {
             {s.label}
           </button>
         ))}
+      </div>
+      <div className="absolute inset-x-0 top-12 flex items-center gap-2 px-3" role="group" aria-label="Filter">
+        {[
+          { on: true, label: 'Active on 1sat.market' },
+          { on: false, label: 'Show all' },
+        ].map((f) => (
+          <button
+            key={f.label}
+            aria-pressed={activeOnly === f.on}
+            onClick={() => {
+              setActiveOnly(f.on);
+              toTop();
+            }}
+            className="shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold"
+            style={
+              activeOnly === f.on
+                ? { background: 'rgba(255,210,77,0.18)', border: `1px solid ${GOLD}`, color: GOLD }
+                : {
+                    background: 'rgba(0,0,0,0.45)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: '#fff',
+                    backdropFilter: 'blur(12px)',
+                  }
+            }
+          >
+            {f.label}
+          </button>
+        ))}
+        {activeOnly && activity === 'error' && (
+          <span className="text-[11px]" style={{ color: MUTED }}>
+            1sat.market unreachable, showing all
+          </span>
+        )}
       </div>
     </div>
   );
