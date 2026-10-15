@@ -57,6 +57,8 @@ import { internalizeBackoff } from './services/internalizeBackoff';
 import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
 import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
 import { makeRecoverDeps, runRecoverOnce } from './services/recoverFailedWiring';
+import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
+import { makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
 import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -144,6 +146,10 @@ export interface AccountContext {
   creditArriving: () => Promise<void>;
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
+  /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
+  recoverTxid: (txid: string, progress?: (step: string) => void) => Promise<TxidRecoverReport>;
+  /** Sweep txids from this wallet's own records, for Find mined payments (recoverByTxidWiring.ts). */
+  sweepCandidates: () => Promise<string[]>;
   /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
   restorePaymails: () => Promise<PaymailRestoreReport>;
   /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
@@ -858,6 +864,34 @@ export const initWallet = async (
         for (const txid of r.restored) internalizeBackoff.clear(txid);
         return r;
       }),
+    recoverTxid: (txid: string, progress?: (step: string) => void) =>
+      recoverPaymentByTxid(
+        txid,
+        makeTxidRecoverDeps({
+          progress,
+          storage,
+          wallet: baseWallet as never,
+          services: toolboxServices as never,
+          legacyAddresses: (() => {
+            const a = chromeStorageService.getCurrentAccountObject().account?.addresses;
+            return a
+              ? [
+                  { label: 'identity', address: a.identityAddress },
+                  { label: 'legacy BSV', address: a.bsvAddress },
+                  { label: 'legacy ordinals', address: a.ordAddress },
+                ].filter((x) => !!x.address)
+              : [];
+          })(),
+        }),
+      ).then((r) => {
+        if (r.result === 'restored') internalizeBackoff.clear(r.txid);
+        return r;
+      }),
+    sweepCandidates: () => {
+      const txo = (toolboxServices as unknown as { txo?: { getSpends?: (o: string[]) => Promise<(string | null)[]> } })
+        .txo;
+      return sweepCandidateTxids(storage, txo?.getSpends ? (o) => txo.getSpends!.call(txo, o) : undefined);
+    },
     restorePaymails: async () => {
       const held = new Set<string>();
       for (let offset = 0; ; offset += 1000) {

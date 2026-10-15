@@ -1,4 +1,5 @@
 import type { CardPatternId } from '../theme/accents';
+import { hexToHsl, hslToHex, mix } from '../theme/colour';
 
 /**
  * Card patterns (Design your card › Patterns, owner 14 Oct 2026): for people with no picture they want to use.
@@ -171,9 +172,145 @@ function body(id: CardPatternId, c: string): string {
   return out.join('');
 }
 
-/** The pattern as an SVG string: colour `colour` on a near-black ground. */
-export function patternSvg(id: CardPatternId, colour: string, ground = '#050506'): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="${ground}"/>${body(id, colour)}</svg>`;
+/**
+ * Art direction per pattern (owner, 15 Oct 2026: "every card design attractive in its own way, not recolours").
+ * Each pattern gets its own ground, finish and light: banknote engraving with a foil band, neon with scanlines,
+ * a holographic wave foil, brushed carbon, deco gold-leaf, enamel sunburst, risograph halftone and so on. All of
+ * it is derived from the one colour passed in, so "Follow theme colour" still works and gold stays gold.
+ */
+type Finish = { ground: string; defs: string; under?: string; over: string; g?: string };
+
+const dk = (c: string, t: number) => mix(c, '#000000', t);
+const lt = (c: string, t: number) => mix(c, '#FFFFFF', t);
+const shiftHue = (c: string, d: number) => {
+  const h = hexToHsl(c);
+  return hslToHex({ ...h, h: h.h + d, s: Math.max(h.s, 55) });
+};
+const GRAIN = (o: number) =>
+  `<filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 ${o} 0"/></filter>`;
+const grainRect = `<rect width="${W}" height="${H}" filter="url(#grain)"/>`;
+const VIGNETTE = `<radialGradient id="vig" cx="50%" cy="45%" r="75%"><stop offset="60%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.55"/></radialGradient>`;
+const vigRect = `<rect width="${W}" height="${H}" fill="url(#vig)"/>`;
+const SHEEN = (a: string, o = 0.35) =>
+  `<linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1"><stop offset="0.3" stop-color="${a}" stop-opacity="0"/><stop offset="0.48" stop-color="${a}" stop-opacity="${o}"/><stop offset="0.52" stop-color="#fff" stop-opacity="${o * 0.8}"/><stop offset="0.7" stop-color="${a}" stop-opacity="0"/></linearGradient>`;
+const sheenRect = `<rect width="${W}" height="${H}" fill="url(#sheen)"/>`;
+const EDGE = `<rect x="3" y="3" width="${W - 6}" height="${H - 6}" rx="38" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>`;
+
+function finish(id: CardPatternId, c: string): Finish {
+  switch (id) {
+    case 'topo': // Satin night with contour lines lit from the top right.
+      return {
+        ground: `<radialGradient id="gr" cx="80%" cy="20%" r="95%"><stop offset="0" stop-color="${dk(c, 0.62)}"/><stop offset="1" stop-color="${dk(c, 0.95)}"/></radialGradient>`,
+        defs: VIGNETTE + SHEEN(c, 0.18) + GRAIN(0.05),
+        over: sheenRect + vigRect + grainRect + EDGE,
+      };
+    case 'guilloche': // Banknote: cream-on-ink engraving, a foil security band and microtext border.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${dk(c, 0.82)}"/><stop offset="1" stop-color="${dk(c, 0.93)}"/></linearGradient>`,
+        defs:
+          `<linearGradient id="foil" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${lt(c, 0.55)}"/><stop offset="0.5" stop-color="${c}"/><stop offset="1" stop-color="${dk(c, 0.35)}"/></linearGradient>` +
+          GRAIN(0.06),
+        over:
+          `<rect x="${W * 0.86}" y="0" width="38" height="${H}" fill="url(#foil)" opacity="0.85"/>` +
+          `<rect x="${W * 0.86 + 6}" y="0" width="2" height="${H}" fill="#fff" opacity="0.5"/>` +
+          `<rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="26" fill="none" stroke="${c}" stroke-opacity="0.55" stroke-width="1.5" stroke-dasharray="2 4"/>` +
+          grainRect +
+          EDGE,
+      };
+    case 'cypher': // Neon rain: glow filter and CRT scanlines.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${dk(c, 0.9)}"/><stop offset="1" stop-color="#020203"/></linearGradient>`,
+        defs:
+          `<filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>` +
+          `<pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="2" fill="#000" opacity="0.35"/></pattern>` +
+          VIGNETTE,
+        g: 'filter="url(#glow)"',
+        over: `<rect width="${W}" height="${H}" fill="url(#scan)"/>` + vigRect + EDGE,
+      };
+    case 'clouds': // Dreamy dusk sky, soft and bright, with paper grain.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${dk(shiftHue(c, 200), 0.55)}"/><stop offset="0.6" stop-color="${dk(c, 0.45)}"/><stop offset="1" stop-color="${dk(shiftHue(c, -30), 0.3)}"/></linearGradient>`,
+        defs: GRAIN(0.08) + SHEEN('#ffffff', 0.12),
+        over: sheenRect + grainRect + EDGE,
+      };
+    case 'waves': // Holographic foil: rainbow sheen that shifts across the waves.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="1" y2="0.6"><stop offset="0" stop-color="${dk(c, 0.7)}"/><stop offset="1" stop-color="${dk(shiftHue(c, 60), 0.75)}"/></linearGradient>`,
+        defs:
+          `<linearGradient id="holo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shiftHue(c, -60)}" stop-opacity="0.35"/><stop offset="0.25" stop-color="${shiftHue(c, 40)}" stop-opacity="0.12"/><stop offset="0.5" stop-color="${shiftHue(c, 140)}" stop-opacity="0.32"/><stop offset="0.75" stop-color="${shiftHue(c, 220)}" stop-opacity="0.12"/><stop offset="1" stop-color="${c}" stop-opacity="0.35"/></linearGradient>` +
+          SHEEN('#ffffff', 0.25),
+        over: `<rect width="${W}" height="${H}" fill="url(#holo)" style="mix-blend-mode:screen"/>` + sheenRect + EDGE,
+      };
+    case 'hex': // Carbon fibre: woven dark ground with a hard specular stripe.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1A1B1F"/><stop offset="1" stop-color="#050506"/></linearGradient>`,
+        defs:
+          `<pattern id="weave" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="#fff" opacity="0.04"/><rect x="6" y="6" width="6" height="6" fill="#fff" opacity="0.04"/></pattern>` +
+          SHEEN(c, 0.28),
+        under: `<rect width="${W}" height="${H}" fill="url(#weave)"/>`,
+        over: sheenRect + EDGE,
+      };
+    case 'stripes': // Racing livery: deep lacquer, bold metallic stripes, clear coat.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${dk(c, 0.55)}"/><stop offset="1" stop-color="${dk(c, 0.88)}"/></linearGradient>`,
+        defs:
+          `<linearGradient id="coat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.22"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+          VIGNETTE,
+        over: `<rect width="${W}" height="${H * 0.5}" fill="url(#coat)"/>` + vigRect + EDGE,
+      };
+    case 'halftone': // Risograph pop: warm paper tone, offset second ink.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${dk(shiftHue(c, 180), 0.7)}"/><stop offset="1" stop-color="${dk(c, 0.85)}"/></linearGradient>`,
+        defs: GRAIN(0.1),
+        under: `<g transform="translate(7 5)" opacity="0.5">${body('halftone', shiftHue(c, 180))}</g>`,
+        over: grainRect + EDGE,
+      };
+    case 'circuit': // PCB: solder-mask green-black, copper traces glowing at the pads.
+      return {
+        ground: `<radialGradient id="gr" cx="30%" cy="30%" r="90%"><stop offset="0" stop-color="${dk(shiftHue(c, 150), 0.78)}"/><stop offset="1" stop-color="#030605"/></radialGradient>`,
+        defs:
+          `<filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>` +
+          `<pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.2" fill="#fff" opacity="0.08"/></pattern>` +
+          VIGNETTE,
+        under: `<rect width="${W}" height="${H}" fill="url(#dots)"/>`,
+        g: 'filter="url(#glow)"',
+        over: vigRect + EDGE,
+      };
+    case 'chevron': // Art deco: black lacquer, gold-leaf chevrons, a deco fan and double rule frame.
+      return {
+        ground: `<linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#121212"/><stop offset="1" stop-color="#050505"/></linearGradient>`,
+        defs:
+          `<linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${lt(c, 0.45)}"/><stop offset="0.5" stop-color="${c}"/><stop offset="1" stop-color="${dk(c, 0.4)}"/></linearGradient>` +
+          SHEEN(c, 0.2),
+        over:
+          Array.from(
+            { length: 9 },
+            (_, i) =>
+              `<path d="M${W / 2} ${H + 10} L${r1(W / 2 + Math.cos(Math.PI + (i + 1) * (Math.PI / 10)) * 260)} ${r1(H + 10 + Math.sin(Math.PI + (i + 1) * (Math.PI / 10)) * 260)}" stroke="url(#leaf)" stroke-width="3" opacity="0.8"/>`,
+          ).join('') +
+          `<rect x="18" y="18" width="${W - 36}" height="${H - 36}" rx="24" fill="none" stroke="url(#leaf)" stroke-width="3"/>` +
+          `<rect x="30" y="30" width="${W - 60}" height="${H - 60}" rx="16" fill="none" stroke="url(#leaf)" stroke-width="1.2"/>` +
+          sheenRect,
+      };
+    case 'starburst': // Enamel sunburst: hot core fading to a deep rim, glossy glaze on top.
+      return {
+        ground: `<radialGradient id="gr" cx="75%" cy="30%" r="100%"><stop offset="0" stop-color="${lt(c, 0.1)}"/><stop offset="0.35" stop-color="${dk(c, 0.35)}"/><stop offset="1" stop-color="${dk(shiftHue(c, -40), 0.88)}"/></radialGradient>`,
+        defs:
+          `<linearGradient id="glaze" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.25"/><stop offset="0.35" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+          VIGNETTE,
+        over: `<rect width="${W}" height="${H}" fill="url(#glaze)"/>` + vigRect + EDGE,
+      };
+  }
+}
+
+/** The pattern as an SVG string: the pattern in `colour` on its own art-directed ground and finish. */
+export function patternSvg(id: CardPatternId, colour: string): string {
+  const f = finish(id, colour);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    `<defs>${f.ground}${f.defs}</defs><rect width="${W}" height="${H}" fill="url(#gr)"/>${f.under ?? ''}` +
+    `<g ${f.g ?? ''}>${body(id, colour)}</g>${f.over}</svg>`
+  );
 }
 
 const cache = new Map<string, string>();

@@ -28,6 +28,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { PageLoader } from '../components/PageLoader';
 import { QrCode } from '../components/QrCode';
+import { BetaLine } from '../mobile/sweep/BetaLine';
 import { MainContent } from '../components/Reusable';
 import { Show } from '../components/Show';
 import { TopNav } from '../components/TopNav';
@@ -93,6 +94,7 @@ import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
 import { isMainnetAddress } from '../mobile/names/address';
 import { rememberSent } from '../mobile/wallet/send/sendLogic';
+import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -514,6 +516,7 @@ export const BsvWallet = () => {
   const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
     saveLastBalance(identityAddress, satoshis);
+    publishBalance('bsv', satoshis / 100_000_000, 'BSV');
     setBalanceKnown(true);
     setBalanceFailed(false);
     setBalanceLoading(false);
@@ -1163,6 +1166,8 @@ export const BsvWallet = () => {
           Tap your bAvatar to flip it
         </span>
       </div>
+
+      <BetaLine className="mb-3" />
 
       {/* QR code */}
       <QrCode address={receiveAddress} onClick={handleCopyToClipboard} />

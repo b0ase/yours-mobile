@@ -37,7 +37,8 @@ export const PodcastCard = ({
     setNote('');
     const r = await playPodcast(p, mine, apiContext, onExpand);
     setBusy(false);
-    if (r === 'none') setNote('Preview not available yet.');
+    if (r === 'listed') setNote('Listed for sale — cancel the listing to play in full');
+    else if (r === 'none') setNote('Preview not available yet.');
     else if (r === 'preview' && mine) setNote('Full recording isn’t available yet, so this is the preview.');
   };
 

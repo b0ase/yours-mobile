@@ -8,6 +8,9 @@ import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { scanAddress, type ScannedAssets, type TokenBalance } from '../../sweep/scanner';
 import { moneyNow } from '../money/money';
+import { cachedExchangeRate } from '../../utils/wallet';
+import { latestUsdPerGbp } from '../../utils/displayCurrency';
+import { BETA_SWEEP_TEXT, overBetaLimit, pickTestInputs, testTargetSats } from './betaTest';
 import {
   HD_ACCOUNTS,
   accountKey,
@@ -192,6 +195,8 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const [found, setFound] = useState<Found | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [betaSheet, setBetaSheet] = useState(false);
+  const [wasTest, setWasTest] = useState(false);
   const goToWallet = useGoToWallet();
   const cancelled = useRef(false);
   const busy = step === 'scanning' || step === 'sweeping';
@@ -402,13 +407,17 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
     }
   };
 
-  const sweep = async () => {
+  /** testOnly: BSV only, and only the smallest coins adding up to the test amount (beta, 15 Oct 2026). */
+  const sweep = async (testOnly = false) => {
     if (!found) return;
+    setBetaSheet(false);
+    setWasTest(testOnly);
     setStep('sweeping');
     const t0 = performance.now();
     const { keyFor } = found;
     // Only what the user ticked. Possible tokens are never in the plan's classes, so never here.
-    const work = selectedWork(found.plan, selected);
+    const chosen = selectedWork(found.plan, selected);
+    const work = testOnly ? { ...chosen, bsv: true, nfts: [], tokens: [] } : chosen;
     const out: Result[] = [];
     const toInputs = (os: IndexedOutput[]) =>
       os.map((o) => ({ outpoint: o.outpoint, satoshis: o.satoshis ?? 0, score: 0 }));
@@ -429,7 +438,13 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         // Only plain P2PKH coins are swept as BSV. Token outputs (Money Button SFP, anything with a
         // script we don't recognise) are kept back so they are never spent as plain BSV.
         const prepared = await prepareSweepInputs(ctx, toInputs(found.assets.funding));
-        const { spendable: inputs, kept } = splitSpendable(prepared, new Set(found.sfp.map((o) => o.outpoint)));
+        const split = splitSpendable(prepared, new Set(found.sfp.map((o) => o.outpoint)));
+        const { kept } = split;
+        let inputs = split.spendable;
+        if (testOnly) {
+          const all = inputs.reduce((n, i) => n + i.satoshis, 0);
+          inputs = pickTestInputs(inputs, testTargetSats(all, cachedExchangeRate(), latestUsdPerGbp()?.rate)) ?? [];
+        }
         if (inputs.length) {
           const sats = inputs.reduce((n, i) => n + i.satoshis, 0);
           setProgress('Sending… BSV');
@@ -437,7 +452,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
           out.push({ label: `BSV (${moneyNow(sats)})`, txid: r.txid, error: r.error });
           moved ||= !r.error;
         }
-        if (kept.length)
+        if (kept.length && !testOnly)
           out.push({
             label: `Left untouched: ${kept.length} coin${kept.length === 1 ? '' : 's'} that aren’t plain BSV`,
             txid: kept.map((k) => k.outpoint).join(', '),
@@ -483,8 +498,11 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
     // The sweeps are this wallet's own actions, so the new outputs are already in its database: reload the
     // home balance and token / NFT lists now rather than waiting for a tap on Refresh.
     if (moved) requestWalletRefresh();
-    setPhrase('');
-    setPassphrase('');
+    // After a test sweep the phrase stays so "Scan again" can sweep the rest.
+    if (!testOnly) {
+      setPhrase('');
+      setPassphrase('');
+    }
     setResults(out);
     setStep('done');
   };
@@ -494,6 +512,14 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const nothing = !!plan && !plan.classes.length;
   const shown = visibleResults(results);
   const skipped = a ? a.opnsNames.length + a.bsv20Tokens.length + a.locked.length : 0;
+  const fx = latestUsdPerGbp()?.rate;
+  const bigBsv = !!a && selected.has('bsv') && overBetaLimit(a.totalBsv, cachedExchangeRate(), fx);
+  const canTest =
+    !!a &&
+    !!pickTestInputs(
+      a.funding.map((o) => ({ satoshis: o.satoshis ?? 0 })),
+      testTargetSats(a.totalBsv, cachedExchangeRate(), fx),
+    );
 
   return createPortal(
     <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
@@ -672,7 +698,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
               <p className="text-sm text-white">This wallet was used, but there is nothing left in it to sweep.</p>
             ) : (
               <button
-                onClick={() => void sweep()}
+                onClick={() => (bigBsv ? setBetaSheet(true) : void sweep())}
                 disabled={!selected.size}
                 className="rounded-xl py-3 text-sm font-bold disabled:opacity-40"
                 style={{ background: GOLD, color: '#1a1300' }}
@@ -687,6 +713,47 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
               Back
             </button>
           </>
+        )}
+
+        {step === 'review' && betaSheet && (
+          <div
+            className="fixed inset-0 z-[160] flex items-end justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setBetaSheet(false)}
+          >
+            <div
+              role="dialog"
+              aria-label="Sweep a test amount first"
+              className="w-full max-w-md rounded-t-2xl p-5 flex flex-col gap-3"
+              style={{ background: PANEL, paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-base font-bold text-white">Start with a test</p>
+              <p className="text-sm text-white">{BETA_SWEEP_TEXT}</p>
+              {!canTest && (
+                <p className="text-xs" style={{ color: MUTED }}>
+                  This wallet holds its BSV in one coin, so it can’t be split here. You could send a small amount from
+                  your old wallet to this one first.
+                </p>
+              )}
+              {canTest && (
+                <button
+                  onClick={() => void sweep(true)}
+                  className="rounded-xl py-3 text-sm font-bold"
+                  style={{ background: GOLD, color: '#1a1300' }}
+                >
+                  Sweep a test amount
+                </button>
+              )}
+              <button
+                onClick={() => void sweep()}
+                className="rounded-xl py-3 text-sm font-semibold text-white"
+                style={{ border: `1px solid ${LINE}` }}
+              >
+                Sweep everything anyway
+              </button>
+            </div>
+          </div>
         )}
 
         {step === 'done' && (
@@ -707,6 +774,20 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                 </div>
               </div>
             ))}
+            {wasTest && (
+              <>
+                <p className="text-xs" style={{ color: MUTED }}>
+                  Once the test shows in your wallet and you’ve sent some back out, scan again to sweep the rest.
+                </p>
+                <button
+                  onClick={() => void scan()}
+                  className="rounded-xl py-3 text-sm font-semibold text-white"
+                  style={{ border: `1px solid ${LINE}` }}
+                >
+                  Scan again
+                </button>
+              </>
+            )}
             <button
               onClick={finish}
               className="rounded-xl py-3 text-sm font-bold"

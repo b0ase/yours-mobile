@@ -1,4 +1,5 @@
 import { fetchSeries } from '../portfolio/market';
+import { BetaLine } from '../sweep/BetaLine';
 import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -321,6 +322,7 @@ const BuyBsvSheetImpl = ({ onClose, onReceive }: { onClose: () => void; onReceiv
           sub="Share your $name or paymail and they send it in seconds"
           onClick={onReceive}
         />
+        <BetaLine className="mt-1" />
         <div className="text-xs font-semibold uppercase tracking-wide mt-1" style={{ color: MUTED }}>
           Buy with a card or bank
         </div>

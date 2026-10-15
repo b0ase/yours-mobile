@@ -399,3 +399,14 @@ export const BEX_REEL_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * bShares, the bCorp share placement (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
+ * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
+ * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2`.
+ */
+export const PLACEMENT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
