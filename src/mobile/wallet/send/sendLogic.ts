@@ -9,6 +9,8 @@ import { recordPaid } from './payee';
 
 export const SATS_PER_BSV = 100_000_000;
 export const QUICK_USD = [1, 5, 10, 20] as const;
+/** Quick amounts in BSV when the amount is entered in BSV (owner, 15 Oct 2026: the chips follow the unit). */
+export const QUICK_BSV = [0.01, 0.1, 0.5, 1] as const;
 
 export type SendRow = {
   id: string;
