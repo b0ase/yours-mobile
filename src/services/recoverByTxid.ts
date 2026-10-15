@@ -458,7 +458,7 @@ export function txidRecoverySummary(r: TxidRecoverReport): string {
         const when = r.known.createdAt ? `${amt ? ', ' : ' ('}${new Date(r.known.createdAt).toLocaleString()}` : '';
         return `Checked: ${short} is in your wallet${amt}${when}${amt || when ? ')' : ''}.`;
       }
-      return `${short} is already in your wallet.`;
+      return `Checked: ${short} is already in your wallet.`;
   }
   const legacy = r.outputs.find((o) => o.state === 'legacy');
   if (legacy)

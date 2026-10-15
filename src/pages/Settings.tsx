@@ -1353,7 +1353,18 @@ export const Settings = () => {
           <Divider />
           <div className="flex flex-col gap-2 px-4 py-3">
             <span className="text-sm font-semibold">Recover a payment by transaction ID</span>
-            <span className="text-xs opacity-70">
+            <span
+              className={
+                !recoveringTxid && /^(Checked|Restored|Found)/.test(recoverTxidResult ?? '')
+                  ? 'text-xs font-semibold'
+                  : 'text-xs opacity-70'
+              }
+              style={
+                !recoveringTxid && /^(Checked|Restored|Found)/.test(recoverTxidResult ?? '')
+                  ? { color: '#22c55e' }
+                  : undefined
+              }
+            >
               {recoveringTxid
                 ? `${recoverStep.txid ?? 'Checking…'}${elapsed('txid')}`
                 : recoverTxidResult ||
