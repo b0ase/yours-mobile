@@ -389,6 +389,17 @@ export const BMOVIES_FEED_ENABLED: boolean = !(
 );
 
 /**
+ * bCredits (prepaid credit for b, src/mobile/credits): bWalletX only, absent from a store build even as code
+ * (prepaid credit for a digital service is IAP territory: Apple 3.1.1, Play Payments). Literal env check so Vite
+ * inlines it and Rollup drops the lazy CreditsPanel chunk and the bCredits path in Ask b.
+ */
+export const BCREDITS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Feed › bExchange (the token reel: price, 24h change, sparkline, BUY / SELL): bWalletX only, absent from a store
  * build even as code (exchange functionality, Apple 3.1.5(iii); the same rejection as the Market). Literal env
  * check so Vite inlines it and Rollup drops feed/reels/BexReel and its Feed picker entry. Feed › bApps stays in
