@@ -16,6 +16,7 @@ import {
   type FocusedToken,
 } from './cardFocus';
 import { CardBalance, CardSkin } from './CardSkin';
+import { useCardThemed } from './cardLook';
 import { skinFor } from './cardSkins';
 import { publishBalance } from './balanceStore';
 import { useBshares } from '../placement/useBshares';
@@ -24,7 +25,8 @@ import { BuyBsvSheet } from './BuyBsv';
 import { holdersRoomsEnabled, openHoldersRoom, type HoldersCoin } from './holdersRoom';
 import { routeFor } from '../tabs/tabs';
 import { AddressBook } from './AddressBook';
-import { opensAddressBook } from './addressBookGesture';
+import { allCardsSwipe, opensAddressBook } from './addressBookGesture';
+import { BCal } from './BCal';
 import './balanceCards.css';
 
 /**
@@ -108,21 +110,9 @@ const FlipBtn = ({ onFlip, back }: { onFlip: () => void; back: boolean }) => (
   </button>
 );
 
-const FlipCard = ({ c }: { c: CardDef }) => {
-  const [flipped, setFlipped] = useState(false);
-  const [turning, setTurning] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const timers = useRef<number[]>([]);
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
-  const flip = () => {
-    setTurning(true);
-    timers.current.push(
-      window.setTimeout(() => setFlipped((f) => !f), 220),
-      window.setTimeout(() => setTurning(false), 440),
-    );
-  };
+const cardStyle = (c: CardDef) => {
   const ink = skinFor(c.id, c.colour).ink;
-  const style = {
+  return {
     position: 'relative' as const,
     width: '100%',
     overflow: 'hidden',
@@ -132,21 +122,59 @@ const FlipCard = ({ c }: { c: CardDef }) => {
     textAlign: 'left' as const,
     ['--bc-ink' as string]: ink,
   };
-  const head = (
-    <span className="bw-bc-top" style={{ position: 'relative' }}>
-      <span className="bw-bc-logo">{c.logo}</span>
-      <span className="bw-bc-head">
-        <b>{c.title}</b>
-        <small>{c.issuer}</small>
-      </span>
+};
+
+const CardHead = ({ c }: { c: CardDef }) => (
+  <span className="bw-bc-top" style={{ position: 'relative' }}>
+    <span className="bw-bc-logo">{c.logo}</span>
+    <span className="bw-bc-head">
+      <b>{c.title}</b>
+      <small>{c.issuer}</small>
     </span>
-  );
+  </span>
+);
+
+/**
+ * A balance card's front, exactly as the carousel shows it. The All cards browser renders this same component, so
+ * a card never loses its design (or its theme) there. `live` keeps the balance subscribed.
+ */
+const CardFront = ({ c, live = true, onFlip }: { c: CardDef; live?: boolean; onFlip?: () => void }) => (
+  <>
+    <CardSkin id={c.id} colour={c.colour} />
+    {onFlip && <FlipBtn onFlip={onFlip} back={false} />}
+    <CardHead c={c} />
+    <span style={{ position: 'relative' }}>
+      {c.amount !== undefined ? (
+        <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
+      ) : (
+        <CardBalance id={c.id} live={live} fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
+      )}
+    </span>
+  </>
+);
+
+const FlipCard = ({ c }: { c: CardDef }) => {
+  const [flipped, setFlipped] = useState(false);
+  const [turning, setTurning] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const themed = useCardThemed(c.id);
+  const timers = useRef<number[]>([]);
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  const flip = () => {
+    setTurning(true);
+    timers.current.push(
+      window.setTimeout(() => setFlipped((f) => !f), 220),
+      window.setTimeout(() => setTurning(false), 440),
+    );
+  };
+  const style = cardStyle(c);
+  const theme = themed ? ' is-themed' : '';
   if (flipped)
     return (
-      <div className={`bw-bc bw-bc-back${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
+      <div className={`bw-bc bw-bc-back${theme}${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
         <CardSkin id={c.id} colour={c.colour} />
         <FlipBtn onFlip={flip} back />
-        {head}
+        <CardHead c={c} />
         <span className="bw-bc-terms" style={{ position: 'relative' }}>
           {c.backLines.map((l) => (
             <span key={l}>{l}</span>
@@ -184,7 +212,7 @@ const FlipCard = ({ c }: { c: CardDef }) => {
     );
   return (
     <div
-      className={`bw-bc${turning ? ' is-turning' : ''}`}
+      className={`bw-bc${theme}${turning ? ' is-turning' : ''}`}
       style={style}
       role="button"
       tabIndex={0}
@@ -192,16 +220,17 @@ const FlipCard = ({ c }: { c: CardDef }) => {
       onClick={flip}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && flip()}
     >
-      <CardSkin id={c.id} colour={c.colour} />
-      <FlipBtn onFlip={flip} back={false} />
-      {head}
-      <span style={{ position: 'relative' }}>
-        {c.amount !== undefined ? (
-          <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
-        ) : (
-          <CardBalance id={c.id} live fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
-        )}
-      </span>
+      <CardFront c={c} onFlip={flip} />
+    </div>
+  );
+};
+
+/** The All cards browser's copy of a card: the carousel's own front (same skin, theme, ink), not interactive. */
+const StaticCard = ({ c, live }: { c: CardDef; live: boolean }) => {
+  const themed = useCardThemed(c.id);
+  return (
+    <div className={`bw-bc${themed ? ' is-themed' : ''}`} style={cardStyle(c)}>
+      <CardFront c={c} live={live} onFlip={() => undefined} />
     </div>
   );
 };
@@ -353,7 +382,6 @@ const Layer = ({ onClose, children, sheet = false }: { onClose: () => void; chil
   );
 };
 
-type TmCard = { key: string; id: string; title: string; sub: string; colour: string; logo: ReactNode };
 const reducedMotionTm = () => {
   try {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -363,32 +391,48 @@ const reducedMotionTm = () => {
 };
 const TimeMachine = ({
   cards,
+  bsvCard,
   start,
   onPick,
   onClose,
+  onBook,
+  onCalendar,
 }: {
-  cards: TmCard[];
+  cards: CardDef[];
+  /** The carousel's own BSV card (the real WalletCard with the user's design), shown as is. */
+  bsvCard: ReactNode;
   start: number;
   onPick: (i: number) => void;
   onClose: () => void;
+  onBook: () => void;
+  onCalendar: () => void;
 }) => {
   const [focus, setFocus] = useState(start);
   const [reduced] = useState(reducedMotionTm);
-  const t0 = useRef<{ y: number; f: number } | null>(null);
+  const t0 = useRef<{ x: number; y: number; f: number } | null>(null);
   const clamp = (f: number) => Math.max(0, Math.min(cards.length - 1, f));
   return (
     <Layer onClose={onClose}>
       <div
         className={`bw-tm${reduced ? ' is-flat' : ''}`}
         onWheel={(e) => setFocus((f) => clamp(f + e.deltaY / 240))}
-        onTouchStart={(e) => (t0.current = { y: e.touches[0].clientY, f: focus })}
+        onTouchStart={(e) => (t0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, f: focus })}
         onTouchMove={(e) => {
           if (!t0.current || reduced) return;
-          setFocus(clamp(t0.current.f + (t0.current.y - e.touches[0].clientY) / 120));
+          const dx = e.touches[0].clientX - t0.current.x;
+          const dy = t0.current.y - e.touches[0].clientY;
+          if (Math.abs(dx) > Math.abs(dy)) return;
+          setFocus(clamp(t0.current.f + dy / 120));
         }}
-        onTouchEnd={() => {
+        onTouchEnd={(e) => {
+          const s0 = t0.current;
           t0.current = null;
           if (!reduced) setFocus((f) => Math.round(f));
+          if (!s0) return;
+          const t = e.changedTouches[0];
+          const go = allCardsSwipe({ dx: t.clientX - s0.x, dy: t.clientY - s0.y });
+          if (go === 'book') onBook();
+          else if (go === 'calendar') onCalendar();
         }}
       >
         <div className="bw-tm-stars" />
@@ -412,25 +456,28 @@ const TimeMachine = ({
                   pointerEvents: (o < -0.5 ? 'none' : 'auto') as 'none' | 'auto',
                   filter: o > 0.5 ? `brightness(${Math.max(0.45, 1 - o * 0.1)})` : undefined,
                 };
+            const pick = () => (reduced || Math.abs(o) < 0.5 ? onPick(i) : setFocus(i));
             return (
-              <button
-                type="button"
-                key={c.key}
+              <div
+                key={c.id}
+                role="button"
+                tabIndex={0}
+                aria-label={c.title}
                 className="bw-tm-card"
-                style={{ ...style, background: c.colour, color: skinFor(c.id, c.colour).ink }}
-                onClick={() => (reduced || Math.abs(o) < 0.5 ? onPick(i) : setFocus(i))}
+                style={style}
+                onClick={pick}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && pick()}
               >
-                <CardSkin id={c.id} colour={c.colour} />
-                <span className="bw-tm-logo">{c.logo}</span>
-                <span className="bw-tm-text">
-                  <b>{c.title}</b>
-                  <CardBalance id={c.id} live={Math.abs(o) < 2.5} fallback={c.sub} />
-                </span>
-              </button>
+                <div className="bw-tm-inner">
+                  {c.id === 'bsv' ? bsvCard : <StaticCard c={c} live={Math.abs(o) < 2.5} />}
+                </div>
+              </div>
             );
           })}
         </div>
-        <p className="bw-tm-hint">Swipe up and down to fly through · tap a card to land on it</p>
+        <p className="bw-tm-hint">
+          Swipe up and down to fly through · tap a card to land on it · swipe sideways for Friends or bCal
+        </p>
       </div>
     </Layer>
   );
@@ -443,6 +490,8 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const [buyOpen, setBuyOpen] = useState(false);
   // Address book (owner, 15 Oct 2026): pull right past the first card, or the notebook button.
   const [book, setBook] = useState(false);
+  // bCal (owner, 15 Oct 2026): the All cards browser's other sideways swipe.
+  const [cal, setCal] = useState(false);
   const pull0 = useRef<{ x: number; y: number; left: number } | null>(null);
   const [mnee, setMnee] = useState<number | null>(readMnee);
   const track = useRef<HTMLDivElement>(null);
@@ -676,15 +725,6 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   };
   useEffect(() => () => endPress(), []);
 
-  const tmCards: TmCard[] = cards.map((c) => ({
-    key: c.id,
-    id: c.id,
-    title: c.title,
-    sub: c.sub,
-    colour: c.colour,
-    logo: c.logo,
-  }));
-
   return (
     <div className="bw-bcar">
       <div className="bw-bcar-stage">
@@ -766,6 +806,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         )}
       </div>
       {book && <AddressBook onClose={() => setBook(false)} />}
+      {cal && <BCal onClose={() => setCal(false)} />}
       {BUY_CRYPTO_ENABLED && buyOpen && (
         <BuyBsvSheet
           onClose={() => setBuyOpen(false)}
@@ -777,8 +818,17 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       )}
       {tm && (
         <TimeMachine
-          cards={tmCards}
+          cards={cards}
+          bsvCard={bsvCard}
           start={active}
+          onBook={() => {
+            setTm(false);
+            setBook(true);
+          }}
+          onCalendar={() => {
+            setTm(false);
+            setCal(true);
+          }}
           onClose={() => setTm(false)}
           onPick={(i) => {
             setTm(false);

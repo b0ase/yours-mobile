@@ -13,3 +13,15 @@ export const opensAddressBook = (scrollLeft: number, d: Drag): boolean =>
 
 /** True when a drag on the open notebook should close it: a left swipe far enough. */
 export const closesAddressBook = (d: Drag): boolean => d.dx <= -SWIPE_OPEN_PX && horizontal(d);
+
+/**
+ * All cards browser (owner, 15 Oct 2026): a sideways swipe leaves the deck. Like the carousel, pulling right
+ * (finger moves right, revealing the left edge) opens the address book; the other way opens bCal, the calendar.
+ * Vertical drags fly through the deck and never count.
+ */
+export const allCardsSwipe = (d: Drag): 'book' | 'calendar' | null => {
+  if (!horizontal(d)) return null;
+  if (d.dx >= SWIPE_OPEN_PX) return 'book';
+  if (d.dx <= -SWIPE_OPEN_PX) return 'calendar';
+  return null;
+};

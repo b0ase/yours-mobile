@@ -37,6 +37,7 @@ import { onThemeSheetRequest } from '../theme/themeNav';
 import { switchToAccountAccent } from '../theme/accent';
 import { useAccentId } from '../theme/useAccent';
 import { accentById } from '../theme/accents';
+import { cardFollowsTheme, setCardCustomised, useCardCustomised } from './cardLook';
 import { CARD_DESIGN_EVENT, loadCardDesign, saveCardDesign, type CardDesign } from './cardDesign';
 import { loadCardArt, type CardArtModule } from './cardArtLoader';
 import { patternUri } from './cardPatterns';
@@ -285,16 +286,22 @@ const WalletCardInner = ({
     const r = artMod?.resolveArt(design);
     return r ? { src: r.src, attribution: r.line } : null;
   }, [design, artMod, accentId]);
-  // Mono packs (owner, 15 Oct 2026): the default bAvatar art read as a grey smudge on the white card, so Mono
-  // draws its own card pattern in the pack's hue instead (an own picture or chosen design still shows).
+  // Theme-follow (owner, 15 Oct 2026, cardLook.ts): an uncustomised card wears the active pack (White → white,
+  // Blue → blue …), drawing the pack's card pattern in its hue instead of the default bAvatar art. A card the user
+  // customised (own picture, chosen design, saved look/colour) keeps its look whatever the theme.
   const pack = accentById(accentId);
-  const monoArt = pack.group === 'mono' && bavatarArt ? patternUri(pack.pattern, pack.accent) : null;
-  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || monoArt || bavatarArt;
+  const flagged = useCardCustomised(`bsv:${artKey}`);
+  const savedLookNow = loadCardArtLook(artKey);
+  const customised = flagged || !!cardImage || !!design || !!savedLookNow;
+  const themed = !!bavatarArt && cardFollowsTheme(pack, customised);
+  const themeArt = themed ? patternUri(pack.pattern, pack.accent) : null;
+  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;
   const artAttribution = !cardImage && designArt?.attribution ? designArt.attribution : '';
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;
     setCardImage(uri);
     saveCardDesign(artKey, null);
+    setCardCustomised(`bsv:${artKey}`, !!uri);
     return true;
   };
   const pickDesign = (d: CardDesign | null) => {
@@ -303,6 +310,7 @@ const WalletCardInner = ({
       setCardImage(null);
     }
     saveCardDesign(artKey, d);
+    setCardCustomised(`bsv:${artKey}`, !!d);
   };
   const [luma, setLuma] = useState<number | null>(null);
   useEffect(() => {
@@ -327,6 +335,7 @@ const WalletCardInner = ({
     const v = l && clampLook(l);
     setSavedLook(v);
     saveCardArtLook(artKey, v);
+    setCardCustomised(`bsv:${artKey}`, !!v || !!cardImage || !!design);
   };
 
   // The back's QR: the account's bAvatar art QR (its paymail), else the plain receive QR below.
@@ -434,7 +443,10 @@ const WalletCardInner = ({
         onKeyDown={onKey}
       >
         {/* ── Front ── */}
-        <div className={`bw-wcard-face bw-wcard-front${frontArt ? ' has-art' : ''}`} aria-hidden={flipped}>
+        <div
+          className={`bw-wcard-face bw-wcard-front${frontArt ? ' has-art' : ''}${themed ? ' is-themed' : ''}`}
+          aria-hidden={flipped}
+        >
           {frontArt && (
             <>
               <img
@@ -678,7 +690,7 @@ const WalletCardInner = ({
         </div>
 
         {/* ── Back ── */}
-        <div className="bw-wcard-face bw-wcard-back" aria-hidden={!flipped}>
+        <div className={`bw-wcard-face bw-wcard-back${themed ? ' is-themed' : ''}`} aria-hidden={!flipped}>
           {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon on its left. */}
           <div className="bw-wcard-stripe">
             {backKey && (
