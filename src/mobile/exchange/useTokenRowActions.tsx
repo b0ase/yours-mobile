@@ -12,6 +12,22 @@ import { useBackClose } from '../backStack';
 import { buyRoute, chatDecision, heldTokenIds, infoRoute } from './rowActions';
 import { HoldHint } from './TokenRowActions';
 
+/** Tray colours (theme tokens only), shared by every Exchange list. */
+export const TRAY = {
+  primary: { color: 'var(--bw-accent)', fg: 'var(--bw-on-accent)' },
+  second: { color: 'var(--bw-accent-lo)', fg: 'var(--bw-text)' },
+  plain: { color: 'var(--bw-card2, var(--bw-card))', fg: 'var(--bw-text)' },
+} as const;
+
+/** Open an on-chain record (whatsonchain) outside the app. */
+export const openExternal = (url: string) => {
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch {
+    /* no window (tests) */
+  }
+};
+
 /** Token IDs this wallet holds; null while loading or when the wallet cannot be read. */
 export const useHeldTokenIds = (): ReadonlySet<string> | null => {
   const { apiContext } = useServiceContext();
@@ -56,19 +72,22 @@ export const useTokenRowActions = () => {
     }
   }, [hint, held, openRoom]);
 
-  const actionsFor = (id: string, title: string): SwipeAction[] => [
-    {
-      id: 'chat',
-      label: 'Chat',
-      icon: <MessageCircle size={18} />,
-      color: 'var(--bw-accent)',
-      fg: 'var(--bw-on-accent)',
-      onPress: () => {
-        const d = chatDecision(id, held);
-        if (d.kind === 'open') openRoom(d.roomKey);
-        else setHint({ id, title });
-      },
+  /** Chat: the token's room when this wallet holds the token ID, else the "Hold some to enter" sheet. */
+  const chatAction = (id: string, title: string): SwipeAction => ({
+    id: 'chat',
+    label: 'Chat',
+    icon: <MessageCircle size={18} />,
+    color: 'var(--bw-accent)',
+    fg: 'var(--bw-on-accent)',
+    onPress: () => {
+      const d = chatDecision(id, held);
+      if (d.kind === 'open') openRoom(d.roomKey);
+      else setHint({ id, title });
     },
+  });
+
+  const actionsFor = (id: string, title: string): SwipeAction[] => [
+    chatAction(id, title),
     {
       id: 'buy',
       label: 'Buy',
@@ -100,5 +119,5 @@ export const useTokenRowActions = () => {
     />
   ) : null;
 
-  return { actionsFor, sheet };
+  return { actionsFor, chatAction, sheet, held, openRoom };
 };

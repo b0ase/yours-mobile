@@ -1,5 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import { BUY_ANCHOR, ROW_ACTION_IDS, buyRoute, chatDecision, heldTokenIds, infoRoute } from './rowActions';
+import {
+  BUY_ANCHOR,
+  ROW_ACTION_IDS,
+  buyRoute,
+  chatDecision,
+  heldTokenIds,
+  infoRoute,
+  isMaskedHandle,
+  movieActionIds,
+  opnsActionIds,
+  payTarget,
+  peopleActionIds,
+  podcastActionIds,
+  profileRoute,
+  txInfoUrl,
+} from './rowActions';
 import { lockAxis, resolveRelease, ACTION_W } from '../swipe/gesture';
 import { tradeRoute } from './exchangeData';
 
@@ -49,4 +64,35 @@ describe('swipe on token rows', () => {
     expect(resolveRelease({ offset: -350, width: 390, velocity: -2, left: L, right: R })).toBe('open-left'));
   test('a tiny drag snaps closed', () =>
     expect(resolveRelease({ offset: -8, width: 390, velocity: 0, left: L, right: R })).not.toBe('open-left'));
+});
+
+describe('other Exchange lists', () => {
+  test('people: Chat, Pay, Profile; masked handles get Chat only', () => {
+    expect(peopleActionIds('kim')).toEqual(['chat', 'pay', 'profile']);
+    expect(peopleActionIds('k•••.gmail')).toEqual(['chat']);
+    expect(isMaskedHandle('')).toBe(true);
+  });
+  test('people routes', () => {
+    expect(profileRoute('$kim')).toBe('/m/friends/kim');
+    expect(payTarget('kim')).toBe('$kim');
+  });
+  test('txInfoUrl uses the outpoint txid; junk → null', () => {
+    expect(txInfoUrl(A)).toBe(`https://whatsonchain.com/tx/${'a'.repeat(64)}`);
+    expect(txInfoUrl('nope')).toBeNull();
+    expect(txInfoUrl(null)).toBeNull();
+  });
+  test('opns: Buy only when buyable, Info when the outpoint is real; never an offer', () => {
+    expect(opnsActionIds({ canBuy: true, outpoint: A })).toEqual(['buy', 'info']);
+    expect(opnsActionIds({ canBuy: false, outpoint: A })).toEqual(['info']);
+    expect(opnsActionIds({ canBuy: true, outpoint: 'x' })).toEqual(['buy']);
+  });
+  test('podcasts: each action needs a target', () => {
+    expect(podcastActionIds({ playable: true, canBuy: true, origin: A })).toEqual(['play', 'buy', 'info']);
+    expect(podcastActionIds({ playable: false, canBuy: false, origin: null })).toEqual([]);
+  });
+  test('movies: Chat only when the token ID is held (not the ticker)', () => {
+    expect(movieActionIds(A, 2, new Set([A]))).toEqual(['back', 'clip', 'chat']);
+    expect(movieActionIds(A, 0, new Set([B]))).toEqual(['back']);
+    expect(movieActionIds(A, 1, null)).toEqual(['back', 'clip']);
+  });
 });
