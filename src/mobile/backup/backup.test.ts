@@ -103,3 +103,19 @@ describe('backup coverage', () => {
     expect(backupCovers('imported', 'b', ['a', 'b'])).toEqual(['b']);
   });
 });
+
+describe('"I already have a backup" is a full button', () => {
+  test('a full-width themed button that marks the wallet backed up as imported', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(import.meta.dir, 'BackupStep.tsx'), 'utf8');
+    const i = src.indexOf('data-testid="backup-already-have"');
+    expect(i).toBeGreaterThan(0);
+    const block = src.slice(src.lastIndexOf('<button', i), src.indexOf('</button>', i));
+    expect(block).toContain("finish('imported')");
+    expect(block).toContain('w-full rounded-xl py-3 font-bold');
+    expect(block).toContain('color: GOLD');
+    expect(block).not.toContain('underline');
+    expect(src).not.toContain('I restored this wallet from my own phrase or backup');
+  });
+});
