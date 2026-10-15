@@ -148,21 +148,19 @@ export const unlinkPaymail = async (
 type NameSigner = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
 const aliasOf = (paymail: string) => paymail.split('@')[0].toLowerCase();
 
-/** Add an extra plain name to this wallet (it receives too; the main name stays main). */
+/** Add an extra plain name to this wallet (it receives too; the main name stays main). Pay on bit-sign first (extraNames.ts). */
 export const addPaymail = async (
   f: Fetch,
   wallet: NameSigner,
   alias: string,
-  fee: { feeTxid?: string; feeTx?: string } = {},
+  /** bit-sign session token: the server checks bit-sign lists (so has been paid for) this name. */
+  proof: { bitsign: string },
 ): Promise<string> => {
   if (!paymailEnabled()) throw new Error('Paymail is not configured');
   const a = alias.trim().toLowerCase();
   if (!PAYMAIL_ALIAS_RE.test(a)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
-  const fields: Record<string, string> = { alias: a };
-  // The name-fee payment (paymailConfig().nameFee): txid is signed; the tx hex helps a fresh tx through.
-  if (fee.feeTxid) fields.feeTxid = fee.feeTxid;
-  const signed = await signRequest(wallet, 'names-add', fields);
-  const j = await postJson(f, api('names-add'), { ...signed, ...(fee.feeTx ? { feeTx: fee.feeTx } : {}) });
+  const signed = await signRequest(wallet, 'names-add', { alias: a });
+  const j = await postJson(f, api('names-add'), { ...signed, bitsign: proof.bitsign });
   return String(j.added);
 };
 

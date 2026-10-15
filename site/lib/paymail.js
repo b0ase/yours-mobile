@@ -349,6 +349,31 @@ async function bitsignRenamed(alias, env = process.env, f = fetch) {
   }
 }
 
+const MAX_PLAIN_NAMES = 5;
+/**
+ * The names bit-sign lists for this session token (Settings › Identity › Add another name pays there).
+ * Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
+ * Returns lower-case names, null for a missing / refused token; throws when bit-sign is unreachable.
+ */
+async function bitsignListHandles(token, env = process.env, f = fetch) {
+  if (!/^[A-Za-z0-9._~+/=-]{16,4096}$/.test(token || '')) return null;
+  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bitcoinchat.online').replace(/\/$/, '');
+  const r = await f(`${base}/api/bitsign/me/handles`, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (r.status === 401 || r.status === 403) return null;
+  if (!r.ok) throw new Error(`bit-sign ${r.status}`);
+  const j = await r.json();
+  return (Array.isArray(j?.handles) ? j.handles : [])
+    .map((h) =>
+      String(h?.handle || '')
+        .replace(/^\$/, '')
+        .toLowerCase(),
+    )
+    .filter(Boolean);
+}
+
 function makeHandlers({
   store,
   env = process.env,
@@ -363,6 +388,9 @@ function makeHandlers({
   opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : makeOpnsResolver(),
   // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
   feeChain = nameFee.chain,
+  // bit-sign's names for a session token (GET /api/bitsign/me/handles): string[] | null (bad token);
+  // throws when bit-sign can't be reached. Tests inject their own.
+  bitsignHandles = (token) => bitsignListHandles(token, env),
 }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
@@ -799,24 +827,14 @@ function makeHandlers({
         if ((await store.countIpClaims(ipHash, since)) >= max)
           return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
       }
-      // Each extra name costs the name fee (owner, 15 Oct 2026; the first name's fee rules are in register).
-      // Verified on chain here: paid to BWALLET_NAME_FEE_ADDRESS, at least the fee at the live rate, txid
-      // used once. No address configured = fee off.
-      const address = nameFee.feeAddress(env);
-      if (address) {
-        const txid = String(body.fields?.feeTxid || '').toLowerCase();
-        const chk = await nameFee.checkFeeTx({
-          txid,
-          txHex: body.feeTx,
-          address,
-          c: feeChain,
-          broadcast,
-          parse: parseIncoming,
-        });
-        if (!chk.ok) return [402, { error: chk.error, nameFee: { address, usd: nameFee.FEE_USD } }];
-        if (store.useFeeTx && !(await store.useFeeTx({ txid, identity_key: key, alias, satoshis: chk.satoshis })))
-          return [409, { error: 'That payment already paid for a name' }];
-      }
+      // Max 5 plain names per wallet (mirrors bit-sign's /me/handles max).
+      const plain = (store.listByKey ? await store.listByKey(key) : []).filter((r) => (r.kind ?? 'plain') === 'plain');
+      if (plain.length >= MAX_PLAIN_NAMES) return [409, { error: `A wallet can have up to ${MAX_PLAIN_NAMES} names` }];
+      // Paid once, on bit-sign (owner, 15 Oct 2026: 1p per extra name through its 402 flow). Here we only
+      // accept a name that bit-sign already lists for the caller's session; no second fee.
+      const listed = await bitsignHandles(String(body.bitsign || '')).catch(() => undefined);
+      if (listed === undefined) return [503, { error: "Couldn't check your bChatX names. Try again in a minute." }];
+      if (!listed || !listed.includes(alias)) return [402, { error: 'Add (and pay for) the name in bChatX first' }];
       let row;
       try {
         row = await store.insertExtraAlias({ alias, identity_key: key });
@@ -1031,6 +1049,8 @@ module.exports = {
   parseHandleParts,
   validAlias,
   TOMB_RE,
+  MAX_PLAIN_NAMES,
+  bitsignListHandles,
   dotRefusal,
   SYSTEM_TLDS,
   signedMessage,

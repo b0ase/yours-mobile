@@ -1,0 +1,92 @@
+import { P2PKH, Utils } from '@bsv/sdk';
+import type { OneSatContext } from '@1sat/actions';
+import { ChatApiError, saveSession, type BchatClient, type HandlesInfo } from '../chat/api';
+import { commitmentScript, NO_SEND, releasePayment, type Commitment } from '../chat/roomSpend';
+import { kycClient, signedInClient } from '../kyc/kycWallet';
+import { addPaymail, makeMainPaymail, removePaymail } from './paymail';
+import type { Fetch } from './names';
+
+/**
+ * Several names per wallet, one main (owner, 15 Oct 2026). bit-sign is where a name is paid for
+ * (1p per extra name, its 402 flow, PR #272); the paymail server then adds the matching alias after
+ * checking bit-sign lists it. Paid ONCE, on bit-sign.
+ */
+
+/** bit-sign's 402 `payment_required` body. Pure. */
+export type HandlePayment = { pence: number; sats: number; to: string; commitment: Commitment };
+export function parsePaymentRequired(data: unknown): HandlePayment | null {
+  const d = data as { code?: unknown; pay?: Record<string, unknown> } | null;
+  if (d?.code !== 'payment_required' || !d.pay) return null;
+  const p = d.pay;
+  const c = p.commitment as Record<string, unknown> | undefined;
+  const sats = Math.ceil(Number(p.sats));
+  if (!(sats > 0) || typeof p.to !== 'string' || !p.to || !c) return null;
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  return {
+    pence: Number(p.pence) || 0,
+    sats,
+    to: p.to,
+    commitment: { room: str(c.room), author: str(c.author), body: str(c.body), rule: str(c.rule) },
+  };
+}
+
+/** The outputs that pay for a name: sats to bit-sign's address + the room_pay commitment. Pure. */
+export const handlePaymentOutputs = (pay: HandlePayment) => [
+  { lockingScript: new P2PKH().lock(pay.to).toHex(), satoshis: pay.sats, outputDescription: 'Name fee' },
+  { lockingScript: commitmentScript(pay.commitment).toHex(), satoshis: 0, outputDescription: 'Name fee record' },
+];
+
+const client = (ctx: OneSatContext): Promise<BchatClient> => signedInClient(ctx, kycClient());
+
+/** bit-sign's names, max and the next name's fee (shown before the user confirms). */
+export const loadHandles = async (ctx: OneSatContext): Promise<HandlesInfo> => (await client(ctx)).listHandles();
+
+/**
+ * Add an extra name. Call only after the user confirmed the fee (HandlesInfo.nextFee). Pays bit-sign
+ * through its 402 flow (signed, never broadcast by us: bit-sign verifies and broadcasts), then adds the
+ * paymail alias. Returns the new paymail.
+ */
+export async function addExtraName(ctx: OneSatContext, f: Fetch, alias: string): Promise<string> {
+  const c = await client(ctx);
+  try {
+    await c.addHandle(alias);
+  } catch (e) {
+    const pay = e instanceof ChatApiError && e.status === 402 ? parsePaymentRequired(e.data) : null;
+    if (!pay) throw e;
+    const r = await ctx.wallet.createAction({
+      description: `Name ${alias}`,
+      outputs: handlePaymentOutputs(pay),
+      options: NO_SEND,
+    });
+    if (!r.tx || !r.txid) throw new Error('The wallet did not return the payment');
+    try {
+      await c.addHandle(alias, Utils.toHex(r.tx));
+    } catch (err) {
+      await releasePayment(ctx, r.txid);
+      throw err;
+    }
+  }
+  const token = c.current?.token ?? '';
+  return addPaymail(f, ctx.wallet, alias, { bitsign: token });
+}
+
+/** Make a name main on bit-sign (30-day cooldown; new session kept) and on the paymail server. */
+export async function makeMainName(ctx: OneSatContext, f: Fetch, paymail: string): Promise<string> {
+  const alias = paymail.split('@')[0].toLowerCase();
+  const c = await client(ctx);
+  saveSession(await c.setPrimaryHandle(alias));
+  return makeMainPaymail(f, ctx.wallet, paymail);
+}
+
+/** Remove an extra name on bit-sign (held 90 days) and on the paymail server (forwards 90 days). */
+export async function removeName(ctx: OneSatContext, f: Fetch, paymail: string): Promise<void> {
+  const alias = paymail.split('@')[0].toLowerCase();
+  const c = await client(ctx);
+  try {
+    await c.removeHandle(alias);
+  } catch (e) {
+    // A paymail-only name bit-sign never had: still remove it here.
+    if (!(e instanceof ChatApiError && e.status === 404)) throw e;
+  }
+  await removePaymail(f, ctx.wallet, paymail);
+}

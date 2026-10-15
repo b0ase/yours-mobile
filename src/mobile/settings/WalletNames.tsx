@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react';
 import { AtSign, BadgeCheck, Copy, Check, Plus } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import {
-  addPaymail,
-  listPaymails,
-  makeMainPaymail,
-  PAYMAIL_ALIAS_RE,
-  paymailConfig,
-  type NameFee,
-  removePaymail,
-  toAlias,
-  unlinkPaymail,
-  type WalletName,
-} from '../names/paymail';
+import { listPaymails, PAYMAIL_ALIAS_RE, toAlias, unlinkPaymail, type WalletName } from '../names/paymail';
 import { setPaymail } from '../names/accountName';
 import { ErrorActions } from '../errors/ErrorActions';
-import { payNameFee } from '../names/nameFee';
+import { addExtraName, loadHandles, makeMainName, removeName } from '../names/extraNames';
+import type { HandlesInfo } from '../chat/api';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
 import { PAID_FEATURES_ENABLED } from '../storeBuild';
@@ -38,20 +28,24 @@ export const WalletNames = () => {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
   const [removing, setRemoving] = useState(''); // paymail in the Remove confirm sheet
-  // Each extra name costs the name fee when the server asks for one (owner, 15 Oct 2026).
+  // Extra names are paid once, on bit-sign (1p each; owner, 15 Oct 2026). Its list gives the max and the fee.
   const { theme } = useTheme();
-  const [nameFee, setNameFee] = useState<NameFee | null>(null);
+  const [handles, setHandles] = useState<HandlesInfo | null>(null);
   const [feeConfirm, setFeeConfirm] = useState(false);
   useEffect(() => {
+    if (!PAID_FEATURES_ENABLED) return;
     let live = true;
-    void paymailConfig(f)
-      .then((c) => live && setNameFee(c.nameFee))
-      .catch(() => {});
+    loadHandles(apiContext)
+      .then((h) => live && setHandles(h))
+      .catch(() => live && setHandles(null));
     return () => {
       live = false;
     };
-  }, []);
-  const feeLabel = nameFee ? `${Math.round(nameFee.usd * 100)}¢` : '';
+  }, [apiContext, tick]);
+  const nameFee = handles?.nextFee ?? null;
+  const feeLabel = nameFee ? (nameFee.pence ? `${nameFee.pence}p` : `${nameFee.sats} sats`) : '';
+  const plainCount = names?.filter((n) => n.kind === 'plain').length ?? 0;
+  const atMax = plainCount >= (handles?.max ?? 5);
   // After any change: re-read the names and cache the main one, so the top bar and Receive follow it.
   const refresh = async () => {
     const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
@@ -87,7 +81,7 @@ export const WalletNames = () => {
     if (!PAYMAIL_ALIAS_RE.test(a)) return setError('Use a-z, 0-9, - or _ (up to 32)');
     if (nameFee && !confirmed) return setFeeConfirm(true);
     setFeeConfirm(false);
-    const go = async () => addPaymail(f, apiContext.wallet, a, nameFee ? await payNameFee(apiContext, nameFee) : {});
+    const go = () => addExtraName(apiContext, f, a);
     if (await run('add', go, 'Could not add that name')) {
       setDraft('');
       setAdding(false);
@@ -155,11 +149,7 @@ export const WalletNames = () => {
                   type="button"
                   disabled={!!busy}
                   onClick={() =>
-                    void run(
-                      n.paymail,
-                      () => makeMainPaymail(f, apiContext.wallet, n.paymail),
-                      'Could not change your main name',
-                    )
+                    void run(n.paymail, () => makeMainName(apiContext, f, n.paymail), 'Could not change your main name')
                   }
                   className="text-xs bg-transparent border-0 p-0"
                   style={{ color: 'var(--bw-accent)' }}
@@ -197,6 +187,16 @@ export const WalletNames = () => {
           already made are not affected.
         </p>
       )}
+      {plainCount > 1 && (
+        <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
+          You can change your main name once every 30 days.
+        </p>
+      )}
+      {PAID_FEATURES_ENABLED && atMax && (
+        <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
+          A wallet can have up to {handles?.max ?? 5} names.
+        </p>
+      )}
       {adding ? (
         <div className="flex items-center gap-2 mt-2">
           <input
@@ -232,6 +232,8 @@ export const WalletNames = () => {
       ) : (
         // Store build (docs/STORE-AUDIT.md 1.6): only the free paymail, so no paid extra names.
         PAID_FEATURES_ENABLED &&
+        !!handles &&
+        !atMax &&
         names.some((n) => n.kind === 'plain' && n.main) && (
           <button
             type="button"
@@ -284,7 +286,7 @@ export const WalletNames = () => {
                 type="button"
                 disabled={!!busy}
                 onClick={() =>
-                  void run(removing, () => removePaymail(f, apiContext.wallet, removing), 'Could not remove').then(() =>
+                  void run(removing, () => removeName(apiContext, f, removing), 'Could not remove').then(() =>
                     setRemoving(''),
                   )
                 }

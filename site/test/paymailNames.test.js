@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { P2PKH, PrivateKey, ProtoWallet, Transaction, Utils } from '@bsv/sdk';
+import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import storeLib from '../lib/paymailStore.js';
 
@@ -139,7 +139,11 @@ const user = () => {
 
 const setup = () => {
   const store = memStore();
-  const h = pm.makeHandlers({ store, env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test' } });
+  const h = pm.makeHandlers({
+    store,
+    env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test' },
+    bitsignHandles: async () => ['one', 'two', 'bob', 'held', 'other', 'changed'],
+  });
   const u = user();
   store.aliases.set('one', { alias: 'one', identity_key: u.identityKey, kind: 'plain', is_primary: true });
   return { store, h, u };
@@ -244,45 +248,45 @@ describe('several names per wallet', () => {
   });
 });
 
-describe('extra name fee', () => {
-  const FEE_ADDR = PrivateKey.fromRandom().toAddress();
-  const payTx = (sats, to = FEE_ADDR) => {
-    const tx = new Transaction();
-    tx.addOutput({ lockingScript: new P2PKH().lock(to), satoshis: sats });
-    return tx;
-  };
-  const good = payTx(20_000); // 1¢ at $50/BSV
-  const low = payTx(1_000);
-  const wrong = payTx(20_000, PrivateKey.fromRandom().toAddress());
-  const chain = {
-    tx: async (id) => [good, low, wrong].find((t) => t.id('hex') === id) ?? null,
-    bsvUsd: async () => 50,
-  };
-  const feeSetup = () => {
+describe('extra names are paid on bit-sign, checked here', () => {
+  const withHandles = (listed) => {
     const store = memStore();
-    const used = new Set();
-    store.useFeeTx = async (r) => (used.has(r.txid) ? false : (used.add(r.txid), true));
     const u = user();
     store.aliases.set('one', { alias: 'one', identity_key: u.identityKey, kind: 'plain', is_primary: true });
+    const seen = [];
     const h = pm.makeHandlers({
       store,
-      env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test', BWALLET_NAME_FEE_ADDRESS: FEE_ADDR },
-      feeChain: chain,
+      env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test' },
+      bitsignHandles: async (t) => {
+        seen.push(t);
+        if (listed === 'down') throw new Error('bit-sign 502');
+        return t === 'good-session-token-123' ? listed : null;
+      },
     });
-    return { store, h, u };
+    return { store, h, u, seen };
   };
+  const add = async (h, u, alias, bitsign = 'good-session-token-123') =>
+    h['names-add']({}, { ...(await u.sign('names-add', { alias })), bitsign });
 
-  test('refuses an unpaid, short, or wrongly addressed fee; accepts a good one once', async () => {
-    const { store, h, u } = feeSetup();
-    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'two' })))[0]).toBe(402);
-    for (const t of [low, wrong])
-      expect((await h['names-add']({}, await u.sign('names-add', { alias: 'two', feeTxid: t.id('hex') })))[0]).toBe(
-        402,
-      );
+  test('accepts a name bit-sign lists for the session, with no fee of its own', async () => {
+    const { h, u, seen } = withHandles(['one', 'two']);
+    expect((await add(h, u, 'two'))[0]).toBe(200);
+    expect(seen).toEqual(['good-session-token-123']);
+  });
+  test('refuses a name bit-sign does not list, or a bad session', async () => {
+    const { store, h, u } = withHandles(['one']);
+    expect((await add(h, u, 'two'))[0]).toBe(402);
+    expect((await add(h, u, 'two', 'nope'))[0]).toBe(402);
     expect(store.aliases.has('two')).toBe(false);
-    const ok = await h['names-add']({}, await u.sign('names-add', { alias: 'two', feeTxid: good.id('hex') }));
-    expect(ok[0]).toBe(200);
-    const again = await h['names-add']({}, await u.sign('names-add', { alias: 'three', feeTxid: good.id('hex') }));
-    expect(again[0]).toBe(409);
+  });
+  test('503 when bit-sign is unreachable', async () => {
+    const { h, u } = withHandles('down');
+    expect((await add(h, u, 'two'))[0]).toBe(503);
+  });
+  test('max 5 plain names', async () => {
+    const { store, h, u } = withHandles(['six']);
+    for (const a of ['b', 'c', 'd', 'e'])
+      store.aliases.set(a, { alias: a, identity_key: u.identityKey, kind: 'plain', is_primary: false });
+    expect((await add(h, u, 'six'))[0]).toBe(409);
   });
 });
