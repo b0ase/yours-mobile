@@ -234,7 +234,12 @@ export const RowBadge = ({
   if (pinned)
     return (
       <span className="h-5 flex items-center shrink-0" aria-label="Pinned">
-        <Pin size={14} color={MUTED} style={{ transform: 'rotate(45deg)' }} />
+        <Pin
+          size={14}
+          color="var(--bw-accent-hi, #ffd24d)"
+          fill="var(--bw-accent-hi, #ffd24d)"
+          style={{ transform: 'rotate(45deg)' }}
+        />
       </span>
     );
   return null;

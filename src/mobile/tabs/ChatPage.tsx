@@ -2934,15 +2934,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           <div className="px-4 pb-1 flex gap-2">
             <button
               onClick={() => setNewRoom(true)}
-              className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+              className="flex-1 rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center justify-center gap-1"
               style={{ background: GOLD, color: '#1a1300' }}
             >
-              <Plus size={16} strokeWidth={2.6} /> New room
+              <Plus size={16} strokeWidth={2.6} /> New Room
             </button>
             {BSPACES_ENABLED && (
               <button
                 onClick={() => setNewSpace(true)}
-                className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+                className="flex-1 rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center justify-center gap-1"
                 style={{ border: `1px solid ${GOLD}`, color: GOLD }}
               >
                 <Plus size={16} strokeWidth={2.6} /> New Space
@@ -2975,8 +2975,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
 
         {BSPACES_ENABLED && ROOMS && handle && rooms && <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />}
-        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
+        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter !== 'rooms' && (
           <SpacesRoomList
+            quiet={roomFilter === 'all'}
             client={client}
             me={handle}
             items={tokenMine.flatMap(({ e }) =>
@@ -2991,7 +2992,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           />
         )}
 
-        {handle && rooms && (!BSPACES_ENABLED || roomFilter === 'all') && (
+        {handle && rooms && (!BSPACES_ENABLED || roomFilter !== 'spaces') && (
           <>
             <LoungeCard
               client={client}
