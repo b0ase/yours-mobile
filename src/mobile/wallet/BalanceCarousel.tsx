@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { PenLine } from 'lucide-react';
+import { PenLine, X } from 'lucide-react';
 import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
 import { PNEE_ICON } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
 import { MNEE_ICON_URL } from '../../utils/constants';
-import { setWalletKind } from './walletKind';
+import { getListCoin, getWalletKind, setWalletKind, setWalletView, subscribeWalletKind } from './walletKind';
+import { cardForView, filterForCard } from './cardFilter';
+import {
+  clearFocusedToken,
+  getFocusedToken,
+  registerFocusHost,
+  subscribeFocusedToken,
+  type FocusedToken,
+} from './cardFocus';
 import { CardBalance, CardSkin } from './CardSkin';
 import { skinFor } from './cardSkins';
 import { publishBalance } from './balanceStore';
@@ -53,7 +61,27 @@ type CardDef = {
   backButtons: BackButton[];
   /** "View contract" sheet (bCredits only, the decided terms). */
   agreement?: Agreement;
+  /** A tapped token's card: its real balance, already formatted (instead of balanceStore). */
+  amount?: string;
 };
+
+/** A tapped token row as a card: real balance and icon; the back's buttons are the row's existing actions. */
+const tokenCard = (t: FocusedToken): CardDef => ({
+  id: `tok-${t.id}`,
+  title: t.name,
+  sub: t.amount,
+  amount: t.amount,
+  issuer: 'BSV-21 token',
+  colour: '#14161f',
+  logo: <img src={t.icon} alt="" width={22} height={22} style={{ borderRadius: 11 }} />,
+  backLines: ['A BSV-21 token held in this wallet’s keys.'],
+  backButtons: [
+    { label: 'Send', run: t.onSend, primary: true },
+    ...(t.onReceive ? [{ label: 'Receive', run: t.onReceive }] : []),
+    ...(t.onLock ? [{ label: 'Lock', run: t.onLock }] : []),
+    ...(t.onRoom ? [{ label: 'Room', run: t.onRoom }] : []),
+  ],
+});
 
 /*
  * Not here on purpose: Stop, running-contract lines, spent counters and a live tick-down. They need a running
@@ -164,7 +192,11 @@ const FlipCard = ({ c }: { c: CardDef }) => {
       <FlipBtn onFlip={flip} back={false} />
       {head}
       <span style={{ position: 'relative' }}>
-        <CardBalance id={c.id} live fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
+        {c.amount !== undefined ? (
+          <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
+        ) : (
+          <CardBalance id={c.id} live fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
+        )}
       </span>
     </div>
   );
@@ -567,16 +599,59 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     },
   );
 
+  // Card ⇄ list sync (owner, 15 Oct 2026). A swipe that settles on a card shows that card's list (cardFilter.ts);
+  // a chip (or any other view change) scrolls to the matching card. `pending` is a scroll we started: its
+  // in-between cards never touch the list.
+  const ids = cards.map((c) => c.id);
+  const idsKey = ids.join(',');
+  const activeRef = useRef(0);
+  const pending = useRef<number | null>(null);
+  const settle = useRef<number | null>(null);
   const goTo = useCallback((i: number) => {
     const el = track.current;
     if (!el || i < 0) return;
+    pending.current = i;
     el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' });
   }, []);
   const onScroll = () => {
     const el = track.current;
     if (!el || !el.clientWidth) return;
-    setActive(Math.round(el.scrollLeft / el.clientWidth));
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    activeRef.current = i;
+    setActive(i);
+    if (settle.current !== null) window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => {
+      settle.current = null;
+      const at = activeRef.current;
+      if (pending.current !== null) {
+        if (pending.current === at) pending.current = null;
+        return;
+      }
+      const id = ids[at];
+      if (!id) return;
+      const f = filterForCard(id);
+      setWalletView(f.kind, f.coin);
+    }, 140);
   };
+  useEffect(
+    () => () => {
+      if (settle.current !== null) window.clearTimeout(settle.current);
+    },
+    [],
+  );
+  const kind = useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
+  const coin = useSyncExternalStore(subscribeWalletKind, getListCoin, getListCoin);
+  useEffect(() => {
+    const list = idsKey.split(',');
+    const at = pending.current ?? activeRef.current;
+    const i = cardForView({ kind, coin }, list, list[at]);
+    if (i !== null && i !== at) goTo(i);
+  }, [kind, coin, idsKey, goTo]);
+
+  // Tap a token row: it becomes the front card until × or a swipe (cardFocus.ts).
+  useEffect(() => registerFocusHost(), []);
+  const focused = useSyncExternalStore(subscribeFocusedToken, getFocusedToken, getFocusedToken);
+  const swipe0 = useRef<{ x: number; y: number } | null>(null);
   const press = useRef<number | null>(null);
   const startPress = () => {
     press.current = window.setTimeout(() => setTm(true), 600);
@@ -598,29 +673,58 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
 
   return (
     <div className="bw-bcar">
-      <div
-        ref={track}
-        className="bw-bcar-track"
-        onScroll={onScroll}
-        onTouchStart={startPress}
-        onTouchEnd={endPress}
-        onTouchMove={endPress}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setTm(true);
-        }}
-      >
-        {cards.map((c) => (
-          <div className="bw-bcar-slide" key={c.id}>
-            {c.id === 'bsv' ? (
-              <div className="bw-bcar-bsv">{bsvCard}</div>
-            ) : (
-              <div className="bw-bcar-wrap">
-                <FlipCard c={c} />
-              </div>
-            )}
+      <div className="bw-bcar-stage">
+        <div
+          ref={track}
+          className="bw-bcar-track"
+          style={focused ? { visibility: 'hidden' } : undefined}
+          onScroll={onScroll}
+          onTouchStart={startPress}
+          onTouchEnd={endPress}
+          onTouchMove={endPress}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setTm(true);
+          }}
+        >
+          {cards.map((c) => (
+            <div className="bw-bcar-slide" key={c.id}>
+              {c.id === 'bsv' ? (
+                <div className="bw-bcar-bsv">{bsvCard}</div>
+              ) : (
+                <div className="bw-bcar-wrap">
+                  <FlipCard c={c} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {focused && (
+          <div
+            className="bw-bcar-focus"
+            onTouchStart={(e) => (swipe0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+            onTouchEnd={(e) => {
+              const s0 = swipe0.current;
+              swipe0.current = null;
+              if (!s0) return;
+              const dx = e.changedTouches[0].clientX - s0.x;
+              const dy = e.changedTouches[0].clientY - s0.y;
+              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) clearFocusedToken();
+            }}
+          >
+            <div className="bw-bcar-wrap">
+              <FlipCard key={focused.id} c={tokenCard(focused)} />
+            </div>
+            <button
+              type="button"
+              className="bw-bcar-unfocus"
+              aria-label="Back to your cards"
+              onClick={clearFocusedToken}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
           </div>
-        ))}
+        )}
       </div>
       {cards.length > 1 && (
         <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>

@@ -96,6 +96,7 @@ import { isMainnetAddress } from '../mobile/names/address';
 import { pendingMeta, rememberSent } from '../mobile/wallet/send/sendLogic';
 import { payeeNote } from '../mobile/wallet/send/payee';
 import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { CoinRow } from '../mobile/wallet/CoinRow';
 import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
@@ -1532,6 +1533,7 @@ export const BsvWallet = () => {
             <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />
           </div>
 
+          <CoinRow id="bsv">
           <TokenSwipe
             id="bsv"
             noArchive
@@ -1565,6 +1567,7 @@ export const BsvWallet = () => {
             }
           />
           </TokenSwipe>
+          </CoinRow>
           {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
@@ -1574,6 +1577,7 @@ export const BsvWallet = () => {
               }}
             />
           )}
+          <CoinRow id="mnee">
           <Show when={services.mnee}>
             <TokenSwipe
               id="mnee"
@@ -1611,7 +1615,9 @@ export const BsvWallet = () => {
             />
             </TokenSwipe>
           </Show>
+          </CoinRow>
           <DefaultTokenCards />
+          <CoinRow id="locks">
           {lockData && (
             <Show when={services.locks && lockData.totalLocked > 0}>
               <AssetRow
@@ -1627,6 +1633,7 @@ export const BsvWallet = () => {
               />
             </Show>
           )}
+          </CoinRow>
         </motion.div>
 
         {/* ── Favorite tokens ── */}
