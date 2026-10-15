@@ -10,6 +10,7 @@ import {
   parseLiveSpaces,
   parsePodcastPage,
   podcastProofMessage,
+  PodcastListedError,
 } from './podcasts';
 import { routeFromData, routeFromQuery, routeToQuery } from '../push/logic';
 
@@ -129,6 +130,43 @@ describe('owned audio (challenge + signature)', () => {
     expect(calls[1].headers['x-bwx-origin']).toBe(pod.nft!.origin);
     expect(calls[1].headers['x-bwx-pubkey']).toBe('PK');
     expect(calls[1].headers['x-bwx-sig']).toBe('SIG');
+    expect(calls[1].headers['x-bwx-nonce']).toBe('n1');
+    expect(calls.length).toBe(2);
+  });
+  test('refusal → one fresh challenge with a new nonce, then success', async () => {
+    const nonces: string[] = [];
+    let n = 0;
+    const f = async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/challenge')) return res(200, { nonce: `n${++n}` });
+      const h = (init?.headers ?? {}) as Record<string, string>;
+      nonces.push(h['x-bwx-nonce']);
+      return nonces.length === 1 ? res(401, null) : res(200, { url: 'https://cdn/y.mp3' });
+    };
+    expect(await fetchOwnedAudio(f, pod, async () => ({ pubKey: 'p', sig: 's' }))).toBe('https://cdn/y.mp3');
+    expect(nonces).toEqual(['n1', 'n2']);
+  });
+  test('two refusals → null after exactly two challenges', async () => {
+    let challenges = 0;
+    const f = async (url: string) =>
+      url.endsWith('/challenge') ? (challenges++, res(200, { nonce: 'n' })) : res(403, null);
+    expect(await fetchOwnedAudio(f, pod, async () => ({ pubKey: 'p', sig: 's' }))).toBeNull();
+    expect(challenges).toBe(2);
+  });
+  test('audio 404 (unknown or excluded) → null, no retry', async () => {
+    let challenges = 0;
+    const f = async (url: string) =>
+      url.endsWith('/challenge') ? (challenges++, res(200, { nonce: 'n' })) : res(404, null);
+    expect(await fetchOwnedAudio(f, pod, async () => ({ pubKey: 'p', sig: 's' }))).toBeNull();
+    expect(challenges).toBe(1);
+  });
+  test('listed item: signer refusal propagates, no audio request', async () => {
+    const urls: string[] = [];
+    const f = async (url: string) => (urls.push(url), res(200, { nonce: 'n' }));
+    const signer = async (): Promise<{ pubKey: string; sig: string }> => {
+      throw new PodcastListedError();
+    };
+    await expect(fetchOwnedAudio(f, pod, signer)).rejects.toBeInstanceOf(PodcastListedError);
+    expect(urls.every((u) => u.endsWith('/challenge'))).toBe(true);
   });
   test('challenge 404 → null without signing', async () => {
     let signed = false;
